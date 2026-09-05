@@ -84,10 +84,10 @@ describe "Gori::Verbs.register_sitemap" do
     r["sitemap.open-flow"].available?(ctx).should be_true
   end
 
-  it "gives the scope toggle an explicit 's' menu key (its only chord is ⇧S)" do
+  it "keeps the scope toggle a menu row under 's' — the Global `s` is its key" do
     verb = r["sitemap.scope-toggle"]
-    verb.chords.should eq([typed_chord("s", shift: true)])
-    verb.menu_key.should eq('s') # a shifted chord yields no menu key on its own
+    verb.chords.should be_empty # the ⇧S twin of the Global lens toggle is gone
+    verb.menu_key.should eq('s')
   end
 
   it "escapes back to the Sitemap/Discover strip, not the tab bar" do

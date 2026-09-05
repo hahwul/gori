@@ -17,18 +17,22 @@ module Gori
       # --- content pane (Body) navigation: arrow keys / hjkl ---
       r.register Verb::Definition.new(
         "body.down", "Select next flow", "Move selection down", Verb::Scope::Body,
-        [Verb::Chord.new("down"), Verb::Chord.new("j")], hidden: true) { |ctx| ctx.move_selection(1); nil }
+        # `available: in_history` — Body is shared with Help and the Project settings pane,
+        # and these two were the only Body verbs without the gate.
+        [Verb::Chord.new("down"), Verb::Chord.new("j")], available: in_history, hidden: true) { |ctx| ctx.move_selection(1); nil }
 
       r.register Verb::Definition.new(
         "body.up", "Select previous flow", "Move selection up", Verb::Scope::Body,
-        [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.move_selection(-1); nil }
+        [Verb::Chord.new("up"), Verb::Chord.new("k")], available: in_history, hidden: true) { |ctx| ctx.move_selection(-1); nil }
 
       # (No left/h → tab bar here: ← was an easy overshoot when walking back out of
       #  the detail's REQ/RES panes. esc (body.to-menu) / ↑-at-top go up instead.)
 
       r.register Verb::Definition.new(
         "body.open", "Open flow detail", "View the selected request/response", Verb::Scope::Body,
-        [Verb::Chord.new("enter"), Verb::Chord.new("right"), Verb::Chord.new("l")],
+        # `o` too: Sitemap, Probe, Issues, Discover and the Activity feed all open a row's flow
+        # on `o`, and History was the one list where the same key was silent.
+        [Verb::Chord.new("enter"), Verb::Chord.new("right"), Verb::Chord.new("l"), Verb::Chord.new("o")],
         available: history_selected, mnemonic: 'o', group: :view) { |ctx| ctx.open_detail; nil }
 
       r.register Verb::Definition.new(

@@ -147,15 +147,27 @@ describe "Gori::Verbs.register_issues" do
   end
 
   describe "the issue detail" do
-    it "cycles severity and status with signed deltas on the bracket/brace chords" do
-      {"issue.severity-up"   => {:issue_severity, "1", "]"},
-       "issue.severity-down" => {:issue_severity, "-1", "["},
-       "issue.status-up"     => {:issue_status, "1", "}"},
-       "issue.status-down"   => {:issue_status, "-1", "{"},
+    it "cycles status with signed deltas on the brace chords" do
+      {"issue.status-up"   => {:issue_status, "1", "}"},
+       "issue.status-down" => {:issue_status, "-1", "{"},
       }.each do |id, (intent, delta, key)|
         verb = r[id]
         verb.hidden?.should be_true # power shortcut; the pickers are the discoverable path
         verb.chords.should eq([typed_chord(key)])
+        ctx = FakeExecContext.new
+        verb.call(ctx)
+        ctx.args_for(intent).should eq([delta])
+      end
+    end
+
+    it "cycles severity from the space menu only — `[` / `]` are the Global tab chords" do
+      {"issue.severity-up"   => {:issue_severity, "1", '+'},
+       "issue.severity-down" => {:issue_severity, "-1", '-'},
+      }.each do |id, (intent, delta, key)|
+        verb = r[id]
+        verb.hidden?.should be_false # a menu row now, so it has to show there
+        verb.chords.should be_empty
+        verb.menu_key.should eq(key)
         ctx = FakeExecContext.new
         verb.call(ctx)
         ctx.args_for(intent).should eq([delta])

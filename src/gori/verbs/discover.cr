@@ -16,6 +16,13 @@ module Gori
       # Plain `p` — a chord, so the hint and the hotkey editor both see it (it was a raw arm
       # in the controller). No ctrl-p — that's reserved for the command palette.
       r.register Verb::Definition.new(
+        "discover.prev-run", "Previous run", "Select the run above (the RUNS list's ↑, from either pane)",
+        Verb::Scope::Discover, [] of Verb::Chord, mnemonic: 'k') { |ctx| ctx.discover_prev_run; nil }
+      r.register Verb::Definition.new(
+        "discover.next-run", "Next run", "Select the run below (the RUNS list's ↓, from either pane)",
+        Verb::Scope::Discover, [] of Verb::Chord, mnemonic: 'j') { |ctx| ctx.discover_next_run; nil }
+
+      r.register Verb::Definition.new(
         "discover.pause", "Pause / resume", "Pause or resume the running discovery",
         Verb::Scope::Discover, [Verb::Chord.new("p")], mnemonic: 'p') { |ctx| ctx.discover_toggle_pause; nil }
 

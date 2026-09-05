@@ -48,7 +48,7 @@ module Gori
       # the ⇧S chip — so the toggle is reachable where its effect is visible.
       r.register Verb::Definition.new(
         "probe.scope-toggle", "Toggle scope lens", "Filter issues to in-scope hosts on/off",
-        Verb::Scope::Probe, [Verb::Chord.new("s", shift: true)], mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
+        Verb::Scope::Probe, [] of Verb::Chord, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
 
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
       # code, or a whole host, in one confirmed action. 'r' is reserved for repeater-evidence

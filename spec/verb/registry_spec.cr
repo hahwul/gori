@@ -632,6 +632,14 @@ private class FakeContext < ExecContext
     @calls << :discover_toggle_pause
   end
 
+  def discover_prev_run : Nil
+    @calls << :discover_prev_run
+  end
+
+  def discover_next_run : Nil
+    @calls << :discover_next_run
+  end
+
   def discover_dismiss : Nil
     @calls << :discover_dismiss
   end

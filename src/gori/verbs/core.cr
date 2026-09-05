@@ -159,7 +159,9 @@ module Gori
 
       r.register Verb::Definition.new(
         "scope.toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
-        Verb::Scope::Body, [Verb::Chord.new("s", shift: true)],
+        # Menu-only: the Global `s` (scope.toggle-lens) reaches this pane already, and the ⇧S
+        # twin was a second key for the same flip in the same tab.
+        Verb::Scope::Body, [] of Verb::Chord,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
 
       # --- Project tab SCOPE pane: the rule-list action menu (space) + its a/e/d keys.

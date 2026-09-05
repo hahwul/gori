@@ -174,13 +174,15 @@ module Gori
         "issue.set-cvss", "Set CVSS", "Score this issue with the CVSS calculator (severity follows)",
         Verb::Scope::IssuesDetail, [] of Verb::Chord, mnemonic: 'V') { |ctx| ctx.issue_set_cvss; nil }
 
+      # Menu-only. They sat on `]` / `[` — the Global prev/next-tab chords — hidden and unhinted,
+      # so `]` inside an issue raised its severity where everywhere else it moved a tab.
       r.register Verb::Definition.new(
         "issue.severity-up", "Raise severity", "Increase severity", Verb::Scope::IssuesDetail,
-        [Verb::Chord.new("]")], hidden: true) { |ctx| ctx.issue_severity(1); nil }
+        [] of Verb::Chord, mnemonic: '+') { |ctx| ctx.issue_severity(1); nil }
 
       r.register Verb::Definition.new(
         "issue.severity-down", "Lower severity", "Decrease severity", Verb::Scope::IssuesDetail,
-        [Verb::Chord.new("[")], hidden: true) { |ctx| ctx.issue_severity(-1); nil }
+        [] of Verb::Chord, mnemonic: '-') { |ctx| ctx.issue_severity(-1); nil }
 
       # edit-notes/edit-title/open-flow/repeater-flow/delete are NON-hidden so they front
       # the issue-detail "space" action menu (parity with the History detail; the

@@ -82,10 +82,11 @@ describe "Gori::Verbs.register_activity" do
       under_c.should_not eq(v.id)
     end
 
-    # And the two scopes that spend ⇧X on "Enable/disable everywhere" keep it: the reuse is
-    # cross-scope, which `Conflicts.overlap?` (`a == b`) permits by design.
-    km.lookup(x, Gori::Verb::Scope::Rewriter).should eq("rewriter.toggle-default")
-    km.lookup(x, Gori::Verb::Scope::Colormarker).should eq("colormarker.toggle-default")
+    # And the two scopes that used to spend ⇧X on "Enable/disable everywhere" — a toggle with
+    # no confirm — no longer do: ⇧X is the wipe chord and nothing quieter, so a hand trained
+    # on the five wipes cannot flip every default rule off where it expected a card.
+    km.lookup(x, Gori::Verb::Scope::Rewriter).should be_nil
+    km.lookup(x, Gori::Verb::Scope::Colormarker).should be_nil
   end
 
   # ↵ is the second chord on `open` rather than a hard-coded twin in the key handler, so the

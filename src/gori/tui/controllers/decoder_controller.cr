@@ -597,6 +597,11 @@ module Gori::Tui
       @popup.close
     end
 
+    def insert_key_refusal : String?
+      return nil unless cur.pane == :output
+      "OUTPUT is read-only — i edits the INPUT (↹ up); intercept toggles from the tab bar"
+    end
+
     # Focus the CHAIN field and surface the converter list (used by ↓ from INPUT and ↑
     # from OUTPUT, mirroring the Tab focus ring).
     private def focus_chain : Nil

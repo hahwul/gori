@@ -1235,6 +1235,15 @@ module Gori::Tui
     def focus_resume : Nil
     end
 
+    # Why a bare `i` does nothing on the FOCUSED pane, or nil when it should reach the keymap.
+    # `i` enters INSERT in every editor pane; on the read-only pane beside one — the Repeater
+    # RESPONSE, the Fuzzer RESULTS, the Decoder OUTPUT — the same reflex fell through to the
+    # Global `intercept.toggle` and started holding every request on the proxy. A tab with
+    # such a pane answers with a line naming both facts; the Runner toasts it and stops.
+    def insert_key_refusal : String?
+      nil
+    end
+
     # --- lifecycle ---
     def on_enter : Nil # tab became active — refresh derived data
     end

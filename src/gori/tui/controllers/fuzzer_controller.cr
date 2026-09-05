@@ -982,6 +982,11 @@ module Gori::Tui
       current_view.try(&.focus_resume)
     end
 
+    def insert_key_refusal : String?
+      return nil unless (v = current_view) && (v.focus == :results || v.focus == :detail)
+      "results are read-only — i edits the TEMPLATE (↹ up); intercept toggles from the tab bar"
+    end
+
     # --- sub-tab nav (filter-aware: ←/→ skip hidden chips; ^1-9 escapes the filter) ---
     private def select_subtab(idx : Int32, *, save : Bool = true) : Nil
       return unless 0 <= idx < @fuzzers.size

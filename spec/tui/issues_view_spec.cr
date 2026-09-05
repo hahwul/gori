@@ -535,7 +535,7 @@ describe "Issues verbs" do
     keymap = Gori::Verb::Keymap.build(reg)
     keymap.lookup(typed_chord("f", shift: true), Gori::Verb::Scope::Body).should eq("issue.create")
     keymap.lookup(typed_chord("enter"), Gori::Verb::Scope::Issues).should eq("issues.open")
-    keymap.lookup(typed_chord("]"), Gori::Verb::Scope::IssuesDetail).should eq("issue.severity-up")
+    keymap.lookup(typed_chord("]"), Gori::Verb::Scope::IssuesDetail).should eq("nav.next-tab") # the Global chord; severity is a menu row
     keymap.lookup(typed_chord("}"), Gori::Verb::Scope::IssuesDetail).should eq("issue.status-up")
     keymap.lookup(typed_chord("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
     keymap.lookup(typed_chord("o"), Gori::Verb::Scope::IssuesDetail).should eq("issue.open-flow")

@@ -264,7 +264,7 @@ gori run history -q 'status:5xx host:api.example.com'
 
 ## Views (`v`) {#views}
 
-A **view** is a named query the list narrows to, and it is a **mode**: press `v`, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar: a view is ANDed *over* whatever you type, the same way the `⇧S` scope lens is, so `/ status:5xx` refines the view instead of replacing it. The filter row carries a `v:name` chip so what you are looking at is never a guess. It is lowercase like the `f:follow` and `⇧S scope` chips beside it, and abbreviated where a name is too wide for the row (`History + Repeater` shows as `v:history+rptr`). The name itself is unchanged everywhere it is a name (the picker, `gori run views`, `--view`, MCP), and `--view` ignores case, so `--view history` finds `History`.
+A **view** is a named query the list narrows to, and it is a **mode**: press `v`, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar: a view is ANDed *over* whatever you type, the same way the `s` scope lens is, so `/ status:5xx` refines the view instead of replacing it. The filter row carries a `v:name` chip so what you are looking at is never a guess. It is lowercase like the `f:follow` and ``s` scope` chips beside it, and abbreviated where a name is too wide for the row (`History + Repeater` shows as `v:history+rptr`). The name itself is unchanged everywhere it is a name (the picker, `gori run views`, `--view`, MCP), and `--view` ignores case, so `--view history` finds `History`.
 
 Seven views ship with every project, on two axes. The **source** views answer *is this evidence about the target, or something gori did?*; the **protocol** ones answer *which conversation am I reading?*
 
@@ -466,7 +466,7 @@ Global rules apply **first**, in their own order, then the project's own: the st
 A global rule carries a **default** on/off state, and a project may disagree with it:
 
 - `x` toggles the rule **in this project**. For a global rule that writes an override, and the row is marked `G*`.
-- `Shift-X` (space menu: **Enable/disable everywhere**) flips the global default itself, which every project that has not overridden it follows.
+- **Enable/disable everywhere** (`Space → X`; no direct key — `Space → X` is the wipe chord on the tabs that have one) flips the global default itself, which every project that has not overridden it follows.
 - Toggling back to the default **removes** the override, so the project follows the library again, including later changes to it.
 
 Deleting a global rule removes it from every project. A running gori in another window picks up global changes when its rules reload (reopen the Rewriter tab), and a second gori **process** only on restart.
@@ -566,13 +566,13 @@ Conditions use the same boolean grammar the conditional-intercept bar speaks: `h
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`.
 - **There is no `header:` / `size:` / `dur:` / `url:` / `stub:`.** Those need a query, and a colour is decided while the row is being drawn. An unknown field is refused; left alone it would quietly become a free-text search and the rule would never fire.
 
-A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `s` moves it between the two, `x` toggles it here, and `Shift-X` flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
+A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `s` moves it between the two, `x` toggles it here, and `Space → X` flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
 
 | Action | Key |
 |--------|-----|
 | Add / edit a rule | `a` / `Enter` or `e` |
 | Enable or disable here | `x` |
-| Flip a global rule's default everywhere | `Shift-X` |
+| Flip a global rule's default everywhere | `Space → X` |
 | Move between project and global | `s` |
 | Reorder (changes which rule wins) | `Shift-J` / `Shift-K` |
 | Delete | `d` |
