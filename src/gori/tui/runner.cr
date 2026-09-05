@@ -490,7 +490,7 @@ module Gori::Tui
       last_probe_gen = @session.store.probe_generation # committed probe_issues mutations
       last_spin = Time.instant                         # advances the background-job spinner frame
       last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
-      last_ui_ident = nil.as(String?)                  # last-written ui-state identity (see UI_STATE_THROTTLE)
+      last_ui_ident = nil.as(UiIdentity?)              # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
       last_pub_rev = -1                                                     # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
       last_bridge_pub = Time.instant                                        # #123: last bridge-heartbeat write (throttled so idle never churns the WAL)
@@ -845,10 +845,14 @@ module Gori::Tui
     end
 
     # A cheap identity of "what the user is viewing" for change detection — no timestamp,
-    # so an unchanged view yields a stable string (ui_state_json stamps the time on write).
-    # Project is constant per session, so it's not part of the identity.
-    private def ui_state_identity : String
-      "#{@active_tab}|#{@focus}|#{current_selected_flow_id}|#{current_subtab_index}"
+    # so an unchanged view compares equal (ui_state_json stamps the time on write). Project
+    # is constant per session, so it's not part of the identity. A tuple, not an interpolated
+    # string: this is read on every 50 ms tick, and the string was built (and thrown away)
+    # even when nothing had moved and nothing would be written.
+    alias UiIdentity = {Symbol, Symbol, Int64?, Int32}
+
+    private def ui_state_identity : UiIdentity
+      {@active_tab, @focus, current_selected_flow_id, current_subtab_index}
     end
 
     # May THIS window write the project's single `ui_state` row?
@@ -1073,7 +1077,10 @@ module Gori::Tui
       miner_controller.reconcile
       oast_controller.reconcile
       sequencer_controller.reconcile
-      notes_controller.view.reload(@session.store) unless notes_locked?
+      # Notes, like the other store-backed views, only while it is the ACTIVE tab: `on_enter`
+      # reloads a clean buffer on the way back in, so a tick-cadence query for a tab nobody
+      # is looking at bought nothing.
+      notes_controller.view.reload(@session.store) if @active_tab == :notes && !notes_locked?
       search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
     end
 

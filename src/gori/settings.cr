@@ -358,11 +358,31 @@ module Gori
     # store and never touches this file.
     @@reloaded_from : Hash(String, {String, String}) = {} of String => {String, String}
 
+    # The file's identity on disk — path, mtime, size — as of the last time `reload_section`
+    # settled `key`. A `stat` a tick instead of a `read` a tick: the three sections the TUI
+    # re-reads on every data_version poll (colormarker, saved views, rewriter) cost three
+    # blocking `File.read`s of settings.json on the render fiber, up to four times a second
+    # under capture, and `@@reloaded_from` only ever skipped the PARSE. A file whose mtime and
+    # size have not moved has not been written; a same-size rewrite still moves its mtime.
+    @@reloaded_stat : Hash(String, {String, Time, Int64}) = {} of String => {String, Time, Int64}
+
+    private def self.file_signature : {String, Time, Int64}?
+      info = File.info(path)
+      {path, info.modification_time, info.size.to_i64}
+    rescue
+      nil
+    end
+
     protected def self.reload_section(key : String, & : JSON::Any -> Nil) : Nil
+      sig = file_signature
+      return if sig && @@reloaded_stat[key]? == sig # not written since this section was settled
       raw = load_raw
       return unless raw
       here = {path, raw}
-      return if @@reloaded_from[key]? == here
+      if @@reloaded_from[key]? == here
+        @@reloaded_stat[key] = sig if sig # same bytes under a new stat (our own save): settle it
+        return
+      end
       root = JSON.parse(raw).as_h?
       return unless root
       node = root[key]?
@@ -370,6 +390,7 @@ module Gori
       yield node
       rebase_section(key)
       @@reloaded_from[key] = here
+      @@reloaded_stat[key] = sig if sig
     rescue
       nil
     end
@@ -385,6 +406,7 @@ module Gori
     # cache is an assertion about, and it has no other way to say so.
     def self.forget_reloaded_sections : Nil
       @@reloaded_from.clear
+      @@reloaded_stat.clear
     end
 
     # Re-base the merge on ONE section as it now stands in memory. Called by `reload_section`,
