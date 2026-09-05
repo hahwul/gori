@@ -135,6 +135,13 @@ docker run --rm    -v gori:/data ghcr.io/hahwul/gori run history
 docker run --rm -i -v gori:/data ghcr.io/hahwul/gori mcp
 ```
 
+시간은 기본적으로 UTC로 표시됩니다. 존 이름을 넘기면 로컬 시간으로 나옵니다:
+
+```bash
+docker run --rm -it -v gori:/data -p 8070:8070 -e TZ=Asia/Seoul \
+  ghcr.io/hahwul/gori --listen 0.0.0.0
+```
+
 ## 사전 빌드 바이너리 {#pre-built-binary}
 
 macOS와 Linux용 독립 실행 바이너리가 모든 [GitHub Release](https://github.com/hahwul/gori/releases/latest)에 첨부됩니다.
