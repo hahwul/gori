@@ -361,9 +361,9 @@ describe Gori::Tui::DecoderView do
     big = Bytes.new(4 * 1024 * 1024) { |i| (i % 251).to_u8 }
     result = Gori::Decoder.run(REG, big, "hex-encode > base64-encode")
     render_view(view, result, pane: :input)
-    t = Time.monotonic
+    t = Time.instant
     20.times { render_view(view, result, pane: :input) }
-    (Time.monotonic - t).should be < 2.seconds # was ~0.5 s per frame for two 8-16 MiB steps
+    (Time.instant - t).should be < 2.seconds # was ~0.5 s per frame for two 8-16 MiB steps
     b = render_view(view, result, pane: :input)
     b.contains?("1 hex-encode › " + big[0, 8].hexstring).should be_true
   end
