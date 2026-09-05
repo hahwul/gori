@@ -72,6 +72,28 @@ module Gori::Tui
       handle_click_content(rect.inset(1, 1), mx, my)
     end
 
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      handle_double_click_content(rect.inset(1, 1), mx, my)
+    end
+
+    # The universal tree gesture: a double-click on a row's LABEL folds or unfolds a folder
+    # and opens a leaf's flow (what `o` does). Expand/collapse used to answer only on the
+    # one-column ▾/▸ marker, and a double-click there was a net no-op — the first press of
+    # the pair had already toggled, the second toggled back. So the marker column is
+    # swallowed here (true, nothing done): the pair reads as one toggle. Off every row it
+    # answers false and the shell delivers the second press as an ordinary click.
+    def handle_double_click_content(content : Rect, mx : Int32, my : Int32) : Bool
+      return false unless ri = @sitemap.row_at(content, mx, my)
+      return true if @sitemap.marker_hit?(content, mx, ri)
+      @sitemap.select_index(ri)
+      if @sitemap.leaf_at?(ri)
+        @host.sitemap_open_flow
+      else
+        @sitemap.toggle_at(ri)
+      end
+      true
+    end
+
     # Click hit-test against the content rect directly (TargetController passes the rect
     # below its sub-tab strip; the standalone path insets the frame itself).
     def handle_click_content(content : Rect, mx : Int32, my : Int32) : Bool

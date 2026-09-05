@@ -39,6 +39,15 @@ module Gori::Tui
     # question "what fields are there?" actually occurs — a controller cannot open an
     # overlay itself, so it asks here.
     abstract def open_help_query(surface : Symbol) : Nil
+
+    # Open the Sitemap cursor row's representative flow in the History detail — the `o`
+    # verb's body, on the Runner because it crosses tabs. A double-click on a leaf row asks
+    # for the same thing the key does, and the controller has no other way to reach it. A
+    # default rather than an abstract: some thirty spec doubles implement this module by
+    # hand for one pane each, and a seam only the Sitemap reaches should not tax them all.
+    def sitemap_open_flow : Nil
+    end
+
     # Open the Fuzzer's payload-set editor overlay (nil = add a new set, else edit that
     # index) / the advanced-settings overlay. The Runner builds them from the current view.
     abstract def open_fuzz_set_editor(edit_index : Int32?) : Nil
