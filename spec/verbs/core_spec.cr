@@ -17,7 +17,7 @@ describe "Gori::Verbs.register_core" do
 
       key = r["app.back-key"]
       key.scope.should eq(Gori::Verb::Scope::Sidebar)
-      key.chords.should eq([Gori::Verb::Chord.new("q")])
+      key.chords.should eq([typed_chord("q")])
       key.hidden?.should be_true # same action, so only one of the two lists in the palette
 
       verb_intents(r, "app.back").should eq([:leave_project])
@@ -31,7 +31,7 @@ describe "Gori::Verbs.register_core" do
     end
 
     it "binds the palette to ctrl-p and the notification centre to no chord" do
-      r["app.palette"].chords.should eq([Gori::Verb::Chord.new("p", ctrl: true)])
+      r["app.palette"].chords.should eq([typed_chord("p", ctrl: true)])
       verb_intents(r, "app.palette").should eq([:open_palette])
       r["app.notifications"].chords.should be_empty
       verb_intents(r, "app.notifications").should eq([:open_notifications])
@@ -75,7 +75,7 @@ describe "Gori::Verbs.register_core" do
 
   describe "scope" do
     it "toggles the lens from anywhere with bare 's' and jumps to the editor via the palette" do
-      r["scope.toggle-lens"].chords.should eq([Gori::Verb::Chord.new("s")])
+      r["scope.toggle-lens"].chords.should eq([typed_chord("s")])
       verb_intents(r, "scope.toggle-lens").should eq([:scope_toggle_lens])
       r["scope.edit"].chords.should be_empty
       verb_intents(r, "scope.edit").should eq([:scope_open])
@@ -135,7 +135,7 @@ describe "Gori::Verbs.register_core" do
     # the only way to copy without leaving the mode.
     it "carries the 'y' menu key with only the ctrl chord, in its own scope, gated on tab AND pane" do
       verb = r["project.copy"]
-      verb.chords.should eq([Gori::Verb::Chord.new("y", ctrl: true)])
+      verb.chords.should eq([typed_chord("y", ctrl: true)])
       verb.menu_key.should eq('y')
       verb.scope.should eq(Gori::Verb::Scope::ProjectDesc) # NOT Body — see the History list
       ctx = FakeExecContext.new
@@ -164,7 +164,7 @@ describe "Gori::Verbs.register_core" do
 
   describe "intercept" do
     it "binds the Global toggle to bare 'i'" do
-      r["intercept.toggle"].chords.should eq([Gori::Verb::Chord.new("i")])
+      r["intercept.toggle"].chords.should eq([typed_chord("i")])
       verb_intents(r, "intercept.toggle").should eq([:intercept_toggle])
     end
 
@@ -198,9 +198,9 @@ describe "Gori::Verbs.register_core" do
       it "registers the mark gestures on keys free across Scope::Intercept" do
         r["intercept.mark-toggle"].chords.map(&.label).should eq(["t"])
         r["intercept.mark-toggle"].menu_key.should eq('t')
-        # Chord.new("t", shift: true), never Chord.new("T") — Keybind.from_event normalises a
+        # typed_chord("t", shift: true), never typed_chord("T") — Keybind.from_event normalises a
         # typed capital to shift+lowercase, so a "T" chord could never fire.
-        r["intercept.mark-all"].chords.should eq([Gori::Verb::Chord.new("t", shift: true)])
+        r["intercept.mark-all"].chords.should eq([typed_chord("t", shift: true)])
         r["intercept.mark-all"].menu_key.should eq('T')
         r["intercept.mark-clear"].chords.should be_empty
         r["intercept.mark-clear"].menu_key.should eq('N')
@@ -261,7 +261,7 @@ describe "Gori::Verbs.register_core" do
       (1..9).each do |n|
         verb = r["nav.pos#{n}"]
         verb.hidden?.should be_true
-        verb.chords.should eq([Gori::Verb::Chord.new(n.to_s)])
+        verb.chords.should eq([typed_chord(n.to_s)])
         ctx = FakeExecContext.new
         verb.call(ctx)
         ctx.args_for(:focus_visible_tab).should eq([n.to_s])
@@ -280,7 +280,7 @@ describe "Gori::Verbs.register_core" do
         ctx.call_names.should eq([:focus_tab])
         ctx.args_for(:focus_tab).should eq([tab])
       end
-      r["tab.help"].chords.should eq([Gori::Verb::Chord.new("?")])
+      r["tab.help"].chords.should eq([typed_chord("?")])
       verb_intents(r, "tab.discover").should eq([:goto_discover]) # a Target sub-tab, not a tab
     end
 

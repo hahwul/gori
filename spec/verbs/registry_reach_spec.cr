@@ -49,8 +49,8 @@ describe "rule-list keys" do
 
   it "gives Colormarker the same key set its controller used to hardcode" do
     r = Gori::Verbs.registry
-    plain = ->(k : String) { Gori::Verb::Chord.new(k) }
-    shift = ->(k : String) { Gori::Verb::Chord.new(k, shift: true) }
+    plain = ->(k : String) { typed_chord(k) }
+    shift = ->(k : String) { typed_chord(k, shift: true) }
     r["colormarker.add"].chords.should contain(plain.call("a"))
     r["colormarker.edit"].chords.should contain(plain.call("e"))
     r["colormarker.edit"].chords.should contain(plain.call("enter"))
@@ -81,7 +81,7 @@ describe "hex and whitespace letters" do
   end
 
   it "keeps hex on ^X wherever it has a chord at all" do
-    ctrl_x = Gori::Verb::Chord.new("x", ctrl: true)
+    ctrl_x = typed_chord("x", ctrl: true)
     r.each do |v|
       next unless v.id.includes?("hex")
       next if v.chords.empty? # the response-pane dump is menu-only; ^X reaches it pane-dispatched
@@ -168,13 +168,13 @@ describe "Rewriter rule keys" do
   r = Gori::Verbs.registry
 
   it "binds every rule action except toggle" do
-    plain = ->(k : String) { Gori::Verb::Chord.new(k) }
+    plain = ->(k : String) { typed_chord(k) }
     r["rewriter.add"].chords.should contain(plain.call("a"))
     r["rewriter.edit"].chords.should contain(plain.call("e"))
     r["rewriter.delete"].chords.should contain(plain.call("d"))
     r["rewriter.scope"].chords.should contain(plain.call("s"))
-    r["rewriter.move-up"].chords.should contain(Gori::Verb::Chord.new("k", shift: true))
-    r["rewriter.toggle-default"].chords.should contain(Gori::Verb::Chord.new("x", shift: true))
+    r["rewriter.move-up"].chords.should contain(typed_chord("k", shift: true))
+    r["rewriter.toggle-default"].chords.should contain(typed_chord("x", shift: true))
   end
 
   it "leaves `x` to the controller, because the KEYMAP has no focus dimension" do
@@ -184,12 +184,12 @@ describe "Rewriter rule keys" do
     # `rewriter.toggle` would shadow one of them. `RewriterController#handle_list_key` runs
     # only when the LIST has focus, which is the disambiguation the keymap cannot express.
     r["rewriter.toggle"].chords.should be_empty
-    r["rewriter.select-line"].chords.should contain(Gori::Verb::Chord.new("x"))
+    r["rewriter.select-line"].chords.should contain(typed_chord("x"))
     r["rewriter.toggle"].menu_key.should eq('x') # still the letter, in its own section
     r["rewriter.select-line"].section.should eq(:preview)
     r["rewriter.toggle"].section.should eq(:rules)
     # Colormarker COULD take the chord: it has no read pane, so nothing else claims `x`.
-    r["colormarker.toggle"].chords.should contain(Gori::Verb::Chord.new("x"))
+    r["colormarker.toggle"].chords.should contain(typed_chord("x"))
   end
 end
 
@@ -206,7 +206,7 @@ end
 describe "JWT's lens switch" do
   it "is on ^T, the Repeater's letter for the same gesture" do
     r = Gori::Verbs.registry
-    ctrl_t = Gori::Verb::Chord.new("t", ctrl: true)
+    ctrl_t = typed_chord("t", ctrl: true)
     r["jwt.toggle-mode"].chords.should contain(ctrl_t)
     # `repeater.toggle-decoded` is "switch which representation this pane shows" — the same
     # question, and it has held ^T all along.

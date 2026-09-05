@@ -16,7 +16,7 @@ describe "Gori::Verbs.register_comparer" do
     # One handler taking :a/:b — a copy-paste slip here silently makes 'b' overwrite A.
     {"comparer.pick-a" => {"a", "a"}, "comparer.pick-b" => {"b", "b"}}.each do |id, (key, slot)|
       ctx = in_comparer
-      r[id].chords.should eq([Gori::Verb::Chord.new(key)])
+      r[id].chords.should eq([typed_chord(key)])
       r[id].call(ctx)
       ctx.call_names.should eq([:comparer_pick])
       ctx.args_for(:comparer_pick).should eq([slot])

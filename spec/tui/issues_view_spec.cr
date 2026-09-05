@@ -533,15 +533,15 @@ describe "Issues verbs" do
   it "registers issue.create and the issues detail/export verbs in the registry" do
     reg = Gori::Verbs.registry
     keymap = Gori::Verb::Keymap.build(reg)
-    keymap.lookup(Gori::Verb::Chord.new("f", shift: true), Gori::Verb::Scope::Body).should eq("issue.create")
-    keymap.lookup(Gori::Verb::Chord.new("enter"), Gori::Verb::Scope::Issues).should eq("issues.open")
-    keymap.lookup(Gori::Verb::Chord.new("]"), Gori::Verb::Scope::IssuesDetail).should eq("issue.severity-up")
-    keymap.lookup(Gori::Verb::Chord.new("}"), Gori::Verb::Scope::IssuesDetail).should eq("issue.status-up")
-    keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
-    keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::IssuesDetail).should eq("issue.open-flow")
-    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::IssuesDetail).should eq("issue.repeater-flow")
+    keymap.lookup(typed_chord("f", shift: true), Gori::Verb::Scope::Body).should eq("issue.create")
+    keymap.lookup(typed_chord("enter"), Gori::Verb::Scope::Issues).should eq("issues.open")
+    keymap.lookup(typed_chord("]"), Gori::Verb::Scope::IssuesDetail).should eq("issue.severity-up")
+    keymap.lookup(typed_chord("}"), Gori::Verb::Scope::IssuesDetail).should eq("issue.status-up")
+    keymap.lookup(typed_chord("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
+    keymap.lookup(typed_chord("o"), Gori::Verb::Scope::IssuesDetail).should eq("issue.open-flow")
+    keymap.lookup(typed_chord("r"), Gori::Verb::Scope::IssuesDetail).should eq("issue.repeater-flow")
     # export is a chord-less Global palette verb; the FORMAT comes from a picker, not the id
     reg["issues.export"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
-    keymap.lookup(Gori::Verb::Chord.new("e", shift: true), Gori::Verb::Scope::Issues).should eq("issues.export-key")
+    keymap.lookup(typed_chord("e", shift: true), Gori::Verb::Scope::Issues).should eq("issues.export-key")
   end
 end

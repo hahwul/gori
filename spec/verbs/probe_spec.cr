@@ -30,25 +30,25 @@ describe "Gori::Verbs.register_probe" do
        "probe.delete-selected"   => "d",
       }.each do |id, key|
         r[id].scope.should eq(Gori::Verb::Scope::Probe)
-        r[id].chords.should eq([Gori::Verb::Chord.new(key)])
+        r[id].chords.should eq([typed_chord(key)])
       end
       # `probe.clear` answers ⇧X — the chord every clear-all verb in the app answers, each in
       # its own scope. NOT a bare `x`: that is what 0edc3c5b took away, because on the Rules
       # sub-tab one chip over `x` is a harmless enable toggle and no Probe hint ever named the
       # destructive reading. The shift is the whole difference, so it is asserted through
-      # `Keybind.from_event` rather than against a hand-written chord — `Chord.new("X")`
+      # `Keybind.from_event` rather than against a hand-written chord — `typed_chord("X")`
       # satisfies an equality assertion perfectly and never fires.
       r["probe.clear"].chords.should eq([shift_chord('X')])
-      r["probe.clear"].chords.should_not contain(Gori::Verb::Chord.new("x"))
+      r["probe.clear"].chords.should_not contain(typed_chord("x"))
       r["probe.clear"].menu_key.should eq('X')
       # The bare `x` it is a shift away from lives in a DIFFERENT scope, so the two can never
       # resolve on one keystroke (`ProbeController#command_scope` answers ProbeRules there).
       r["probe-rules.toggle"].scope.should eq(Gori::Verb::Scope::ProbeRules)
-      r["probe-rules.toggle"].chords.should eq([Gori::Verb::Chord.new("x")])
+      r["probe-rules.toggle"].chords.should eq([typed_chord("x")])
 
-      r["probe.open"].chords.first.should eq(Gori::Verb::Chord.new("enter"))
+      r["probe.open"].chords.first.should eq(typed_chord("enter"))
       r["probe.open"].menu_key.should eq('v') # 'o' is reserved for open-evidence
-      r["probe.scope-toggle"].chords.should eq([Gori::Verb::Chord.new("s", shift: true)])
+      r["probe.scope-toggle"].chords.should eq([typed_chord("s", shift: true)])
     end
 
     it "routes each list action to its own intent" do
@@ -95,7 +95,7 @@ describe "Gori::Verbs.register_probe" do
        "probe.delete"        => {:probe_delete, "d"},
       }.each do |id, (intent, key)|
         r[id].scope.should eq(Gori::Verb::Scope::ProbeDetail)
-        r[id].chords.should eq([Gori::Verb::Chord.new(key)])
+        r[id].chords.should eq([typed_chord(key)])
         verb_intents(r, id).should eq([intent])
       end
       verb_intents(r, "probe.close").should eq([:probe_close])
@@ -108,8 +108,8 @@ describe "Gori::Verbs.register_probe" do
       # ↵/l/→ mirrors probe.close's esc/h/← in the same scope: ← leaves the detail, → goes
       # deeper. The aliases also keep a bare `enter` — structurally reserved — off the
       # rebindable surface (see spec/verb/keymap_spec.cr).
-      r["probe.open-affected"].chords.should eq([Gori::Verb::Chord.new("enter"),
-                                                 Gori::Verb::Chord.new("l"), Gori::Verb::Chord.new("right")])
+      r["probe.open-affected"].chords.should eq([typed_chord("enter"),
+                                                 typed_chord("l"), typed_chord("right")])
       verb_intents(r, "probe.open-affected").should eq([:probe_open_affected])
       # A menu key of its own: `o` is taken by the sample flow, and the space menu is the one
       # place both are listed side by side.
@@ -125,7 +125,7 @@ describe "Gori::Verbs.register_probe" do
       r["probe-rules.add"].available?(ctx).should be_true
       # `x` for the chord AND the menu key — the letter the Rewriter and Colormarker rule
       # lists already use for this action, where this one used to say `t` in the menu.
-      r["probe-rules.toggle"].chords.should eq([Gori::Verb::Chord.new("x")])
+      r["probe-rules.toggle"].chords.should eq([typed_chord("x")])
       r["probe-rules.toggle"].menu_key.should eq('x')
       # ↵ belongs to EDIT here, as it does in every other rule list in gori. Bound to toggle,
       # it meant a reflex carried from any of them silently disabled a scanning rule.

@@ -22,25 +22,51 @@ Gori::Settings.warning_io = nil
 
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 
-# The chord a SHIFTED letter actually produces, built the way the TUI builds it rather than
-# spelled by hand. `Verb::Chord.new("X")` looks like ⇧X, satisfies an equality assertion
-# perfectly, and never fires: `Keybind.from_event` normalises a typed capital to
-# shift+lowercase, so nothing ever asks the keymap for a chord whose key is "X". Asserting a
-# declaration against a hand-written twin of itself is what let a dead binding ship once
-# already (see the note in spec/verbs/activity_spec.cr), so an assertion that the SHIFT is
-# right wants the real event path — this is it.
+# The chord a keypress ACTUALLY produces, built the way the TUI builds it: a Termisu key
+# event run through `Keybind.from_event`, never a hand-spelled `Verb::Chord.new`.
 #
-# Not yet swept through the suite: the ⇧J/⇧K/⇧F/⇧E/⇧T assertions in the sitemap, diff, oast,
-# sequencer, comparer and issues specs still build their chords by hand. Those are reorder and
-# navigation verbs, where a dead binding is visible the first time anyone presses the key; the
-# four clear-all verbs are the ones where it would not be. Prefer this helper in new specs.
+# Why the detour matters: `Verb::Chord.new("X")` looks like ⇧X, satisfies an equality
+# assertion against a declaration spelled the same way, and never fires — the event path
+# normalises a typed capital to shift+lowercase, so nothing ever asks the keymap for a chord
+# whose key is "X". Asserting a declaration against a hand-written twin of itself is what
+# let a dead binding ship once (see the note in spec/verbs/activity_spec.cr). Every binding
+# assertion in spec/verbs/ therefore goes through this helper: `typed_chord("f", shift: true)`
+# is what pressing ⇧F yields, `typed_chord("X")` is what typing a capital X yields (the same
+# chord), `typed_chord("enter")` a named key, `typed_chord("p", ctrl: true)` a control chord.
+#
+# Raises when the event maps to no chord at all — a helper that quietly substituted a
+# hand-built chord there would reintroduce exactly the blind spot it exists to close.
+def typed_chord(key : String, *, ctrl = false, alt = false, shift = false) : Gori::Verb::Chord
+  named = {
+    "enter" => Termisu::Input::Key::Enter, "escape" => Termisu::Input::Key::Escape,
+    "tab" => Termisu::Input::Key::Tab, "up" => Termisu::Input::Key::Up,
+    "down" => Termisu::Input::Key::Down, "left" => Termisu::Input::Key::Left,
+    "right" => Termisu::Input::Key::Right, "backspace" => Termisu::Input::Key::Backspace,
+    "space" => Termisu::Input::Key::Space,
+  }
+  mods = Termisu::Input::Modifier::None
+  mods |= Termisu::Input::Modifier::Ctrl if ctrl
+  mods |= Termisu::Input::Modifier::Alt if alt
+  mods |= Termisu::Input::Modifier::Shift if shift
+  ev =
+    if k = named[key]?
+      Termisu::Event::Key.new(k, mods, nil)
+    else
+      raise "typed_chord: #{key.inspect} is neither a named key nor one character" unless key.size == 1
+      c = key[0]
+      # A shifted letter arrives as the lowercase key with Shift and the uppercase char
+      # (the shape `Keybind.from_event` documents); a typed capital arrives as the capital
+      # itself with no modifier. Ctrl+letter carries no char, matching the parser branch.
+      char = ctrl ? nil : (shift && c.ascii_letter? ? c.upcase : c)
+      Termisu::Event::Key.new(Termisu::Input::Key.from_char(c.downcase), mods, char)
+    end
+  Gori::Tui::Keybind.from_event(ev) ||
+    raise("typed_chord: #{key.inspect} (ctrl=#{ctrl} alt=#{alt} shift=#{shift}) maps to no chord")
+end
+
+# `typed_chord(letter, shift: true)` for the ⇧-letter case, kept under its older name.
 def shift_chord(letter : Char) : Gori::Verb::Chord
-  # `.not_nil!` rather than a fallback: from_event returns nil for an event it cannot name, and
-  # a helper that quietly substituted a hand-built chord there would reintroduce exactly the
-  # blind spot it exists to close.
-  Gori::Tui::Keybind.from_event(
-    Termisu::Event::Key.new(Termisu::Input::Key.from_char(letter.downcase),
-      Termisu::Input::Modifier::Shift, char: letter.upcase)).not_nil!
+  typed_chord(letter.downcase.to_s, shift: true)
 end
 
 # The scope decision for a spec that is exercising something OTHER than the scope gate

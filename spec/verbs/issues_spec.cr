@@ -14,7 +14,7 @@ describe "Gori::Verbs.register_issues" do
       verb.available?(ctx).should be_true
       ctx.current_tab = :issues
       verb.available?(ctx).should be_false
-      verb.chords.should eq([Gori::Verb::Chord.new("f", shift: true)])
+      verb.chords.should eq([typed_chord("f", shift: true)])
       verb_intents(r, "issue.create").should eq([:issue_create])
     end
   end
@@ -70,7 +70,7 @@ describe "Gori::Verbs.register_issues" do
       ctx = FakeExecContext.new
       ctx.selected_issue = 1_i64
       r["issues.mark-toggle"].available?(ctx).should be_true
-      r["issues.mark-toggle"].chords.should eq([Gori::Verb::Chord.new("t")])
+      r["issues.mark-toggle"].chords.should eq([typed_chord("t")])
       r["issues.mark-toggle"].menu_key.should eq('t')
       verb_intents(r, "issues.mark-toggle").should eq([:issues_mark_toggle])
 
@@ -79,9 +79,9 @@ describe "Gori::Verbs.register_issues" do
       empty.issue_marks = [4_i64]
       r["issues.mark-toggle"].available?(empty).should be_false
 
-      # Chord.new("T") would be DEAD (Keybind.from_event normalises a capital to
+      # typed_chord("T") would be DEAD (Keybind.from_event normalises a capital to
       # shift+lowercase), and menu_key skips shift chords — hence the explicit mnemonic.
-      r["issues.mark-all"].chords.should eq([Gori::Verb::Chord.new("t", shift: true)])
+      r["issues.mark-all"].chords.should eq([typed_chord("t", shift: true)])
       r["issues.mark-all"].menu_key.should eq('T')
       verb_intents(r, "issues.mark-all").should eq([:issues_mark_all])
 
@@ -93,7 +93,7 @@ describe "Gori::Verbs.register_issues" do
       {"issues.mark-extend-down" => {"down", "1"}, "issues.mark-extend-up" => {"up", "-1"}}.each do |id, (key, delta)|
         verb = r[id]
         verb.hidden?.should be_true # a nav primitive, like issues.up/down
-        verb.chords.should eq([Gori::Verb::Chord.new(key, shift: true)])
+        verb.chords.should eq([typed_chord(key, shift: true)])
         c = FakeExecContext.new
         verb.call(c)
         c.args_for(:issues_mark_extend).should eq([delta])
@@ -101,7 +101,7 @@ describe "Gori::Verbs.register_issues" do
     end
 
     # The tab-wipe. Asserted through `Keymap#lookup` on the chord a shift+X event actually
-    # produces, not against a hand-written twin of the declaration: `Chord.new("X")` satisfies
+    # produces, not against a hand-written twin of the declaration: `typed_chord("X")` satisfies
     # every equality assertion here and never fires, which is how a dead binding shipped once
     # before. `spec/verbs/activity_spec.cr` holds the family-wide version of this — the one
     # that fails when a SIXTH clear-all verb picks its own letter.
@@ -117,8 +117,8 @@ describe "Gori::Verbs.register_issues" do
       km.lookup(shift_chord('X'), Gori::Verb::Scope::Issues).should eq("issues.clear")
       # The letter under the shift is free in the LIST — the property that makes ⇧X safe here —
       # while one ↵ away it is Select line, in a scope this chord can never resolve in.
-      km.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::Issues).should be_nil
-      km.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::IssuesDetail).should eq("issue.select-line")
+      km.lookup(typed_chord("x"), Gori::Verb::Scope::Issues).should be_nil
+      km.lookup(typed_chord("x"), Gori::Verb::Scope::IssuesDetail).should eq("issue.select-line")
       # And the tab's other two shifted letters keep theirs: a wipe must not be a slip away
       # from either the export or mark-all, both of which sit under the same hand.
       km.lookup(shift_chord('E'), Gori::Verb::Scope::Issues).should eq("issues.export-key")
@@ -128,18 +128,18 @@ describe "Gori::Verbs.register_issues" do
     it "keeps the mark chords clear of the list's own bindings, and of the detail's `t`" do
       keymap = Gori::Verb::Keymap.build(r)
       issues = Gori::Verb::Scope::Issues
-      keymap.lookup(Gori::Verb::Chord.new("t"), issues).should eq("issues.mark-toggle")
-      keymap.lookup(Gori::Verb::Chord.new("t", shift: true), issues).should eq("issues.mark-all")
+      keymap.lookup(typed_chord("t"), issues).should eq("issues.mark-toggle")
+      keymap.lookup(typed_chord("t", shift: true), issues).should eq("issues.mark-all")
       # Chord records match EXACTLY, so the shift arrows never shadowed plain up/down.
-      keymap.lookup(Gori::Verb::Chord.new("down", shift: true), issues).should eq("issues.mark-extend-down")
-      keymap.lookup(Gori::Verb::Chord.new("down"), issues).should eq("issues.down")
+      keymap.lookup(typed_chord("down", shift: true), issues).should eq("issues.mark-extend-down")
+      keymap.lookup(typed_chord("down"), issues).should eq("issues.down")
       # One ↵ away, `t` still renames the open issue — a different scope, so no collision.
-      keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
+      keymap.lookup(typed_chord("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
     end
 
     it "returns focus to the tab menu on escape only (← was a tab-bar overshoot)" do
       verb = r["issues.leave"]
-      verb.chords.should eq([Gori::Verb::Chord.new("escape")])
+      verb.chords.should eq([typed_chord("escape")])
       ctx = FakeExecContext.new
       verb.call(ctx)
       ctx.args_for(:focus_pane).should eq(["menu"])
@@ -155,7 +155,7 @@ describe "Gori::Verbs.register_issues" do
       }.each do |id, (intent, delta, key)|
         verb = r[id]
         verb.hidden?.should be_true # power shortcut; the pickers are the discoverable path
-        verb.chords.should eq([Gori::Verb::Chord.new(key)])
+        verb.chords.should eq([typed_chord(key)])
         ctx = FakeExecContext.new
         verb.call(ctx)
         ctx.args_for(intent).should eq([delta])
@@ -196,7 +196,7 @@ describe "Gori::Verbs.register_issues" do
     # character selection. What is still under test is that plain ← still closes the detail —
     # the collision the shifted chords existed to avoid.
     it "leaves plain ← to close the detail, with no h-scroll pair to collide with" do
-      r["issue.close"].chords.should contain(Gori::Verb::Chord.new("left"))
+      r["issue.close"].chords.should contain(typed_chord("left"))
       ids = r.map(&.id)
       ids.should_not contain("issue.hscroll-right")
       ids.should_not contain("issue.hscroll-left")
@@ -253,9 +253,9 @@ describe "Gori::Verbs.register_issues" do
       verb.menu_key.should eq(r["notes.export"].menu_key)
       verb.hidden?.should be_false
 
-      # Chord.new("E") would be DEAD: Keybind.from_event normalises a typed capital to
+      # typed_chord("E") would be DEAD: Keybind.from_event normalises a typed capital to
       # shift + lowercase, so the stored chord has to be the shift form.
-      verb.chords.should eq([Gori::Verb::Chord.new("e", shift: true)])
+      verb.chords.should eq([typed_chord("e", shift: true)])
       verb.chords.map(&.key).should_not contain("x")
 
       # …and nothing in the Issues list scope claims 'x' any more.
