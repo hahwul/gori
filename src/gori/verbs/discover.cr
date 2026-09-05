@@ -42,6 +42,10 @@ module Gori
         Verb::Scope::Discover, [Verb::Chord.new("d")], mnemonic: 'd') { |ctx| ctx.discover_dismiss; nil }
 
       r.register Verb::Definition.new(
+        "discover.copy", "Copy", "Copy the selected finding's URL",
+        Verb::Scope::Discover, [Verb::Chord.new("y")], mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
+      r.register Verb::Definition.new(
         "discover.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Discover,
         [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:subtabs); nil }
     end

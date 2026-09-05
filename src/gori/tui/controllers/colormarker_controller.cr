@@ -59,6 +59,11 @@ module Gori::Tui
       Settings.colormarker_colors
     end
 
+    # `y`: the selected rule's match filter — the QL that paints the row, pasteable into a bar.
+    def colormarker_copy : Nil
+      copy_text(selected_rule.try(&.match_filter) || "")
+    end
+
     def selected_rule : Store::ColorRule?
       rule_list[@sel]?
     end
@@ -144,7 +149,7 @@ module Gori::Tui
       if @focus == :colors
         keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.delete} delete · space cmds · esc tabs")
       else
-        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.delete} delete · space cmds · ↹ colours")
+        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.copy} copy · {colormarker.delete} delete · space cmds · ↹ colours")
       end
     end
 

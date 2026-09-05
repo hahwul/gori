@@ -1596,6 +1596,11 @@ module Gori::Tui
       current_override.try(&.host)
     end
 
+    # The selected override as a hosts-file line (`ip host`) — what `y` copies.
+    def selected_override_line : String?
+      current_override.try { |e| "#{e.ip} #{e.host}" }
+    end
+
     # Removes the selected override, returning its host (for the toast) — or nil when there
     # was nothing selected OR the delete did not COMMIT. `HostOverrides#remove` answers that
     # (its doc: "false = store busy/locked/closing") and this discarded it, so a dropped
@@ -1757,6 +1762,12 @@ module Gori::Tui
     # be screen-sharing, and the key alone identifies the row.
     def selected_env_key : String?
       @env_items[@env_sel]?.try { |(key, _)| key }
+    end
+
+    # The selected variable as `KEY=VALUE` — what `y` copies. The value is included: the pane
+    # draws it in full, so the clipboard gets no more than the screen already shows.
+    def selected_env_line : String?
+      @env_items[@env_sel]?.try { |(key, val)| "#{key}=#{val}" }
     end
 
     def env_delete : String?

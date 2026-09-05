@@ -55,7 +55,7 @@ module Gori::Tui
       if @view.focus == :runs
         keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
       else
-        keys("↑/↓ nav · ↵/o request+response · tab runs · {discover.run} run · {discover.stop} stop · {discover.pause} pause · space cmds · esc sub-tabs")
+        keys("↑/↓ nav · ↵/o request+response · {discover.copy} copy · tab runs · {discover.run} run · {discover.stop} stop · {discover.pause} pause · space cmds · esc sub-tabs")
       end
     end
 
@@ -148,6 +148,11 @@ module Gori::Tui
 
     def page_rows : Int32?
       @view.page_rows
+    end
+
+    # `y`: the selected finding's URL.
+    def copy_row : Nil
+      copy_text(@view.selected_finding.try(&.url) || "")
     end
 
     def handle_wheel(step : Int32) : Bool

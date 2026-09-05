@@ -133,6 +133,15 @@ module Gori::Tui
       end
     end
 
+    # `y` — the cursor row (or the marks) of whichever sub-tab is up, as text.
+    def copy_row : Nil
+      case @active_sub
+      when 0 then @sitemap.copy_row
+      when 1 then @discover.copy_row
+      else        @diff.copy_row
+      end
+    end
+
     # --- forwarded input / focus / lifecycle ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       active_child.handle_body_key(ev)

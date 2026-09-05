@@ -914,6 +914,12 @@ module Gori::Tui
       true
     end
 
+    # `y`: the selected request as `METHOD host/path`.
+    def authorize_copy : Nil
+      e = @view.selected_entry
+      copy_text(e ? "#{e.method} #{e.host_path}" : "")
+    end
+
     # ⇥ / ⇧⇥ step the identity sub-cursor — the focus-ring hook, not a `key.tab?` arm: the
     # Runner claims ⇥ for the ring BEFORE the body sees a key, so the arms that used to sit
     # in `handle_body_key` never ran and the `⇥ identity` the hint promised went to the tab
@@ -943,7 +949,7 @@ module Gori::Tui
       # the two keys a run leaves meaningful, and "empty the queue" is not the thing to put in
       # front of an operator watching one go out. Resolved through the keymap so a rebind
       # reaches the hint; the rest of this line is still literal, as its siblings are.
-      keys("↑/↓ request · ⇥ identity · {authorize.run} run · {authorize.run-all} all · {authorize.identities} identities · {authorize.passive} passive#{passive} · {authorize.clear} clear · space cmds")
+      keys("↑/↓ request · ⇥ identity · {authorize.run} run · {authorize.run-all} all · {authorize.identities} identities · {authorize.passive} passive#{passive} · {authorize.copy} copy · {authorize.clear} clear · space cmds")
     end
   end
 end

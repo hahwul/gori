@@ -29,6 +29,12 @@ module Gori
         "sitemap.query", "Filter (QL)", "Filter the tree with a query (host: path: method: status: tag: …)",
         Verb::Scope::Sitemap, [Verb::Chord.new("/")], group: :view) { |ctx| ctx.sitemap_query; nil }
 
+      # `y` — the cursor row's host/path, or every marked row one per line. The lists this
+      # sits beside (History, Probe, Issues) all copy on `y`; the tree was the one that did not.
+      r.register Verb::Definition.new(
+        "sitemap.copy", "Copy", "Copy the cursor row's host/path — or every marked row, one per line",
+        Verb::Scope::Sitemap, [Verb::Chord.new("y")], mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
       # --- multi-select marks (mirrors History #442) ---
       # Marks make the EXISTING action menu act on N paths — the batch verbs below read the
       # view's target set ("the marks if any, else the cursor row"), so there are no
