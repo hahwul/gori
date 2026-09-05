@@ -365,6 +365,28 @@ describe Gori::Proxy::H2::HeadRewrite do
       end
     end
 
+    it "announces a kept advertisement to gori.log once per host per SESSION, not per connection" do
+      # This half fires in the DEFAULT configuration against origins that mostly advertise h3,
+      # and a browser opens several h2 connections per origin — a per-connection latch would
+      # be a log flood. The flow's advisory carries the fact every time; the LOG line is the
+      # once-per-host marker (`Settings.first_alt_svc_h3_notice?`), shared with h1.
+      Gori::Settings.reset_alt_svc_h3_notices
+      begin
+        capturing_log do |log|
+          2.times do
+            with_strip(%(h3=":443"), on: false) do |_, _, _, sink|
+              sink.responses.first.advisory.to_s.should eq(Gori::AltSvc.kept_note([%(h3=":443")]))
+            end
+          end
+          lines = log.entries.map(&.message).select(&.includes?("api.example.com"))
+          lines.size.should eq(1)
+          lines.first.should eq("h2 api.example.com: #{Gori::AltSvc.kept_note([%(h3=":443")])}")
+        end
+      ensure
+        Gori::Settings.reset_alt_svc_h3_notices
+      end
+    end
+
     it "says nothing about clear / h2= / a near-miss protocol-id, switch off" do
       {"clear", %(h2=":8443"), %(fooh3=":443"), %(h32=":443")}.each do |value|
         with_strip(value, on: false) do |pipe, emitted, block, sink|

@@ -1160,7 +1160,34 @@ end
 # gate and therefore covers every subcommand: an example that ran one command and found its stdout
 # clean would keep passing after somebody added a subcommand that logs, which is exactly how this
 # was missed the first time.
+# `dup(2)` is not in Crystal's LibC bindings; one line binds it for the helper below.
+lib LibC
+  fun dup(fd : Int) : Int
+end
+
+# Run the block with STDOUT pointed at /dev/null — for driving a `gori run` entry point whose
+# normal output is the help page, when the example is about a side effect and not the page.
+private def stdout_silenced(&)
+  STDOUT.flush
+  saved = LibC.dup(STDOUT.fd)
+  File.open(File::NULL, "w") { |null| STDOUT.reopen(null) }
+  yield
+ensure
+  STDOUT.flush
+  if saved
+    STDOUT.reopen(IO::FileDescriptor.new(saved))
+  end
+end
+
 describe "gori run — the root logger" do
+  it "writes to STDERR once the dispatch gate has run, whatever the subcommand" do
+    # Driven through the real entry point rather than the setup method: `-h` is the cheapest
+    # path that crosses the gate, and every other subcommand crosses the same one.
+    stdout_silenced { Gori::CLI::Run.dispatch(["-h"]) }
+    backend = ::Log.for("").backend.should be_a(::Log::IOBackend)
+    backend.io.should be(STDERR)
+  end
+
   it "is pointed at STDERR before any subcommand runs" do
     src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "cli", "run.cr"))
     body = src.lines.reject(&.lstrip.starts_with?('#')).join('\n')

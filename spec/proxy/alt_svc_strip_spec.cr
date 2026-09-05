@@ -157,6 +157,28 @@ describe "proxy — the h3 Alt-Svc strip" do
     end
   end
 
+  it "announces the kept advertisement to gori.log once per host per SESSION, not per connection" do
+    # Same marker as the h2 transport (`Settings.first_alt_svc_h3_notice?`), same reason: this
+    # fires in the default configuration and a browser opens several connections per origin.
+    # Two connections, one origin, one line — and the advisory on BOTH flows regardless.
+    port = start_origin(%(Alt-Svc: h3=":443"))
+    Gori::Settings.reset_alt_svc_h3_notices
+    begin
+      capturing_log do |log|
+        2.times do
+          through_proxy(strip: false, origin_port: port) do |_, sink|
+            sink.responses.first.advisory.to_s.should eq(Gori::AltSvc.kept_note([%(h3=":443")]))
+          end
+        end
+        lines = log.entries.map(&.message).select(&.starts_with?("alt-svc "))
+        lines.size.should eq(1)
+        lines.first.should end_with(Gori::AltSvc.kept_note([%(h3=":443")]))
+      end
+    ensure
+      Gori::Settings.reset_alt_svc_h3_notices
+    end
+  end
+
   it "says nothing about an Alt-Svc that advertises no h3, switch off" do
     # `clear` and a plain h2 alternative cost gori no visibility, so there is no blind spot to
     # report. Same answer the strip gives them.

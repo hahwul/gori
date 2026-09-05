@@ -122,6 +122,30 @@ def spawn_with(value : T, &block : T -> Nil) : Nil forall T
   spawn { block.call(value) }
 end
 
+# Run the block with the ROOT logger writing into a `Log::MemoryBackend`, and hand the
+# backend over so the example can read `entries`. The previous backend and level come back
+# on the way out, whether or not the block raised, so a spec asserting on gori.log lines
+# cannot leave the suite logging into memory. Reach for this rather than grepping the source
+# for a `Log.info` call: what the operator gets is the line, not the call site.
+def capturing_log(&)
+  root = ::Log.for("")
+  prev_backend = root.backend
+  prev_level = root.level
+  mem = ::Log::MemoryBackend.new
+  ::Log.setup(:info, mem)
+  # A nested begin, so the restore sees the captured values as the compiler knows them: a
+  # variable assigned inside a method-level body is nilable in that method's `ensure`.
+  begin
+    yield mem
+  ensure
+    if prev_backend
+      ::Log.setup(prev_level, prev_backend)
+    else
+      ::Log.setup(:none)
+    end
+  end
+end
+
 # NEVER a bare `Channel#receive` in a spec driven by real sockets — use this instead.
 #
 # PR #555 hung CI for 24 minutes on exactly that. The suite was green on macOS; on Linux a
