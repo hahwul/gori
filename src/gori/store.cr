@@ -32,6 +32,7 @@ require "./store/event_log"
 require "./store/intercept_bridge"
 require "./store/h2_frames"
 require "./store/reads"
+require "./store/query_control"
 require "./store/sitemap_tags"
 require "./ql"
 require "./open_lock"
@@ -942,6 +943,10 @@ module Gori
     def close : Nil
       return if @closed
       @closed = true
+      @controlled_reads.each_key(&.cancel)
+      until @controlled_reads.empty?
+        Fiber.yield
+      end
       @writes.close
       @done.receive
       # LAST-DITCH GUARD, and it is about a segfault rather than an exception. `DB::Disposable`

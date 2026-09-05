@@ -1989,6 +1989,48 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "keeps a requested dropdown across asynchronous host completions" do
+    view = HistoryView.new
+    requested = [] of String
+    view.host_suggest_handler = ->(prefix : String) { requested << prefix; nil }
+    view.set_query("host:a")
+    view.start_query
+    view.popup_down
+    view.popup_open?.should be_false
+    requested.should eq(["a"])
+    view.apply_host_suggestions("a", ["api.test"])
+    view.popup_open?.should be_true
+
+    view.query_insert('p')
+    view.popup_open?.should be_false
+    requested.should eq(["a", "ap"])
+    view.apply_host_suggestions("ap", ["api.test"])
+    view.popup_open?.should be_true
+
+    view.query_insert('i')
+    view.popup_close
+    view.apply_host_suggestions("api", ["api.test"])
+    view.popup_open?.should be_false
+  end
+
+  it "does not reopen a loading dropdown after leaving the host token or query bar" do
+    view = HistoryView.new
+    view.host_suggest_handler = ->(_prefix : String) { nil }
+    view.set_query("host:a")
+    view.start_query
+    view.popup_down
+    view.query_insert(' ')
+    view.apply_host_suggestions("a", ["api.test"])
+    view.query_insert('m')
+    view.popup_open?.should be_false
+
+    view.set_query("host:b")
+    view.popup_down
+    view.stop_query
+    view.apply_host_suggestions("b", ["beta.test"])
+    view.popup_open?.should be_false
+  end
+
   # ↵ with the dropdown open must be able to TERMINATE. Re-deriving candidates after a splice can
   # hand back the token that was just completed — `method:GET` narrows the value pool to exactly
   # `["method:GET"]` — so a popup that re-opens itself would make every ↵ re-splice the identical

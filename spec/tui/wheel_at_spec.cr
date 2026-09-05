@@ -1,4 +1,5 @@
 require "../support/tui_contract"
+require "../support/history_search"
 
 include Gori::Tui
 
@@ -71,6 +72,7 @@ describe "TabController#handle_wheel_at" do
         TuiContract.each_controller(session) do |controller, _host|
           next unless controller.is_a?(HistoryController)
           controller.on_enter
+          settle_history(controller)
           TuiContract.render(controller)
           view = controller.view
           inner = TuiContract::AREA.inset(1, 1)

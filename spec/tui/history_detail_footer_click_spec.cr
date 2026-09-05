@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/fake_host"
 require "../support/memory_backend"
+require "../support/history_search"
 require "file_utils"
 require "../../src/gori/tui/controllers/history_controller"
 
@@ -39,6 +40,7 @@ private def with_detail(&)
       flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, duration_us: 1_000_i64))
     session.store.flush
     ctl.view.reload(session.store)
+    settle_history(ctl)
     ctl.view.open_detail(session.store).should be_true
     yield ctl
   ensure

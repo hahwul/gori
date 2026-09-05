@@ -1,5 +1,6 @@
 require "../tab_controller"
 require "../history_view"
+require "./history_search"
 require "../clipboard"
 require "../url"
 require "../../hotkeys"
@@ -16,9 +17,9 @@ module Gori::Tui
   class HistoryController < TabController
     QUERY_DEBOUNCE = 110.milliseconds
 
-    def initialize(host : Host)
+    def initialize(host : Host, history : HistoryView = HistoryView.new)
       super(host)
-      @history = HistoryView.new
+      @history = history
       @history.set_scope(@host.session.scope)
       @history.set_colormarker(@host.session.colormarker)
       reload_columns
@@ -31,6 +32,8 @@ module Gori::Tui
       # runs while the shell is still booting, where a status line is overwritten before anyone
       # reads it. `on_enter` says it at the moment the operator actually looks at History.
       @lost_view_key = resolve_active_view.as(String?)
+      @history.reload_handler = ->request_search(Store)
+      @history.host_suggest_handler = ->request_host_suggestions(String)
     end
 
     # Read the project's persisted active view (#776) into the list.
@@ -219,6 +222,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      @pending_open = nil
       inner = rect.inset(1, 1) # framed insets 1,1
       if @host.overlay == :detail
         click_detail(rect, inner, mx, my)
@@ -233,11 +237,13 @@ module Gori::Tui
       # keystroke ago meant the debounced reload was still pending.
       gauge_row = @history.gauge_row_at(inner, mx, my)
       clicked_id = @history.list_row_at(inner, mx, my).try { |i| @history.row_id_at(i) }
+      clicked_selected = clicked_id == @history.selected_id
       # A click that selects a row / opens detail also exits QL edit mode (applying the query,
       # like Enter) — otherwise @querying stays set and later keys are hijacked into the filter bar.
       if @history.querying?
         flush_query_reload
         @history.stop_query
+        return true if select_during_search(clicked_id, clicked_selected)
       end
       # The scroll gauge on the frame's right hairline: a click there jumps the cursor to the
       # row it points at. Before the pane test — the gauge column is inside the preview split's
@@ -520,7 +526,7 @@ module Gori::Tui
       if had && @history.active_view.nil?
         @host.status("the #{had.name} view is gone — showing All")
       end
-      @history.reload(@host.session.store)
+      refresh_search
       @history.refresh_detail(@host.session.store) if @host.overlay == :detail # peer filled the open flow
     end
 
@@ -593,15 +599,20 @@ module Gori::Tui
     # Called from the run loop each tick: run a debounced filter reload if the
     # deadline passed. Returns true when it flushed (→ the shell marks the frame dirty).
     def flush_query_reload_if_due(now : Time::Instant) : Bool
+      dirty = drain_search
+      dirty = drain_host_search || dirty
+      dirty = @history.refresh_host_suggestions(now) || dirty
+      dirty = @history.reveal_searching(now) || dirty
       if (deadline = @query_reload_at) && now >= deadline
         flush_query_reload
         return true
       end
-      false
+      dirty
     end
 
     # Defer the filter reload until typing pauses (coalesces a burst into one search).
     private def schedule_query_reload : Nil
+      invalidate_search
       @query_reload_at = Time.instant + QUERY_DEBOUNCE
     end
 
@@ -615,6 +626,7 @@ module Gori::Tui
 
     # --- ExecContext verbs (delegated from the Runner) ---
     def move_selection(delta : Int32) : Nil
+      @pending_open = nil
       # Preview-focused: scroll the preview side (HistoryView#move handles it). The list
       # cursor doesn't move, so a range gesture in flight is left alone.
       if preview_scroll_focused?
