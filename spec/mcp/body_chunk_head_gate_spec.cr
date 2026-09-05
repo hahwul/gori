@@ -9,7 +9,7 @@ require "../spec_helper"
 # readings of one stored flow.
 
 private def call_json(store, name, args : String) : JSON::Any
-  tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools = tools_for(store)
   r = tools.call(name, JSON.parse(args))
   fail "#{name} errored: #{r.text}" if r.is_error
   JSON.parse(r.text)

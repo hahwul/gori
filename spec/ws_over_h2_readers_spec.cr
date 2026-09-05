@@ -344,7 +344,7 @@ describe "MCP create_repeater seeded from a socket" do
   it "seeds frames from an h2 socket" do
     with_store do |store|
       detail = h2_ws_flow(store, [{"out", 1, "a".to_slice}, {"out", 1, "b".to_slice}])
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("create_repeater", JSON.parse(%({"flow_id": #{detail.row.id}})))
       r.is_error.should be_false
       j = JSON.parse(r.text)
@@ -356,7 +356,7 @@ describe "MCP create_repeater seeded from a socket" do
   it "still seeds frames from an h1 socket" do
     with_store do |store|
       detail = h1_ws_flow(store, [{"out", 1, "a".to_slice}, {"out", 1, "b".to_slice}])
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("create_repeater", JSON.parse(%({"flow_id": #{detail.row.id}})))
       r.is_error.should be_false
       j = JSON.parse(r.text)

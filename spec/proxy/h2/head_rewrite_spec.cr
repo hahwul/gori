@@ -381,6 +381,11 @@ describe Gori::Proxy::H2::HeadRewrite do
           lines = log.entries.map(&.message).select(&.includes?("api.example.com"))
           lines.size.should eq(1)
           lines.first.should eq("h2 api.example.com: #{Gori::AltSvc.kept_note([%(h3=":443")])}")
+          # …and it was the SHARED latch that got spent, not one of this transport's own: the
+          # h1 path asks the same question for the same host and must now get "no", which is
+          # what makes "once per host per session" hold across an h1 and an h2 connection to
+          # one origin (spec/proxy/alt_svc_strip_spec.cr asserts the mirror image).
+          Gori::Settings.first_alt_svc_h3_notice?("api.example.com").should be_false
         end
       ensure
         Gori::Settings.reset_alt_svc_h3_notices

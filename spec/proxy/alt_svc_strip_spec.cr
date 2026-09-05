@@ -173,6 +173,11 @@ describe "proxy — the h3 Alt-Svc strip" do
         lines = log.entries.map(&.message).select(&.starts_with?("alt-svc "))
         lines.size.should eq(1)
         lines.first.should end_with(Gori::AltSvc.kept_note([%(h3=":443")]))
+        # The latch it spent is the SHARED one in Settings (the h2 transport asks the same
+        # question of the same set — spec/proxy/h2/head_rewrite_spec.cr), so an h1 and an h2
+        # connection to one origin log the notice once between them, not once each.
+        host = lines.first[/\Aalt-svc (\S+):/, 1].not_nil!
+        Gori::Settings.first_alt_svc_h3_notice?(host).should be_false
       end
     ensure
       Gori::Settings.reset_alt_svc_h3_notices

@@ -51,9 +51,19 @@ def typed_chord(key : String, *, ctrl = false, alt = false, shift = false) : Gor
   ev =
     if k = named[key]?
       Termisu::Event::Key.new(k, mods, nil)
+    elsif key == "tab" && shift
+      # Legacy terminals deliver ⇧Tab as its own key, which the event path maps to no chord:
+      # a binding spelled shift+tab is dead, and this helper says so by raising below.
+      Termisu::Event::Key.new(Termisu::Input::Key::BackTab, mods, nil)
     else
       raise "typed_chord: #{key.inspect} is neither a named key nor one character" unless key.size == 1
       c = key[0]
+      # Shift on a letter is a real event; shift on a symbol or digit is not — the terminal
+      # sends the shifted CHARACTER ('?' for ⇧/, '!' for ⇧1) with no modifier, so a chord
+      # spelled that way can never be pressed. Refuse rather than certify it.
+      if shift && !c.ascii_letter?
+        raise "typed_chord: shift+#{key.inspect} is not an event a terminal sends; spell the shifted character itself"
+      end
       # A shifted letter arrives as the lowercase key with Shift and the uppercase char
       # (the shape `Keybind.from_event` documents); a typed capital arrives as the capital
       # itself with no modifier. Ctrl+letter carries no char, matching the parser branch.
@@ -99,6 +109,28 @@ def with_store(&)
   end
 end
 
+# `with_store` for an example that writes the project env or bindings layer: the
+# process-global `Settings.project_env_vars` and `Env.layer` are put back on the way out
+# and the highlight revision bumped, so a `$KEY` an example set cannot leak into the next
+# file's expansions. Used to be pasted into six spec/mcp files.
+def with_store_env(&)
+  path = File.tempname("gori-spec", ".db")
+  store = Gori::Store.open(path)
+  prev_env = Gori::Settings.project_env_vars
+  prev_layer = Gori::Env.layer
+  begin
+    yield store
+  ensure
+    Gori::Env.layer = prev_layer
+    Gori::Settings.project_env_vars = prev_env
+    Gori::Env.bump_highlight_rev
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
 # The MCP tool facade over a store, built the way `gori mcp` builds it for a bound project:
 # actions allowed, upstream verification off. `allow_actions: false` is the --read-only
 # surface. Typed to a Store so a file that builds its Tools from a Project keeps its own.
@@ -106,13 +138,17 @@ def tools_for(store : Gori::Store, allow_actions = true, verify_upstream = false
   Gori::MCP::Tools.new(store, allow_actions: allow_actions, verify_upstream: verify_upstream)
 end
 
-# Hand a fresh value to a new fiber. The origin loops in this tree are all
+# Hand a fresh value to a new fiber. An origin loop in this tree passes the accepted
+# socket to its fiber one of two ways, and never through a block that names the loop
+# variable:
 #
-#     while conn = server.accept?
-#       spawn_with(conn) do |conn|   # NOT `spawn do`
+#     while accepted = server.accept?
+#       spawn_with(accepted) do |conn|   # a body of its own
+#     — or —
+#       spawn serve(accepted)            # a call: `spawn` evaluates the ARGUMENTS first
 #
-# because a `spawn do … conn … end` block captures the LOOP VARIABLE by reference, and the
-# next `accept?` reassigns it before the fiber runs. Two clients dialling back to back then
+# because a `spawn do … conn … end` (or `spawn { … conn … }`) block captures the LOOP
+# VARIABLE by reference, and the next `accept?` reassigns it before the fiber runs. Two clients dialling back to back then
 # both get served on the second socket while the first is never read: the engine under
 # test blocks on it until the GC finalises the orphaned socket, which is why one discover
 # example cost 30 s inside the full suite and 1 s alone. AGENTS.md lists the same trap for

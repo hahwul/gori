@@ -13,7 +13,7 @@ require "socket"
 # stored the OPPOSITE of the absent-default. See `Tools#bool_value`.
 
 private def bool_tools(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 private def bool_json(tools : Gori::MCP::Tools, name : String, args : String) : JSON::Any

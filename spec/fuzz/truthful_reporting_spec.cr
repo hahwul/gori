@@ -55,8 +55,8 @@ private class ShortBodyOrigin
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn do
-      while conn = @server.accept?
-        spawn do
+      while accepted = @server.accept?
+        spawn_with(accepted) do |conn|
           if Gori::Proxy::Codec::Http1.read_head(conn)
             conn << "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nab"
             conn.flush

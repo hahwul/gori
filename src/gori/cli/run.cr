@@ -127,6 +127,24 @@ module Gori
       # the top of this file — that list IS the help page's order.
       macro finished
         {% cmds = @type.class.methods.select(&.annotation(Subcommand)) %}
+        {% for m in cmds %}
+          {% anns = m.annotations(Subcommand) %}
+          {% if anns.size != 1 %}
+            {% raise "#{m.name}: an entry point carries exactly one @[Subcommand] (found #{anns.size})" %}
+          {% end %}
+          {% ann = anns[0] %}
+          {% if ann.args.empty? || !ann.args.all?(&.is_a?(StringLiteral)) %}
+            {% raise "#{m.name}: @[Subcommand] takes the name and its aliases as string arguments" %}
+          {% end %}
+          {% for key in ann.named_args.keys %}
+            {% unless key.stringify == "help" %}
+              {% raise "#{m.name}: unknown @[Subcommand] option '#{key}' — only help: is accepted" %}
+            {% end %}
+          {% end %}
+          {% if !ann[:help].is_a?(ArrayLiteral) || ann[:help].empty? %}
+            {% raise "#{m.name}: @[Subcommand] needs help: [{name column, description}, …] with at least one row" %}
+          {% end %}
+        {% end %}
 
         private def self.dispatch_subcommand(args : Array(String)) : Nil
           Settings.load # global env vars (and other persisted defaults) for all subcommands

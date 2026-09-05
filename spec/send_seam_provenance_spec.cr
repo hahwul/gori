@@ -314,7 +314,7 @@ describe "Repeater::Sender provenance (a DECLARED binding at the send seam)" do
           method: "GET", target: "/api?$TOKEN=1&sort=asc", http_version: "HTTP/1.1",
           head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         store.flush
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         r = tools.call("send_request", JSON.parse(%({"flow_id":#{fid},"allow_unscoped":true})))
         r.is_error.should be_false
         wire = String.new(origin.requests.first)
@@ -530,7 +530,7 @@ describe "WebSocket message provenance across the three surfaces" do
       store.insert_ws_message(0_i64, "out", 1, %({"$where":"this.a==1"}).to_slice, repeater_id: id)
       store.flush
 
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("send_websocket",
         JSON.parse(%({"repeater_id":#{id},"idle_ms":300,"allow_unscoped":true})))
       r.is_error.should be_false
@@ -552,7 +552,7 @@ describe "WebSocket message provenance across the three surfaces" do
       upgrade = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
       id = store.insert_repeater("ws://127.0.0.1:#{port}", upgrade.to_slice, false, true, nil, 0)
       store.flush
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("send_websocket", JSON.parse(
         %({"repeater_id":#{id},"idle_ms":300,"allow_unscoped":true,"verbatim":true,"messages":["{\\"$where\\":1}"]})))
       r.is_error.should be_false
@@ -570,7 +570,7 @@ describe "WebSocket message provenance across the three surfaces" do
       upgrade = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
       id = store.insert_repeater("ws://127.0.0.1:#{port}", upgrade.to_slice, false, true, nil, 0)
       store.flush
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       # An invalid-UTF-8 TEXT payload is the one shape that reaches `payload_base64`, which
       # is where the raw substituted value used to be printed unmasked beside the masked
       # `payload`. Base64 of `bad\xff\xfe$where` — the frame the h3 report caught.
@@ -929,7 +929,7 @@ describe "verbatim at the send seam (#910)" do
       # its OWN freshly-loaded `Bindings` as `Env.layer` at construction, so a table bound first
       # is replaced by an empty one and every "the token did not go out" assertion below would
       # pass with nothing to substitute.
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
         r = tools.call("send_request",
           JSON.parse(%({"repeater_id":#{rec.id},"verbatim":true,"allow_unscoped":true})))
@@ -952,7 +952,7 @@ describe "verbatim at the send seam (#910)" do
       origin = RecordingOrigin.new
       origin.serve(2)
       # Constructed before the layer — see the note in the `repeater_id` example above.
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
         raw = "GET /api?$TOKEN=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
         url = "http://127.0.0.1:#{origin.port}/"
@@ -1069,7 +1069,7 @@ describe "verbatim at the send seam (#910)" do
       store.update_repeater_ws_messages(id, [Gori::Store::WsOutMessage.text("p=$TOKEN")]).should be_true
       store.flush
       # Constructed before the layer — see the note in the `repeater_id` example above.
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
         r = tools.call("send_websocket",
           JSON.parse(%({"repeater_id":#{id},"verbatim":true,"allow_unscoped":true,"idle_ms":500})))

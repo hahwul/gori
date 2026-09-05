@@ -110,6 +110,21 @@ module Gori
       # that used to be two hand-kept `case` ladders here is the `gated:` flag.
       macro finished
         {% tools = @type.methods.select(&.annotation(Tool)) %}
+        {% for m in tools %}
+          {% anns = m.annotations(Tool) %}
+          {% if anns.size != 1 %}
+            {% raise "#{m.name}: a handler carries exactly one @[Tool] (found #{anns.size}); a tool has one name" %}
+          {% end %}
+          {% ann = anns[0] %}
+          {% if ann.args.size != 1 || !ann.args[0].is_a?(StringLiteral) %}
+            {% raise "#{m.name}: @[Tool] takes the tool name as its one positional argument" %}
+          {% end %}
+          {% for key in ann.named_args.keys %}
+            {% unless %w[gated agent_action env_refresh unbound].includes?(key.stringify) %}
+              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound" %}
+            {% end %}
+          {% end %}
+        {% end %}
 
         # Dispatch by tool name; nil when `name` is not a tool at all. A handler taking an
         # argument receives the call's argument hash, a zero-argument one is called bare.

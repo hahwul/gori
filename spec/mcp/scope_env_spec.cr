@@ -192,7 +192,7 @@ describe "MCP env reload (R2-3)" do
     with_store do |store|
       store.set_setting(Gori::Env::PROJECT_VARS_KEY,
         Gori::Env.serialize_vars([{"APIHOST", "old.test"}]))
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       begin
         # initialize -> Env.load_project seeded the old value.
         Gori::Settings.project_env_vars.should eq([{"APIHOST", "old.test"}])
@@ -218,7 +218,7 @@ describe "MCP env reload (R2-3)" do
     with_store do |store|
       store.set_setting(Gori::Env::PROJECT_VARS_KEY,
         Gori::Env.serialize_vars([{"APIHOST", "old.test"}]))
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       begin
         store.set_setting(Gori::Env::PROJECT_VARS_KEY,
           Gori::Env.serialize_vars([{"APIHOST", "new.test"}]))
@@ -447,7 +447,7 @@ describe "MCP per-project network overrides" do
       store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "9")
       store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
 
-      Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools_for(store)
 
       Gori::Settings.project_upstream_proxy.should eq("jump:8888")
       Gori::Settings.project_upstream_destination.should eq("*.example.com")
@@ -482,7 +482,7 @@ describe "MCP per-project network overrides" do
       Gori::Settings.project_upstream_auth = Gori::Settings::ProjectProxyAuth.new("basic", "stale", "old")
       Gori::Settings.project_capture_max_mib = 64
 
-      Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools_for(store)
 
       Gori::Settings.project_upstream_proxy.should be_nil
       Gori::Settings.project_upstream_destination.should be_nil

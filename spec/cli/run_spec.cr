@@ -1182,10 +1182,23 @@ end
 describe "gori run — the root logger" do
   it "writes to STDERR once the dispatch gate has run, whatever the subcommand" do
     # Driven through the real entry point rather than the setup method: `-h` is the cheapest
-    # path that crosses the gate, and every other subcommand crosses the same one.
-    stdout_silenced { Gori::CLI::Run.dispatch(["-h"]) }
-    backend = ::Log.for("").backend.should be_a(::Log::IOBackend)
-    backend.io.should be(STDERR)
+    # path that crosses the gate, and every other subcommand crosses the same one. The root
+    # logger is pointed somewhere else FIRST, so the assertion cannot pass on whatever an
+    # earlier file left behind, and put back after, so this file leaves nothing behind either.
+    root = ::Log.for("")
+    prev_backend, prev_level = root.backend, root.level
+    begin
+      ::Log.setup(:info, ::Log::MemoryBackend.new)
+      stdout_silenced { Gori::CLI::Run.dispatch(["-h"]) }
+      backend = ::Log.for("").backend.should be_a(::Log::IOBackend)
+      backend.io.should be(STDERR)
+    ensure
+      if prev_backend
+        ::Log.setup(prev_level, prev_backend)
+      else
+        ::Log.setup(:none)
+      end
+    end
   end
 
   it "is pointed at STDERR before any subcommand runs" do

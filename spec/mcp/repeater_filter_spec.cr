@@ -6,7 +6,7 @@ require "../spec_helper"
 # against each other here rather than only against literals.
 
 private def tools(store)
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 private def call_json(store, name, args : String) : JSON::Any

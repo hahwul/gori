@@ -23,7 +23,7 @@ require "socket"
 # the string readers were what was left.
 
 private def str_tools(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 private def str_json(tools : Gori::MCP::Tools, name : String, args : String) : JSON::Any

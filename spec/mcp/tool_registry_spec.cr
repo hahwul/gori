@@ -33,7 +33,7 @@ describe "MCP tool registry" do
 
   it "advertises exactly the tools it dispatches" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       listed = advertised(tools)
       listed.uniq.size.should eq(listed.size)
       listed.sort.should eq(Gori::MCP::Tools::TOOL_NAMES.sort)
@@ -42,7 +42,7 @@ describe "MCP tool registry" do
 
   it "under --read-only advertises exactly the tools it will run, and refuses the rest before their handlers" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      tools = tools_for(store, allow_actions: false)
       # Project selection is not `gated:` because an install on a fresh machine needs it
       # under --read-only too: `switch_project` always runs, and `create_project` runs while
       # UNBOUND and self-gates once a project is bound (`create_project_entry`). Bound and
@@ -62,6 +62,43 @@ describe "MCP tool registry" do
           r.error_code.should_not eq("INTERNAL"), "#{name} crashed on empty arguments: #{r.text}"
         end
       end
+    end
+  end
+
+  it "pins the flags the other examples cannot see through a call" do
+    # The sets are generated from the same annotations the dispatcher is, so a flag typo
+    # would make a set silently smaller and every example above still pass. Pin a member
+    # of each set whose reason is written down: the send is the canonical agent action and
+    # the canonical `$KEY` expander; `list_env` reports the env and so must re-read it;
+    # `decode` is a pure tool and so needs no project.
+    Gori::MCP::Tools::AGENT_ACTION_TOOLS.should contain("send_request")
+    Gori::MCP::Tools::AGENT_ACTION_TOOLS.should_not contain("list_history")
+    Gori::MCP::Tools::ENV_REFRESH_TOOLS.should eq(Set{"send_request", "send_websocket", "fuzz_start", "mine_start",
+                                                      "sequence_start", "discover_start", "list_env", "set_env_var", "delete_env_var"})
+    Gori::MCP::Tools::UNBOUND_SAFE.should contain("decode")
+    Gori::MCP::Tools::UNBOUND_SAFE.should_not contain("list_history")
+    Gori::MCP::Tools::GATED_TOOLS.should contain("send_request")
+    Gori::MCP::Tools::GATED_TOOLS.should_not contain("get_flow")
+  end
+
+  it "with no project bound and actions allowed, the tools flagged both unbound and gated reach their handlers" do
+    # Under --read-only the next example refuses these before dispatch, so it proves nothing
+    # about their handlers. With actions allowed the handler runs, and every one of the three
+    # refuses its arguments before touching a network or a store: a provider that does not
+    # exist, a session that was never started, a project with no name.
+    tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false)
+    both = Gori::MCP::Tools::UNBOUND_SAFE & Gori::MCP::Tools::GATED_TOOLS
+    both.should eq(Set{"oast_start", "oast_stop", "delete_project"})
+    safe_args = {
+      "oast_start"     => %({"provider":"no-such-provider"}),
+      "oast_stop"      => %({}),
+      "delete_project" => %({}),
+    }
+    both.each do |name|
+      r = tools.call(name, JSON.parse(safe_args[name]))
+      r.error_code.should_not eq("NO_PROJECT"), "#{name} is flagged unbound but asked for a project"
+      r.error_code.should_not eq("TOOL_DISABLED"), "#{name} was refused with actions allowed"
+      r.error_code.should_not eq("INTERNAL"), "#{name} crashed: #{r.text}"
     end
   end
 

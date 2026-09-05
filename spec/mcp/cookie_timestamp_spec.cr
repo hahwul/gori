@@ -7,7 +7,7 @@ require "json"
 # time and reported the forged cookie as success. See `Tools#cookie_forge_tool`.
 
 private def cookie_tools(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 private def forge(tools : Gori::MCP::Tools, ts : String)

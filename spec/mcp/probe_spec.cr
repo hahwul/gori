@@ -70,7 +70,7 @@ describe "MCP probe_scan tool" do
   it "passively scans and returns grouped issues with the documented fields" do
     with_store do |store|
       seed_secret_flow(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       res = call_json(tools, "probe_scan", "{}")
       res["active"].as_bool.should be_false
       res["flows_scanned"].as_i.should eq(1)
@@ -87,7 +87,7 @@ describe "MCP probe_scan tool" do
   it "filters by severity" do
     with_store do |store|
       seed_secret_flow(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       res = call_json(tools, "probe_scan", %({"severity":"critical"}))
       codes = res["issues"].as_a.map { |g| g["code"].as_s }
       codes.should_not contain("secret_in_url") # it's High, below Critical
@@ -116,7 +116,7 @@ describe "MCP probe_scan tool" do
   it "refuses an active scan when no scope is configured (SCOPE_BLOCKED, no network)" do
     with_store do |store|
       seed_secret_flow(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("probe_scan", JSON.parse(%({"active":true})))
       r.is_error.should be_true
       r.text.should contain("scope")
@@ -126,7 +126,7 @@ describe "MCP probe_scan tool" do
   it "accepts unsafe/aggressive params, inert (not echoed) under a passive scan" do
     with_store do |store|
       seed_secret_flow(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       # active defaults false → the two knobs parse but do nothing and are not echoed.
       res = call_json(tools, "probe_scan", %({"unsafe":true,"aggressive":true}))
       res["active"].as_bool.should be_false
@@ -140,7 +140,7 @@ describe "MCP probe_scan tool" do
     with_store do |store|
       seed_secret_flow(store)
       Gori::Scope.load(store).add("exclude", "host", "evil.test") # configured, but zero includes
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("probe_scan", JSON.parse(%({"active":true})))
       r.is_error.should be_true # was: silently ran zero active probes and reported success
       r.text.should contain("include")
@@ -163,7 +163,7 @@ describe "MCP probe triage tools" do
   it "lists persisted findings open-only by default, and all under include_closed" do
     with_store do |store|
       issue = seed_probe_issue(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       res = call_json(tools, "probe_issues", "{}")
       res["total"].as_i.should eq(1)
@@ -183,7 +183,7 @@ describe "MCP probe triage tools" do
   it "toggles a single finding dismissed then back open" do
     with_store do |store|
       issue = seed_probe_issue(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       call_json(tools, "probe_dismiss", %({"id":#{issue.id}}))["status"].as_s.should eq("false-positive")
       call_json(tools, "probe_dismiss", %({"id":#{issue.id}}))["status"].as_s.should eq("open")
     end
@@ -194,7 +194,7 @@ describe "MCP probe triage tools" do
       seed_probe_issue(store, code: "secret_in_url", host: "a.test")
       seed_probe_issue(store, code: "secret_in_url", host: "b.test")
       seed_probe_issue(store, code: "other_code", host: "b.test")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       call_json(tools, "probe_dismiss", %({"code":"secret_in_url"}))["dismissed"].as_i.should eq(2)
       open_now = call_json(tools, "probe_issues", "{}")["issues"].as_a
@@ -209,7 +209,7 @@ describe "MCP probe triage tools" do
   it "rejects zero or multiple dismiss selectors" do
     with_store do |store|
       seed_probe_issue(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       tools.call("probe_dismiss", JSON.parse("{}")).is_error.should be_true
       tools.call("probe_dismiss", JSON.parse(%({"id":1,"code":"x"}))).is_error.should be_true
     end
@@ -218,7 +218,7 @@ describe "MCP probe triage tools" do
   it "promotes a finding to an Issue exactly once" do
     with_store do |store|
       issue = seed_probe_issue(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       res = call_json(tools, "probe_promote", %({"id":#{issue.id}}))
       res["promoted"].as_bool.should be_true
@@ -241,7 +241,7 @@ describe "MCP probe triage tools" do
       rid = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, false, true, nil, 0)
       issue = seed_probe_issue(store, repeater_id: rid)
       issue.sample_flow_id.should be_nil
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       issue_id = call_json(tools, "probe_promote", %({"id":#{issue.id}}))["issue_id"].as_i64
       links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
@@ -253,7 +253,7 @@ describe "MCP probe triage tools" do
     with_store do |store|
       a = seed_probe_issue(store, code: "secret_in_url", host: "a.test")
       seed_probe_issue(store, code: "secret_in_url", host: "b.test")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       call_json(tools, "probe_delete", %({"id":#{a.id}}))["deleted"].as_i.should eq(1)
       store.count_probe_issues.should eq(1)
@@ -279,7 +279,7 @@ end
 describe "MCP probe rules + mode tools" do
   it "lists built-in and custom rules with their enabled state and the project mode" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       res = call_json(tools, "list_probe_rules", "{}")
       res["mode"].as_s.should eq("passive") # the fresh-project default
       # One built-in ships OFF by default (the opt-in request-smuggling detector), so a fresh
@@ -299,7 +299,7 @@ describe "MCP probe rules + mode tools" do
 
   it "filters the catalog by kind" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       res = call_json(tools, "list_probe_rules", %({"kind":"active"}))
       res["rules"].as_a.map { |r| r["kind"].as_s }.uniq.should eq(["active"])
       tools.call("list_probe_rules", JSON.parse(%({"kind":"bogus"}))).is_error.should be_true
@@ -309,7 +309,7 @@ describe "MCP probe rules + mode tools" do
   it "disables a built-in and the change is what a scan actually honours" do
     with_store do |store|
       seed_secret_flow(store)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       before = call_json(tools, "probe_scan", "{}")["issues"].as_a.map { |g| g["code"].as_s }
       before.should contain("secret_in_url")
@@ -335,7 +335,7 @@ describe "MCP probe rules + mode tools" do
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
         body: "leak sk_live_abc".to_slice, content_type: "text/html"))
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       created = call_json(tools, "create_probe_rule",
         %({"title":"stripe key","pattern":"sk_live_[a-z]+","match_kind":"regex","severity":"high"}))
@@ -357,7 +357,7 @@ describe "MCP probe rules + mode tools" do
 
   it "refuses a regex PCRE rejects instead of saving a rule that can never match" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("create_probe_rule", JSON.parse(%({"title":"x","pattern":"[unclosed","match_kind":"regex"})))
       r.is_error.should be_true
       store.probe_custom_rules.empty?.should be_true
@@ -366,7 +366,7 @@ describe "MCP probe rules + mode tools" do
 
   it "refuses to delete a built-in (disable is the only option)" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       tools.call("delete_probe_rule", JSON.parse(%({"id":"secret_in_url"}))).is_error.should be_true
       tools.call("set_probe_rule_enabled", JSON.parse(%({"id":"no_such_rule","enabled":false}))).is_error.should be_true
     end
@@ -374,7 +374,7 @@ describe "MCP probe rules + mode tools" do
 
   it "updates a custom rule's fields" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       id = call_json(tools, "create_probe_rule", %({"title":"a","pattern":"AAA"}))["id"].as_s
       call_json(tools, "update_probe_rule",
         %({"id":"#{id}","title":"b","pattern":"BBB","side":"request","region":"header","severity":"low"}))
@@ -393,7 +393,7 @@ describe "MCP probe rules + mode tools" do
   # `set_probe_rule_enabled` twin, because calling again is the right move.
   it "refuses to report an edit the store did not commit" do
     with_rule_update_failing_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       id = call_json(tools, "create_probe_rule", %({"title":"a","pattern":"AAA"}))["id"].as_s
 
       store.fail_update = true
@@ -416,7 +416,7 @@ describe "MCP probe rules + mode tools" do
   # into the human's Activity feed. The CLI twin (cli/run/probe.cr) has always checked it.
   it "refuses to report a delete the store did not commit" do
     with_rule_update_failing_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       id = call_json(tools, "create_probe_rule", %({"title":"a","pattern":"AAA"}))["id"].as_s
 
       store.fail_delete = true
@@ -433,7 +433,7 @@ describe "MCP probe rules + mode tools" do
 
   it "round-trips the scan mode and rejects an unknown label" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       store.probe_mode.passive?.should be_true
 
       res = call_json(tools, "set_probe_mode", %({"mode":"aggressive"}))
@@ -466,7 +466,7 @@ describe "MCP probe_delete guards" do
     with_store do |store|
       a = seed_probe_issue(store, code: "secret_in_url", host: "a.test")
       seed_probe_issue(store, code: "secret_in_url", host: "b.test")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       # all:true wipes every SUPPRESSION too, so a rescan re-discovers everything — gated.
       r = tools.call("probe_delete", JSON.parse(%({"all":true})))
@@ -490,7 +490,7 @@ describe "MCP probe_delete guards" do
       store.upsert_probe_issue(Gori::Probe::Detection.new(
         code: "custom_p_1", category: "custom", host: "acme.test", title: "stripe key",
         severity: Gori::Store::Severity::High, url: "https://acme.test/x"))
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       res = call_json(tools, "probe_issues", %({"category":"custom"}))
       res["total"].as_i.should eq(1)

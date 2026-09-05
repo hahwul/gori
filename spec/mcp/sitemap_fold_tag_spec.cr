@@ -36,7 +36,7 @@ describe "MCP list_sitemap tag stamping" do
   it "does not stamp a path tag on a folded row, matching the tree model" do
     with_store do |store|
       seed(store, "/search?q=1")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       call_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/search","tag":"look-here"}))
 
       row = row_for(call_json(tools, "list_sitemap", "{}"), "/search")
@@ -48,7 +48,7 @@ describe "MCP list_sitemap tag stamping" do
   it "keeps set_sitemap_tag's invisibility warning honest about list_sitemap" do
     with_store do |store|
       seed(store, "/search?q=1")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
 
       set = call_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/search","tag":"look-here"}))
       set["matches_endpoint"].as_bool.should be_false
@@ -62,7 +62,7 @@ describe "MCP list_sitemap tag stamping" do
   it "still stamps a tag on an UNFOLDED row" do
     with_store do |store|
       seed(store, "/plain")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       call_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/plain","tag":"plain-tag"}))
 
       row = row_for(call_json(tools, "list_sitemap", "{}"), "/plain")
@@ -74,7 +74,7 @@ describe "MCP list_sitemap tag stamping" do
   it "reports a tag pinned on a variant through variant_tags, and through fold_query:false" do
     with_store do |store|
       seed(store, "/search?q=1")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       set = call_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/search?q=1","tag":"variant-tag"}))
       set["matches_endpoint"].as_bool.should be_true
 

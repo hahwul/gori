@@ -12,7 +12,7 @@ require "socket"
 # compare_flows and the extract-rule offsets inverted it.
 
 private def int_tools(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 # The failure this file exists for: an INTERNAL result carrying the OverflowError's message.
