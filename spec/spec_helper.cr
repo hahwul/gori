@@ -37,41 +37,46 @@ Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 # Raises when the event maps to no chord at all — a helper that quietly substituted a
 # hand-built chord there would reintroduce exactly the blind spot it exists to close.
 def typed_chord(key : String, *, ctrl = false, alt = false, shift = false) : Gori::Verb::Chord
-  named = {
-    "enter" => Termisu::Input::Key::Enter, "escape" => Termisu::Input::Key::Escape,
-    "tab" => Termisu::Input::Key::Tab, "up" => Termisu::Input::Key::Up,
-    "down" => Termisu::Input::Key::Down, "left" => Termisu::Input::Key::Left,
-    "right" => Termisu::Input::Key::Right, "backspace" => Termisu::Input::Key::Backspace,
-    "space" => Termisu::Input::Key::Space,
-  }
   mods = Termisu::Input::Modifier::None
   mods |= Termisu::Input::Modifier::Ctrl if ctrl
   mods |= Termisu::Input::Modifier::Alt if alt
   mods |= Termisu::Input::Modifier::Shift if shift
-  ev =
-    if k = named[key]?
-      Termisu::Event::Key.new(k, mods, nil)
-    elsif key == "tab" && shift
-      # Legacy terminals deliver ⇧Tab as its own key, which the event path maps to no chord:
-      # a binding spelled shift+tab is dead, and this helper says so by raising below.
-      Termisu::Event::Key.new(Termisu::Input::Key::BackTab, mods, nil)
-    else
-      raise "typed_chord: #{key.inspect} is neither a named key nor one character" unless key.size == 1
-      c = key[0]
-      # Shift on a letter is a real event; shift on a symbol or digit is not — the terminal
-      # sends the shifted CHARACTER ('?' for ⇧/, '!' for ⇧1) with no modifier, so a chord
-      # spelled that way can never be pressed. Refuse rather than certify it.
-      if shift && !c.ascii_letter?
-        raise "typed_chord: shift+#{key.inspect} is not an event a terminal sends; spell the shifted character itself"
-      end
-      # A shifted letter arrives as the lowercase key with Shift and the uppercase char
-      # (the shape `Keybind.from_event` documents); a typed capital arrives as the capital
-      # itself with no modifier. Ctrl+letter carries no char, matching the parser branch.
-      char = ctrl ? nil : (shift && c.ascii_letter? ? c.upcase : c)
-      Termisu::Event::Key.new(Termisu::Input::Key.from_char(c.downcase), mods, char)
-    end
-  Gori::Tui::Keybind.from_event(ev) ||
+  Gori::Tui::Keybind.from_event(typed_key_event(key, mods, ctrl: ctrl, shift: shift)) ||
     raise("typed_chord: #{key.inspect} (ctrl=#{ctrl} alt=#{alt} shift=#{shift}) maps to no chord")
+end
+
+TYPED_NAMED_KEYS = {
+  "enter" => Termisu::Input::Key::Enter, "escape" => Termisu::Input::Key::Escape,
+  "tab" => Termisu::Input::Key::Tab, "up" => Termisu::Input::Key::Up,
+  "down" => Termisu::Input::Key::Down, "left" => Termisu::Input::Key::Left,
+  "right" => Termisu::Input::Key::Right, "backspace" => Termisu::Input::Key::Backspace,
+  "space" => Termisu::Input::Key::Space,
+}
+
+# The Termisu event a terminal delivers for `key` under `mods` — the half of `typed_chord`
+# that knows what real input looks like.
+private def typed_key_event(key : String, mods : Termisu::Input::Modifier, *, ctrl : Bool, shift : Bool) : Termisu::Event::Key
+  if key == "tab" && shift
+    # Legacy terminals deliver ⇧Tab as its own key, which the event path maps to no chord:
+    # a binding spelled shift+tab is dead, and typed_chord says so by raising.
+    return Termisu::Event::Key.new(Termisu::Input::Key::BackTab, mods, nil)
+  end
+  if named = TYPED_NAMED_KEYS[key]?
+    return Termisu::Event::Key.new(named, mods, nil)
+  end
+  raise "typed_chord: #{key.inspect} is neither a named key nor one character" unless key.size == 1
+  c = key[0]
+  # Shift on a letter is a real event; shift on a symbol or digit is not — the terminal
+  # sends the shifted CHARACTER ('?' for ⇧/, '!' for ⇧1) with no modifier, so a chord
+  # spelled that way can never be pressed. Refuse rather than certify it.
+  if shift && !c.ascii_letter?
+    raise "typed_chord: shift+#{key.inspect} is not an event a terminal sends; spell the shifted character itself"
+  end
+  # A shifted letter arrives as the lowercase key with Shift and the uppercase char (the
+  # shape `Keybind.from_event` documents); a typed capital arrives as the capital itself
+  # with no modifier. Ctrl+letter carries no char, matching the parser branch.
+  char = ctrl ? nil : (shift ? c.upcase : c)
+  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c.downcase), mods, char)
 end
 
 # `typed_chord(letter, shift: true)` for the ⇧-letter case, kept under its older name.
