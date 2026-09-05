@@ -60,10 +60,11 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
-      when key.escape? then return :cancel
-      when key.up?     then move(-1)
-      when key.down?   then move(1)
-      when key.enter?  then return :commit
+      when key.escape?  then return :cancel
+      when key.up?      then move(-1)
+      when key.down?    then move(1)
+      when page_key(ev) then nil
+      when key.enter?   then return :commit
       else
         if (c = ev.char) && !ev.ctrl? && !ev.alt? && (idx = index_for(c))
           set_selected(idx)

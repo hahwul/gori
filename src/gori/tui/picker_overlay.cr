@@ -30,6 +30,23 @@ module Gori::Tui
       @selected = (@selected + step).clamp(0, n - 1)
     end
 
+    @list_last_h = 0 # rows the last frame drew — the PgUp/PgDn step
+
+    # PgUp/PgDn/Home/End over the list, one page being the rows the last frame drew. Every
+    # picker walked its rows one at a time — a 500-flow FlowPicker had no other gait. True
+    # when `ev` was one of the four, so a subclass's key ladder can take it as one arm.
+    def page_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when key.page_up?   then move(-{@list_last_h, 1}.max)
+      when key.page_down? then move({@list_last_h, 1}.max)
+      when key.home?      then set_selected(0)
+      when key.end?       then set_selected(entry_count - 1)
+      else                     return false
+      end
+      true
+    end
+
     def set_selected(idx : Int32) : Nil
       n = entry_count
       return if n == 0
@@ -52,6 +69,7 @@ module Gori::Tui
     # `entry_count` is the subclass's own navigable-row count — the FILTERED list plus any
     # pinned action row — which is exactly what its draw loop walks.
     private def ensure_visible(list_h : Int32) : Nil
+      @list_last_h = list_h
       @scroll = Viewport.scroll_to_show(@selected, @scroll, list_h, entry_count)
     end
   end
@@ -93,6 +111,7 @@ module Gori::Tui
       when key.escape?    then return :cancel
       when key.up?        then move(-1)
       when key.down?      then move(1)
+      when page_key(ev)   then nil
       when key.enter?     then return :commit
       when key.backspace? then backspace
       else

@@ -229,7 +229,7 @@ module Gori::Tui
         # "fuzz results already saved as run #N" refusal unreachable through the binding.
         # Named off the same predicate the gate reads, not a second copy of its conditions.
         save = v.results_saveable? ? " · #{save_key} save" : ""
-        "↑/↓ select · ↵ detail · o sort · m matched · v dist#{save} · " \
+        "↑/↓ select · ↵ detail · #{keys("{fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
         "#{run} run · #{stop} stop · space cmds · ↹ pane"
       when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
       else              "↹/esc tabs"
@@ -718,9 +718,7 @@ module Gori::Tui
       when key.enter?              then v.open_detail
       when key.up?, key.lower_k?   then v.results_at_top? ? v.pane_advance(-1) : v.results_move(-1)
       when key.down?, key.lower_j? then v.results_move(1)
-      when key.lower_o?            then @host.status(v.cycle_sort)
-      when key.lower_m?            then @host.status(v.toggle_matched_only)
-      when key.lower_v?            then @host.status(v.toggle_dist)
+        # `o` sort / `m` matched / `v` dist are verbs (`fuzz.sort` …) — they fall through.
       when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
         return false # Global breath
       end
@@ -1438,6 +1436,25 @@ module Gori::Tui
       else
         ""
       end
+    end
+
+    # The three RESULTS-pane views, as verbs: sort column, matched-only lens, distribution
+    # sidebar. Each answers with the view's own one-line report. They act on the session in
+    # front whatever pane holds focus — a sort is a property of the results, not of the
+    # cursor — and say so when there is nothing to sort yet.
+    def fuzz_cycle_sort : Nil
+      return @host.status("no fuzz session") unless v = current_view
+      @host.status(v.cycle_sort)
+    end
+
+    def fuzz_toggle_matched : Nil
+      return @host.status("no fuzz session") unless v = current_view
+      @host.status(v.toggle_matched_only)
+    end
+
+    def fuzz_toggle_dist : Nil
+      return @host.status("no fuzz session") unless v = current_view
+      @host.status(v.toggle_dist)
     end
 
     def fuzz_stop : Nil

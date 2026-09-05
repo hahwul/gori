@@ -53,9 +53,9 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       return "start from Sitemap/History (space → \"Discover here\")" if @view.empty?
       if @view.focus == :runs
-        keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · p pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
+        keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
       else
-        keys("↑/↓ nav · ↵/o request+response · tab runs · {discover.run} run · {discover.stop} stop · p pause · space cmds · esc sub-tabs")
+        keys("↑/↓ nav · ↵/o request+response · tab runs · {discover.run} run · {discover.stop} stop · {discover.pause} pause · space cmds · esc sub-tabs")
       end
     end
 
@@ -111,8 +111,7 @@ module Gori::Tui
       when ev.key.escape? then @host.request_focus(:subtabs)
       when c == '['       then @view.move_run(-1) # cycling still works from either pane
       when c == ']'       then @view.move_run(1)
-      when c == 'p'       then discover_toggle_pause
-      else                     return false
+      else                     return false # `p` pause is a chord — the keymap's
       end
       true
     end

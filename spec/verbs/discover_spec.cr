@@ -17,7 +17,10 @@ describe "Gori::Verbs.register_discover" do
 
   it "keeps pause off ctrl-p, which belongs to the command palette" do
     # Plain `p` is handled by the controller body; the verb exists for the space menu.
-    r["discover.pause"].chords.should be_empty
+    # Plain `p` is the chord (it was a raw arm in the controller, invisible to the hotkey
+    # editor); the CTRL form stays the palette's.
+    r["discover.pause"].chords.should eq([Gori::Verb::Chord.new("p")])
+    r["discover.pause"].chords.none?(&.ctrl).should be_true
     r["discover.pause"].menu_key.should eq('p')
     r["app.palette"].chords.should eq([typed_chord("p", ctrl: true)])
     r["discover.run"].chords.should eq([typed_chord("r", ctrl: true)])

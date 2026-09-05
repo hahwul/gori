@@ -593,6 +593,17 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
+      # The RESULTS pane's three lenses. They were raw `key.lower_o?` arms in the controller —
+      # no palette row, no space-menu row, and the hotkey editor offered the letters as free.
+      r.register Verb::Definition.new(
+        "fuzz.sort", "Cycle sort", "RESULTS: cycle the sort column (index → status → length → …)",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("o")], available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
+      r.register Verb::Definition.new(
+        "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, mnemonic: 'm', section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }
+      r.register Verb::Definition.new(
+        "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, mnemonic: 'g', section: :results) { |ctx| ctx.fuzz_toggle_dist; nil }
       # Shift-S is intentionally READ-mode-only: in a template editor it remains a literal
       # uppercase S. Ctrl-S already edits the target's SNI and cannot be repurposed.
       r.register Verb::Definition.new(

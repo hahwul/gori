@@ -376,6 +376,18 @@ private class FakeContext < ExecContext
     @calls << :fuzz_stop
   end
 
+  def fuzz_cycle_sort : Nil
+    @calls << :fuzz_cycle_sort
+  end
+
+  def fuzz_toggle_matched : Nil
+    @calls << :fuzz_toggle_matched
+  end
+
+  def fuzz_toggle_dist : Nil
+    @calls << :fuzz_toggle_dist
+  end
+
   def fuzz_save_results : Nil
     @calls << :fuzz_save_results
   end

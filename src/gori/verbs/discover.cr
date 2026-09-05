@@ -13,11 +13,11 @@ module Gori
         "discover.stop", "Stop", "Stop the selected discovery run (in-flight requests finish)",
         Verb::Scope::Discover, [Verb::Chord.new("x", ctrl: true)], mnemonic: 's') { |ctx| ctx.discover_stop; nil }
 
-      # Plain `p` toggles pause in the body (handled by the controller); the space menu
-      # exposes it too. No ctrl-p — that's reserved for the command palette.
+      # Plain `p` — a chord, so the hint and the hotkey editor both see it (it was a raw arm
+      # in the controller). No ctrl-p — that's reserved for the command palette.
       r.register Verb::Definition.new(
         "discover.pause", "Pause / resume", "Pause or resume the running discovery",
-        Verb::Scope::Discover, [] of Verb::Chord, mnemonic: 'p') { |ctx| ctx.discover_toggle_pause; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("p")], mnemonic: 'p') { |ctx| ctx.discover_toggle_pause; nil }
 
       # `o`/`↵` on a findings row opens the bytes that row was found with, in the same History
       # detail the Sitemap's `o` opens (the run persisted the exchange when it recorded the

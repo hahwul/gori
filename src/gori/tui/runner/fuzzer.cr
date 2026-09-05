@@ -44,6 +44,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     fuzzer_controller.fuzz_stop
   end
 
+  def fuzz_cycle_sort : Nil
+    fuzzer_controller.fuzz_cycle_sort
+  end
+
+  def fuzz_toggle_matched : Nil
+    fuzzer_controller.fuzz_toggle_matched
+  end
+
+  def fuzz_toggle_dist : Nil
+    fuzzer_controller.fuzz_toggle_dist
+  end
+
   def fuzz_save_results : Nil
     fuzzer_controller.fuzz_save_results
   end
