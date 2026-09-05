@@ -12,7 +12,7 @@ require "digest/sha1"
 # to be a refusal that names the field.
 #
 # Helpers are file-local (Crystal's top-level `private def` is file-scoped) so this file does
-# not depend on spec/mcp_spec.cr's.
+# not depend on the shared ones in spec/support/mcp_harness.cr.
 
 private def drive(store, *lines, allow_actions = true, verify_upstream = true) : Array(JSON::Any)
   input = IO::Memory.new(lines.join('\n') + "\n")
