@@ -219,8 +219,11 @@ traffic, which matters the moment History is read as evidence: "the target answe
 
 The **SRC** column says which. `PROXY` is traffic a client sent through gori; `RPTR`, `FUZZ`,
 `CRAWL` and friends are requests gori made; `IMPRT` was read in from a file. The detail pane
-spells it out under the request (`sent by gori — repeater (tui) #4`), naming the surface it
-came from and the session behind it, so a row can be traced back to the tab that produced it.
+spells it out in the strip under the text (`sent by gori — repeater (tui) #4`), naming the
+surface it came from and the session behind it, so a row can be traced back to the tab that
+produced it. That strip also carries the exchange's facts — status, protocol, request and
+response size, latency, content type and capture time — under every pane, so the panes
+themselves stay the wire's bytes.
 
 Filter on it with [`src:`](/reference/query-language/#src-provenance):
 
