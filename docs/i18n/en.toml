@@ -68,7 +68,7 @@ install_pick_aria = "Choose an install method"
 install_copy = "Copy install command"
 
 hero_art_alt = "The gori mark: two broad translucent rings crossing around a disc of the gori artwork"
-showcase_aria = "gori running in the terminal — pick a tab"
+showcase_aria = "gori running in the terminal. Pick a tab"
 showcase_k_l = "the workbench, up close"
 showcase_k_r = "click a tab"
 showcase_tabs_aria = "Switch the terminal view"

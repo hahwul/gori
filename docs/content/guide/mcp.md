@@ -43,9 +43,9 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 
 With no explicit selector, gori discovers the nearest Git root and binds its canonical path to an isolated project. The binding prevents two repositories with the same directory name from sharing a database.
 
-**Outside a Git workspace** (the common case when an AI client spawns MCP from a home or app directory), the server starts **unbound**: the MCP handshake and tool list succeed immediately, but traffic tools (`list_history`, `send_request`, …) return `NO_PROJECT` until the agent calls `list_projects`, `create_project` (auto-binds when unbound), or `switch_project`. Unbound mode never silently opens the active TUI or MRU project — that requires the explicit `--use-active-project` opt-in (or `--project` / `--db` / `GORI_MCP_PROJECT` / `GORI_MCP_DB`).
+**Outside a Git workspace** (the common case when an AI client spawns MCP from a home or app directory), the server starts **unbound**: the MCP handshake and tool list succeed immediately, but traffic tools (`list_history`, `send_request`, …) return `NO_PROJECT` until the agent calls `list_projects`, `create_project` (auto-binds when unbound), or `switch_project`. Unbound mode never silently opens the active TUI or MRU project; that requires the explicit `--use-active-project` opt-in (or `--project` / `--db` / `GORI_MCP_PROJECT` / `GORI_MCP_DB`).
 
-**If the selected project cannot be opened** — a database that is missing, corrupt, or unreadable, a project name that no longer exists — the server still completes the handshake and starts unbound rather than exiting. The reason is written to stderr, repeated in the handshake `instructions`, returned with every `NO_PROJECT` tool error, and reported as `bind_error` by `project_info`, so the agent can call `list_projects` and `switch_project` to recover without a restart.
+**If the selected project cannot be opened** (a database that is missing, corrupt, or unreadable, a project name that no longer exists), the server still completes the handshake and starts unbound rather than exiting. The reason is written to stderr, repeated in the handshake `instructions`, returned with every `NO_PROJECT` tool error, and reported as `bind_error` by `project_info`, so the agent can call `list_projects` and `switch_project` to recover without a restart.
 
 Call `project_info` before using data. It reports `bound`, the selected project, database path, workspace root, and selection source.
 
@@ -57,15 +57,15 @@ By default the server also exposes action tools that send live requests and writ
 gori mcp --read-only
 ```
 
-A read-only server also keeps no writer. It never writes the project it serves and runs no background indexing — SQLite allows a single writer, and a second gori holding that slot for nothing but its own bookkeeping is what makes it contend with the TUI capturing into the same project. The one exception is a database written by an older gori, which is migrated on open because this build cannot read it otherwise.
+A read-only server also keeps no writer. It never writes the project it serves and runs no background indexing, because SQLite allows a single writer, and a second gori holding that slot for nothing but its own bookkeeping is what makes it contend with the TUI capturing into the same project. The one exception is a database written by an older gori, which is migrated on open because this build cannot read it otherwise.
 
-A default (actions-on) server still has a writer — `send_request` and `create_issue` need one — but it does not idle-index. Free-text search drains the backlog on demand; the capturing TUI is the process that keeps the index current in the background.
+A default (actions-on) server still has a writer (`send_request` and `create_issue` need one), but it does not idle-index. Free-text search drains the backlog on demand; the capturing TUI is the process that keeps the index current in the background.
 
-One consequence is worth knowing: free-text search (`body:`) reads an index that is built off the capture commit, and a read-only server cannot build it. If flows are still waiting to be indexed, such a query is refused with `FTS_BACKLOG` rather than answered from a partial index — open the project in gori, or drop `--read-only`, to drain it.
+One consequence is worth knowing: free-text search (`body:`) reads an index that is built off the capture commit, and a read-only server cannot build it. If flows are still waiting to be indexed, such a query is refused with `FTS_BACKLOG` rather than answered from a partial index; open the project in gori, or drop `--read-only`, to drain it.
 
 ## Seeing an Agent From the TUI
 
-While an MCP server is bound to a project, gori shows it. In the project picker the project's row carries an `mcp` mark (`mcp×2` for more than one), and once the project is open a clickable `mcp:<client>` chip appears on the top bar. Click it — or run `app.agents` from the command palette — to open a card listing every attached agent: its name, version, pid, when it connected, and whether it is read-only. The name comes from the client's own `clientInfo` handshake; a server started with `--read-only` shows as read-only there. A row disappears on its own the moment its process exits, so the chip and card always reflect what is attached right now.
+While an MCP server is bound to a project, gori shows it. In the project picker the project's row carries an `mcp` mark (`mcp×2` for more than one), and once the project is open a clickable `mcp:<client>` chip appears on the top bar. Click it, or run `app.agents` from the command palette, to open a card listing every attached agent: its name, version, pid, when it connected, and whether it is read-only. The name comes from the client's own `clientInfo` handshake; a server started with `--read-only` shows as read-only there. A row disappears on its own the moment its process exits, so the chip and card always reflect what is attached right now.
 
 ## Installing Into an Agent
 
@@ -80,9 +80,9 @@ gori can write the MCP configuration for common clients for you:
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), or `$HERMES_HOME` |
 
-Every client except Claude Desktop and Hermes keeps its config in the same place on macOS, Linux and Windows. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop follows Electron's app-data directory instead: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` — defaulting to `~/.config/Claude/` — on Linux. gori reads that variable, so a Nix or home-manager session that moves it is followed too.
+Every client except Claude Desktop and Hermes keeps its config in the same place on macOS, Linux and Windows. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop follows Electron's app-data directory instead: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (defaulting to `~/.config/Claude/`) on Linux. gori reads that variable, so a Nix or home-manager session that moves it is followed too.
 
-The exception is a **Flatpak** Claude Desktop: it reads `XDG_CONFIG_HOME` from inside its own sandbox (`~/.var/app/<app-id>/config/Claude/`), which the host shell running gori cannot see. There gori writes `~/.config/Claude/claude_desktop_config.json` and prints that path — copy it into the app's sandbox directory yourself. Every install command prints the file it wrote, so check that line against where your build actually reads.
+The exception is a **Flatpak** Claude Desktop: it reads `XDG_CONFIG_HOME` from inside its own sandbox (`~/.var/app/<app-id>/config/Claude/`), which the host shell running gori cannot see. There gori writes `~/.config/Claude/claude_desktop_config.json` and prints that path; copy it into the app's sandbox directory yourself. Every install command prints the file it wrote, so check that line against where your build actually reads.
 
 ```bash
 gori mcp --install-claude-code
@@ -96,7 +96,7 @@ Codex and Grok use TOML with an `[mcp_servers.gori]` table, and Hermes YAML with
 
 If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example `gori mcp --project my-engagement --install-codex`.
 
-Every flag you pass alongside `--install-*` is written into the installed command, so what the client spawns matches what you typed — selectors (`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--insecure-upstream`, and `--config`. Paths are made absolute, because the client spawns the server from a working directory you did not choose.
+Every flag you pass alongside `--install-*` is written into the installed command, so what the client spawns matches what you typed: selectors (`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--insecure-upstream`, and `--config`. Paths are made absolute, because the client spawns the server from a working directory you did not choose.
 
 ## Tools
 
@@ -104,9 +104,9 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 
 | Tool | Purpose |
 | ------ | --------- |
-| `list_history` | List flows newest-first, with optional QL and pagination. Every row carries `source` — `proxy` for traffic a client sent, `repeater` for a `send_request` (including your own, which records by default), `discover`, `import`, … — so a flow gori made is never read back as evidence about the target. Filter with `src:` . Pass `columns` — the same `[LABEL=][req\|res:]kind:selector` specs `gori run ls --column` takes — to carry an extracted value per row (a header, a JSON field, a regex capture) under a `columns` object: what QL can *filter* on, [shown](/guide/proxy/#columns). Opt-in, since it costs a read per row |
-| `list_events` | Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows. Every event carries `actor` — the surface that acted (`tui` / `cli` / `mcp`) — so an agent can tell its own writes from the operator's, and config changes are recorded whoever makes them. The human reads the same feed on the **Project → Activity** pane |
-| `list_views` | The project's History [views](/guide/proxy/#views) — named QL queries `list_history{view}` applies as a lens, ANDed over `query` rather than replacing it. Seven built-ins (`All`, `History`, `History + Repeater` — the default — `WebSocket`, `gRPC`, `SSE`, `Errors`), then the global library, then the project's own; `active` marks the one the TUI is showing, which does **not** apply to `list_history` — that filters only by the `view` you pass it |
+| `list_history` | List flows newest-first, with optional QL and pagination. Every row carries `source` (`proxy` for traffic a client sent, `repeater` for a `send_request` (including your own, which records by default), `discover`, `import`, …), so a flow gori made is never read back as evidence about the target. Filter with `src:`. Pass `columns` (the same `[LABEL=][req\|res:]kind:selector` specs `gori run ls --column` takes) to carry an extracted value per row (a header, a JSON field, a regex capture) under a `columns` object: what QL can *filter* on, [shown](/guide/proxy/#columns). Opt-in, since it costs a read per row |
+| `list_events` | Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows. Every event carries `actor`, the surface that acted (`tui` / `cli` / `mcp`), so an agent can tell its own writes from the operator's, and config changes are recorded whoever makes them. The human reads the same feed on the **Project → Activity** pane |
+| `list_views` | The project's History [views](/guide/proxy/#views): named QL queries `list_history{view}` applies as a lens, ANDed over `query` rather than replacing it. Seven built-ins (`All`, `History`, `History + Repeater` (the default), `WebSocket`, `gRPC`, `SSE`, `Errors`), then the global library, then the project's own; `active` marks the one the TUI is showing, which does **not** apply to `list_history`, which filters only by the `view` you pass it |
 | `get_flow` | Full request + response for one flow |
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |
 | `list_sitemap` / `list_sitemap_tags` | Distinct endpoints (host, method, path), and the tags placed on them |
@@ -116,22 +116,22 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `list_probe_rules` | Every scan rule (passive, active, custom), which are enabled, and the project's scan mode |
 | `list_scope` | Current scope include/exclude rules |
 | `list_links` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
-| `compare_flows` | Line diff of two flows' request or response — with each side's status/size/time and the A→B delta; `context:N` folds the unchanged runs into `{kind:fold,hidden}` markers |
-| `diff_projects` | Retest diff: two PROJECTS at endpoint scale — what is new, gone, or answering differently since the last engagement. Endpoints are keyed by the Sitemap's folded template, and `removed` (never requested in the newer capture) is a separate verdict from `gone` (asked, got 404/410) |
+| `compare_flows` | Line diff of two flows' request or response, with each side's status/size/time and the A→B delta; `context:N` folds the unchanged runs into `{kind:fold,hidden}` markers |
+| `diff_projects` | Retest diff: two PROJECTS at endpoint scale: what is new, gone, or answering differently since the last engagement. Endpoints are keyed by the Sitemap's folded template, and `removed` (never requested in the newer capture) is a separate verdict from `gone` (asked, got 404/410) |
 | `intercept_list` / `intercept_get` | Inspect the live intercept queue and one held item in full |
 | `list_projects` | Every gori project on this host |
 | `list_notes` / `get_note` | Read project notes |
-| `list_rule_presets` | The response-modification [presets](/guide/proxy/#rewriter-presets) — named starting points that install ordinary Match & Replace rules (unhide hidden fields, enable disabled controls, remove `maxlength`, strip client-side validation, drop CSP / security headers, disable SRI). Each row names the rules it would install |
-| `list_extract_rules` | The project's **extract** rules — the read half of a [session binding](/guide/proxy/#session-bindings): each observes a response and binds one `$NAME` in memory for a Match & Replace rule to inject |
-| `list_color_rules` / `list_custom_colors` | The [Colormarker](/guide/proxy/#colouring-rows-colormarker-tab) rules in precedence order, and the global custom colours a rule's `color` can name. Display only — a colour rule never modifies traffic |
+| `list_rule_presets` | The response-modification [presets](/guide/proxy/#rewriter-presets): named starting points that install ordinary Match & Replace rules (unhide hidden fields, enable disabled controls, remove `maxlength`, strip client-side validation, drop CSP / security headers, disable SRI). Each row names the rules it would install |
+| `list_extract_rules` | The project's **extract** rules, the read half of a [session binding](/guide/proxy/#session-bindings): each observes a response and binds one `$NAME` in memory for a Match & Replace rule to inject |
+| `list_color_rules` / `list_custom_colors` | The [Colormarker](/guide/proxy/#colouring-rows-colormarker-tab) rules in precedence order, and the global custom colours a rule's `color` can name. Display only; a colour rule never modifies traffic |
 | `preview_color_rule` | How many recent flows a colour condition would MATCH, and how many it would actually PAINT once the rules resolving ahead of it are counted |
-| `grpc_schema` | What `.proto` schema this project renders captured gRPC through, and where each piece came from — a descriptor-set file or a reflection fetch. Sends nothing |
-| `list_rules` | List the Match & Replace rules applied to the project in apply order — global rules first, then the project's own (`scope` filters to one) |
-| `list_env` | Project env tokens available to `$KEY` substitution (values redacted). Each row also carries `length` and, when the value already begins with one, `scheme` — enough to tell whether a header should read `Bearer $KEY` or just `$KEY`, without the value |
+| `grpc_schema` | What `.proto` schema this project renders captured gRPC through, and where each piece came from: a descriptor-set file or a reflection fetch. Sends nothing |
+| `list_rules` | List the Match & Replace rules applied to the project in apply order: global rules first, then the project's own (`scope` filters to one) |
+| `list_env` | Project env tokens available to `$KEY` substitution (values redacted). Each row also carries `length` and, when the value already begins with one, `scheme`, enough to tell whether a header should read `Bearer $KEY` or just `$KEY`, without the value |
 | `list_host_overrides` | The host to IP dial map in force for this project |
-| `list_session_slots` | The project's [session slots](/guide/authorize/#session-slots-one-list-two-readers) — named identities, each a header overlay plus the extract rules whose bound values belong to it — and which one is ACTIVE (header values redacted) |
+| `list_session_slots` | The project's [session slots](/guide/authorize/#session-slots-one-list-two-readers) (named identities, each a header overlay plus the extract rules whose bound values belong to it) and which one is ACTIVE (header values redacted) |
 | `list_oast_providers` | Configured OAST providers and which one is active |
-| `list_oast_sessions` | The project's persisted OAST listening sessions — payload host, hits, last poll — the rows `oast_resume` re-arms |
+| `list_oast_sessions` | The project's persisted OAST listening sessions (payload host, hits, last poll), the rows `oast_resume` re-arms |
 | `decode` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
 | `jwt_decode` / `jwt_encode` / `jwt_attacks` | Decode, re-sign, or generate attack payloads for a JWT (pure compute; available even under `--read-only`) |
 | `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | The [Cookie workbench](/guide/cookie/) as pure offline compute: parse a Flask / Rack / Django signed session cookie, check it against a candidate secret, brute-force the secret over a wordlist, and re-sign an edited payload. No network, so all four survive `--read-only` |
@@ -140,7 +140,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `discover_status` / `discover_results` | Progress and findings of a Discover run |
 | `project_info` | Flow / issue counts, database, workspace binding, and selection source |
 | `get_current_context` | What the user is viewing in the TUI right now |
-| `get_repeater_context` | Repeater workbench state and saved sessions. Every session reports **both** ids — `db_id`, which every repeater tool takes, and `tui_index`, the 1-based number the TUI paints on its sub-tab chip (`6:POST /api`) — so an agent and the operator name the same tab. `filter` takes the same sub-tab language the TUI's `/` does (`tag:` `name:` `host:` `method:` `status:`, `-` negates, bare words search), ANDed with `query`. `include_content` adds the request head and, per credential header, an `env_headers` shape (`Authorization: Bearer $AUTH`) that names the wiring without the secret; `include_response_body` inlines the stored last response body |
+| `get_repeater_context` | Repeater workbench state and saved sessions. Every session reports **both** ids (`db_id`, which every repeater tool takes, and `tui_index`, the 1-based number the TUI paints on its sub-tab chip (`6:POST /api`)), so an agent and the operator name the same tab. `filter` takes the same sub-tab language the TUI's `/` does (`tag:` `name:` `host:` `method:` `status:`, `-` negates, bare words search), ANDed with `query`. `include_content` adds the request head and, per credential header, an `env_headers` shape (`Authorization: Bearer $AUTH`) that names the wiring without the secret; `include_response_body` inlines the stored last response body |
 | `list_fuzz_runs` / `get_fuzz_run` | List and inspect permanent Fuzzer result sets. Metrics use a scalar-only projection, including `result_index`, so retained BLOBs are not loaded. `include_content:true` returns at most 25 rows from SQLite-capped prefixes: `max_head_bytes` (default 16 KiB, max 64 KiB) bounds heads and `max_body_bytes` (default 2 KiB, max 64 KiB) bounds decoded bodies/raw samples. Full source sizes plus head/source/decode truncation flags say what was omitted; `include_sensitive:true` opts into exact capped prefixes, never uncapped bytes. Run metadata labels pre-current snapshots as `legacy:true` |
 | `ql_reference` | The query-language reference |
 | `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
@@ -149,23 +149,23 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 
 | Tool | Purpose |
 | ------ | --------- |
-| `send_request` | Send / resend an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested). `reframe_grpc: true` recomputes a unary gRPC message's 5-byte length prefix over the body actually sent — off by default, so an edited message ships with the prefix it was captured with |
+| `send_request` | Send / resend an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested). `reframe_grpc: true` recomputes a unary gRPC message's 5-byte length prefix over the body actually sent. Off by default, so an edited message ships with the prefix it was captured with |
 | `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Manage one Repeater session. Every reply carries `tui_index` beside `id`; a delete names the tab it destroyed (`was_tui_index`) and renumbers the rest |
-| `create_repeaters` | Seed a tab from each of several captured flows — the second hop of an OpenAPI import (see below). Checks every flow exists before creating the first session |
-| `delete_repeaters` / `update_repeaters` | Bulk close, and bulk re-label (tags and name affixes only — `update_repeater` is the one that writes request bytes). Both take explicit ids, never a filter: narrow with `get_repeater_context{filter}` first, so the set you read is the set acted on. Delete needs `confirm:true`, and an unknown id refuses the whole call |
-| `move_repeater` | Rearrange the sub-tab strip — `to_index` for an absolute tab number, `direction` for a one-step nudge. An open TUI picks the new order up on its own |
+| `create_repeaters` | Seed a tab from each of several captured flows, the second hop of an OpenAPI import (see below). Checks every flow exists before creating the first session |
+| `delete_repeaters` / `update_repeaters` | Bulk close, and bulk re-label (tags and name affixes only; `update_repeater` is the one that writes request bytes). Both take explicit ids, never a filter: narrow with `get_repeater_context{filter}` first, so the set you read is the set acted on. Delete needs `confirm:true`, and an unknown id refuses the whole call |
+| `move_repeater` | Rearrange the sub-tab strip: `to_index` for an absolute tab number, `direction` for a one-step nudge. An open TUI picks the new order up on its own |
 | `minimize_repeater` | Shrink a Repeater request to the smallest form that still reproduces the response |
 | `create_issue` / `update_issue` / `delete_issue` | Record, update, and remove issues |
 | `add_link` / `remove_link` | Attach or detach an issue's / note's evidence pointer |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |
-| `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body). Each takes `scope` — `project` (default) or `global`, which applies in every project |
-| `create_rule_from_preset` | Install a preset (see `list_rule_presets`) as ordinary Match & Replace rules — the same result as calling `create_rule` once per rule, so they stay visible, editable and disable-able afterwards. Returns the ids created |
+| `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body). Each takes `scope`: `project` (default) or `global`, which applies in every project |
+| `create_rule_from_preset` | Install a preset (see `list_rule_presets`) as ordinary Match & Replace rules, the same result as calling `create_rule` once per rule, so they stay visible, editable and disable-able afterwards. Returns the ids created |
 | `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | Manage the extract rules that bind `$NAME` from a response. Renaming drops the old name's bound value rather than re-labelling it, and disabling **un-declares** the name, so a rule injecting it goes back to refusing rather than sending a stale value |
-| `create_color_rule` / `update_color_rule` / `set_color_rule_enabled` / `move_color_rule` / `delete_color_rule` | Manage Colormarker rules. `move_color_rule` is a semantic edit, not cosmetic: the first enabled match paints the row. Each takes `scope` — `project` (default) or `global` |
-| `create_custom_color` / `update_custom_color` / `delete_custom_color` | Define the global custom colours the picker offers on top of the six built-ins. Deleting one leaves a rule that still names it inert — its rows fall back to a visible default rather than the deletion cascading into rules |
+| `create_color_rule` / `update_color_rule` / `set_color_rule_enabled` / `move_color_rule` / `delete_color_rule` | Manage Colormarker rules. `move_color_rule` is a semantic edit, not cosmetic: the first enabled match paints the row. Each takes `scope`: `project` (default) or `global` |
+| `create_custom_color` / `update_custom_color` / `delete_custom_color` | Define the global custom colours the picker offers on top of the six built-ins. Deleting one leaves a rule that still names it inert; its rows fall back to a visible default rather than the deletion cascading into rules |
 | `grpc_reflect` / `grpc_forget` | Ask a target's `grpc.reflection.v1` service (falling back to `v1alpha`) for its descriptors and cache them in the project, or drop a cached target. `grpc_reflect` is an outbound send and is scope-gated like any other |
-| `create_view` / `update_view` / `delete_view` | Create, edit, re-home and delete saved History [views](/guide/proxy/#views). Each takes `scope` — `project` (default) or `global`. The query is validated on the way in: one whose every term would be dropped is refused, because it would narrow nothing while every surface showed a chip claiming it does |
+| `create_view` / `update_view` / `delete_view` | Create, edit, re-home and delete saved History [views](/guide/proxy/#views). Each takes `scope`: `project` (default) or `global`. The query is validated on the way in: one whose every term would be dropped is refused, because it would narrow nothing while every surface showed a chip claiming it does |
 | `preview_rule` | Estimate how many stored flows a rule would change, before creating it |
 | `import_flows` | Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file into History |
 | `delete_flow` / `clear_history` | Remove one flow, or wipe captured History |
@@ -174,21 +174,21 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | Edit the project's include / exclude rules and toggle the scope lens |
 | `set_sandbox` | Hard containment: when on, the proxy forwards only what scope allows and blocks the rest |
 | `set_env_var` / `delete_env_var` | Manage the project env tokens `$KEY` substitution reads |
-| `create_session_slot` / `update_session_slot` / `delete_session_slot` | Manage the session slots — the same list the Authorize tab's identities card edits, and the set `authorize_start` replays under |
-| `set_active_session_slot` | Choose the identity every outbound request goes out as: its header overlay is applied to the final wire bytes and `$NAME` resolves against its binding table. Held by this server process only — never persisted, so a new connection starts as-captured |
+| `create_session_slot` / `update_session_slot` / `delete_session_slot` | Manage the session slots, the same list the Authorize tab's identities card edits, and the set `authorize_start` replays under |
+| `set_active_session_slot` | Choose the identity every outbound request goes out as: its header overlay is applied to the final wire bytes and `$NAME` resolves against its binding table. Held by this server process only, never persisted, so a new connection starts as-captured |
 | `add_host_override` / `update_host_override` / `delete_host_override` | Manage the host to IP dial map (changes only the connect IP, never the request) |
 | `probe_promote` / `probe_dismiss` / `probe_delete` | Triage a Probe finding into Issues, dismiss it, or remove it |
 | `set_probe_mode` | Set the scan mode: `off`, `passive`, `active`, or `aggressive` (authorized targets only) |
 | `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | Manage custom match rules and arm or disarm any scan rule |
 | `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | Manage the OAST providers `oast_start` can listen on |
-| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer. `save_results:true` permanently stores **every** row through a byte-bounded asynchronous writer and returns a database `run_id`; storage backpressure marks the save failed without stopping outbound traffic. This is independent of the bounded/selective live-job cache and `record_history`. `fuzz_start{fields: ["role"]}` sweeps a **schema-known gRPC field** of a unary request — each payload goes through the field's declaration on its way to bytes, every other byte of the message is copied from the capture, and the length prefix follows. A gRPC sweep of BYTE positions reports `grpc_stale_prefix` when a payload changed a message's length; `fuzz_start{reframe_grpc: true}` recomputes the prefix instead of reporting it. `fuzz_results` keeps rows the matcher rejected when the run observed something about them, so read each row's `matched` — or pass `matched_only: true` |
+| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer. `save_results:true` permanently stores **every** row through a byte-bounded asynchronous writer and returns a database `run_id`; storage backpressure marks the save failed without stopping outbound traffic. This is independent of the bounded/selective live-job cache and `record_history`. `fuzz_start{fields: ["role"]}` sweeps a **schema-known gRPC field** of a unary request: each payload goes through the field's declaration on its way to bytes, every other byte of the message is copied from the capture, and the length prefix follows. A gRPC sweep of BYTE positions reports `grpc_stale_prefix` when a payload changed a message's length; `fuzz_start{reframe_grpc: true}` recomputes the prefix instead of reporting it. `fuzz_results` keeps rows the matcher rejected when the run observed something about them, so read each row's `matched`, or pass `matched_only: true` |
 | `delete_fuzz_run` | Delete a permanent fuzz run and its results; refuses a known live writer. `force_stale:true` removes a `running`/`saving` row left by a crashed process, and must never be used while another gori is saving |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |
-| `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | Replay captured flows under several identities and compare each response against a baseline — broken access control. Results lead with `access_control` (`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`) and a flat, never-paged `bypasses` list |
+| `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | Replay captured flows under several identities and compare each response against a baseline (broken access control). Results lead with `access_control` (`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`) and a flat, never-paged `bypasses` list |
 | `discover_start` / `discover_stop` | Spider and brute-force endpoints (poll with `discover_status` / `discover_results`) |
 | `oast_start` / `oast_stop` | Register an ad-hoc OAST payload and poll for callbacks (read the hits with `oast_poll`); `oast_stop` on a RESUMED session stops polling but keeps it resumable |
-| `oast_resume` / `oast_release` | Re-arm a persisted session so payloads planted earlier keep resolving (its polls are saved into the project), or deregister one for a finished engagement — its callbacks stay |
+| `oast_resume` / `oast_release` | Re-arm a persisted session so payloads planted earlier keep resolving (its polls are saved into the project), or deregister one for a finished engagement; its callbacks stay |
 | `list_jobs` / `get_job` / `stop_job` | Work across job kinds: list every fuzz and mine job this session started, or fetch and stop one by id |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | Release a held message byte-exact, release it with edited wire bytes, or drop it |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | Arm or disarm the catch, set its condition query, and choose which leg it holds |
@@ -219,7 +219,7 @@ One safety rule is worth knowing before you leave an agent running. A held messa
 
 ## One Call at a Time
 
-Tools run one at a time, in the order they arrive — a fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are answered immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call and declares the server dead, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling does not abort work already in flight — an in-progress request finishes, its answer is simply not sent.
+Tools run one at a time, in the order they arrive; a fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are answered immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call and declares the server dead, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling does not abort work already in flight: an in-progress request finishes, its answer is simply not sent.
 
 ## Why an MCP Seam
 
@@ -228,6 +228,6 @@ gori deliberately has no in-tool AI chat. The intelligence lives outside the too
 ## Next Steps
 
 - [AI Setup](/getting-started/ai-setup/): a step-by-step walkthrough to connect an agent and drive its first request
-- [Scripting](/guide/scripting/): the other automation path — `gori run` for pipelines and CI
+- [Scripting](/guide/scripting/): the other automation path, `gori run` for pipelines and CI
 - [CLI Reference](/reference/cli/): full `gori mcp` flags
 - [Query Language](/reference/query-language/): the syntax agents use to filter

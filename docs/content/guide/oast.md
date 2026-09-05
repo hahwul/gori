@@ -29,7 +29,7 @@ A callback is proof the target reached a server it shouldn't have. The absence o
 
 Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `t` set type, `d` delete); a public preset auto-fills the server host when you pick its type.
 
-The bar above the callbacks table selects which provider `g` and `Ctrl-R` act on — `←` / `→` cycle it (the bar draws the pick as `‹ name ›`), and **All** shows every provider's callbacks at once. Getting a payload or starting a listener needs one provider, so on **All** with two or more providers enabled, `g` and `Ctrl-R` open a picker card; pick a row with `↵` and the bar follows. With a single enabled provider there is nothing to ask, and the action just runs.
+The bar above the callbacks table selects which provider `g` and `Ctrl-R` act on; `←` / `→` cycle it (the bar draws the pick as `‹ name ›`), and **All** shows every provider's callbacks at once. Getting a payload or starting a listener needs one provider, so on **All** with two or more providers enabled, `g` and `Ctrl-R` open a picker card; pick a row with `↵` and the bar follows. With a single enabled provider there is nothing to ask, and the action just runs.
 
 | Provider | What it is |
 |----------|-----------|
@@ -45,16 +45,16 @@ With interactsh, gori generates an RSA key pair locally, registers the public ke
 
 The callbacks that matter most arrive late: a stored payload that only fires when someone opens a back-office page, a webhook a nightly job replays, an injection behind a queue. So a listener outlives the session that started it.
 
-`Ctrl-X` stops polling but **keeps the registration**, and so does quitting gori or leaving the project. The payloads you already planted keep resolving. Press `r` to open **RESUME LISTENER**, pick a saved session, and gori starts polling it again — every callback the provider buffered while you were away lands on the next poll, and the session's existing callbacks are still there under it.
+`Ctrl-X` stops polling but **keeps the registration**, and so does quitting gori or leaving the project. The payloads you already planted keep resolving. Press `r` to open **RESUME LISTENER**, pick a saved session, and gori starts polling it again. Every callback the provider buffered while you were away lands on the next poll, and the session's existing callbacks are still there under it.
 
 | Key | In the picker |
 |-----|---------------|
 | `↵` | Resume polling this session |
-| `x` | Release it — deregister the server-side state for a finished engagement. Its callbacks stay. |
+| `x` | Release it: deregister the server-side state for a finished engagement. Its callbacks stay. |
 
 Callbacks are durable per-project history. Resume is a deliberate action, not something gori does on startup: reopening a project does not put you back on a third-party provider without asking.
 
-All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project — so the tab, a script, and an agent are reading one table. What stays ad-hoc is `gori run oast listen` and MCP `oast_start`: they register with no project behind them, and those registrations end with the process.
+All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project, so the tab, a script, and an agent are reading one table. What stays ad-hoc is `gori run oast listen` and MCP `oast_start`: they register with no project behind them, and those registrations end with the process.
 
 No surface resumes on its own. Opening a project, binding an MCP server, or starting a `gori run` never re-arms a listener; someone asks for it.
 
@@ -63,7 +63,7 @@ No surface resumes on its own. Opening a project, binding an MCP server, or star
 | Key | Action |
 |-----|--------|
 | `Ctrl-R` | Start listening (register a payload and begin polling) |
-| `Ctrl-X` | Stop polling (the session is kept — resume it with `r`) |
+| `Ctrl-X` | Stop polling (the session is kept; resume it with `r`) |
 | `r` | Resume a saved listener |
 | `g` | Get / copy the current payload (asks which provider on **All**) |
 | `←` / `→` | Cycle the provider the bar acts on |
@@ -74,7 +74,7 @@ No surface resumes on its own. Opening a project, binding an MCP server, or star
 
 ## Filing a Callback
 
-A callback is the strongest evidence this tool produces: the target's own infrastructure reached a server it was never given a reason to reach. `Shift-F` (or `Space` → **Add issue**) files the selected callback as an **Issue**, prefilled with its protocol and source and carrying the raw interaction in as the notes. It opens at **HIGH** — Tab re-rates it before you commit.
+A callback is the strongest evidence this tool produces: the target's own infrastructure reached a server it was never given a reason to reach. `Shift-F` (or `Space` → **Add issue**) files the selected callback as an **Issue**, prefilled with its protocol and source and carrying the raw interaction in as the notes. It opens at **HIGH**; Tab re-rates it before you commit.
 
 ## Headless
 
@@ -87,7 +87,7 @@ gori run oast listen --provider webhook.site   # a different provider
 gori run oast listen --once --json             # poll once, emit JSON lines
 ```
 
-The project's saved sessions — the ones the picker above resumes — are reachable headlessly too:
+The project's saved sessions (the ones the picker above resumes) are reachable headlessly too:
 
 ```bash
 gori run oast list                             # id, provider, payload host, hits, last poll

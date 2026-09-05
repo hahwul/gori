@@ -8,7 +8,7 @@ gori keeps global preferences in a JSON settings file and stores each project as
 
 ## The gori Home Directory
 
-Everything gori writes lives under a single tree, `GORI_HOME` — `$GORI_HOME` when that variable is set and non-empty, otherwise `~/.gori`. It holds `settings.json` (global preferences), your project databases under `projects/`, the root CA in `ca/`, plus `themes/` and `wordlists/`. See [Storage Layout](/reference/config/#storage-layout) for the full tree.
+Everything gori writes lives under a single tree, `GORI_HOME`: `$GORI_HOME` when that variable is set and non-empty, otherwise `~/.gori`. It holds `settings.json` (global preferences), your project databases under `projects/`, the root CA in `ca/`, plus `themes/` and `wordlists/`. See [Storage Layout](/reference/config/#storage-layout) for the full tree.
 
 Point gori at an isolated home for a session:
 
@@ -39,9 +39,9 @@ You rarely need to edit the file by hand. Everything in it is editable in-app fr
 
 By default the proxy listens on `127.0.0.1:8070` and connects directly to targets. You can change that in three places, highest priority first:
 
-1. **Per-project** — pin a bind address, port, and upstream for one project from the **Project** tab; these win for that project only.
-2. **CLI flags** — `--listen` / `--port` override the global default for the current process, without writing to disk.
-3. **`settings.json` `network`** — the shared default, edited by the first-run wizard and Preferences → **Network**.
+1. **Per-project**: pin a bind address, port, and upstream for one project from the **Project** tab; these win for that project only.
+2. **CLI flags**: `--listen` / `--port` override the global default for the current process, without writing to disk.
+3. **`settings.json` `network`**: the shared default, edited by the first-run wizard and Preferences → **Network**.
 
 When nothing is set, the factory default is `127.0.0.1:8070`, direct. See [network](/reference/config/#network) for every key and [Per-Project Overrides](/reference/config/#per-project-overrides) for the exact precedence.
 
@@ -68,7 +68,7 @@ openssl req -x509 -new -key root.key.pem -days 3650 -subj "/CN=my ca" -out root.
 gori ca import --cert root.crt.pem --key root.key.pem --yes
 ```
 
-The same action is available from the palette (**Import CA certificate**). gori checks the key matches the cert, that it is a CA, and that it can actually sign a leaf with the key before adopting it — an Ed25519 or Ed448 root is rejected, because leaves are signed with SHA-256. Distribute only `root.crt.pem` to trust; keep `root.key.pem` secret. See [`gori ca import`](/reference/cli/#gori-ca-import).
+The same action is available from the palette (**Import CA certificate**). gori checks the key matches the cert, that it is a CA, and that it can actually sign a leaf with the key before adopting it. An Ed25519 or Ed448 root is rejected, because leaves are signed with SHA-256. Distribute only `root.crt.pem` to trust; keep `root.key.pem` secret. See [`gori ca import`](/reference/cli/#gori-ca-import).
 
 The palette's **Open browser** action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy (see the [Quick Start](/getting-started/quick-start/)).
 

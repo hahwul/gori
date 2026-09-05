@@ -1,15 +1,15 @@
 +++
 title = "Run an AI co-pilot session"
-description = "Put an agent on the same project over MCP and keep its consequential actions visible — the intelligence lives outside the tool, by design."
+description = "Put an agent on the same project over MCP and keep its consequential actions visible. The intelligence lives outside the tool, by design."
 weight = 120
 
 [extra]
 group = "Wrap up"
 +++
 
-gori has no chat window, and that is deliberate: the intelligence lives outside the tool, reached over MCP. You bring the model and the client; gori exposes the project over a clean tool interface, so you choose what runs and your traffic isn't shipped anywhere you didn't intend. Sends and important state changes are tagged as agent activity in the same TUI you're already watching; read-only lookups are not presented as mutations. This playbook connects an agent to a project you already captured and puts it to work — about ten minutes, most of it a one-time install.
+gori has no chat window, and that is deliberate: the intelligence lives outside the tool, reached over MCP. You bring the model and the client; gori exposes the project over a clean tool interface, so you choose what runs and your traffic isn't shipped anywhere you didn't intend. Sends and important state changes are tagged as agent activity in the same TUI you're already watching; read-only lookups are not presented as mutations. This playbook connects an agent to a project you already captured and puts it to work, in about ten minutes, most of it a one-time install.
 
-> **Before you begin.** You need an existing project with captured traffic — ideally the one from the earlier playbooks — and an MCP-capable client (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes, and others). An agent can send real requests, so keep the project scoped to a target you are authorized to test.
+> **Before you begin.** You need an existing project with captured traffic (ideally the one from the earlier playbooks) and an MCP-capable client (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes, and others). An agent can send real requests, so keep the project scoped to a target you are authorized to test.
 
 ## 1. Install the MCP server
 
@@ -27,11 +27,11 @@ Two choices ride along into that recorded command. **Read-only vs. full access**
 gori mcp --project my-engagement --install-codex
 ```
 
-**Checkpoint.** Your client lists gori's tools — `list_history`, `get_flow`, `send_request`, `project_info`, and the rest. If they don't appear, confirm the client restarted and that `gori` is on the `PATH` it uses.
+**Checkpoint.** Your client lists gori's tools: `list_history`, `get_flow`, `send_request`, `project_info`, and the rest. If they don't appear, confirm the client restarted and that `gori` is on the `PATH` it uses.
 
 ## 2. Give the agent a task
 
-With the tools live, prompt the agent in plain language. It maps your intent onto the same tools you drive by hand, against the same project database — not a copy:
+With the tools live, prompt the agent in plain language. It maps your intent onto the same tools you drive by hand, against the same project database, not a copy:
 
 > "List the last 20 POSTs to `/login`, resend the newest with a different password, and open an issue if the status code changes."
 
@@ -50,15 +50,15 @@ Tools run one at a time, in the order they arrive, so a slow `send_request` neve
 
 ## 3. Watch what it does
 
-You can see the co-pilot before it does anything: the moment it connects, an `mcp:claude-code` chip appears on the top bar, and clicking it lists every agent attached to the project. From there you don't have to trust it blindly. Its consequential actions surface in gori's **notification center** tagged as coming from an agent and rendered differently from your own, so you can glance over and see what a co-pilot changed — a request it sent, an issue it filed, a rule it wrote — while you were reading another tab.
+You can see the co-pilot before it does anything: the moment it connects, an `mcp:claude-code` chip appears on the top bar, and clicking it lists every agent attached to the project. From there you don't have to trust it blindly. Its consequential actions surface in gori's **notification center** tagged as coming from an agent and rendered differently from your own, so you can glance over and see what a co-pilot changed (a request it sent, an issue it filed, a rule it wrote) while you were reading another tab.
 
-The same holds inside the intercept loop: an agent can sit in the queue next to you, and each `intercept_forward_edit` it makes is marked as its own. One safety note for a live handoff — once an agent attaches to the intercept queue, gori arms a 30-second auto-forward for held items nobody is watching, so a client that dies mid-hold can't wedge the connection indefinitely.
+The same holds inside the intercept loop: an agent can sit in the queue next to you, and each `intercept_forward_edit` it makes is marked as its own. One safety note for a live handoff: once an agent attaches to the intercept queue, gori arms a 30-second auto-forward for held items nobody is watching, so a client that dies mid-hold can't wedge the connection indefinitely.
 
 **Checkpoint.** Open the notification center from the command palette (`Ctrl-P` → notifications) and the agent's actions are there, visibly tagged apart from your own.
 
 ## 4. Hand off safely
 
-To hand the project to an agent — or a teammate — you don't fully trust with the target, install it read-only:
+To hand the project to an agent, or a teammate, you don't fully trust with the target, install it read-only:
 
 ```bash
 gori mcp --read-only --install-claude-code
@@ -66,9 +66,9 @@ gori mcp --read-only --install-claude-code
 
 Read-only keeps every inspection tool (`list_history`, `get_flow`, `list_sitemap`, `compare_flows`) and the pure-compute helpers (`decode`, `jwt_decode`) while disabling `send_request`, issue writes, and the intercept mutators. The agent can read and reason about the whole engagement; it cannot touch the target or change your records.
 
-Scope is the second guardrail, and it holds even with the action tools enabled. An active tool aimed at a host outside — or without — your project scope is refused with a `SCOPE_BLOCKED` error, whether or not the sandbox is on. So even a full-access agent cannot send a stray request to a host you never scoped; it inherits the same guardrail Repeater and the Fuzzer check.
+Scope is the second guardrail, and it holds even with the action tools enabled. An active tool aimed at a host outside your project scope, or without one, is refused with a `SCOPE_BLOCKED` error, whether or not the sandbox is on. So even a full-access agent cannot send a stray request to a host you never scoped; it inherits the same guardrail Repeater and the Fuzzer check.
 
-**Checkpoint.** A read-only agent can list history and analyze flows, but `send_request` comes back disabled — and with the action tools on, a request to an out-of-scope host returns `SCOPE_BLOCKED`.
+**Checkpoint.** A read-only agent can list history and analyze flows, but `send_request` comes back disabled, and with the action tools on, a request to an out-of-scope host returns `SCOPE_BLOCKED`.
 
 ## Next Steps
 

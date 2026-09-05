@@ -8,13 +8,13 @@ gori를 다루는 심화 가이드입니다. TUI의 각 탭은 하나의 목적�
 
 ## 주제 {#topics}
 
-**핵심** — 캡처부터 트리아지까지의 작업 흐름:
+**핵심**: 캡처부터 트리아지까지의 작업 흐름:
 
 - **[Proxy & History](/ko/guide/proxy/)**: 캡처, 인터셉트, 스코프, 임포트, Match & Replace, 호스트 오버라이드.
 - **[Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/)**: 요청 워크벤치, 환경 변수 토큰, Intruder 스타일 Fuzzer.
 - **[Scanning & Issues](/ko/guide/scanning/)**: Probe, Param Miner, Discover(스파이더 & 브루트포스), Issues, Notes, Comparer, 그리고 리테스트 Diff.
 
-**워크벤치** — 하나의 목적에 집중한 분석 도구:
+**워크벤치**: 하나의 목적에 집중한 분석 도구:
 
 - **[Decoder](/ko/guide/decoder/)**: TUI 안에서 동작하는 인코드 / 디코드 / 해시 파이프라인.
 - **[JWT](/ko/guide/jwt/)**: JSON Web Token을 디코드, 재서명, 공격합니다.
@@ -23,7 +23,7 @@ gori를 다루는 심화 가이드입니다. TUI의 각 탭은 하나의 목적�
 - **[OAST](/ko/guide/oast/)**: 아웃오브밴드 콜백을 잡아 블라인드 취약점을 확인합니다.
 - **[Authorize](/ko/guide/authorize/)**: 하나의 요청을 여러 아이덴티티로 재전송해 접근 제어 결함을 찾습니다.
 
-**자동화** — 같은 엔진을 터미널 없이 돌리는 길:
+**자동화**: 같은 엔진을 터미널 없이 돌리는 길:
 
 - **[Scripting](/ko/guide/scripting/)**: `gori run`으로 헤드리스 구동. 파이프라인과 CI를 위한 경로입니다.
 - **[MCP Server](/ko/guide/mcp/)**: Model Context Protocol로 프로젝트를 AI 에이전트에게 넘깁니다.

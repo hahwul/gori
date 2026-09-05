@@ -56,7 +56,7 @@ difference.
   HTTP/2 and reopens it in Repeater/Fuzzer, but per-message Intercept and Match & Replace on
   messages are HTTP/1.1 only: both would have to reframe a DATA payload to a different length,
   which deadlocks against the peer's flow-control window. Replay dials h2, waits for the
-  origin's `SETTINGS_ENABLE_CONNECT_PROTOCOL`, and treats the `2xx` — not a `101` — as the
+  origin's `SETTINGS_ENABLE_CONNECT_PROTOCOL`, and treats the `2xx` (not a `101`) as the
   socket opening; an origin that does not advertise the setting is a refusal naming it rather
   than an empty transcript.
 - **HTTP/3 is outside the proxy.** `network.strip_alt_svc` can remove response fields advertising

@@ -8,13 +8,13 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 
 ## Topics
 
-**Core** — the capture-to-triage workflow:
+**Core**: the capture-to-triage workflow:
 
 - **[Proxy & History](/guide/proxy/)**: capture, intercept, scope, import, match & replace, host overrides.
 - **[Repeater & Fuzzer](/guide/repeater-and-fuzzer/)**: the request workbench, env tokens, and the Intruder-style fuzzer.
 - **[Scanning & Issues](/guide/scanning/)**: Probe, Param Miner, Discover (spider & brute-force), Issues, Notes, Comparer, and the retest Diff.
 
-**Workbenches** — focused, single-purpose analysis tools:
+**Workbenches**: focused, single-purpose analysis tools:
 
 - **[Decoder](/guide/decoder/)**: encode / decode / hash pipeline in the TUI.
 - **[JWT](/guide/jwt/)**: decode, re-sign, and attack JSON Web Tokens.
@@ -23,7 +23,7 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 - **[OAST](/guide/oast/)**: catch out-of-band callbacks to confirm blind vulnerabilities.
 - **[Authorize](/guide/authorize/)**: replay a request under several identities to find broken access control.
 
-**Automation** — the same engines without a terminal in front of them:
+**Automation**: the same engines without a terminal in front of them:
 
 - **[Scripting](/guide/scripting/)**: drive gori headless with `gori run`, for pipelines and CI.
 - **[MCP Server](/guide/mcp/)**: hand the project to an AI agent over the Model Context Protocol.

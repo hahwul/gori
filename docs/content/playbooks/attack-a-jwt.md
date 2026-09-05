@@ -7,9 +7,9 @@ weight = 70
 group = "Workbenches"
 +++
 
-A JWT is only as trustworthy as the server's check of its signature. This playbook takes a token off a captured request, reads its claims, changes one, re-signs it, and fires the classic verification-bypass payloads — alg:none, a weak-secret guess, header injection — to find out which the server accepts. Budget about ten minutes.
+A JWT is only as trustworthy as the server's check of its signature. This playbook takes a token off a captured request, reads its claims, changes one, re-signs it, and fires the classic verification-bypass payloads (alg:none, a weak-secret guess, header injection) to find out which the server accepts. Budget about ten minutes.
 
-> **Before you begin.** Set up a project and scope for a host you're authorized to test ([Set up an engagement](/playbooks/set-up-an-engagement/)), and capture a flow that carries a JWT — an `Authorization: Bearer eyJ…` header is the usual source. The examples target `api.example.com`.
+> **Before you begin.** Set up a project and scope for a host you're authorized to test ([Set up an engagement](/playbooks/set-up-an-engagement/)), and capture a flow that carries a JWT; an `Authorization: Bearer eyJ…` header is the usual source. The examples target `api.example.com`.
 
 ## 1. Send a token to the JWT tab
 
@@ -26,9 +26,9 @@ The decode shows what the token *claims*; it never checks the signature, so a to
 
 ## 2. Tamper a claim
 
-Switch to the Encode lens with `Ctrl-T`, or press `l` to load the decoded token straight into the Encode editors. Edit the **PAYLOAD** JSON — escalate a `role`, swap a `sub`, extend an `exp`. Pick the algorithm with `Ctrl-A` (it cycles `HS256` / `HS384` / `HS512` / `none`), set a **SECRET** when you're signing with an HMAC algorithm, and the re-signed token appears live in OUTPUT. Copy it with `y`.
+Switch to the Encode lens with `Ctrl-T`, or press `l` to load the decoded token straight into the Encode editors. Edit the **PAYLOAD** JSON: escalate a `role`, swap a `sub`, extend an `exp`. Pick the algorithm with `Ctrl-A` (it cycles `HS256` / `HS384` / `HS512` / `none`), set a **SECRET** when you're signing with an HMAC algorithm, and the re-signed token appears live in OUTPUT. Copy it with `y`.
 
-The same claim edit runs headless, taking the token from the argument or stdin — `--set KEY=VALUE` patches one claim (repeatable), or `--payload` replaces the claims wholesale:
+The same claim edit runs headless, taking the token from the argument or stdin. `--set KEY=VALUE` patches one claim (repeatable), or `--payload` replaces the claims wholesale:
 
 ```bash
 gori run jwt eyJhbGci... --encode --set role=admin --secret s3cret       # escalate one claim
@@ -45,9 +45,9 @@ You rarely know the secret, so let gori generate the bypass attempts instead. On
 
 | Attack | What it tests |
 |--------|---------------|
-| **alg:none** | Strips the signature and sets `alg` to `none` (plus `None` / `NONE` case variants) — a server that accepts unsigned tokens. |
-| **Weak secret** | Re-signs with a list of common weak HMAC secrets — a guessable signing key. |
-| **Header injection** | Manipulates the `kid`, `jku`, `x5u`, and `jwk` header parameters — a server that trusts attacker-supplied key material. |
+| **alg:none** | Strips the signature and sets `alg` to `none` (plus `None` / `NONE` case variants). Catches a server that accepts unsigned tokens. |
+| **Weak secret** | Re-signs with a list of common weak HMAC secrets. Catches a guessable signing key. |
+| **Header injection** | Manipulates the `kid`, `jku`, `x5u`, and `jwk` header parameters. Catches a server that trusts attacker-supplied key material. |
 
 Generate the same set headless:
 
@@ -61,10 +61,10 @@ Over MCP the `jwt_attacks` tool returns the identical list (and `jwt_decode` / `
 
 ## 4. Replay and confirm
 
-A forged token proves nothing until the server sees it. Pick a payload — your tampered token from step 2, or a preset from step 3 — and send it to **Repeater**, swap it into the `Authorization` header of the captured request, and re-send with `Ctrl-R`. Read the status against what the endpoint should return for a bad token:
+A forged token proves nothing until the server sees it. Pick a payload (your tampered token from step 2, or a preset from step 3) and send it to **Repeater**, swap it into the `Authorization` header of the captured request, and re-send with `Ctrl-R`. Read the status against what the endpoint should return for a bad token:
 
-- A `401` or `403` means the server rejected the forgery — it verified the signature.
-- A `200` where you expected a reject means it did *not* verify — the token was accepted on your terms.
+- A `401` or `403` means the server rejected the forgery; it verified the signature.
+- A `200` where you expected a reject means it did *not* verify; the token was accepted on your terms.
 
 **Checkpoint.** You can tell an accepted forgery (a success status) from a rejected one (`401` / `403`), and you know which presets, if any, the server let through.
 

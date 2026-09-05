@@ -166,7 +166,7 @@ This is the loop you'll spend most of your time in: take a captured request, cha
    ```
 4. Press `Esc` to leave edit mode, then `Ctrl-R` to **send**.
 
-   Copying while you edit: `Shift`+arrows select in both modes, but the copy key differs. In READ it is `y`; in INS `y` is a literal character — and typing it over a selection *replaces* the selection — so use **`Ctrl-Y`**. `Esc` also carries the selection out of INS, so `Esc` then `y` works too. If a keystroke does eat a selection, `Ctrl-Z` puts it back in one step.
+   Copying while you edit: `Shift`+arrows select in both modes, but the copy key differs. In READ it is `y`; in INS `y` is a literal character, and typing it over a selection *replaces* the selection, so use **`Ctrl-Y`**. `Esc` also carries the selection out of INS, so `Esc` then `y` works too. If a keystroke does eat a selection, `Ctrl-Z` puts it back in one step.
 5. The response, its timing, and a diff against the previous reply appear on the right. `Tab` cycles target → request → response.
 
 <figure class="tui-shot">
@@ -178,7 +178,7 @@ This is the loop you'll spend most of your time in: take a captured request, cha
 
 ## 7. Where to go next
 
-You now have the core loop. From here, the [Playbooks](/playbooks/) walk one workflow at a time — scope, map, intercept, fuzz, and report — each run end to end with checkpoints. A few first directions, also covered in depth in the [Guide](/guide/):
+You now have the core loop. From here, the [Playbooks](/playbooks/) walk one workflow at a time (scope, map, intercept, fuzz, and report), each run end to end with checkpoints. A few first directions, also covered in depth in the [Guide](/guide/):
 
 - **Fuzz a parameter.** Select a flow, press `Shift-I` to send it to the **Fuzzer**, mark a position (`Ctrl-A` auto-marks common params), attach a wordlist, and `Ctrl-R` to run. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/).
 - **Intercept and edit in flight.** Press `i` to hold matching requests and forward, drop, or modify them before they continue. See [Proxy & History](/guide/proxy/#intercept).
@@ -212,7 +212,7 @@ gori wizard
 
 The bind step sets the shared default in `settings.json`, the same layer as Preferences → **Network & Tabs** → **Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed. If something already listens on the port you pick, the step says so; `Enter` again keeps it. `Esc` twice skips the wizard (the first press only arms it, so a stray `Esc` in a field cannot end setup).
 
-The final **Review** step recaps what you picked and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl — useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
+The final **Review** step recaps what you picked and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl, which is useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
 
 ## Guided UI tour
 
