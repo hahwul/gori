@@ -59,8 +59,13 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 
-# The binary is static; ca-certificates is for verifying upstream TLS.
-RUN apk add --no-cache ca-certificates
+# The binary is static, so this is the whole runtime:
+#   ca-certificates  -> verifying upstream TLS
+#   tzdata           -> without it /usr/share/zoneinfo is absent, Time::Location
+#                       falls back to UTC without erroring, and `-e TZ=Asia/Seoul`
+#                       is silently ignored. 1.5 MB buys honest local timestamps.
+#   tini             -> see the ENTRYPOINT note below
+RUN apk add --no-cache ca-certificates tzdata tini
 
 COPY --from=builder /gori/bin/gori /usr/local/bin/gori
 
@@ -68,6 +73,9 @@ COPY --from=builder /gori/bin/gori /usr/local/bin/gori
 # $GORI_HOME (default ~/.gori). Mount a volume here or the CA is regenerated —
 # and must be re-trusted — on every run.
 ENV GORI_HOME=/data
+# Also the working directory, so a relative path handed to an export or a
+# redirect lands in the volume instead of the container's throwaway write layer.
+WORKDIR /data
 VOLUME ["/data"]
 
 # Default proxy port. Note the default bind host is 127.0.0.1, which is not
@@ -78,4 +86,19 @@ EXPOSE 8070
 # Headless subcommands work without one, e.g.
 #   docker run --rm -v gori:/data ghcr.io/hahwul/gori run history
 #   docker run --rm -i  -v gori:/data ghcr.io/hahwul/gori mcp
-ENTRYPOINT ["gori"]
+#
+# tini, not bare `gori`, because gori must not be PID 1. Linux drops any signal
+# whose disposition is still the default when it is aimed at PID 1, and both
+# shutdown paths rely on exactly that:
+#
+#   App::SignalGuard restores the terminal and then re-raises the signal at
+#   itself so the process dies FROM it and exits the conventional 128+signo
+#   (app.cr, REAL_DIE). As PID 1 the re-raise is discarded, so `docker stop`
+#   on the TUI exited 1 instead of 143.
+#
+#   `gori mcp` installs no trap at all, so SIGTERM was dropped outright and
+#   `docker stop` burned its whole timeout before SIGKILL (exit 137).
+#
+# Under tini both exit 143 immediately. `docker run --init` does the same thing
+# from the outside; baking it in means nobody has to know that.
+ENTRYPOINT ["/sbin/tini", "--", "gori"]

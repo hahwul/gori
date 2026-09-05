@@ -136,6 +136,13 @@ docker run --rm    -v gori:/data ghcr.io/hahwul/gori run history
 docker run --rm -i -v gori:/data ghcr.io/hahwul/gori mcp
 ```
 
+Times render in UTC by default. Pass a zone name to get local ones:
+
+```bash
+docker run --rm -it -v gori:/data -p 8070:8070 -e TZ=Asia/Seoul \
+  ghcr.io/hahwul/gori --listen 0.0.0.0
+```
+
 ## Pre-built Binary
 
 Standalone binaries for macOS and Linux are attached to every [GitHub Release](https://github.com/hahwul/gori/releases/latest).
