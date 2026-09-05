@@ -234,13 +234,13 @@ module Gori::Tui
         Item.new("^B", "reveal whitespace"),
       ]},
       {"OTHER TABS", [
-        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · {sitemap.scope-toggle} scope · space → T tag"),
+        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · space → T tag"),
         # `⇧X clear` sits in the LIST half, where the chord fires — and it is on this row at all
         # for the reason the Probe and Authorize rows carry theirs: a wipe has to be named where
         # it can be read before it is pressed. Marks make that sharper here than anywhere else,
         # since `d` acts on the marked set and this one does not.
         Item.new("Issues", "list: {issues.mark-toggle} mark · {issues.mark-all} all · ⇧arrows range · {issues.clear} clear · notes: i/↵ edit · {issue.select-line} line · {issue.copy} copy · space cmds"),
-        Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {probe.scope-toggle} scope · {probe.clear} clear issues · space cmds"),
+        Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {scope.toggle-lens} scope · {probe.clear} clear issues · space cmds"),
         # Authorize had no row at all while `TAB_SECTION` pointed its Shortcuts popup here — so
         # the one tab whose keys are `^R`/`⇧R`/`^X` and nothing an operator can guess opened on
         # a section that never named it.
@@ -277,7 +277,7 @@ module Gori::Tui
       {"REWRITER", [
         Item.new("{rewriter.add} · ↵/e", "add a Match & Replace rule · edit the selected one"),
         Item.new("x · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("{rewriter.scope} · {rewriter.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
+        Item.new("{rewriter.scope} · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere"),
         Item.new("G / P column", "global (every project) or project · G* = this project overrides its default"),
         Item.new("{rewriter.move-down} / {rewriter.move-up}", "reorder within a scope — globals apply first, then project rules"),
         Item.new("[ / ]", "switch sub-tab: rules · extract · bindings"),
@@ -291,7 +291,7 @@ module Gori::Tui
       {"COLORMARKER", [
         Item.new("{colormarker.add} · ↵/e", "add a History row-colour rule · edit the selected one"),
         Item.new("{colormarker.toggle} · {colormarker.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("{colormarker.scope} · {colormarker.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
+        Item.new("{colormarker.scope} · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere"),
         Item.new("{colormarker.move-down} / {colormarker.move-up}", "reorder — the FIRST enabled match paints the row, the rest are skipped"),
         Item.new("style", "full = tint the whole row · strip = one colour cell ahead of TIME"),
         Item.new("when:", "host: path: method: scheme: status: proto: — ↹ completes · no header:/size:/dur:"),

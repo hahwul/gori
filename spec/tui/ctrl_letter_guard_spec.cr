@@ -73,7 +73,7 @@ describe "the extract and custom-colours strips read the rebound letter" do
     with_session("rewriter-strip") do |host|
       ctl = RewriterController.new(host)
       ctl.render_body(Screen.new(MemoryBackend.new(100, 40)), Rect.new(0, 0, 100, 40), :body)
-      ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, char: ']'))
+      ctl.pane_advance(1) # rules → extract, on the focus ring
       ctl.@sub.should eq(:extract)
       prev = Gori::Settings.keymap_overrides
       begin
@@ -113,7 +113,7 @@ describe "Ctrl+letter must not fire a pane's bare-letter action" do
       with_session("rewriter-ctrl") do |host|
         ctl = RewriterController.new(host)
         ctl.render_body(Screen.new(MemoryBackend.new(100, 40)), Rect.new(0, 0, 100, 40), :body)
-        ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, char: ']')) # rules → extract
+        ctl.pane_advance(1) # rules → extract (⇥ on the focus ring; the bracket keys are the Global tab chords)
         ctl.@sub.should eq(:extract)
 
         # The control: bare `a` still opens the editor and still reports "consumed".

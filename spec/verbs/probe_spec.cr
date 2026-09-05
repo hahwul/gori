@@ -47,8 +47,8 @@ describe "Gori::Verbs.register_probe" do
       r["probe-rules.toggle"].chords.should eq([typed_chord("x")])
 
       r["probe.open"].chords.first.should eq(typed_chord("enter"))
-      r["probe.open"].menu_key.should eq('v') # 'o' is reserved for open-evidence
-      r["probe.scope-toggle"].chords.should eq([typed_chord("s", shift: true)])
+      r["probe.open"].menu_key.should eq('v')        # 'o' is reserved for open-evidence
+      r["probe.scope-toggle"].chords.should be_empty # the Global `s` is the lens key; no ⇧S twin
     end
 
     it "routes each list action to its own intent" do

@@ -235,6 +235,18 @@ module Gori::Tui
     # ⇥ / ⇧⇥ cycles the sub-tab strip. Selection and scroll reset because the three lists
     # are unrelated — carrying row 7 from `rules` into a two-row `bindings` list would be a
     # selection the operator never made.
+    # ⇥ / ⇧⇥ walk the three sections (rules → extract → bindings) — the focus-ring hook, so
+    # the shell's ⇥ lands here. `[` / `]` used to stand in for it, on the reading that the
+    # shell owned ⇥; it does, and this is the hook it owns it through. Off either end the ring
+    # returns to the tab bar, as every other multi-pane tab's does.
+    def pane_advance(dir : Int32) : Bool
+      i = RewriterView::SUBS.index(@sub) || 0
+      ni = i + dir
+      return false if ni < 0 || ni >= RewriterView::SUBS.size
+      cycle_sub(dir)
+      true
+    end
+
     private def cycle_sub(d : Int32) : Nil
       i = RewriterView::SUBS.index(@sub) || 0
       @sub = RewriterView::SUBS[(i + d) % RewriterView::SUBS.size]
@@ -313,18 +325,6 @@ module Gori::Tui
 
     # --- keys ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
-      # `[` / `]` switch sub-tabs from ANY focus in the body, including the preview editor:
-      # the strip is the body's own navigation and must not be reachable only from the list.
-      #
-      # NOT ⇥. The shell owns Tab/BackTab for its focus cycle and says so at the gate
-      # (`runner.cr`: "wins over the per-tab body editors below — Repeater used to hijack
-      # Tab"), so a body binding for it never fires. Driving the built TUI is what showed
-      # that: ⇥ moved focus to the tab bar and back, and the sub-tab never changed.
-      c = ev.char || ev.key.to_char
-      if !ev.ctrl? && !ev.alt? && (c == ']' || c == '[')
-        cycle_sub(c == ']' ? 1 : -1)
-        return true
-      end
       return handle_sub_key(ev) unless @sub == :rules
       case @focus
       when :preview_in  then handle_preview_in_key(ev)
@@ -1058,9 +1058,9 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @sub
       when :extract
-        return keys("[/] sub-tab · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.delete} delete · space cmds · esc tabs")
+        return keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.delete} delete · space cmds · esc tabs")
       when :bindings
-        return "[/] sub-tab · ↑/↓ select · d clear · space cmds · esc tabs"
+        return "↹ section · ↑/↓ select · d clear · space cmds · esc tabs"
       end
       case @focus
       when :preview_in
@@ -1071,7 +1071,7 @@ module Gori::Tui
       when :preview_out
         keys("↑/↓ move · ⇧arrows select · {rewriter.copy} copy · {rewriter.select-line} line · space cmds · ← input · esc input")
       else
-        keys("[/] sub-tab · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
+        keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
       end
     end
   end

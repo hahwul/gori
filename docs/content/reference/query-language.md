@@ -101,7 +101,7 @@ The two common `src:` scopings are also **views**; press `v` in History to pick 
 ## Scope: `scope:in` / `scope:out` {#scope-in-scope-out}
 
 `scope:in` matches the flows inside the project's scope (the same include/exclude boundary the
-TUI's `⇧S` lens and `gori run history --in-scope` apply), and `scope:out` matches the ones
+TUI's `s` lens and `gori run history --in-scope` apply), and `scope:out` matches the ones
 outside it. It is an ordinary term, so it negates and it groups:
 
 ```text
@@ -112,7 +112,7 @@ scope:out -host:cdn                   traffic that leaked out of scope, minus th
 
 Three things about it are deliberate:
 
-- **It ignores whether the `⇧S` lens is switched on.** A filter term is a question, not a mode,
+- **It ignores whether the `s` lens is switched on.** A filter term is a question, not a mode,
   so `scope:in` means the same thing either way. (With the lens ON, it is redundant, since the lens
   already ANDs the same predicate over your query, and `scope:out` then matches nothing, since
   the lens has already dropped every out-of-scope row.)

@@ -182,6 +182,16 @@ module Gori::Tui
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       return true if handle_body_hscroll(ev)
+      # ^N / ^W from the body, as the Decoder/JWT/Cookie bodies take them — they answered
+      # only from the sub-tab strip here.
+      if ev.ctrl? && key.lower_n?
+        comparer_new
+        return true
+      elsif ev.ctrl? && key.lower_w?
+        comparer_close # confirm-gated in the controller; the shell re-seats focus after
+        @host.resolve_subtab_focus
+        return true
+      end
       case
       when nav_up?(ev)
         # The cursor moves and drags the viewport with it; ⇧ grows a row selection. At the top

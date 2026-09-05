@@ -103,7 +103,7 @@ module Gori
       # action menu (its only chord is ⇧S, which yields no menu key).
       r.register Verb::Definition.new(
         "sitemap.scope-toggle", "Toggle scope lens", "Filter the tree to in-scope endpoints on/off",
-        Verb::Scope::Sitemap, [Verb::Chord.new("s", shift: true)], mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
+        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
 
       # `a` — add the cursor row to the project scope, pre-filling the SAME popup the Project
       # tab's `a` opens (hence the same chord): a host row seeds a `host` rule, a path row a
@@ -113,10 +113,12 @@ module Gori
         "sitemap.scope-add", "Add to scope", "Add the selected host — or host + path — to the scope rules",
         Verb::Scope::Sitemap, [Verb::Chord.new("a")], mnemonic: 'a', group: :scope) { |ctx| ctx.sitemap_scope_add; nil }
 
-      # `d` — spider + brute-force the selected host/path (opens the Discover config popup).
+      # Menu-only (`space → d`): spider + brute-force the selected host/path (opens the Discover
+      # config popup). It sat on bare `d` — the key that DELETES a row on History, Issues and
+      # Probe, one ⇥ away — so a hand trained on those put requests on the wire here.
       r.register Verb::Definition.new(
         "sitemap.discover", "Discover here", "Spider + brute-force the selected host or path subtree",
-        Verb::Scope::Sitemap, [Verb::Chord.new("d")], mnemonic: 'd', group: :send) { |ctx| ctx.sitemap_discover; nil }
+        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'd', group: :send) { |ctx| ctx.sitemap_discover; nil }
 
       # `o` — read the bytes behind the selected endpoint: resolve its representative captured
       # flow and open History's detail on it. Same chord and same shape as the Issues tab's

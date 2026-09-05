@@ -196,7 +196,7 @@ describe "HistoryView — filter bar chips are clickable" do
     history_bar(view).should eq({
       :view   => "v:all",
       :follow => "f:follow",
-      :scope  => "⇧S scope:off",
+      :scope  => "s scope:off",
     })
   end
 
@@ -230,7 +230,7 @@ describe "SitemapView — filter bar chips are clickable" do
     view = SitemapView.new
     sitemap_bar(view).should eq({
       :fold  => "g:fold",
-      :scope => "⇧S scope:off",
+      :scope => "s scope:off",
     })
   end
 

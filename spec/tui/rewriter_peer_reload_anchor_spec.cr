@@ -273,9 +273,9 @@ describe "the Rewriter rule list under a peer's edit" do
       session.bindings.add("beta", "", Gori::ExtractKind::Header, "X-B")
       session.bindings.add("gamma", "", Gori::ExtractKind::Header, "X-C")
       ctl.on_enter
-      # `]` cycles the sub-tab; the wheel then walks the sub list, both public entry points.
-      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::RightBracket,
-        Termisu::Input::Modifier::None, ']'))
+      # ⇥ (the focus ring's `pane_advance`) moves to the extract section; the wheel then walks
+      # the sub list, both public entry points.
+      ctl.pane_advance(1)
       ctl.handle_wheel(1)
       ctl.handle_wheel(1)
       gamma = session.bindings.rules.find! { |r| r.name == "gamma" }.id

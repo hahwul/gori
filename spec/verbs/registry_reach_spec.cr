@@ -57,7 +57,7 @@ describe "rule-list keys" do
     r["colormarker.delete"].chords.should contain(plain.call("d"))
     r["colormarker.toggle"].chords.should contain(plain.call("x"))
     r["colormarker.scope"].chords.should contain(plain.call("s"))
-    r["colormarker.toggle-default"].chords.should contain(shift.call("x"))
+    r["colormarker.toggle-default"].chords.should be_empty # menu-only: ⇧X is the wipe chord elsewhere
     r["colormarker.move-down"].chords.should contain(shift.call("j"))
     r["colormarker.move-up"].chords.should contain(shift.call("k"))
     # …and the menu letter now names the key. It was 'g', which matched neither the verb
@@ -174,7 +174,7 @@ describe "Rewriter rule keys" do
     r["rewriter.delete"].chords.should contain(plain.call("d"))
     r["rewriter.scope"].chords.should contain(plain.call("s"))
     r["rewriter.move-up"].chords.should contain(typed_chord("k", shift: true))
-    r["rewriter.toggle-default"].chords.should contain(typed_chord("x", shift: true))
+    r["rewriter.toggle-default"].chords.should be_empty # menu-only: ⇧X is the wipe chord elsewhere
   end
 
   it "leaves `x` to the controller, because the KEYMAP has no focus dimension" do

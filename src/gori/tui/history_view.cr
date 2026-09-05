@@ -3342,7 +3342,7 @@ module Gori::Tui
         chips << {:count, @rows.size >= PAGE ? "#{PAGE}+" : @rows.size.to_s, Theme.muted}
       end
       scope_on = @scope.try(&.active?) == true
-      chips << (scope_on ? {:scope, "⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "⇧S scope:off", Theme.muted})
+      chips << (scope_on ? {:scope, "s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "s scope:off", Theme.muted})
       chips << {:follow, "f:follow", @follow ? Theme.accent : Theme.muted}
       # LEFT of `f:follow` — the chain draws rightmost-first, so it is pushed after it. Always
       # shown, like the scope chip and for the same reason: a mode nothing advertises is a mode

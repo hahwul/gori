@@ -107,7 +107,7 @@ module Gori::Tui
           if !@rows.empty?
             {"no flows match", nil}
           elsif @scoped
-            {"no flows in scope", "⇧S toggles the lens"}
+            {"no flows in scope", "s toggles the lens"}
           else
             {"no flows captured yet", nil}
           end

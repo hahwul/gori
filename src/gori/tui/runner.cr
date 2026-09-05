@@ -1444,6 +1444,13 @@ module Gori::Tui
 
       chord = Keybind.from_event(ev)
       return unless chord
+      # `i` on a read-only pane that sits beside an editor (see TabController#insert_key_refusal):
+      # the hand meant INSERT, not the Global intercept toggle. Named, then dropped.
+      if chord == Keybind::INSERT_CHORD && @overlay.none? && @focus == :body &&
+         (refusal = @tabs[@active_tab]?.try(&.insert_key_refusal))
+        status(refusal)
+        return
+      end
       # Resolve through the keymap, honouring available? so a scoped binding that is
       # gated off (e.g. Repeater copy only in READ) does not swallow the chord — and so
       # Global breath keys (c/i/s) still fire when a scoped verb is unavailable.

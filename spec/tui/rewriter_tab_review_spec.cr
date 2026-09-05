@@ -321,7 +321,7 @@ describe "Gori::Tui::RewriterController (tab review)" do
     it "edits an extract rule on its sub-tab" do
       with_rewriter_controller do |ctl, host, session|
         session.bindings.add("TOK", "", Gori::ExtractKind::Cookie, "sid").should be_nil
-        ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, :none, ']'))
+        ctl.pane_advance(1)
         render(ctl)
         mx, my = sub_row_cell(ctl, 0)
         ctl.handle_click(BODY, mx, my)
@@ -335,7 +335,7 @@ describe "Gori::Tui::RewriterController (tab review)" do
     it "follows a rebind of rewriter.add" do
       with_rebind({"rewriter.add" => ["n"]}) do
         with_rewriter_controller do |ctl, host, _|
-          ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, :none, ']'))
+          ctl.pane_advance(1)
           ctl.body_hint(:body).should contain("n add")
           ctl.handle_body_key(key(Termisu::Input::Key::LowerA, :none, 'a')).should be_false
           host.opened_extracts.should be_empty
@@ -348,7 +348,7 @@ describe "Gori::Tui::RewriterController (tab review)" do
     it "keeps the default `a` when nothing is rebound" do
       with_rebind({} of String => Array(String)) do
         with_rewriter_controller do |ctl, host, _|
-          ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, :none, ']'))
+          ctl.pane_advance(1)
           ctl.handle_body_key(key(Termisu::Input::Key::LowerA, :none, 'a')).should be_true
           host.opened_extracts.should eq([nil])
         end
@@ -360,7 +360,7 @@ describe "Gori::Tui::RewriterController (tab review)" do
     it "reaches a Ctrl chord through the sub-tab's modifier guard" do
       with_rebind({"rewriter.add" => ["ctrl-t"]}) do
         with_rewriter_controller do |ctl, host, _|
-          ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, :none, ']'))
+          ctl.pane_advance(1)
           ctl.body_hint(:body).should contain("^T add")
           ctl.handle_body_key(key(Termisu::Input::Key::LowerT, :ctrl, 't')).should be_true
           host.opened_extracts.should eq([nil])
@@ -375,7 +375,7 @@ describe "Gori::Tui::RewriterController (tab review)" do
       with_rebind({"rewriter.delete" => ["shift-d"]}) do
         with_rewriter_controller do |ctl, host, session|
           session.bindings.add("TOK", "", Gori::ExtractKind::Cookie, "sid").should be_nil
-          ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, :none, ']'))
+          ctl.pane_advance(1)
           ctl.handle_body_key(key(Termisu::Input::Key::LowerD, :none, 'd')).should be_false
           session.bindings.rules.size.should eq(1)
           ctl.handle_body_key(key(Termisu::Input::Key::UpperD, :none, 'D')).should be_true
@@ -398,7 +398,7 @@ describe "Gori::Tui::RewriterController (tab review)" do
     it "on the extract sub-tab" do
       with_rebind({"rewriter.add" => ["n"]}) do
         with_rewriter_controller do |ctl, _, _|
-          ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, :none, ']'))
+          ctl.pane_advance(1)
           render(ctl).contains?("no extract rules — press n to add one").should be_true
         end
       end
@@ -436,10 +436,10 @@ describe "Gori::Tui::RewriterController (tab review)" do
       with_rewriter_controller do |ctl, _, session|
         session.bindings.add("A", "", Gori::ExtractKind::Cookie, "a").should be_nil
         session.bindings.add("B", "", Gori::ExtractKind::Cookie, "b").should be_nil
-        ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, :none, ']'))
+        ctl.pane_advance(1)
         ctl.body_scroll(5).should be_true
         ctl.selected_extract_rule.try(&.name).should eq("B")
-        ctl.handle_body_key(key(Termisu::Input::Key::LeftBracket, :none, '['))
+        ctl.pane_advance(-1)
         render(ctl)
         down(ctl)
         ctl.@focus.should eq(:preview_in)

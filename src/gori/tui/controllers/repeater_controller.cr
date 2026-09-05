@@ -1175,6 +1175,11 @@ module Gori::Tui
       current_view.try(&.focus_resume)
     end
 
+    def insert_key_refusal : String?
+      return nil unless (v = current_view) && v.focus == :response
+      "the response is read-only — i edits the REQUEST (↹ up); intercept toggles from the tab bar"
+    end
+
     # --- sub-tab nav (the shell's shared strip machinery drives these for Repeater) ---
     # Move the active sub-tab by ±1 (strip ←/→) among the VISIBLE (filtered) chips, so
     # h/l walks exactly the chips shown; clamped, no wrap, saving the outgoing tab first.

@@ -576,6 +576,11 @@ module Gori::Tui
       true
     end
 
+    def insert_key_refusal : String?
+      return nil unless {:decoded, :attacks, :output}.includes?(cur.pane)
+      "this pane is read-only — i edits the INPUT (↹ up); intercept toggles from the tab bar"
+    end
+
     def focus_first : Nil
       enter_pane(cur, panes(cur).first)
     end

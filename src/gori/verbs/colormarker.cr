@@ -67,7 +67,7 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.toggle-default", "Enable/disable everywhere",
         "Flip a GLOBAL rule's default — the state every project without an override follows",
-        Verb::Scope::Colormarker, [Verb::Chord.new("x", shift: true)],
+        Verb::Scope::Colormarker, [] of Verb::Chord, # menu-only: ⇧X is the wipe chord on five tabs, and this one asked no confirm
         available: on_global_rule, mnemonic: 'X', section: :rules) { |ctx| ctx.colormarker_toggle_default; nil }
 
       # --- CUSTOM COLORS pane (section :colors) — no chords, see the header note. ---

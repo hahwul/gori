@@ -106,12 +106,11 @@ module Gori::Tui
 
     # Keys that mean the same thing in either pane.
     private def handle_pane_chord(ev : Termisu::Event::Key) : Bool
-      c = ev.char || ev.key.to_char
       case
       when ev.key.escape? then @host.request_focus(:subtabs)
-      when c == '['       then @view.move_run(-1) # cycling still works from either pane
-      when c == ']'       then @view.move_run(1)
-      else                     return false # `p` pause is a chord — the keymap's
+        # `[` / `]` used to cycle runs from either pane; they are the Global tab chords, and the
+        # RUNS list's ↑/↓ (or `space → k/j`) is the way between runs now.
+      else return false # `p` pause is a chord — the keymap's
       end
       true
     end

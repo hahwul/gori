@@ -731,7 +731,7 @@ module Gori::Tui
       chips = [] of {String, Color}
       chips << {@issues.size.to_s, Theme.muted} if filtering?
       scope_on = scope_active?
-      chips << (scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted})
+      chips << (scope_on ? {"s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"s scope:off", Theme.muted})
       scope_x = Frame.right_text_chain(screen, rect.right - 1, y, rect.x + 2, chips)
       left_w = {scope_x - (rect.x + 1) - 1, 0}.max
       if filtering?

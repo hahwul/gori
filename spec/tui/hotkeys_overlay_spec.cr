@@ -70,8 +70,8 @@ describe HotkeysOverlay do
       by_binding = fresh_overlay
       hb = OverlayHarness.new(by_binding)
       start_hotkey_search(hb)
-      hb.type("shift-s")
-      hb.rendered?("Toggle scope lens").should be_true
+      hb.type("shift-x")
+      hb.rendered?("Clear history").should be_true
     end
 
     it "shows IME preedit only after / activates search" do

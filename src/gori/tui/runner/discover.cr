@@ -73,6 +73,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     discover_controller.discover_toggle_pause
   end
 
+  def discover_prev_run : Nil
+    discover_controller.view.move_run(-1)
+  end
+
+  def discover_next_run : Nil
+    discover_controller.view.move_run(1)
+  end
+
   def discover_dismiss : Nil
     discover_controller.discover_dismiss
   end

@@ -1278,7 +1278,7 @@ module Gori::Tui
       chips = [] of {Symbol, String, Color}
       chips << {:count, "#{@hosts.size}h", Theme.muted} if filtering?
       scope_on = @scope.try(&.active?) == true
-      chips << (scope_on ? {:scope, "⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "⇧S scope:off", Theme.muted})
+      chips << (scope_on ? {:scope, "s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "s scope:off", Theme.muted})
       chips << {:fold, "g:fold", @grouping ? Theme.accent : Theme.muted}
       chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
       chips
