@@ -1,16 +1,7 @@
-{# One centered tier: meta line carrying the hahwul signature and copyright.
-   Deliberately untranslated — this strip is frame, not content, and the
-   handwriting stack under "Built with Love" carries no Hangul anyway. #}
-<footer class="docs-footer">
-  <p class="footer-meta">
-    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
-      <span class="hahwul-img" aria-hidden="true"></span>
-      <span class="footer-love">Built with Love</span>
-    </a>
-    <span aria-hidden="true">·</span>
-    <span>Apache-2.0 · © HAHWUL</span>
-  </p>
-</footer>
+{# On doc pages the meta strip lives inside the article column (see
+   page.html / section.html), so the side panes run uninterrupted to the
+   bottom of the screen; everywhere else it spans the page here. #}
+{% if not docs_footer_inline %}{% include "partials/footer-meta.html" %}{% endif %}
 <script>
   /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
      screenshots to the matching light/dark capture. */

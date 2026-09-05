@@ -209,6 +209,8 @@
     {% include "partials/doc-path.html" %}
     {% if page.title is present %}<h1>{{ page.title | e }}</h1>{% endif %}
     {{ content }}
+    {% set docs_footer_inline = true %}
+    {% include "partials/footer-meta.html" %}
   </main>
 </div>
 {% endif %}

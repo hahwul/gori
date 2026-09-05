@@ -79,8 +79,8 @@
   --space-7: 3.5rem;
   --space-8: 6rem;
   --header-h: 68px;
-  --sidebar-w: 284px;
-  --toc-w: 220px;
+  --sidebar-w: 300px;
+  --toc-w: 288px;
   --content-max-w: 800px;
   --transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
   --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Helvetica Neue", Arial, sans-serif;
@@ -1862,51 +1862,38 @@ kbd {
   clip-path: inset(50% 0 0 0);
 }
 
-/* The doc pages borrow the TUI's own furniture: two framed panes flank the
-   article — the navigator on the left, the page outline on the right — each
-   with its title cut into the top rule the way a gori pane carries its name,
-   a `[−]`/`[+]` fold at the corner, mono rows, and a solid cursor block on
-   the row you are on. The article itself stays a sans reading column; only
-   the chrome around it talks terminal.
+/* The doc pages borrow the TUI's own furniture: the screen splits into three
+   panes — the navigator on the left, the article in the middle, the page
+   outline on the right — the way a gori screen splits into list, detail and
+   inspector. The side panes run the full height from the header to the
+   footer with a hairline divider, carry their title cut into a top rule the
+   way a gori pane carries its name, and paint a solid cursor block on the
+   row you are on. The article itself stays a sans reading column; only the
+   chrome around it talks terminal.
 
-   A centered three-track grid capped at the footer's own width, so the
-   footer's centered rule and the reading column share one axis. Named areas
-   let the outline pane move above the article in the two-track range
-   instead of disappearing. */
+   Full-bleed up to a wide cap, so the panes sit at the screen edges like
+   real splits instead of floating in a centered card. */
 .docs-container {
   position: relative;
   z-index: 1;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
   grid-template-areas: "nav main toc";
-  gap: 2.6rem;
-  align-items: start;
-  width: min(100%, 1380px);
+  align-items: stretch;
+  width: min(100%, 1720px);
   margin-inline: auto;
   min-height: 100dvh;
   padding-top: var(--header-h);
-  padding-inline: clamp(1.25rem, 4vw, 2.5rem);
 }
 
-/* --- Shared pane frame (sidebar + TOC) ------------------------------------
-   The <details> draws the left/right/bottom rules; the <summary> draws the
-   top rule in segments around its title, and is pulled up by half its own
-   height so that rule lands exactly on the box's top edge. The result is a
-   `┌─ TITLE ───[−]─┐` frame with no background patch behind the title. */
-.tui-panel {
-  margin-top: 0.7rem;
-  border: 1px solid var(--line-strong);
-  border-top: 0;
-  border-radius: 0 0 3px 3px;
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
-}
-
+/* --- Shared pane title: `─ TITLE ─────[−] ─` ------------------------------
+   A <summary>, so the pane folds on the small layouts; on the wide layouts
+   the fold is retired (see the media blocks) and the row is just the rule. */
 .panel-title {
   display: flex;
   align-items: center;
   gap: 0;
   height: 1.4rem;
-  margin-top: -0.7rem;
   padding: 0 0.55rem;
   color: var(--accent);
   font-family: var(--font-mono);
@@ -1967,12 +1954,6 @@ kbd {
   content: "[+]";
 }
 
-/* A folded pane collapses to its title rule alone — no empty box under it. */
-.tui-panel:not([open]) {
-  border-color: transparent;
-  background: transparent;
-}
-
 .panel-title:hover .panel-toggle {
   color: var(--heading);
 }
@@ -1985,32 +1966,101 @@ kbd {
   color: var(--accent-strong);
 }
 
-/* --- Left pane: the navigator ---------------------------------------------
-   Sticky, not fixed: the pane stays parked under the header while the
-   article scrolls, but still ends with the flow, so the footer spans the
-   real page width. The pane BODY is the scroller (natural height capped at
-   the viewport), so the frame always wraps whatever is visible. */
-.docs-sidebar {
-  grid-area: nav;
-  position: sticky;
-  top: var(--header-h);
-  padding: 3.2rem 0 2rem;
+/* --- The framed variant (small layouts) -----------------------------------
+   Where a pane sits in the flow above the article it wears a full frame:
+   the <details> draws the left/right/bottom rules and the <summary> is
+   pulled up by half its height so its rule lands on the box's top edge —
+   `┌─ TITLE ───[−]─┐` with no background patch behind the title. A folded
+   pane collapses to the title rule alone. */
+.tui-panel {
+  margin-top: 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-top: 0;
+  border-radius: 0 0 3px 3px;
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
 }
 
-.sidebar-body {
-  max-height: calc(100dvh - var(--header-h) - 6.6rem);
-  padding: 0.55rem 0 0.9rem;
+.tui-panel > .panel-title {
+  margin-top: -0.7rem;
+}
+
+.tui-panel:not([open]) {
+  border-color: transparent;
+  background: transparent;
+}
+
+/* --- The split variant (wide layouts) --------------------------------------
+   The aside is the full-height column: tinted, with a hairline divider on
+   its article side. The pane inside is sticky and sized to the viewport so
+   the title rule stays parked right under the header while its body
+   scrolls; the column itself still ends with the flow, so the footer spans
+   the real page width. */
+.docs-sidebar,
+.docs-toc-rail {
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+
+.docs-sidebar {
+  grid-area: nav;
+  border-right: 1px solid var(--line);
+}
+
+.docs-toc-rail {
+  grid-area: toc;
+  border-left: 1px solid var(--line);
+}
+
+.docs-sidebar .tui-panel,
+.docs-toc-rail .tui-panel {
+  position: sticky;
+  top: var(--header-h);
+  margin: 0;
+  padding-top: 0.9rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.docs-sidebar .tui-panel > .panel-title,
+.docs-toc-rail .tui-panel > .panel-title {
+  flex: none;
+  margin-top: 0;
+  padding-inline: 0.9rem;
+  pointer-events: none;
+}
+
+.docs-sidebar .panel-toggle,
+.docs-toc-rail .panel-toggle {
+  display: none;
+}
+
+/* The body is the scroller, capped to what is left of the viewport under the
+   header, the pane's top padding and its title row — set explicitly rather
+   than via flex, because a <details> element's content sits in its own
+   internal box and would not shrink as a flex item. */
+.sidebar-body,
+.toc-body {
+  max-height: calc(100dvh - var(--header-h) - 2.3rem);
   overflow-y: auto;
   overscroll-behavior: contain;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2rem), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2rem), transparent);
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
+.sidebar-body {
+  padding: 0.7rem 0.75rem 2rem;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4rem), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4rem), transparent);
+}
+
+.toc-body {
+  padding: 0.6rem 0.75rem 2rem;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4rem), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4rem), transparent);
+}
+
 /* The scrollbar only surfaces while the pointer is over the pane: thin stays
-   on either way so the gutter never shifts, only the thumb's paint toggles.
-   Same idiom on the TOC body below. */
+   on either way so the gutter never shifts, only the thumb's paint toggles. */
 .sidebar-body:hover,
 .sidebar-body:focus-within,
 .toc-body:hover,
@@ -2040,15 +2090,15 @@ kbd {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: calc(100% - 1.1rem);
-  margin: 0 0.55rem 0.65rem;
-  padding: 0.38rem 0.5rem 0.38rem 0.6rem;
+  width: 100%;
+  margin: 0 0 0.75rem;
+  padding: 0.42rem 0.5rem 0.42rem 0.65rem;
   border: 1px solid var(--line);
   border-radius: 3px;
   background: rgb(var(--ink-rgb) / 0.03);
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   text-align: left;
   cursor: pointer;
   transition: color var(--transition), border-color var(--transition), background var(--transition);
@@ -2095,7 +2145,7 @@ kbd {
 }
 
 .sidebar-section + .sidebar-section {
-  margin-top: 0.35rem;
+  margin-top: 0.4rem;
 }
 
 /* The <symbol> sprite ships inline at the top of the sidebar partial; park it
@@ -2113,8 +2163,8 @@ kbd {
    the right group when the pane is scanned. */
 .sidebar-icon {
   flex: none;
-  width: 0.95rem;
-  height: 0.95rem;
+  width: 1rem;
+  height: 1rem;
   color: var(--quiet);
   transition: color var(--transition);
 }
@@ -2132,10 +2182,10 @@ kbd {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.36rem 0.65rem 0.36rem 0.55rem;
+  padding: 0.4rem 0.65rem 0.4rem 0.55rem;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   font-weight: 700;
   letter-spacing: 0.01em;
   line-height: 1.35;
@@ -2191,13 +2241,13 @@ kbd {
    a list cursor paints in the TUI. */
 .sidebar-links {
   list-style: none;
-  margin: 0.1rem 0 0.45rem 1.2rem;
+  margin: 0.1rem 0 0.5rem 1.2rem;
   padding: 0;
   border-left: 1px solid var(--line);
 }
 
 .sidebar-subhead {
-  margin: 0.8rem 0 0.15rem;
+  margin: 0.85rem 0 0.15rem;
   padding: 0 0.6rem 0 0.9rem;
   color: var(--quiet);
   font-family: var(--font-mono);
@@ -2214,10 +2264,10 @@ kbd {
 .sidebar-links a {
   position: relative;
   display: block;
-  padding: 0.3rem 0.6rem 0.3rem 1.35rem;
+  padding: 0.32rem 0.6rem 0.32rem 1.4rem;
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.84rem;
   line-height: 1.4;
   text-decoration: none;
   transition: color var(--transition), background var(--transition);
@@ -2226,7 +2276,7 @@ kbd {
 .sidebar-links a::before {
   content: "▸";
   position: absolute;
-  top: 0.3rem;
+  top: 0.32rem;
   left: 0.45rem;
   color: var(--accent);
   opacity: 0;
@@ -2248,13 +2298,13 @@ kbd {
   opacity: 1;
 }
 
-/* The grid track already sizes and gutters the column; the cap only binds in
-   the two-track range (no TOC), where the track would otherwise run wide. */
+/* The article column: its own gutters, the reading measure capped inside. */
 .docs-main {
   grid-area: main;
   min-width: 0;
-  max-width: var(--content-max-w);
-  padding: 3.2rem 0 4rem;
+  width: 100%;
+  max-width: calc(var(--content-max-w) + 2 * clamp(1.5rem, 3.4vw, 3.2rem));
+  padding: 2.4rem clamp(1.5rem, 3.4vw, 3.2rem) 4.5rem;
 }
 
 .docs-main h2,
@@ -2283,26 +2333,16 @@ kbd {
   color: var(--accent-strong);
 }
 
-/* --- Right pane: the page outline -----------------------------------------
-   Same frame, same sticky rule. The body is the scroller; the fade equals
-   the bottom padding, so the last row reads at full strength once the
-   scroll ends. */
-.docs-toc-rail {
-  grid-area: toc;
-  position: sticky;
-  top: var(--header-h);
-  padding: 3.2rem 0 2rem;
+/* The meta strip closes the article column instead of the page, so the side
+   panes run to the bottom of the screen without a footer pushing the sticky
+   pane up under the header on the last scroll. */
+.docs-main > .docs-footer {
+  width: 100%;
+  margin-top: var(--space-8);
+  padding-inline: 0;
 }
 
-.toc-body {
-  max-height: calc(100dvh - var(--header-h) - 6.6rem);
-  padding: 0.45rem 0 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-
+/* --- Right pane: the page outline ----------------------------------------- */
 .docs-toc-rail nav > ul {
   position: relative;
   margin: 0;
@@ -2323,10 +2363,10 @@ kbd {
 .docs-toc-rail a {
   position: relative;
   display: block;
-  padding: 0.26rem 0.6rem 0.26rem 1.35rem;
+  padding: 0.28rem 0.6rem 0.28rem 1.4rem;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: 0.78rem;
   line-height: 1.4;
   text-decoration: none;
   transition: color var(--transition), background var(--transition);
@@ -2336,7 +2376,7 @@ kbd {
 .docs-toc-rail a[data-target]::before {
   content: "▸";
   position: absolute;
-  top: 0.26rem;
+  top: 0.28rem;
   left: 0.45rem;
   color: var(--accent);
   opacity: 0;
@@ -2345,14 +2385,14 @@ kbd {
 
 /* h3 rows branch off their h2 with box-drawing tees: `├` between, `└` last. */
 .docs-toc-rail ul ul a {
-  padding-left: 2.3rem;
+  padding-left: 2.35rem;
 }
 
 .docs-toc-rail ul ul a::after {
   content: "├";
   position: absolute;
-  top: 0.26rem;
-  left: 1.35rem;
+  top: 0.28rem;
+  left: 1.4rem;
   color: var(--quiet);
 }
 
@@ -2380,8 +2420,8 @@ kbd {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-top: 0.5rem;
-  padding: 0.45rem 0.6rem 0.55rem 0.75rem;
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.6rem 0.55rem 0.75rem;
   border-top: 1px solid var(--line);
   color: var(--quiet);
   font-family: var(--font-mono);
@@ -2399,30 +2439,62 @@ kbd {
   color: var(--heading);
 }
 
-/* Below the three-track range the outline pane moves above the article
-   (folded, via toc.js) rather than vanishing. */
+/* Below the three-pane width the outline leaves its column and sits above
+   the article as a framed, foldable pane (toc.js folds it) rather than
+   vanishing. */
 @media (max-width: 1199px) {
   .docs-container {
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
     grid-template-areas:
       "nav toc"
       "nav main";
-    gap: 0 2.5rem;
   }
 
   .docs-toc-rail {
+    width: 100%;
+    max-width: calc(var(--content-max-w) + 2 * clamp(1.5rem, 3.4vw, 3.2rem));
+    padding: 2.4rem clamp(1.5rem, 3.4vw, 3.2rem) 0;
+    border-left: 0;
+    background: transparent;
+  }
+
+  .docs-toc-rail .tui-panel {
     position: static;
-    max-width: var(--content-max-w);
-    padding: 3.2rem 0 0;
+    display: block;
+    max-height: none;
+    margin-top: 0.7rem;
+    padding-top: 0;
+    border: 1px solid var(--line-strong);
+    border-top: 0;
+    border-radius: 0 0 3px 3px;
+    background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  }
+
+  .docs-toc-rail .tui-panel:not([open]) {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .docs-toc-rail .tui-panel > .panel-title {
+    margin-top: -0.7rem;
+    padding-inline: 0.55rem;
+    pointer-events: auto;
+  }
+
+  .docs-toc-rail .panel-toggle {
+    display: block;
   }
 
   .toc-body {
     max-height: 22rem;
+    padding-top: 0.45rem;
+    padding-bottom: 0;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
-  .docs-toc-rail + .docs-main,
   .docs-toc-rail ~ .docs-main {
-    padding-top: 1.6rem;
+    padding-top: 1.4rem;
   }
 }
 
@@ -3753,14 +3825,16 @@ html.search-lock body {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 0;
+    padding-inline: 1.25rem;
   }
 
   .docs-sidebar,
   .docs-toc-rail {
-    position: static;
+    width: 100%;
     max-width: none;
     padding: 0;
+    border: 0;
+    background: transparent;
   }
 
   .docs-sidebar {
@@ -3771,9 +3845,43 @@ html.search-lock body {
     padding-top: 1.2rem;
   }
 
+  .docs-sidebar .tui-panel,
+  .docs-toc-rail .tui-panel {
+    position: static;
+    display: block;
+    max-height: none;
+    margin-top: 0.7rem;
+    padding-top: 0;
+    border: 1px solid var(--line-strong);
+    border-top: 0;
+    border-radius: 0 0 3px 3px;
+    background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  }
+
+  .docs-sidebar .tui-panel:not([open]),
+  .docs-toc-rail .tui-panel:not([open]) {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .docs-sidebar .tui-panel > .panel-title,
+  .docs-toc-rail .tui-panel > .panel-title {
+    margin-top: -0.7rem;
+    padding-inline: 0.55rem;
+    pointer-events: auto;
+  }
+
+  .docs-sidebar .panel-toggle,
+  .docs-toc-rail .panel-toggle {
+    display: block;
+  }
+
   .sidebar-body,
   .toc-body {
     max-height: 60dvh;
+    padding: 0.55rem 0.55rem 0.9rem;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
   /* The container's own gutter carries the inline padding now. */

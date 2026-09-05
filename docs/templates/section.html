@@ -14,6 +14,8 @@
       {{ section.list }}
     </ul>
     {{ pagination }}
+    {% set docs_footer_inline = true %}
+    {% include "partials/footer-meta.html" %}
   </main>
 </div>
 {% include "footer.html" %}
