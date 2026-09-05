@@ -70,7 +70,7 @@ One thing survives on purpose: the global rule-id counters. A project can overri
 |---------|--------|
 | **Theme** | Opener: the theme picker (built-ins plus your own) |
 | **Display** | Default detail pane, History list time, Line numbers, Wrap long lines, Preview body limit (KiB), Resource meter, Terminal title |
-| **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth |
+| **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth, Tab numbers |
 | **Companion** | Companion (Miss Ring), Placement, Motion, Notices |
 
 The Theme row previews the current theme inline, showing its name and a swatch of its palette. See the [Themes guide](/guide/themes/).

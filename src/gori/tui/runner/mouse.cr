@@ -311,7 +311,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     seg = Chrome.menu_segments(rect, @active_tab, tabs: effective_tabs,
-      intercept_count: @session.interceptor.pending_count, hidden_count: hidden_tab_count).find { |(_, r)| r.contains?(mx, my) }
+      intercept_count: @session.interceptor.pending_count, hidden_count: hidden_tab_count,
+      numbered: Settings.tab_numbers?).find { |(_, r)| r.contains?(mx, my) }
     if seg
       seg[0] == @active_tab ? focus_pane(:menu) : focus_tab(seg[0], focus: :menu)
     else

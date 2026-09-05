@@ -417,7 +417,8 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
     "probe_preview": false,
     "issues_preview": false,
     "history_list_order": "newest",
-    "sitemap_expand_depth": -1
+    "sitemap_expand_depth": -1,
+    "tab_numbers": false
   }
 }
 ```
@@ -429,6 +430,7 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 | `issues_preview` | bool | `false` | Issues list page shows a bottom summary of the selected issue |
 | `history_list_order` | string | `"newest"` | List sort: `"newest"` (newest at top) or `"oldest"` (oldest at top) |
 | `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`-`3` = expand only nodes shallower than this depth |
+| `tab_numbers` | bool | `false` | Paint `1:`…`9:` before the first nine tabs on the tab bar — the positions the `1`-`9` jump keys answer to |
 
 ### statusline
 
@@ -798,7 +800,7 @@ Omitted until you apply or star a wordlist.
 | `mine` | Saved Param Miner defaults. See [mine](#mine) above |
 | `saved_views` | The GLOBAL History **views** library: named QL queries applied as a lens, with the same global/project split `rewriter` has. See [run views](/reference/cli/#run-views) |
 | `companion` | Miss Ring, the mascot: `enabled` (off by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`) and `notices`. See the [Settings guide](/guide/settings/) |
-| `layout` | History / Probe / Issues previews + Sitemap expand depth. See [layout](#layout) above |
+| `layout` | History / Probe / Issues previews, Sitemap expand depth, tab-bar numbers. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
 | `display` | Default detail pane, list time format, line-number gutter, `wrap_lines` (soft-wrap long lines, on by default), preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |
 
