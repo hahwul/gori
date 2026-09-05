@@ -684,6 +684,21 @@ module Gori::Tui
       @host.status("authorize: stopping…")
     end
 
+    # Project-level halt (`Runner#stop_all_jobs`): the engine fiber owns its own sockets and
+    # kept sending after the operator was back at the picker, with the job pinned at
+    # `running` and nothing that could stop it — the exact gap the other six job-owning
+    # controllers had already closed. Same `request_stop` + `jobs.finish(:stopped, …)` pair
+    # `finish_batch` applies; the fiber's next poll sees the flag and its outcomes are then
+    # dropped by the generation check.
+    def stop_all : Nil
+      return unless running?
+      @view.request_stop
+      if id = @job_id
+        @host.jobs.finish(id, :stopped, "project closed")
+        @job_id = nil
+      end
+    end
+
     # Drop the cursor request from the queue. Refused while it is mid-run — its outcome is
     # still on the way.
     def remove_selected : Nil

@@ -520,8 +520,14 @@ module Gori::Tui
         @persist_owners.each_with_index { |(run, idx), i| run.set_flow_id(idx, ids[i]) }
       end
       clear_persist
-    rescue
-      clear_persist # a store write failure must not wedge the drain
+    rescue ex
+      # A store write failure must not wedge the drain — but the operator has no other signal
+      # that these captures were lost, and the rows keep no bytes, so they can never be opened
+      # later. Say so, on the toast AND in the notification centre (the toast is one keypress
+      # from gone).
+      lost = @persist_buf.size
+      clear_persist
+      @host.status("discover: #{lost} captured exchange#{lost == 1 ? "" : "s"} not saved (store busy: #{ex.message}) — their rows can't be opened", :error)
     end
 
     private def clear_persist : Nil

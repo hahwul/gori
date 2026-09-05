@@ -2753,7 +2753,7 @@ module Gori::Tui
     # engine fiber — it owns its own sockets and would keep sending. Order does not matter
     # (each controller only touches its own tabs), but every job-owning controller must be
     # listed: the ones that call `@host.jobs.start` are discover / fuzzer / miner /
-    # sequencer / repeater(minimize) / oast.
+    # sequencer / repeater(minimize) / oast / authorize.
     private def stop_all_jobs : Nil
       discover_controller.stop_all
       fuzzer_controller.stop_all
@@ -2761,6 +2761,7 @@ module Gori::Tui
       sequencer_controller.stop_all
       repeater_controller.stop_all
       oast_controller.stop_all
+      authorize_controller.stop_all
     end
 
     private def quit_message : String
@@ -2954,6 +2955,10 @@ module Gori::Tui
     def status(message : String, kind : Symbol) : Nil
       @toast_kinded = {message, kind}
       status(message)
+      # An error is the one toast an operator cannot afford to lose to the next keypress — it
+      # is written into the notification centre too, so `notify:` on the top bar and the
+      # app.notifications card can bring it back. Plain / busy / done stay toast-only.
+      @notifications.push(:error, message, source: "toast") if kind == :error
     end
 
     def open_palette : Nil
