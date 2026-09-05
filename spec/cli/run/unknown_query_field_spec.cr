@@ -140,13 +140,18 @@ describe Gori::QL do
       Gori::QL.field_shaped?("methd", "GET").should be_true
       Gori::QL.field_shaped?("hsot", "acme").should be_true
       Gori::QL.field_shaped?("resp.bdy", "secret").should be_true
-      Gori::QL.field_shaped?("xyzzy", "1").should be_true
+      Gori::QL.field_shaped?("xyzzy", "foo").should be_true
+      Gori::QL.field_shaped?("stauts", "500").should be_true # a numeric value is no escape for a near-miss
     end
 
     it "reads a scheme, a non-letter start and a bare authority as free text" do
       Gori::QL.field_shaped?("http", "//acme.test/x").should be_false
       Gori::QL.field_shaped?("12", "34").should be_false
       Gori::QL.field_shaped?("acme.test", "8443").should be_false
+      # A dotless host:port — `localhost:8080`, `api:3000` — is an authority too, unless the name
+      # is close to a real field; a dotted namespace guess (`resp.status:200`) never is.
+      Gori::QL.field_shaped?("localhost", "8080").should be_false
+      Gori::QL.field_shaped?("resp.status", "200").should be_true
     end
   end
 

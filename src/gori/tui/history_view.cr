@@ -92,7 +92,7 @@ module Gori::Tui
     # The highlighter's field vocabulary. `QL.known_field?`, not `QL_FIELDS.includes?`: the pool
     # is what Tab OFFERS and is a strict subset of what QL accepts, so testing against it would
     # paint `res.body:` — which compiles perfectly — as a typo.
-    QL_KNOWN = ->(f : String) { QL.known_field?(f) }
+    QL_KNOWN = ->(f : String, op : Char) { QL.known_field?(f, regex: op == '~') }
 
     getter rows : Array(Store::FlowRow)
     getter? follow : Bool

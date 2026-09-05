@@ -13,6 +13,7 @@ module Gori
   #   host:a OR host:b                OR
   #   (host:a OR host:b) -method:GET  parentheses group; `-` negates one term
   #   NOT (host:cdn OR host:static)   NOT negates a term OR a whole group
+  #   -(host:cdn OR host:static)      ...and so do `-(` and `NOT(` fused to the paren
   #   host:"my host"  "two words"     quotes keep spaces inside one token
   #
   # `AND`/`OR`/`NOT` are recognised UPPERCASE-only and unquoted, so the far more
@@ -105,6 +106,17 @@ module Gori
       acc = [] of Lexeme
       depth = 0
       each_chunk(query) do |raw, chars, quoted_any, at|
+        # `-(` and `NOT(` — a negation marker FUSED to the paren that opens a group — read as
+        # `NOT (`. Without this the `(` was not at the start of its chunk, so it stayed a literal
+        # character: `-(host:a OR host:b)` lexed as the negated free-text word `(host:a` OR'd
+        # with `host:b)` — an answer that looks plausible on the list and is the opposite of
+        # what was typed. Both spellings are the natural ones for anyone who has written a
+        # boolean expression before, and `-term`/`NOT term` being equivalent everywhere else made
+        # `-(` in particular look supported. The marker must itself be unquoted, like every other
+        # operator, so `"-(a"` still searches for that literal text. Looped, and behind any
+        # parens already open in this chunk, so `(NOT(a))` and `-(-(a))` read the way they nest.
+        chars, raw, at, opened = lex_fused_negations(chars, raw, at, acc)
+        depth += opened
         lead = 0
         while lead < chars.size && chars[lead][0] == '(' && !chars[lead][1]
           lead += 1
@@ -134,6 +146,43 @@ module Gori
         depth -= trail
       end
       acc
+    end
+
+    # Emit every `(`-run + fused negation marker at the head of a chunk, in order, and hand back
+    # the chunk with them cut off: `((-(NOT(a` yields `( ( - ( NOT` and leaves `(a` for the
+    # ordinary paren/word cut. The parens emitted here are counted in the returned `opened` so
+    # `lex` can keep its `depth` right. Only parens that precede a marker are consumed — a run
+    # with no marker after it is left for `lex`'s own lead-paren pass.
+    private def self.lex_fused_negations(chars : Array({Char, Bool}), raw : String, at : Int32,
+                                         acc : Array(Lexeme)) : {Array({Char, Bool}), String, Int32, Int32}
+      opened = 0
+      loop do
+        parens = 0
+        while parens < chars.size && chars[parens][0] == '(' && !chars[parens][1]
+          parens += 1
+        end
+        skip = fused_negation(chars[parens..])
+        break if skip == 0
+        parens.times { |k| acc << Lexeme.new(Tok::LParen, nil, at + k, 1) }
+        acc << Lexeme.new(Tok::Not, nil, at + parens, skip)
+        opened += parens
+        chars = chars[(parens + skip)..]
+        raw = raw[(parens + skip)..]
+        at += parens + skip
+      end
+      {chars, raw, at, opened}
+    end
+
+    # How many leading characters of a chunk are a negation marker fused to a group-opening
+    # `(` — 1 for `-(`, 3 for `NOT(`, 0 when the chunk starts any other way. Every character
+    # involved must be unquoted: a quoted `-` or `(` is literal text (see `word_term`, and the
+    # paren rule in `lex`).
+    private def self.fused_negation(chars : Array({Char, Bool})) : Int32
+      return 0 if chars.size < 2
+      return 1 if chars[0] == {'-', false} && chars[1] == {'(', false}
+      return 0 if chars.size < 4
+      return 3 if chars[0] == {'N', false} && chars[1] == {'O', false} && chars[2] == {'T', false} && chars[3] == {'(', false}
+      0
     end
 
     # Keywords are UPPERCASE and unquoted; anything else is a searchable word.
@@ -490,18 +539,22 @@ module Gori
     SEPS_FIELD       = ":"
     SEPS_FIELD_REGEX = ":~"
 
-    # `known`, when given, is the backend's "do I implement this field name?" and it exists for
-    # exactly the reason `seps` does, one level down. `seps` already stops a bar painting an
-    # operator it does not run; this stops one painting a FIELD it does not have. `hsot:acme` is
-    # a typo whose whole token gets free-texted — it matches nothing real — and every bar
-    # rendered it in the same confident blue as `host:acme`, so the one visible signal said the
-    # query was fine. Naming a namespace made it worse: `resp.status:200` is a reasonable guess
-    # at a real prefix, and QL now DROPS it, while the bar still called it a field.
+    # `known`, when given, is the backend's "do I implement this field name, WITH this separator?"
+    # and it exists for exactly the reason `seps` does, one level down. `seps` already stops a
+    # bar painting an operator it does not run; this stops one painting a FIELD it does not have.
+    # `hsot:acme` is a typo whose whole token gets free-texted — it matches nothing real — and
+    # every bar rendered it in the same confident blue as `host:acme`, so the one visible signal
+    # said the query was fine. Naming a namespace made it worse: `resp.status:200` is a reasonable
+    # guess at a real prefix, and QL now DROPS it, while the bar still called it a field.
+    #
+    # The separator is passed because a field can be real under `:` and not under `~`: QL takes
+    # `status:5xx` and has no `status~` at all, and painting `status~5..` as a field claimed a
+    # regex match nobody performs (the term is dropped). One predicate, two operators, one truth.
     #
     # Nil (the default) keeps the old behaviour for a caller that has no such predicate, so a
     # backend opts in rather than being told what its vocabulary is.
     def self.spans(query : String, seps : String = SEPS_FIELD_REGEX,
-                   known : Proc(String, Bool)? = nil) : Array(Span)
+                   known : Proc(String, Char, Bool)? = nil) : Array(Span)
       acc = [] of Span
       lex(query).each do |lexeme|
         case lexeme.tok
@@ -517,14 +570,23 @@ module Gori
     end
 
     # Index of the separator that makes `[from, to)` a field term, or nil for free text.
-    # Needs at least one character of field name before it, and a quote appearing first
-    # means the whole thing is a quoted phrase rather than a `field:value`.
+    # Needs at least one character of field name before it. Quote marks are skipped, not
+    # honoured: the grammar strips them BEFORE any backend splits a token, so `"host:a"` compiles
+    # exactly as `host:a` does (QL's spec pins that quoting is not an escape — see
+    # `field_shaped?` there), and a highlighter that read the quote as "this is a phrase" painted
+    # the one token as free text while the parser ran it as a field.
     private def self.field_sep(query : String, from : Int32, to : Int32, seps : String) : Int32?
       j = from
+      named = false
       while j < to
         ch = query[j]
-        return nil if ch == '"'
-        return j if seps.includes?(ch) && j > from
+        if ch == '"'
+          # not part of the name
+        elsif seps.includes?(ch)
+          return named ? j : nil
+        else
+          named = true
+        end
         j += 1
       end
       nil
@@ -533,7 +595,7 @@ module Gori
     # Sub-classify one word: an optional `-`, an optional `field:`/`field~` prefix, then
     # the remainder with any quote marks called out.
     private def self.word_spans(query : String, lexeme : Lexeme, acc : Array(Span), seps : String,
-                                known : Proc(String, Bool)? = nil) : Nil
+                                known : Proc(String, Char, Bool)? = nil) : Nil
       s = lexeme.start
       e = s + lexeme.size
       i = s
@@ -546,20 +608,28 @@ module Gori
       end
 
       sep = field_sep(query, i, e, seps)
+      real = false
       if sep
         # The name is matched case-INSENSITIVELY because `split_field` downcases before it
-        # dispatches: `HOST:x` compiles, so it must not be painted as a typo.
-        name = query[i...sep].downcase
-        real = known.nil? || known.call(name)
-        acc << Span.new(i, sep - i + 1, real ? SpanKind::Field : SpanKind::UnknownField)
+        # dispatches: `HOST:x` compiles, so it must not be painted as a typo. Quote marks are
+        # dropped from the name the way the lexer drops them from `Term#text`.
+        name = query[i...sep].delete('"').downcase
+        real = known.nil? || known.call(name, query[sep])
+        quoted_runs(query, i, sep + 1, real ? SpanKind::Field : SpanKind::UnknownField, acc)
         i = sep + 1
       end
 
       # A value under an UNKNOWN field is not a value — the backend free-texts the whole token,
       # so painting `acme` as a value in `hsot:acme` would claim a match nobody will perform.
-      kind = (sep && real) ? SpanKind::Value : SpanKind::Plain
-      run = i
-      while i < e
+      quoted_runs(query, i, e, real ? SpanKind::Value : SpanKind::Plain, acc)
+    end
+
+    # Paint `[from, to)` as `kind`, calling out every `"` inside it as its own Quote span.
+    private def self.quoted_runs(query : String, from : Int32, to : Int32, kind : SpanKind,
+                                 acc : Array(Span)) : Nil
+      run = from
+      i = from
+      while i < to
         if query[i] == '"'
           acc << Span.new(run, i - run, kind) if i > run
           acc << Span.new(i, 1, SpanKind::Quote)
@@ -567,7 +637,7 @@ module Gori
         end
         i += 1
       end
-      acc << Span.new(run, e - run, kind) if e > run
+      acc << Span.new(run, to - run, kind) if to > run
     end
 
     # --- Tab-completion support ----------------------------------------------
@@ -594,7 +664,16 @@ module Gori
       while i < token.size && token[i] == '('
         i += 1
       end
-      i += 1 if i < token.size - 1 && token[i] == '-' # `-` negates only with more after it
+      if i < token.size - 1 && token[i] == '-' # `-` negates only with more after it
+        i += 1
+      elsif token[i..].starts_with?("NOT(") # the fused keyword form `lex` reads as `NOT (`
+        i += 3
+      end
+      # The parens a negation marker was fused to (`-(`, `NOT(`) are prefix as well: the lexer
+      # opens a group there, so `-(ho` completes to `-(host:` rather than matching `(ho` to nothing.
+      while i < token.size && token[i] == '('
+        i += 1
+      end
       Cursor.new(token[0...i], token[i..], s, e)
     end
 

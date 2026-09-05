@@ -149,13 +149,17 @@ dur:<2s             2s보다 빠름 (s / ms 접미사 허용)
 
 ## 정규 표현식 {#regular-expressions}
 
-`host`, `path`, `url`, `header`, `body`에 정규식 매칭을 하려면 `~`를 씁니다. `~`는 자체적으로 필드/값 구분자 역할을 하므로 앞에 콜론을 붙이지 **마세요**. 매칭은 대소문자를 구분하며, 대소문자를 무시하려면 `(?i)`를 앞에 붙입니다.
+`host`, `path`, `url`, `method`, `scheme`, `header`, `body`(그리고 뒤의 둘은 `req.`/`resp.` 한쪽)에 정규식 매칭을 하려면 `~`를 씁니다. `~`는 자체적으로 필드/값 구분자 역할을 하므로 앞에 콜론을 붙이지 **마세요**. 매칭은 대소문자를 구분하며, 대소문자를 무시하려면 `(?i)`를 앞에 붙입니다.
 
 ```text
 path~/admin/
 host~^api\.
 header~set-cookie
+method~^P(OST|UT|ATCH)$                쓰기 메서드 전부를 한 항목으로
 ```
+
+그 외 필드(`status`, `size`, `dur`, `proto` 등)에는 정규식 형태가 없습니다. 그런 `~` 항목은
+텍스트로 검색되는 대신, 잘못된 숫자 값과 같은 방식으로 버려지고 보고됩니다.
 
 ## 항목 결합 {#combining-terms}
 
@@ -172,6 +176,7 @@ method:POST -status:200               POST이지만 200은 아님
 host:a.com OR host:b.com              둘 중 하나의 호스트
 (host:a.com OR host:b.com) -path:/js  둘 중 하나의 호스트, /js 제외
 NOT (host:cdn OR host:static)         둘 다 아닌 것
+-(host:cdn OR host:static)            같은 뜻 — `-(`와 `NOT(`도 그룹을 부정
 login                                 자유 텍스트 검색
 ```
 

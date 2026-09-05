@@ -40,7 +40,7 @@ describe "MCP query tools: an unknown QL field" do
 
   it "lists the fields when nothing is close enough to suggest" do
     with_store do |store|
-      t = call_tools(store, "list_history", q("xyzzy:1")).text
+      t = call_tools(store, "list_history", q("xyzzy:foo")).text
       t.should contain("QL has no such field")
       t.should contain("status")
     end
@@ -80,7 +80,10 @@ describe "MCP query tools: an unknown QL field" do
 
   it "does not refuse a token that names no field — a pasted URL, an authority, a bare word" do
     with_store do |store|
-      ["http://acme.test/x", "acme.test:8443", "login", "12:34"].each do |query|
+      # `localhost:8080` is `host:port` for a host with no dot in it — the address of every dev
+      # server a proxy fronts — and was refused as the unknown field `localhost:` until the
+      # port-shaped-value rule in `QL.field_shaped?`.
+      ["http://acme.test/x", "acme.test:8443", "login", "12:34", "localhost:8080", "api:3000"].each do |query|
         r = call_tools(store, "list_history", q(query))
         r.is_error.should be_false, "#{query} was refused: #{r.text}"
       end

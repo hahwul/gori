@@ -56,7 +56,7 @@ module Gori::Tui
     # The highlighter's field vocabulary: everything QL ACCEPTS (a superset of `QL_FIELDS`, which
     # is only what Tab offers here) plus this surface's own `tag:`, which QL knows nothing about
     # because `partition` pulls it out before the query ever reaches the parser.
-    QL_KNOWN = ->(f : String) { f == "tag" || QL.known_field?(f) }
+    QL_KNOWN = ->(f : String, op : Char) { (f == "tag" && op == ':') || QL.known_field?(f, regex: op == '~') }
     # The editing bar's label — a constant because `render_query_popup` lines the dropdown up
     # under the token, which means knowing how far the query text is indented.
     QUERY_PREFIX = "filter › "

@@ -108,7 +108,7 @@ describe "MCP ql_explain verdict" do
 
   it "leaves did_you_mean null when nothing is close enough to name" do
     with_store do |store|
-      explain(store, "xyzzy:1")["unknown_fields"][0]["did_you_mean"].raw.should be_nil
+      explain(store, "xyzzy:foo")["unknown_fields"][0]["did_you_mean"].raw.should be_nil
     end
   end
 
