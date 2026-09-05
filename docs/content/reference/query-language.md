@@ -17,7 +17,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `url` | Full URL |
 | `method` | HTTP method |
 | `scheme` | `http` / `https` |
-| `proto` | Protocol: `http`, `ws`, `grpc`, `sse` — suffix `s` for the TLS one (`https`, `wss`, `grpcs`, `sses`), and `websocket` is an alias of `ws` |
+| `proto` | Protocol: `http`, `ws`, `grpc`, `sse`. Suffix `s` for the TLS one (`https`, `wss`, `grpcs`, `sses`), and `websocket` is an alias of `ws` |
 | `src` | Where the flow came from ([below](#src-provenance)) |
 | `status` | Response status code |
 | `size` | Total request + response bytes |
@@ -25,8 +25,8 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `dur` | Response time in milliseconds |
 | `header` | Substring over the head (request + response headers) |
 | `body` | Full-text match over bodies (trigram FTS index) |
-| `stub` | `true` / `false` — flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
-| `scope` | `in` / `out` — the project's scope rules ([below](#scope-in-scope-out)) |
+| `stub` | `true` / `false`. Flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
+| `scope` | `in` / `out`. The project's scope rules ([below](#scope-in-scope-out)) |
 
 ```text
 host:example.com
@@ -63,13 +63,13 @@ capture read out of somebody else's file.
 
 | Value | Matches |
 |-------|---------|
-| `proxy` | The capture proxy relayed a client's request — ordinary captured traffic |
+| `proxy` | The capture proxy relayed a client's request. Ordinary captured traffic |
 | `repeater` | A Repeater send (the TUI, `gori run repeater send --record-history`, MCP `send_request`) |
 | `fuzzer` | A fuzz result recorded with `--record-history` / `record_history` |
 | `discover` | A crawl fetch (Discover persists by default) |
-| `miner`, `sequencer`, `authorize`, `probe` | Reserved — those tools do not record flows yet |
+| `miner`, `sequencer`, `authorize`, `probe` | Reserved. Those tools do not record flows yet |
 | `import` | Read in from a HAR, Burp export, `--urls`, an OpenAPI document |
-| `gori` | Every source gori SENT — the union of the middle rows, and **not** `import` |
+| `gori` | Every source gori SENT. The union of the middle rows, and **not** `import` |
 
 ```text
 src:proxy                             read History as traffic that really happened
@@ -88,20 +88,20 @@ Two things about it are deliberate:
 - **An imported flow is not `src:gori`.** gori never put it on a wire; it describes a real
   endpoint somebody else captured. `-src:proxy` keeps it, `src:gori` does not.
 - **A flow captured before gori recorded provenance matches NEITHER direction.** Those rows
-  hold no source at all — gori was already writing repeater sends, crawls and imports into
+  hold no source at all: gori was already writing repeater sends, crawls and imports into
   History before the column existed, so filling them in as `proxy` would have invented a fact
   no capture produced. They show `—` in the SRC column, and both `src:proxy` and `-src:proxy`
   skip them, the way a Pending flow falls out of `status:` and `-status:`. Only flows captured
   after the upgrade carry it.
 
-The two common `src:` scopings are also **views** — press `v` in History to pick `History`
+The two common `src:` scopings are also **views**; press `v` in History to pick `History`
 (`src:proxy`) or `History + Repeater`, and the list stays narrowed while you type other filters.
 `History + Repeater` is what a project opens on. See [Views](/guide/proxy/#views).
 
 ## Scope: `scope:in` / `scope:out` {#scope-in-scope-out}
 
-`scope:in` matches the flows inside the project's scope — the same include/exclude boundary the
-TUI's `⇧S` lens and `gori run history --in-scope` apply — and `scope:out` matches the ones
+`scope:in` matches the flows inside the project's scope (the same include/exclude boundary the
+TUI's `⇧S` lens and `gori run history --in-scope` apply), and `scope:out` matches the ones
 outside it. It is an ordinary term, so it negates and it groups:
 
 ```text
@@ -113,12 +113,12 @@ scope:out -host:cdn                   traffic that leaked out of scope, minus th
 Three things about it are deliberate:
 
 - **It ignores whether the `⇧S` lens is switched on.** A filter term is a question, not a mode,
-  so `scope:in` means the same thing either way. (With the lens ON, it is redundant — the lens
-  already ANDs the same predicate over your query — and `scope:out` then matches nothing, since
+  so `scope:in` means the same thing either way. (With the lens ON, it is redundant, since the lens
+  already ANDs the same predicate over your query, and `scope:out` then matches nothing, since
   the lens has already dropped every out-of-scope row.)
 - **With no scope rules configured, both spellings match nothing.** Nothing is in scope, so the
   question has no answer and is not asked. In particular `scope:out` does *not* mean "everything"
-  in that state — which is also why `-scope:in`, a negated never-match, is *not* the same as
+  in that state, which is also why `-scope:in`, a negated never-match, is *not* the same as
   `scope:out` on a project with no scope rules. `ql_explain` reports
   `scope_rules_configured: false` and warns, and `gori run history delete` refuses a scope query
   outright rather than risk deleting a project's history over a term that had nothing to answer.
@@ -164,7 +164,7 @@ header~set-cookie
 - `OR` matches either side. `NOT` and a `-` prefix both negate.
 - Parentheses group. Precedence is `NOT` then `AND` then `OR`.
 - A bare word (no `field:`) is free text over method, host, and target.
-- A `field:` name that does not exist is not free text you meant to write: `gori run history`, `gori run sitemap` and `gori run probe` **refuse** it, name the nearest real field, and exit non-zero. `--lenient` searches the token as text instead (what every surface used to do silently — `methd:GET` matched nothing, which reads as an empty project). The TUI filter bar still accepts a half-typed name as you type it.
+- A `field:` name that does not exist is not free text you meant to write: `gori run history`, `gori run sitemap` and `gori run probe` **refuse** it, name the nearest real field, and exit non-zero. `--lenient` searches the token as text instead (what every surface used to do silently: `methd:GET` matched nothing, which reads as an empty project). The TUI filter bar still accepts a half-typed name as you type it.
 
 ```text
 host:example.com status:5xx           both must match
@@ -198,8 +198,8 @@ Every filter bar shares the grammar above (fields, comparisons, `~` regex, `AND`
 |---------|--------|
 | History, `gori run history`, MCP | The full table above |
 | Sitemap | The same, plus `tag:` for per-node path memos |
-| Colour rules (Colormarker) | The same — a colour rule takes the query the History bar takes |
-| Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body` — **no `scope:`** |
+| Colour rules (Colormarker) | The same. A colour rule takes the query the History bar takes |
+| Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **No `scope:`** |
 | Probe | `severity` (`sev`), `status` (`st`), `category` (`cat`), `host`, `code` |
 | Issues | `severity` (`sev`), `status` (`st`), `host`, `title`, `cvss` |
 
@@ -224,14 +224,14 @@ Both the Intercept and colour-rule bars Tab-complete field names and known value
 `header:` and `body:` search the bytes of a message, so where they work is decided by which bytes exist at the moment the filter is asked:
 
 - **History, Sitemap and colour rules** search a captured flow, so both fields always work, on both sides of the exchange.
-- **Intercept and extract-rule conditions** search the message in flight. `header:` works at every gate. `body:` works for a held **WebSocket message** and for an **extract-rule** condition, where the payload is in hand — but not at an HTTP hold gate, because that gate is what decides whether the body gets buffered in the first place.
+- **Intercept and extract-rule conditions** search the message in flight. `header:` works at every gate. `body:` works for a held **WebSocket message** and for an **extract-rule** condition, where the payload is in hand, but not at an HTTP hold gate, because that gate is what decides whether the body gets buffered in the first place.
 
 One deliberate difference between the two, worth knowing before you write a rule:
 
-- In a **query**, `body:` reads a trigram index — fast, but bounded to the first 8 KiB of each side and skipping binary and compressed bodies. `body~regex` scans the stored bytes instead, with no bound.
-- In a **colour rule**, `body:` always scans, and reads the first 64 KiB of each side. Indexing happens after capture and a rule has to paint the row that just arrived, so scanning is the only way to be right; the 64 KiB bound is what keeps a screenful of large bodies from stalling the list. A colour rule therefore paints rows the identical query does not list — but a match past 64 KiB is not painted.
+- In a **query**, `body:` reads a trigram index: fast, but bounded to the first 8 KiB of each side and skipping binary and compressed bodies. `body~regex` scans the stored bytes instead, with no bound.
+- In a **colour rule**, `body:` always scans, and reads the first 64 KiB of each side. Indexing happens after capture and a rule has to paint the row that just arrived, so scanning is the only way to be right; the 64 KiB bound is what keeps a screenful of large bodies from stalling the list. A colour rule therefore paints rows the identical query does not list, but a match past 64 KiB is not painted.
 
-Every `body:` term, on every surface, reads the bytes **as they went over the wire**, so none of them finds a string inside a gzipped body. That includes an extract rule's condition, which is evaluated before the response is decoded — only the extraction that follows sees decompressed text. To match on compressed content, match something outside it: a header, the path, or the response size.
+Every `body:` term, on every surface, reads the bytes **as they went over the wire**, so none of them finds a string inside a gzipped body. That includes an extract rule's condition, which is evaluated before the response is decoded; only the extraction that follows sees decompressed text. To match on compressed content, match something outside it: a header, the path, or the response size.
 
 ## Examples
 

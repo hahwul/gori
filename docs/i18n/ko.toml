@@ -67,7 +67,7 @@ install_pick_aria = "설치 방법 선택"
 install_copy = "설치 명령 복사"
 
 hero_art_alt = "gori 마크: gori 아트워크 원반 주위를 서로 엇갈려 도는 두 개의 넓은 고리"
-showcase_aria = "터미널에서 실행 중인 gori — 탭을 골라보세요"
+showcase_aria = "터미널에서 실행 중인 gori. 탭을 골라보세요"
 showcase_k_l = "워크벤치를 가까이서"
 showcase_k_r = "탭을 클릭하세요"
 showcase_tabs_aria = "터미널 화면 전환"

@@ -34,7 +34,7 @@ gori mcp --install-hermes        # Hermes
 
 Each command prints the file it wrote and the exact launch command it recorded. Codex and Grok use a TOML `[mcp_servers.gori]` table, and Hermes a YAML `mcp_servers:` entry, rather than JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
 
-Only Claude Desktop and Hermes vary per platform. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop's location — it follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, which gori reads so a Nix or home-manager session that moves it is followed too. A Flatpak build is the exception: it reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
+Only Claude Desktop and Hermes vary per platform. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop's location follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, which gori reads so a Nix or home-manager session that moves it is followed too. A Flatpak build is the exception: it reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
 
 Wiring it up by hand instead? The server is just the `gori mcp` command over stdio. Point any MCP client at that command with no extra arguments.
 
@@ -47,7 +47,7 @@ Each gori project is its own database. After install, `gori mcp` always connects
 | How the client starts MCP | What happens |
 |---------------------------|--------------|
 | Inside a Git repository | Path-binds that workspace to its own gori project |
-| Outside a Git repository (common for Desktop / global agents) | Starts **unbound** — handshake succeeds; the agent calls `list_projects` / `create_project` / `switch_project` before traffic tools |
+| Outside a Git repository (common for Desktop / global agents) | Starts **unbound**. Handshake succeeds; the agent calls `list_projects` / `create_project` / `switch_project` before traffic tools |
 | Installed with `--project` / `--db` | Serves that project from the first tool call |
 
 Have the agent call `project_info` first. When `bound` is false, it should list or create a project (create auto-binds when unbound), then switch if needed. When bound, confirm the name, database path, and selection source before mutating data.

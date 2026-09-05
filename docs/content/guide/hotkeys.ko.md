@@ -30,8 +30,8 @@ Ctrl-P  → settings:hotkeys
 
 - 새 패널 동작의 기본값은 L3(space 메뉴 전용)입니다. 루프가 입증된 뒤에야 직접 키로 승격하세요.
 - **Ctrl**은 타이핑 중(INS)에도 작동해야 하는 동작, 그리고 워크벤치의 실행·중지(`Ctrl-R` / `Ctrl-X`)를 위한 것입니다. 맨 글자에서 한 단계 올리는 범용 승격 수단이 아닙니다.
-- **Shift**는 탭 전체를 비우는 동작을 맡습니다. `⇧X`는 clear가 있는 모든 탭 — History·Probe·Authorize·Issues·프로젝트 ACTIVITY 피드 — 에서 같은 키이고, 스페이스 메뉴 글자는 그 옆의 `X`입니다. `c`가 아니라 `x`인 이유는 shift 아래에 무엇이 있느냐입니다: 맨 `x`는 그 다섯 스코프 어디에도 바인딩되어 있지 않지만 맨 `c`는 다섯 곳 모두에서 살아 있고(`capture.toggle`, Probe 목록에서는 dismiss), 프로젝트를 지우는 동작이 하루 종일 누르는 키 바로 위 shift에 있어서는 안 됩니다. 파괴적인 코드는 **누르기 전에 읽을 수 있는 곳에 이름이 적혀 있어야** 합니다 — 스페이스 메뉴만이 아니라 Help 시트와 그 탭의 본문 힌트에 — 그리고 먼저 확인을 물어야 합니다.
-- **복사가 그 규칙의 실례입니다.** `y`는 READ에서, `Ctrl-Y`는 **INS에서도** 복사합니다 — 모든 텍스트 상자에서. INS에서 맨 `y`는 그냥 문자이고, `Shift`+화살표로 만든 선택 위에 타이핑하면 그 선택을 *덮어씁니다*. 그래서 복사 반사에는 타이핑을 견디는 코드가 필요합니다. 둘은 같은 동사(`*.copy`)이므로 재지정은 READ 쪽 글자만 옮기고 **`Ctrl-Y`는 그대로 남습니다**. 모든 스코프에서, 명시적인 해제(unbind)를 해도 마찬가지입니다. `y`를 푸는 것은 READ 모드에 대한 결정이지, 방금 선택한 것을 복사할 방법을 텍스트 패널에서 조용히 없애도 된다는 뜻이 아니기 때문입니다.
+- **Shift**는 탭 전체를 비우는 동작을 맡습니다. `⇧X`는 clear가 있는 모든 탭(History·Probe·Authorize·Issues·프로젝트 ACTIVITY 피드)에서 같은 키이고, 스페이스 메뉴 글자는 그 옆의 `X`입니다. `c`가 아니라 `x`인 이유는 shift 아래에 무엇이 있느냐입니다: 맨 `x`는 그 다섯 스코프 어디에도 바인딩되어 있지 않지만 맨 `c`는 다섯 곳 모두에서 살아 있고(`capture.toggle`, Probe 목록에서는 dismiss), 프로젝트를 지우는 동작이 하루 종일 누르는 키 바로 위 shift에 있어서는 안 됩니다. 파괴적인 코드는 **누르기 전에 읽을 수 있는 곳에 이름이 적혀 있어야** 하고(스페이스 메뉴만이 아니라 Help 시트와 그 탭의 본문 힌트에), 먼저 확인을 물어야 합니다.
+- **복사가 그 규칙의 실례입니다.** `y`는 READ에서, `Ctrl-Y`는 **INS에서도**, 모든 텍스트 상자에서 복사합니다. INS에서 맨 `y`는 그냥 문자이고, `Shift`+화살표로 만든 선택 위에 타이핑하면 그 선택을 *덮어씁니다*. 그래서 복사 반사에는 타이핑을 견디는 코드가 필요합니다. 둘은 같은 동사(`*.copy`)이므로 재지정은 READ 쪽 글자만 옮기고 **`Ctrl-Y`는 그대로 남습니다**. 모든 스코프에서, 명시적인 해제(unbind)를 해도 마찬가지입니다. `y`를 푸는 것은 READ 모드에 대한 결정이지, 방금 선택한 것을 복사할 방법을 텍스트 패널에서 조용히 없애도 된다는 뜻이 아니기 때문입니다.
 - **History → Repeater**와 **Repeater 전송**은 **`Ctrl-R`**로 유지됩니다(동일한 근육 기억). History→Repeater를 맨 글자 `r`로 옮기지 마세요.
 - Match & Replace와 알림은 키 없이(팔레트 / 배지) 제공됩니다. Global 키 조합을 원하면 재지정하세요.
 
@@ -65,11 +65,11 @@ Ctrl-P  → settings:hotkeys
 - **종료**: `Ctrl-C`, `Ctrl-D`.
 - **명명된 키와 구별 불가**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, 그리고 맨 `:`(명령줄).
-- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기 — 마크가 있으면 전부), `Ctrl-Z` (undo — 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
+- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
 
-  `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다 — 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
+  `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다. 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
 
-  이 패밀리에서 개별 키를 옮길 수는 없지만, 패밀리 전체에 **두 번째 모디파이어**를 줄 수는 있습니다 — 아래 [커맨드 모디파이어](#command-modifier)를 참고하세요.
+  이 패밀리에서 개별 키를 옮길 수는 없지만, 패밀리 전체에 **두 번째 모디파이어**를 줄 수는 있습니다. 아래 [커맨드 모디파이어](#command-modifier)를 참고하세요.
 
 `Ctrl-S` 같은 흐름 제어/시그널 키 조합은 예약되어 있지 **않습니다**. gori는 터미널을 raw 모드로 실행하므로 이들이 앱에 도달합니다(Repeater의 SNI 토글은 `Ctrl-S`로 제공됩니다).
 
@@ -83,22 +83,22 @@ Ctrl-P  → settings:hotkeys
 
 *예약된 키*에 나열된 키 조합 패밀리는 키맵보다 먼저 하드코딩된 가드가 소비하기 때문에 고정입니다. 문제는 **터미널이 Ctrl 형태를 아예 전달하지 않는** 경우입니다.
 
-- **`Ctrl-1`…`Ctrl-9`는 상당수 터미널에서 전달 불가**입니다. 대응하는 제어 문자가 없어서 서브탭 점프가 애초에 도착하지 않습니다. 없어도 됩니다. 서브탭 스트립에서는 어느 칩에 있든 **`f`**로 열려 있는 서브탭 전체를 나열·검색할 수 있습니다. (스트립 왼쪽 끝의 **`⌕`**도 같은 목록을 엽니다 — 클릭하거나, 첫 칩에서 `←`를 누르면 됩니다.)
+- **`Ctrl-1`…`Ctrl-9`는 상당수 터미널에서 전달 불가**입니다. 대응하는 제어 문자가 없어서 서브탭 점프가 애초에 도착하지 않습니다. 없어도 됩니다. 서브탭 스트립에서는 어느 칩에 있든 **`f`**로 열려 있는 서브탭 전체를 나열·검색할 수 있습니다. (스트립 왼쪽 끝의 **`⌕`**도 같은 목록을 엽니다. 클릭하거나, 첫 칩에서 `←`를 누르면 됩니다.)
 - **멀티플렉서가 먼저 먹습니다.** tmux의 기본 프리픽스는 `Ctrl-B`인데, gori도 reveal-whitespace로 씁니다.
 
-**Preferences → Editor & Keys → Keys → Command modifier**(`Ctrl-,`), 또는 팔레트의 **`settings:keys`**에서 이 패밀리를 `Ctrl`과 `Option (⌥)` 사이에서 고를 수 있습니다. 이는 **교체가 아니라 별칭 추가**입니다. Option을 고르면 `⌥P`로도 팔레트가 열리고 `^P`도 그대로 동작합니다. 바뀌는 것은 *표시*뿐입니다 — 상태 힌트, Help 탭, 팔레트가 모두 `⌥P`, `⌥N`, `⌥1-9`로 표시됩니다.
+**Preferences → Editor & Keys → Keys → Command modifier**(`Ctrl-,`), 또는 팔레트의 **`settings:keys`**에서 이 패밀리를 `Ctrl`과 `Option (⌥)` 사이에서 고를 수 있습니다. 이는 **교체가 아니라 별칭 추가**입니다. Option을 고르면 `⌥P`로도 팔레트가 열리고 `^P`도 그대로 동작합니다. 바뀌는 것은 *표시*뿐입니다. 상태 힌트, Help 탭, 팔레트가 모두 `⌥P`, `⌥N`, `⌥1-9`로 표시됩니다.
 
 | 모디파이어 | 동작 |
 |-----------|------|
 | `Ctrl` (기본) | `^P` `^N` `^W` `^G` `^F` `^B` `^E` `^Z` `^,` `^1`-`^9` |
 | `Option (⌥)` | 위 전부 **더하기** `⌥P` `⌥N` `⌥W` `⌥G` `⌥F` `⌥B` `⌥E` `⌥Z` `⌥,` `⌥1`-`⌥9` |
 
-Ctrl이 계속 살아있으므로 Option을 골라도 팔레트에 못 들어가는 상황은 생기지 않습니다. 다만 바꾸기 전에 알아둘 점이 있습니다 — **macOS에서는 터미널이 Option을 Meta/Esc+로 보내도록 설정해야** 합니다. 그러지 않으면 `⌥P`가 `π`로 도착해 아무 일도 일어나지 않습니다.
+Ctrl이 계속 살아있으므로 Option을 골라도 팔레트에 못 들어가는 상황은 생기지 않습니다. 다만 바꾸기 전에 알아둘 점이 있습니다. **macOS에서는 터미널이 Option을 Meta/Esc+로 보내도록 설정해야** 합니다. 그러지 않으면 `⌥P`가 `π`로 도착해 아무 일도 일어나지 않습니다.
 
 - **Terminal.app**: 설정 → 프로파일 → 키보드 → *Option을 Meta 키로 사용*
 - **iTerm2**: Settings → Profiles → Keys → Left/Right Option key → *Esc+*
 
-하지 않는 일 두 가지. 에디터에서 이미 재지정할 수 있는 키 조합(`^R` send, `^S` SNI 등)은 건드리지 않습니다 — 그건 동작별로 재지정하세요. 그리고 이 패밀리의 `Option` 조합(예: `alt-n`)에 어떤 동작을 바인딩해 뒀다면, 별칭을 켜는 순간 가려집니다. 가드가 이기고 해당 동작은 기본값으로 되돌아가며, 저장 토스트가 그 동작을 알려줍니다.
+하지 않는 일 두 가지. 에디터에서 이미 재지정할 수 있는 키 조합(`^R` send, `^S` SNI 등)은 건드리지 않습니다. 그건 동작별로 재지정하세요. 그리고 이 패밀리의 `Option` 조합(예: `alt-n`)에 어떤 동작을 바인딩해 뒀다면, 별칭을 켜는 순간 가려집니다. 가드가 이기고 해당 동작은 기본값으로 되돌아가며, 저장 토스트가 그 동작을 알려줍니다.
 
 첫 실행 마법사의 Review 스텝에서도 이 값을 요약해 보여주므로, 앱에 들어가기 전에 모디파이어를 고를 수 있습니다.
 

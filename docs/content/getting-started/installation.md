@@ -18,9 +18,9 @@ Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `
 
 ### If you hit a GitHub rate limit
 
-The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP** — behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working; you should see a line like `resolved v0.4.0 via ... (no API call)`.
+The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP**, so behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working; you should see a line like `resolved v0.4.0 via ... (no API call)`.
 
-To use the authenticated 5000/hour limit instead, export a token first. Note that it has to be exported rather than prefixed onto `curl` — the script runs in the piped `bash`, which would not inherit a `curl`-scoped variable:
+To use the authenticated 5000/hour limit instead, export a token first. Note that it has to be exported rather than prefixed onto `curl`, because the script runs in the piped `bash`, which would not inherit a `curl`-scoped variable:
 
 ```bash
 export GITHUB_TOKEN=<personal access token>
@@ -31,17 +31,17 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 ### Direct download (Dockerfiles, CI)
 
-Every release also carries a version-less copy of each asset, so you can pull the latest build from a stable URL with no version lookup and no API call. These start at v0.2.0 — earlier releases only carry the versioned names:
+Every release also carries a version-less copy of each asset, so you can pull the latest build from a stable URL with no version lookup and no API call. These start at v0.2.0; earlier releases only carry the versioned names:
 
 ```bash
-# Linux x86_64 / arm64 — a static binary
+# Linux x86_64 / arm64: a static binary
 curl -fsSL -o gori https://github.com/hahwul/gori/releases/latest/download/gori-linux-x86_64 && chmod +x gori
 
-# macOS arm64 / x86_64 — a tarball holding gori plus its lib/
+# macOS arm64 / x86_64: a tarball holding gori plus its lib/
 curl -fsSL -o gori.tar.gz https://github.com/hahwul/gori/releases/latest/download/gori-osx-arm64.tar.gz
 ```
 
-The versioned names (`gori-v0.4.0-linux-x86_64`) stay published alongside them — use those when you want to pin a build.
+The versioned names (`gori-v0.4.0-linux-x86_64`) stay published alongside them; use those when you want to pin a build.
 
 Each release also publishes a `SHA256SUMS` listing every asset under both naming schemes. The installer and `gori update` check against it automatically; to verify a direct download yourself:
 
@@ -101,7 +101,7 @@ Or pin it as an input to a NixOS / home-manager configuration:
   # then, in your package list:
   #   inputs.gori.packages.${pkgs.system}.default
 
-  # or add the overlay once, and `pkgs.gori` works everywhere — no ${system} at
+  # or add the overlay once, and `pkgs.gori` works everywhere, no ${system} at
   # each use site, and gori is built against the same nixpkgs as the rest of the
   # configuration:
   #   nixpkgs.overlays = [ inputs.gori.overlays.default ];
