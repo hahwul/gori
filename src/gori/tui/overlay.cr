@@ -204,6 +204,19 @@ module Gori::Tui
       end
     end
 
+    # Whether a keystroke that arrived INSIDE A BRACKETED PASTE may reach `handle_key`.
+    #
+    # A paste over a modal is delivered key by key (the bulk path is body-only), and every
+    # pasted line break arrives as ↵. On a one-line form ↵ is COMMIT, so pasting
+    # `/tmp/a.har⏎` submitted the import and typed whatever followed into the pane the shell
+    # restored; on a confirm card a pasted `y` was an answer. The default lets text through
+    # and holds back ↵: a one-line field takes the first line and the operator sees the rest
+    # refused rather than acted on. A multi-line editor overrides to take ↵ as the newline
+    # it is; the confirm card overrides to take nothing — a clipboard is not a decision.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      !ev.key.enter?
+    end
+
     # Runs on a :commit outcome; returns true when the overlay should close (false keeps
     # it open — e.g. a validation error keeps the form up). Supplied at the open-site.
     property on_commit : Proc(Bool)?

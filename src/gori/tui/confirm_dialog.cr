@@ -99,6 +99,12 @@ module Gori::Tui
       ev.key.y? && !ev.ctrl? && !ev.alt?
     end
 
+    # A pasted `y` is not an answer, and a pasted esc/`n` is not a refusal either: the card
+    # ignores the whole paste and waits for a key that was pressed at it.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case

@@ -144,6 +144,11 @@ module Gori::Tui
       [:type] + field_rows
     end
 
+    # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the VALUES editor takes a line break as a newline; the other rows keep the default.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      focused == :values || !ev.key.enter?
+    end
+
     private def focused : Symbol
       rows[@sel]? || :type
     end
@@ -271,8 +276,9 @@ module Gori::Tui
     private def edit_values(ev : Termisu::Event::Key) : Nil
       key = ev.key
       case
-      when key.enter? then @values.insert_newline
-        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when key.enter?               then @values.insert_newline
+      when ev.ctrl? && key.lower_z? then @values.undo # the undo chord every body editor binds
+      # Before plain ⌫, which would swallow the modified form as a one-character delete.
       when @values.word_delete_key?(ev)  then @values.handle_motion_key(ev)
       when key.backspace?                then @values.backspace
       when key.delete?                   then @values.delete

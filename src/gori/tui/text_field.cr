@@ -242,6 +242,10 @@ module Gori::Tui
       when key.backspace?           then backspace
       when key.delete?              then delete
       else
+        # ⇥/⇧⇥ are never text here: `Key::Tab.to_char` is '\t', so a name prompt that handed
+        # every printable to this field typed a tab into a project name. Refused (false), so
+        # the owning card gets to move focus with it — or leave it a no-op.
+        return false if key.tab? || key.back_tab?
         ch = ev.char || key.to_char
         return false unless ch && !ev.ctrl? && !ev.alt?
         insert(ch)
