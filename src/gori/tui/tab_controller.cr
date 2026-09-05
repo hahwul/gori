@@ -502,6 +502,15 @@ module Gori::Tui
       false
     end
 
+    # The PgUp/PgDn step for the pane `body_scroll` will move: the rows that pane drew LAST
+    # FRAME minus two of overlap (the `HistoryView#list_page_rows` convention), or nil to
+    # take the Runner's whole-body fallback. A body-height page skipped the rows a frame,
+    # a header and a preview split had taken off the list — four to ten a press, never
+    # seen. Read after a render; a pane that has not drawn yet answers 1.
+    def page_rows : Int32?
+      nil
+    end
+
     # Same notch, but with the pointer position + body rect — lets a multi-pane tab
     # (Project) scroll the pane UNDER the cursor instead of the focused one. Defaults
     # to the coordinate-free handle_wheel, so single-target tabs need no change.
@@ -1214,6 +1223,16 @@ module Gori::Tui
     end
 
     def focus_last : Nil
+    end
+
+    # The body is re-entered from OUTSIDE the focus ring — ↓/↵ off the tab bar, a "Go to …"
+    # jump, a [ ] cycle while already in the body, the sub-tab strip's ↓. Keep the pane the
+    # view already holds: `focus_first`/`focus_last` stay the Tab-ring entries (they name an
+    # END of the ring), and this is the "come back to where I was" entry. The default is a
+    # no-op because every multi-pane view initialises its pane to the first one, so a first
+    # visit lands there with no help. Override only for a side effect that must ALSO run on
+    # a resume — a popup to close, a sub-field to exit — never to move the pane.
+    def focus_resume : Nil
     end
 
     # --- lifecycle ---

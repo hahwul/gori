@@ -256,16 +256,23 @@ module Gori::Tui
     # gone rather than kept as a no-op. (⇧↑/⇧↓ had already left for the mark-range gesture;
     # vertical reading is PgUp/PgDn/Home/End — see `#body_scroll`.)
 
-    # PageUp/PageDown/Home/End page the read-only held-message preview (the Runner routes
-    # these here when handle_body_key declines them). The preview, not the queue: a hold
-    # queue is a handful of rows that j/k covers, while a held body runs to thousands of
-    # lines and this is now its only scroll path short of opening the editor. No editing?
-    # guard is needed — handle_body_key swallows every key while the editor is up, so these
-    # never reach here then (and vscroll_detail self-guards regardless).
+    # PageUp/PageDown/Home/End page the QUEUE (the Runner routes these here when
+    # handle_body_key declines them), the same list ↑/↓ walk — as every other list tab's page
+    # keys do. They used to page the read-only held-message PREVIEW instead, on the argument
+    # that a queue is short and a body is long; but the keys a hand learns on History/Issues
+    # then did something else on the one tab whose list can be the longest under a flood,
+    # and Home/End could not reach its ends at all. The preview keeps two scroll paths: the
+    # wheel over it (`handle_wheel_at`), and opening the editor (↵), where the same keys
+    # page the text. No editing? guard is needed — handle_body_key swallows every key while
+    # the editor is up, and `move` self-guards regardless.
     def body_scroll(delta : Int32) : Bool
       return false if @intercept.empty?
-      @intercept.vscroll_detail(delta)
+      @intercept.move(delta)
       true
+    end
+
+    def page_rows : Int32?
+      @intercept.editing? ? nil : @intercept.list_page_rows
     end
 
     # --- catch-condition filter bar (a text sub-mode; the shell claims it before the

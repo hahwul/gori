@@ -148,9 +148,25 @@ module Gori::Tui
       handle_wheel(delta)
     end
 
+    def page_rows : Int32?
+      @view.page_rows
+    end
+
     def handle_wheel(step : Int32) : Bool
-      @view.focus == :runs ? @view.move_run(step) : @view.move(step)
+      wheel_pane(@view.focus, step)
       true
+    end
+
+    # Pointer-aware: the card under the cursor scrolls, keyboard focus stays put. Same
+    # content inset `handle_click` hit-tests with.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      pane = @view.pane_at(rect.inset(1, 1), mx, my)
+      wheel_pane(pane || @view.focus, step)
+      true
+    end
+
+    private def wheel_pane(pane : Symbol, step : Int32) : Nil
+      pane == :runs ? @view.move_run(step) : @view.move(step)
     end
 
     # --- focus ring ---

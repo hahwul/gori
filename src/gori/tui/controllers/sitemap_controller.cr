@@ -35,6 +35,10 @@ module Gori::Tui
       true
     end
 
+    def page_rows : Int32?
+      @sitemap.list_page_rows
+    end
+
     # esc clears the marks. Runs BEFORE the Sitemap keymap, so this shadows sitemap.to-menu
     # ONLY while marks are set — with none set, esc still pops to the sub-tab strip. (The QL
     # bar and the tag editor claim every key ahead of this while either is up, so their own

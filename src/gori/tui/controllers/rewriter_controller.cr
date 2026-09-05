@@ -444,6 +444,21 @@ module Gori::Tui
       true
     end
 
+    # The page for the list `body_scroll` moves, from the same capacities the scroll clamp
+    # reads off the last drawn body. nil for the preview input (not a list).
+    def page_rows : Int32?
+      return nil if @last_body.empty?
+      rows =
+        if @sub != :rules
+          @view.sub_row_capacity(@last_body)
+        elsif @focus == :list
+          @view.list_row_capacity(@last_body, rules_engine.active?)
+        else
+          return nil
+        end
+      {rows - 2, 1}.max
+    end
+
     # ↓ past the last rule (or empty list) enters the preview input when shown.
     private def list_down : Nil
       n = rule_list.size

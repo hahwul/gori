@@ -67,6 +67,12 @@ class Gori::Tui::RepeaterView
     set_focus(:response)
   end
 
+  # Re-entry from the tab bar / strip: the pane stays, the ^S SNI sub-field does not — the
+  # same rule `set_focus` states below, minus the pane move.
+  def focus_resume : Nil
+    @target_field = :url
+  end
+
   # Move focus to `pane`, exiting the ^S SNI sub-field. SNI editing is an explicit
   # per-visit sub-mode (you opt in with ^S each time you're on the target), so ANY
   # focus change drops back to the URL field — otherwise navigating away while

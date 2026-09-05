@@ -426,9 +426,9 @@ module Gori::Tui
       selecting = ev.shift?
       case
       when key.enter?, c == 'i' then s.input_mode = InputMode::Insert
-      when key.up?
+      when nav_up?(ev)
         s.input.at_top? ? cross_pane(s, -1) : s.input_read.move(s.input, -1, 0, selecting: selecting)
-      when key.down?
+      when nav_down?(ev)
         s.input.at_bottom? ? cross_pane(s, 1) : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
       when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
@@ -687,13 +687,42 @@ module Gori::Tui
 
     def handle_wheel(step : Int32) : Bool
       s = cur
-      case s.pane
+      wheel_pane(s, s.pane, step)
+      true
+    end
+
+    # Pointer-aware: the card under the cursor scrolls, keyboard focus stays put. The same
+    # lens layouts `handle_click` hit-tests with.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      s = cur
+      body = body_rect_below_filter(rect)
+      pane =
+        if s.mode == :decode
+          input_c, dec_c, _, _ = s.view.decode_layout(body)
+          case
+          when input_c.contains?(mx, my) then :input
+          when dec_c.contains?(mx, my)   then :decoded
+          else                                s.pane
+          end
+        else
+          pay_c, _, _, out_c = s.view.forge_layout(body)
+          case
+          when pay_c.contains?(mx, my) then :payload
+          when out_c.contains?(mx, my) then :output
+          else                              s.pane
+          end
+        end
+      wheel_pane(s, pane, step)
+      true
+    end
+
+    private def wheel_pane(s : CookieSession, pane : Symbol, step : Int32) : Nil
+      case pane
       when :decoded then s.view.scroll_decoded(step)
       when :output  then s.view.scroll_output(step)
       when :input   then s.input.scroll_view(step)
       when :payload then s.payload.scroll_view(step)
       end
-      true
     end
 
     def set_preedit(text : String) : Bool
@@ -703,7 +732,6 @@ module Gori::Tui
       when :payload then s.payload.set_preedit(text)
       when :opts    then s.salt_pre = text
       when :secret  then s.secret_pre = text
-      else               nil
       end
       true
     end
@@ -1048,7 +1076,6 @@ module Gori::Tui
       case Cookie.b64decode(parts[2]).size
       when 20 then "sha1"
       when 32 then "sha256"
-      else         nil
       end
     rescue Cookie::CookieError
       nil

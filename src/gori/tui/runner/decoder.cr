@@ -49,10 +49,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     decoder_controller.cycle_output_mode
   end
 
-  # `focus_pane(:body)` only when focus is NOT already there: it lands on the FIRST pane
-  # (`view_focus_first` → INPUT), so an unconditional call sent a ^S pressed in CHAIN or
-  # OUTPUT back to INPUT once the modal closed — a leftover from when the prompt lived
-  # inside the OUTPUT card and the body had to hold it.
+  # `focus_pane(:body)` only when focus is NOT already there. It used to land on the FIRST
+  # pane (INPUT) — an unconditional call sent a ^S pressed in CHAIN or OUTPUT back to INPUT
+  # once the modal closed. `focus_pane` resumes the held pane now, so the guard is belt and
+  # braces; it stays because the popup-close side effect of a resume is not wanted here.
   def decoder_save : Nil
     focus_pane(:body) unless @focus == :body
     open_chain_save

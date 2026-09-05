@@ -62,6 +62,18 @@ module Gori::Tui
       true
     end
 
+    def page_rows : Int32?
+      @issues.detail_open? || preview_scroll_focused? ? nil : @issues.list_page_rows
+    end
+
+    # ⇥ / ⇧⇥ between the list and its preview; off either end the ring returns to the tab
+    # bar. The focus-ring hook — a `key.tab?` arm in `handle_body_key` never ran (the Runner
+    # claims ⇥ for the ring first), so the `↹ preview` the hint promised was mouse-only.
+    def pane_advance(dir : Int32) : Bool
+      return false if @issues.detail_open? || !@issues.preview_enabled?
+      @issues.step_preview_focus(dir)
+    end
+
     def body_badge : Symbol
       @issues.notes_insert_mode? ? :editor : :body
     end
@@ -191,6 +203,17 @@ module Gori::Tui
       true
     end
 
+    # Pointer-aware: the preview under the cursor scrolls without taking focus from the list.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return handle_wheel(step) if @issues.detail_open?
+      if @issues.preview_enabled? && @issues.preview_at?(rect.inset(1, 1), mx, my)
+        @issues.wheel_preview(step)
+      else
+        @issues.move(step)
+      end
+      true
+    end
+
     # esc clears the marks; Tab cycles list ↔ preview focus when that layout is active. Runs
     # BEFORE the Issues keymap, so the esc branch shadows issues.leave ONLY while marks are
     # set — with none set, esc still pops to the tab bar. (The `/` filter bar claims every
@@ -200,10 +223,6 @@ module Gori::Tui
       return false if ev.ctrl? || ev.alt?
       if ev.key.escape? && @issues.mark_count > 0
         @issues.clear_marks
-        return true
-      end
-      if @issues.preview_enabled? && ev.key.tab?
-        @issues.cycle_preview_focus
         return true
       end
       false
@@ -237,8 +256,8 @@ module Gori::Tui
         @issues.focus_links!
       when key.enter?, c == 'i'
         @issues.enter_notes_insert!
-      when key.up?                           then @issues.notes_read_move(-1, 0, selecting: selecting)
-      when key.down?                         then @issues.notes_read_move(1, 0, selecting: selecting)
+      when nav_up?(ev)                       then @issues.notes_read_move(-1, 0, selecting: selecting)
+      when nav_down?(ev)                     then @issues.notes_read_move(1, 0, selecting: selecting)
       when key.left?                         then @issues.notes_read_move(0, -1, selecting: selecting)
       when key.right?                        then @issues.notes_read_move(0, 1, selecting: selecting)
       when @issues.notes_read_motion_key(ev) then nil # Home/End/Page — the shared editor set

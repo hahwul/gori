@@ -1171,6 +1171,10 @@ module Gori::Tui
       current_view.try(&.focus_last)
     end
 
+    def focus_resume : Nil
+      current_view.try(&.focus_resume)
+    end
+
     # --- sub-tab nav (the shell's shared strip machinery drives these for Repeater) ---
     # Move the active sub-tab by ±1 (strip ←/→) among the VISIBLE (filtered) chips, so
     # h/l walks exactly the chips shown; clamped, no wrap, saving the outgoing tab first.

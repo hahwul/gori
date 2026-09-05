@@ -200,6 +200,12 @@ module Gori::Tui
       @sel = idxs.empty? ? 0 : (idxs.includes?(@sel) ? @sel : idxs.first)
     end
 
+    @list_last_h = 0 # rows the last frame drew — the PgUp/PgDn step (list_page_rows)
+
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     def render(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.empty?
       # Reserve the bottom line for the selected rule's description when there is room — the one
@@ -207,6 +213,7 @@ module Gori::Tui
       # from the name. Falls away on a very short pane (the list keeps every line it can).
       footer = footer_text
       list_h = list_h(rect)
+      @list_last_h = list_h
       ensure_visible(list_h)
       list_h.times do |i|
         idx = @scroll + i

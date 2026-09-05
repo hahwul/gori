@@ -313,12 +313,24 @@ module Gori::Tui
 
     def handle_wheel(step : Int32) : Bool
       if v = current_view
-        case v.focus
-        when :results then v.results_move(step)
-        when :detail  then v.detail_wheel(step) # viewport only — ↑/↓ are the cursor
-        end
+        wheel_pane(v, v.focus, step)
       end
       true
+    end
+
+    # Pointer-aware: the pane under the cursor scrolls, keyboard focus stays put.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return true unless v = current_view
+      pane = v.pane_at(body_rect_below_filter(rect), mx, my)
+      wheel_pane(v, pane || v.focus, step)
+      true
+    end
+
+    private def wheel_pane(v : MinerView, pane : Symbol, step : Int32) : Nil
+      case pane
+      when :results then v.results_move(step)
+      when :detail  then v.detail_wheel(step) # viewport only — ↑/↓ are the cursor
+      end
     end
 
     def commit : Nil

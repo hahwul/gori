@@ -479,6 +479,12 @@ module Gori::Tui
 
     # --- rendering ------------------------------------------------------------
 
+    @list_last_h = 0 # rows the last list frame drew — the PgUp/PgDn step (list_page_rows)
+
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
                listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
@@ -512,6 +518,7 @@ module Gori::Tui
       Frame.inner_divider(screen, rect, rect.y + 3, border: Frame.pane_border(focused))
       top = rect.y + 4
       list_h = {rect.bottom - top, 0}.max
+      @list_last_h = list_h
       return render_empty(screen, rect, top, listen: listen, capturing: capturing) if @issues.empty?
 
       ensure_visible(list_h)

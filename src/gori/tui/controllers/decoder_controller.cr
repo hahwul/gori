@@ -514,12 +514,30 @@ module Gori::Tui
     # snapping the view back — which is what made this feel unsafe to allow.
     def handle_wheel(step : Int32) : Bool
       s = cur
-      if s.pane == :output
-        s.view.output_scroll_view(step, s.result)
-      elsif s.pane == :input
-        s.input.scroll_view(step)
-      end
+      wheel_pane(s, s.pane, step)
       true
+    end
+
+    # Pointer-aware: the card under the cursor scrolls (INPUT / OUTPUT — CHAIN is one line
+    # and PIPELINE sizes to its steps), keyboard focus stays put. Same layout the click uses.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      s = cur
+      regions = s.view.layout(body_rect_below_filter(rect))
+      pane =
+        case
+        when regions.output.contains?(mx, my) then :output
+        when regions.input.contains?(mx, my)  then :input
+        else                                       s.pane
+        end
+      wheel_pane(s, pane, step)
+      true
+    end
+
+    private def wheel_pane(s : DecoderSession, pane : Symbol, step : Int32) : Nil
+      case pane
+      when :output then s.view.output_scroll_view(step, s.result)
+      when :input  then s.input.scroll_view(step)
+      end
     end
 
     def set_preedit(text : String) : Bool
@@ -527,7 +545,6 @@ module Gori::Tui
       case s.pane
       when :input then s.input.set_preedit(text) if s.input_mode == InputMode::Insert
       when :chain then @chain_pre = text
-      else             nil
       end
       true
     end
@@ -570,6 +587,13 @@ module Gori::Tui
 
     def focus_last : Nil
       cur.pane = :output
+      @popup.close
+    end
+
+    # The pane is kept; only the chain autocomplete is closed. `handle_complete_key` is
+    # gated on body focus, so a popup left open across a trip to the tab bar would sit
+    # unreachable on the way back in.
+    def focus_resume : Nil
       @popup.close
     end
 
@@ -832,7 +856,7 @@ module Gori::Tui
       case
       when key.enter? then s.input_mode = InputMode::Insert
       when c == 'i'   then s.input_mode = InputMode::Insert
-      when key.up?
+      when nav_up?(ev)
         # A ⇧↑ on the first line extends the selection to its start rather than leaving the
         # pane (same for ⇧↓ below): a selection in progress is never a focus gesture.
         if s.input.at_top? && !selecting
@@ -841,7 +865,7 @@ module Gori::Tui
         else
           s.input_read.move(s.input, -1, 0, selecting: selecting)
         end
-      when key.down?
+      when nav_down?(ev)
         s.input.at_bottom? && !selecting ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
       when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)

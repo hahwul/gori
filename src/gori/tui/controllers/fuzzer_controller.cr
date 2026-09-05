@@ -845,13 +845,27 @@ module Gori::Tui
 
     def handle_wheel(step : Int32) : Bool
       if v = current_view
-        case v.focus
-        when :results  then v.results_move(step)
-        when :detail   then v.detail_scroll_view(step)
-        when :template then v.template_scroll_view(step)
-        end
+        wheel_pane(v, v.focus, step)
       end
       true
+    end
+
+    # The wheel scrolls the pane UNDER THE POINTER and leaves keyboard focus where it is —
+    # `pane_at` is the hit-test `handle_click` uses, over the same rect. Off every pane
+    # (chrome, the DIST sidebar) it falls back to the focused pane, as the base does.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return true unless v = current_view
+      pane = v.pane_at(body_rect_below_filter(rect), mx, my)
+      wheel_pane(v, pane || v.focus, step)
+      true
+    end
+
+    private def wheel_pane(v : FuzzerView, pane : Symbol, step : Int32) : Nil
+      case pane
+      when :results  then v.results_move(step)
+      when :detail   then v.detail_scroll_view(step)
+      when :template then v.template_scroll_view(step)
+      end
     end
 
     def set_preedit(text : String) : Bool
@@ -964,6 +978,10 @@ module Gori::Tui
 
     def focus_last : Nil
       current_view.try(&.focus_last)
+    end
+
+    def focus_resume : Nil
+      current_view.try(&.focus_resume)
     end
 
     # --- sub-tab nav (filter-aware: ←/→ skip hidden chips; ^1-9 escapes the filter) ---
