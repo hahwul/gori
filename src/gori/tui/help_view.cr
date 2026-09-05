@@ -54,7 +54,7 @@ module Gori::Tui
         Item.new("←/→", "switch tab (on the tab bar)"),
         Item.new("↹ / ⇧↹", "focus ring: tab bar ↔ panes"),
         Item.new("↵ / ↓", "enter the tab body"),
-        Item.new("1-9", "jump to the Nth visible tab"),
+        Item.new("1-9", "jump to the Nth visible tab (Settings → Layout → Tab numbers paints them)"),
         # Seventeen surfaces bind j/k and no hint anywhere named them, so a whole navigation
         # layer was reachable only by guessing. It belongs HERE rather than in each tab's
         # hint: it is a global convention like ^P or ^D, the hints are already at the width

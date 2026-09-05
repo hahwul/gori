@@ -25,6 +25,7 @@ module Gori::Settings
   DEFAULT_ISSUES_PREVIEW       = false
   DEFAULT_HISTORY_LIST_ORDER   = "newest" # "newest" | "oldest" — list sort direction
   DEFAULT_SITEMAP_EXPAND_DEPTH = -1       # -1 = all
+  DEFAULT_TAB_NUMBERS          = false    # paint `1:`…`9:` on the tab bar (the 1-9 jump's targets)
   # Statusline (settings:statusline): opt-in bottom row that runs a command on an
   # interval and shows its (ANSI-coloured) stdout. Off by default; no cost until enabled.
   DEFAULT_STATUSLINE_ENABLED  = false
@@ -94,6 +95,7 @@ module Gori::Settings
   class_property issues_preview : Bool = DEFAULT_ISSUES_PREVIEW
   class_property history_list_order : String = DEFAULT_HISTORY_LIST_ORDER
   class_property sitemap_expand_depth : Int32 = DEFAULT_SITEMAP_EXPAND_DEPTH
+  class_property? tab_numbers : Bool = DEFAULT_TAB_NUMBERS # tab bar shows `N:` before the first nine tabs
   # Statusline (settings:statusline). command is run via `/bin/sh -c` on statusline_interval
   # seconds; its stdout (first line) is rendered at the very bottom of the TUI.
   class_property? statusline_enabled : Bool = DEFAULT_STATUSLINE_ENABLED
@@ -163,6 +165,7 @@ module Gori::Settings
     if d = int_field(o, "sitemap_expand_depth")
       self.sitemap_expand_depth = normalize_sitemap_depth(d)
     end
+    self.tab_numbers = load_bool_h(o, "tab_numbers", tab_numbers?)
   end
 
   # Whether the statusline row is actually LIVE — enabled AND given something to run.
@@ -267,6 +270,7 @@ module Gori::Settings
     self.issues_preview = DEFAULT_ISSUES_PREVIEW
     self.history_list_order = DEFAULT_HISTORY_LIST_ORDER
     self.sitemap_expand_depth = DEFAULT_SITEMAP_EXPAND_DEPTH
+    self.tab_numbers = DEFAULT_TAB_NUMBERS
   end
 
   # Omit layout when every pref is factory default (quiet install; merge-safe section).
@@ -275,7 +279,8 @@ module Gori::Settings
            probe_preview == DEFAULT_PROBE_PREVIEW &&
            issues_preview == DEFAULT_ISSUES_PREVIEW &&
            history_list_order == DEFAULT_HISTORY_LIST_ORDER &&
-           sitemap_expand_depth == DEFAULT_SITEMAP_EXPAND_DEPTH
+           sitemap_expand_depth == DEFAULT_SITEMAP_EXPAND_DEPTH &&
+           tab_numbers? == DEFAULT_TAB_NUMBERS
       j.field "layout" do
         j.object do
           j.field "history_preview", history_preview
@@ -283,6 +288,7 @@ module Gori::Settings
           j.field "issues_preview", issues_preview
           j.field "history_list_order", history_list_order
           j.field "sitemap_expand_depth", sitemap_expand_depth
+          j.field "tab_numbers", tab_numbers?
         end
       end
     end

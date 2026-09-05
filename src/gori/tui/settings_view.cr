@@ -148,6 +148,9 @@ module Gori::Tui
       Field.new("Sitemap expand depth",
         "how deep the tree opens after reload — ←/→ cycles (all = fully expanded)",
         choices: LAYOUT_DEPTH_CHOICES, choice_labels: LAYOUT_DEPTH_LABELS),
+      Field.new("Tab numbers",
+        "paint 1:…9: on the tab bar, the keys the 1-9 jump answers to — ←/→/space toggles",
+        bool: true),
     ]
     # Statusline: an opt-in bottom row that runs a command and shows its output.
     STATUSLINE_FIELDS = [
@@ -329,6 +332,7 @@ module Gori::Tui
                   Settings::DEFAULT_ISSUES_PREVIEW ? "on" : "off",
                   Settings::DEFAULT_HISTORY_LIST_ORDER,
                   Settings::DEFAULT_SITEMAP_EXPAND_DEPTH.to_s,
+                  Settings::DEFAULT_TAB_NUMBERS ? "on" : "off",
                 ]
                 when :statusline then [
                   Settings::DEFAULT_STATUSLINE_ENABLED ? "on" : "off",
@@ -498,6 +502,7 @@ module Gori::Tui
         Settings.issues_preview ? "on" : "off",
         Settings.history_list_order,
         Settings.sitemap_expand_depth.to_s,
+        Settings.tab_numbers? ? "on" : "off",
       ]
     end
 
@@ -727,6 +732,7 @@ module Gori::Tui
         Settings.issues_preview = @values[2] == "on"
         Settings.history_list_order = Settings.normalize_history_list_order(@values[3])
         Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(@values[4].to_i? || Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
+        Settings.tab_numbers = @values[5] == "on"
         @values = layout_values
         return persist
       end

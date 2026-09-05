@@ -2337,7 +2337,8 @@ module Gori::Tui
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
-        hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more)
+        hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more,
+        numbered: Settings.tab_numbers?)
       render_body(screen, layout.body)
       render_companion(screen, layout.body)
       # One retag for the whole status row: key_hints already funnels the Runner's own
