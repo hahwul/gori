@@ -278,6 +278,15 @@ img {
   -webkit-backdrop-filter: blur(22px) saturate(145%);
 }
 
+/* Doc pages: the header is the screen's top bar, flat and opaque, so the
+   pane dividers meet a solid rule instead of a glass strip. The landing keeps
+   the blur over its hero. */
+body.is-doc .docs-header {
+  background: var(--bg-soft);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .logo {
   display: inline-flex;
   align-items: center;
@@ -400,9 +409,13 @@ img {
   min-width: 0;
 }
 
+/* Section tabs speak the panes' language: square corners, the active tab a
+   solid block like the sidebar's cursor row (the TUI's own tab bar paints
+   its current tab the same way), hover a rule under the label. */
 .top-nav a {
+  position: relative;
   padding: 0.38rem 0.78rem;
-  border-radius: var(--radius-pill);
+  border-radius: 3px;
   color: var(--muted);
   font-size: 0.88rem;
   text-decoration: none;
@@ -410,15 +423,33 @@ img {
   transition: color var(--transition), background var(--transition);
 }
 
+.top-nav a::after {
+  content: "";
+  position: absolute;
+  right: 0.78rem;
+  bottom: 0.2rem;
+  left: 0.78rem;
+  border-top: 1px solid var(--line-strong);
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
 .top-nav a:hover {
   color: var(--heading);
-  background: rgb(var(--ink-rgb) / 0.06);
+}
+
+.top-nav a:hover::after {
+  opacity: 1;
 }
 
 .top-nav a.active {
   color: var(--accent-strong);
-  background: rgb(var(--accent-rgb) / 0.12);
-  font-weight: 500;
+  background: rgb(var(--accent-rgb) / 0.16);
+  font-weight: 600;
+}
+
+.top-nav a.active::after {
+  display: none;
 }
 
 /* Mobile section picker: hidden on desktop; replaces .top-nav when it collapses. */
@@ -509,9 +540,9 @@ img {
   display: inline-flex;
   align-items: center;
   gap: 0.1rem;
-  padding: 0.2rem;
+  padding: 0.15rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
+  border-radius: 3px;
   background: rgb(var(--ink-rgb) / 0.045);
 }
 
@@ -521,7 +552,7 @@ img {
   justify-content: center;
   min-width: 2.1rem;
   padding: 0.26rem 0.5rem;
-  border-radius: var(--radius-pill);
+  border-radius: 2px;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 0.68rem;
@@ -553,12 +584,71 @@ img {
   height: 2.25rem;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 3px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   text-decoration: none;
   transition: transform var(--transition), background var(--transition), color var(--transition);
+}
+
+/* Hidden until the wide layout turns the trigger into a field. */
+.search-trigger-label,
+.search-trigger-key {
+  display: none;
+}
+
+@media (min-width: 1000px) {
+  .search-trigger {
+    width: auto;
+    min-width: 13rem;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    margin-right: 0.35rem;
+    padding: 0 0.45rem 0 0.6rem;
+    border: 1px solid var(--line);
+    background: rgb(var(--ink-rgb) / 0.03);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+  }
+
+  .search-trigger:hover,
+  .search-trigger:focus-visible {
+    border-color: var(--line-strong);
+    background: rgb(var(--ink-rgb) / 0.06);
+    color: var(--heading);
+  }
+
+  .search-trigger svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    color: var(--quiet);
+  }
+
+  .search-trigger-label {
+    display: block;
+    flex: 1 1 auto;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .search-trigger-key {
+    display: block;
+    flex: none;
+    padding: 0.08rem 0.32rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    color: var(--quiet);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+  }
+
+  .search-trigger:hover .search-trigger-key {
+    color: var(--text);
+  }
+
 }
 
 .search-trigger:hover,
@@ -2142,6 +2232,15 @@ kbd {
 
 .sidebar-search:hover kbd {
   color: var(--text);
+}
+
+/* One search field per screen: the header's, once it has grown into one
+   (see .search-trigger). The sidebar row only serves the narrow layouts,
+   where the header shows a bare glyph. `/` keeps working everywhere. */
+@media (min-width: 1000px) {
+  .sidebar-search {
+    display: none;
+  }
 }
 
 .sidebar-section + .sidebar-section {

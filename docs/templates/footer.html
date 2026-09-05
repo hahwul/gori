@@ -49,6 +49,8 @@
     var st = document.querySelector(".search-trigger");
     if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
       st.title = st.title.replace("⌘K", "Ctrl K");
+      var key = st.querySelector(".search-trigger-key");
+      if (key) key.textContent = "Ctrl K";
     }
   })();
 
