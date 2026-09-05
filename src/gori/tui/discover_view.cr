@@ -693,6 +693,24 @@ module Gori::Tui
       end
     end
 
+    # Mouse: select a finding by VISIBLE index (what `findings_index_at` answers), clamped.
+    def select_finding(idx : Int32) : Nil
+      r = current
+      return if r.nil?
+      n = visible(r).size
+      return if n == 0
+      @fsel = idx.clamp(0, n - 1)
+    end
+
+    # The FINDINGS index under the pointer, or nil (another card, the header, past the list).
+    # The same answer `click` acts on for that card, exposed so a double-click can act on the
+    # row the pair's first press selected — through the same hit-test, so the two agree.
+    def findings_index_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless pane_at(rect, mx, my) == :findings
+      _, res_card = pane_rects(rect)
+      findings_row_at(res_card, my)
+    end
+
     # Mouse: the findings index under `my` within the FINDINGS card, or nil (no run, empty
     # list, the header row, or past the last populated row). Mirrors render_findings'
     # inset → header → @scroll+i. Y-only, like every other list hit-test here.

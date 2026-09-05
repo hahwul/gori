@@ -313,13 +313,22 @@ module Gori::Tui
       text_fields.each { |f| break if f.click_to_cursor(mx, my, selecting: true) }
     end
 
-    # Two presses in the same cell inside the double-click window. Selects the word under
-    # the pointer; return false to fall back to the ordinary single-click behaviour (which,
-    # for a modal, includes the click-away dismiss — so a modal that answers true here is
-    # also saying "this press was text, not a dismiss").
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
-      text_fields.each { |f| return true if f.select_word_at(mx, my) }
-      false
+    # Two presses in the same cell inside the double-click window. An OUTCOME, like
+    # `handle_key` / `handle_click`, plus one more value:
+    #
+    #   :pass   — not mine; the shell delivers the second press as an ordinary click (which,
+    #             for a modal, includes the click-away dismiss — so any other answer is also
+    #             saying "this press was text or a row, not a dismiss")
+    #   :stay   — taken, card stays up (a word selected, an inline row opened)
+    #   :cancel / :commit — taken, and the card closes the way the key outcomes close it
+    #
+    # The default selects the word under the pointer in whichever listed field was drawn
+    # there. A LIST card overrides to run what ↵ runs on the row — and a list whose ↵ hands
+    # off to a form (`AuthorizeIdentitiesOverlay`, `ColumnsOverlay`) needs `:cancel` to do
+    # that, which is why this is a Symbol and not the Bool the tab tier answers with.
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      text_fields.each { |f| return :stay if f.select_word_at(mx, my) }
+      :pass
     end
 
     # Place the caret in whichever listed field was drawn under the pointer, collapsing any

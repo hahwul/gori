@@ -69,6 +69,20 @@ module Gori::Tui
       true
     end
 
+    # A pair on a row sends its pair of captures to the Comparer — what ↵ / `o`
+    # (`diff.to-comparer`) do, through the Host because the tab switch is the Runner's. False
+    # off every row, so the shell delivers the second press as an ordinary click.
+    def handle_double_click_content(content : Rect, mx : Int32, my : Int32) : Bool
+      return false unless idx = @diff.row_at(content, mx, my)
+      @diff.select_index(idx)
+      @host.diff_to_comparer
+      true
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      handle_double_click_content(BodyChrome.frame_inner(rect), mx, my)
+    end
+
     def body_scroll(delta : Int32) : Bool
       @diff.move(delta)
       true

@@ -380,8 +380,19 @@ module Gori::Tui
       end
     end
 
+    # A pair on a QUEUE row opens the held message's editor — what ↵ / `e` do there, and the
+    # same method, so a binary frame gets the same hex-edit sentence. The pair's first press
+    # already selected the row (and collapsed any mark range) through `handle_click`. On the
+    # editor or the preview the pair selects a word, as before.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = hit_rect(rect)
+      if @intercept.pane_at(inner, mx, my) == :list
+        return false unless idx = @intercept.list_row_at(inner, mx, my)
+        @intercept.focus_list # `toggle_edit` is a toggle: land on the list first, so this OPENS
+        @intercept.select_index(idx)
+        open_editor
+        return true
+      end
       return false if @intercept.hex_editing? # a byte buffer has no words
       @intercept.editing? ? @intercept.editor_select_word(inner, mx, my) : @intercept.preview_select_word(inner, mx, my)
     end

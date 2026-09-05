@@ -127,13 +127,15 @@ module Gori::Tui
       end
     end
 
-    # Same rect derivation as `handle_click`, so a pair of clicks hit-tests once. Only the
-    # Sitemap answers today (fold/unfold a folder, open a leaf); the other two keep the base.
+    # Same rect derivation as `handle_click`, so a pair of clicks hit-tests once. Each sub-tab
+    # answers for its own rows: the Sitemap folds/unfolds a folder or opens a leaf, Discover
+    # opens a finding's flow, Diff sends a row's pair to the Comparer.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       content = BodyChrome.content_rect(rect, strip: true)
       case @active_sub
       when 0 then @sitemap.handle_double_click_content(content, mx, my)
-      else        false
+      when 1 then @discover.handle_double_click_content(content, mx, my)
+      else        @diff.handle_double_click_content(content, mx, my)
       end
     end
 

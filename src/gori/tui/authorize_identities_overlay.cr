@@ -90,6 +90,17 @@ module Gori::Tui
       :stay
     end
 
+    # A pair on a row opens its form — what ↵ / `e` do: arm `pending` and close, so the
+    # Runner's `on_close` opens the form. That hand-off is why the pointer contract answers an
+    # outcome and not a Bool. Off every row it passes.
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      return :pass unless box = overlay_box(area)
+      return :pass unless i = row_at(box, mx, my)
+      @selected = i
+      @pending = Pending.new(i)
+      :cancel
+    end
+
     # --- mutations that keep the card open ---
 
     private def delete_selected : Nil

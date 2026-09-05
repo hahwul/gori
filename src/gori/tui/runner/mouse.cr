@@ -190,7 +190,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # The first press of the pair already placed the caret and focused the pane, so the
     # word selection lands where the operator is looking.
     if ov = active_overlay
-      return ov.handle_double_click(layout.body, mx, my)
+      # An OUTCOME, applied the way a click's is: a list card whose ↵ hands off to a form
+      # answers `:cancel` here and closes into it. `:pass` = not taken → the ordinary click.
+      outcome = ov.handle_double_click(layout.body, mx, my)
+      return false if outcome == :pass
+      apply_overlay_outcome(ov, outcome)
+      return true
     end
     @tabs[@active_tab]?.try(&.handle_double_click(layout.body, mx, my)) || false
   end

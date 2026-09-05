@@ -219,6 +219,13 @@ module Gori::Tui
         end
       when :overrides
         @project_view.focus_pane(:overrides)
+        # A press inside the open add/edit row is a CARET, not a row pick — the row is text.
+        return true if @project_view.ov_field_click(mx, my)
+        # Leaving an open row for the list is a SAVE, the way the web reads a blur and the way
+        # this tab's SETTINGS pane already applies a pending edit on a click out of it. A row
+        # the store refuses stays open with its reason on the strip, and the pick is dropped —
+        # the operator is looking at the field, not at the row they grazed.
+        return true if @project_view.ov_adding? && !leave_override_row
         # The card's scroll gauge rides its right hairline, which `ov_row_at` excludes.
         if row = @project_view.ov_gauge_row(rect, mx, my)
           @project_view.select_override(row)
@@ -227,6 +234,8 @@ module Gori::Tui
         end
       when :env
         @project_view.focus_pane(:env)
+        return true if @project_view.env_field_click(mx, my) # caret — see :overrides
+        return true if env_row_open? && !leave_env_row       # blur = save — see :overrides
         # The card's scroll gauge rides its right hairline, which `env_row_at` excludes.
         if row = @project_view.env_gauge_row(rect, mx, my)
           @project_view.select_env(row)
@@ -282,22 +291,110 @@ module Gori::Tui
     end
 
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
-    # DESCRIPTION only: the other four panes are row lists and inline fields, where a drag is
-    # a fast repeated select and a double-click is two activations. No focus/save side
-    # effects — the press that began the gesture already ran them.
+    # A drag extends a selection over TEXT: the DESCRIPTION, or the HOST OVERRIDES / ENV row
+    # while one is open. The lists themselves have no text to extend over — a drag there is a
+    # fast repeated select — so they answer false. No focus/save side effects — the press that
+    # began the gesture already ran them.
     def supports_drag? : Bool
-      @project_view.pane == :desc
+      @project_view.pane == :desc || @project_view.ov_adding? || env_row_open?
     end
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless @project_view.pane == :desc
-      @project_view.desc_drag_to_cursor(rect, mx, my)
+      case @project_view.pane
+      when :desc      then @project_view.desc_drag_to_cursor(rect, mx, my)
+      when :overrides then @project_view.ov_field_click(mx, my, selecting: true)
+      when :env       then @project_view.env_field_click(mx, my, selecting: true)
+      end
     end
 
+    # A pair on a row does what ↵ does there — the universal list gesture, and the same
+    # method the key and the `e` verb run, so the three cannot drift: SCOPE opens the rule
+    # popup, HOST OVERRIDES / ENV open the row's inline editor, ACTIVITY jumps to what the
+    # event names. On the DESCRIPTION (and on an open row's text) the pair selects a word.
+    # False off every row, so the shell delivers the second press as an ordinary click; the
+    # SETTINGS pane declines outright because a single click already activates its rows.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      return false unless @project_view.pane == :desc
       return false if @project_view.strip_chip_at(rect, mx, my) # a chip is a button, not text
-      @project_view.desc_select_word(rect, mx, my)
+      case @project_view.pane_at(rect, mx, my)
+      when :desc      then @project_view.desc_select_word(rect, mx, my)
+      when :scope     then double_click_scope(rect, mx, my)
+      when :overrides then double_click_override(rect, mx, my)
+      when :env       then double_click_env(rect, mx, my)
+      when :activity  then double_click_activity(rect, mx, my)
+      else                 false
+      end
+    end
+
+    private def double_click_scope(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless idx = @project_view.scope_row_at(rect, mx, my)
+      @project_view.select_scope(idx)
+      scope_edit_rule
+      true
+    end
+
+    private def double_click_override(rect : Rect, mx : Int32, my : Int32) : Bool
+      return true if @project_view.ov_field_select_word(mx, my)
+      # An open row the pair did not land on: the first press already tried to leave it
+      # (`handle_click`) and was refused with a reason on the strip. Say nothing twice.
+      return true if @project_view.ov_adding?
+      return false unless idx = @project_view.ov_row_at(rect, mx, my)
+      @project_view.select_override(idx)
+      hostov_edit_entry
+      true
+    end
+
+    private def double_click_env(rect : Rect, mx : Int32, my : Int32) : Bool
+      return true if @project_view.env_field_select_word(mx, my)
+      return true if env_row_open? # as above
+      return false unless idx = @project_view.env_row_at(rect, mx, my)
+      @project_view.select_env(idx)
+      env_edit_var
+      true
+    end
+
+    private def double_click_activity(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless idx = @project_view.activity_row_at(rect, mx, my)
+      @project_view.activity_select_at(idx)
+      @host.activity_open
+      true
+    end
+
+    # Whether an ENV sub-mode row (add/edit or prefix) is open — the two share the field.
+    private def env_row_open? : Bool
+      @project_view.env_adding? || @project_view.env_prefix_editing?
+    end
+
+    # Save-on-leave for the HOST OVERRIDES row: true when the row is gone (committed, or empty
+    # and so cancelled) and the pick that prompted it may proceed; false when the store or the
+    # parser refused, in which case `commit_override` has already said why and the row stays.
+    private def leave_override_row : Bool
+      case commit_override
+      when :ok, :updated then true
+      when :empty
+        @project_view.cancel_ov_add
+        true
+      else false
+      end
+    end
+
+    private def leave_env_row : Bool
+      if @project_view.env_prefix_editing?
+        case commit_project_env_prefix
+        when :ok then true
+        when :empty
+          @project_view.cancel_env_prefix_edit
+          true
+        else false
+        end
+      else
+        case commit_project_env
+        when :ok then true
+        when :empty
+          @project_view.cancel_env_add
+          true
+        else false
+        end
+      end
     end
 
     # A wheel notch scrolls the card UNDER the pointer without focusing it first, so a long
@@ -881,23 +978,24 @@ module Gori::Tui
     # cancels, esc cancels. (No kind/type chips — unlike the SCOPE add-row.)
     private def handle_project_ov_add_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
         @project_view.cancel_ov_add
       elsif key.enter?
         commit_override
-      elsif key.left?
-        @project_view.ov_move_cursor(-1)
-      elsif key.right?
-        @project_view.ov_move_cursor(1)
       elsif key.backspace?
+        # ⌫ on an already-empty row means "I am done here", so the empty check comes BEFORE
+        # the field sees the key — `TextField#backspace` on an empty value is a silent no-op
+        # and the row would sit there with no way out but esc.
         @project_view.cancel_ov_add unless @project_view.ov_backspace
       elsif key.tab?
-        @project_view.ov_input(' ') # Tab types the IP/host separator, not a pane jump
-        @project_view.set_preedit("")
-      elsif c && !ev.ctrl? && !ev.alt?
-        @project_view.ov_input(c)
-        @project_view.set_preedit("") # commit any preedit
+        # ↹ types the IP/host separator rather than jumping focus. There is nowhere to jump
+        # to: this row is one field holding two values, and the pair is what `ov_commit`
+        # parses. Same in the ENV row below and in both global editors under Settings.
+        @project_view.ov_input(' ')
+      else
+        # Everything else goes through the shared editor: caret motion, word jumps, Home/End,
+        # selection, ⌥⌫, Delete and ^Z — the keys this row used to answer with ←/→ alone.
+        @project_view.ov_edit_key(ev)
       end
     end
 
@@ -928,8 +1026,11 @@ module Gori::Tui
       end
     end
 
-    private def commit_override : Nil
-      case @project_view.ov_commit
+    # Toasts the outcome and returns it, so the pointer's leave-to-save path can tell a row
+    # that closed from one that stayed.
+    private def commit_override : Symbol
+      outcome = @project_view.ov_commit
+      case outcome
       when :empty   then @host.status("host override: empty")
       when :invalid then @host.status(%(host override: need "IP host" — a valid IP + a hostname))
       when :dup     then @host.status("host override: host already mapped — edit it (e)")
@@ -937,6 +1038,7 @@ module Gori::Tui
       when :updated then @host.status("host override updated — #{@host.session.host_overrides.size} total")
       when :ok      then @host.status("host override added — #{@host.session.host_overrides.size} total")
       end
+      outcome
     end
 
     # --- ENV pane: browse the var list (or route to an inline add/edit or prefix row).
@@ -1029,30 +1131,27 @@ module Gori::Tui
       @project_view.env_vars.size > 0
     end
 
+    # Mirrors `handle_project_ov_add_key`, including the ⌫-closes-an-empty-row rule and the
+    # separator on ↹.
     private def handle_project_env_add_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
         @project_view.cancel_env_add
       elsif key.enter?
         commit_project_env
-      elsif key.left?
-        @project_view.env_move_cursor(-1)
-      elsif key.right?
-        @project_view.env_move_cursor(1)
       elsif key.backspace?
         @project_view.cancel_env_add unless @project_view.env_backspace
       elsif key.tab?
         @project_view.env_input(' ') # Tab types the KEY/VALUE separator, not a pane jump
-        @project_view.set_preedit("")
-      elsif c && !ev.ctrl? && !ev.alt?
-        @project_view.env_input(c)
-        @project_view.set_preedit("")
+      else
+        @project_view.env_edit_key(ev)
       end
     end
 
-    private def commit_project_env : Nil
-      case @project_view.env_commit
+    # Returns the outcome too — see `commit_override`.
+    private def commit_project_env : Symbol
+      outcome = @project_view.env_commit
+      case outcome
       when :empty then @host.status("env var: empty")
       when :invalid then @host.status( # The KEY rule spelled out, as the global editor's copy of this message already did — a
       # rejected entry is usually a key with a dash or a leading digit, so naming the shape is
@@ -1067,33 +1166,28 @@ module Gori::Tui
         n = @project_view.env_vars.size
         @host.status(ok ? "env var saved — #{n} total" : "env var NOT saved (project busy or unwritable) — try again")
       end
+      outcome
     end
 
     # The one-line prefix editor: type the sigil, ↵ commits, ⌫ on an empty input
     # cancels, esc cancels. Mirrors the add-row, but the prefix is a GLOBAL setting.
     private def handle_project_env_prefix_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
         @project_view.cancel_env_prefix_edit
       elsif key.enter?
         commit_project_env_prefix
-      elsif key.left?
-        @project_view.env_move_cursor(-1)
-      elsif key.right?
-        @project_view.env_move_cursor(1)
       elsif key.backspace?
         @project_view.cancel_env_prefix_edit unless @project_view.env_backspace
-      elsif c && !ev.ctrl? && !ev.alt?
-        @project_view.env_input(c)
-        @project_view.set_preedit("")
+      else
+        @project_view.env_edit_key(ev) # a sigil has no separator, so ↹ is the field's no-op
       end
     end
 
     # Persist the prefix to GLOBAL Settings (it's not per-project) + refresh highlight so
     # every editor re-tints the new sigil immediately. Failure to write settings.json is
     # surfaced but the in-memory prefix still applies for the session.
-    private def commit_project_env_prefix : Nil
+    private def commit_project_env_prefix : Symbol
       kind, prefix = @project_view.env_prefix_commit
       case kind
       when :empty then @host.status("env prefix: empty")
@@ -1103,6 +1197,7 @@ module Gori::Tui
         Env.bump_highlight_rev if ok
         @host.status(ok ? "env prefix saved — #{prefix.inspect}" : "env prefix applied — could not save to #{Settings.path}")
       end
+      kind
     end
 
     # --- NETWORK pane: scope-lens toggle (row 0) + inline network fields (rows 1-3).

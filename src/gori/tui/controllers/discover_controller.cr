@@ -105,6 +105,23 @@ module Gori::Tui
       handle_click_content(rect.inset(1, 1), mx, my)
     end
 
+    # A pair on a FINDINGS row opens its flow — what ↵ / `o` (`discover.open-flow`) do, through
+    # the same Host seam, because the hop into the History detail is the Runner's. A RUNS row
+    # declines: ↵ there drills into the findings, which the pair's first press has done by
+    # focusing the card, and there is no request of its own to open. Same `content` rect as
+    # `handle_click_content`, so a pair hit-tests once.
+    def handle_double_click_content(content : Rect, mx : Int32, my : Int32) : Bool
+      return false unless idx = @view.findings_index_at(content, mx, my)
+      @view.focus_pane(:findings)
+      @view.select_finding(idx)
+      @host.discover_open_flow
+      true
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      handle_double_click_content(rect.inset(1, 1), mx, my)
+    end
+
     # --- input ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return handle_empty_key(ev) if @view.empty?
