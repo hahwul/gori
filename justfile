@@ -66,10 +66,26 @@ docker-build tag="gori:dev":
 docker-run tag="gori:dev" *args:
     docker run --rm -it -v gori:/data {{tag}} {{args}}
 
-# Run all tests.
+# Run all tests. `--no-debug` because the suite is one 7,000-unit binary whose compile the
+# object cache barely helps (~35 s warm), and skipping DWARF takes ~17% off that. What it
+# costs: an UNEXPECTED exception's backtrace shows mangled names without file:line —
+# assertion failures still print `# spec/x_spec.cr:LINE`. CI keeps debug info (ci.yml).
+# For the backtrace of a crashing example, rerun that file: `just test-file spec/x_spec.cr`.
 [group('development')]
 test:
-    crystal spec
+    crystal spec --no-debug
+
+# Run the specs that mirror what changed against BASE (scripts/spec_for_changes.sh) —
+# the pre-flight before `just test`: a change's own specs compile in 3–9 s where the
+# whole suite takes ~35 s. `just test-changed HEAD` covers uncommitted edits only.
+[group('development')]
+test-changed base="origin/main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=$(scripts/spec_for_changes.sh {{base}})
+    if [ -z "$files" ]; then echo "test-changed: no spec mirrors what changed against {{base}}"; exit 0; fi
+    echo "$files" | sed 's/^/  /'
+    crystal spec $files
 
 # Run the spec files CI's matrix gives one runner, e.g. `just test-shard 2` for the
 # third of four. The partition is a function of the tree (scripts/spec_shard.sh), so

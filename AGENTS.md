@@ -110,7 +110,8 @@ bottleneck every time.
 | Task | Command |
 | --- | --- |
 | Build (debug, → `bin/gori`) | `just build` (`shards build`) |
-| Full suite | `just test` (`crystal spec`) |
+| Full suite | `just test` (`crystal spec --no-debug`; a crashing example's backtrace then lacks file:line — rerun that file with `just test-file`) |
+| Specs mirroring your change | `just test-changed` (`scripts/spec_for_changes.sh`, against `origin/main`; `just test-changed HEAD` for uncommitted edits only) — the 3–9 s pre-flight before the ~35 s suite compile |
 | One file or dir | `just test-file spec/store_spec.cr` |
 | One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import`, `test-mcp`, `test-settings` |
 | Format + lint check | `just check` (`crystal tool format --check src spec bench scripts`, then ameba) |
@@ -209,7 +210,7 @@ written.
 
 ### Before you commit
 
-- `just check`, `just test` and `just benchmark-check` green. If you touched `scripts/`, also
+- `just test-changed` while iterating, then `just check`, `just test` and `just benchmark-check` green. If you touched `scripts/`, also
   type-check it — nothing else compiles most of it (`crystal build --no-codegen scripts/seed_demo.cr`;
   `scripts/nix_shards_check.cr` is the exception, since `just check` and CI now run it).
 - **Format only the files you changed** (`crystal tool format <files>`). A whole-tree format
