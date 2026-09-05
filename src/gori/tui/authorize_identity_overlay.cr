@@ -105,6 +105,11 @@ module Gori::Tui
       "⇥ field · type · ↵ save (newline in headers) · esc cancel"
     end
 
+    # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the headers editor takes a line break as a newline; the name/remove rows keep the default.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      @selected == EDITOR_ROW || !ev.key.enter?
+    end
+
     def text_fields : Array(TextField)
       [@name, @remove]
     end
@@ -172,6 +177,7 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter?                    then @editor.insert_newline
+      when ev.ctrl? && key.lower_z?      then @editor.undo # the undo chord every body editor binds
       when @editor.word_delete_key?(ev)  then @editor.handle_motion_key(ev)
       when key.backspace?                then @editor.backspace
       when key.delete?                   then @editor.delete

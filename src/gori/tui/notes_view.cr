@@ -189,7 +189,7 @@ module Gori::Tui
     # Replace the current note's text (e.g. from the external editor); marks dirty
     # so it persists + the cross-session reconcile won't clobber it.
     def replace_current(text : String) : Nil
-      current.area.set_text(text)
+      current.area.replace_from_outside(text)
       @dirty = true
     end
 

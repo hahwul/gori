@@ -1775,7 +1775,7 @@ module Gori::Tui
     # Replace the description (e.g. from the external editor); marks dirty so save
     # persists it on the next tab-exit.
     def replace_desc(text : String) : Nil
-      @desc_area.set_text(text)
+      @desc_area.replace_from_outside(text)
       @desc_dirty = true
     end
 

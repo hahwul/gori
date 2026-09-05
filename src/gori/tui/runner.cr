@@ -1154,11 +1154,20 @@ module Gori::Tui
       end
     end
 
+    # The surfaces with no text field that own the keys while up — the IME's composing text
+    # has nowhere to go and must not leak to the editor behind them. The send-to picker was
+    # missing: it lives in its own slot (not `active_overlay`), so `apply_preedit_body` took
+    # the composition for the tab body under the card.
+    private def preedit_swallowed? : Bool
+      @space_menu_open || # the space menu has no text field
+        copy_as_shown? || # copy-as picker is mnemonic-only
+        send_to_shown? || # send-to picker, same
+        @goto_open        # ^G is digits-only
+    end
+
     private def apply_preedit(text : String) : Nil
-      return if @space_menu_open # the space menu has no text field — swallow IME while modal
-      return if copy_as_shown?   # copy-as picker is mnemonic-only — swallow IME while modal
-      return if @goto_open       # ^G is digits-only; swallow IME (don't leak to the editor)
-      if @search_open            # ^F find — IME composing text
+      return if preedit_swallowed?
+      if @search_open # ^F find — IME composing text
         @search_preedit = text
         return
       end
@@ -1243,13 +1252,19 @@ module Gori::Tui
       return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
       return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
       return handle_send_to_key(ev) if send_to_shown?      # the send-to picker is modal while up
-      return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
-      # The ^F find prompt is modal while up — EXCEPT under its own replace confirm,
-      # which must get the keys (the prompt stays open behind it so cancelling doesn't
-      # cost you the query you just typed).
-      return handle_search_key(ev) if @search_open && !@overlay.confirm?
-      return handle_rename_key(ev) if @rename_open     # the sub-tab rename prompt is modal while up
-      return handle_tag_edit_key(ev) if @tag_edit_open # the Repeater tag editor is modal while up
+      # The four bottom prompts are modal while up — EXCEPT under a confirm card, which must
+      # get the keys. ^F's replace confirm was the first case (the prompt stays open behind
+      # it so cancelling doesn't cost you the query you just typed); the QUIT confirm is the
+      # general one: `quit_chord_claimed?` sees no `active_overlay` while a prompt is up, so
+      # ^D raised the card — and then the prompt claimed `y`, `n` and esc, leaving a modal on
+      # screen that nothing could answer. A confirm over a prompt now takes the keys, and the
+      # prompt is still there when the card closes.
+      unless @overlay.confirm?
+        return handle_goto_key(ev) if @goto_open         # the ^G line prompt
+        return handle_search_key(ev) if @search_open     # the ^F find prompt
+        return handle_rename_key(ev) if @rename_open     # the sub-tab rename prompt
+        return handle_tag_edit_key(ev) if @tag_edit_open # the Repeater tag editor
+      end
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
       # keys, so they work inside text editors without conflicting with typing.
@@ -1534,11 +1549,32 @@ module Gori::Tui
     # :stay stays open; :cancel closes; :commit runs the injected commit closure and
     # closes iff it returns true (a validation failure keeps the form up).
     private def dispatch_overlay_key(ov : Overlay, ev : Termisu::Event::Key) : Nil
+      # Pasted keystrokes reach a modal one at a time; the modal says which it takes
+      # (`Overlay#takes_pasted?`). The refusal is named ONCE per paste, on the first key
+      # held back, so a long clipboard does not toast a hundred times.
+      if @paste_newline.pasting? && !ov.takes_pasted?(ev)
+        status(PASTE_MODAL_REFUSED) unless @toast == PASTE_MODAL_REFUSED
+        return
+      end
       case ov.handle_key(ev)
       when :cancel then close_active_overlay(ov)
-      when :commit then close_active_overlay(ov) if ov.commit
+      when :commit
+        # A commit closure may open a CHILD modal in the parent's place (a picker raised from
+        # a form's row, the Links card's add-picker). `close_active_overlay` then declines —
+        # the shell holds the child — and the parent's `on_close` never runs, so the pop-back
+        # to ITS parent was lost with it. The child inherits it, unless it brought its own.
+        parent_close = ov.on_close
+        if ov.commit
+          if (child = @active_overlay) && !child.same?(ov) && child.on_close.nil?
+            child.on_close = parent_close
+          end
+          close_active_overlay(ov)
+        end
       end
     end
+
+    # Shown when a pasted keystroke was held back from a modal (see `dispatch_overlay_key`).
+    PASTE_MODAL_REFUSED = "paste stopped at the line break — ↵ here means commit; press it yourself"
 
     private def dispatch_overlay_click(ov : Overlay, area : Rect, mx : Int32, my : Int32) : Nil
       case ov.handle_click(area, mx, my)
@@ -4167,6 +4203,11 @@ module Gori::Tui
       # A one-row list is a poor list, but it is not a dead key.
       return @toast = "no sub-tabs open" if rows.empty?
       sp = SubtabPicker.new("FIND SUB-TAB", rows)
+      # Open on the ACTIVE chip, not row 0: ↵ with no query then stays put, and ↑/↓ walk out
+      # from where the operator is — the way the other pickers open on their current value.
+      if (active = @tabs[@active_tab]?.try(&.subtab_index)) && (cur = rows.index { |r| r.index == active })
+        sp.set_selected(cur)
+      end
       # The picker hands back the ABSOLUTE index; jump_subtab clamps + saves the outgoing
       # tab, so a stale index (the cross-session reconcile reordered behind the modal) is
       # a safe no-op.

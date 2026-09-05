@@ -792,7 +792,7 @@ module Gori::Tui
     # for a file the editor left alone.
     def replace_editor(text : String) : Nil
       return unless text_editing?
-      @editor.set_text(text)
+      @editor.replace_from_outside(text)
       mark_editor_edit
     end
 

@@ -228,7 +228,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return if @space_menu_open && click_space_menu(layout, mx, my)
     return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
     return if send_to_shown? && click_send_to(layout.body, mx, my) # ditto
-    if @goto_open || @search_open || @rename_open || @tag_edit_open
+    # A confirm card over a prompt takes the click (its buttons, or click-away to cancel),
+    # the same precedence the key path gives it; the prompt is still there afterwards.
+    if (@goto_open || @search_open || @rename_open || @tag_edit_open) && !@overlay.confirm?
       close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
       close_search if @search_open
       close_rename if @rename_open

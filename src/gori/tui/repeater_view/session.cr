@@ -60,7 +60,7 @@ class Gori::Tui::RepeaterView
   end
 
   def replace_edit_buffer(text : String) : Nil
-    req_editor.set_text(text)
+    req_editor.replace_from_outside(text)
     mark_req_edit
   end
 

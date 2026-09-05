@@ -73,6 +73,11 @@ module Gori::Tui
       @editor.select_word_at(editor_rect(box), mx, my)
     end
 
+    # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the whole card is the editor, so a line break is a newline.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      true
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
@@ -90,8 +95,9 @@ module Gori::Tui
     private def edit(ev : Termisu::Event::Key) : Nil
       key = ev.key
       case
-      when key.enter? then @editor.insert_newline
-        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when key.enter?               then @editor.insert_newline
+      when ev.ctrl? && key.lower_z? then @editor.undo # the undo chord every body editor binds
+      # Before plain ⌫, which would swallow the modified form as a one-character delete.
       when @editor.word_delete_key?(ev)  then @editor.handle_motion_key(ev)
       when key.backspace?                then @editor.backspace
       when key.delete?                   then @editor.delete
