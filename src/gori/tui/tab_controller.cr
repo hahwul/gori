@@ -48,6 +48,28 @@ module Gori::Tui
     def sitemap_open_flow : Nil
     end
 
+    # Three more of the same shape, for the same gesture: a double-click on a row runs what ↵
+    # runs there, and these three ↵ bodies live on the Runner because each crosses a tab —
+    # the Activity feed's jump to the flow or tab an event names (`activity.open`), the
+    # Discover FINDINGS row's flow in the History detail (`discover.open-flow`), and the Diff
+    # row's pair sent to the Comparer (`diff.to-comparer`). Defaults, not abstracts, as above.
+    def activity_open : Nil
+    end
+
+    def discover_open_flow : Nil
+    end
+
+    def diff_to_comparer : Nil
+    end
+
+    # The Probe MODE picker (`probe.set-mode`), which the MODE band's chip raises on a click.
+    # A Runner verb body like the three above — but it was never DECLARED here: the call in
+    # `ProbeController#handle_click` compiled only because the Runner is the one production
+    # `Host`, and the first spec to route a click through that method found no such method on
+    # its double. Declared as the same defaulted seam so the contract says what the code uses.
+    def probe_set_mode : Nil
+    end
+
     # Open the Fuzzer's payload-set editor overlay (nil = add a new set, else edit that
     # index) / the advanced-settings overlay. The Runner builds them from the current view.
     abstract def open_fuzz_set_editor(edit_index : Int32?) : Nil

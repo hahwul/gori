@@ -65,6 +65,25 @@ class FakeHost
     @sitemap_opens += 1
   end
 
+  # The three cross-tab ↵ bodies a row's double-click reaches through the Host (see
+  # `Host#activity_open`) — counted, like `sitemap_open_flow`, so a spec can tell the gesture
+  # reached the seam without a Runner.
+  getter activity_opens = 0
+  getter discover_opens = 0
+  getter diff_comparer_sends = 0
+
+  def activity_open : Nil
+    @activity_opens += 1
+  end
+
+  def discover_open_flow : Nil
+    @discover_opens += 1
+  end
+
+  def diff_to_comparer : Nil
+    @diff_comparer_sends += 1
+  end
+
   def open_space_menu : Nil
   end
 
@@ -80,10 +99,17 @@ class FakeHost
   def reconfigure_sequence : Nil
   end
 
+  # The rule EDITORS a row's ↵ / double-click asks the shell to raise — recorded, so a spec can
+  # tell the gesture reached the request without a Runner to build the form.
+  getter scope_rule_edits = [] of Int64?
+  getter custom_rule_edits = [] of Gori::Probe::CustomRule?
+
   def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
+    @scope_rule_edits << edit_id
   end
 
   def open_custom_rule_editor(rule : Gori::Probe::CustomRule?) : Nil
+    @custom_rule_edits << rule
   end
 
   def open_rewriter_preset_picker : Nil

@@ -215,6 +215,18 @@ module Gori::Tui
       :stay
     end
 
+    # A pair on a row opens its editor — what ↵ / `e` do, and the same method (see
+    # `HostsOverlay#handle_double_click`, its twin). On an open row's text the pair selects a
+    # word; off every row it passes.
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      return :stay if super == :stay
+      return :pass unless box = overlay_box(area)
+      return :pass unless idx = row_at(box, mx, my)
+      set_selected(idx)
+      edit_start
+      :stay
+    end
+
     def move(step : Int32) : Nil
       select_move(step)
     end

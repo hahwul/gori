@@ -85,9 +85,13 @@ module Gori::Tui
       @ov_sel = 0
       @ov_adding = false
       @ov_edit_id = nil.as(Int64?) # non-nil ⇒ editing an existing override
-      @ov_input = ""               # add-row text ("IP host")
-      @ov_icx = 0                  # add-row cursor index
-      @ov_preedit = ""             # IME preedit for the add-row
+      # The add/edit row is a real `TextField`, like `HostsOverlay`'s (its twin one modal
+      # over) and every other form row in gori. The hand-rolled `@input`/`@icx`/`@preedit`
+      # triple that stood in for it answered ←/→/⌫ and nothing else: no word motion, no
+      # Home/End, no selection, and no caret from the pointer — a TextField remembers where it
+      # was drawn (`hit?`) and inverts its own clicks. An EDIT draws this field ON the row it
+      # edits; an ADD still takes the first list line.
+      @ov_field = TextField.new
 
       # ACTIVITY pane: a materialized PAGE of the #124 event feed, not a live object. The
       # cursor is anchored to an event ID rather than a row index — the list is newest-first and
@@ -119,14 +123,14 @@ module Gori::Tui
       @env_items = [] of {String, String}
       @env_sel = 0
       @env_adding = false
-      @env_prefix_editing = false # non-nil ⇒ the single-line prefix editor is up (shares @env_input)
+      @env_prefix_editing = false # the single-line prefix editor is up (shares @env_field)
       @env_edit_idx = nil.as(Int32?)
       # The KEY an open edit row targets, so `reload_env_vars` can re-anchor the index when a
       # peer process reorders or shortens the list under it.
       @env_edit_key = nil.as(String?)
-      @env_input = ""
-      @env_icx = 0
-      @env_preedit = ""
+      # One field for the three sub-modes (add / edit / prefix), which are mutually exclusive —
+      # the same shape as `EnvOverlay`. See `@ov_field` for why a TextField and not a triple.
+      @env_field = TextField.new
 
       # PROJECT SETTINGS pane: two policy toggles plus project network/proxy fields and the
       # target's protobuf schema. Authentication belongs to the project proxy pin, not global
@@ -316,9 +320,9 @@ module Gori::Tui
     # IME preedit routes to whichever pane is composing (SCOPE uses a popup overlay).
     def set_preedit(text : String) : Nil
       if @pane == :overrides && @ov_adding
-        @ov_preedit = text
+        @ov_field.set_preedit(text)
       elsif @pane == :env && (@env_adding || @env_prefix_editing)
-        @env_preedit = text
+        @env_field.set_preedit(text)
       elsif @pane == :settings && settings_text_row?
         @set_preedit = text
       elsif @pane == :desc && desc_insert_mode?
@@ -639,7 +643,7 @@ module Gori::Tui
     # SAME ov_list_inner offset render does, so the example-hint row never drifts the click.
     def ov_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless card = card_rect(rect, :overrides)
-      row_at(ov_list_inner(card.inset(1, 1)), mx, my, @ov_adding, @ov_sel, @host_overrides.entries.size)
+      row_at(ov_list_inner(card.inset(1, 1)), mx, my, ov_row_offset?, @ov_sel, @host_overrides.entries.size)
     end
 
     def env_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
@@ -647,13 +651,39 @@ module Gori::Tui
       row_at(env_list_inner(card.inset(1, 1)), mx, my, env_row_offset?, @env_sel, @env_items.size)
     end
 
+    # Whether the HOST OVERRIDES list starts ONE ROW DOWN: only while an ADD row holds the
+    # first interior line. An EDIT draws its field on the row it edits (`ov_edit_row`), so the
+    # list does not move — the row an operator double-clicked stays under the pointer as it
+    # turns into the editor. Same predicate for the draw, `ov_row_at` and `ov_gauge_row`.
+    private def ov_row_offset? : Bool
+      @ov_adding && ov_edit_row.nil?
+    end
+
+    # The list index the open EDIT row sits on, or nil (not editing, or the entry it opened
+    # on is gone — a peer deleted it — in which case the row falls back to the add line and
+    # the commit reports what happened).
+    private def ov_edit_row : Int32?
+      return nil unless id = @ov_edit_id
+      @host_overrides.entries.index { |e| e.id == id }
+    end
+
     # Whether the ENV list starts ONE ROW DOWN. `render_env_list` gives the first interior line
-    # to EITHER sub-mode — the add/edit row or the prefix row — so both hit-tests have to ask
-    # about both. Passing `@env_adding` alone made every click land on the row after the one
-    # under the pointer while the prefix editor was open. One predicate, three callers (the
+    # to EITHER top-anchored sub-mode — the ADD row or the prefix row — so both hit-tests have
+    # to ask about both. Passing `@env_adding` alone made every click land on the row after the
+    # one under the pointer while the prefix editor was open. An EDIT is not an offset: its
+    # field is drawn on the row it edits (`env_edit_row`). One predicate, three callers (the
     # draw, `env_row_at`, `env_gauge_row`), which is the lockstep the geometry section promises.
     private def env_row_offset? : Bool
-      @env_adding || @env_prefix_editing
+      (@env_adding && env_edit_row.nil?) || @env_prefix_editing
+    end
+
+    # The list index the open ENV edit row sits on, or nil. `reload_env_vars` re-anchors
+    # `@env_edit_idx` by key and clears it when the peer deleted the var, which turns the row
+    # into an add — and moves it to the first line, where adds live.
+    private def env_edit_row : Int32?
+      return nil unless @env_adding
+      idx = @env_edit_idx
+      idx && idx < @env_items.size ? idx : nil
     end
 
     # Shared row hit-test for the SCOPE/HOST-OVERRIDES list interiors: account for the
@@ -668,7 +698,7 @@ module Gori::Tui
 
     def ov_gauge_row(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless card = card_rect(rect, :overrides)
-      gauge_row(ov_list_inner(card.inset(1, 1)), mx, my, @ov_adding, @host_overrides.entries.size)
+      gauge_row(ov_list_inner(card.inset(1, 1)), mx, my, ov_row_offset?, @host_overrides.entries.size)
     end
 
     def env_gauge_row(rect : Rect, mx : Int32, my : Int32) : Int32?
@@ -1010,7 +1040,12 @@ module Gori::Tui
     def reload_env_vars : Nil
       @env_items = Settings.project_env_vars.dup
       clamp_env_sel
-      @env_edit_idx = @env_items.index { |(k, _)| k == @env_edit_key } if @env_edit_key
+      if @env_edit_key
+        @env_edit_idx = @env_items.index { |(k, _)| k == @env_edit_key }
+        # The editor is drawn ON that row, and the window follows the selection — so the
+        # selection follows the re-anchored row, or the open field could slide off screen.
+        @env_sel = @env_edit_idx || @env_sel
+      end
     end
 
     # --- ACTIVITY pane (#864): a human window over the #124 event feed ------------------
@@ -1513,50 +1548,64 @@ module Gori::Tui
     def ov_add_start : Nil
       @ov_adding = true
       @ov_edit_id = nil
-      @ov_input = ""
-      @ov_icx = 0
-      @ov_preedit = ""
+      @ov_field.set("")
     end
 
-    # Open the add-row pre-filled from the selected override (edit-in-place), "IP host".
+    # Open the editor ON the selected override's row, pre-filled "IP host" (edit-in-place).
     def ov_edit_start : Nil
       entry = current_override
       return unless entry
       @ov_adding = true
       @ov_edit_id = entry.id
-      @ov_input = "#{entry.ip} #{entry.host}"
-      @ov_icx = @ov_input.size
-      @ov_preedit = ""
+      @ov_field.set("#{entry.ip} #{entry.host}")
+    end
+
+    # Whether the open row is an EDIT of an existing entry (false for an add, or when closed).
+    def ov_editing? : Bool
+      @ov_adding && !@ov_edit_id.nil?
+    end
+
+    # The open row's text as typed so far — what ↵ would parse.
+    def ov_input_text : String
+      @ov_field.value
     end
 
     def cancel_ov_add : Nil
       @ov_adding = false
       @ov_edit_id = nil
-      @ov_input = ""
-      @ov_icx = 0
-      @ov_preedit = ""
+      @ov_field.set("")
     end
 
     def ov_input(ch : Char) : Nil
-      @ov_input = "#{@ov_input[0, @ov_icx]}#{ch}#{@ov_input[@ov_icx..]}"
-      @ov_icx += 1
-      @ov_preedit = ""
+      @ov_field.insert(ch)
     end
 
-    # Backspace the add-row; false when the ROW is empty (the controller then closes it) —
-    # never merely because the caret sits at 0, which discarded a typed line the operator had
-    # only moved the caret inside. Same rule as `env_backspace`, which spells it out.
+    # Every other key of the open row — caret motion, word jumps, Home/End, selection, ⌥⌫,
+    # Delete, ^Z — through the shared editor. Answers whether the field took it.
+    def ov_edit_key(ev : Termisu::Event::Key) : Bool
+      @ov_field.handle_edit_key(ev)
+    end
+
+    # Backspace the add/edit row; false when the ROW is empty (the controller then closes it)
+    # — never merely because the caret sits at 0, which discarded a typed line the operator
+    # had only moved the caret inside. Same rule as `env_backspace`, which spells it out.
     def ov_backspace : Bool
-      return false if @ov_input.empty?
-      if @ov_icx > 0
-        @ov_input = "#{@ov_input[0, @ov_icx - 1]}#{@ov_input[@ov_icx..]}"
-        @ov_icx -= 1
-      end
+      return false if @ov_field.value.empty?
+      @ov_field.backspace
       true
     end
 
-    def ov_move_cursor(d : Int32) : Nil
-      @ov_icx = (@ov_icx + d).clamp(0, @ov_input.size)
+    # --- pointer contract for the open row (see `Overlay#text_fields` for the shape) ---
+    # A press inside the field is a CARET; a drag extends a selection; a pair selects a word.
+    # The field answers from the geometry it was last drawn at, so the row moving between the
+    # add line and an entry's own line costs the hit-test nothing. All three are false while
+    # no row is open, so a list click can never land a caret in a field that is not on screen.
+    def ov_field_click(mx : Int32, my : Int32, selecting : Bool = false) : Bool
+      @ov_adding && @ov_field.click_to_cursor(mx, my, selecting: selecting)
+    end
+
+    def ov_field_select_word(mx : Int32, my : Int32) : Bool
+      @ov_adding && @ov_field.select_word_at(mx, my)
     end
 
     # Commit the add/edit row. Parses "IP host" (/etc/hosts order — IP first). Returns
@@ -1569,7 +1618,7 @@ module Gori::Tui
     # simply wrong — it told an operator fixing an address to "edit it (e)", which is what
     # they were already doing.
     def ov_commit : Symbol
-      text = @ov_input.strip
+      text = @ov_field.value.strip
       return :empty if text.empty?
       parsed = HostOverrides.parse_line(text)
       return :invalid unless parsed
@@ -1653,11 +1702,10 @@ module Gori::Tui
       @env_adding = true
       @env_edit_idx = nil
       @env_edit_key = nil
-      @env_input = ""
-      @env_icx = 0
-      @env_preedit = ""
+      @env_field.set("")
     end
 
+    # Open the editor ON the selected var's row, pre-filled "KEY VALUE" (edit-in-place).
     def env_edit_start : Nil
       entry = @env_items[@env_sel]?
       return unless entry
@@ -1666,51 +1714,70 @@ module Gori::Tui
       @env_adding = true
       @env_edit_idx = @env_sel
       @env_edit_key = key
-      @env_input = "#{key} #{val}"
-      @env_icx = @env_input.size
-      @env_preedit = ""
+      @env_field.set("#{key} #{val}")
+    end
+
+    # Whether the open row is an EDIT of an existing var (false for an add, or when closed).
+    def env_editing? : Bool
+      !env_edit_row.nil?
+    end
+
+    # The open row's text as typed so far — what ↵ would parse.
+    def env_input_text : String
+      @env_field.value
     end
 
     def cancel_env_add : Nil
       @env_adding = false
       @env_edit_idx = nil
       @env_edit_key = nil
-      @env_input = ""
-      @env_icx = 0
-      @env_preedit = ""
+      @env_field.set("")
     end
 
     # --- prefix editor: a one-line field seeded with the current GLOBAL sigil.
-    # Reuses the add-row input buffer (mutually exclusive with @env_adding).
+    # Reuses the add-row field (mutually exclusive with @env_adding).
     def env_prefix_edit_start : Nil
       cancel_env_add
       @env_prefix_editing = true
-      @env_input = Settings.env_prefix
-      @env_icx = @env_input.size
-      @env_preedit = ""
+      @env_field.set(Settings.env_prefix)
     end
 
     def cancel_env_prefix_edit : Nil
       @env_prefix_editing = false
-      @env_input = ""
-      @env_icx = 0
-      @env_preedit = ""
+      @env_field.set("")
     end
 
     # Commit the typed prefix: :empty rejects a blank sigil (the substitution engine
     # treats an empty prefix as "disabled"), else :ok with the trimmed sigil. The
     # caller persists it to global Settings.
     def env_prefix_commit : {Symbol, String}
-      text = @env_input.strip
+      text = @env_field.value.strip
       return {:empty, ""} if text.empty?
       cancel_env_prefix_edit
       {:ok, text}
     end
 
     def env_input(ch : Char) : Nil
-      @env_input = "#{@env_input[0, @env_icx]}#{ch}#{@env_input[@env_icx..]}"
-      @env_icx += 1
-      @env_preedit = ""
+      @env_field.insert(ch)
+    end
+
+    # Every other key of the open add/edit/prefix row, through the shared editor (see
+    # `ov_edit_key`).
+    def env_edit_key(ev : Termisu::Event::Key) : Bool
+      @env_field.handle_edit_key(ev)
+    end
+
+    # Pointer contract for whichever ENV row is open — see `ov_field_click`.
+    def env_field_click(mx : Int32, my : Int32, selecting : Bool = false) : Bool
+      env_row_open? && @env_field.click_to_cursor(mx, my, selecting: selecting)
+    end
+
+    def env_field_select_word(mx : Int32, my : Int32) : Bool
+      env_row_open? && @env_field.select_word_at(mx, my)
+    end
+
+    private def env_row_open? : Bool
+      @env_adding || @env_prefix_editing
     end
 
     # Whether the row still holds text — the callers read this to tell a ⌫ that edited the
@@ -1722,20 +1789,18 @@ module Gori::Tui
     # already at 0 with text behind it is an ordinary no-op, and that is what `TextField`
     # (`EnvOverlay`'s field, the same editor one modal away) has always done.
     def env_backspace : Bool
-      return false if @env_input.empty?
-      if @env_icx > 0
-        @env_input = "#{@env_input[0, @env_icx - 1]}#{@env_input[@env_icx..]}"
-        @env_icx -= 1
-      end
+      return false if @env_field.value.empty?
+      @env_field.backspace
       true
     end
 
+    # Caret step, clamped by the field (the keyboard reaches it through `env_edit_key`).
     def env_move_cursor(d : Int32) : Nil
-      @env_icx = (@env_icx + d).clamp(0, @env_input.size)
+      @env_field.move(d)
     end
 
     def env_commit : Symbol
-      text = @env_input.strip
+      text = @env_field.value.strip
       return :empty if text.empty?
       parsed = Env.parse_line(text)
       return :invalid unless parsed
@@ -2401,7 +2466,10 @@ module Gori::Tui
       entries = @host_overrides.entries
       y = list.y
       rows = list.h
-      if @ov_adding
+      # The ADD row takes the first line and pushes the list down one. An EDIT does not: its
+      # field is drawn on the entry's own row below (`edit_row`), so the list holds still and
+      # the row an operator double-clicked turns into the editor under the pointer.
+      if ov_row_offset?
         render_ov_add_row(screen, list, y, focused)
         y += 1
         rows -= 1
@@ -2412,14 +2480,19 @@ module Gori::Tui
       # standing-empty case up top): nothing to window, so skip the list and gauge.
       return if entries.empty?
 
+      edit_row = ov_edit_row
       scroll = scroll_for(@ov_sel, entries.size, rows)
       shown = {rows, entries.size - scroll}.min
       shown.times do |i|
         idx = scroll + i
         entry = entries[idx]
         ry = y + i
-        # Dimmed rather than erased when focus leaves — see the SCOPE list above. `@ov_adding`
-        # still clears it outright: while the add-row is open there is no selected ENTRY.
+        if idx == edit_row
+          render_inline_field(screen, list, ry, @ov_field, focused)
+          next
+        end
+        # Dimmed rather than erased when focus leaves — see the SCOPE list above. An open ADD
+        # row still clears it outright: while it is open there is no selected ENTRY.
         selected = idx == @ov_sel && !@ov_adding
         bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
         screen.fill(Rect.new(list.x, ry, list.w, 1), bg) if selected
@@ -2449,12 +2522,26 @@ module Gori::Tui
       screen.text(hx, y, entry.host, fg, bg, width: {inner.right - hx, 1}.max) if inner.right > hx
     end
 
-    # The inline "add"/"edit" row: a single "IP host" input (no chips — unlike SCOPE).
+    # The top-anchored "add" row: a single "IP host" input (no chips — unlike SCOPE). Also
+    # where an EDIT lands when the entry it opened on has vanished under it (`ov_edit_row` nil).
     private def render_ov_add_row(screen : Screen, inner : Rect, y : Int32, focused : Bool) : Nil
       x = inner.x + 1
       x = screen.text(x, y, @ov_edit_id ? "edit " : "add ", Theme.accent, Theme.bg)
       w = {inner.right - x, 3}.max
-      screen.input_line(x, y, @ov_input, @ov_icx, @ov_preedit, Theme.text_bright, Theme.bg, width: w)
+      # `TextField#render` is what records the geometry `hit?` inverts, so drawing through it
+      # is what makes the pointer work — not merely tidier than `screen.input_line`.
+      @ov_field.render(screen, x, y, w, focused, Theme.text_bright, Theme.bg)
+    end
+
+    # An EDIT row, drawn in place of the entry it edits: the selection bar every other row
+    # carries, then the field where the IP/host columns were. No "edit" label — the row's
+    # position says which entry this is, and the hint line says what the keys do.
+    private def render_inline_field(screen : Screen, inner : Rect, y : Int32, field : TextField, focused : Bool) : Nil
+      bg = focused ? Theme.accent_bg : Theme.selection_dim
+      screen.fill(Rect.new(inner.x, y, inner.w, 1), bg)
+      screen.cell(inner.x, y, '▎', Theme.accent, bg)
+      x = inner.x + 1
+      field.render(screen, x, y, {inner.right - x, 3}.max, focused, Theme.text_bright, bg)
     end
 
     private def render_env_card(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -2483,7 +2570,7 @@ module Gori::Tui
       if env_row_offset?
         # The two sub-modes are mutually exclusive and share this line; `env_row_offset?` is
         # what both hit-tests ask, so the offset cannot drift from the draw.
-        @env_prefix_editing ? render_env_prefix_row(screen, list, y) : render_env_add_row(screen, list, y, focused)
+        @env_prefix_editing ? render_env_prefix_row(screen, list, y, focused) : render_env_add_row(screen, list, y, focused)
         y += 1
         rows -= 1
       end
@@ -2491,12 +2578,17 @@ module Gori::Tui
       # Empty here means an add/prefix row is open on a fresh pane (the onboarding card
       # handled the standing-empty case up top): nothing to window.
       return if @env_items.empty?
+      edit_row = env_edit_row
       scroll = scroll_for(@env_sel, @env_items.size, rows)
       shown = {rows, @env_items.size - scroll}.min
       shown.times do |i|
         idx = scroll + i
         key, val = @env_items[idx]
         ry = y + i
+        if idx == edit_row # an EDIT is drawn on its own row — see render_overrides_list
+          render_inline_field(screen, list, ry, @env_field, focused)
+          next
+        end
         # Dimmed rather than erased when focus leaves — see the SCOPE list above.
         selected = idx == @env_sel && !@env_adding
         bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
@@ -2524,18 +2616,18 @@ module Gori::Tui
       end
     end
 
-    private def render_env_add_row(screen : Screen, inner : Rect, y : Int32, _focused : Bool) : Nil
+    private def render_env_add_row(screen : Screen, inner : Rect, y : Int32, focused : Bool) : Nil
       x = inner.x + 1
       x = screen.text(x, y, @env_edit_idx ? "edit " : "add ", Theme.accent, Theme.bg)
       w = {inner.right - x, 3}.max
-      screen.input_line(x, y, @env_input, @env_icx, @env_preedit, Theme.text_bright, Theme.bg, width: w)
+      @env_field.render(screen, x, y, w, focused, Theme.text_bright, Theme.bg)
     end
 
-    private def render_env_prefix_row(screen : Screen, inner : Rect, y : Int32) : Nil
+    private def render_env_prefix_row(screen : Screen, inner : Rect, y : Int32, focused : Bool) : Nil
       x = inner.x + 1
       x = screen.text(x, y, "prefix ", Theme.accent, Theme.bg)
       w = {inner.right - x, 3}.max
-      screen.input_line(x, y, @env_input, @env_icx, @env_preedit, Theme.text_bright, Theme.bg, width: w)
+      @env_field.render(screen, x, y, w, focused, Theme.text_bright, Theme.bg)
     end
 
     private def render_desc_card(screen : Screen, rect : Rect, focused : Bool) : Nil

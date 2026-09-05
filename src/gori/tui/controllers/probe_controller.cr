@@ -33,6 +33,12 @@ module Gori::Tui
       @sub_idx = 0 # 0 = Findings · 1 = Rules
     end
 
+    # The RULES sub-tab's list — read by specs that drive the row gestures through the view's
+    # own hit-tests, the way `view` exposes the findings.
+    def rules : ProbeRulesView
+      @rules
+    end
+
     def view : ProbeView
       @probe
     end
@@ -669,9 +675,23 @@ module Gori::Tui
       @probe.detail_click(BodyChrome.content_rect(rect, strip: true), mx, my, selecting: true)
     end
 
+    # RULES: a pair on a row opens its editor — what ↵ / `e` (`probe-rules.edit`) do, and the
+    # same method, so a built-in row gets the same sentence the key gives it ("built-in rules
+    # can't be edited") rather than two silent selects. Elsewhere the pair selects a word in
+    # the detail's AFFECTED URLS, as before. Same `content` rect as `handle_click`.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      content = BodyChrome.content_rect(rect, strip: true)
+      if rules_tab?
+        return false unless idx = @rules.row_at(content, mx, my)
+        @rules.select_index(idx)
+        # A section header or the empty placeholder is not a rule: `select_index` refused it,
+        # so acting now would edit whichever row was selected before. Decline instead.
+        return false unless @rules.selected_index == idx
+        rules_edit
+        return true
+      end
       return false unless supports_drag?
-      @probe.detail_select_word(BodyChrome.content_rect(rect, strip: true), mx, my)
+      @probe.detail_select_word(content, mx, my)
     end
 
     # --- READ-pane delegators (the detail's read verbs + the Runner's read_* ladders) ---

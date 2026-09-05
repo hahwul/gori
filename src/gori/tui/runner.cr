@@ -1602,7 +1602,13 @@ module Gori::Tui
     PASTE_MODAL_REFUSED = "paste stopped at the line break — ↵ here means commit; press it yourself"
 
     private def dispatch_overlay_click(ov : Overlay, area : Rect, mx : Int32, my : Int32) : Nil
-      case ov.handle_click(area, mx, my)
+      apply_overlay_outcome(ov, ov.handle_click(area, mx, my))
+    end
+
+    # The pointer's outcome rule, shared by a click and a double-click: :cancel closes,
+    # :commit runs the closure and closes iff it returns true, anything else stays.
+    private def apply_overlay_outcome(ov : Overlay, outcome : Symbol) : Nil
+      case outcome
       when :cancel then close_active_overlay(ov)
       when :commit then close_active_overlay(ov) if ov.commit
       end

@@ -68,9 +68,9 @@ module Gori::Tui
       @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
     end
 
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
-      return false unless box = overlay_box(area)
-      @editor.select_word_at(editor_rect(box), mx, my)
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      return :pass unless box = overlay_box(area)
+      @editor.select_word_at(editor_rect(box), mx, my) ? :stay : :pass
     end
 
     # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the whole card is the editor, so a line break is a newline.
