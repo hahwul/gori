@@ -17,19 +17,6 @@ require "../../spec_helper"
 #   2. `Plan.build` runs BEFORE `seed_bindings`, so its unresolved-env refusal fired on exactly
 #      the template `--bind-from` was passed for. The no-rules abort is now hoisted ahead of it.
 
-private def with_store(&)
-  path = File.tempname("gori-binddisabled", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_layer(bindings : Gori::Bindings?, &)
   previous = Gori::Env.layer
   Gori::Env.layer = bindings

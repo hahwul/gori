@@ -8,19 +8,6 @@ require "compress/gzip"
 # against a local origin — the IO::Memory server harness never yields between
 # scripted lines, so a polled async job can't progress there.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpfuzz", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def start_origin : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
@@ -92,7 +79,7 @@ describe "MCP fuzz tools" do
   it "starts a job, polls to completion, returns matched results" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       args = {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -128,7 +115,7 @@ describe "MCP fuzz tools" do
   it "permanently saves every row independently of the bounded selective live cache" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start", {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer secret\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -353,7 +340,7 @@ describe "MCP fuzz tools" do
   it "deletes a terminal permanent run and cascades its results" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start", {
         "template" => "GET /§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url" => "http://127.0.0.1:#{port}", "payloads" => [{"list" => ["a"]}],
@@ -378,7 +365,7 @@ describe "MCP fuzz tools" do
   it "refuses to delete a permanent run while its live job can still append" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start", {
         "template" => "GET /§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url" => "http://127.0.0.1:#{port}", "payloads" => [{"numbers" => "1-100"}],
@@ -399,7 +386,7 @@ describe "MCP fuzz tools" do
   it "runs a race_count job with no payloads at all" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       args = {
         "template"       => "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -432,7 +419,7 @@ describe "MCP fuzz tools" do
   it "accepts payloads as a JSON array (not only a JSON string)" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       args = {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -447,7 +434,7 @@ describe "MCP fuzz tools" do
   it "accepts structured object payload sets for numbers and brute" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -477,7 +464,7 @@ describe "MCP fuzz tools" do
   it "clamps brute-force lengths so a huge one can neither freeze nor OOM the server" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -517,7 +504,7 @@ describe "MCP fuzz tools" do
   it "accepts a built-in preset as a payload set, and merges a user file" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -550,7 +537,7 @@ describe "MCP fuzz tools" do
   it "list_base64 splices a payload's exact octets, which `list` cannot" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       payload = Bytes[0xc3, 0x28, 0x80] # invalid UTF-8: an overlong-looking pair plus a bare 0x80
       start = call_json(tools, "fuzz_start",
         {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
@@ -589,7 +576,7 @@ describe "MCP fuzz tools" do
 
   it "refuses invalid base64 in list_base64 instead of fuzzing with different bytes" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       text, err = call_raw(tools, "fuzz_start",
         {"template"       => "GET /?q=§x§ HTTP/1.1\r\n\r\n",
          "url"            => "http://127.0.0.1:1",
@@ -609,7 +596,7 @@ describe "MCP fuzz tools" do
   it "processors:[encode:url] percent-encodes a payload before it's spliced in" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url"            => "http://127.0.0.1:#{port}",
@@ -645,7 +632,7 @@ describe "MCP fuzz tools" do
   it "URL-encodes a query payload by default, and sends it raw under no_encode" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
               "url"            => "http://127.0.0.1:#{port}",
               "payloads"       => %([{"list":["<script>"]}]),
@@ -662,7 +649,7 @@ describe "MCP fuzz tools" do
 
   it "rejects an unknown or malformed processor spec cleanly" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {"template" => "GET /?q=§x§ HTTP/1.1\r\n\r\n", "url" => "http://127.0.0.1:1",
               "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
 
@@ -676,7 +663,7 @@ describe "MCP fuzz tools" do
 
   it "rejects a processor's text/pattern given as JSON null or a non-string value" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {"template" => "GET /?q=§x§ HTTP/1.1\r\n\r\n", "url" => "http://127.0.0.1:1",
               "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
 
@@ -699,7 +686,7 @@ describe "MCP fuzz tools" do
   it "matches a processor's type case-insensitively, same as kind/algo" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url"            => "http://127.0.0.1:#{port}",
@@ -728,7 +715,7 @@ describe "MCP fuzz tools" do
 
   it "rejects bad args, and gates the tool under --read-only" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       _, no_payloads = call_raw(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\n\r\n", "url" => "http://127.0.0.1:1"}.to_json)
       no_payloads.should be_true
@@ -745,7 +732,7 @@ describe "MCP fuzz tools" do
 
   it "rejects a request count over the hard cap" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       _, capped = call_raw(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\n\r\n", "url" => "http://127.0.0.1:1",
          "payloads" => %([{"numbers":"1-200000"}]), "allow_unscoped" => true}.to_json)
@@ -756,7 +743,7 @@ describe "MCP fuzz tools" do
   it "blocks fuzz_start when the origin host is out of the configured scope" do
     with_store do |store|
       store.add_scope_rule("include", "host", "example.com")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       text, err = call_raw(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "url" => "http://127.0.0.1:1",
          "payloads" => %([{"list":["a"]}])}.to_json)
@@ -769,7 +756,7 @@ describe "MCP fuzz tools" do
     port = start_origin
     with_store do |store|
       store.add_scope_rule("include", "host", "127.0.0.1")
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "url" => "http://127.0.0.1:#{port}",
          "payloads" => %([{"list":["a"]}])}.to_json)
@@ -780,7 +767,7 @@ describe "MCP fuzz tools" do
   it "lists jobs, gets one by id, and stop_job(wait:true) converges to terminal" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url" => "http://127.0.0.1:#{port}",
@@ -807,7 +794,7 @@ describe "MCP fuzz tools" do
     port = probe.local_address.port
     probe.close
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url"            => "http://127.0.0.1:#{port}",
@@ -841,7 +828,7 @@ describe "MCP fuzz tools" do
   it "accepts record_history true/false as all/none and refuses any other value by name" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
               "url"            => "http://127.0.0.1:#{port}",
               "payloads"       => %([{"list":["a"]}]),
@@ -874,7 +861,7 @@ describe "MCP fuzz tools" do
   it "records matched results to History with a redacted flow_id when record_history:matched" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer sekret\r\n\r\n",
          "url"            => "http://127.0.0.1:#{port}",
@@ -910,7 +897,7 @@ describe "MCP fuzz tools" do
   it "ends budget_exhausted (not done) when max_requests halts before all candidates" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url" => "http://127.0.0.1:#{port}",
@@ -941,7 +928,7 @@ describe "MCP fuzz tools" do
 
   it "refuses a match/filter term that can never fire, before any send" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
               "url" => "http://127.0.0.1:9", "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
       text, err = call_raw(tools, "fuzz_start", base.merge({"match" => {"size" => "1O00"}}).to_json)
@@ -959,7 +946,7 @@ describe "MCP fuzz tools" do
 
   it "reads a JSON null container argument as absent, and refuses race_warmup without race_count" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       base = {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
               "url" => "http://127.0.0.1:9", "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
       start = call_json(tools, "fuzz_start",
@@ -974,7 +961,7 @@ describe "MCP fuzz tools" do
   it "treats sni:\"\" and timeout_ms:0 as absent rather than as an empty name and a 1 ms deadline" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url" => "http://127.0.0.1:#{port}", "payloads" => %([{"list":["a","b"]}]),
@@ -989,7 +976,7 @@ describe "MCP fuzz tools" do
   it "records no tls_preset on a plaintext run's saved row, matching what fuzz_start reports" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url" => "http://127.0.0.1:#{port}", "payloads" => %([{"list":["a"]}]),
@@ -1003,7 +990,7 @@ describe "MCP fuzz tools" do
   it "persists budget_exhausted when an unknown-total run reaches its wire cap" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start", {
         "template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"      => "http://127.0.0.1:#{port}",
@@ -1047,7 +1034,7 @@ describe "MCP fuzz_start match:{time}" do
      "is the only evidence for, and the one an identical-response origin leaves untouched" do
     port = start_slow_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start", {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -1100,7 +1087,7 @@ describe "MCP fuzz_results — the stored page is not matched-only, and says so"
   it "carries a per-row `matched` bit, and matched_only actually filters" do
     port = start_mixed_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start", {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -1138,7 +1125,7 @@ describe "MCP fuzz_results — the stored page is not matched-only, and says so"
   it "pages the FILTERED set, not the stored one" do
     port = start_mixed_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start", {
         "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "url"            => "http://127.0.0.1:#{port}",
@@ -1180,7 +1167,7 @@ end
 describe "MCP fuzz_start — a 'marks' token that made no position" do
   it "warns when every occurrence was already marked, and stays quiet when the mark lands" do
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       # Port 9 (discard) — this asserts on the START reply, so nothing needs to answer.
       base = {"url" => "http://127.0.0.1:9/", "payloads" => %([{"list":["a"]}]),
               "allow_unscoped" => true, "record_history" => false}
@@ -1222,7 +1209,7 @@ describe "MCP fuzz_results — a failed row is stored, not silently dropped" do
     port = probe.local_address.port
     probe.close
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url"            => "http://127.0.0.1:#{port}",
@@ -1254,7 +1241,7 @@ describe "MCP fuzz_results — a failed row is stored, not silently dropped" do
   it "keeps an unmatched row whose ¦chain could not run on its payload" do
     port = start_origin
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       # `gzip-decompress` over a payload that is not gzip: the chain resolves fine at template
       # time (so `refuse_unrunnable_chains` lets the run start) and raises on THESE bytes, which
       # is exactly the per-payload case `chain_error` exists for. `filter: {status: "200"}`
@@ -1306,7 +1293,7 @@ describe "MCP fuzz — failures cannot crowd matches out of the stored set" do
     cap.should be < Gori::MCP::Tools::FUZZ_MAX_STORED
 
     with_store do |store|
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "fuzz_start",
         {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url"            => "http://127.0.0.1:#{port}",

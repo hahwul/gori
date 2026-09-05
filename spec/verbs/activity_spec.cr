@@ -27,16 +27,16 @@ describe "Gori::Verbs.register_activity" do
   # at all — there is no unmodified neighbour for the shift to slip off.
   it "keeps the destructive clear off the capture-toggle key, and off its shift" do
     r["capture.toggle"].scope.should eq(Gori::Verb::Scope::Global)
-    r["capture.toggle"].chords.should eq([Gori::Verb::Chord.new("c")])
+    r["capture.toggle"].chords.should eq([typed_chord("c")])
 
     # `shift_chord` round-trips through `Keybind.from_event`, NOT a hand-written chord: a
-    # capital spelling (`Chord.new("X")`) satisfies an equality assertion perfectly and still
+    # capital spelling (`typed_chord("X")`) satisfies an equality assertion perfectly and still
     # never fires, because from_event normalises a typed capital to shift+lowercase. Asserting
     # the DECLARATION against a twin of itself is what let that dead binding ship.
     r["activity.clear"].chords.should eq([shift_chord('X')])
-    r["activity.clear"].chords.should_not contain(Gori::Verb::Chord.new("c"))
+    r["activity.clear"].chords.should_not contain(typed_chord("c"))
     r["activity.clear"].chords.should_not contain(shift_chord('C'))
-    r["activity.clear"].chords.should_not contain(Gori::Verb::Chord.new("x"))
+    r["activity.clear"].chords.should_not contain(typed_chord("x"))
     r["activity.clear"].menu_key.should eq('X')
     r["activity.clear"].group.should eq(:wipe)
   end
@@ -59,14 +59,14 @@ describe "Gori::Verbs.register_activity" do
       v.menu_key.should eq('X'), v.id
       # The letter under the shift is free in each of those scopes — that is the property that
       # made ⇧X the right key, and it is the one a later bare-`x` binding would quietly break.
-      r.select { |o| o.scope == v.scope && o.chords.includes?(Gori::Verb::Chord.new("x")) }
+      r.select { |o| o.scope == v.scope && o.chords.includes?(typed_chord("x")) }
         .map(&.id).should be_empty, "bare `x` is bound in #{v.scope}, under #{v.id}'s shift"
     end
   end
 
   # The declaration says ⇧X; this says the DISPATCH agrees. `Keymap#lookup` is what the runner
   # asks on a keypress, so a chord spelled in a way `Keybind.from_event` never produces —
-  # `Chord.new("X")` — is dead here and nowhere else: every assertion above would still pass.
+  # `typed_chord("X")` — is dead here and nowhere else: every assertion above would still pass.
   # Bare `c` rides along because it is the reason the letter is ⇧X and not ⇧C: it is LIVE in
   # every one of those scopes — `capture.toggle` by Global fallback in four, and
   # `probe.dismiss-selected` shadowing it on the Probe list — so ⇧C would have put a project
@@ -77,7 +77,7 @@ describe "Gori::Verbs.register_activity" do
     x = shift_chord('X')
     r.select(&.group.==(:wipe)).each do |v|
       km.lookup(x, v.scope).should eq(v.id)
-      under_c = km.lookup(Gori::Verb::Chord.new("c"), v.scope)
+      under_c = km.lookup(typed_chord("c"), v.scope)
       under_c.should_not be_nil, "bare `c` is unbound in #{v.scope}"
       under_c.should_not eq(v.id)
     end
@@ -91,7 +91,7 @@ describe "Gori::Verbs.register_activity" do
   # ↵ is the second chord on `open` rather than a hard-coded twin in the key handler, so the
   # Hotkeys editor can see it — the same shape `discover.open-flow` uses.
   it "reaches the jump from both ↵ and o" do
-    r["activity.open"].chords.should eq([Gori::Verb::Chord.new("o"), Gori::Verb::Chord.new("enter")])
+    r["activity.open"].chords.should eq([typed_chord("o"), typed_chord("enter")])
   end
 
   # Each chip cycles back to "all" where it was set, so releasing all three at once does not

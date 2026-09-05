@@ -2,10 +2,6 @@ require "../spec_helper"
 
 private alias F = Gori::Fuzz
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 private RAWREQ = "GET /chat HTTP/1.1\r\nHost: t.test\r\nCookie: s=secret\r\n\r\n"
 private MARKED = "GET /chat?q=§x§ HTTP/1.1\r\nHost: t.test\r\nCookie: s=secret\r\n\r\n"
 
@@ -28,7 +24,7 @@ describe "Fuzz::Origin scheme fold (wss:// must not dial cleartext)" do
         sources: [F::InlineList.new(%w[a])] of F::PayloadSource,
         config: F::Config.new(mode: F::Mode::Sniper, concurrency: 1, keep_bodies: :none),
         matcher: F::Matcher.new(keep_bodies: :none), verify: false),
-      ungated)
+      ungated_outbound)
     plan.origin.scheme.should eq("https")
   end
 
@@ -36,7 +32,7 @@ describe "Fuzz::Origin scheme fold (wss:// must not dial cleartext)" do
     plan = Gori::Miner::Plan.build(
       Gori::Miner::PlanOptions.new(RAWREQ, target: "wss://t.test/chat",
         config: Gori::Miner::Config.new),
-      ungated)
+      ungated_outbound)
     plan.origin.scheme.should eq("https")
   end
 
@@ -44,7 +40,7 @@ describe "Fuzz::Origin scheme fold (wss:// must not dial cleartext)" do
     plan = Gori::Sequencer::Plan.build(
       Gori::Sequencer::PlanOptions.new(RAWREQ.to_slice, target: "wss://t.test/chat",
         config: Gori::Sequencer::Config.new(token_loc: Gori::Sequencer::TokenLoc.cookie("s"))),
-      ungated)
+      ungated_outbound)
     plan.origin!.scheme.should eq("https")
   end
 end

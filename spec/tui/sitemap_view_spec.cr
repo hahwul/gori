@@ -3,19 +3,6 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
-private def tmp_store(&)
-  path = File.tempname("gori-sm", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture(store, host, method, target)
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
@@ -30,7 +17,7 @@ end
 
 describe Gori::Tui::SitemapView do
   it "builds and renders a literal host -> path tree" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users/123")
       capture(store, "acme.test", "POST", "/api/orders")
       capture(store, "acme.test", "GET", "/")
@@ -51,7 +38,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "collapses and expands nodes" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       view = SitemapView.new
       view.reload(store)
@@ -71,7 +58,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "renders an empty-state when nothing is captured" do
-    tmp_store do |store|
+    with_store do |store|
       view = SitemapView.new
       view.reload(store)
       # 15 rows is the least the SITE MAP card fits in (9 interior + 2 borders + headline,
@@ -91,7 +78,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "filters the tree with a QL query" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "api.acme.test", "GET", "/v1/users")
       capture(store, "cdn.acme.test", "GET", "/assets/app.js")
 
@@ -115,7 +102,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "rejects an all-invalid QL query instead of showing the whole tree" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "api.acme.test", "GET", "/v1/users")
       capture(store, "cdn.acme.test", "GET", "/assets/app.js")
 
@@ -135,7 +122,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "does NOT reject a tag:-only query (its QL residual is blank)" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       capture(store, "acme.test", "GET", "/static/app.js")
       store.set_sitemap_tag("acme.test", "/api", "payment")
@@ -156,7 +143,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "flags an invalid regex filter term in the empty-state" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/")
       view = SitemapView.new
       view.reload(store)
@@ -172,7 +159,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "renders the filter bar: scope chip + hint, then the filter prompt" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/")
       view = SitemapView.new
       view.reload(store)
@@ -204,7 +191,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "marks in-scope hosts with a scope glyph even when the ⇧S lens is off" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       capture(store, "cdn.vendor.test", "GET", "/app.js")
 
@@ -230,7 +217,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "shows an endpoint count on host rows" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       capture(store, "acme.test", "POST", "/api/orders")
       capture(store, "acme.test", "GET", "/health")
@@ -244,7 +231,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "colours method chips by verb on endpoint rows" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users")
 
       view = SitemapView.new
@@ -259,7 +246,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "draws tree guide lines for nested nodes" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "a.test", "GET", "/x/y") # nested + a following host ⇒ a │ guide
       capture(store, "b.test", "GET", "/z")
 
@@ -272,7 +259,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "folds a long numeric sequence into a collapsed group; `g` unfolds it" do
-    tmp_store do |store|
+    with_store do |store|
       (1001..1012).each { |i| capture(store, "acme.test", "GET", "/users/#{i}") } # 12 > threshold(10)
 
       view = SitemapView.new
@@ -293,7 +280,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "folds uuid siblings into a collapsed {uuid}; `g` unfolds it" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
 
@@ -316,7 +303,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "folds query-string variants into one path row; ⇧G unfolds them" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "shop.demo.test", "GET", "/search?q=widgets")
       capture(store, "shop.demo.test", "GET", "/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
 
@@ -342,7 +329,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "leaves a query-less path as one plain row" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/search")
       view = SitemapView.new
       view.reload(store)
@@ -355,7 +342,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "keeps id folding on its own axis: `g` does not explode the query fold" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
       capture(store, "acme.test", "GET", "/search?q=widgets")
@@ -379,7 +366,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "resolves the fold to a concrete captured target for Repeater, and to its path for scope" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "shop.demo.test", "GET", "/search?q=widgets")
       capture(store, "shop.demo.test", "GET", "/search?q=other")
 
@@ -397,7 +384,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "refuses to tag or mark a query fold, as it refuses an id fold" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "shop.demo.test", "GET", "/search?q=widgets")
       capture(store, "shop.demo.test", "GET", "/search?q=other")
 
@@ -414,7 +401,7 @@ describe Gori::Tui::SitemapView do
     # Regression: apply_expand_depth! force-collapses every fold on every rebuild, and the
     # expand-state walk used to skip synthetic nodes entirely — so a fold the user opened
     # snapped shut on the next ~750ms poll and its subtree was unreadable during capture.
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
 
@@ -438,7 +425,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "keeps the cursor on a fold row across reload" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
 
@@ -459,7 +446,7 @@ describe Gori::Tui::SitemapView do
   it "lands on the enclosing fold when a new sibling swallows the selected row" do
     # At the id-fold threshold this fires during ordinary browsing: the SECOND uuid of a
     # kind materialises the fold and hides the row the cursor was sitting on.
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
 
       view = SitemapView.new
@@ -475,7 +462,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "resolves a fold to a descendant for Repeater and to the container for Discover" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
 
@@ -497,7 +484,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "seeds a scope rule from the cursor: host row -> host rule, path row -> host+path string" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
 
       view = SitemapView.new
@@ -520,7 +507,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "seeds a fold's scope rule from its CONTAINER, not one folded child" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
 
@@ -538,7 +525,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "refuses to tag a template fold" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
 
@@ -551,7 +538,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "leaves a short numeric sequence ungrouped" do
-    tmp_store do |store|
+    with_store do |store|
       (1..5).each { |i| capture(store, "acme.test", "GET", "/a/#{i}") } # 5 <= threshold
 
       view = SitemapView.new
@@ -564,7 +551,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "stamps and renders a persisted path tag" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       store.set_sitemap_tag("acme.test", "/api", "payment flow")
 
@@ -577,7 +564,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "keeps at least one blank column between a tag and method chips on the same row" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       store.set_sitemap_tag("acme.test", "/api/users", "memo")
 
@@ -595,7 +582,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "filters the tree by a tag: query (folder tag keeps its subtree)" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       capture(store, "acme.test", "GET", "/static/app.js")
       store.set_sitemap_tag("acme.test", "/api", "payment")
@@ -615,7 +602,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "cuts tag: terms with the shared lexer, so quoting and NOT work" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       capture(store, "acme.test", "GET", "/static/app.js")
       store.set_sitemap_tag("acme.test", "/api", "my flow")
@@ -635,7 +622,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "treats NOT tag:x as exclusion, like -tag:x" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       capture(store, "acme.test", "GET", "/static/app.js")
       store.set_sitemap_tag("acme.test", "/api", "done")
@@ -656,7 +643,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "does not blank the tree when cutting tags leaves only an operator" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       store.set_sitemap_tag("acme.test", "/api", "payment")
 
@@ -677,7 +664,7 @@ describe Gori::Tui::SitemapView do
   it "re-anchors selection, scroll, and manual collapse across reload (live capture poll)" do
     # Regression: data_version polls used to zero @selected/@scroll every rebuild,
     # so navigating deep under live traffic kept jumping back to the top host.
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users/1")
       capture(store, "acme.test", "GET", "/api/users/2")
       capture(store, "other.test", "GET", "/x")
@@ -709,7 +696,7 @@ describe Gori::Tui::SitemapView do
   # --- marks (multi-select) -------------------------------------------------
 
   it "marks the cursor row with `t` and steps down, so a run of `t` marks consecutive rows" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/a")
       capture(store, "acme.test", "GET", "/b")
 
@@ -735,7 +722,7 @@ describe Gori::Tui::SitemapView do
     # Regression: a fold node keeps `path` empty, exactly like its host row, so a mark keyed on
     # (host, path) alone made `{"acme.test", ""}` mean BOTH — marking the host banded every
     # fold in the tree. A fold is not markable at all; only the host row may carry the band.
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
 
@@ -759,7 +746,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "keeps marks across a reload and counts the ones off-screen" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
 
       view = SitemapView.new
@@ -786,7 +773,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "extends a range with ⇧arrows, stepping over folds instead of marking them" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
       capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
       capture(store, "acme.test", "GET", "/orders")
@@ -805,7 +792,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "hands back only the gesture's own marks when it ends" do
-    tmp_store do |store|
+    with_store do |store|
       %w(/a /b /c /d).each { |p| capture(store, "acme.test", "GET", p) }
 
       view = SitemapView.new
@@ -822,7 +809,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "tags every marked path from one editor, seeded from the cursor row's memo" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/a")
       capture(store, "acme.test", "GET", "/b")
       store.set_sitemap_tag("acme.test", "/a", "old")
@@ -859,7 +846,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "resolves the marked set to endpoints, and falls back to the cursor row with no marks" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "POST", "/api/orders")
       capture(store, "acme.test", "GET", "/api/users")
 
@@ -882,7 +869,7 @@ describe Gori::Tui::SitemapView do
   end
 
   it "round-trips and clears a tag through the store" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       store.set_sitemap_tag("acme.test", "/api", "memo")
       store.sitemap_tags[{"acme.test", "/api"}].should eq("memo")
@@ -900,7 +887,7 @@ describe Gori::Tui::SitemapView do
   # depth (1.6 GB at 20k), so a fixture deep enough to overflow these particular walks costs
   # gigabytes. What this pins is that a deep tree still renders correctly end to end.
   it "reloads, prunes and flattens a deep tree without overflowing the stack" do
-    tmp_store do |store|
+    with_store do |store|
       deep = String.build { |io| 2_000.times { |i| io << "/s" << i } }
       capture(store, "deep.test", "GET", deep)
       capture(store, "deep.test", "GET", "/shallow")

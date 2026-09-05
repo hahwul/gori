@@ -8,11 +8,14 @@ on:
       - shard.yml
       - shard.lock
       - "**/*.cr"
-      # Two shell scripts the jobs below actually execute, neither of which matches
+      # Three shell scripts the jobs below actually execute, none of which matches
       # `**/*.cr`: without these lines a change to the spec partition or to the bench
       # type-check would merge without the job that runs it ever waking up.
       - scripts/spec_shard.sh
       - scripts/bench_check.sh
+      - scripts/ameba_gate.sh
+      # …and the lint gate's config: a relaxed or added rule must wake `lint-gate`.
+      - .ameba.yml
       # Generated from shard.lock, and checked against it by `build-crystal`. The
       # lock is already listed above, which covers the drift that matters (a bump
       # landing without the regeneration); this line covers the other direction —
@@ -78,9 +81,9 @@ jobs:
         # `--production` (= `--frozen --without-development`) rather than a bare
         # install. Two reasons, one of each kind:
         #
-        # LIGHTER: the only development dependency is ameba — and no job here runs it
-        # (see the note above `tests`), so `--without-development` skips a clone paid
-        # once per job for a tool nothing in CI invokes. `--frozen` costs nothing on top
+        # LIGHTER: the only development dependency is ameba — and only `lint-gate` runs
+        # it, installing for itself — so `--without-development` skips a clone paid once
+        # per job for a tool this job never invokes. `--frozen` costs nothing on top
         # and leaves shard.lock untouched, so this stays a read of the tree, not an edit.
         #
         # STRICTER: `--frozen` fails when shard.lock does not satisfy shard.yml, which
@@ -147,16 +150,38 @@ jobs:
         # The same script `just benchmark-check` runs, so local and CI cannot drift apart
         # (and this job needs no `just` on the runner).
         run: scripts/bench_check.sh
-  # Still no ameba job. The backlog is down from 965 findings to 641, but 248 of the
-  # remainder are Metrics/CyclomaticComplexity in the TUI — splitting those methods is a
-  # real refactor, not lint cleanup, and `.ameba.yml` already records the decision to
-  # raise the bar to 12 rather than carve them up. `just check` still runs it locally —
-  # which is now the ONLY place it runs at all: the install steps pass `--production`, so
-  # no runner clones ameba any more. Whichever job gains the gate has to drop that flag
-  # for itself, and compile `lib/ameba/bin/ameba.cr` itself: since 1.7.0 the shard ships
-  # no postinstall, so installing it no longer leaves a binary behind.
-  # Add the gate when that category is dealt with, not by excluding it — a check that is
-  # always red is a check nobody reads, but one that is green by exclusion is worse.
+  lint-gate:
+    # ameba, as a DIFF gate: `scripts/ameba_gate.sh` counts findings per changed file at
+    # the merge base and at HEAD, and fails only when a file GAINED some. The plain run is
+    # deliberately still not a gate — the backlog is ~640 findings, most of them
+    # Metrics/CyclomaticComplexity in the TUI that `.ameba.yml` chose to leave in place,
+    # so a whole-tree gate is either always red (a check nobody reads) or green by
+    # excluding that category (worse: new offences of the same kind would pass). The
+    # per-file comparison neither pays the backlog down nor hides it; it only stops a
+    # change from adding to it, and a new file starts from zero. `just lint-gate` runs
+    # the same script locally.
+    #
+    # Pull requests only: the comparison needs a base, and on a push to main there is
+    # none that says anything. Both sides are linted with the same compiled ameba and
+    # this checkout's .ameba.yml (see the script), so a rule change on the branch is not
+    # a regression. `shards install` WITHOUT `--production` here, alone among the jobs:
+    # ameba is the development dependency, and since 1.7.0 the shard ships no
+    # postinstall, so the script compiles `lib/ameba/bin/ameba.cr` itself.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The whole history: the script diffs against the merge base with the target
+          # branch, and a shallow clone has no such commit.
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.21.0
+      - name: Install dependencies (with ameba)
+        run: shards install
+      - name: No changed file may gain ameba findings
+        run: scripts/ameba_gate.sh "origin/${{ github.base_ref }}"
   tests:
     # Sharded, because `crystal spec` compiles the whole suite into ONE binary and runs
     # its ~10,900 examples in ONE single-threaded fiber scheduler — so this job was the

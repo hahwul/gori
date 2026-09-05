@@ -69,10 +69,6 @@ private def grpc_template(prefix : String = GOOD_PREFIX) : String
   "#{GRPC_HEAD}#{prefix}§hello§"
 end
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 # Build + drain a run over `template` against `respond`, through Fuzz::Plan (the builder is
 # what decides `grpc_template?`, so going around it would test the wrong seam).
 private def sweep(template : String, payloads : Array(String),
@@ -85,7 +81,7 @@ private def sweep(template : String, payloads : Array(String),
     config: F::Config.new(mode: F::Mode::Sniper, concurrency: 1, keep_bodies: :none,
       reframe_grpc: reframe_grpc),
     matcher: matcher)
-  plan = F::Plan.build(options, ungated)
+  plan = F::Plan.build(options, ungated_outbound)
   backend = FakeBackend.new(plan.origin, &respond)
   engine = F::Engine.new(plan.generator, plan.matcher, backend, plan.config)
   results = [] of F::Result

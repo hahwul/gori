@@ -4,6 +4,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("compare", help: [
+        {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},
+      ])]
       private def self.cmd_compare(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil

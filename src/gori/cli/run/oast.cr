@@ -7,6 +7,10 @@ module Gori
       # `gori run oast` — headless out-of-band listener (interactsh & friends). `listen` is
       # store-free and ad-hoc: register a payload, print it, then stream decrypted callbacks.
       # `providers` and the session verbs (`list`/`resume`/`release`) read the project store.
+      @[Subcommand("oast", help: [
+        {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
+        {"oast providers", "Manage saved OAST providers (list, add, update, enable/disable, delete)"},
+      ])]
       private def self.cmd_oast(args : Array(String)) : Nil
         # `providers` is the one OAST subcommand that touches the project store, so it must be
         # dispatched BEFORE strip_project_flags eats the --project/--db it actually needs.

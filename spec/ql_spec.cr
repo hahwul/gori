@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-private def tmp_store(&)
-  path = File.tempname("gori-ql", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture(store, host, method, target, status = nil)
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
@@ -154,7 +141,7 @@ describe Gori::QL do
   # tokenizer's, which varies by SQLite build, so it is deliberately not pinned here — this
   # test targets the blob fallback that the fix actually changed.)
   it "finds a short (<3-char) body: needle that sits AFTER a NUL byte" do
-    tmp_store do |store|
+    with_store do |store|
       buried = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/bin", http_version: "HTTP/1.1",
@@ -246,7 +233,7 @@ describe Gori::QL do
 
   it "matches header: past an embedded NUL in the stored head bytes" do
     # CAST AS TEXT LIKE stopped at the first NUL; the REGEXP/instr path must not.
-    tmp_store do |store|
+    with_store do |store|
       head = "HTTP/1.1 200 OK\r\nX-Trace: a\u0000b\r\nSet-Cookie: sid=1\r\n\r\n".to_slice
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
@@ -266,7 +253,7 @@ describe Gori::QL do
   # for both. The same expression backs Scope's string/regex rules, where the miss was a
   # fail-OPEN: an exclude naming a port did not hold over TLS.
   it "url: matches a non-default port on BOTH wire shapes" do
-    tmp_store do |store|
+    with_store do |store|
       capture_on_port(store, "http", "127.0.0.1", 19316, "http://127.0.0.1:19316/x") # plaintext, absolute-form
       capture_on_port(store, "https", "127.0.0.1", 19316, "/x")                      # tunnelled, origin-form
       capture_on_port(store, "https", "127.0.0.1", 443, "/x")                        # same host, default port
@@ -282,7 +269,7 @@ describe Gori::QL do
   # (RFC 3986 §3.2.3), so building the authority must not hand every ordinary flow a `:443`
   # for `url:443` to match.
   it "url: does not invent a default port" do
-    tmp_store do |store|
+    with_store do |store|
       capture_on_port(store, "https", "acme.test", 443, "/x")
       capture_on_port(store, "http", "acme.test", 80, "/y")
 
@@ -296,7 +283,7 @@ describe Gori::QL do
   # authority has to put them back or `url:` reads `https://::1:8443/x` — a string no operator
   # can type and no URL parser accepts.
   it "url: brackets an IPv6 literal the way FlowRow#url does" do
-    tmp_store do |store|
+    with_store do |store|
       capture_on_port(store, "https", "::1", 8443, "/x")
       rows = store.search(Gori::QL.parse("url:[::1]:8443"), 50)
       rows.map(&.url).should eq(["https://[::1]:8443/x"])
@@ -308,7 +295,7 @@ describe Gori::QL do
   # `Scope.request_url` builds without it. They are written twice — once in SQL, once in
   # Crystal — so nothing but a test can hold them together.
   it "URL_EXPR and URL_EXPR_NO_PORT are the two Crystal builders, row for row" do
-    tmp_store do |store|
+    with_store do |store|
       rows = [
         {"https", "127.0.0.1", 19316, "/x"},
         {"https", "acme.test", 443, "/a?b=c"},
@@ -442,7 +429,7 @@ end
 
 describe "Gori::Store#search (QL)" do
   it "filters flows by a compiled query" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/", 200)
       capture(store, "acme.test", "POST", "/login", 500)
       capture(store, "other.test", "GET", "/", 200)
@@ -465,7 +452,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "url~ recognizes an ABSOLUTE-FORM target of any scheme case without doubling scheme://host" do
-    tmp_store do |store|
+    with_store do |store|
       # Origin-form (the common case: HTTPS/CONNECT) and absolute-form (plain-HTTP
       # forward-proxy wire shape) captures of the same logical endpoint, plus an
       # upper-cased-scheme absolute-form capture (RFC 3986 §3.1: schemes are
@@ -490,7 +477,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "filters by proto: over real captured flows (ws/grpc/sse/http, NULL-safe)" do
-    tmp_store do |store|
+    with_store do |store|
       # WebSocket handshake (101, no content type).
       ws = capture(store, "acme.test", "GET", "/socket", 101)
       # gRPC + SSE distinguished only by Content-Type on a 200.
@@ -521,7 +508,7 @@ describe "Gori::Store#search (QL)" do
   # together the way an operator triages them. `proto:ws` still means "a WebSocket"; the
   # spelling the PROTO column shows for each row selects that row and only that row.
   it "separates ws:// from wss:// on proto:, the way the PROTO column now spells them" do
-    tmp_store do |store|
+    with_store do |store|
       cleartext = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/chat", http_version: "HTTP/1.1",
@@ -545,7 +532,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "searches request and response bodies (body:)" do
-    tmp_store do |store|
+    with_store do |store|
       req_match = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
@@ -589,7 +576,7 @@ describe "Gori::Store#search (QL)" do
   # so these pin that the filter really scopes rather than being ignored by the MATCH parser,
   # which would silently return the two-sided answer and look like it worked.
   it "scopes header:/body: to one side with a req./resp. prefix" do
-    tmp_store do |store|
+    with_store do |store|
       req_side = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
@@ -734,7 +721,7 @@ describe "Gori::Store#search (QL)" do
     # The claim the whole design rests on: `scope:in` IS the `--in-scope` predicate, not a
     # respelling of it. Run against a real store, both ways, and compared row for row.
     it "selects exactly what Scope#filter(force: true) selects" do
-      tmp_store do |store|
+      with_store do |store|
         scope = Gori::Scope.load(store)
         scope.add("include", "host", "acme.test")
         scope.add("exclude", "host", "cdn.acme.test")
@@ -807,7 +794,7 @@ describe "Gori::Store#search (QL)" do
   # '%überweisung%'` left the haystack's `Ü` uppercase and answered nothing; a non-ASCII needle
   # takes `gori_ci_contains` (Crystal's `downcase.includes?` as a UDF) instead.
   it "folds a non-ASCII needle on both sides for path:, url: and free text" do
-    tmp_store do |store|
+    with_store do |store|
       id = capture(store, "acme.test", "GET", "/Überweisung")
       other = capture(store, "acme.test", "GET", "/other")
 
@@ -823,7 +810,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "folds a non-ASCII needle for host: and free text too" do
-    tmp_store do |store|
+    with_store do |store|
       id = capture(store, "Über.test", "GET", "/x")
       capture(store, "acme.test", "GET", "/x")
 
@@ -836,7 +823,7 @@ describe "Gori::Store#search (QL)" do
   # The ASCII needle keeps the native `lower(col) LIKE ?` path, so the LIKE-metacharacter
   # escaping that path depends on must still hold over real rows, not just in the compiled SQL.
   it "still treats a literal % / _ in the needle literally" do
-    tmp_store do |store|
+    with_store do |store|
       pct = capture(store, "acme.test", "GET", "/a%b")
       capture(store, "acme.test", "GET", "/axb")
 
@@ -852,7 +839,7 @@ describe "Gori::Store#search (QL)" do
       method: "GET", host: "acme.test", target: "/Überweisung", scheme: "http")
     Gori::InterceptFilter.new("path:Überweisung").matches?(subject).should be_true
 
-    tmp_store do |store|
+    with_store do |store|
       id = capture(store, "acme.test", "GET", "/Überweisung")
       store.search(Gori::QL.parse("path:Überweisung"), 50).map(&.id).should eq([id])
     end
@@ -891,7 +878,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "matches bodies, hosts and headers by regex (~), case-sensitively" do
-    tmp_store do |store|
+    with_store do |store|
       secret = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "api.acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
@@ -926,7 +913,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "scans a binary / invalid-UTF-8 body with body~ past a NUL without crashing" do
-    tmp_store do |store|
+    with_store do |store|
       # leading invalid-UTF-8 bytes + an embedded NUL with "ABC" AFTER it. The scan
       # must (1) not crash on the invalid UTF-8 (scrubbed) and (2) still see content
       # past the NUL — the haystack is read by its true byte length (value_bytes),
@@ -948,7 +935,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "filters by total size and duration; respsize:/dur: exclude pending rows" do
-    tmp_store do |store|
+    with_store do |store|
       big = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/big", http_version: "HTTP/1.1",

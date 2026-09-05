@@ -81,7 +81,7 @@ describe "Gori::Verbs.registry (every verb)" do
     reg = Gori::Verb::Registry.new
     reg.register(Gori::Verb::Definition.new(
       "demo.wipe", "Wipe", "x", Gori::Verb::Scope::Body,
-      [Gori::Verb::Chord.new("z")], group: :wipe) { |_| nil })
+      [typed_chord("z")], group: :wipe) { |_| nil })
     offenders = reg.select(&.group.==(:wipe)).select { |v| v.chords.any? { |c| bare_chord?(c) } }
     offenders.map(&.id).should eq(["demo.wipe"])
   end

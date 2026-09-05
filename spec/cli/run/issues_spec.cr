@@ -5,19 +5,6 @@ require "json"
 # `--format` and `--export` flags write (Issues::Export, shared with the TUI's
 # issues.export verb).
 
-private def with_store(&)
-  path = File.tempname("gori-cliissues", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def issue(id : Int64, title : String, severity : Gori::Store::Severity,
                   host : String?, flow_id : Int64?, notes = "",
                   status = Gori::Store::Status::Open) : Gori::Store::Issue

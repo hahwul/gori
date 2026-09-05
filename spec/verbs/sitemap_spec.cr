@@ -19,7 +19,7 @@ describe "Gori::Verbs.register_sitemap" do
     # `enter` toggles; a redundant `space` expand binding would shadow the helix leader.
     sitemap_verbs = r.select(&.scope.sitemap?)
     sitemap_verbs.should_not be_empty # else the sweep below asserts nothing
-    sitemap_verbs.each { |v| v.chords.should_not contain(Gori::Verb::Chord.new("space")) }
+    sitemap_verbs.each { |v| v.chords.should_not contain(typed_chord("space")) }
   end
 
   it "routes the tree actions to their own intents" do
@@ -39,11 +39,11 @@ describe "Gori::Verbs.register_sitemap" do
   # Project tab — so scoping a host you just found meant retyping it there.
   it "adds the cursor row to the scope on `a`, the same chord the Project scope pane uses" do
     verb = r["sitemap.scope-add"]
-    verb.chords.should eq([Gori::Verb::Chord.new("a")])
+    verb.chords.should eq([typed_chord("a")])
     verb.hidden?.should be_false # else it reaches neither the space menu nor Help
     verb.menu_key.should eq('a')
     # Same gesture as the popup's other door, so `a` means "add a scope rule" in both places.
-    r["scope.add-rule"].chords.should eq([Gori::Verb::Chord.new("a")])
+    r["scope.add-rule"].chords.should eq([typed_chord("a")])
     # 's' still belongs to the LENS toggle here — adding a rule and filtering by it are
     # distinct actions, and the toast after a save points at 's'.
     r["sitemap.scope-toggle"].menu_key.should eq('s')
@@ -54,9 +54,9 @@ describe "Gori::Verbs.register_sitemap" do
   # literal id" also dump every payload ever sent to /search.
   it "puts query folding on ⇧G, its own chord and its own menu key" do
     verb = r["sitemap.toggle-query-fold"]
-    verb.chords.should eq([Gori::Verb::Chord.new("g", shift: true)])
-    r["sitemap.toggle-grouping"].chords.should eq([Gori::Verb::Chord.new("g")]) # unchanged
-    verb.hidden?.should be_false                                                # else it reaches neither the space menu nor Help
+    verb.chords.should eq([typed_chord("g", shift: true)])
+    r["sitemap.toggle-grouping"].chords.should eq([typed_chord("g")]) # unchanged
+    verb.hidden?.should be_false                                      # else it reaches neither the space menu nor Help
     # A shift chord yields no menu key, so the mnemonic is what the action menu renders —
     # and it must not collide with the id toggle's chord-derived 'g'.
     verb.menu_key.should eq('Q')
@@ -68,12 +68,12 @@ describe "Gori::Verbs.register_sitemap" do
   # not reach the bytes behind a tree node. Registering it is what wires BOTH surfaces.
   it "opens the selected endpoint's flow on `o`, and shows it in the action menu" do
     verb = r["sitemap.open-flow"]
-    verb.chords.should eq([Gori::Verb::Chord.new("o")])
+    verb.chords.should eq([typed_chord("o")])
     verb.hidden?.should be_false # else it reaches neither the space menu nor Help
     verb.menu_key.should eq('o') # what for_scope+SpaceMenu need to render a row
     # Same chord as the two siblings that make the same jump, so `o` means one thing.
-    r["issue.open-flow"].chords.should eq([Gori::Verb::Chord.new("o")])
-    r["probe.open-flow"].chords.should eq([Gori::Verb::Chord.new("o")])
+    r["issue.open-flow"].chords.should eq([typed_chord("o")])
+    r["probe.open-flow"].chords.should eq([typed_chord("o")])
   end
 
   # The space menu filters on available? while validate_menu_keys! does not, so an entry can
@@ -86,7 +86,7 @@ describe "Gori::Verbs.register_sitemap" do
 
   it "gives the scope toggle an explicit 's' menu key (its only chord is ⇧S)" do
     verb = r["sitemap.scope-toggle"]
-    verb.chords.should eq([Gori::Verb::Chord.new("s", shift: true)])
+    verb.chords.should eq([typed_chord("s", shift: true)])
     verb.menu_key.should eq('s') # a shifted chord yields no menu key on its own
   end
 
@@ -135,12 +135,12 @@ describe "Gori::Verbs.register_sitemap" do
     # a text prompt here. Tagging is a space-menu entry now, like `sitemap.mark-clear`, and
     # ⇧T is deliberately left free rather than reassigned — a tree has no useful "mark every
     # row" today (see sitemap.mark-toggle), and this keeps the letter for the day it does.
-    r["sitemap.mark-toggle"].chords.should eq([Gori::Verb::Chord.new("t")])
+    r["sitemap.mark-toggle"].chords.should eq([typed_chord("t")])
     r["sitemap.mark-toggle"].menu_key.should eq('t')
     tag = r["sitemap.tag"]
     tag.chords.should be_empty
     tag.menu_key.should eq('T')
-    shift_t = Gori::Verb::Chord.new("t", shift: true)
+    shift_t = typed_chord("t", shift: true)
     sitemap_verbs = [] of Gori::Verb::Definition
     r.each { |v| sitemap_verbs << v if v.scope.sitemap? }
     sitemap_verbs.none? { |v| v.chords.includes?(shift_t) }.should be_true
@@ -148,10 +148,10 @@ describe "Gori::Verbs.register_sitemap" do
 
   it "extends the range on ⇧arrows without shadowing plain tree nav" do
     # Keymap#lookup matches a Chord EXACTLY, so these never collide with sitemap.up/down.
-    r["sitemap.mark-extend-up"].chords.should eq([Gori::Verb::Chord.new("up", shift: true)])
-    r["sitemap.mark-extend-down"].chords.should eq([Gori::Verb::Chord.new("down", shift: true)])
-    r["sitemap.up"].chords.should contain(Gori::Verb::Chord.new("up"))
-    r["sitemap.down"].chords.should contain(Gori::Verb::Chord.new("down"))
+    r["sitemap.mark-extend-up"].chords.should eq([typed_chord("up", shift: true)])
+    r["sitemap.mark-extend-down"].chords.should eq([typed_chord("down", shift: true)])
+    r["sitemap.up"].chords.should contain(typed_chord("up"))
+    r["sitemap.down"].chords.should contain(typed_chord("down"))
     # Hidden like the other nav primitives — they're a gesture, not a menu row.
     r["sitemap.mark-extend-up"].hidden?.should be_true
     r["sitemap.mark-extend-down"].hidden?.should be_true

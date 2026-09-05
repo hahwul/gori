@@ -10,6 +10,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("intercept", help: [
+        {"intercept", "Inspect/drive a live TUI's paused intercept queue (list, forward, drop, edit, …)"},
+      ])]
       private def self.cmd_intercept(args : Array(String)) : Nil
         sub = args.first?
         case sub

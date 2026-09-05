@@ -7,6 +7,7 @@ module Gori
       # Every rule that applies to this project, in apply order: the GLOBAL library first, then
       # the project's own rows. `id` is unique only WITHIN a scope, so every row carries its
       # `scope` and the mutation tools take one alongside the id.
+      @[Tool("list_rules")]
       private def list_rules(h) : Result
         want = nil.as(Store::RuleScope?)
         if present?(h, "scope")
@@ -92,6 +93,7 @@ module Gori
             "'200 OK', then headers, then a blank line and the body)", "INVALID_ARGUMENT", field: "replacement")
       end
 
+      @[Tool("create_rule", gated: true, agent_action: true)]
       private def create_rule(h) : Result
         pattern = str(h, "pattern")
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
@@ -152,6 +154,7 @@ module Gori
 
       # The response-modification preset catalog (#821), read-only, so it sits with the other
       # list tools rather than behind the action gate. `create_rule_from_preset` installs one.
+      @[Tool("list_rule_presets")]
       private def list_rule_presets : Result
         Result.new(JSON.build do |j|
           j.array do
@@ -186,6 +189,7 @@ module Gori
       # rule is indistinguishable from a hand-authored one and is editable/disable-able/
       # deletable (P4). Returns the ids created; a partial write (some rows committed, one
       # refused) reports what landed rather than pretending it was all-or-nothing.
+      @[Tool("create_rule_from_preset", gated: true, agent_action: true)]
       private def create_rule_from_preset(h) : Result
         key = str(h, "preset")
         return err("missing required 'preset' (see list_rule_presets)", "INVALID_ARGUMENT", field: "preset") if key.nil? || key.empty?
@@ -224,6 +228,7 @@ module Gori
         err(ex.message || "invalid preset arguments", "INVALID_ARGUMENT")
       end
 
+      @[Tool("update_rule", gated: true, agent_action: true)]
       private def update_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -289,6 +294,7 @@ module Gori
       # transform the live proxy uses (regex / header ops / host-scope all reflected)
       # over recent flows. Nothing is written. Approximate: response bodies are scanned
       # as STORED (possibly compressed) wire bytes.
+      @[Tool("preview_rule", gated: true)]
       private def preview_rule(h) : Result
         pattern = str(h, "pattern")
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
@@ -401,6 +407,7 @@ module Gori
       # For a global rule this writes THIS PROJECT's override by default — the same meaning `x`
       # has in the Rewriter tab. `everywhere: true` changes the library's own default instead,
       # which reaches every project that has not overridden it.
+      @[Tool("set_rule_enabled", gated: true, agent_action: true)]
       private def set_rule_enabled(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -439,6 +446,7 @@ module Gori
         rule.enabled == enabled ? store.clear_rewriter_override(id) : store.set_rewriter_override(id, enabled)
       end
 
+      @[Tool("delete_rule", gated: true, agent_action: true)]
       private def delete_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -489,6 +497,7 @@ module Gori
         end
       end
 
+      @[Tool("list_extract_rules")]
       private def list_extract_rules : Result
         rules = store.extract_rules
         Result.new(JSON.build do |j|
@@ -579,6 +588,7 @@ module Gori
         err("'pos_end' must be greater than 'pos_start' for kind=position", "INVALID_ARGUMENT", field: "pos_end")
       end
 
+      @[Tool("create_extract_rule", gated: true, agent_action: true)]
       private def create_extract_rule(h) : Result
         name = extract_name_arg(str(h, "name"))
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
@@ -627,6 +637,7 @@ module Gori
         busy("extract rule created but the disable did not persist (store busy or unwritable); retry")
       end
 
+      @[Tool("update_extract_rule", gated: true, agent_action: true)]
       private def update_extract_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -664,6 +675,7 @@ module Gori
         end)
       end
 
+      @[Tool("set_extract_rule_enabled", gated: true, agent_action: true)]
       private def set_extract_rule_enabled(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -674,6 +686,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
       end
 
+      @[Tool("delete_extract_rule", gated: true, agent_action: true)]
       private def delete_extract_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id

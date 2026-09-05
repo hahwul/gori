@@ -85,10 +85,6 @@ private def seed_body_flow(store, needle : String, target : String = "/a") : Int
   id
 end
 
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-end
-
 private def call_result(tools, name, args : String) : Gori::MCP::Tools::Result
   tools.call(name, JSON.parse(args))
 end

@@ -9,23 +9,6 @@ require "socket"
 # Helpers are file-local — Crystal's top-level `private def` is file-scoped, so this file
 # does not depend on spec/mcp/fuzz_spec.cr's.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpwire", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-end
-
 private def call_raw(tools, name, args : String) : {String, Bool}
   r = tools.call(name, JSON.parse(args))
   {r.text, r.is_error}
@@ -45,8 +28,8 @@ private def recording_origin(conns = 1) : {Int32, Channel(Bytes)}
   seen = Channel(Bytes).new(conns)
   spawn do
     conns.times do
-      break unless conn = server.accept?
-      spawn do
+      break unless accepted = server.accept?
+      spawn_with(accepted) do |conn|
         buf = IO::Memory.new
         begin
           conn.read_timeout = 400.milliseconds
@@ -94,8 +77,8 @@ private def html_origin : Int32
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
   spawn do
-    while conn = server.accept?
-      spawn do
+    while accepted = server.accept?
+      spawn_with(accepted) do |conn|
         begin
           conn.read_timeout = 2.seconds
           body = "<html><body>no links here</body></html>"

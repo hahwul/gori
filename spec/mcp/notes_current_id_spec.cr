@@ -9,26 +9,13 @@ require "../spec_helper"
 # the last place still handing out the index. The CLI twin never had the ambiguity: `gori run
 # notes --format json` names `id` and `index` on every row.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpnotes", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def seed_notes(store, cur : Int32) : Nil
   entries = (1..5).map { |i| %({"id":#{i},"text":"note #{i}"}) }
   store.set_setting("notes.docs", %({"cur":#{cur},"notes":[#{entries.join(",")}],"next_id":6}))
 end
 
 private def call_json(store, name, args : String) : JSON::Any
-  tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools = tools_for(store)
   r = tools.call(name, JSON.parse(args))
   fail "#{name} errored: #{r.text}" if r.is_error
   JSON.parse(r.text)

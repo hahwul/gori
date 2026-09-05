@@ -20,6 +20,7 @@ module Gori
       # of them: it dials a FRESH connection per identity on purpose (`Engine.live`), so a
       # ten-flow selection under three identities is thirty handshakes.
 
+      @[Tool("authorize_start", gated: true, agent_action: true)]
       private def authorize_start(h) : Result
         allow_unscoped = bool_arg(h, "allow_unscoped", false)
         ob = outbound(allow_unscoped)
@@ -159,6 +160,7 @@ module Gori
         end
       end
 
+      @[Tool("authorize_status", gated: true)]
       private def authorize_status(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
@@ -195,6 +197,7 @@ module Gori
       # The verdicts, per replayed request. The headline fields come FIRST and are computed
       # over the whole job, never over the page: a bypass on request 40 must not be invisible
       # to a caller who read page 1 and stopped.
+      @[Tool("authorize_results", gated: true)]
       private def authorize_results(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
@@ -231,6 +234,7 @@ module Gori
         end)
       end
 
+      @[Tool("authorize_stop", gated: true, agent_action: true)]
       private def authorize_stop(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)

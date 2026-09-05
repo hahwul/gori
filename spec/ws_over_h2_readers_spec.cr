@@ -17,19 +17,6 @@ require "./support/memory_backend"
 
 private alias HeadCodec = Gori::Proxy::H2::HeadCodec
 
-private def with_store(&)
-  path = File.tempname("gori-wsh2", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A WebSocket captured over HTTP/2, projected the way `H2::Assembler#emit_request` /
 # `#emit_response` do it: `:method CONNECT`, the `:protocol` pseudo-header re-added by
 # `HeadCodec` as its `X-Gori-Protocol` marker line, and the origin's `200`. The head comes out
@@ -357,7 +344,7 @@ describe "MCP create_repeater seeded from a socket" do
   it "seeds frames from an h2 socket" do
     with_store do |store|
       detail = h2_ws_flow(store, [{"out", 1, "a".to_slice}, {"out", 1, "b".to_slice}])
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("create_repeater", JSON.parse(%({"flow_id": #{detail.row.id}})))
       r.is_error.should be_false
       j = JSON.parse(r.text)
@@ -369,7 +356,7 @@ describe "MCP create_repeater seeded from a socket" do
   it "still seeds frames from an h1 socket" do
     with_store do |store|
       detail = h1_ws_flow(store, [{"out", 1, "a".to_slice}, {"out", 1, "b".to_slice}])
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("create_repeater", JSON.parse(%({"flow_id": #{detail.row.id}})))
       r.is_error.should be_false
       j = JSON.parse(r.text)

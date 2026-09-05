@@ -26,19 +26,6 @@ end
 
 private alias A = Gori::Authorize
 
-private def with_store(&)
-  path = File.tempname("gori-cli-authorize", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A complete captured flow (request + response), the only kind Authorize replays.
 private def capture_flow(store, method = "GET", target = "/admin", host = "acme.test",
                          req_headers = "Cookie: session=abc\r\n") : Int64

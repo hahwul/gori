@@ -6,6 +6,7 @@ module Gori
   module MCP
     class Tools
       # Add a scope rule (validates + dedupes, like `gori run project scope add`).
+      @[Tool("add_scope_rule", gated: true, agent_action: true)]
       private def add_scope_rule(h) : Result
         kind = str(h, "kind").try(&.strip.downcase) || "include"
         return err("invalid 'kind' (expected #{Scope::KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
@@ -50,6 +51,7 @@ module Gori
       # Edit an existing rule in place (the TUI's `e` on the scope list). Without this, the only
       # way to fix a typo'd pattern was delete + re-add, which changes the rule's id and — for a
       # moment — leaves the scope gate without it.
+      @[Tool("update_scope_rule", gated: true, agent_action: true)]
       private def update_scope_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -111,6 +113,7 @@ module Gori
         end)
       end
 
+      @[Tool("delete_scope_rule", gated: true, agent_action: true)]
       private def delete_scope_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -132,6 +135,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true; j.field "blocks_all", blocks_all } })
       end
 
+      @[Tool("set_scope_enabled", gated: true, agent_action: true)]
       private def set_scope_enabled(h) : Result
         enabled = optional_bool_arg(h, "enabled")
         return err("missing required 'enabled' (true or false)", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
@@ -146,6 +150,7 @@ module Gori
       # from set_scope_enabled (the display lens): the sandbox BLOCKS every request the
       # scope does not allow — with no include rule it blocks ALL captured traffic
       # (reported as blocks_all).
+      @[Tool("set_sandbox", gated: true, agent_action: true)]
       private def set_sandbox(h) : Result
         enabled = optional_bool_arg(h, "enabled")
         return err("missing required 'enabled' (true or false)", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?

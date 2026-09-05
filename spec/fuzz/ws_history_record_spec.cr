@@ -27,19 +27,6 @@ private def result(request : Bytes, head : Bytes, matched : Bool = true) : Fuzz:
     head: head, body: "hi".to_slice, request: request)
 end
 
-private def with_store(&)
-  path = File.tempname("gori-fuzz-wshist", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe Gori::Fuzz::HistoryRecord do
   it "records an ordinary HTTP result" do
     with_store do |store|

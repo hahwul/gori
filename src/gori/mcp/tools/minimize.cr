@@ -32,6 +32,7 @@ module Gori
         "repeater_id"
       end
 
+      @[Tool("minimize_repeater", gated: true, agent_action: true)]
       private def minimize_repeater(h) : Result
         key = minimize_id_key(h)
         id = int(h, key)

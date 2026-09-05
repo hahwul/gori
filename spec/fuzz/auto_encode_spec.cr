@@ -12,13 +12,9 @@ private alias F = Gori::Fuzz
 # Pinned at the WIRE, off `Generator#each`: the request bytes each candidate would send
 # are the only statement that survives a refactor of where the encode is applied.
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 # Every candidate request this option set would send, as strings.
 private def wires(options : F::PlanOptions) : Array(String)
-  plan = F::Plan.build(options, ungated)
+  plan = F::Plan.build(options, ungated_outbound)
   out = [] of String
   plan.generator.each { |j| out << String.new(j.bytes) }
   out

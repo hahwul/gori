@@ -11,19 +11,6 @@ require "compress/gzip"
 # decision the issue called out — a capped body must be marked, a WebSocket flow has no HAR
 # representation, a flow with no response never becomes a response-less entry.
 
-private def with_store(&)
-  path = File.tempname("gori-export-har", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A real captured flow, written through the real Store writer: the export reads
 # `request_size`/`response_size` back out to recover the true wire body size, so a
 # hand-built FlowDetail would not exercise that path honestly.

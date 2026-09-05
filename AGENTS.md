@@ -110,10 +110,12 @@ bottleneck every time.
 | Task | Command |
 | --- | --- |
 | Build (debug, → `bin/gori`) | `just build` (`shards build`) |
-| Full suite | `just test` (`crystal spec`) |
+| Full suite | `just test` (`crystal spec --no-debug`; a crashing example's backtrace then lacks file:line — rerun that file with `just test-file`) |
+| Specs mirroring your change | `just test-changed` (`scripts/spec_for_changes.sh`, against `origin/main`; `just test-changed HEAD` for uncommitted edits only) — the 3–9 s pre-flight before the ~35 s suite compile |
 | One file or dir | `just test-file spec/store_spec.cr` |
 | One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import`, `test-mcp`, `test-settings` |
 | Format + lint check | `just check` (`crystal tool format --check src spec bench scripts`, then ameba) |
+| Lint diff gate | `just lint-gate` (`scripts/ameba_gate.sh`, fails when a changed file gained ameba findings) |
 | Format + autofix | `just fix` |
 | Type-check `bench/` | `just benchmark-check` (`scripts/bench_check.sh`) |
 | Proxy benchmark | `just benchmark` |
@@ -127,10 +129,12 @@ What CI gates, and what it does not:
   `scripts/bench_check.sh`, and `scripts/nix_shards_check.cr` (nix/shards.nix against shard.lock).
   Format, bench and the shards gate are real gates — `just test` touches none of them, so a green
   suite is not a green CI.
-- **Not gated:** ameba. It carries a large pre-existing backlog, mostly
-  `Metrics/CyclomaticComplexity` in the TUI (the reasoning is in `.ameba.yml` and in the
-  `# Still no ameba job` comment in `ci.yml`), so judge `just check` output on the files
-  *you* touched.
+- **Gated as a diff, on pull requests:** ameba. The full run is not a gate — it carries a
+  large pre-existing backlog, mostly `Metrics/CyclomaticComplexity` in the TUI (the
+  reasoning is in `.ameba.yml` and above the `lint-gate` job in `ci.yml`) — but
+  `scripts/ameba_gate.sh` fails when any file you changed has MORE findings than it had on
+  `main`, and a new file starts from zero. `just lint-gate` runs it locally; judge the full
+  `just check` output on the files *you* touched.
 - CI tests your branch, **not the merge result** — the `merge_group` trigger is inert until a
   merge queue is enabled. Re-run the build and the suite after every rebase.
 - ameba runs as the source file in `lib/ameba/bin/ameba.cr`, not a `bin/ameba` binary.
@@ -206,14 +210,17 @@ written.
 
 ### Before you commit
 
-- `just check`, `just test` and `just benchmark-check` green. If you touched `scripts/`, also
+- `just test-changed` while iterating, then `just check`, `just test` and `just benchmark-check` green. If you touched `scripts/`, also
   type-check it — nothing else compiles most of it (`crystal build --no-codegen scripts/seed_demo.cr`;
   `scripts/nix_shards_check.cr` is the exception, since `just check` and CI now run it).
 - **Format only the files you changed** (`crystal tool format <files>`). A whole-tree format
   rewrites 100+ unrelated files due to Crystal version drift.
 - Add or update specs mirroring the source you touched. `spec/spec_helper.cr` points
   `GORI_HOME` at a tempdir before requiring gori; engine specs that are not exercising the
-  scope gate use the `ungated_outbound` helper rather than inventing a decision.
+  scope gate use the `ungated_outbound` helper rather than inventing a decision. A
+  store-backed example uses its `with_store` (and MCP examples `tools_for`) rather than
+  pasting a copy — a file that genuinely needs a different shape keeps a file-private one,
+  which shadows the shared helper inside that file only.
 - A user-visible change gets its CHANGELOG line, in the shape above.
 - If your change makes a `DESIGN.md` section wrong, fix that section in the same PR, and
   append to the §7 decision log instead of quietly widening a principle to fit.

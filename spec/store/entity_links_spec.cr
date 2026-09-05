@@ -1,18 +1,5 @@
 require "../spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-links", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe "entity_links (V21)" do
   it "never replaces a pre-existing issue when allocating the next id" do
     with_store do |store|

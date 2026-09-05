@@ -3,19 +3,6 @@ require "../spec_helper"
 # The Probe `exec` custom rule kind (#818): the region goes to a command on stdin and its EXIT
 # CODE is the verdict. See `Probe::CustomRule#exec_evidence`.
 
-private def with_store(&)
-  path = File.tempname("gori-probe-exec", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_hook(body : String, &)
   dir = File.tempname("gori-probe-hook")
   Dir.mkdir_p(dir)

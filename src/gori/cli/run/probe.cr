@@ -20,6 +20,15 @@ module Gori
         "mode"    => ->(a : Array(String)) { cmd_probe_mode(a) },
       }
 
+      @[Subcommand("probe", help: [
+        {"probe [QL]", "Passively scan captured flows for issues (zero requests)"},
+        {"probe issues", "List persisted probe findings (the TUI Probe tab's list)"},
+        {"probe dismiss", "Mute a finding by id, or bulk by --code / --host"},
+        {"probe promote", "Promote a finding to a human-confirmed Issue"},
+        {"probe delete", "Hard-delete a finding (or --all)"},
+        {"probe rules", "List/enable/disable scan rules; add or delete custom ones"},
+        {"probe mode", "Get/set the scan mode (off, passive, active, aggressive)"},
+      ])]
       private def self.cmd_probe(args : Array(String)) : Nil
         if (sub = args.first?) && (run = PROBE_SUBCOMMANDS[sub]?)
           run.call(args[1..])

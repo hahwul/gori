@@ -35,7 +35,7 @@ describe "Gori::Verbs.register_jwt" do
     r["jwt.copy"].available?(in_jwt).should be_false
     r["jwt.copy"].available?(in_jwt(read: true)).should be_true
     r["jwt.copy"].chords.should eq([
-      Gori::Verb::Chord.new("y"), Gori::Verb::Chord.new("y", ctrl: true),
+      typed_chord("y"), typed_chord("y", ctrl: true),
     ])
     verb_intents(r, "jwt.copy").should eq([:jwt_copy])
 

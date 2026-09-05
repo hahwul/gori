@@ -12,6 +12,7 @@ module Gori
       # Comparer tab (src/gori/tui/comparer_view.cr). Reuses Repeater::MessageLines
       # (decode/split) and Repeater::Diff (LCS line diff), same engine and MAX_LINES
       # cap, so the comparison matches what a human sees in the Comparer tab.
+      @[Tool("compare_flows")]
       private def compare_flows(h) : Result
         id_a = int(h, "flow_id_a")
         return err(id_error(h, "flow_id_a"), "INVALID_ARGUMENT", field: "flow_id_a") unless id_a

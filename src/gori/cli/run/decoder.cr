@@ -5,6 +5,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("decoder", help: [
+        {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
+      ])]
       private def self.cmd_decoder(args : Array(String)) : Nil
         if args.first? == "list"
           cmd_decoder_list(args[1..])

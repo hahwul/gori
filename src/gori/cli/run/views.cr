@@ -11,6 +11,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("views", help: [
+        {"views", "Manage History views — named QL filters (list, add, rm, rename, set, scope)"},
+      ])]
       private def self.cmd_views(args : Array(String)) : Nil
         case sub = args.first?
         when "add"          then cmd_views_add(args[1..])

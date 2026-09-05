@@ -46,19 +46,6 @@ private def flow_detail(scheme : String, host : String, port : Int32, request_he
     request_body_truncated: request_body_truncated)
 end
 
-private def with_store(&)
-  path = File.tempname("gori-clirun", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe Gori::Repeater::FlowRequest do
   it "rewrites an absolute-form request line to origin-form, keeping the rest exact" do
     head = "GET http://example.com/a?b=1 HTTP/1.1\r\nHost: example.com\r\nX-T: 1\r\n\r\n"
@@ -1173,7 +1160,47 @@ end
 # gate and therefore covers every subcommand: an example that ran one command and found its stdout
 # clean would keep passing after somebody added a subcommand that logs, which is exactly how this
 # was missed the first time.
+# `dup(2)` is not in Crystal's LibC bindings; one line binds it for the helper below.
+lib LibC
+  fun dup(fd : Int) : Int
+end
+
+# Run the block with STDOUT pointed at /dev/null — for driving a `gori run` entry point whose
+# normal output is the help page, when the example is about a side effect and not the page.
+private def stdout_silenced(&)
+  STDOUT.flush
+  saved = LibC.dup(STDOUT.fd)
+  File.open(File::NULL, "w") { |null| STDOUT.reopen(null) }
+  yield
+ensure
+  STDOUT.flush
+  if saved
+    STDOUT.reopen(IO::FileDescriptor.new(saved))
+  end
+end
+
 describe "gori run — the root logger" do
+  it "writes to STDERR once the dispatch gate has run, whatever the subcommand" do
+    # Driven through the real entry point rather than the setup method: `-h` is the cheapest
+    # path that crosses the gate, and every other subcommand crosses the same one. The root
+    # logger is pointed somewhere else FIRST, so the assertion cannot pass on whatever an
+    # earlier file left behind, and put back after, so this file leaves nothing behind either.
+    root = ::Log.for("")
+    prev_backend, prev_level = root.backend, root.level
+    begin
+      ::Log.setup(:info, ::Log::MemoryBackend.new)
+      stdout_silenced { Gori::CLI::Run.dispatch(["-h"]) }
+      backend = ::Log.for("").backend.should be_a(::Log::IOBackend)
+      backend.io.should be(STDERR)
+    ensure
+      if prev_backend
+        ::Log.setup(prev_level, prev_backend)
+      else
+        ::Log.setup(:none)
+      end
+    end
+  end
+
   it "is pointed at STDERR before any subcommand runs" do
     src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "cli", "run.cr"))
     body = src.lines.reject(&.lstrip.starts_with?('#')).join('\n')

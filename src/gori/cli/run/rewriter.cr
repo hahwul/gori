@@ -2,6 +2,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("rewriter", help: [
+        {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview, extract, bindings)"},
+      ])]
       private def self.cmd_rewriter(args : Array(String)) : Nil
         case sub = args.first?
         when "add"          then cmd_rewriter_add(args[1..])

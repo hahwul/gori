@@ -9,19 +9,6 @@ require "./spec_helper"
 # "no `$` → the identical string, for every op and every match kind" property is pinned for
 # each combination rather than argued.
 
-private def with_store(&)
-  path = File.tempname("gori-bindings", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Install a binding layer for the duration of the block, then put back whatever was there.
 # `Env.layer` is a per-project global (like `Settings.project_env_vars`), so a spec that
 # leaked one would change what every later example thinks `$SESSION` means.

@@ -8,11 +8,7 @@ require "file_utils"
 private alias F = Gori::Fuzz
 
 # The builder takes the Outbound as an argument; this spec is not about the scope gate,
-# so use one ungated decision (mirrors spec/fuzz/plan_spec.cr).
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
+# so use one ungated_outbound decision (mirrors spec/fuzz/plan_spec.cr).
 describe Gori::Fuzz::Presets do
   it "enumerates every documented preset name, sorted and stable" do
     F::Presets.names.should eq(
@@ -155,7 +151,7 @@ describe "preset in a fuzz plan" do
       target: "http://example.com",
       sources: [F::PresetSource.new("sqli").as(F::PayloadSource)],
     )
-    plan = F::Plan.build(options, ungated)
+    plan = F::Plan.build(options, ungated_outbound)
     plan.total.should eq(F::Presets.load("sqli").size.to_i64)
   end
 
@@ -171,7 +167,7 @@ describe "preset in a fuzz plan" do
         F::InlineList.new(inline).as(F::PayloadSource),
       ],
     )
-    plan = F::Plan.build(options, ungated)
+    plan = F::Plan.build(options, ungated_outbound)
     plan.total.should eq(sqli * inline.size)
   end
 end

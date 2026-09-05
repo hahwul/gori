@@ -2,19 +2,6 @@ require "../spec_helper"
 
 # The MCP `decode` tool's input and output edges.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-decode", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def call(tools : Gori::MCP::Tools, args : String) : Gori::MCP::Tools::Result
   tools.call("decode", JSON.parse(args))
 end

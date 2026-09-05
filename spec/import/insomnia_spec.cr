@@ -2,19 +2,6 @@ require "../spec_helper"
 
 # src/gori/import/insomnia.cr — Insomnia v4 JSON export → response-less History flows.
 
-private def with_store(&)
-  path = File.tempname("gori-insomnia", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_export(json : String, ext = ".json", &)
   path = File.tempname("gori-insomnia", ext)
   File.write(path, json)

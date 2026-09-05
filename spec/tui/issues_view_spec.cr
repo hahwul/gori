@@ -3,19 +3,6 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
-private def tmp_store(&)
-  path = File.tempname("gori-fnd", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Four issues whose severity DESC / created_at DESC display order is deliberately NOT the
 # insert (id) order — the difference that separates this list from History's, where ids are
 # monotonic with the list.
@@ -31,7 +18,7 @@ end
 
 describe Gori::Tui::IssuesView do
   it "renders the severity-sorted list with badges + a status tag" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
       store.insert_issue("Missing header", Gori::Store::Severity::Low, "acme.test", nil)
 
@@ -51,7 +38,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "renders CVSS score in list row and CVSS chip in detail" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil,
         cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
 
@@ -77,7 +64,7 @@ describe Gori::Tui::IssuesView do
   # the severity badge — the title is drawn afterwards with its width floored at 0, so it never
   # repaints those cells and the damage stays.
   it "drops the list score rather than painting it over the badges on a narrow pane" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("SQLi", Gori::Store::Severity::Critical,
         "a-very-long-hostname-that-eats-the-row.example.test", nil, cvss: "9.8")
       view = IssuesView.new
@@ -102,7 +89,7 @@ describe Gori::Tui::IssuesView do
   # columns), and Frame.tag_chip clips to the SCREEN, not to the pane — so a chip that no
   # longer fits must drop its vector half rather than paint over the panel border.
   it "drops the vector half of the CVSS chip when the pane is too narrow for it" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil,
         cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
       view = IssuesView.new
@@ -122,7 +109,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
       view = IssuesView.new
       view.reload(store)
@@ -138,7 +125,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "renders an empty-state when there are no issues" do
-    tmp_store do |store|
+    with_store do |store|
       view = IssuesView.new
       view.reload(store)
       # 13 rows is the least this card fits in: TrafficEmptyState admits the FULL card only
@@ -155,7 +142,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "cycles triage status independently of severity" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_issue("IDOR", Gori::Store::Severity::High, "acme.test", nil)
       store.get_issue(id).not_nil!.status.should eq(Gori::Store::Status::Open)
 
@@ -176,7 +163,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "discards notes edits on cancel (^W) without persisting" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_issue("XSS", Gori::Store::Severity::Medium, nil, nil)
       view = IssuesView.new
       view.reload(store)
@@ -195,7 +182,7 @@ describe Gori::Tui::IssuesView do
   # no chord to press to see the second one. Still under test: that a line wider than the pane
   # is fully reachable, which is what the h-scroll pair existed to provide.
   it "wraps a long notes line instead of scrolling it sideways" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
       store.update_issue(id, notes: "HEAD" + ("." * 80) + "TAIL")
       view = IssuesView.new
@@ -219,7 +206,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "moves RELATED link selection with move_links (wheel/↑/↓)" do
-    tmp_store do |store|
+    with_store do |store|
       f1 = store.insert_issue("A", Gori::Store::Severity::Low, nil, nil)
       f2 = store.insert_issue("B", Gori::Store::Severity::Low, nil, nil)
       fid1 = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -242,7 +229,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "opens a detail, changes severity, and edits + saves notes" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
       view = IssuesView.new
       view.reload(store)
@@ -265,7 +252,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "filters the list and tab-completes a field without mangling a trailing-space query" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "api.test", nil)
       store.insert_issue("Missing header", Gori::Store::Severity::Low, "app.test", nil)
       view = IssuesView.new
@@ -285,7 +272,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "deletes an issue" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("temp", Gori::Store::Severity::Info, nil, nil)
       view = IssuesView.new
       view.reload(store)
@@ -297,7 +284,7 @@ describe Gori::Tui::IssuesView do
   it "re-anchors selection by issue id across reload (not by list index)" do
     # severity DESC: Critical then Low. Selecting Low then inserting High between
     # would leave index 1 on the new High if we only clamped — id-anchor keeps Low.
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("crit-row", Gori::Store::Severity::Critical, "h.test", nil)
       store.insert_issue("low-row", Gori::Store::Severity::Low, "h.test", nil)
       view = IssuesView.new
@@ -313,7 +300,7 @@ describe Gori::Tui::IssuesView do
 
   # --- multi-select marks ---------------------------------------------------
   it "marks the cursor row with `t` and steps down, so a run of `t` marks consecutive rows" do
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, ids|
         crit, high, _, _ = ids
         view.toggle_mark
@@ -332,7 +319,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "returns marked ids in DISPLAY order (severity sort), not id order" do
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, ids|
         crit, high, low, info = ids
         # Mark bottom-up: INFO(3), LOW(2), HIGH(1) — ids ascending would be crit,low,high,info.
@@ -349,7 +336,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "⇧T marks what the FILTER shows, and reports the rest of the set as hidden" do
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, ids|
         crit, high, _, _ = ids
         "severity:>=high".each_char { |c| view.query_insert(c) }
@@ -370,7 +357,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "⇧↓/⇧↑ extend and shrink a range from the anchor, sparing a `t` mark it sweeps over" do
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, ids|
         crit, high, low, info = ids
         # A deliberate `t` mark on LOW (row 2), then a range from the top.
@@ -394,7 +381,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "ends the range gesture on a plain move, handing back only what the gesture marked" do
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, ids|
         _, _, low, info = ids
         view.select_index(2)
@@ -420,7 +407,7 @@ describe Gori::Tui::IssuesView do
     # ⇧T marks are deliberate tags, exactly like `t` ones, so a range gesture owns only what
     # IT added — here, nothing. Without that rule, ⇧↓⇧↑ after ⇧T would silently un-mark rows
     # the user asked for, and a plain arrow afterwards would clear the whole set.
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, ids|
         crit, high, low, info = ids
         view.mark_all
@@ -434,7 +421,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "deletes every marked issue in one write and prunes the marks" do
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, ids|
         _, high, _, info = ids
         [0, 2].each { |i| view.select_index(i); view.toggle_mark } # CRIT + LOW
@@ -446,7 +433,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "closes the detail when the batch delete takes the issue it was showing" do
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, ids|
         crit, _, _, _ = ids
         view.open_detail(store).should be_true
@@ -458,7 +445,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "paints a marked row with a fuller gutter bar and shows a live mark chip" do
-    tmp_store do |store|
+    with_store do |store|
       marks_view(store) do |view, _|
         view.toggle_mark
         view.toggle_mark
@@ -472,7 +459,7 @@ describe Gori::Tui::IssuesView do
   end
 
   it "open_by_id reloads, selects, and opens detail for a known issue" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_issue("target", Gori::Store::Severity::High, "acme.test", nil)
       store.insert_issue("other", Gori::Store::Severity::Low, "acme.test", nil)
       view = IssuesView.new
@@ -527,7 +514,7 @@ describe Gori::Tui::IssuesView do
     end
 
     it "save_notes still reports success on a healthy store" do
-      tmp_store do |store|
+      with_store do |store|
         store.insert_issue("t", Gori::Store::Severity::Low, "h.test", nil)
         view = IssuesView.new
         view.reload(store)
@@ -546,15 +533,15 @@ describe "Issues verbs" do
   it "registers issue.create and the issues detail/export verbs in the registry" do
     reg = Gori::Verbs.registry
     keymap = Gori::Verb::Keymap.build(reg)
-    keymap.lookup(Gori::Verb::Chord.new("f", shift: true), Gori::Verb::Scope::Body).should eq("issue.create")
-    keymap.lookup(Gori::Verb::Chord.new("enter"), Gori::Verb::Scope::Issues).should eq("issues.open")
-    keymap.lookup(Gori::Verb::Chord.new("]"), Gori::Verb::Scope::IssuesDetail).should eq("issue.severity-up")
-    keymap.lookup(Gori::Verb::Chord.new("}"), Gori::Verb::Scope::IssuesDetail).should eq("issue.status-up")
-    keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
-    keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::IssuesDetail).should eq("issue.open-flow")
-    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::IssuesDetail).should eq("issue.repeater-flow")
+    keymap.lookup(typed_chord("f", shift: true), Gori::Verb::Scope::Body).should eq("issue.create")
+    keymap.lookup(typed_chord("enter"), Gori::Verb::Scope::Issues).should eq("issues.open")
+    keymap.lookup(typed_chord("]"), Gori::Verb::Scope::IssuesDetail).should eq("issue.severity-up")
+    keymap.lookup(typed_chord("}"), Gori::Verb::Scope::IssuesDetail).should eq("issue.status-up")
+    keymap.lookup(typed_chord("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
+    keymap.lookup(typed_chord("o"), Gori::Verb::Scope::IssuesDetail).should eq("issue.open-flow")
+    keymap.lookup(typed_chord("r"), Gori::Verb::Scope::IssuesDetail).should eq("issue.repeater-flow")
     # export is a chord-less Global palette verb; the FORMAT comes from a picker, not the id
     reg["issues.export"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
-    keymap.lookup(Gori::Verb::Chord.new("e", shift: true), Gori::Verb::Scope::Issues).should eq("issues.export-key")
+    keymap.lookup(typed_chord("e", shift: true), Gori::Verb::Scope::Issues).should eq("issues.export-key")
   end
 end

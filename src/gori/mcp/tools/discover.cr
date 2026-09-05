@@ -8,6 +8,7 @@ module Gori
     class Tools
       # --- discover (spider + directory brute-force) --------------------------
 
+      @[Tool("discover_start", gated: true, agent_action: true, env_refresh: true)]
       private def discover_start(h) : Result
         # ONE Outbound for the whole call: the builder derives the crawl-time ScopePolicy
         # from it (see Discover::Plan.resolve_policy) and the Layer-1 check below reads the
@@ -282,6 +283,7 @@ module Gori
         djob.persist_buf.clear # a store failure must not wedge the crawl or grow forever
       end
 
+      @[Tool("discover_status", gated: true)]
       private def discover_status(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)
@@ -316,6 +318,7 @@ module Gori
         end)
       end
 
+      @[Tool("discover_results", gated: true)]
       private def discover_results(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)
@@ -356,6 +359,7 @@ module Gori
         end
       end
 
+      @[Tool("discover_stop", gated: true, agent_action: true)]
       private def discover_stop(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)

@@ -3,12 +3,8 @@ require "../spec_helper"
 private alias F = Gori::Fuzz
 
 # The builder takes the Outbound as an argument (Layer-1 strictness differs per surface on
-# purpose), so the equivalence check uses one ungated decision for all three — the gate is
+# purpose), so the equivalence check uses one ungated_outbound decision for all three — the gate is
 # not what is under test here, `spec/outbound_spec.cr` owns that.
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 # Everything downstream of PlanOptions that a surface could get wrong, flattened so two
 # plans can be compared with a single `should eq`. `jobs` is the decisive field: the exact
 # request bytes, payloads and Sniper position of EVERY candidate the run would send.
@@ -28,7 +24,7 @@ private record Shape,
   jobs : Array({Int64, Array(String), Int32?, String})
 
 private def shape_of(options : F::PlanOptions) : Shape
-  plan = F::Plan.build(options, ungated)
+  plan = F::Plan.build(options, ungated_outbound)
   jobs = [] of {Int64, Array(String), Int32?, String}
   plan.generator.each { |j| jobs << {j.index, j.payloads, j.position, String.new(j.bytes)} }
   Shape.new(scheme: plan.origin.scheme, host: plan.origin.host, port: plan.origin.port,
@@ -144,7 +140,7 @@ describe Gori::Fuzz::Plan do
   end
 
   it "renders the payload into every marked position (sniper, one at a time)" do
-    plan = F::Plan.build(surface_cases[0].cli.call, ungated)
+    plan = F::Plan.build(surface_cases[0].cli.call, ungated_outbound)
     jobs = [] of F::Job
     plan.generator.each { |j| jobs << j }
     # Position 0 is the `q` query value; the other three keep their template defaults.
@@ -157,7 +153,7 @@ describe Gori::Fuzz::Plan do
   end
 
   it "applies the processing pipeline to every payload set" do
-    plan = F::Plan.build(surface_cases[1].cli.call, ungated)
+    plan = F::Plan.build(surface_cases[1].cli.call, ungated_outbound)
     payloads = [] of Array(String)
     plan.generator.each { |j| payloads << j.payloads }
     payloads.should eq([["<x", "<1"], ["<x", "<2"], ["<x", "<3"],
@@ -176,7 +172,7 @@ describe Gori::Fuzz::Plan do
         "GET /p?x=§v§&t=$A HTTP/1.1\r\nHost: t.test\r\n\r\n",
         default_target: "http://$A.test",
         sources: [F::InlineList.new(["1"])] of F::PayloadSource,
-        config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+        config: F::Config.new(keep_bodies: :none), verify: false), ungated_outbound)
       plan.origin.host.should eq("$B.test")
       jobs = [] of F::Job
       plan.generator.each { |j| jobs << j }
@@ -193,7 +189,7 @@ describe Gori::Fuzz::Plan do
       plan = F::Plan.build(F::PlanOptions.new(
         "GET /?x=§v§ HTTP/1.1\r\nHost: h\r\n\r\n", target: "https://$HOST",
         sources: [F::InlineList.new(["1"])] of F::PayloadSource,
-        config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+        config: F::Config.new(keep_bodies: :none), verify: false), ungated_outbound)
       {plan.origin.scheme, plan.origin.host, plan.origin.port}.should eq({"https", "api.test", 443})
     ensure
       Gori::Settings.env_vars = [] of {String, String}
@@ -204,12 +200,12 @@ describe Gori::Fuzz::Plan do
   it "takes the request target from the UNMARKED first line" do
     # The gate matches this string against the scope rules, so a §…§ byte must never
     # reach it — auto_mark would otherwise turn `/s?q=hi` into `/s?q=§hi§`.
-    plan = F::Plan.build(surface_cases[0].cli.call, ungated)
+    plan = F::Plan.build(surface_cases[0].cli.call, ungated_outbound)
     plan.request_target.should eq("/s?q=hi&p=2")
   end
 
   it "counts each --mark token's occurrences so a surface can warn about a broad token" do
-    plan = F::Plan.build(surface_cases[1].cli.call, ungated)
+    plan = F::Plan.build(surface_cases[1].cli.call, ungated_outbound)
     plan.mark_matches.should eq([{"VAL", 2}])
   end
 
@@ -219,7 +215,7 @@ describe Gori::Fuzz::Plan do
     plan = F::Plan.build(F::PlanOptions.new(
       "GET /?x=§v§ HTTP/1.1\r\nHost: t.test\r\n\r\n", target: "http://t.test",
       sources: [F::InlineList.new(["1"])] of F::PayloadSource, matcher: m,
-      config: F::Config.new(auto_calibrate: true, keep_bodies: :none), verify: false), ungated)
+      config: F::Config.new(auto_calibrate: true, keep_bodies: :none), verify: false), ungated_outbound)
     plan.matcher.auto_calibrate?.should be_true
     m.auto_calibrate?.should be_true # the caller's live instance, not a copy
   end
@@ -231,21 +227,21 @@ describe Gori::Fuzz::Plan do
     it "reports NoPositions for a template with no markers" do
       ex = expect_raises(F::PlanError) do
         F::Plan.build(F::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n",
-          target: "http://t.test", sources: payload), ungated)
+          target: "http://t.test", sources: payload), ungated_outbound)
       end
       ex.reason.should eq(F::PlanError::Reason::NoPositions)
     end
 
     it "reports NoTarget when neither an explicit nor a flow target is given" do
       ex = expect_raises(F::PlanError) do
-        F::Plan.build(F::PlanOptions.new(marked, sources: payload), ungated)
+        F::Plan.build(F::PlanOptions.new(marked, sources: payload), ungated_outbound)
       end
       ex.reason.should eq(F::PlanError::Reason::NoTarget)
     end
 
     it "reports BadTarget with the expanded string a surface quotes back" do
       ex = expect_raises(F::PlanError) do
-        F::Plan.build(F::PlanOptions.new(marked, target: "::::", sources: payload), ungated)
+        F::Plan.build(F::PlanOptions.new(marked, target: "::::", sources: payload), ungated_outbound)
       end
       ex.reason.should eq(F::PlanError::Reason::BadTarget)
       ex.detail.should eq("::::")
@@ -253,7 +249,7 @@ describe Gori::Fuzz::Plan do
 
     it "reports NoPayloads when no set was configured" do
       ex = expect_raises(F::PlanError) do
-        F::Plan.build(F::PlanOptions.new(marked, target: "http://t.test"), ungated)
+        F::Plan.build(F::PlanOptions.new(marked, target: "http://t.test"), ungated_outbound)
       end
       ex.reason.should eq(F::PlanError::Reason::NoPayloads)
     end
@@ -262,12 +258,12 @@ describe Gori::Fuzz::Plan do
       # The order every surface's error text inherits: with all three wrong, the
       # template's missing positions is what gets reported.
       ex = expect_raises(F::PlanError) do
-        F::Plan.build(F::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated)
+        F::Plan.build(F::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n"), ungated_outbound)
       end
       ex.reason.should eq(F::PlanError::Reason::NoPositions)
 
       ex = expect_raises(F::PlanError) do
-        F::Plan.build(F::PlanOptions.new(marked), ungated)
+        F::Plan.build(F::PlanOptions.new(marked), ungated_outbound)
       end
       ex.reason.should eq(F::PlanError::Reason::NoTarget)
     end
@@ -278,7 +274,7 @@ describe Gori::Fuzz::Plan do
   describe "race_count" do
     it "builds with no §…§ markers and no payload sources at all" do
       plan = F::Plan.build(F::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n",
-        target: "http://t.test", config: F::Config.new(race_count: 10)), ungated)
+        target: "http://t.test", config: F::Config.new(race_count: 10)), ungated_outbound)
       plan.template.position_count.should eq(0)
       String.new(plan.generator.baseline_request).should contain("GET / HTTP/1.1\r\n")
     end
@@ -286,7 +282,7 @@ describe Gori::Fuzz::Plan do
     it "refuses a race_count below 2" do
       ex = expect_raises(F::PlanError, /race_count must be at least 2/) do
         F::Plan.build(F::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n",
-          target: "http://t.test", config: F::Config.new(race_count: 1)), ungated)
+          target: "http://t.test", config: F::Config.new(race_count: 1)), ungated_outbound)
       end
       # A PlanError (not a bare Gori::Error) so the CLI's `rescue Fuzz::PlanError` around
       # Plan.build catches it — closing outbound and prefixing the message — like every other
@@ -310,13 +306,13 @@ describe Gori::Fuzz::Plan do
     it "sends the operator's declared Content-Length when the knob is off" do
       plan = F::Plan.build(F::PlanOptions.new(desync_tpl, target: "http://t.test",
         sources: [F::InlineList.new(["aa"])] of F::PayloadSource,
-        config: F::Config.new(update_content_length: false)), ungated)
+        config: F::Config.new(update_content_length: false)), ungated_outbound)
       String.new(plan.generator.baseline_request).should contain("Content-Length: 5\r\n")
     end
 
     it "still recomputes it by default (the knob is opt-OUT, not a behaviour change)" do
       plan = F::Plan.build(F::PlanOptions.new(desync_tpl, target: "http://t.test",
-        sources: [F::InlineList.new(["aa"])] of F::PayloadSource), ungated)
+        sources: [F::InlineList.new(["aa"])] of F::PayloadSource), ungated_outbound)
       String.new(plan.generator.baseline_request).should contain("Content-Length: 10\r\n")
     end
 
@@ -325,7 +321,7 @@ describe Gori::Fuzz::Plan do
     # discovered per request, so a surface can name the flag before the sweep starts.
     it "flags a template whose declared CL already disagrees with its own body" do
       F::Plan.build(F::PlanOptions.new(desync_tpl, target: "http://t.test",
-        sources: [F::InlineList.new(["aa"])] of F::PayloadSource), ungated)
+        sources: [F::InlineList.new(["aa"])] of F::PayloadSource), ungated_outbound)
         .rewrites_content_length?.should be_true
     end
 
@@ -338,11 +334,11 @@ describe Gori::Fuzz::Plan do
                 "Content-Length: 99\r\n\r\n1\r\n\u00A7S\u00A7\r\n0\r\n\r\n"
       src = [F::InlineList.new(["a"])] of F::PayloadSource
       {correct, bodiless, chunked}.each do |tpl|
-        F::Plan.build(F::PlanOptions.new(tpl, target: "http://t.test", sources: src), ungated)
+        F::Plan.build(F::PlanOptions.new(tpl, target: "http://t.test", sources: src), ungated_outbound)
           .rewrites_content_length?.should be_false
       end
       F::Plan.build(F::PlanOptions.new(desync_tpl, target: "http://t.test", sources: src,
-        config: F::Config.new(update_content_length: false)), ungated)
+        config: F::Config.new(update_content_length: false)), ungated_outbound)
         .rewrites_content_length?.should be_false
     end
   end
@@ -364,7 +360,7 @@ describe Gori::Fuzz::Plan do
 
     it "frames a body the template declared no length for" do
       plan = F::Plan.build(F::PlanOptions.new(unframed_tpl, target: "http://t.test",
-        sources: src), ungated)
+        sources: src), ungated_outbound)
       String.new(plan.generator.baseline_request).should contain("Content-Length: 9\r\n")
     end
 
@@ -373,12 +369,12 @@ describe Gori::Fuzz::Plan do
     # none — so the fact is computed off the no-add rendering, never off `baseline_request`.
     it "does not report an added header as a rewrite of one the operator authored" do
       F::Plan.build(F::PlanOptions.new(unframed_tpl, target: "http://t.test", sources: src),
-        ungated).rewrites_content_length?.should be_false
+        ungated_outbound).rewrites_content_length?.should be_false
     end
 
     it "reports an unframed body when the knob is off, and leaves the request unframed" do
       plan = F::Plan.build(F::PlanOptions.new(unframed_tpl, target: "http://t.test",
-        sources: src, config: F::Config.new(update_content_length: false)), ungated)
+        sources: src, config: F::Config.new(update_content_length: false)), ungated_outbound)
       plan.unframed_body?.should be_true
       String.new(plan.generator.baseline_request).should_not contain("Content-Length")
     end
@@ -398,12 +394,12 @@ describe Gori::Fuzz::Plan do
                  "1\r\n§S§\r\n0\r\n\r\n"
       bodiless = "GET /z?q=§S§ HTTP/1.1\r\nHost: t.test\r\n\r\n"
       F::Plan.build(F::PlanOptions.new(unframed_tpl, target: "http://t.test", sources: src),
-        ungated).unframed_body?.should be_false
+        ungated_outbound).unframed_body?.should be_false
       # …and the self-framed / bodiless shapes stay quiet even under the knob that would
       # otherwise leave a body unframed, because none of them has an unframed body.
       {declared, chunked, te_multi, bodiless}.each do |tpl|
         F::Plan.build(F::PlanOptions.new(tpl, target: "http://t.test", sources: src,
-          config: F::Config.new(update_content_length: false)), ungated)
+          config: F::Config.new(update_content_length: false)), ungated_outbound)
           .unframed_body?.should be_false
       end
     end
@@ -448,7 +444,7 @@ describe "Gori::Fuzz::Plan --mark over bytes" do
   plan_for = ->(marks : Array(String)) do
     F::Plan.build(F::PlanOptions.new(raw, evidence: true, target: "http://t.test",
       marks: marks, sources: [F::InlineList.new(["P"])] of F::PayloadSource,
-      config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+      config: F::Config.new(keep_bodies: :none), verify: false), ungated_outbound)
   end
 
   it "a SINGLE-character --mark leaves every byte it was not asked to wrap alone" do
@@ -509,14 +505,14 @@ describe "Gori::Fuzz::Plan --mark over bytes" do
            "Content-Length: #{utf8_body.bytesize}\r\n\r\n#{utf8_body}"
     plan = F::Plan.build(F::PlanOptions.new(utf8, evidence: true, target: "http://t.test",
       marks: ["v"], sources: [F::InlineList.new(["P"])] of F::PayloadSource,
-      config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+      config: F::Config.new(keep_bodies: :none), verify: false), ungated_outbound)
     plan.template.render(plan.template.default_payloads).to_a.should eq(utf8.to_slice.to_a)
     String.new(plan.generator.baseline_raw).should contain("name=관리자🐿️")
 
     korean = "GET /?q=관리자 HTTP/1.1\r\nHost: t.test\r\n\r\n"
     kplan = F::Plan.build(F::PlanOptions.new(korean, evidence: true, target: "http://t.test",
       marks: ["관"], sources: [F::InlineList.new(["P"])] of F::PayloadSource,
-      config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+      config: F::Config.new(keep_bodies: :none), verify: false), ungated_outbound)
     kplan.mark_matches.should eq([{"관", 1}])
     String.new(kplan.template.render(["P"])).should contain("q=P리자")
   end
@@ -528,7 +524,7 @@ private def mark_plan(raw : String, marks : Array(String), auto : Bool = false) 
   F::Plan.build(F::PlanOptions.new(raw, evidence: true, target: "http://t.test",
     auto_mark: auto, marks: marks,
     sources: [F::InlineList.new(["P"])] of F::PayloadSource,
-    config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+    config: F::Config.new(keep_bodies: :none), verify: false), ungated_outbound)
 end
 
 # IDEMPOTENCE, on the same `--mark` step.

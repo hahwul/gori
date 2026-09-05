@@ -44,6 +44,7 @@ require "../export/go_http"
 require "../export/httpie"
 require "../export/csrf_poc"
 require "./output"
+require "./run/subcommand"
 require "./run/interrupt"
 require "./run/capture"
 require "./run/history"
@@ -58,23 +59,23 @@ require "./run/fuzz_saved"
 require "./run/mine"
 require "./run/sequence"
 require "./run/authorize"
+require "./run/session"
 require "./run/discover"
 require "./run/oast"
-require "./run/probe"
-require "./run/notes"
 require "./run/sitemap"
 require "./run/import"
+require "./run/probe"
+require "./run/notes"
 require "./run/issues"
 require "./run/links"
 require "./run/jwt"
 require "./run/cookie"
 require "./run/decoder"
-require "./run/rewriter"
 require "./run/grpc"
+require "./run/rewriter"
 require "./run/colormarker"
 require "./run/views"
 require "./run/project"
-require "./run/session"
 
 module Gori
   module CLI
@@ -92,8 +93,8 @@ module Gori
         # `gori run … | head` (or any reader that closes early) breaks the STDOUT
         # pipe; a well-behaved Unix filter exits quietly on EPIPE rather than
         # dumping an IO::Error backtrace. Re-raise anything that isn't a broken pipe.
-        # (Kept as a thin wrapper so the subcommand `case` stays under the
-        # cyclomatic-complexity bar — see dispatch_subcommand.)
+        # (Kept as a thin wrapper around the generated dispatch_subcommand; see the
+        # Subcommand registry below.)
         raise ex unless ex.os_error == Errno::EPIPE
         exit 0
       end
@@ -116,122 +117,64 @@ module Gori
         # case is the behaviour that shipped.
       end
 
-      private def self.dispatch_subcommand(args : Array(String)) : Nil
-        Settings.load # global env vars (and other persisted defaults) for all subcommands
-        # No args / -h / --help all print help. `args[1..]` is only reached in the named
-        # branches, where args[0] matched a subcommand string (so args is non-empty and the
-        # tail slice is safe). Folding the empty case into this `when` keeps the dispatch
-        # under the cyclomatic-complexity bar; the rest of the subcommands live in
-        # dispatch_subcommand2 for the same reason (one `case` would overflow the bar).
-        case sub = args.first?
-        when nil, "-h", "--help" then print_help
-        when "capture"           then cmd_capture(args[1..])
-        when "history", "ls"     then cmd_history(args[1..])
-        when "show"              then cmd_show(args[1..])
-        when "repeater"          then cmd_repeater(args[1..])
-        when "fuzz"              then cmd_fuzz(args[1..])
-        when "mine"              then cmd_mine(args[1..])
-        when "sequence", "seq"   then cmd_sequence(args[1..])
-        else                          dispatch_subcommand2(sub, args[1..])
-        end
-      end
+      # --- Subcommand registry ----------------------------------------------------
+      #
+      # Generated from the `@[Subcommand]` annotations (run/subcommand.cr) on the `cmd_*`
+      # entry points, once every `run/*.cr` reopen has been parsed: the name → handler
+      # dispatch and the `gori run -h` table both derive from the same declarations, so a
+      # subcommand is declared once, next to its body, and adding one touches only its own
+      # file. Running order is definition order, which is the `require "./run/…"` order at
+      # the top of this file — that list IS the help page's order.
+      macro finished
+        {% cmds = @type.class.methods.select(&.annotation(Subcommand)) %}
+        {% for m in cmds %}
+          {% anns = m.annotations(Subcommand) %}
+          {% if anns.size != 1 %}
+            {% raise "#{m.name}: an entry point carries exactly one @[Subcommand] (found #{anns.size})" %}
+          {% end %}
+          {% ann = anns[0] %}
+          {% if ann.args.empty? || !ann.args.all?(&.is_a?(StringLiteral)) %}
+            {% raise "#{m.name}: @[Subcommand] takes the name and its aliases as string arguments" %}
+          {% end %}
+          {% for key in ann.named_args.keys %}
+            {% unless key.stringify == "help" %}
+              {% raise "#{m.name}: unknown @[Subcommand] option '#{key}' — only help: is accepted" %}
+            {% end %}
+          {% end %}
+          {% if !ann[:help].is_a?(ArrayLiteral) || ann[:help].empty? %}
+            {% raise "#{m.name}: @[Subcommand] needs help: [{name column, description}, …] with at least one row" %}
+          {% end %}
+        {% end %}
 
-      # The second half of the subcommand `case` (split from dispatch_subcommand so each
-      # method stays under the cyclomatic-complexity bar). `sub` is non-nil here — the
-      # empty/-h/--help case is handled above.
-      private def self.dispatch_subcommand2(sub : String?, rest : Array(String)) : Nil
-        case sub
-        when "probe"       then cmd_probe(rest)
-        when "discover"    then cmd_discover(rest)
-        when "oast"        then cmd_oast(rest)
-        when "sitemap"     then cmd_sitemap(rest)
-        when "import"      then cmd_import(rest)
-        when "notes"       then cmd_notes(rest)
-        when "issues"      then cmd_issues(rest)
-        when "jwt"         then cmd_jwt(rest)
-        when "cookie"      then cmd_cookie(rest)
-        when "decoder"     then cmd_decoder(rest)
-        when "rewriter"    then cmd_rewriter(rest)
-        when "grpc"        then cmd_grpc(rest)
-        when "colormarker" then cmd_colormarker(rest)
-        when "project"     then cmd_project(rest)
-        else                    dispatch_subcommand3(sub, rest)
+        private def self.dispatch_subcommand(args : Array(String)) : Nil
+          Settings.load # global env vars (and other persisted defaults) for all subcommands
+          # No args / -h / --help all print help. `args[1..]` is only reached in the named
+          # branches, where args[0] matched a subcommand string (so args is non-empty and the
+          # tail slice is safe).
+          case sub = args.first?
+          when nil, "-h", "--help" then print_help
+          {% for m in cmds %}
+            when {{ m.annotation(Subcommand).args.splat }} then {{ m.name }}(args[1..])
+          {% end %}
+          else
+            STDERR.puts "gori run: unknown subcommand '#{sub}'"
+            print_help
+            exit 1
+          end
         end
-      end
 
-      # The third slice of the subcommand `case` (same complexity-bar reason as
-      # dispatch_subcommand2). `sub` is still non-nil here.
-      private def self.dispatch_subcommand3(sub : String?, rest : Array(String)) : Nil
-        case sub
-        when "compare"   then cmd_compare(rest)
-        when "diff"      then cmd_diff(rest)
-        when "intercept" then cmd_intercept(rest)
-        when "links"     then cmd_links(rest)
-        when "authorize" then cmd_authorize(rest)
-        when "session"   then cmd_session(rest)
-        when "views"     then cmd_views(rest)
-        else
-          STDERR.puts "gori run: unknown subcommand '#{sub}'"
-          print_help
-          exit 1
-        end
+        # `gori run -h` rows: {name column, description}, one or more per subcommand.
+        SUBCOMMANDS = [
+          {% for m in cmds %}
+            {% for row in m.annotation(Subcommand)[:help] %}
+              {{ row }},
+            {% end %}
+          {% end %}
+        ]
       end
 
       # Left column width for `gori run -h` subcommand names (longest: "project host-override").
       SUBCMD_COL_W = 22
-
-      SUBCOMMANDS = [
-        {"capture", "Start the proxy and stream captured flows to STDOUT"},
-        {"history (ls)", "List / QL-query captured flows"},
-        {"history delete", "Hard-delete one captured flow by id, or every match of -q QL (needs --yes)"},
-        {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
-        {"show <id>", "Print a flow's request/response (text, json, raw bytes, HAR, curl/python/fetch/go/httpie, or a CSRF PoC)"},
-        {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
-        {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
-        {"repeater move", "Rearrange the sub-tab strip: move a session to a tab number (--to N) or one place (--up/--down)"},
-        {"repeater delete", "Delete saved repeater sessions by id (needs --yes)"},
-        {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},
-        {"diff", "Retest report: diff two projects at endpoint scale (--from/--to, text/json/md)"},
-        {"intercept", "Inspect/drive a live TUI's paused intercept queue (list, forward, drop, edit, …)"},
-        {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
-        {"fuzz save/list/show", "Persist and inspect complete fuzz-run results (delete removes one)"},
-        {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
-        {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
-        {"authorize [<id>…]", "Replay requests under several identities to find broken access control"},
-        {"session", "Manage session slots — named identities a send goes out as (list, show, add, from-flow, edit, rm, baseline)"},
-        {"discover", "Spider + directory brute-force a target; findings feed the Sitemap"},
-        {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
-        {"oast providers", "Manage saved OAST providers (list, add, update, enable/disable, delete)"},
-        {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
-        {"sitemap tag", "Pin/clear/list a free-text memo on a sitemap path"},
-        {"import", "Import flows from a HAR, URL list, or OpenAPI spec into History"},
-        {"probe [QL]", "Passively scan captured flows for issues (zero requests)"},
-        {"probe issues", "List persisted probe findings (the TUI Probe tab's list)"},
-        {"probe dismiss", "Mute a finding by id, or bulk by --code / --host"},
-        {"probe promote", "Promote a finding to a human-confirmed Issue"},
-        {"probe delete", "Hard-delete a finding (or --all)"},
-        {"probe rules", "List/enable/disable scan rules; add or delete custom ones"},
-        {"probe mode", "Get/set the scan mode (off, passive, active, aggressive)"},
-        {"notes [<n>]", "Read or write the project's notes (list, <n>, --all, create, delete)"},
-        {"issues", "List, export, create, update, or delete issues (text, json, markdown)"},
-        {"links", "List/add/delete an issue's or note's evidence links"},
-        {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
-        {"cookie [<cookie>]", "Decode, verify, brute-force, or forge a Flask/Rack/Django session cookie"},
-        {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
-        {"grpc reflect <url>", "Fetch a gRPC target's .proto descriptors by server reflection (ACTIVE) and cache them"},
-        {"grpc schema", "What .proto schema this project loaded, and where each piece came from"},
-        {"grpc forget", "Drop a cached reflection result (by target, or --all)"},
-        {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview, extract, bindings)"},
-        {"colormarker", "Manage History row-colour rules (list, add, rm, enable/disable, move, preview)"},
-        {"views", "Manage History views — named QL filters (list, add, rm, rename, set, scope)"},
-        {"project [list]", "List projects holding captured traffic (--all for every one)"},
-        {"project create", "Create (or reopen) a project by name"},
-        {"project delete", "Delete a project and everything captured in it"},
-        {"project scope", "Manage scope rules (list, add, update, delete, enable/disable)"},
-        {"project sandbox", "Get/set the hard-containment sandbox gate (status, on, off)"},
-        {"project env", "Manage project env vars ($KEY substitution)"},
-        {"project host-override", "Manage host overrides (list, add, update, delete)"},
-      ]
 
       private def self.print_help : Nil
         puts "gori run — non-interactive CLI (script the proxy / history / repeater)"

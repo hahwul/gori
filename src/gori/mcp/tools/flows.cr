@@ -8,6 +8,7 @@ module Gori
     class Tools
       # --- read tools ---------------------------------------------------------
 
+      @[Tool("list_history")]
       private def list_history(h) : Result
         limit = clamp(optional_int_arg(h, "limit"), 50, 500)
         before_id = optional_int_arg(h, "before_id")
@@ -113,6 +114,7 @@ module Gori
       # max id SCANNED this page (NOT the max matched id), so source/kind filters never make
       # the agent re-scan or skip; on an empty page it echoes the input `since` (never 0,
       # never max-of-empty) so a no-new-events poll keeps the caller's place.
+      @[Tool("list_events")]
       private def list_events(h) : Result
         since = optional_int_arg(h, "since") || 0_i64
         limit = clamp(optional_int_arg(h, "limit"), 100, 500)
@@ -147,6 +149,7 @@ module Gori
         end)
       end
 
+      @[Tool("get_flow")]
       private def get_flow(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -170,6 +173,7 @@ module Gori
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit))
       end
 
+      @[Tool("get_response_body_chunk")]
       private def get_response_body_chunk(h) : Result
         options = body_chunk_options(h)
 
@@ -302,6 +306,7 @@ module Gori
 
       # Hard-delete ONE captured flow (the TUI History tab's delete). Single and explicit,
       # so no extra confirmation — unlike clear_history.
+      @[Tool("delete_flow", gated: true, agent_action: true)]
       private def delete_flow(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -315,6 +320,7 @@ module Gori
       # Wipe EVERY captured flow. The TUI puts a danger confirm in front of this; here
       # confirm:true is that gate. Without it we report the count and refuse, so a
       # mis-issued call cannot silently empty a capture session.
+      @[Tool("clear_history", gated: true, agent_action: true)]
       private def clear_history(h) : Result
         n = store.count?
         return busy("history NOT cleared (store busy); every flow is still there") unless n

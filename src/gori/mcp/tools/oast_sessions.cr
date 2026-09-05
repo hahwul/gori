@@ -17,6 +17,7 @@ module Gori
       #
       # Nothing here resumes on its own. Binding a project starts no listener (P4) — an agent
       # asks for a session back explicitly, exactly as the operator presses `r`.
+      @[Tool("list_oast_sessions")]
       private def list_oast_sessions(h) : Result
         sessions = Oast::Sessions.list(store)
         # Which of them THIS process is polling, and under which ephemeral handle — the
@@ -52,6 +53,7 @@ module Gori
         end)
       end
 
+      @[Tool("oast_resume", gated: true, agent_action: true)]
       private def oast_resume(h) : Result
         row = oast_session_row(h)
         return row if row.is_a?(Result)
@@ -94,6 +96,7 @@ module Gori
 
       # Deregister the session's SERVER-side state. The row and every callback it collected
       # stay — this releases the listener, not the evidence.
+      @[Tool("oast_release", gated: true, agent_action: true)]
       private def oast_release(h) : Result
         row = oast_session_row(h)
         return row if row.is_a?(Result)

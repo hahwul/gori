@@ -36,9 +36,9 @@ private def with_tls_connect_proxy(mode : Symbol = :ok, cn : String = "localhost
   stop = Channel(Nil).new
   spawn do
     while raw = server.accept?
-      # Bound to a local so the spawn does not capture the loop variable (AGENTS.md / server.cr).
-      conn = raw
-      spawn { serve_tls_connect_proxy(conn, ctx, mode, seen, stop, relay_to) }
+      # The call form: `spawn` evaluates its arguments before the fiber starts, so this
+      # iteration's socket is what the fiber serves (a block would capture the loop variable).
+      spawn serve_tls_connect_proxy(raw, ctx, mode, seen, stop, relay_to)
     end
   end
   begin
@@ -105,8 +105,7 @@ private def start_tls_origin(&)
   server = TCPServer.new("127.0.0.1", 0)
   spawn do
     while raw = server.accept?
-      conn = raw
-      spawn do
+      spawn_with(raw) do |conn|
         # A read timeout so a failing example cannot leave this fiber blocked on `gets` forever.
         conn.read_timeout = 5.seconds
         ssl = OpenSSL::SSL::Socket::Server.new(conn, ctx, sync_close: true)

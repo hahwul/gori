@@ -2,19 +2,6 @@ require "../../spec_helper"
 
 # --- file-local harness (mirrors spec/probe_spec.cr's private with_store/capture_flow/analyze) ---
 
-private def with_store(&)
-  path = File.tempname("gori-domxss", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Insert a flow + response and return its full FlowDetail (what the analyzer feeds Passive).
 private def capture_flow(store, resp_head : String = "HTTP/1.1 200 OK\r\n\r\n", *,
                          scheme = "https", host = "acme.test", target = "/", status = 200,

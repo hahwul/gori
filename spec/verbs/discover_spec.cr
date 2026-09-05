@@ -19,9 +19,9 @@ describe "Gori::Verbs.register_discover" do
     # Plain `p` is handled by the controller body; the verb exists for the space menu.
     r["discover.pause"].chords.should be_empty
     r["discover.pause"].menu_key.should eq('p')
-    r["app.palette"].chords.should eq([Gori::Verb::Chord.new("p", ctrl: true)])
-    r["discover.run"].chords.should eq([Gori::Verb::Chord.new("r", ctrl: true)])
-    r["discover.stop"].chords.should eq([Gori::Verb::Chord.new("x", ctrl: true)])
+    r["app.palette"].chords.should eq([typed_chord("p", ctrl: true)])
+    r["discover.run"].chords.should eq([typed_chord("r", ctrl: true)])
+    r["discover.stop"].chords.should eq([typed_chord("x", ctrl: true)])
   end
 
   it "escapes back to the Sitemap/Discover strip, not the tab bar" do

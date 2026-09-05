@@ -7,23 +7,6 @@ require "../spec_helper"
 # create_oast_provider"), and the refusal named the rejected value without naming the legal
 # ones — so a model that guessed wrong learned nothing from either half and guessed again.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpoastkind", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-end
-
 private def enum_of(tools, tool_name : String, arg : String) : Array(String)?
   listing = JSON.parse(JSON.build { |j| tools.list(j) }).as_a
   t = listing.find { |x| x["name"] == tool_name }.not_nil!

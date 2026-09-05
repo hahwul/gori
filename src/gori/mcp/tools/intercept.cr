@@ -20,6 +20,7 @@ module Gori
         nil
       end
 
+      @[Tool("intercept_list")]
       private def intercept_list(h) : Result
         include_sensitive = bool_arg(h, "include_sensitive", false)
         bridge = intercept_bridge_state
@@ -56,6 +57,7 @@ module Gori
         end)
       end
 
+      @[Tool("intercept_get")]
       private def intercept_get(h) : Result
         item_id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless item_id
@@ -99,18 +101,21 @@ module Gori
         hb > 0 && (Time.utc.to_unix_ms - hb) < INTERCEPT_LIVE_MS
       end
 
+      @[Tool("intercept_forward", gated: true, agent_action: true)]
       private def intercept_forward(h) : Result
         id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
         enqueue_intercept("forward", item_id: id)
       end
 
+      @[Tool("intercept_drop", gated: true, agent_action: true)]
       private def intercept_drop(h) : Result
         id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
         enqueue_intercept("drop", item_id: id)
       end
 
+      @[Tool("intercept_forward_edit", gated: true, agent_action: true)]
       private def intercept_forward_edit(h) : Result
         id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
@@ -205,12 +210,14 @@ module Gori
         RequestBuilder.normalize_raw(raw)
       end
 
+      @[Tool("intercept_toggle", gated: true, agent_action: true)]
       private def intercept_toggle(h) : Result
         want = optional_bool_arg(h, "enable")
         return err("missing required 'enable' (true or false)", "INVALID_ARGUMENT", field: "enable") if want.nil?
         enqueue_intercept("toggle", arg: want ? "true" : "false")
       end
 
+      @[Tool("intercept_set_filter", gated: true, agent_action: true)]
       private def intercept_set_filter(h) : Result
         q = str(h, "query")
         return err("missing required 'query' (empty string to clear)", "INVALID_ARGUMENT", field: "query") if q.nil?
@@ -226,6 +233,7 @@ module Gori
         enqueue_intercept("set_filter", arg: q)
       end
 
+      @[Tool("intercept_set_direction", gated: true, agent_action: true)]
       private def intercept_set_direction(h) : Result
         dir = str(h, "direction").try(&.downcase)
         unless dir && INTERCEPT_DIRECTIONS.includes?(dir)

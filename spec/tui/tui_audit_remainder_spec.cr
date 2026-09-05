@@ -8,19 +8,6 @@ include Gori::Tui
 # preview-focus soft-lock after a resize collapses the pane, and the two missing
 # width clamps. Each `it` here failed before its fix and passes after.
 
-private def tmp_store(&)
-  path = File.tempname("gori-audit", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def add_flow(store, method, target, host = "h.test")
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
@@ -42,7 +29,7 @@ describe "TUI audit remainder — IssuesView scroll clamp" do
     prev = Gori::Settings.issues_preview
     begin
       Gori::Settings.issues_preview = false # keep list_split whole: this asserts on list_h
-      tmp_store do |store|
+      with_store do |store|
         60.times { |i| store.insert_issue("issue #{i}", Gori::Store::Severity::Medium, "h.test", nil) }
         view = IssuesView.new
         view.reload(store)
@@ -74,7 +61,7 @@ describe "TUI audit remainder — HistoryView cursor on an emptied list" do
   # silent no-op, and (off-tab, where nothing re-clamps) a reload that re-targets the
   # cursor onto a row the operator never chose.
   it "does not walk the cursor past the end when inserts land on a cleared (empty) list" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a")
       add_flow(store, "GET", "/b")
       view = HistoryView.new
@@ -108,7 +95,7 @@ describe "TUI audit remainder — preview focus after a collapsing resize" do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store, "GET", "/a")
         add_flow(store, "GET", "/b")
         add_flow(store, "GET", "/c")
@@ -135,7 +122,7 @@ describe "TUI audit remainder — preview focus after a collapsing resize" do
     prev = Gori::Settings.issues_preview
     begin
       Gori::Settings.issues_preview = true
-      tmp_store do |store|
+      with_store do |store|
         3.times { |i| store.insert_issue("issue #{i}", Gori::Store::Severity::Medium, "h.test", nil) }
         view = IssuesView.new
         view.reload(store)
@@ -162,7 +149,7 @@ describe "TUI audit remainder — missing width clamps" do
   # was drawn with no `width:` at all, so its limit was the whole screen. RFC 9110 permits
   # any token and the parser caps nothing, so a long method ran through PROTO/HOST/PATH.
   it "clamps an over-long METHOD token to its 8-column cell" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "X-CUSTOM-METHOD", "/vc")
       view = HistoryView.new
       view.reload(store)
@@ -191,7 +178,7 @@ describe "TUI audit remainder — missing width clamps" do
   # the only row shape that can lose it. Flush against PROTO the two cells read as one token
   # (`PROPFINDHTTPS`), which is why `proto_x` is +25 and not +24.
   it "renders an exactly-8-character method in full, without eating PROTO" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "PROPFIND", "/dav")
       view = HistoryView.new
       view.reload(store)
@@ -211,7 +198,7 @@ describe "TUI audit remainder — missing width clamps" do
   # with no punycode/IDNA anywhere on the path, so a wide-glyph host started too far right,
   # painted past the card's border, and over-budgeted the title underneath itself.
   it "right-aligns an IDN host by display columns, not characters" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("cross-site scripting in the search parameter",
         Gori::Store::Severity::High, "日本語.test", nil)
       view = IssuesView.new

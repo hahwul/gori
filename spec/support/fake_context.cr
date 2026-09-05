@@ -42,108 +42,8 @@ class FakeExecContext < Gori::Verb::ExecContext
     @calls << Call.new(name, args.map(&.to_s).to_a)
   end
 
-  def quit! : Nil
-    rec(:quit!)
-  end
-
-  def leave_project : Nil
-    rec(:leave_project)
-  end
-
-  def status(message : String) : Nil
-    rec(:status, message)
-  end
-
-  def open_palette : Nil
-    rec(:open_palette)
-  end
-
-  def open_notifications : Nil
-    rec(:open_notifications)
-  end
-
-  def open_passthrough : Nil
-    rec(:open_passthrough)
-  end
-
-  def open_listeners : Nil
-    rec(:open_listeners)
-  end
-
-  def open_agents : Nil
-    rec(:open_agents)
-  end
-
-  def open_session_slots : Nil
-    rec(:open_session_slots)
-  end
-
-  def open_help_shortcuts : Nil
-    rec(:open_help_shortcuts)
-  end
-
-  def open_tutorial : Nil
-    rec(:open_tutorial)
-  end
-
   def open_help_query(surface : Symbol) : Nil
     rec(:open_help_query)
-  end
-
-  def close_overlay : Nil
-    rec(:close_overlay)
-  end
-
-  def refresh_screen : Nil
-    rec(:refresh_screen)
-  end
-
-  def toggle_companion : Nil
-    rec(:toggle_companion)
-  end
-
-  def focus_pane(pane : Symbol) : Nil
-    rec(:focus_pane, pane)
-  end
-
-  def enter_content : Nil
-    rec(:enter_content)
-  end
-
-  def focus_tab(tab : Symbol) : Nil
-    rec(:focus_tab, tab)
-  end
-
-  def focus_visible_tab(n : Int32) : Nil
-    rec(:focus_visible_tab, n)
-  end
-
-  def cycle_tab(delta : Int32) : Nil
-    rec(:cycle_tab, delta)
-  end
-
-  def menu_left : Nil
-    rec(:menu_left)
-  end
-
-  def menu_right : Nil
-    rec(:menu_right)
-  end
-
-  def move_selection(delta : Int32) : Nil
-    rec(:move_selection, delta)
-  end
-
-  def open_detail : Nil
-    rec(:open_detail)
-  end
-
-  def close_detail : Nil
-    rec(:close_detail)
-  end
-
-  def toggle_follow : Nil
-    rec(:toggle_follow)
   end
 
   def selected_flow_id : Int64?
@@ -166,118 +66,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     marks.size
   end
 
-  def history_mark_toggle : Nil
-    rec(:history_mark_toggle)
-  end
-
-  def history_mark_all : Nil
-    rec(:history_mark_all)
-  end
-
-  def history_mark_clear : Nil
-    rec(:history_mark_clear)
-  end
-
-  def history_mark_extend(delta : Int32) : Nil
-    rec(:history_mark_extend, delta)
-  end
-
-  def copy_selection : Nil
-    rec(:copy_selection)
-  end
-
-  def history_query : Nil
-    rec(:history_query)
-  end
-
-  def history_view_pick : Nil
-    rec(:history_view_pick)
-  end
-
-  def history_columns_edit : Nil
-    rec(:history_columns_edit)
-  end
-
-  def history_grpc_reflect : Nil
-    rec(:history_grpc_reflect)
-  end
-
-  def history_delete : Nil
-    rec(:history_delete)
-  end
-
-  def history_clear : Nil
-    rec(:history_clear)
-  end
-
-  def scroll_detail(delta : Int32) : Nil
-    rec(:scroll_detail, delta)
-  end
-
-  def detail_copy : Nil
-    rec(:detail_copy)
-  end
-
-  def toggle_detail_pane : Nil
-    rec(:toggle_detail_pane)
-  end
-
-  def move_detail_pane(dir : Int32) : Nil
-    rec(:move_detail_pane, dir)
-  end
-
-  def toggle_detail_hex : Nil
-    rec(:toggle_detail_hex)
-  end
-
-  def toggle_reveal : Nil
-    rec(:toggle_reveal)
-  end
-
-  def toggle_pretty : Nil
-    rec(:toggle_pretty)
-  end
-
-  def repeater_selected : Nil
-    rec(:repeater_selected)
-  end
-
-  def repeater_new : Nil
-    rec(:repeater_new)
-  end
-
-  def repeater_send : Nil
-    rec(:repeater_send)
-  end
-
-  def repeater_send_group : Nil
-    rec(:repeater_send_group)
-  end
-
-  def repeater_find_subtab : Nil
-    rec(:repeater_find_subtab)
-  end
-
   property repeater_tab_count : Int32 = 0
 
   def repeater_subtab_count : Int32
     @repeater_tab_count
-  end
-
-  def subtab_search_open : Nil
-    rec(:subtab_search_open)
-  end
-
-  def subtab_filter_open : Nil
-    rec(:subtab_filter_open)
-  end
-
-  def subtab_mark_all : Nil
-    rec(:subtab_mark_all)
-  end
-
-  def subtab_mark_clear : Nil
-    rec(:subtab_mark_clear)
   end
 
   property subtab_marks : Int32 = 0
@@ -292,120 +84,12 @@ class FakeExecContext < Gori::Verb::ExecContext
     @subtab_search_tab_count
   end
 
-  def repeater_rename_subtab : Nil
-    rec(:repeater_rename_subtab)
-  end
-
-  def repeater_tag_subtab : Nil
-    rec(:repeater_tag_subtab)
-  end
-
-  def repeater_filter_subtabs : Nil
-    rec(:repeater_filter_subtabs)
-  end
-
-  def repeater_close_subtab : Nil
-    rec(:repeater_close_subtab)
-  end
-
-  def repeater_duplicate_subtab : Nil
-    rec(:repeater_duplicate_subtab)
-  end
-
-  def repeater_toggle_hex : Nil
-    rec(:repeater_toggle_hex)
-  end
-
-  def repeater_toggle_decoded : Nil
-    rec(:repeater_toggle_decoded)
-  end
-
-  def repeater_toggle_sni : Nil
-    rec(:repeater_toggle_sni)
-  end
-
-  def repeater_toggle_auto_content_length : Nil
-    rec(:repeater_toggle_auto_content_length)
-  end
-
-  def repeater_toggle_ws_key : Nil
-    rec(:repeater_toggle_ws_key)
-  end
-
-  def repeater_toggle_grpc_fields : Nil
-    rec(:repeater_toggle_grpc_fields)
-  end
-
-  def repeater_cycle_tls_preset : Nil
-    rec(:repeater_cycle_tls_preset)
-  end
-
-  def repeater_toggle_grpc_reframe : Nil
-    rec(:repeater_toggle_grpc_reframe)
-  end
-
   def repeater_toggle_http2 : Nil
     rec(:repeater_toggle_http2)
   end
 
-  def repeater_toggle_resp_diff : Nil
-    rec(:repeater_toggle_resp_diff)
-  end
-
-  def repeater_toggle_resp_hex : Nil
-    rec(:repeater_toggle_resp_hex)
-  end
-
-  def repeater_pretty_request : Nil
-    rec(:repeater_pretty_request)
-  end
-
-  def repeater_minimize : Nil
-    rec(:repeater_minimize)
-  end
-
-  def fuzz_pretty_template : Nil
-    rec(:fuzz_pretty_template)
-  end
-
   def fuzz_toggle_http2 : Nil
     rec(:fuzz_toggle_http2)
-  end
-
-  def fuzz_toggle_sni : Nil
-    rec(:fuzz_toggle_sni)
-  end
-
-  def repeater_auto_mark : Nil
-    rec(:repeater_auto_mark)
-  end
-
-  def repeater_mark_word : Nil
-    rec(:repeater_mark_word)
-  end
-
-  def repeater_insert_marker : Nil
-    rec(:repeater_insert_marker)
-  end
-
-  def repeater_clear_marks : Nil
-    rec(:repeater_clear_marks)
-  end
-
-  def repeater_attach_chain : Nil
-    rec(:repeater_attach_chain)
-  end
-
-  def repeater_copy : Nil
-    rec(:repeater_copy)
-  end
-
-  def repeater_copy_all : Nil
-    rec(:repeater_copy_all)
-  end
-
-  def repeater_open_response_external : Nil
-    rec(:repeater_open_response_external)
   end
 
   property repeater_read_mode : Bool = false # settable so grouped-menu specs can exercise the read-mode verbs
@@ -414,126 +98,14 @@ class FakeExecContext < Gori::Verb::ExecContext
     @repeater_read_mode
   end
 
-  def fuzz_selected : Nil
-    rec(:fuzz_selected)
-  end
-
-  def fuzz_from_repeater : Nil
-    rec(:fuzz_from_repeater)
-  end
-
-  def fuzz_run : Nil
-    rec(:fuzz_run)
-  end
-
-  def fuzz_stop : Nil
-    rec(:fuzz_stop)
-  end
-
-  def fuzz_save_results : Nil
-    rec(:fuzz_save_results)
-  end
-
-  def fuzz_run_history : Nil
-    rec(:fuzz_run_history)
-  end
-
   property fuzzer_results_saveable : Bool = false
 
   def fuzzer_results_saveable? : Bool
     @fuzzer_results_saveable
   end
 
-  def fuzz_new : Nil
-    rec(:fuzz_new)
-  end
-
-  def fuzz_automark : Nil
-    rec(:fuzz_automark)
-  end
-
-  def fuzz_mark_word : Nil
-    rec(:fuzz_mark_word)
-  end
-
-  def fuzz_insert_marker : Nil
-    rec(:fuzz_insert_marker)
-  end
-
-  def fuzz_attach_chain : Nil
-    rec(:fuzz_attach_chain)
-  end
-
-  def fuzz_list_paste : Nil
-    rec(:fuzz_list_paste)
-  end
-
-  def fuzz_clear_marks : Nil
-    rec(:fuzz_clear_marks)
-  end
-
-  def fuzzer_rename_subtab : Nil
-    rec(:fuzzer_rename_subtab)
-  end
-
-  def fuzzer_close_subtab : Nil
-    rec(:fuzzer_close_subtab)
-  end
-
-  def fuzzer_duplicate_subtab : Nil
-    rec(:fuzzer_duplicate_subtab)
-  end
-
-  def fuzzer_copy : Nil
-    rec(:fuzzer_copy)
-  end
-
-  def fuzzer_copy_all : Nil
-    rec(:fuzzer_copy_all)
-  end
-
   # Settable so the read-mode-gated Fuzzer verbs can be exercised.
   property? fuzzer_read_mode : Bool = false
-
-  def mine_selected : Nil
-    rec(:mine_selected)
-  end
-
-  def mine_from_repeater : Nil
-    rec(:mine_from_repeater)
-  end
-
-  def mine_run : Nil
-    rec(:mine_run)
-  end
-
-  def mine_stop : Nil
-    rec(:mine_stop)
-  end
-
-  def sequence_selected : Nil
-    rec(:sequence_selected)
-  end
-
-  def sequence_from_repeater : Nil
-    rec(:sequence_from_repeater)
-  end
-
-  def sequence_from_sitemap : Nil
-    rec(:sequence_from_sitemap)
-  end
-
-  def sequence_run : Nil
-    rec(:sequence_run)
-  end
-
-  def sequence_stop : Nil
-    rec(:sequence_stop)
-  end
-
-  def sequence_configure : Nil
-    rec(:sequence_configure)
-  end
 
   def sequence_export(format : Symbol) : Nil
     rec(:sequence_export)
@@ -542,34 +114,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   getter sequence_export_format : Symbol? = nil
 
-  def sequence_promote : Nil
-    rec(:sequence_promote)
-  end
-
   property? sequence_report_ready = false
 
   def sequence_report_ready? : Bool
     @sequence_report_ready
-  end
-
-  def miner_rename_subtab : Nil
-    rec(:miner_rename_subtab)
-  end
-
-  def miner_close_subtab : Nil
-    rec(:miner_close_subtab)
-  end
-
-  def sequencer_rename_subtab : Nil
-    rec(:sequencer_rename_subtab)
-  end
-
-  def sequencer_close_subtab : Nil
-    rec(:sequencer_close_subtab)
-  end
-
-  def miner_duplicate_subtab : Nil
-    rec(:miner_duplicate_subtab)
   end
 
   property? miner_has_issue = false
@@ -578,199 +126,23 @@ class FakeExecContext < Gori::Verb::ExecContext
     @miner_has_issue
   end
 
-  def mine_repeater_selected : Nil
-    rec(:mine_repeater_selected)
-  end
-
   property? fuzzer_has_result = false
 
   def fuzzer_result_selected? : Bool
     @fuzzer_has_result
   end
 
-  def fuzz_repeater_selected : Nil
-    rec(:fuzz_repeater_selected)
-  end
-
-  def sitemap_move(delta : Int32) : Nil
-    rec(:sitemap_move, delta)
-  end
-
-  def sitemap_toggle : Nil
-    rec(:sitemap_toggle)
-  end
-
-  def sitemap_expand : Nil
-    rec(:sitemap_expand)
-  end
-
-  def sitemap_collapse : Nil
-    rec(:sitemap_collapse)
-  end
-
-  def sitemap_query : Nil
-    rec(:sitemap_query)
-  end
-
-  def sitemap_tag : Nil
-    rec(:sitemap_tag)
-  end
-
-  def sitemap_toggle_grouping : Nil
-    rec(:sitemap_toggle_grouping)
-  end
-
-  def sitemap_toggle_query_fold : Nil
-    rec(:sitemap_toggle_query_fold)
-  end
-
-  def sitemap_discover : Nil
-    rec(:sitemap_discover)
-  end
-
-  def sitemap_repeater : Nil
-    rec(:sitemap_repeater)
-  end
-
-  def sitemap_open_flow : Nil
-    rec(:sitemap_open_flow)
-  end
-
-  def sitemap_scope_add : Nil
-    rec(:sitemap_scope_add)
-  end
-
-  def sitemap_mark_toggle : Nil
-    rec(:sitemap_mark_toggle)
-  end
-
-  def sitemap_mark_clear : Nil
-    rec(:sitemap_mark_clear)
-  end
-
-  def sitemap_mark_extend(delta : Int32) : Nil
-    rec(:sitemap_mark_extend, delta)
-  end
-
   # Settable so the availability sweep can exercise the marked-only entries (sitemap.mark-clear
   # renders only while a mark is set), the way `current_tab` is settable for the tab gates.
   property sitemap_marked_count : Int32 = 0
 
-  def history_discover : Nil
-    rec(:history_discover)
-  end
-
-  def discover_run : Nil
-    rec(:discover_run)
-  end
-
-  def discover_stop : Nil
-    rec(:discover_stop)
-  end
-
-  def discover_toggle_pause : Nil
-    rec(:discover_toggle_pause)
-  end
-
-  def discover_dismiss : Nil
-    rec(:discover_dismiss)
-  end
-
-  def discover_open_flow : Nil
-    rec(:discover_open_flow)
-  end
-
-  def goto_discover : Nil
-    rec(:goto_discover)
-  end
-
-  def oast_listen : Nil
-    rec(:oast_listen)
-  end
-
-  def oast_stop : Nil
-    rec(:oast_stop)
-  end
-
-  def oast_generate : Nil
-    rec(:oast_generate)
-  end
-
-  def oast_copy : Nil
-    rec(:oast_copy)
-  end
-
-  def oast_filter : Nil
-    rec(:oast_filter)
-  end
-
-  def oast_sessions : Nil
-    rec(:oast_sessions)
-  end
-
   # Settable so the selection-gated "promote this callback to an Issue" verb can be exercised.
   property? oast_callback_selected : Bool = false
-
-  def oast_issue_create : Nil
-    rec(:oast_issue_create)
-  end
-
-  def oast_add_provider : Nil
-    rec(:oast_add_provider)
-  end
-
-  def oast_edit_provider : Nil
-    rec(:oast_edit_provider)
-  end
-
-  def oast_toggle_provider : Nil
-    rec(:oast_toggle_provider)
-  end
-
-  def oast_delete_provider : Nil
-    rec(:oast_delete_provider)
-  end
 
   # Settable so the listener-gated OAST insert verbs can be exercised.
   property? oast_payload_available : Bool = false
 
-  def oast_insert_payload : Nil
-    rec(:oast_insert_payload)
-  end
-
-  def oast_copy_payload : Nil
-    rec(:oast_copy_payload)
-  end
-
-  def scope_open : Nil
-    rec(:scope_open)
-  end
-
-  def scope_add_host : Nil
-    rec(:scope_add_host)
-  end
-
-  def scope_toggle_lens : Nil
-    rec(:scope_toggle_lens)
-  end
-
-  def scope_toggle_sandbox : Nil
-    rec(:scope_toggle_sandbox)
-  end
-
   property scope_has_rule : Bool = false
-
-  def scope_add_rule : Nil
-    rec(:scope_add_rule)
-  end
-
-  def scope_edit_rule : Nil
-    rec(:scope_edit_rule)
-  end
-
-  def scope_delete_rule : Nil
-    rec(:scope_delete_rule)
-  end
 
   def scope_rule_selected? : Bool
     @scope_has_rule
@@ -778,39 +150,11 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   property probe_has_custom_rule : Bool = false
 
-  def probe_rule_toggle : Nil
-    rec(:probe_rule_toggle)
-  end
-
-  def probe_rule_add : Nil
-    rec(:probe_rule_add)
-  end
-
-  def probe_rule_edit : Nil
-    rec(:probe_rule_edit)
-  end
-
-  def probe_rule_delete : Nil
-    rec(:probe_rule_delete)
-  end
-
   def probe_custom_rule_selected? : Bool
     @probe_has_custom_rule
   end
 
   property hostov_has_entry : Bool = false
-
-  def hostov_add_entry : Nil
-    rec(:hostov_add_entry)
-  end
-
-  def hostov_edit_entry : Nil
-    rec(:hostov_edit_entry)
-  end
-
-  def hostov_delete_entry : Nil
-    rec(:hostov_delete_entry)
-  end
 
   def hostov_entry_selected? : Bool
     @hostov_has_entry
@@ -818,94 +162,14 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   property env_has_var : Bool = false
 
-  def env_add_var : Nil
-    rec(:env_add_var)
-  end
-
-  def env_edit_var : Nil
-    rec(:env_edit_var)
-  end
-
-  def env_delete_var : Nil
-    rec(:env_delete_var)
-  end
-
-  def env_edit_prefix : Nil
-    rec(:env_edit_prefix)
-  end
-
   def env_var_selected? : Bool
     @env_has_var
   end
 
   property activity_has_row : Bool = false
 
-  def activity_open : Nil
-    rec(:activity_open)
-  end
-
-  def activity_filter_source : Nil
-    rec(:activity_filter_source)
-  end
-
-  def activity_filter_level : Nil
-    rec(:activity_filter_level)
-  end
-
-  def activity_filter_actor : Nil
-    rec(:activity_filter_actor)
-  end
-
-  def activity_clear_filters : Nil
-    rec(:activity_clear_filters)
-  end
-
-  def activity_clear : Nil
-    rec(:activity_clear)
-  end
-
-  def activity_find : Nil
-    rec(:activity_find)
-  end
-
-  def activity_refresh : Nil
-    rec(:activity_refresh)
-  end
-
   def activity_row_selected? : Bool
     @activity_has_row
-  end
-
-  def issue_create : Nil
-    rec(:issue_create)
-  end
-
-  def issues_new : Nil
-    rec(:issues_new)
-  end
-
-  def issues_query : Nil
-    rec(:issues_query)
-  end
-
-  def issues_move(delta : Int32) : Nil
-    rec(:issues_move, delta)
-  end
-
-  def issues_open : Nil
-    rec(:issues_open)
-  end
-
-  def issue_close : Nil
-    rec(:issue_close)
-  end
-
-  def issues_delete : Nil
-    rec(:issues_delete)
-  end
-
-  def issues_clear : Nil
-    rec(:issues_clear)
   end
 
   # Issues multi-select, mirroring the History pair above: `issue_marks` is settable state
@@ -928,186 +192,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     issue_marks.size
   end
 
-  def issues_mark_toggle : Nil
-    rec(:issues_mark_toggle)
-  end
-
-  def issues_mark_all : Nil
-    rec(:issues_mark_all)
-  end
-
-  def issues_mark_clear : Nil
-    rec(:issues_mark_clear)
-  end
-
-  def issues_mark_extend(delta : Int32) : Nil
-    rec(:issues_mark_extend, delta)
-  end
-
-  def issue_severity(delta : Int32) : Nil
-    rec(:issue_severity, delta)
-  end
-
-  def issue_status(delta : Int32) : Nil
-    rec(:issue_status, delta)
-  end
-
-  def issue_set_severity : Nil
-    rec(:issue_set_severity)
-  end
-
-  def issue_set_cvss : Nil
-    rec(:issue_set_cvss)
-  end
-
-  def issue_set_status : Nil
-    rec(:issue_set_status)
-  end
-
-  def issue_edit_notes : Nil
-    rec(:issue_edit_notes)
-  end
-
-  def issue_edit_title : Nil
-    rec(:issue_edit_title)
-  end
-
-  def issue_open_flow : Nil
-    rec(:issue_open_flow)
-  end
-
-  def issue_repeater_flow : Nil
-    rec(:issue_repeater_flow)
-  end
-
-  def issues_export_pick : Nil
-    rec(:issues_export_pick)
-  end
-
-  def issues_export(format : Symbol) : Nil
-    rec(:issues_export, format)
-  end
-
-  def probe_move(delta : Int32) : Nil
-    rec(:probe_move, delta)
-  end
-
-  def probe_open : Nil
-    rec(:probe_open)
-  end
-
-  def probe_close : Nil
-    rec(:probe_close)
-  end
-
-  def probe_query : Nil
-    rec(:probe_query)
-  end
-
-  def probe_set_mode : Nil
-    rec(:probe_set_mode)
-  end
-
-  def probe_clear : Nil
-    rec(:probe_clear)
-  end
-
-  def probe_delete : Nil
-    rec(:probe_delete)
-  end
-
-  def probe_dismiss : Nil
-    rec(:probe_dismiss)
-  end
-
-  def probe_toggle_closed : Nil
-    rec(:probe_toggle_closed)
-  end
-
-  def probe_dismiss_code : Nil
-    rec(:probe_dismiss_code)
-  end
-
-  def probe_dismiss_host : Nil
-    rec(:probe_dismiss_host)
-  end
-
-  def probe_open_flow : Nil
-    rec(:probe_open_flow)
-  end
-
-  def probe_open_affected : Nil
-    rec(:probe_open_affected)
-  end
-
-  def probe_repeater_flow : Nil
-    rec(:probe_repeater_flow)
-  end
-
-  def probe_promote : Nil
-    rec(:probe_promote)
-  end
-
-  def probe_active_selected : Nil
-    rec(:probe_active_selected)
-  end
-
-  def probe_active_rescan : Nil
-    rec(:probe_active_rescan)
-  end
-
-  def probe_active_from_repeater : Nil
-    rec(:probe_active_from_repeater)
-  end
-
-  def toggle_capture : Nil
-    rec(:toggle_capture)
-  end
-
-  def intercept_toggle : Nil
-    rec(:intercept_toggle)
-  end
-
-  def intercept_forward : Nil
-    rec(:intercept_forward)
-  end
-
-  def intercept_drop : Nil
-    rec(:intercept_drop)
-  end
-
-  def intercept_forward_all : Nil
-    rec(:intercept_forward_all)
-  end
-
-  def intercept_query : Nil
-    rec(:intercept_query)
-  end
-
-  def intercept_cycle_direction : Nil
-    rec(:intercept_cycle_direction)
-  end
-
   property intercept_selected : Int64? = nil # settable so the held-message-gated verbs can be exercised
 
   def selected_intercept_id : Int64?
     @intercept_selected
-  end
-
-  def intercept_mark_toggle : Nil
-    rec(:intercept_mark_toggle)
-  end
-
-  def intercept_mark_all : Nil
-    rec(:intercept_mark_all)
-  end
-
-  def intercept_mark_clear : Nil
-    rec(:intercept_mark_clear)
-  end
-
-  def intercept_mark_extend(delta : Int32) : Nil
-    rec(:intercept_mark_extend, delta)
   end
 
   property marked_intercept : Int32 = 0 # settable so the mark-gated verbs can be exercised
@@ -1116,64 +204,8 @@ class FakeExecContext < Gori::Verb::ExecContext
     @marked_intercept
   end
 
-  def export_ca : Nil
-    rec(:export_ca)
-  end
-
-  def regenerate_ca : Nil
-    rec(:regenerate_ca)
-  end
-
-  def import_ca : Nil
-    rec(:import_ca)
-  end
-
-  def open_browser_picker : Nil
-    rec(:open_browser_picker)
-  end
-
-  def authorize_seed_selected : Nil
-    rec(:authorize_seed_selected)
-  end
-
-  def authorize_seed_sitemap : Nil
-    rec(:authorize_seed_sitemap)
-  end
-
-  def authorize_run : Nil
-    rec(:authorize_run)
-  end
-
-  def authorize_run_all : Nil
-    rec(:authorize_run_all)
-  end
-
-  def authorize_run_one : Nil
-    rec(:authorize_run_one)
-  end
-
-  def authorize_stop : Nil
-    rec(:authorize_stop)
-  end
-
-  def authorize_remove : Nil
-    rec(:authorize_remove)
-  end
-
-  def authorize_toggle_passive : Nil
-    rec(:authorize_toggle_passive)
-  end
-
   def authorize_passive? : Bool
     false
-  end
-
-  def authorize_identities : Nil
-    rec(:authorize_identities)
-  end
-
-  def authorize_clear : Nil
-    rec(:authorize_clear)
   end
 
   def authorize_has_target? : Bool
@@ -1184,131 +216,12 @@ class FakeExecContext < Gori::Verb::ExecContext
     false
   end
 
-  def comparer_pick(slot : Symbol) : Nil
-    rec(:comparer_pick, slot)
-  end
-
   # --- retest diff (two PROJECTS at endpoint scale) ---
-  def diff_pick(slot : Symbol) : Nil
-    rec(:diff_pick, slot)
-  end
-
-  def diff_swap : Nil
-    rec(:diff_swap)
-  end
-
-  def diff_run : Nil
-    rec(:diff_run)
-  end
-
-  def diff_cycle_lens(dir : Int32) : Nil
-    rec(:diff_cycle_lens, dir)
-  end
-
-  def diff_move(delta : Int32) : Nil
-    rec(:diff_move, delta)
-  end
-
-  def diff_to_comparer : Nil
-    rec(:diff_to_comparer)
-  end
-
-  def diff_issue : Nil
-    rec(:diff_issue)
-  end
-
-  def diff_note : Nil
-    rec(:diff_note)
-  end
 
   property diff_rows_shown : Bool = false
 
   def diff_rows_shown? : Bool
     @diff_rows_shown
-  end
-
-  def comparer_swap : Nil
-    rec(:comparer_swap)
-  end
-
-  def comparer_toggle_pane : Nil
-    rec(:comparer_toggle_pane)
-  end
-
-  def comparer_add_selected : Nil
-    rec(:comparer_add_selected)
-  end
-
-  def open_response_external : Nil
-    rec(:open_response_external)
-  end
-
-  def comparer_add_repeater : Nil
-    rec(:comparer_add_repeater)
-  end
-
-  def comparer_add_sitemap : Nil
-    rec(:comparer_add_sitemap)
-  end
-
-  def comparer_add_fuzz : Nil
-    rec(:comparer_add_fuzz)
-  end
-
-  def comparer_jump_change(dir : Int32) : Nil
-    rec(:comparer_jump_change, dir)
-  end
-
-  def comparer_toggle_fold : Nil
-    rec(:comparer_toggle_fold)
-  end
-
-  def comparer_new : Nil
-    rec(:comparer_new)
-  end
-
-  def comparer_close_subtab : Nil
-    rec(:comparer_close_subtab)
-  end
-
-  def comparer_rename_subtab : Nil
-    rec(:comparer_rename_subtab)
-  end
-
-  def comparer_duplicate_subtab : Nil
-    rec(:comparer_duplicate_subtab)
-  end
-
-  def decoder_new : Nil
-    rec(:decoder_new)
-  end
-
-  def decoder_close : Nil
-    rec(:decoder_close)
-  end
-
-  def decoder_rename_subtab : Nil
-    rec(:decoder_rename_subtab)
-  end
-
-  def decoder_duplicate_subtab : Nil
-    rec(:decoder_duplicate_subtab)
-  end
-
-  def decoder_clear : Nil
-    rec(:decoder_clear)
-  end
-
-  def decoder_copy : Nil
-    rec(:decoder_copy)
-  end
-
-  def decoder_copy_selection : Nil
-    rec(:decoder_copy_selection)
-  end
-
-  def decoder_copy_all : Nil
-    rec(:decoder_copy_all)
   end
 
   property decoder_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
@@ -1317,126 +230,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     @decoder_read_mode
   end
 
-  def decoder_cycle_mode : Nil
-    rec(:decoder_cycle_mode)
-  end
-
-  def decoder_save : Nil
-    rec(:decoder_save)
-  end
-
-  def decoder_load : Nil
-    rec(:decoder_load)
-  end
-
-  def jwt_new : Nil
-    rec(:jwt_new)
-  end
-
-  def jwt_close : Nil
-    rec(:jwt_close)
-  end
-
-  def jwt_rename_subtab : Nil
-    rec(:jwt_rename_subtab)
-  end
-
-  def jwt_duplicate_subtab : Nil
-    rec(:jwt_duplicate_subtab)
-  end
-
-  def jwt_clear : Nil
-    rec(:jwt_clear)
-  end
-
-  def jwt_toggle_mode : Nil
-    rec(:jwt_toggle_mode)
-  end
-
-  def jwt_cycle_alg : Nil
-    rec(:jwt_cycle_alg)
-  end
-
-  def jwt_load_decoded : Nil
-    rec(:jwt_load_decoded)
-  end
-
-  def jwt_copy : Nil
-    rec(:jwt_copy)
-  end
-
-  def jwt_copy_all : Nil
-    rec(:jwt_copy_all)
-  end
-
-  def jwt_copy_token : Nil
-    rec(:jwt_copy_token)
-  end
-
-  def jwt_copy_attack : Nil
-    rec(:jwt_copy_attack)
-  end
-
   property jwt_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
 
   def jwt_read_mode? : Bool
     @jwt_read_mode
-  end
-
-  def cookie_new : Nil
-    rec(:cookie_new)
-  end
-
-  def cookie_close : Nil
-    rec(:cookie_close)
-  end
-
-  def cookie_rename_subtab : Nil
-    rec(:cookie_rename_subtab)
-  end
-
-  def cookie_duplicate_subtab : Nil
-    rec(:cookie_duplicate_subtab)
-  end
-
-  def cookie_clear : Nil
-    rec(:cookie_clear)
-  end
-
-  def cookie_toggle_mode : Nil
-    rec(:cookie_toggle_mode)
-  end
-
-  def cookie_cycle_format : Nil
-    rec(:cookie_cycle_format)
-  end
-
-  def cookie_cycle_algorithm : Nil
-    rec(:cookie_cycle_algorithm)
-  end
-
-  def cookie_cycle_salt : Nil
-    rec(:cookie_cycle_salt)
-  end
-
-  def cookie_crack : Nil
-    rec(:cookie_crack)
-  end
-
-  def cookie_load_decoded : Nil
-    rec(:cookie_load_decoded)
-  end
-
-  def cookie_copy : Nil
-    rec(:cookie_copy)
-  end
-
-  def cookie_copy_all : Nil
-    rec(:cookie_copy_all)
-  end
-
-  def cookie_copy_output : Nil
-    rec(:cookie_copy_output)
   end
 
   property cookie_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
@@ -1455,38 +252,6 @@ class FakeExecContext < Gori::Verb::ExecContext
   property sequencer_analysis : Bool = false     # settable so the Sequencer ANALYSIS read-pane gate can be exercised
   property probe_detail_read : Bool = false      # settable so the Probe AFFECTED-URLS read-pane gate can be exercised
   property oast_detail : Bool = false            # settable so the OAST callback-detail read-pane gate can be exercised
-
-  def rewriter_add : Nil
-    rec(:rewriter_add)
-  end
-
-  def rewriter_preset : Nil
-    rec(:rewriter_preset)
-  end
-
-  def rewriter_edit : Nil
-    rec(:rewriter_edit)
-  end
-
-  def rewriter_toggle : Nil
-    rec(:rewriter_toggle)
-  end
-
-  def rewriter_delete : Nil
-    rec(:rewriter_delete)
-  end
-
-  def rewriter_move(dir : Int32) : Nil
-    rec(:rewriter_move, dir)
-  end
-
-  def rewriter_duplicate : Nil
-    rec(:rewriter_duplicate)
-  end
-
-  def rewriter_reload : Nil
-    rec(:rewriter_reload)
-  end
 
   def rewriter_rule_selected? : Bool
     @rewriter_rule_selected
@@ -1512,34 +277,6 @@ class FakeExecContext < Gori::Verb::ExecContext
   property colormarker_rule_selected : Bool = false # settable so the has-rule gate can be exercised
   property colormarker_global_rule : Bool = false   # settable so the global-rule gate (toggle-default) can be exercised
 
-  def colormarker_add : Nil
-    rec(:colormarker_add)
-  end
-
-  def colormarker_edit : Nil
-    rec(:colormarker_edit)
-  end
-
-  def colormarker_toggle : Nil
-    rec(:colormarker_toggle)
-  end
-
-  def colormarker_delete : Nil
-    rec(:colormarker_delete)
-  end
-
-  def colormarker_move(dir : Int32) : Nil
-    rec(:colormarker_move, dir)
-  end
-
-  def colormarker_duplicate : Nil
-    rec(:colormarker_duplicate)
-  end
-
-  def colormarker_reload : Nil
-    rec(:colormarker_reload)
-  end
-
   def colormarker_rule_selected? : Bool
     @colormarker_rule_selected
   end
@@ -1558,32 +295,12 @@ class FakeExecContext < Gori::Verb::ExecContext
     @colormarker_global_rule
   end
 
-  def colormarker_scope_toggle : Nil
-    rec(:colormarker_scope_toggle)
-  end
-
-  def colormarker_toggle_default : Nil
-    rec(:colormarker_toggle_default)
-  end
-
   def colormarker_colors_focused? : Bool
     @colormarker_colors_focused
   end
 
   def colormarker_color_selected? : Bool
     @colormarker_color_selected
-  end
-
-  def colormarker_color_add : Nil
-    rec(:colormarker_color_add)
-  end
-
-  def colormarker_color_edit : Nil
-    rec(:colormarker_color_edit)
-  end
-
-  def colormarker_color_delete : Nil
-    rec(:colormarker_color_delete)
   end
 
   def comparer_diff_shown? : Bool
@@ -1618,92 +335,20 @@ class FakeExecContext < Gori::Verb::ExecContext
     @miner_detail_read
   end
 
-  def rewriter_scope_toggle : Nil
-    rec(:rewriter_scope_toggle)
-  end
-
-  def rewriter_toggle_default : Nil
-    rec(:rewriter_toggle_default)
-  end
-
   def rewriter_global_rule_selected? : Bool
     @rewriter_global_rule
-  end
-
-  def notes_new : Nil
-    rec(:notes_new)
-  end
-
-  def notes_close : Nil
-    rec(:notes_close)
-  end
-
-  def notes_duplicate_subtab : Nil
-    rec(:notes_duplicate_subtab)
-  end
-
-  def notes_copy : Nil
-    rec(:notes_copy)
-  end
-
-  def notes_copy_all : Nil
-    rec(:notes_copy_all)
   end
 
   # Settable; defaults ON — the Notes body opens in read mode.
   property? notes_read_mode : Bool = true
 
-  def notes_clear : Nil
-    rec(:notes_clear)
-  end
-
-  def notes_export : Nil
-    rec(:notes_export)
-  end
-
-  def notes_edit : Nil
-    rec(:notes_edit)
-  end
-
-  def notes_goto : Nil
-    rec(:notes_goto)
-  end
-
-  def notes_find : Nil
-    rec(:notes_find)
-  end
-
-  def notes_links : Nil
-    rec(:notes_links)
-  end
-
   # Settable so project.copy / project.select-line can be exercised.
   property? project_desc_read_mode : Bool = false
-
-  def project_copy : Nil
-    rec(:project_copy)
-  end
-
-  def project_copy_all : Nil
-    rec(:project_copy_all)
-  end
 
   property selection_active : Bool = false # settable so selection-gated verbs (send-to, clear-selection) can be exercised
 
   def read_selection_active? : Bool
     selection_active
-  end
-
-  def read_select_line : Nil
-    rec(:read_select_line)
-  end
-
-  def read_clear_selection : Nil
-    rec(:read_clear_selection)
-  end
-
-  def read_copy : Nil
-    rec(:read_copy)
   end
 
   # Settable so the INS half of the `*.copy` verbs' availability can be exercised: those verbs
@@ -1713,10 +358,6 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def editor_focused? : Bool
     editor_focused
-  end
-
-  def copy_as_open : Nil
-    rec(:copy_as_open)
   end
 
   getter send_to_opened : Bool = false
@@ -1736,32 +377,8 @@ class FakeExecContext < Gori::Verb::ExecContext
     nil
   end
 
-  def issue_links : Nil
-    rec(:issue_links)
-  end
-
-  def issue_open_link : Nil
-    rec(:issue_open_link)
-  end
-
-  def issue_link_move(delta : Int32) : Nil
-    rec(:issue_link_move, delta)
-  end
-
   # Settable so the issue-notes read verbs can be exercised.
   property? issues_notes_read_mode : Bool = false
-
-  def issues_copy : Nil
-    rec(:issues_copy)
-  end
-
-  def issues_copy_all : Nil
-    rec(:issues_copy_all)
-  end
-
-  def link_attach : Nil
-    rec(:link_attach)
-  end
 
   # The four linkable-entity ids, settable so both sides of the link.* gates can be
   # exercised (a verb is offered only once the entity has a persisted row to point at).
@@ -1786,40 +403,23 @@ class FakeExecContext < Gori::Verb::ExecContext
     @link_miner
   end
 
-  def open_settings(section : Symbol) : Nil
-    rec(:open_settings, section)
-  end
-
-  def open_preferences : Nil
-    rec(:open_preferences)
-  end
-
-  def import_har : Nil
-    rec(:import_har)
-  end
-
-  def import_urls : Nil
-    rec(:import_urls)
-  end
-
-  def import_oas : Nil
-    rec(:import_oas)
-  end
-
-  def import_postman : Nil
-    rec(:import_postman)
-  end
-
-  def import_insomnia : Nil
-    rec(:import_insomnia)
-  end
-
-  def import_burp : Nil
-    rec(:import_burp)
-  end
-
-  def import_wsdl : Nil
-    rec(:import_wsdl)
+  # Every remaining intent, generated from the catalogue itself. `ExecContext` declares
+  # 400-odd abstract methods (verb/context.cr and verb/context/*.cr); all but a handful of
+  # the Nil-returning ones are pure "record that this fired" here, so this block harvests
+  # the catalogue once the whole program is parsed and emits a recorder for each one the
+  # class does not define by hand above. Adding an intent to the catalogue therefore no
+  # longer touches this file — only a recorder that must ALSO mutate state (a counter the
+  # verb's `available?` gate reads) or a query with a settable default is written out.
+  # Queries (Bool/Int/Array returns) are deliberately NOT generated: a missing one is a
+  # compile error here, which is the right prompt to decide its default.
+  macro finished
+    {% for m in Gori::Verb::ExecContext.methods %}
+      {% if m.abstract? && m.return_type && m.return_type.stringify == "Nil" && !@type.methods.any? { |d| d.name == m.name && d.args.size == m.args.size } %}
+        def {{ m.name }}({{ m.args.map { |a| "#{a.name} : #{a.restriction}".id }.splat }}) : Nil
+          rec({{ m.name.symbolize }}{% unless m.args.empty? %}, {{ m.args.map(&.name).splat }}{% end %})
+        end
+      {% end %}
+    {% end %}
   end
 end
 

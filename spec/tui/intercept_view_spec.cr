@@ -777,7 +777,7 @@ describe "Intercept verbs (P1)" do
   it "binds `i` to intercept.toggle and scopes forward/drop to Intercept" do
     reg = Gori::Verbs.registry
     keymap = Gori::Verb::Keymap.build(reg)
-    keymap.lookup(Gori::Verb::Chord.new("i"), Gori::Verb::Scope::Body).should eq("intercept.toggle")
+    keymap.lookup(typed_chord("i"), Gori::Verb::Scope::Body).should eq("intercept.toggle")
     reg["intercept.forward"].scope.should eq(Gori::Verb::Scope::Intercept)
     reg["intercept.drop"].scope.should eq(Gori::Verb::Scope::Intercept)
     reg["intercept.forward-all"].scope.should eq(Gori::Verb::Scope::Intercept)
@@ -788,7 +788,7 @@ describe "Intercept verbs (P1)" do
     keymap = Gori::Verb::Keymap.build(reg)
     # Number keys are positional now (digit N → Nth visible tab), handled by nav.pos*; the
     # Runner resolves N to the actual tab. With the default layout the 3rd visible is Intercept.
-    keymap.lookup(Gori::Verb::Chord.new("3"), Gori::Verb::Scope::Body).should eq("nav.pos3")
+    keymap.lookup(typed_chord("3"), Gori::Verb::Scope::Body).should eq("nav.pos3")
   end
 
   # R4. `Item#refuse_edit` is asked by the CLI/MCP drain (`Runner#apply_intercept_command`)

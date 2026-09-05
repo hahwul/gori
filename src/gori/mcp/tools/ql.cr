@@ -52,6 +52,7 @@ module Gori
       # Diagnose a QL query WITHOUT running it: applied vs ignored (dropped) vs
       # invalid-regex terms, the compiled SQL, and warnings — so a caller can catch
       # a silently-broadening typo or a never-matching regex before relying on results.
+      @[Tool("ql_explain", unbound: true)]
       private def ql_explain(h) : Result
         query = str(h, "query")
         return err("missing required 'query'", "INVALID_ARGUMENT", field: "query") if query.nil? || query.strip.empty?
@@ -129,6 +130,7 @@ module Gori
         end)
       end
 
+      @[Tool("ql_reference", unbound: true)]
       private def ql_reference : Result
         Result.new(JSON.build { |j| j.object { j.field "reference", QL::REFERENCE } })
       end

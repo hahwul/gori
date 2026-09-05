@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-nul", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A request that holds a NUL is ordinary here: a gRPC/protobuf frame, a gzip'd POST, a
 # multipart upload carrying a PNG. `^F` seeds the Fuzzer template from a capture verbatim,
 # deliberately unscrubbed, because a capture is evidence.

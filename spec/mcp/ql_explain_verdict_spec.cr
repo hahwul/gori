@@ -12,19 +12,6 @@ require "../spec_helper"
 # turns BOTH into a QUERY_SYNTAX refusal, so a caller that explained first was told its query
 # would run.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpqlx", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def explain(store, query : String) : JSON::Any
   tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
   r = tools.call("ql_explain", JSON::Any.new({"query" => JSON::Any.new(query)}))

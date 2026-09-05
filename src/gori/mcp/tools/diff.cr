@@ -13,6 +13,7 @@ module Gori
       # Reads only: two grouped queries and one shared fold tree, no bodies and no
       # network. Confirming that a finding still reproduces takes a request, and that stays
       # a deliberate `send_request` — see `Gori::Diff`, which owns the whole comparison.
+      @[Tool("diff_projects", unbound: true)]
       private def diff_projects(h) : Result
         from = str(h, "from").try(&.strip).presence
         return err("missing required 'from' (the BASELINE project — name, slug or short id)",

@@ -6,19 +6,6 @@ require "./spec_helper"
 
 private alias Slot = Gori::SessionSlot
 
-private def with_store(&)
-  path = File.tempname("gori-slots", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # The overlay resolver a send seam supplies. `Bindings` passes `Env.expand_bindings`; a spec
 # that only cares about the plumbing passes something it can read.
 private def slot_overlay(slots : Gori::SessionSlots, wire : String,

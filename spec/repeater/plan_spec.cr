@@ -8,12 +8,8 @@ FN_FIELDS = [{":method", "GET"}, {":method", "POST"}, {":path", "/fn"},
              {":scheme", "http"}, {":authority", "spoofed"}]
 
 # The builder takes the Outbound as an argument (Layer-1 strictness differs per surface on
-# purpose), so the equivalence check uses one ungated decision for all three — the gate is
+# purpose), so the equivalence check uses one ungated_outbound decision for all three — the gate is
 # not what is under test here, `spec/outbound_spec.cr` owns that.
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 # Everything downstream of PlanOptions that a surface could get wrong, flattened so two
 # plans can be compared with a single `should eq`. `wires` is the decisive field: the exact
 # bytes that would go on the wire.
@@ -44,7 +40,7 @@ ensure
 end
 
 private def shape_of(options : R::PlanOptions) : Shape
-  plan = R::Plan.build(options, ungated)
+  plan = R::Plan.build(options, ungated_outbound)
   Shape.new(scheme: plan.scheme, host: plan.host, port: plan.port, http2: plan.http2?,
     websocket: plan.websocket?, sni: plan.sni, wires: plan.requests.map { |b| String.new(b) })
 end
@@ -130,7 +126,7 @@ describe Gori::Repeater::Plan do
     # check above could agree on a wrong answer and still pass.
     it "frames the CLI/MCP session replay to the exact expected bytes" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "https://t.test:8443", http2: true, sni: "front.test"), ungated)
+        default_target: "https://t.test:8443", http2: true, sni: "front.test"), ungated_outbound)
       String.new(plan.bytes).should eq(SESSION_SYNCED)
       plan.scheme.should eq("https")
       plan.host.should eq("t.test")
@@ -144,7 +140,7 @@ describe Gori::Repeater::Plan do
   describe "the Content-Length policy" do
     it "resyncs a stale Content-Length when auto_content_length is ON" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "http://t.test", auto_content_length: true), ungated)
+        default_target: "http://t.test", auto_content_length: true), ungated_outbound)
       String.new(plan.bytes).should contain("Content-Length: 5\r\n")
     end
 
@@ -152,7 +148,7 @@ describe Gori::Repeater::Plan do
     # exist so a deliberately-wrong CL survives to the wire (CL-mismatch / smuggling tests).
     it "preserves a hand-set Content-Length when auto_content_length is OFF" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "http://t.test", auto_content_length: false), ungated)
+        default_target: "http://t.test", auto_content_length: false), ungated_outbound)
       String.new(plan.bytes).should contain("Content-Length: 999\r\n")
     end
 
@@ -160,7 +156,7 @@ describe Gori::Repeater::Plan do
       raw = "GET /s HTTP/1.1\r\nHost: t.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
             "Sec-WebSocket-Version: 13\r\nContent-Length: 42\r\n\r\n"
       plan = R::Plan.build(R::PlanOptions.new([raw.to_slice],
-        default_target: "http://t.test", auto_content_length: true), ungated)
+        default_target: "http://t.test", auto_content_length: true), ungated_outbound)
       plan.websocket?.should be_true
       String.new(plan.bytes).should contain("Content-Length: 42\r\n") # untouched
     end
@@ -172,14 +168,14 @@ describe Gori::Repeater::Plan do
   describe "the gRPC reframe policy" do
     it "is OFF by default, on the plan and on the sender it builds" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "http://t.test"), ungated)
+        default_target: "http://t.test"), ungated_outbound)
       plan.reframe_grpc?.should be_false
       plan.sender.reframe_grpc?.should be_false
     end
 
     it "carries the opt-in through to the sender that will encode the h2 request" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated)
+        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated_outbound)
       plan.reframe_grpc?.should be_true
       plan.sender.reframe_grpc?.should be_true
     end
@@ -190,7 +186,7 @@ describe Gori::Repeater::Plan do
     # the opt-in was turned on for.
     it "survives with_requests" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated)
+        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated_outbound)
       plan.with_requests(["GET /rewritten HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice])
         .reframe_grpc?.should be_true
     end
@@ -201,9 +197,9 @@ describe Gori::Repeater::Plan do
     # nothing" — `spec/repeater/h2_engine_spec.cr` owns the byte-level half.
     it "leaves the plan's own wire bytes untouched — the reframe happens at the send seam" do
       opts = R::PlanOptions.new([SESSION_RAW.to_slice], default_target: "http://t.test", http2: true)
-      off = R::Plan.build(opts, ungated)
+      off = R::Plan.build(opts, ungated_outbound)
       on = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated)
+        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated_outbound)
       on.bytes.should eq(off.bytes)
     end
   end
@@ -213,7 +209,7 @@ describe Gori::Repeater::Plan do
       with_env_vars([{"HOSTV", "t.test"}, {"TOK", "s3cr3t"}, {"SNIV", "front.test"}]) do
         plan = R::Plan.build(R::PlanOptions.new(
           ["GET /a HTTP/1.1\nHost: $HOSTV\nAuth: $TOK\n\n".to_slice],
-          default_target: "https://$HOSTV:9443", sni: "$SNIV"), ungated)
+          default_target: "https://$HOSTV:9443", sni: "$SNIV"), ungated_outbound)
         String.new(plan.bytes).should eq("GET /a HTTP/1.1\r\nHost: t.test\r\nAuth: s3cr3t\r\n\r\n")
         plan.host.should eq("t.test")
         plan.port.should eq(9443)
@@ -226,7 +222,7 @@ describe Gori::Repeater::Plan do
     it "leaves the request bytes verbatim when expand_request is off" do
       with_env_vars([{"A", "$B"}, {"B", "leaked"}]) do
         plan = R::Plan.build(R::PlanOptions.new(["GET /$A HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice],
-          expand_request: false, default_target: "http://t.test"), ungated)
+          expand_request: false, default_target: "http://t.test"), ungated_outbound)
         String.new(plan.bytes).should eq("GET /$A HTTP/1.1\r\nHost: t.test\r\n\r\n")
       end
     end
@@ -235,7 +231,7 @@ describe Gori::Repeater::Plan do
   describe "target resolution" do
     it "prefers an explicit target over the seeding flow's" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        target: "http://explicit.test:8080", default_target: "https://seed.test"), ungated)
+        target: "http://explicit.test:8080", default_target: "https://seed.test"), ungated_outbound)
       plan.host.should eq("explicit.test")
       plan.port.should eq(8080)
     end
@@ -246,20 +242,20 @@ describe Gori::Repeater::Plan do
     it "refuses a blank explicit target instead of falling back to the default" do
       ex = expect_raises(R::PlanError) do
         R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-          target: "  ", default_target: "https://seed.test"), ungated)
+          target: "  ", default_target: "https://seed.test"), ungated_outbound)
       end
       ex.reason.should eq(R::PlanError::Reason::BadTarget)
     end
 
     it "still falls back to the default when no target is given at all" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "https://seed.test"), ungated)
+        default_target: "https://seed.test"), ungated_outbound)
       plan.host.should eq("seed.test")
     end
 
     it "takes a pre-resolved origin verbatim, over any target string" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        origin: R::Origin.new("https", "pinned.test", 8443), target: "http://ignored.test"), ungated)
+        origin: R::Origin.new("https", "pinned.test", 8443), target: "http://ignored.test"), ungated_outbound)
       plan.scheme.should eq("https")
       plan.host.should eq("pinned.test")
       plan.port.should eq(8443)
@@ -267,7 +263,7 @@ describe Gori::Repeater::Plan do
 
     it "brackets and unwraps an IPv6 literal target" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        default_target: "http://[::1]:8080"), ungated)
+        default_target: "http://[::1]:8080"), ungated_outbound)
       plan.host.should eq("::1")
       plan.port.should eq(8080)
     end
@@ -276,7 +272,7 @@ describe Gori::Repeater::Plan do
   describe "field-native h2 (h2_fields)" do
     it "builds a field-native plan: forces http2, carries the fields, needs no request bytes" do
       plan = R::Plan.build(R::PlanOptions.new(
-        h2_fields: FN_FIELDS, target: "https://t.test:8443"), ungated)
+        h2_fields: FN_FIELDS, target: "https://t.test:8443"), ungated_outbound)
       plan.http2?.should be_true
       plan.websocket?.should be_false
       plan.h2_fields.should eq(FN_FIELDS)
@@ -287,7 +283,7 @@ describe Gori::Repeater::Plan do
 
     it "carries a field-native body onto the plan" do
       plan = R::Plan.build(R::PlanOptions.new(
-        h2_fields: FN_FIELDS, h2_body: "payload".to_slice, target: "https://t.test"), ungated)
+        h2_fields: FN_FIELDS, h2_body: "payload".to_slice, target: "https://t.test"), ungated_outbound)
       String.new(plan.h2_body.not_nil!).should eq("payload")
     end
 
@@ -297,13 +293,13 @@ describe Gori::Repeater::Plan do
     # so the scope decision cannot silently start reading `/` for every field-native send.
     it "synthesizes the scope request line from the first :method/:path" do
       plan = R::Plan.build(R::PlanOptions.new(
-        h2_fields: FN_FIELDS, target: "https://t.test"), ungated)
+        h2_fields: FN_FIELDS, target: "https://t.test"), ungated_outbound)
       String.new(plan.bytes).should start_with("GET /fn HTTP/2\r\n")
     end
 
     it "still resolves the origin (a bad target is refused before any send)" do
       ex = expect_raises(R::PlanError) do
-        R::Plan.build(R::PlanOptions.new(h2_fields: FN_FIELDS, target: "ftp://t.test"), ungated)
+        R::Plan.build(R::PlanOptions.new(h2_fields: FN_FIELDS, target: "ftp://t.test"), ungated_outbound)
       end
       ex.reason.should eq(R::PlanError::Reason::UnsupportedScheme)
     end
@@ -312,14 +308,14 @@ describe Gori::Repeater::Plan do
   describe "refusals" do
     it "reports NoTarget when neither a target nor a default is given" do
       ex = expect_raises(R::PlanError) do
-        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice]), ungated)
+        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice]), ungated_outbound)
       end
       ex.reason.should eq(R::PlanError::Reason::NoTarget)
     end
 
     it "reports BadTarget with the expanded string a surface can quote back" do
       ex = expect_raises(R::PlanError) do
-        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice], target: "http://"), ungated)
+        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice], target: "http://"), ungated_outbound)
       end
       ex.reason.should eq(R::PlanError::Reason::BadTarget)
       ex.detail.should eq("http://")
@@ -327,21 +323,21 @@ describe Gori::Repeater::Plan do
 
     it "reports BadTarget for a zero port (only MCP send_websocket used to catch this)" do
       ex = expect_raises(R::PlanError) do
-        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice], target: "http://t.test:0"), ungated)
+        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice], target: "http://t.test:0"), ungated_outbound)
       end
       ex.reason.should eq(R::PlanError::Reason::BadTarget)
     end
 
     it "reports NoRequest for an empty request list (the TUI's empty `%%%` split)" do
       ex = expect_raises(R::PlanError) do
-        R::Plan.build(R::PlanOptions.new(default_target: "http://t.test"), ungated)
+        R::Plan.build(R::PlanOptions.new(default_target: "http://t.test"), ungated_outbound)
       end
       ex.reason.should eq(R::PlanError::Reason::NoRequest)
     end
 
     it "reports UnsupportedScheme, carrying the scheme as detail" do
       ex = expect_raises(R::PlanError) do
-        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice], target: "ftp://t.test"), ungated)
+        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice], target: "ftp://t.test"), ungated_outbound)
       end
       ex.reason.should eq(R::PlanError::Reason::UnsupportedScheme)
       ex.detail.should eq("ftp")
@@ -349,7 +345,7 @@ describe Gori::Repeater::Plan do
 
     it "still rejects a scheme no engine can dial" do
       ex = expect_raises(R::PlanError) do
-        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice], target: "gopher://t.test"), ungated)
+        R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice], target: "gopher://t.test"), ungated_outbound)
       end
       ex.reason.should eq(R::PlanError::Reason::UnsupportedScheme)
       ex.detail.should eq("gopher")
@@ -366,7 +362,7 @@ describe Gori::Repeater::Plan do
     {"ws" => "http", "wss" => "https"}.each do |typed, dialled|
       it "folds a hand-typed #{typed}:// target to #{dialled}" do
         plan = R::Plan.build(R::PlanOptions.new([WS_UPGRADE.to_slice],
-          target: "#{typed}://t.test"), ungated)
+          target: "#{typed}://t.test"), ungated_outbound)
         plan.websocket?.should be_true
         plan.scheme.should eq(dialled)
       end
@@ -374,7 +370,7 @@ describe Gori::Repeater::Plan do
 
     it "folds wss on the pre-resolved origin path too" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        origin: R::Origin.new("wss", "t.test", 443)), ungated)
+        origin: R::Origin.new("wss", "t.test", 443)), ungated_outbound)
       plan.scheme.should eq("https")
     end
 
@@ -402,7 +398,7 @@ describe Gori::Repeater::Plan do
               "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\nCookie: #{secret}\r\n\r\n"
         plan = R::Plan.build(R::PlanOptions.new([raw.to_slice],
           target: "wss://127.0.0.1:#{port}", auto_content_length: false,
-          verify: false, timeout: 3.seconds), ungated)
+          verify: false, timeout: 3.seconds), ungated_outbound)
         plan.scheme.should eq("https")
         plan.send # fails: the listener speaks no TLS — the point is WHAT it received
         select
@@ -424,17 +420,17 @@ describe Gori::Repeater::Plan do
       a = "GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n"
       b = "GET /b HTTP/1.1\r\nHost: t.test\r\n\r\n"
       plan = R::Plan.build(R::PlanOptions.new([a.to_slice, b.to_slice],
-        expand_request: false, auto_content_length: false, target: "http://t.test"), ungated)
+        expand_request: false, auto_content_length: false, target: "http://t.test"), ungated_outbound)
       plan.requests.map { |r| String.new(r) }.should eq([a, b])
       plan.bytes.should eq(a.to_slice) # #bytes is the FIRST request, not the last
-      plan.refusal.should be_nil       # ungated
+      plan.refusal.should be_nil       # ungated_outbound
     end
   end
 
   describe "#with_requests" do
     it "carries the same origin and dialer onto rewritten bytes (MCP's Match&Replace)" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        target: "https://t.test:8443", http2: true, sni: "front.test"), ungated)
+        target: "https://t.test:8443", http2: true, sni: "front.test"), ungated_outbound)
       rewritten = plan.with_requests(["GET /rewritten HTTP/1.1\r\n\r\n".to_slice])
       String.new(rewritten.bytes).should eq("GET /rewritten HTTP/1.1\r\n\r\n")
       rewritten.scheme.should eq(plan.scheme)
@@ -455,7 +451,7 @@ describe Gori::Repeater::Plan do
     # applied.
     it "carries the per-send TLS fingerprint (#844) across the rewrite" do
       plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
-        target: "https://t.test:8443", tls_preset: "chrome"), ungated)
+        target: "https://t.test:8443", tls_preset: "chrome"), ungated_outbound)
       plan.tls_preset.should eq("chrome")
       plan.with_requests(["GET /rewritten HTTP/1.1\r\n\r\n".to_slice]).tls_preset.should eq("chrome")
     end
@@ -466,7 +462,7 @@ describe Gori::Repeater::Plan do
     # is why nothing exercises it today; carrying the fields is what keeps the next caller
     # from having to know.
     it "keeps a field-native plan field-native" do
-      plan = R::Plan.build(R::PlanOptions.new(h2_fields: FN_FIELDS, target: "http://t.test"), ungated)
+      plan = R::Plan.build(R::PlanOptions.new(h2_fields: FN_FIELDS, target: "http://t.test"), ungated_outbound)
       rewritten = plan.with_requests(["GET /rewritten HTTP/1.1\r\n\r\n".to_slice])
       rewritten.h2_fields.should eq(FN_FIELDS)
     end
@@ -478,21 +474,21 @@ describe Gori::Repeater::Plan do
   describe "an HTTP/2 version line on an h1 send" do
     it "is downgraded whichever surface built the plan" do
       plan = R::Plan.build(R::PlanOptions.new(["GET /v HTTP/2\r\nHost: h.test\r\n\r\n".to_slice],
-        default_target: "http://h.test"), ungated)
+        default_target: "http://h.test"), ungated_outbound)
       String.new(plan.bytes).lines.first.should eq("GET /v HTTP/1.1")
     end
 
     it "leaves a version the operator meant alone" do
       {"HTTP/1.0", "HTTP/9.9"}.each do |v|
         plan = R::Plan.build(R::PlanOptions.new(["GET /v #{v}\r\nHost: h.test\r\n\r\n".to_slice],
-          default_target: "http://h.test"), ungated)
+          default_target: "http://h.test"), ungated_outbound)
         String.new(plan.bytes).lines.first.should eq("GET /v #{v}")
       end
     end
 
     it "does not touch an h2 send, which builds its fields from this text" do
       plan = R::Plan.build(R::PlanOptions.new(["GET /v HTTP/2\r\nHost: h.test\r\n\r\n".to_slice],
-        default_target: "http://h.test", http2: true), ungated)
+        default_target: "http://h.test", http2: true), ungated_outbound)
       String.new(plan.bytes).lines.first.should eq("GET /v HTTP/2")
     end
   end
@@ -506,20 +502,20 @@ describe Gori::Repeater::Plan do
     it "keeps a bare LF in the head instead of promoting it to CRLF" do
       raw = "GET /v HTTP/1.1\r\nHost: h.test\nX-Bare: lf\n\r\n".to_slice
       plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test",
-        expand_request: false, auto_content_length: false), ungated)
+        expand_request: false, auto_content_length: false), ungated_outbound)
       String.new(plan.bytes).should eq(String.new(raw))
     end
 
     it "promotes it by default, which is what every other send still does" do
       raw = "GET /v HTTP/1.1\r\nHost: h.test\nX-Bare: lf\n\r\n".to_slice
-      plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test"), ungated)
+      plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test"), ungated_outbound)
       String.new(plan.bytes).should eq("GET /v HTTP/1.1\r\nHost: h.test\r\nX-Bare: lf\r\n\r\n")
     end
 
     it "also leaves the version line alone, since the operator asked for these exact bytes" do
       raw = "GET /v HTTP/2\r\nHost: h.test\r\n\r\n".to_slice
       plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test",
-        expand_request: false, auto_content_length: false), ungated)
+        expand_request: false, auto_content_length: false), ungated_outbound)
       String.new(plan.bytes).lines.first.should eq("GET /v HTTP/2")
     end
 
@@ -530,7 +526,7 @@ describe Gori::Repeater::Plan do
     it "sends an unresolved $VAR as itself, since these are the exact bytes asked for" do
       raw = "GET /v HTTP/1.1\r\nHost: h.test\r\nX-T: $NOPE\r\n\r\n".to_slice
       plan = R::Plan.build(R::PlanOptions.new([raw], default_target: "http://h.test",
-        expand_request: false, auto_content_length: false), ungated)
+        expand_request: false, auto_content_length: false), ungated_outbound)
       String.new(plan.bytes).should contain("X-T: $NOPE")
     end
   end

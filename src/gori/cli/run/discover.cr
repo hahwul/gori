@@ -4,6 +4,9 @@ require "../../discover/plan"
 module Gori
   module CLI
     module Run
+      @[Subcommand("discover", help: [
+        {"discover", "Spider + directory brute-force a target; findings feed the Sitemap"},
+      ])]
       private def self.cmd_discover(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil

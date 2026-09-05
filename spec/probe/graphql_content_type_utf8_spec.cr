@@ -16,19 +16,6 @@ private def hostile_ct : String
   "multipart/form-data; boundary=graphql" + String.new(Bytes[0xFF_u8])
 end
 
-private def with_store(&)
-  path = File.tempname("gori-probe-ct", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A captured POST whose request head carries `ct` verbatim, with a body (the GraphQL gates all
 # require one). `target` stays off `/graphql` so the active rule's cheap path check cannot
 # short-circuit the body branch that raised.

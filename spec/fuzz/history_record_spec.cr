@@ -3,19 +3,6 @@ require "../spec_helper"
 # `Fuzz::HistoryRecord` — the opt-in `--record-history` write that turns a fuzz result into a
 # History flow (#749). The projection mirrors MCP's own recorder; this pins the shared engine
 # half plus the `records?` policy.
-private def with_store(&)
-  path = File.tempname("gori-fuzzhist", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def result_with(request : String?, resp_head : String, *, matched : Bool) : Gori::Fuzz::Result
   Gori::Fuzz::Result.new(
     index: 0_i64, payloads: ["p"], position: nil, status: 200, length: 2_i64, words: 1, lines: 1,

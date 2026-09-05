@@ -6,19 +6,6 @@ require "../../spec_helper"
 # print "no links on issue #99999" — which reads as "this issue has no evidence" rather
 # than "there is no such issue".
 
-private def with_store(&)
-  path = File.tempname("gori-clilinks", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def seed_flow(store : Gori::Store) : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "api.test", port: 443, method: "GET",

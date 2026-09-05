@@ -14,19 +14,6 @@ require "socket"
 #    contract; six object-returning paginated tools skipped it and did not even echo `limit`,
 #    so an agent that computed `limit` down to 0 got one row back and no signal.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-jobstop", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def start_origin : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
@@ -72,7 +59,7 @@ describe "MCP per-kind job stop" do
   it "reports the job's real terminal status instead of a hard-coded \"stopping\"" do
     with_store do |store|
       port = start_origin
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       job_id = start_fuzz(tools, port)
       terminal = wait_terminal(tools, "fuzz", job_id)
       terminal.should eq("done")
@@ -89,7 +76,7 @@ describe "MCP per-kind job stop" do
   it "answers a finished job the same way the unified stop_job does" do
     with_store do |store|
       port = start_origin
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       a = start_fuzz(tools, port)
       b = start_fuzz(tools, port)
       wait_terminal(tools, "fuzz", a)
@@ -106,7 +93,7 @@ describe "MCP per-kind job stop" do
   it "sequence_stop reports its real status too (the same shared emitter)" do
     with_store do |store|
       port = start_origin
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       job_id = call_json(tools, "sequence_start", {
         template:       "GET /t HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
         url:            "http://127.0.0.1:#{port}",
@@ -127,7 +114,7 @@ describe "MCP job-results pagination clamp" do
   it "reports a clamped limit on fuzz_results, list_fuzz_runs and get_fuzz_run" do
     with_store do |store|
       port = start_origin
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       job_id = start_fuzz(tools, port)
       wait_terminal(tools, "fuzz", job_id)
       run_id = call_json(tools, "fuzz_results", {job_id: job_id}.to_json)["run_id"].as_i64
@@ -149,7 +136,7 @@ describe "MCP job-results pagination clamp" do
   it "stays quiet when the pagination arguments were honoured" do
     with_store do |store|
       port = start_origin
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       job_id = start_fuzz(tools, port)
       wait_terminal(tools, "fuzz", job_id)
 

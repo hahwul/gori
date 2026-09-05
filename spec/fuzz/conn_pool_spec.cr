@@ -43,7 +43,7 @@ private class KeepAliveOrigin
   private def accept_loop : Nil
     while conn = @server.accept?
       @connections += 1
-      spawn { serve(conn) }
+      spawn serve(conn)
     end
   rescue
     # server closed
@@ -89,9 +89,9 @@ private class PoisonOrigin
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn do
-      while conn = @server.accept?
+      while accepted = @server.accept?
         @connections += 1
-        spawn { serve(conn) rescue nil }
+        spawn_with(accepted) { |conn| serve(conn) rescue nil }
       end
     rescue
       # server closed

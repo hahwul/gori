@@ -6,21 +6,8 @@ require "json"
 # unparseable / fractional / out-of-range / negative value silently stamped the current
 # time and reported the forged cookie as success. See `Tools#cookie_forge_tool`.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-cookie-ts", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def cookie_tools(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 private def forge(tools : Gori::MCP::Tools, ts : String)

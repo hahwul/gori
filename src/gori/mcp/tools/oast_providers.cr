@@ -11,6 +11,7 @@ module Gori
       # once (a private interactsh server and its auth token, say) and reuses. Without them the
       # only way to reach a configured provider from MCP was to re-supply its host and token
       # inline every time — including the token, on every call.
+      @[Tool("list_oast_providers")]
       private def list_oast_providers(h) : Result
         configs = Oast.provider_configs(store)
         include_sensitive = bool_arg(h, "include_sensitive", false)
@@ -38,6 +39,7 @@ module Gori
         end)
       end
 
+      @[Tool("create_oast_provider", gated: true, agent_action: true)]
       private def create_oast_provider(h) : Result
         fields = oast_provider_fields(h)
         return fields if fields.is_a?(Result)
@@ -55,6 +57,7 @@ module Gori
       # Every field an update does NOT mention keeps its current value. Replacing the whole
       # row instead would silently drop the provider's auth TOKEN whenever a caller edited,
       # say, only the name. (Same defaulting rule as update_scope_rule.)
+      @[Tool("update_oast_provider", gated: true, agent_action: true)]
       private def update_oast_provider(h) : Result
         row = oast_provider_row(h)
         return row if row.is_a?(Result)
@@ -84,6 +87,7 @@ module Gori
         Result.new({"id" => "p_#{row}", "name" => name, "kind" => kind.label}.to_json)
       end
 
+      @[Tool("set_oast_provider_enabled", gated: true, agent_action: true)]
       private def set_oast_provider_enabled(h) : Result
         row = oast_provider_row(h)
         return row if row.is_a?(Result)
@@ -93,6 +97,7 @@ module Gori
         Result.new({"id" => "p_#{row}", "enabled" => enabled}.to_json)
       end
 
+      @[Tool("delete_oast_provider", gated: true, agent_action: true)]
       private def delete_oast_provider(h) : Result
         row = oast_provider_row(h)
         return row if row.is_a?(Result)

@@ -12,20 +12,7 @@ require "digest/sha1"
 # to be a refusal that names the field.
 #
 # Helpers are file-local (Crystal's top-level `private def` is file-scoped) so this file does
-# not depend on spec/mcp_spec.cr's.
-
-private def with_store(&)
-  path = File.tempname("gori-mcp-agent", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
+# not depend on the shared ones in spec/support/mcp_harness.cr.
 
 private def drive(store, *lines, allow_actions = true, verify_upstream = true) : Array(JSON::Any)
   input = IO::Memory.new(lines.join('\n') + "\n")
@@ -65,8 +52,8 @@ private def recording_origin(conns = 1) : {Int32, Channel(Bytes)}
   seen = Channel(Bytes).new(conns)
   spawn do
     conns.times do
-      break unless conn = server.accept?
-      spawn do
+      break unless accepted = server.accept?
+      spawn_with(accepted) do |conn|
         buf = IO::Memory.new
         begin
           conn.read_timeout = 300.milliseconds

@@ -5,6 +5,7 @@ module Gori
     class Tools
       # --- unified async job management (list/get/stop across fuzz + mine) -----
 
+      @[Tool("list_jobs", gated: true)]
       private def list_jobs : Result
         Result.new(JSON.build do |j|
           j.object do
@@ -90,6 +91,7 @@ module Gori
       # Unified status for a fuzz, mine, discover, sequence, or authorize job (dispatch by the
       # id prefix), so a caller polling many jobs needs one tool. Delegates to the per-engine status
       # serializers, which already carry counts/audit/incomplete_reason.
+      @[Tool("get_job", gated: true)]
       private def get_job(h) : Result
         id = str(h, "job_id")
         return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
@@ -111,6 +113,7 @@ module Gori
       # Stop a fuzz, mine, discover, sequence, or authorize job. With wait:true, blocks (yielding to the runner
       # fiber via sleep) until the job reaches a terminal state or wait_timeout_ms
       # elapses, so a caller can stop-and-confirm in one call instead of polling.
+      @[Tool("stop_job", gated: true, agent_action: true)]
       private def stop_job(h) : Result
         id = str(h, "job_id")
         return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
