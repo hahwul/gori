@@ -1,4 +1,5 @@
 require "./screen"
+require "./line_edit"
 require "./theme"
 require "./frame"
 require "./query_suggest"
@@ -18,6 +19,7 @@ module Gori::Tui
   # WRAPPING their children rather than rewriting any path. Helps answer "what does this
   # app do". Navigate with ↑/↓, expand/collapse with →/←/Enter.
   class SitemapView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # The tree node + pure builder live in `Gori::Sitemap` (shared with the headless
     # `gori run sitemap`); this view layers scope markers, path-tag editing, and
     # rendering on top. The alias keeps the rest of this file reading as `Node`.

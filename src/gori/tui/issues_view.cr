@@ -12,6 +12,7 @@ require "../store"
 require "../issues_query"
 require "../links"
 require "./preview_split"
+require "./line_edit"
 require "./issue_presentation"
 
 module Gori::Tui
@@ -19,6 +20,7 @@ module Gori::Tui
   # severity-sorted list + a detail with inline-editable notes and a severity
   # control. Created from a flow (History `F`) or blank (`n`).
   class IssuesView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # The list-over-preview layout and the severity/status vocabulary, both shared with
     # the sibling tab that lists the same records through the other lens.
     include PreviewSplit

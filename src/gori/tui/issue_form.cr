@@ -1,4 +1,5 @@
 require "./screen"
+require "./line_edit"
 require "./theme"
 require "./frame"
 require "./overlay"
@@ -143,8 +144,11 @@ module Gori::Tui
       when key.enter?             then return enter
       when key.tab?, key.down?    then move_row(1)
       when key.back_tab?, key.up? then move_row(-1)
-      when key.left?              then step(-1)
-      when key.right?             then step(1)
+      when (act = LineEdit.action(ev)) && @sel != ROW_CVSS # ⌃/⌥←→, Home/End, Delete, ⌥⌫ on the title
+        focus_title
+        @issue_title, @cx = LineEdit.apply(act, @issue_title, @cx)
+      when key.left?  then step(-1)
+      when key.right? then step(1)
       when key.backspace?
         if @sel == ROW_CVSS
           set_cvss_value("")

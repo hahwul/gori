@@ -1,4 +1,5 @@
 require "./screen"
+require "./line_edit"
 require "./theme"
 require "./frame"
 require "./query_suggest"
@@ -27,6 +28,7 @@ module Gori::Tui
   # Pure view: it reads the shared Interceptor snapshot; the Runner performs the
   # actual forward/drop. No diff (that's Repeater's job).
   class InterceptView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # Height of the top filter bar (catch direction + condition), reserved above the
     # queue|detail split — the Intercept tab's analogue of History's QL bar. While the
     # condition is being edited a second row carries Tab suggestions (see bar_h).

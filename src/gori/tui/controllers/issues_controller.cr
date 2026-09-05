@@ -333,12 +333,13 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-      when key.enter?     then @issues.stop_query
-      when key.escape?    then @issues.cancel_query
-      when key.tab?       then @issues.query_complete
-      when key.backspace? then @issues.query_backspace
-      when key.left?      then @issues.query_move(-1)
-      when key.right?     then @issues.query_move(1)
+      when key.enter?                  then @issues.stop_query
+      when key.escape?                 then @issues.cancel_query
+      when key.tab?                    then @issues.query_complete
+      when (act = LineEdit.action(ev)) then @issues.query_edit(act) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before plain ⌫, which would swallow ⌥⌫
+      when key.backspace?              then @issues.query_backspace
+      when key.left?                   then @issues.query_move(-1)
+      when key.right?                  then @issues.query_move(1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @issues.query_insert(c)
