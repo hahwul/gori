@@ -556,16 +556,16 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
       resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx/1.25\r\n\r\n"
       id = store.insert_repeater("https://repeater.test", req.to_slice, false, true, nil, 0)
       store.update_repeater_response(id, resp.to_slice, "<html/>".to_slice, nil, 12_i64)
-      rec = store.get_repeater(id).not_nil!
+      store.get_repeater(id).should_not be_nil
       # get_repeater may not load response blobs — use full repeaters list
       rec = store.repeaters.find!(&.id.== id)
       detail = Gori::Probe.detail_from_repeater(rec).not_nil!
       detail.row.host.should eq("repeater.test")
       detail.row.method.should eq("GET")
       detail.row.status.should eq(200)
-      dets = Gori::Probe::Passive.analyze(detail).map { |d|
+      dets = Gori::Probe::Passive.analyze(detail).map do |d|
         Gori::Probe.with_source(d, repeater_id: id)
-      }
+      end
       dets.map(&.code).should contain("tech_server")
       dets.map(&.code).should contain("missing_csp")
       dets.each { |d| store.upsert_probe_issue(d) }

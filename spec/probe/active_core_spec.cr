@@ -549,9 +549,9 @@ describe "Gori::Probe::Active (manual run estimate)" do
       est = a.active_estimate(detail)
       # reflected_param, cors_reflection, backslash_powered all apply — plus crlf_injection, ssti,
       # and sqli_error_based, which reuse the same reflectable-query-param gate.
-      est.map(&.info.id).sort.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "reflected_param", "sqli_error_based", "ssti"])
+      est.map(&.info.id).sort!.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "reflected_param", "sqli_error_based", "ssti"])
       # reflected_param (1) + cors_reflection (1) + backslash_powered (≤8) + crlf_injection (1) + ssti (2) + sqli_error_based (≤5) = 18
-      est.sum { |e| e.requests.end }.should eq(18)
+      est.sum(&.requests.end).should eq(18)
     end
   end
 

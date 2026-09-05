@@ -7,7 +7,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"target":"https://api.test","request":"GET /x HTTP/1.1\\r\\nHost: api.test\\r\\n\\r\\n","name":"My Repeater Tab"}}})
         resp = mcp_drive(store, call)[0]
-        resp["result"]["isError"]?.should_not eq(true)
+        resp["result"]["isError"]?.should_not be_true
         payload = mcp_tool_payload(resp)
         payload["id"].as_i64.should_not eq(0)
         payload["name"].as_s.should eq("My Repeater Tab")
@@ -19,7 +19,7 @@ describe Gori::MCP::Server do
         id = payload["id"].as_i64
         upd_call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_repeater","arguments":{"id":#{id},"target":"https://updated.test","name":"Updated Name"}}})
         resp2 = mcp_drive(store, upd_call)[0]
-        resp2["result"]["isError"]?.should_not eq(true)
+        resp2["result"]["isError"]?.should_not be_true
         payload2 = mcp_tool_payload(resp2)
         payload2["id"].as_i64.should eq(id)
         payload2["name"].as_s.should eq("Updated Name")
@@ -261,7 +261,7 @@ describe Gori::MCP::Server do
         rows = payload["diff"].as_a
         folds = rows.select { |r| r["kind"].as_s == "fold" }
         folds.size.should be > 0
-        folds.each { |f| f["hidden"].as_i.should be > 1 }
+        folds.each(&.["hidden"].as_i.should(be > 1))
         texts = rows.compact_map { |r| r["text"]?.try(&.as_s) }
         texts.any?(&.includes?("BEFORE")).should be_true
         texts.any?(&.includes?("line19")).should be_true # context kept

@@ -34,8 +34,8 @@ private def grpc_mine_origin : Int32
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
   spawn do
-    while conn = server.accept?
-      spawn_with(conn) do |conn|
+    while accepted = server.accept?
+      spawn_with(accepted) do |conn|
         begin
           conn.read_timeout = 2.seconds
           while head = Gori::Proxy::Codec::Http1.read_head(conn)

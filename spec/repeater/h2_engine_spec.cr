@@ -49,8 +49,8 @@ private def start_tls_origin(advertise_h2 : Bool) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
-    while conn = origin.accept?
-      spawn_with(conn) do |conn|
+    while accepted = origin.accept?
+      spawn_with(accepted) do |conn|
         ssl = OpenSSL::SSL::Socket::Server.new(conn, ctx, sync_close: true)
         # Longer than any example's own timeout. At 2s a second connection on a loaded runner
         # could start its handshake after this fiber had closed, and the example then compared

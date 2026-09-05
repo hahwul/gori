@@ -52,7 +52,7 @@ def start_mcp_ws_origin : Int32
     head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
     key = String.new(head).each_line
       .find(&.downcase.starts_with?("sec-websocket-key:"))
-      .try { |line| line.split(':', 2)[1].strip } || ""
+      .try(&.split(':', 2).[1].strip) || ""
     accept = Base64.strict_encode(Digest::SHA1.digest(key + Gori::Repeater::WsEngine::GUID))
     conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
             "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"

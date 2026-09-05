@@ -408,8 +408,8 @@ private def start_bool_always200_origin : Int32
   port = origin.local_address.port
   spawn do
     loop do
-      break unless conn = origin.accept?
-      spawn_with(conn) do |conn|
+      break unless accepted = origin.accept?
+      spawn_with(accepted) do |conn|
         conn.read_timeout = 2.seconds
         loop do
           break unless Gori::Proxy::Codec::Http1.read_head(conn)

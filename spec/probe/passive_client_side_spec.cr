@@ -11,17 +11,22 @@ private def analyze_js(store, body : String)
     content_type: "application/javascript", body: body)
 end
 
+# Two statements, a string literal holding a sink and a comment holding a source, no
+# trailing newline (the stripper must return the same size it was given).
+private STRIP_SAMPLE = <<-JS.chomp
+  a = "el.innerHTML=location.hash"; // note document.cookie
+  b = location.search;
+  JS
+
 describe Gori::Probe::Passive::JsScan do
   it "blanks string literals and comments but keeps code" do
-    stripped = Gori::Probe::Passive::JsScan.strip(%q{a = "el.innerHTML=location.hash"; // note document.cookie
-b = location.search;})
+    stripped = Gori::Probe::Passive::JsScan.strip(STRIP_SAMPLE)
     # Tokens that lived inside a string or a comment are gone...
     stripped.includes?("el.innerHTML").should be_false
     stripped.includes?("document.cookie").should be_false
     # ...but real code (identifiers outside strings/comments) survives, offsets preserved.
     stripped.includes?("location.search").should be_true
-    stripped.size.should eq(%q{a = "el.innerHTML=location.hash"; // note document.cookie
-b = location.search;}.size)
+    stripped.size.should eq(STRIP_SAMPLE.size)
   end
 
   it "correlates a source and a sink only in the same statement" do
@@ -118,7 +123,7 @@ describe Gori::Probe::Passive::PostMessage do
   # bundle suppressed every finding in it — the rule detected nothing on real bundles.
   it "still flags an unchecked handler when an unrelated .origin exists elsewhere in the bundle" do
     with_store do |store|
-      js = %(var o = location.origin + "/api";) + ("var pad#{1};" * 5) +
+      js = %(var o = location.origin + "/api";) + ("var pad1;" * 5) +
            %(window.addEventListener("message", function(e){ handle(e.data); });)
       probe_codes_of(analyze_js(store, js)).should contain("postmessage_no_origin")
     end
@@ -464,7 +469,7 @@ describe "Gori::Probe::Passive::JsScan (navigation + parsing sinks)" do
     Gori::Probe::Passive::JsScan::SOURCE_SCANS.each do |(_, slots)|
       slots.each_value { |i| factored << i }
     end
-    covered = (factored + Gori::Probe::Passive::JsScan::SOLO_SOURCES).uniq.sort
+    covered = (factored + Gori::Probe::Passive::JsScan::SOLO_SOURCES).uniq.sort!
     covered.should eq((0...Gori::Probe::Passive::JsScan::SOURCES.size).to_a)
     (factored & Gori::Probe::Passive::JsScan::SOLO_SOURCES).should be_empty
   end

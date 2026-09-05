@@ -91,7 +91,7 @@ private def start_mcp_ws_sink_origin : Int32
     head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
     key = String.new(head).each_line
       .find(&.downcase.starts_with?("sec-websocket-key:"))
-      .try { |line| line.split(':', 2)[1].strip } || ""
+      .try(&.split(':', 2).[1].strip) || ""
     accept = Base64.strict_encode(Digest::SHA1.digest(key + Gori::Repeater::WsEngine::GUID))
     conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
             "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
@@ -174,7 +174,7 @@ describe Gori::MCP::Server do
         out = mcp_drive(store, send, %({"jsonrpc":"2.0","id":2,"method":"ping"}))
         # The ping came back FIRST — it did not wait out the request in front of it. Before
         # the reader/worker split this line arrived only after the whole timeout elapsed.
-        out.map { |r| r["id"].as_i }.should eq([2, 1])
+        out.map(&.["id"].as_i).should eq([2, 1])
         (Time.instant - started).should be >= 1.second # …and the slow call really was slow
       end
     end
@@ -185,7 +185,7 @@ describe Gori::MCP::Server do
         cancel = %({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7,"reason":"timed out"}})
         # The cancel is read (and recorded) by the reader before the worker gets to id 7.
         out = mcp_drive(store, call, cancel, %({"jsonrpc":"2.0","id":8,"method":"ping"}))
-        out.map { |r| r["id"].as_i }.should eq([8]) # 7's answer suppressed, 8 still served
+        out.map(&.["id"].as_i).should eq([8]) # 7's answer suppressed, 8 still served
       end
     end
 
@@ -195,7 +195,7 @@ describe Gori::MCP::Server do
         out = mcp_drive(store, cancel, %({"jsonrpc":"2.0","id":"never-sent","method":"ping"}))
         # A cancel that arrived before (or without) its request must not silence a LATER
         # request that happens to reuse the id — nothing was pending, so nothing was recorded.
-        out.map { |r| r["id"].as_s }.should eq(["never-sent"])
+        out.map(&.["id"].as_s).should eq(["never-sent"])
       end
     end
 
@@ -614,7 +614,7 @@ describe "Gori::MCP::Server WebSocket frame shapes" do
       resp = mcp_drive(store, call, verify_upstream: false)[0]
       resp["result"]["isError"].as_bool.should be_false
       out = mcp_tool_payload(resp)["messages"].as_a.select { |m| m["direction"].as_s == "out" }
-      out.map { |m| m["frame"].as_s }.should eq([
+      out.map(&.["frame"].as_s).should eq([
         "PING", "TEXT rsv=4", "TEXT unmasked", "TEXT len=4096", "CLOSE", "TEXT",
       ])
       out[4]["close_code"].as_i.should eq(1002)

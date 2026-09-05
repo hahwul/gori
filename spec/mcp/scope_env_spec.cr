@@ -314,7 +314,7 @@ describe "MCP project env vars" do
       store.set_setting(Gori::Env::PROJECT_VARS_KEY, %([{"key":"CLI_TOKEN","value":"abc"}]))
 
       listed = mcp_ok_json(tools, "list_env", %({"include_sensitive":true}))
-      listed.as_a.map { |v| v["key"].as_s }.should eq ["CLI_TOKEN"]
+      listed.as_a.map(&.["key"].as_s).should eq ["CLI_TOKEN"]
     end
   end
 
@@ -327,7 +327,7 @@ describe "MCP project env vars" do
       mcp_ok_json(tools, "set_env_var", %({"key":"MCP_KEY","value":"v"}))
 
       # set_env_var read-modify-WRITES the whole array; on a stale copy CLI_TOKEN vanished.
-      keys = mcp_ok_json(tools, "list_env", "{}").as_a.map { |v| v["key"].as_s }
+      keys = mcp_ok_json(tools, "list_env", "{}").as_a.map(&.["key"].as_s)
       keys.should contain "CLI_TOKEN"
       keys.should contain "MCP_KEY"
     end

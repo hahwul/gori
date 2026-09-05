@@ -60,8 +60,8 @@ private def start_origin(response : Bytes, seen : Array(String)) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
-    while conn = origin.accept?
-      spawn_with(conn) do |conn|
+    while accepted = origin.accept?
+      spawn_with(accepted) do |conn|
         head = Gori::Proxy::Codec::Http1.read_head(conn)
         seen << String.new(head) if head
         conn.write(response)

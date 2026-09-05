@@ -273,9 +273,9 @@ describe "Repeater::Engine — a body that stalls after the head" do
     # socket-fiber race.
     conns = [] of TCPSocket
     spawn do
-      while conn = server.accept?
-        conns << conn
-        spawn_with(conn) do |conn|
+      while accepted = server.accept?
+        conns << accepted
+        spawn_with(accepted) do |conn|
           Gori::Proxy::Codec::Http1.read_head(conn)
           # A head promising ten bytes, and then silence — the ordinary shape of a read
           # timeout, and of a time-based payload against an origin that streams its head.

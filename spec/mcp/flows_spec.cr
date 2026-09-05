@@ -53,7 +53,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         a = mcp_seed_flow(store, "h.test", "GET", "/a", 500)
         b = mcp_seed_flow(store, "h.test", "GET", "/b", 500)
-        c = mcp_seed_flow(store, "h.test", "GET", "/c", 200)
+        mcp_seed_flow(store, "h.test", "GET", "/c", 200)
 
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:500","limit":1}}})
         page1 = mcp_tool_payload(mcp_drive(store, call)[0]).as_a
@@ -451,7 +451,7 @@ describe Gori::MCP::Server do
         store.set_setting(Gori::Store::UI_STATE_KEY, "[1,2,3]") # valid JSON, wrong shape
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_current_context","arguments":{}}})
         resp = mcp_drive(store, call)[0]
-        resp["result"]["isError"]?.try(&.as_bool?).should_not eq(true) # was: "tool error: Expected Hash…"
+        resp["result"]["isError"]?.try(&.as_bool?).should_not be_true # was: "tool error: Expected Hash…"
         payload = mcp_tool_payload(resp)
         payload["available"].as_bool.should be_false
         payload["note"].as_s.should contain("unreadable")

@@ -105,8 +105,7 @@ private def start_tls_origin(&)
   server = TCPServer.new("127.0.0.1", 0)
   spawn do
     while raw = server.accept?
-      conn = raw
-      spawn_with(conn) do |conn|
+      spawn_with(raw) do |conn|
         # A read timeout so a failing example cannot leave this fiber blocked on `gets` forever.
         conn.read_timeout = 5.seconds
         ssl = OpenSSL::SSL::Socket::Server.new(conn, ctx, sync_close: true)

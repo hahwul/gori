@@ -21,7 +21,7 @@ describe "Gori::MCP::Tools project lifecycle" do
       alt = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Alt"}))).text)["slug"].as_s
 
       # list shows both (neither current — server serves current.db, not a registry project)
-      listed = JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)["projects"].as_a.map { |p| p["slug"].as_s }
+      listed = JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)["projects"].as_a.map(&.["slug"].as_s)
       listed.should contain(doomed_slug)
       listed.should contain(alt)
 
@@ -48,7 +48,7 @@ describe "Gori::MCP::Tools project lifecycle" do
       done["deleted"].as_bool.should be_true
 
       # Doomed is gone, Alt remains
-      after = JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)["projects"].as_a.map { |p| p["slug"].as_s }
+      after = JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)["projects"].as_a.map(&.["slug"].as_s)
       after.should_not contain(doomed_slug)
       after.should contain(alt)
 
@@ -158,10 +158,11 @@ describe "Gori::MCP::Tools unbound mode" do
   # surface the agent reads and the tools that repair it stay reachable.
   describe "degraded start (bind_error)" do
     it "names the failure in instructions and in every NO_PROJECT error" do
-      input = IO::Memory.new(%({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{}}}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"project_info","arguments":{}}}
-))
+      input = IO::Memory.new(<<-JSON)
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+        {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{}}}
+        {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"project_info","arguments":{}}}
+        JSON
       output = IO::Memory.new
       Gori::MCP::Server.new(nil, allow_actions: true, verify_upstream: false,
         selection_source: "unbound", bind_error: "cannot open database /tmp/x.db: file is not a database",
@@ -204,9 +205,10 @@ describe "Gori::MCP::Tools unbound mode" do
   end
 
   it "handshakes an unbound Server over stdio" do
-    input = IO::Memory.new(%({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}
-{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-))
+    input = IO::Memory.new(<<-JSON)
+      {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}
+      {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+      JSON
     output = IO::Memory.new
     Gori::MCP::Server.new(nil, allow_actions: true, verify_upstream: false,
       selection_source: "unbound", input: input, output: output).run
@@ -215,7 +217,7 @@ describe "Gori::MCP::Tools unbound mode" do
     init = lines[0]["result"]
     init["serverInfo"]["name"].as_s.should eq("gori")
     init["instructions"].as_s.should match(/No project is bound/i)
-    names = lines[1]["result"]["tools"].as_a.map { |t| t["name"].as_s }
+    names = lines[1]["result"]["tools"].as_a.map(&.["name"].as_s)
     names.should contain("list_projects")
     names.should contain("create_project")
     names.should contain("switch_project")
@@ -248,11 +250,11 @@ describe "MCP agent event feed" do
 
       all = mcp_ok_json(tools, "probe_scan", "{}")
       all["flows_scanned"].as_i.should eq(2) # every flow scanned regardless
-      all["issues"].as_a.map(&.["host"].as_s).uniq.sort.should eq(["alpha.test", "beta.test"])
+      all["issues"].as_a.map(&.["host"].as_s).uniq!.sort!.should eq(["alpha.test", "beta.test"])
 
       scoped = mcp_ok_json(tools, "probe_scan", %({"in_scope":true}))
-      scoped["flows_scanned"].as_i.should eq(2)                                 # still scanned all
-      scoped["issues"].as_a.map(&.["host"].as_s).uniq.should eq(["alpha.test"]) # report narrowed
+      scoped["flows_scanned"].as_i.should eq(2)                                  # still scanned all
+      scoped["issues"].as_a.map(&.["host"].as_s).uniq!.should eq(["alpha.test"]) # report narrowed
     end
   end
 

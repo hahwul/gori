@@ -218,7 +218,7 @@ describe Gori::MCP::Server do
     it "lists presets and installs one as ordinary Match & Replace rules" do
       with_store do |store|
         presets = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_rule_presets"}}))[0])
-        presets.as_a.map { |p| p["key"].as_s }.should contain("remove-csp")
+        presets.as_a.map(&.["key"].as_s).should contain("remove-csp")
 
         add = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_rule_from_preset","arguments":{"preset":"remove-csp"}}})
         res = mcp_tool_payload(mcp_drive(store, add)[0])

@@ -151,7 +151,7 @@ describe Gori::MCP::Server do
           .should eq([{"X-T", "gotcha"}])
         # and it is NOT laundered into the header list, where it would be indistinguishable
         # from a header the origin actually sent in the head
-        payload["headers"].as_a.map { |h| h["name"].as_s }.should_not contain("X-T")
+        payload["headers"].as_a.map(&.["name"].as_s).should_not contain("X-T")
       end
     end
 

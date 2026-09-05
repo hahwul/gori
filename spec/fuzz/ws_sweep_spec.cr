@@ -21,8 +21,8 @@ private def start_ws_sweep_origin(count : Int32, close_code : Int32 = 1000) : {I
   got = [] of String
   spawn do
     count.times do
-      break unless conn = origin.accept?
-      spawn_with(conn) do |conn|
+      break unless accepted = origin.accept?
+      spawn_with(accepted) do |conn|
         conn.read_timeout = 5.seconds
         head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
         key = String.new(head).each_line

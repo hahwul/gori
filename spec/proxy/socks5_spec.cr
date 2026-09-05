@@ -93,8 +93,8 @@ private def start_banner_origin(dialled : Channel(Nil)) : Int32
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
   spawn do
-    while conn = server.accept?
-      spawn_with(conn) do |conn|
+    while accepted = server.accept?
+      spawn_with(accepted) do |conn|
         begin
           dialled.send(nil)
           conn << "220 banner.origin ESMTP ready\r\n"

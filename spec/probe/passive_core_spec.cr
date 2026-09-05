@@ -1114,7 +1114,7 @@ describe "Gori::Probe::Passive (shared body decode)" do
       plain = "<html><script>document.write(location.hash)</script>" \
               "<p>key #{PROBE_AWS_KEY_ID} here</p></html>"
       gz = IO::Memory.new
-      Compress::Gzip::Writer.open(gz) { |w| w.write(plain.to_slice) }
+      Compress::Gzip::Writer.open(gz, &.write(plain.to_slice))
       dets = probe_analyze(store,
         resp_head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n",
         content_type: "text/html", body: String.new(gz.to_slice))

@@ -259,10 +259,10 @@ describe "MCP entity links" do
 
       listed = mcp_ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))
       listed["total"].as_i.should eq(2)
-      kinds = listed["links"].as_a.map { |l| l["ref_kind"].as_s }
+      kinds = listed["links"].as_a.map(&.["ref_kind"].as_s)
       kinds.should contain("flow")
       kinds.should contain("repeater")
-      listed["links"].as_a.each { |l| l["label"].as_s.empty?.should be_false }
+      listed["links"].as_a.each(&.["label"].as_s.empty?.should(be_false))
 
       mcp_ok_json(tools, "remove_link",
         %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))["removed"].as_bool.should be_true

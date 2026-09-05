@@ -112,7 +112,7 @@ describe Gori::MCP::Server do
         %w[in out].each do |side|
           call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"scope:#{side}","strict":true}}})
           rows = mcp_tool_payload(mcp_drive(store, call)[0]).as_a
-          rows.map { |r| r["host"].as_s }.should eq([side == "in" ? "ex.test" : "other.test"])
+          rows.map(&.["host"].as_s).should eq([side == "in" ? "ex.test" : "other.test"])
         end
       end
     end
@@ -144,7 +144,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"decode","arguments":{"input":"hi","spec":"sha256"}}})
         resp = mcp_drive(store, call, allow_actions: false)[0]
-        resp["result"]["isError"]?.should_not eq(true)
+        resp["result"]["isError"]?.should_not be_true
         mcp_tool_payload(resp)["output"].as_s.size.should eq(64)
       end
     end
@@ -172,7 +172,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_decode","arguments":{"token":"#{jwt}"}}})
         resp = mcp_drive(store, call, allow_actions: false)[0]
-        resp["result"]["isError"]?.should_not eq(true)
+        resp["result"]["isError"]?.should_not be_true
         payload = mcp_tool_payload(resp)
         payload["alg"].as_s.should eq("HS256")
         payload["header"]["typ"].as_s.should eq("JWT")
@@ -231,7 +231,7 @@ describe Gori::MCP::Server do
     it "jwt_attacks lists none/weak-secret/header-inject payloads" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{jwt}"}}})
-        cats = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0]).as_a.map { |a| a["category"].as_s }.uniq
+        cats = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0]).as_a.map(&.["category"].as_s).uniq!
         cats.should contain("none")
         cats.should contain("weak-secret")
         cats.should contain("header-inject")
@@ -240,7 +240,7 @@ describe Gori::MCP::Server do
 
     it "all three jwt tools are listed even in read-only mode" do
       with_store do |store|
-        names = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/list"}), allow_actions: false)[0]["result"]["tools"].as_a.map { |t| t["name"].as_s }
+        names = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/list"}), allow_actions: false)[0]["result"]["tools"].as_a.map(&.["name"].as_s)
         names.should contain("jwt_decode")
         names.should contain("jwt_encode")
         names.should contain("jwt_attacks")

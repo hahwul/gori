@@ -50,9 +50,10 @@ describe Gori::MCP::Serialize do
   # back as `�` and was unrecoverable through MCP — two different invalid bytes rendered the
   # same. Trailers are header values too, and share the contract.
   it "hands back the exact bytes of a value scrubbing had to change" do
-    res = JSON.parse(JSON.build { |j|
+    built = JSON.build do |j|
       j.object { Gori::MCP::Serialize.emit_lossy_text(j, "value", String.new(Bytes[0x80, 0xff])) }
-    })
+    end
+    res = JSON.parse(built)
     res["value"].as_s.valid_encoding?.should be_true
     Base64.decode(res["value_base64"].as_s).should eq(Bytes[0x80, 0xff])
     res["value_lossy"].as_bool.should be_true
@@ -71,22 +72,26 @@ describe Gori::MCP::Serialize do
   # was handed is not the whole truth.
   it "flags a lossy head always, and emits its bytes only under include_sensitive" do
     head = Bytes[0x58, 0x3a, 0x20, 0x80, 0xff]
-    gated = JSON.parse(JSON.build { |j|
+    built = JSON.build do |j|
       j.object { Gori::MCP::Serialize.emit_head_base64(j, "response_head", head, false) }
-    })
+    end
+    gated = JSON.parse(built)
     gated["response_head_lossy"].as_bool.should be_true
     gated.as_h.has_key?("response_head_base64").should be_false
 
-    opened = JSON.parse(JSON.build { |j|
+    built = JSON.build do |j|
       j.object { Gori::MCP::Serialize.emit_head_base64(j, "response_head", head, true) }
-    })
+    end
+
+    opened = JSON.parse(built)
     Base64.decode(opened["response_head_base64"].as_s).should eq(head)
   end
 
   it "adds nothing for a head that is valid UTF-8" do
-    out = JSON.parse(JSON.build { |j|
+    built = JSON.build do |j|
       j.object { Gori::MCP::Serialize.emit_head_base64(j, "response_head", "HTTP/1.1 200 OK\r\n\r\n".to_slice, true) }
-    })
+    end
+    out = JSON.parse(built)
     out.as_h.should be_empty
   end
 end
