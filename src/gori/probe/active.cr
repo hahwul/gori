@@ -17,6 +17,7 @@ require "./active/ssti"
 require "./active/nextjs_action_no_auth"
 require "./active/request_smuggling"
 require "./active/ssrf_oast"
+require "./active/xxe_oast"
 require "./active/cmd_injection_oast"
 require "../outbound"
 require "../scope"
@@ -45,7 +46,7 @@ module Gori
                CrlfInjection.new, PathNormalizationBypass.new,
                UrlRewriteBypass.new, Ssti.new,
                NextjsActionNoAuth.new, RequestSmuggling.new,
-               SsrfOast.new, CmdInjectionOast.new] of Rule
+               SsrfOast.new, CmdInjectionOast.new, XxeOast.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.

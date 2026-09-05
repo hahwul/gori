@@ -46,7 +46,7 @@ module Gori
     # them "needs OAST" and to keep their (currently-unpayable) request cost out of the enabled
     # total. One list so the catalog, the estimate, and the badge cannot drift on which rules
     # these are.
-    OOB_RULE_IDS = Set{"ssrf_oast", "cmd_injection_oast"}
+    OOB_RULE_IDS = Set{"ssrf_oast", "cmd_injection_oast", "xxe_oast"}
 
     # Whether the analyzer/scan must SKIP rule `id`, given the project's stored disabled-id set.
     def self.rule_disabled?(id : String, stored : Set(String)) : Bool
@@ -152,6 +152,7 @@ module Gori
       "path_normalization_bypass"      => "A probe reached a denied (401/403) path by rewriting it with a normalization trick (e.g. /admin/..;/admin, /admin/%2e/, /admin//) and got a 2xx. Enforce access control on the NORMALIZED path after the proxy and application collapse ./ ..; // %2e sequences, keep the proxy and backend agreeing on normalization, and reject ambiguous paths. Single-shot; confirm by re-requesting the canonical path.",
       "url_rewrite_bypass"             => "A probe reached a denied resource by requesting / with an X-Original-URL / X-Rewrite-URL header naming the gated path, and got different (served) content than the plain root. Don't let application URL-rewrite headers override the routed path for authorization; strip X-Original-URL / X-Rewrite-URL at the edge and enforce access control on the actual request path. Single-shot; confirm manually.",
       "ssti"                           => "A probe injected template expressions in this parameter and the server returned their evaluated results (7*7→49 and 7*8→56), indicating server-side template injection — frequently a path to remote code execution. Never build templates from user input; pass user data as template variables/context, use a sandboxed or logic-less engine, and validate input. Confirm the engine and impact manually.",
+      "xxe_oast"                       => "An XML probe caused an OAST callback after declaring and referencing an external parameter entity. Disable DTD processing and external entity resolution in the XML parser, including external parameter entities and external DTD loading. Use a parser configuration that forbids network and file access.",
       "ssrf_oast"                      => "An out-of-band probe pointed this URL parameter at a gori-controlled OAST payload and the server called back to it — confirming the endpoint fetches an attacker-supplied URL (server-side request forgery). Validate the target against a strict allowlist of hosts/schemes, resolve and pin the destination IP (rejecting private/link-local/metadata ranges and DNS-rebinding), and never let a request parameter choose an arbitrary host to connect to. Blind SSRF reaches internal services, cloud metadata (169.254.169.254), and localhost admin panels.",
       "cmd_injection_oast"             => "An out-of-band probe appended a shell-breakout payload to this command/diagnostic parameter and the server's shell called the OAST listener back — confirming the value is concatenated into an OS command (command injection, typically remote code execution). Do not exec user input: pass arguments to a parameterized/safe API (no shell), or map the parameter to an allowlisted operation. Reject shell metacharacters and never build a command string from a request value.",
       "nextjs_action_no_auth"          => "A probe re-sent this Next.js server action (Next-Action) with the session Cookie / Authorization removed and still received a comparable 2xx response. Next.js does not authenticate or authorize server actions for you — enforce authentication and per-user authorization INSIDE every 'use server' function (and treat each action as a public, unauthenticated endpoint until it does). Single-shot; confirm the unauthenticated response actually contains privileged data.",
@@ -295,6 +296,7 @@ module Gori
       "path_normalization_bypass" => {288, "Authentication Bypass Using an Alternate Path or Channel"},
       "url_rewrite_bypass"        => {288, "Authentication Bypass Using an Alternate Path or Channel"},
       "nextjs_action_no_auth"     => {306, "Missing Authentication for Critical Function"},
+      "xxe_oast"                  => {611, "Improper Restriction of XML External Entity Reference"},
       "ssrf_oast"                 => {918, "Server-Side Request Forgery (SSRF)"},
       "cmd_injection_oast"        => {78, "Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"},
       "jwt_alg_none"              => {347, "Improper Verification of Cryptographic Signature"},

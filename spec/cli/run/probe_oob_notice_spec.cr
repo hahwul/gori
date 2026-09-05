@@ -2,7 +2,7 @@ require "../../spec_helper"
 
 # `gori run probe --active` and the out-of-band half.
 #
-# An OOB rule (ssrf_oast, cmd_injection_oast) only plants when the project has an OAST session to
+# An OOB rule only plants when the project has an OAST session to
 # mint against, and the TUI's OAST tab is the only surface that writes one — `gori run oast listen`
 # and the MCP `oast_start` are ad-hoc, their registration dying with the process. So headless the
 # rule can be listed `[on]` by `probe rules` and still send nothing, which made an empty active
@@ -31,6 +31,7 @@ describe "gori run probe — out-of-band reachability notice" do
       note = Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg, true).not_nil!
       note.should contain("ssrf_oast")
       note.should contain("cmd_injection_oast")
+      note.should contain("xxe_oast")
       note.should contain("no OAST session")
       note.should contain("not evidence that no blind (out-of-band) vulnerability exists")
     end
@@ -61,7 +62,7 @@ describe "gori run probe — out-of-band reachability notice" do
       # passive: nothing was going to be sent, so there is nothing to warn about
       Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg, false).should be_nil
       # the operator switched the OOB rules off — not a surprise that needs naming
-      Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg(["ssrf_oast", "cmd_injection_oast"]), true).should be_nil
+      Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg(Gori::Probe::OOB_RULE_IDS.to_a), true).should be_nil
       # degraded: ACTIVE is skipped wholesale and Scan reports that instead
       Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg(degraded: true), true).should be_nil
     end
