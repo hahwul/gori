@@ -47,16 +47,36 @@ module Gori::Tui
     end
 
     def body_badge : Symbol
-      :body
+      querying? ? :editor : :body
     end
 
     def body_hint(focus : Symbol) : String
       return "start from Sitemap/History (space → \"Discover here\")" if @view.empty?
+      return @view.filter_hint if querying?
       if @view.focus == :runs
         keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
       else
-        keys("↑/↓ nav · ↵/o request+response · {discover.copy} copy · tab runs · {discover.run} run · {discover.stop} stop · {discover.pause} pause · space cmds · esc sub-tabs")
+        keys("↑/↓ nav · ↵/o request+response · {discover.filter} filter · {discover.copy} copy · tab runs · {discover.run} run · {discover.stop} stop · {discover.pause} pause · space cmds · esc sub-tabs")
       end
+    end
+
+    # --- the FINDINGS `/` filter (a text sub-mode the shell claims ahead of the focus ring) ---
+    def querying? : Bool
+      @view.filter_editing?
+    end
+
+    def handle_query_key(ev : Termisu::Event::Key) : Bool
+      @view.handle_filter_key(ev)
+    end
+
+    def set_preedit(text : String) : Bool
+      @view.set_filter_preedit(text)
+    end
+
+    # `/` — narrow the FINDINGS table by status / source / URL. Refused with nothing to filter.
+    def discover_filter : Nil
+      return @host.status("no run selected — start from Sitemap/History (space → \"Discover here\")") unless @view.current
+      @view.filter_start
     end
 
     # --- rendering (frameless seam for TargetController) ---

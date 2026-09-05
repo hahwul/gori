@@ -5,6 +5,7 @@ require "./fmt"
 require "./traffic_empty_state"
 require "../discover"
 require "./viewport"
+require "./row_filter"
 
 module Gori::Tui
   # One discovery run (a spider + brute session). Ephemeral (in-memory) — the durable
@@ -22,6 +23,8 @@ module Gori::Tui
     # never sent.
     property status : Symbol = :idle
     getter findings = [] of Discover::Finding
+    # Bumped whenever `findings` changes shape — the memo key the view's `/` filter reads.
+    getter rev = 0
     # The flow each finding was persisted as, INDEX-ALIGNED with `findings` — nil until the
     # controller's persist batch commits (or forever, if that write failed). It is what turns
     # a findings row into something openable: the run is in-memory and holds no bytes, the
@@ -64,6 +67,7 @@ module Gori::Tui
     def add_finding(f : Discover::Finding) : Int32
       @findings << f
       @flow_ids << nil
+      @rev += 1
       @findings.size - 1
     end
 
@@ -80,6 +84,7 @@ module Gori::Tui
       @stop_requested = false
       @findings.clear
       @flow_ids.clear
+      @rev += 1
       @stats = nil
       @sent = 0_i64
       @found = 0
@@ -156,6 +161,67 @@ module Gori::Tui
       @scroll = 0
       @rscroll = 0
       @focus = :runs
+      @filter = RowFilter.new # the FINDINGS `/` filter
+      @vis = [] of Int32      # visible finding indices, memoised over {run, rev, query}
+      @vis_key = {0_u64, 0, ""}
+    end
+
+    # --- the FINDINGS `/` filter -------------------------------------------------------------
+    # A lens over the selected run's findings: `visible(r)` is the list the cursor, the draw
+    # loop and every hit-test walk; the run's own array is untouched.
+    def filter_start : Nil
+      focus_pane(:findings)
+      @filter.start
+    end
+
+    def filter_editing? : Bool
+      @filter.editing?
+    end
+
+    def filter_hint : String
+      @filter.hint
+    end
+
+    # A key while editing. The cursor is re-anchored to the SOURCE row it was on, so a
+    # narrowing that keeps the row keeps the selection.
+    def handle_filter_key(ev : Termisu::Event::Key) : Bool
+      prev = selected_source_index
+      @filter.handle_key(ev)
+      if (r = current) && prev
+        @fsel = visible(r).index(prev) || @fsel.clamp(0, {visible(r).size - 1, 0}.max)
+      end
+      true
+    end
+
+    def set_filter_preedit(text : String) : Bool
+      @filter.set_preedit(text)
+    end
+
+    private def visible(r : DiscoverRun) : Array(Int32)
+      key = {r.object_id, r.rev, @filter.query}
+      return @vis if key == @vis_key
+      @vis = (0...r.findings.size).select { |i| @filter.matches?(finding_haystack(r.findings[i])) }
+      @vis_key = key
+      @vis
+    end
+
+    # What the row shows, in the order it shows it — so what you see is what you can type.
+    private def finding_haystack(f : Discover::Finding) : String
+      "#{f.status.try(&.to_s) || "—"} #{f.source.label} #{f.method} #{f.url}"
+    end
+
+    # The source index under the findings cursor, or nil with no run / no visible rows.
+    private def selected_source_index : Int32?
+      current.try { |r| visible(r)[@fsel]? }
+    end
+
+    # {bar, list} for the FINDINGS card's interior: the `/` bar takes the first row only while
+    # shown, so an idle card is laid out exactly as it was. ONE derivation for the render and
+    # both hit-tests.
+    private def findings_bands(card : Rect) : {Rect?, Rect}
+      inner = card.inset(1, 1)
+      return {nil, inner} unless @filter.shown? && inner.h > 0
+      {Rect.new(inner.x, inner.y, inner.w, 1), Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)}
     end
 
     def empty? : Bool
@@ -252,12 +318,15 @@ module Gori::Tui
 
     def move(d : Int32) : Nil
       return unless r = current
-      return if r.findings.empty?
-      @fsel = (@fsel + d).clamp(0, r.findings.size - 1)
+      vis = visible(r)
+      return if vis.empty?
+      @fsel = (@fsel + d).clamp(0, vis.size - 1)
     end
 
     def selected_finding : Discover::Finding?
-      current.try(&.findings[@fsel]?)
+      return nil unless r = current
+      src = visible(r)[@fsel]?
+      src ? r.findings[src]? : nil
     end
 
     # The stored flow behind the cursor row, or nil when the row has none yet (the persist
@@ -265,8 +334,8 @@ module Gori::Tui
     # finding under the cursor — `selected_finding` is what says whether there is one.
     def selected_flow_id : Int64?
       return nil unless r = current
-      return nil unless r.findings[@fsel]?
-      r.flow_id_at(@fsel)
+      return nil unless src = visible(r)[@fsel]?
+      r.flow_id_at(src)
     end
 
     # Pull the findings cursor back inside the selected run's list.
@@ -277,8 +346,9 @@ module Gori::Tui
     # with rows plainly on screen — which `open_flow_target` would then report as "this run
     # found nothing". Called from render, alongside the scroll anchor it already fixes up.
     private def clamp_findings(r : DiscoverRun) : Nil
-      return if r.findings.empty? # nothing to clamp to; the empty-state message is correct
-      @fsel = r.findings.size - 1 if @fsel >= r.findings.size
+      n = visible(r).size
+      return if n == 0 # nothing to clamp to; the empty-state message is correct
+      @fsel = n - 1 if @fsel >= n
       @fsel = 0 if @fsel < 0
     end
 
@@ -490,27 +560,22 @@ module Gori::Tui
     private def render_findings(screen : Screen, rect : Rect, focused : Bool) : Nil
       r = current
       n = r ? r.findings.size : 0
+      vis = r ? visible(r) : [] of Int32
       Frame.card(screen, rect, "FINDINGS", border: Frame.pane_border(focused), bg: Theme.bg)
-      Frame.border_meta(screen, rect, "FINDINGS", n.to_s)
-      inner = rect.inset(1, 1)
+      Frame.border_meta(screen, rect, "FINDINGS", @filter.active? ? "#{vis.size}/#{n}" : n.to_s)
+      bar, inner = findings_bands(rect)
       # A card under 3 rows has no interior — `inset` floors the height at 0 but keeps
       # `inner.y` one row down, so an unguarded placeholder lands OUTSIDE the pane.
       # (`render_runs` has carried this guard all along; this pane did not.)
+      @filter.render_bar(screen, bar) if bar
       return if inner.h <= 0 || inner.w <= 0
       return unless r
       if r.findings.empty?
-        # "no endpoints found" over a crawl that stopped on its budget is the claim this
-        # tab must never make — it did not look.
-        msg = if r.running?
-                "discovering… endpoints appear here"
-              elsif r.budget_exhausted?
-                "none found in the #{r.sent} requests the budget allowed — #{r.queued} candidates unexplored"
-              elsif r.stats
-                "no endpoints found"
-              else
-                "no run yet — ^R to run"
-              end
-        screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg)
+        screen.text(inner.x + 1, inner.y, findings_empty_message(r), Theme.muted, Theme.bg)
+        return
+      end
+      if vis.empty? # rows exist, none match the query
+        screen.text(inner.x + 1, inner.y, @filter.no_match_line("findings"), Theme.muted, Theme.bg, width: {inner.w - 2, 0}.max)
         return
       end
       header_row(screen, inner)
@@ -520,14 +585,28 @@ module Gori::Tui
       ensure_visible(cap, r)
       cap.times do |i|
         idx = @scroll + i
-        break if idx >= r.findings.size
-        draw_row(screen, inner, r.findings[idx], idx, inner.y + 1 + i, focused)
+        break if idx >= vis.size
+        draw_row(screen, inner, r.findings[vis[idx]], idx, inner.y + 1 + i, focused)
       end
       # The RUNS card six rows above has had a gauge all along; this one had none. A
       # difference like that INSIDE one view reads as breakage rather than as a gap. Rows
       # start at `inner.y + 1` — `inner.y` is the header — so the gauge measures from there.
       Frame.scroll_gauge(screen, Rect.new(inner.x, inner.y + 1, inner.w, cap),
-        r.findings.size, @scroll, focused)
+        vis.size, @scroll, focused)
+    end
+
+    # The line for a run with no findings at all. "no endpoints found" over a crawl that
+    # stopped on its budget is the claim this tab must never make — it did not look.
+    private def findings_empty_message(r : DiscoverRun) : String
+      if r.running?
+        "discovering… endpoints appear here"
+      elsif r.budget_exhausted?
+        "none found in the #{r.sent} requests the budget allowed — #{r.queued} candidates unexplored"
+      elsif r.stats
+        "no endpoints found"
+      else
+        "no run yet — ^R to run"
+      end
     end
 
     private def header_row(screen : Screen, inner : Rect) : Nil
@@ -565,7 +644,7 @@ module Gori::Tui
     # which is what the draw loop walks, and switching runs re-enters here with a different
     # list under the same offset — the case the tail clamp exists for.
     private def ensure_visible(cap : Int32, r : DiscoverRun) : Nil
-      @scroll = Viewport.scroll_to_show(@fsel, @scroll, cap, r.findings.size)
+      @scroll = Viewport.scroll_to_show(@fsel, @scroll, cap, visible(r).size)
     end
 
     # --- click hit-test ---
@@ -620,12 +699,12 @@ module Gori::Tui
     private def findings_row_at(card : Rect, my : Int32) : Int32?
       r = current
       return nil if r.nil? || r.findings.empty?
-      inner = card.inset(1, 1)
+      _, inner = findings_bands(card)
       return nil if inner.h <= 0 || inner.w <= 0
       i = my - (inner.y + 1) # rows start one line below the header
       return nil if i < 0 || i >= {inner.h - 1, 0}.max
       idx = @scroll + i
-      idx < r.findings.size ? idx : nil
+      idx < visible(r).size ? idx : nil # a VISIBLE index — what @fsel holds
     end
 
     # The RUNS / FINDINGS row a click on either card's scroll gauge asks for. Both scrolls
@@ -638,10 +717,10 @@ module Gori::Tui
         return {:runs, row}
       end
       r = current || return nil
-      inner = res_card.inset(1, 1)
+      _, inner = findings_bands(res_card)
       return nil if inner.h <= 1
       if row = Frame.scroll_gauge_row(Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1),
-           r.findings.size, mx, my)
+           visible(r).size, mx, my)
         return {:findings, row}
       end
       nil

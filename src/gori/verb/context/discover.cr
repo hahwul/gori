@@ -11,4 +11,5 @@ abstract class Gori::Verb::ExecContext
   abstract def discover_dismiss : Nil      # drop the selected FINISHED run's row from the list
   abstract def discover_open_flow : Nil    # open the selected finding's captured request/response
   abstract def goto_discover : Nil         # focus the Target tab's Discover sub-tab
+  abstract def discover_filter : Nil       # open the FINDINGS `/` filter bar
 end

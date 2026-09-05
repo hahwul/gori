@@ -62,6 +62,10 @@ module Gori
         mnemonic: 'p') { |ctx| ctx.authorize_toggle_passive; nil }
 
       r.register Verb::Definition.new(
+        "authorize.filter", "Filter requests", "Filter the queue by method / host / path / verdict",
+        Verb::Scope::Authorize, [Verb::Chord.new("/")], available: queued, mnemonic: 'f') { |ctx| ctx.authorize_filter; nil }
+
+      r.register Verb::Definition.new(
         "authorize.copy", "Copy", "Copy the selected request as `METHOD host/path`",
         Verb::Scope::Authorize, [Verb::Chord.new("y")], available: queued, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 

@@ -2,6 +2,7 @@ require "./screen"
 require "./frame"
 require "./geometry"
 require "./viewport"
+require "./row_filter"
 require "./theme"
 require "./fmt"
 require "./url"
@@ -129,6 +130,10 @@ module Gori::Tui
       # its cursor and the rows the pane turned out to have (`Viewport`), never set by a
       # keypress — the height is only known to the renderer.
       @list_scroll = 0
+      @rev = 0                # bumped on every change the `/` filter's haystack can see
+      @filter = RowFilter.new # the request-list `/` filter
+      @vis = [] of Int32      # visible entry indices, memoised over {rev, query}
+      @vis_key = {-1, ""}
       @trial_scroll = 0
       @detail_scroll = 0
       @stop_requested = false
@@ -151,7 +156,9 @@ module Gori::Tui
     def add(detail : Store::FlowDetail) : Int32
       id = (@next_id += 1)
       @entries << Entry.new(id, detail)
-      @sel = @entries.size - 1
+      touch
+      # Land on the new seed — unless the lens hides it, in which case the cursor stays.
+      @sel = visible.index(@entries.size - 1) || @sel.clamp(0, {visible.size - 1, 0}.max)
       @tsel = 0
       @trial_scroll = 0
       @detail_scroll = 0
@@ -217,7 +224,8 @@ module Gori::Tui
       return false unless e
       return false if e.state == :running
       @entries.delete(e)
-      @sel = @sel.clamp(0, {@entries.size - 1, 0}.max)
+      touch
+      @sel = @sel.clamp(0, {visible.size - 1, 0}.max)
       @tsel = 0
       @trial_scroll = 0
       @detail_scroll = 0
@@ -248,6 +256,7 @@ module Gori::Tui
     # place — so reverting them all to `:pending` would print "pending" on the master row while
     # the detail pane still rendered the previous trials table.
     def settle_running(ids : Set(Int32)) : Nil
+      touch
       @entries.each do |e|
         next unless e.state == :running && ids.includes?(e.id)
         e.state = e.target ? :done : (e.error ? :error : :pending)
@@ -272,10 +281,12 @@ module Gori::Tui
     end
 
     def mark_running(ids : Set(Int32)) : Nil
+      touch
       @entries.each { |e| e.state = :running if ids.includes?(e.id) }
     end
 
     def apply_result(id : Int32, target : Authorize::Target) : Nil
+      touch
       return unless e = entry_by_id(id)
       e.target = target
       e.state = :done
@@ -293,6 +304,7 @@ module Gori::Tui
     # the network, and the operator acts on them differently. The master row says `skipped` and
     # the detail pane names the reason in the same words `gori run authorize` prints.
     def apply_skip(id : Int32, reason : Symbol) : Nil
+      touch
       return unless e = entry_by_id(id)
       e.state = :skipped
       e.skip_reason = reason
@@ -314,6 +326,7 @@ module Gori::Tui
     # Re-running it is still one keystroke: ⇧R takes every row, and changing the identity set
     # bumps the revision, which is when a retry could plausibly go differently.
     def apply_error(id : Int32, message : String) : Nil
+      touch
       return unless e = entry_by_id(id)
       e.state = :error
       e.error = message
@@ -383,6 +396,7 @@ module Gori::Tui
 
     # Empty the queue. Deliberately does NOT reset `@next_id` — see `add`.
     def clear : Nil
+      touch
       @entries.clear
       @sel = 0
       @tsel = 0
@@ -396,12 +410,13 @@ module Gori::Tui
     # has no cursor at all, and leaving ↑ inert there made the tab a dead end you could
     # only leave with esc.
     def at_top? : Bool
-      @entries.empty? || @sel <= 0
+      visible.empty? || @sel <= 0
     end
 
     def move_row(delta : Int32) : Nil
-      return if @entries.empty?
-      @sel = (@sel + delta).clamp(0, @entries.size - 1)
+      n = visible.size
+      return if n == 0
+      @sel = (@sel + delta).clamp(0, n - 1)
       @tsel = 0
       @trial_scroll = 0
       @detail_scroll = 0
@@ -432,7 +447,54 @@ module Gori::Tui
     end
 
     def selected_entry : Entry?
-      @entries[@sel]?
+      src = visible[@sel]?
+      src ? @entries[src]? : nil
+    end
+
+    # --- the request-list `/` filter ----------------------------------------------------------
+    # A lens over `@entries`: `visible` is what the cursor, the list and `selected_entry` walk.
+    # It is never a run scope — `pending_entries`, `mark_running`, `runnable` keep reading
+    # `@entries`, so a hidden row still runs.
+    def filter_start : Nil
+      @filter.start
+    end
+
+    def filter_editing? : Bool
+      @filter.editing?
+    end
+
+    def filter_hint : String
+      @filter.hint
+    end
+
+    # Re-anchored by entry ID, since removals shift the source indices.
+    def handle_filter_key(ev : Termisu::Event::Key) : Bool
+      prev = selected_entry.try(&.id)
+      @filter.handle_key(ev)
+      @sel = (prev && visible.index { |i| @entries[i].id == prev }) || @sel.clamp(0, {visible.size - 1, 0}.max)
+      true
+    end
+
+    def set_filter_preedit(text : String) : Bool
+      @filter.set_preedit(text)
+    end
+
+    private def touch : Nil
+      @rev += 1
+    end
+
+    private def visible : Array(Int32)
+      key = {@rev, @filter.query}
+      return @vis if key == @vis_key
+      @vis = (0...@entries.size).select { |i| @filter.matches?(entry_haystack(@entries[i])) }
+      @vis_key = key
+      @vis
+    end
+
+    # Method, host/path, the full URL and the verdict word — `bypass` / `pending` is the
+    # filter an operator reaches for on a long queue.
+    private def entry_haystack(e : Entry) : String
+      "#{e.method} #{e.host_path} #{e.detail.row.url} #{master_verdict_label(e)}"
     end
 
     def selected_trial : Authorize::Trial?
@@ -449,6 +511,15 @@ module Gori::Tui
       return render_empty(screen, rect) if @entries.empty?
       clamp_trial
       y = render_header(screen, rect, rect.y)
+      if @filter.shown? && y < rect.bottom
+        @filter.render_bar(screen, Rect.new(rect.x, y, rect.w, 1))
+        y += 1
+      end
+      vis = visible
+      if vis.empty? # requests exist, none match the query
+        screen.text(rect.x + 1, y, @filter.no_match_line("requests"), Theme.muted, Theme.bg, width: {rect.w - 2, 0}.max) if y < rect.bottom
+        return
+      end
       # Split: the request list up top (bounded to half the body), the selected request's
       # identities + response below.
       # Bounded by the ROWS THIS PANE HAS, not just by a share of them: the old floor of 3
@@ -456,7 +527,7 @@ module Gori::Tui
       # `rect.bottom` — outside the framed body, over the hint line. `rect.bottom - y` is what
       # is actually left below the header.
       avail = {rect.bottom - y, 0}.max
-      list_h = (@entries.size + 1).clamp(1, {rect.h // 2, 3}.max)
+      list_h = (vis.size + 1).clamp(1, {rect.h // 2, 3}.max)
       list_h = {list_h, avail}.min
       list_bottom = y + list_h
       render_list(screen, rect, y, list_bottom, focused)
@@ -479,6 +550,7 @@ module Gori::Tui
       pending = pending_count
       count = "#{@entries.size} request#{@entries.size == 1 ? "" : "s"}"
       count += " (#{pending} pending)" if pending > 0
+      count += " · #{visible.size} match" if @filter.active?
       screen.text(rect.x, y, "#{count} · identities: #{ids}", Theme.muted, Theme.bg, width: rect.w)
       y + 1
     end
@@ -497,16 +569,18 @@ module Gori::Tui
       screen.text(rect.x, y, hdr, Theme.muted, Theme.bg, Attribute::Bold, width: rect.w)
       y += 1
       rows = {bottom - y, 0}.max
-      @list_scroll = Viewport.scroll_to_show(@sel, @list_scroll, rows, @entries.size)
+      vis = visible
+      @list_scroll = Viewport.scroll_to_show(@sel, @list_scroll, rows, vis.size)
       top = y
       rows.times do |n|
         i = @list_scroll + n
-        break unless e = @entries[i]?
+        break unless (src = vis[i]?) && (e = @entries[src]?)
         selected = i == @sel
         bg = (selected && focused) ? Theme.accent_bg : Theme.bg
         screen.fill(Rect.new(rect.x, y, rect.w, 1), bg) if selected && focused
         screen.text(rect.x, y, selected ? "▎" : " ", Theme.focus_gold, bg)
-        cols = " #{fit((i + 1).to_s, 3)} #{fit(e.method, 6)} #{fit(e.host_path, 38)} "
+        # The `#` column is the SOURCE ordinal — stable under a filter, and what an operator quotes.
+        cols = " #{fit((src + 1).to_s, 3)} #{fit(e.method, 6)} #{fit(e.host_path, 38)} "
         screen.text(rect.x + 1, y, cols, Theme.text, bg)
         vx = rect.x + 1 + Screen.draw_width(cols)
         v = e.verdict
@@ -516,7 +590,7 @@ module Gori::Tui
       end
       # `rect.right` is the framed body's own hairline — the column `scroll_gauge` draws in, the
       # same arrangement `HistoryView`'s list uses.
-      Frame.scroll_gauge(screen, Rect.new(rect.x, top, rect.w, rows), @entries.size,
+      Frame.scroll_gauge(screen, Rect.new(rect.x, top, rect.w, rows), vis.size,
         @list_scroll, focused)
     end
 

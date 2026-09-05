@@ -1319,6 +1319,17 @@ module Gori::Tui
       if @active_tab == :oast && @overlay.none? && @focus == :body && oast_controller.cb_filter_editing?
         return if oast_controller.handle_cb_filter_key(ev)
       end
+      # The three `RowFilter` bars (Discover FINDINGS, Miner RESULTS, Authorize requests) — the
+      # same claim, for the same reason as the arms above.
+      if @active_tab == :target && target_controller.discover_active? && @overlay.none? && @focus == :body && discover_controller.querying?
+        return if discover_controller.handle_query_key(ev)
+      end
+      if @active_tab == :miner && @overlay.none? && @focus == :body && miner_controller.querying?
+        return if miner_controller.handle_query_key(ev)
+      end
+      if @active_tab == :authorize && @overlay.none? && @focus == :body && authorize_controller.querying?
+        return if authorize_controller.handle_query_key(ev)
+      end
       # The Project ACTIVITY pane's `/` bar (#864). Claimed here for the same reason as the six
       # above: while it is editing, a typed "s" has to reach the field rather than the keymap,
       # where it would cycle the source chip out from under the query being written.

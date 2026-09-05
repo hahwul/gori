@@ -14,4 +14,5 @@ abstract class Gori::Verb::ExecContext
   # The FINDING pane holds focus — the gate for its row select / copy verbs. A mined parameter's
   # fields are what go into a report, and the pane had no copy at all.
   abstract def miner_detail_readable? : Bool
+  abstract def mine_filter : Nil # open the FINDINGS `/` filter bar
 end

@@ -85,6 +85,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     discover_controller.discover_dismiss
   end
 
+  def discover_filter : Nil
+    discover_controller.discover_filter
+  end
+
   # Open the bytes behind the selected finding. CROSS-TAB mediator, and deliberately the SAME
   # hop `sitemap_open_flow` makes from the neighbouring sub-tab: the run recorded the request
   # it framed and the response the origin sent, the controller persisted them as an ordinary

@@ -45,6 +45,10 @@ module Gori::Tui
       @active_sub == 0
     end
 
+    def discover_active? : Bool
+      @active_sub == 1
+    end
+
     # Indexed rather than a ternary chain: a third sub-tab is exactly where an
     # `@active_sub == 0 ? … : …` starts answering "Discover" for Diff.
     private def active_child : TabController

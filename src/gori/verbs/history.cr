@@ -774,6 +774,11 @@ module Gori
       r.register Verb::Definition.new(
         "mine.stop", "Stop mining", "Stop the running mine", Verb::Scope::Miner,
         [Verb::Chord.new("x", ctrl: true)], available: in_miner, mnemonic: 's') { |ctx| ctx.mine_stop; nil }
+      # `section: :results` is load-bearing: `mine.find-subtab` holds 'f' in the :tab section,
+      # and validate_menu_keys! checks COMMON ∪ each section — a COMMON 'f' would raise at boot.
+      r.register Verb::Definition.new(
+        "mine.filter", "Filter findings", "Filter the FINDINGS table by parameter / location / evidence",
+        Verb::Scope::Miner, [Verb::Chord.new("/")], available: in_miner, mnemonic: 'f', section: :results) { |ctx| ctx.mine_filter; nil }
       # Send the selected finding (injected into the session request) to Repeater. COMMON so
       # it's reachable from summary/results/detail; gated on a selected finding. 'R', not 'p':
       # `fuzz.repeater` had to move off `r` too and its comment names 'R' as "the letter the
