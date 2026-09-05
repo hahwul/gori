@@ -2053,12 +2053,22 @@ kbd {
   background: transparent;
 }
 
+/* The title rule runs edge to edge so it meets the column divider the way
+   a pane's top rule meets its side in a box drawing — the stubs carry the
+   inset the row's padding used to. */
 .docs-sidebar .tui-panel > .panel-title,
 .docs-toc-rail .tui-panel > .panel-title {
   flex: none;
   margin-top: 0;
-  padding-inline: 0.9rem;
+  padding-inline: 0;
   pointer-events: none;
+}
+
+.docs-sidebar .tui-panel > .panel-title::before,
+.docs-sidebar .tui-panel > .panel-title::after,
+.docs-toc-rail .tui-panel > .panel-title::before,
+.docs-toc-rail .tui-panel > .panel-title::after {
+  width: 0.9rem;
 }
 
 .docs-sidebar .panel-toggle,
