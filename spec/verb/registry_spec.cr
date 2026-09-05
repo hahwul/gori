@@ -480,6 +480,10 @@ private class FakeContext < ExecContext
     @calls << :mine_stop
   end
 
+  def mine_filter : Nil
+    @calls << :mine_filter
+  end
+
   def sequence_selected : Nil
     @calls << :sequence_selected
   end
@@ -642,6 +646,10 @@ private class FakeContext < ExecContext
 
   def discover_dismiss : Nil
     @calls << :discover_dismiss
+  end
+
+  def discover_filter : Nil
+    @calls << :discover_filter
   end
 
   def discover_open_flow : Nil
@@ -1155,6 +1163,10 @@ private class FakeContext < ExecContext
 
   def authorize_remove : Nil
     @calls << :authorize_remove
+  end
+
+  def authorize_filter : Nil
+    @calls << :authorize_filter
   end
 
   def authorize_toggle_passive : Nil

@@ -39,6 +39,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     miner_controller.mine_stop
   end
 
+  def mine_filter : Nil
+    miner_controller.mine_filter
+  end
+
   def miner_duplicate_subtab : Nil
     miner_controller.miner_duplicate
   end

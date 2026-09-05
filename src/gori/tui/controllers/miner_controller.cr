@@ -86,14 +86,15 @@ module Gori::Tui
     end
 
     def body_badge : Symbol
-      :body # read-only display + a navigable findings table — never an editor
+      querying? ? :editor : :body # read-only display + a navigable findings table; the `/` bar is the one text field
     end
 
     def body_hint(focus : Symbol) : String
       v = current_view
       return "↹/esc tabs · mine from History/Repeater (space → Mine parameters)" unless v
+      return v.filter_hint if v.filter_editing?
       case v.focus
-      when :results then keys("↑/↓ select · ↵ detail · {mine.stop} stop · space cmds · ↹ pane · esc tabs")
+      when :results then keys("↑/↓ select · ↵ detail · {mine.filter} filter · {mine.stop} stop · space cmds · ↹ pane · esc tabs")
       when :detail  then "↑/↓ scroll · esc back"
       else               keys("↓ findings · {mine.stop} stop · space cmds · ↹ pane · esc tabs")
       end
@@ -135,8 +136,34 @@ module Gori::Tui
       c = ev.char || ev.key.to_char
       return true if dispatch_chord(chord_action(ev, c), v, c)
       return false if (ev.ctrl? || ev.alt?) && !ev.key.escape? # ^X stop etc. → keymap verb
-      ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
-      true
+      if ev.key.escape?
+        handle_escape(v)
+        return true
+      end
+      # Only a key a pane took is consumed. This used to answer true for EVERY bare key, so
+      # `/` (the filter), `x`/`y` in the detail and the Global breath keys never reached the
+      # keymap from here.
+      handle_pane_key(ev, v)
+    end
+
+    # --- the FINDINGS `/` filter (a text sub-mode the shell claims ahead of the focus ring) ---
+    def querying? : Bool
+      current_view.try(&.filter_editing?) || false
+    end
+
+    def handle_query_key(ev : Termisu::Event::Key) : Bool
+      current_view.try(&.handle_filter_key(ev)) || false
+    end
+
+    def set_preedit(text : String) : Bool
+      current_view.try(&.set_filter_preedit(text)) || false
+    end
+
+    # `/` — narrow the FINDINGS table by parameter / location / evidence. Refused with no
+    # session; lands on the RESULTS pane (closing an open detail) so the rows are on screen.
+    def mine_filter : Nil
+      return @host.status("no miner session — mine from History/Repeater (space → Mine parameters)") unless v = current_view
+      v.filter_start
     end
 
     private def dispatch_chord(action : Symbol?, v : MinerView, c : Char?) : Bool
@@ -179,41 +206,48 @@ module Gori::Tui
       @current_idx = idx if idx < @miners.size
     end
 
-    private def handle_pane_key(ev : Termisu::Event::Key, v : MinerView) : Nil
+    private def handle_pane_key(ev : Termisu::Event::Key, v : MinerView) : Bool
       case v.focus
       when :summary then handle_summary(ev, v)
       when :results then handle_results(ev, v)
       when :detail  then handle_detail(ev, v)
+      else               false
       end
     end
 
-    private def handle_summary(ev : Termisu::Event::Key, v : MinerView) : Nil
+    private def handle_summary(ev : Termisu::Event::Key, v : MinerView) : Bool
       key = ev.key
       if key.down? || key.lower_j?
         v.focus_pane(:results)
       elsif key.up? || key.lower_k?
         @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      else
+        return false
       end
+      true
     end
 
-    private def handle_results(ev : Termisu::Event::Key, v : MinerView) : Nil
+    private def handle_results(ev : Termisu::Event::Key, v : MinerView) : Bool
       key = ev.key
       case
       when key.enter?              then v.open_detail
       when key.down?, key.lower_j? then v.results_move(1)
       when key.up?, key.lower_k?   then v.results_at_top? ? v.focus_pane(:summary) : v.results_move(-1)
+      else                              return false
       end
+      true
     end
 
-    private def handle_detail(ev : Termisu::Event::Key, v : MinerView) : Nil
+    private def handle_detail(ev : Termisu::Event::Key, v : MinerView) : Bool
       key = ev.key
       if key.up? || key.lower_k?
         v.detail_move(-1, ev.shift?)
       elsif key.down? || key.lower_j?
         v.detail_move(1, ev.shift?)
       else
-        v.detail_motion_key(ev) # Home / End / PgUp / PgDn, ⇧ extending
+        return v.detail_motion_key(ev) # Home / End / PgUp / PgDn, ⇧ extending
       end
+      true
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
