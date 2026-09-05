@@ -30,12 +30,8 @@
   {# Tools only: search, locale, source, theme. No social, no install CTA —
      those fight the quiet header chrome and the gilded wordmark. #}
   <div class="header-right">
-    {# On wide screens the trigger is a prompt-shaped field — `⌕ Search docs ⌘K` —
-       the same row the sidebar opens with; narrow screens keep the bare glyph. #}
     <button class="search-trigger" onclick="openSearch()" aria-label="{{ "a11y.search_docs" | t }}" title="{{ "a11y.search_docs" | t }} (&#8984;K)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
-      <span class="search-trigger-label" aria-hidden="true">{{ "search.trigger" | t }}</span>
-      <kbd class="search-trigger-key" aria-hidden="true">&#8984;K</kbd>
     </button>
     {% if page.translations | length > 0 %}
     {% set lang_names = {"en": "English", "ko": "한국어"} %}

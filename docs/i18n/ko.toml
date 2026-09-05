@@ -40,7 +40,6 @@ copy_url = "SVG URL 복사"
 copied = "복사됨"
 
 [search]
-trigger = "문서 검색"
 placeholder = "문서 검색…"
 
 [sidebar]

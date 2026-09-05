@@ -592,64 +592,6 @@ body.is-doc .docs-header {
   transition: transform var(--transition), background var(--transition), color var(--transition);
 }
 
-/* Hidden until the wide layout turns the trigger into a field. */
-.search-trigger-label,
-.search-trigger-key {
-  display: none;
-}
-
-@media (min-width: 1000px) {
-  .search-trigger {
-    width: auto;
-    min-width: 13rem;
-    justify-content: flex-start;
-    gap: 0.5rem;
-    margin-right: 0.35rem;
-    padding: 0 0.45rem 0 0.6rem;
-    border: 1px solid var(--line);
-    background: rgb(var(--ink-rgb) / 0.03);
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-  }
-
-  .search-trigger:hover,
-  .search-trigger:focus-visible {
-    border-color: var(--line-strong);
-    background: rgb(var(--ink-rgb) / 0.06);
-    color: var(--heading);
-  }
-
-  .search-trigger svg {
-    width: 0.95rem;
-    height: 0.95rem;
-    color: var(--quiet);
-  }
-
-  .search-trigger-label {
-    display: block;
-    flex: 1 1 auto;
-    text-align: left;
-    white-space: nowrap;
-  }
-
-  .search-trigger-key {
-    display: block;
-    flex: none;
-    padding: 0.08rem 0.32rem;
-    border: 1px solid var(--line-strong);
-    border-radius: 3px;
-    color: var(--quiet);
-    font-family: var(--font-mono);
-    font-size: 0.66rem;
-    letter-spacing: 0.02em;
-    line-height: 1.3;
-  }
-
-  .search-trigger:hover .search-trigger-key {
-    color: var(--text);
-  }
-
-}
 
 .search-trigger:hover,
 .github-link:hover,
@@ -2232,15 +2174,6 @@ kbd {
 
 .sidebar-search:hover kbd {
   color: var(--text);
-}
-
-/* One search field per screen: the header's, once it has grown into one
-   (see .search-trigger). The sidebar row only serves the narrow layouts,
-   where the header shows a bare glyph. `/` keeps working everywhere. */
-@media (min-width: 1000px) {
-  .sidebar-search {
-    display: none;
-  }
 }
 
 .sidebar-section + .sidebar-section {

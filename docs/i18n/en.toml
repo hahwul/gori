@@ -40,7 +40,6 @@ copy_url = "Copy SVG URL"
 copied = "Copied"
 
 [search]
-trigger = "Search docs"
 placeholder = "Search the docs…"
 
 [sidebar]
