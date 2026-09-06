@@ -203,13 +203,20 @@ module Gori
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit))
       end
 
+      # What `load_chunk_source` hands the pager: the head (nil where the source has none),
+      # the stored bytes, and whether the CAPTURE cap already cut them. The third element is
+      # the one that had no home before: gori records `response_body_truncated` on the row —
+      # the proxy stops storing at 2 MiB — and this tool never read it, so a body cut at 2 KB
+      # of a 2.5 GB transfer paged to its end and reported `complete:true`.
+      alias ChunkSource = {Bytes?, Bytes?, Bool}
+
       @[Tool("get_response_body_chunk")]
       private def get_response_body_chunk(h) : Result
         options = body_chunk_options(h)
 
         loaded = load_chunk_source(options)
         return loaded if loaded.is_a?(Result)
-        head, body = loaded
+        head, body, source_truncated = loaded
         stored = body || Bytes.new(0)
         head_omitted = false
         if options.request? && !options.include_sensitive
@@ -261,8 +268,20 @@ module Gori
               j.field "decode_capped", true
               j.field "decode_cap_warning", "decoded view capped at #{Proxy::Codec::ContentDecode::MAX_OUT} bytes (decompression-bomb ceiling); more decoded data may exist beyond this — page the raw wire bytes with raw:true"
             end
-            j.field "complete", next_offset >= total
+            # `complete` is about THE BODY, not about this page's arithmetic. Reaching the end
+            # of a blob the capture cap already cut is not having the whole body — the same
+            # distinction `decode_capped` above draws for the decompression ceiling, applied
+            # to the cut that happens first and discards far more.
+            j.field "complete", next_offset >= total && !source_truncated
             j.field "next_offset", next_offset < total ? next_offset : nil
+            if source_truncated
+              j.field "source_truncated", true
+              j.field "source_truncated_warning",
+                "gori stored only the first #{total} bytes of this #{options.request? ? "request" : "response"} " \
+                "body — the capture cap cut the rest as it went past, and the discarded bytes exist nowhere. " \
+                "Paging to the end of this range is NOT the whole body, which is why `complete` stays false. " \
+                "Re-send the request (send_request) to capture it again under a larger cap"
+            end
             if text.valid_encoding?
               j.field "encoding", "text"
               j.field "text", text
@@ -312,7 +331,7 @@ module Gori
       end
 
       # The bytes this chunk pages over: {head-for-decoding, payload}.
-      private def load_chunk_source(options : BodyChunkOptions) : {Bytes?, Bytes?} | Result
+      private def load_chunk_source(options : BodyChunkOptions) : ChunkSource | Result
         return load_response_body(options.flow_id, options.repeater_id) unless options.request?
         if id = options.repeater_id
           repeater = store.get_repeater(id)
@@ -320,7 +339,7 @@ module Gori
           # The stored blob IS head+body, byte-exact — the same bytes `send_request
           # {repeater_id}` replays. That is exactly what a caller reading past
           # get_repeater_context's cap wants.
-          {nil, repeater.request}
+          {nil, repeater.request, false}
         elsif id = options.flow_id
           detail = store.get_flow(id)
           return not_found("no flow with id #{id}") unless detail
@@ -328,7 +347,8 @@ module Gori
           # is the paged route to the same bytes plus the body, for a request too big to inline.
           head = detail.request_head || Bytes.new(0)
           body = detail.request_body
-          {nil, body ? Bytes.new(head.size + body.size) { |i| i < head.size ? head[i] : body[i - head.size] } : head}
+          {nil, body ? Bytes.new(head.size + body.size) { |i| i < head.size ? head[i] : body[i - head.size] } : head,
+           detail.request_body_truncated?}
         else
           Result.new("pass exactly one of flow_id or repeater_id", is_error: true)
         end
@@ -363,15 +383,17 @@ module Gori
         Result.new({"deleted" => n, "cleared" => true}.to_json)
       end
 
-      private def load_response_body(flow_id : Int64?, repeater_id : Int64?) : {Bytes?, Bytes?} | Result
+      private def load_response_body(flow_id : Int64?, repeater_id : Int64?) : ChunkSource | Result
         if id = flow_id
           detail = store.get_flow(id)
           return not_found("no flow with id #{id}") unless detail
-          {detail.response_head, detail.response_body}
+          {detail.response_head, detail.response_body, detail.response_body_truncated?}
         elsif id = repeater_id
           repeater = store.get_repeater_full(id)
           return not_found("no repeater with id #{id}") unless repeater
-          {repeater.response_head, repeater.response_body}
+          # A repeater response is a send this process made and kept whole; nothing capped it
+          # on the way in, so there is no capture cut to report.
+          {repeater.response_head, repeater.response_body, false}
         else
           Result.new("pass exactly one of flow_id or repeater_id", is_error: true)
         end
@@ -445,7 +467,11 @@ module Gori
           "default so offsets continue the inline view; raw=true pages stored wire bytes, and a " \
           "request part is always the exact stored bytes. Returns UTF-8 text " \
           "or base64 plus next_offset/complete. An offset past the end is clamped and flagged " \
-          "(requested_offset, offset_out_of_range, warning) rather than silently returning empty." do |s|
+          "(requested_offset, offset_out_of_range, warning) rather than silently returning empty. " \
+          "`complete:true` means you have the WHOLE body: on a message the capture cap already " \
+          "cut (the proxy stops storing past its ceiling, and those bytes exist nowhere), it " \
+          "stays false at the end of the range and `source_truncated` says so — re-send the " \
+          "request to capture it again rather than paging further." do |s|
           s.field "flow_id", intprop("History flow id")
           s.field "repeater_id", intprop("Repeater workbench database id")
           s.field "part", enumprop("which stored blob to page (default response). \"request\" pages the stored REQUEST bytes: for a repeater that is the exact head+body blob send_request(repeater_id) replays, which is the only way to read past get_repeater_context's inline cap", MESSAGE_SIDES)
