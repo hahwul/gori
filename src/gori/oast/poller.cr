@@ -69,9 +69,16 @@ module Gori::Oast
         @events.send(CallbackEvent.new(@session.id, interaction))
       end
     rescue
-      # The FAN-OUT's own failure — a channel closed under a teardown — is not the provider's.
-      # It must not flip `answering?`, and it must not take this fiber down with a backtrace
-      # onto the TUI's alternate screen.
+      # The FAN-OUT's own failure is not the PROVIDER's: it must not flip `answering?`, and it
+      # must not take this fiber down with a backtrace onto the TUI's alternate screen.
+      #
+      # SILENT, and that is not an oversight — there is exactly one thing here that can raise.
+      # `Interaction` and `CallbackEvent` are records and `break` cannot fail, so the only
+      # reachable cause is `@events.send` on a channel closed under a teardown — which is the
+      # channel an `OastErrorEvent` would have to be reported on. A report attempt would raise
+      # again for the same reason, so what looks like the honest branch is a swallowed second
+      # exception dressed as diagnostics. A PROVIDER failure, which is the one an operator can
+      # act on, is reported by `poll_answering` and never lands here.
     end
 
     # One poll, and the record of whether it was ANSWERED. Split from the fan-out above so
