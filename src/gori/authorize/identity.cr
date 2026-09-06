@@ -60,6 +60,25 @@ module Gori
     # unauthenticated (`Env.take_unbound_overlay` is what a run summary drains).
     def self.resolve(id : Identity) : Identity
       Env.report_unbound_overlay(id)
+      resolve_without_report(id)
+    end
+
+    # The RESOLUTION with NO report — for a caller that is not putting these bytes on a wire.
+    #
+    # `resolve` above is the SEND seam's door and the report is half of it. `Passive
+    # .any_identity_changes?` is not a send: it decides whether a flow is worth replaying AT
+    # ALL, it runs on every flow the passive watcher sees, and it applies its overlays to a
+    # `String` it throws away. Reporting from there put `CLI::Run.unbound_overlay_note`'s
+    # sentence — "session values went out LITERALLY … their responses are NOT evidence about
+    # the identity they name" — into the summary of a run that DECLINED the flow and sent
+    # nothing, which is the report inventing the requests it warns about. Worse, the shape that
+    # triggers it is the shape the predicate DECLINES: two slots both carrying `Cookie:
+    # sid=$SESSION` with nothing bound resolve identically, so the flow is skipped as
+    # `:no_effect` and the run still says both identities went out.
+    #
+    # The record is also throttled per {slot, name} until a surface drains it, so a predicate
+    # that got there first would have SILENCED the log line at the seam that really sends.
+    def self.resolve_without_report(id : Identity) : Identity
       id.resolve_values { |v| Env.expand_bindings_as(v, id.name, guard_boundary: true) }
     end
 

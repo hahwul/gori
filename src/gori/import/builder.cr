@@ -223,7 +223,7 @@ module Gori
       def self.request_head(method : String, target : String, http_version : String,
                             scheme : String, host : String, port : Int32, headers : Headers,
                             body : Bytes?, content_length : Int64? = nil,
-                            truncated : Bool = false) : Bytes
+                            truncated : Bool = false, frame_body : Bool = true) : Bytes
         reject_inject!(method, "method")
         reject_inject!(http_version, "HTTP version")
         # `host` reaches the Host line, so it forges a message boundary the same way a header
@@ -280,11 +280,28 @@ module Gori
             next if !both && !wire_chunked && transfer_encoding?(k)
             b << k << ": " << v << "\r\n"
           end
-          if !both && !wire_chunked && (length = synthesized_length(headers, body, content_length))
+          # The verbatim-body suppression is scoped to a version that FRAMES its own body
+          # without a `content-length` — HTTP/2 (and HTTP/3) carry the body in DATA frames
+          # ended by END_STREAM, so a captured POST legitimately has neither header. HTTP/1.x
+          # frames a body only by `Content-Length` or `Transfer-Encoding`, so a verbatim h1
+          # body that stated NEITHER is not a fidelity case worth preserving — it is an
+          # unframed request the origin cannot read, and one this builder still has to make
+          # sendable. So `frame_body: false` only reaches `synthesized_length` under implicit
+          # framing; otherwise a length is synthesized as it always was.
+          frame = frame_body || !implicit_body_framing?(http_version)
+          if !both && !wire_chunked && (length = synthesized_length(headers, body, content_length, frame))
             b << "Content-Length: " << length << "\r\n"
           end
           b << "\r\n"
         end.to_slice
+      end
+
+      # Does this HTTP version frame a request body WITHOUT a `content-length` on the wire?
+      # HTTP/2 and HTTP/3 do (DATA frames ended by END_STREAM); HTTP/1.x and HTTP/0.9 do not.
+      # `Import::Har.normalize_http_version` folds every h2 spelling to `HTTP/2`, and h3 arrives
+      # as `HTTP/3`, so a prefix test covers both.
+      private def self.implicit_body_framing?(http_version : String) : Bool
+        http_version.starts_with?("HTTP/2") || http_version.starts_with?("HTTP/3")
       end
 
       private def self.transfer_encoding?(name : String) : Bool
@@ -293,16 +310,46 @@ module Gori
 
       # The Content-Length `request_head` writes beside the body it actually stored, or nil when
       # the source described no length at all. `declared` is the capture-cap override; otherwise
-      # the stored body's own size. The last arm is the case a body alone cannot answer: a source
-      # that STATED a length and shipped no entity (`Export::Har` writes exactly that pair —
+      # the stored body's own size. The bodiless arm is the case a body alone cannot answer: a
+      # source that STATED a length and shipped no entity (`Export::Har` writes exactly that pair —
       # `Content-Length: 0` and no `postData` — for a captured request with an empty body) is
       # framed, and dropping the line turned gori's own HAR round trip of such a POST into a
       # request carrying no framing header. A bodiless source that stated nothing (`--urls`,
       # OpenAPI) still gets nothing.
-      private def self.synthesized_length(headers : Headers, body : Bytes?, declared : Int64?) : Int64?
-        return declared if declared
-        return body.size.to_i64 if body
+      #
+      # `frame_body` is the request side's version of the rule `response_head` states in prose:
+      # never invent a Content-Length for a source that stated no framing at all, because an
+      # HTTP/2 POST frames its body with DATA/END_STREAM and carries no `content-length` on the
+      # wire — synthesizing one rewrote the operator's captured head (P7) and broke the
+      # export→import fixed point, exactly the way inventing a phrase on a reason-less status line
+      # did. It is `false` only for a body handed over VERBATIM (a HAR `postData.text`); a
+      # CONSTRUCTED body — one this module rebuilt from parts (`postData.params`, an OpenAPI stub,
+      # a Postman/Insomnia collection) — is ours to frame, so those callers keep the default and
+      # still get a length.
+      #
+      # Two cases override `frame_body: false` and still emit a length, because there the head
+      # would otherwise contradict or lose its own framing:
+      #   * the source STATED a `Content-Length` — re-emit one, since the stored head must agree
+      #     with the bytes and a capped or rebuilt body may differ from the entry's own header;
+      #   * the source stated a `Transfer-Encoding` that this call is STRIPPING (a lying `chunked`
+      #     over a body that is not chunked octets — `request_head` only reaches here when
+      #     `!wire_chunked`), which is the same condition `response_head` frames a body under.
+      # A source that stated NEITHER keeps no length — the pure h2 DATA-framed case. That case
+      # holds even when the body was capped: a truncated HTTP/2 POST still carries `bodySize`
+      # (`declared`) yet no `content-length`, so `declared` must not resurrect one on a head that
+      # stated none — emitting it (worse, the full pre-cap size beside a prefix body) is the very
+      # misframe `frame_body: false` exists to prevent. `declared` re-frames only a body the
+      # source already framed (`stated`/`frame_body`/a stripped `Transfer-Encoding`).
+      private def self.synthesized_length(headers : Headers, body : Bytes?, declared : Int64?,
+                                          frame_body : Bool = true) : Int64?
         stated = headers.any? { |(k, _)| k.compare("content-length", case_insensitive: true) == 0 }
+        if body
+          return declared || body.size.to_i64 if stated || frame_body
+          stripped_te = headers.any? { |(k, _)| transfer_encoding?(k) }
+          return declared || body.size.to_i64 if stripped_te
+          return nil
+        end
+        return declared if declared
         stated ? 0_i64 : nil
       end
 
@@ -483,13 +530,14 @@ module Gori
                                headers : Headers = Headers.new,
                                body : Bytes? = nil, http_version : String = "HTTP/1.1",
                                declared_body_size : Int64? = nil,
+                               frame_body : Bool = true,
                                source : FlowSource::Kind = FlowSource::Kind::Import,
                                source_surface : FlowSource::Surface? = nil,
                                source_ref : String? = nil) : FlowPair
         scheme, host, port, target = endpoint(url)
         stored, trunc, size = capped(body, declared_body_size)
         head = request_head(method, target, http_version, scheme, host, port, headers, body,
-          trunc ? size : nil, trunc)
+          trunc ? size : nil, trunc, frame_body)
         # The `flows.method` COLUMN keeps the source's case too, matching live capture:
         # `FlowMapper.request` passes `req.method` straight through, and the consumers that
         # need a canonical form upcase at the comparison (`Authorize::Passive`, QL's
@@ -517,13 +565,14 @@ module Gori
                              declared_resp_body_size : Int64? = nil,
                              connect_protocol : String? = nil,
                              resp_http_version : String? = nil,
+                             frame_body : Bool = true,
                              source : FlowSource::Kind = FlowSource::Kind::Import,
                              source_surface : FlowSource::Surface? = nil,
                              source_ref : String? = nil) : FlowPair
         scheme, host, port, target = endpoint(url)
         req_stored, req_trunc, req_size = capped(req_body, declared_req_body_size)
         req_head = request_head(method, target, http_version, scheme, host, port, req_headers, req_body,
-          req_trunc ? req_size : nil, req_trunc)
+          req_trunc ? req_size : nil, req_trunc, frame_body)
         # The RFC 8441 `:protocol` the importer recovered, when it could (V16). Threaded rather
         # than lifted off `req_head` here, so the decision about whether a given format's bytes
         # may be believed stays with the importer that read them — see `Import::Har`.
