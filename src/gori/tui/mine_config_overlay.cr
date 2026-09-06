@@ -55,7 +55,7 @@ module Gori::Tui
     end
 
     # Remember the last confirmed overlay for the next History/Repeater mine.
-    def save_prefs : Nil
+    def save_prefs : Bool
       locs = @seed.applicable.select { |l| @checked[l]? }.map(&.label)
       notify = NOTIFY_CHOICES[@notify_idx].token
       Settings.save_mine_prefs(locs, CONC_CHOICES[@conc_idx], notify, @keep_alive)
@@ -232,7 +232,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "config needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "config needs a larger window")
         return
       end
       Frame.card(screen, box, "MINE PARAMETERS", border: Theme.border_focus)

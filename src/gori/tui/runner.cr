@@ -188,16 +188,19 @@ module Gori::Tui
       # ↑/↓ keep stepping in BOTH modes — that's why Tab, not an arrow, is the toggle.
       @search_open = false
       @search_buffer = ""
+      @search_cx = 0 # caret into @search_buffer (the prompts edit through `prompt_edit`)
       @search_preedit = ""
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
       @search_replace = false
       @search_replace_buffer = ""
+      @search_replace_cx = 0
       # The sub-tab rename prompt (Repeater + Fuzzer + Decoder + Miner) — orthogonal to
       # @overlay (floats over the bottom status row, like ^G/^F).
       @rename_open = false
       @rename_buffer = ""
+      @rename_cx = 0
       @rename_preedit = ""
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove repeater tabs while the prompt is open, so the
@@ -207,6 +210,7 @@ module Gori::Tui
       # space-separated tags. Held by VIEW identity for the same reconcile-race reason.
       @tag_edit_open = false
       @tag_buffer = ""
+      @tag_cx = 0
       @tag_preedit = ""
       @tag_views = [] of RepeaterView # the sub-tabs the prompt will tag (marks, else the active one)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
@@ -2189,10 +2193,7 @@ module Gori::Tui
           close_overlay
           @toast = verb.call(self) || @toast
         end
-      elsif key.up?
-        @palette.move(-1)
-      elsif key.down?
-        @palette.move(1)
+      elsif @palette.edit(ev, self) # ↑/↓, ⌃/⌥←→, Home/End, Delete, ⌥⌫, ←/→ — before ⌫ and the printables
       elsif key.backspace?
         @palette.backspace(self)
       elsif c && !ev.ctrl? && !ev.alt?
@@ -3519,16 +3520,13 @@ module Gori::Tui
 
     private def handle_rename_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
         close_rename
       elsif key.enter?
         apply_rename(@rename_buffer)
         close_rename
-      elsif key.backspace?
-        @rename_buffer = @rename_buffer[0, {@rename_buffer.size - 1, 0}.max]
-      elsif c && !ev.ctrl? && !ev.alt?
-        @rename_buffer += c
+      elsif edited = prompt_edit(ev, @rename_buffer, @rename_cx)
+        @rename_buffer, @rename_cx = edited
         @rename_preedit = "" # commit any IME preedit
       end
     end
@@ -3565,6 +3563,7 @@ module Gori::Tui
       return unless view
       @rename_view = view
       @rename_buffer = view.name || ""
+      @rename_cx = @rename_buffer.size
       @rename_preedit = ""
       @rename_open = true
     end
@@ -3600,7 +3599,7 @@ module Gori::Tui
       hint = "↵ save · esc cancel · empty: auto"
       x = rect.x + prefix.size
       iw = {rect.right - x - hint.size - 2, 4}.max
-      screen.input_line(x, rect.y, @rename_buffer, @rename_buffer.size, @rename_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.input_line(x, rect.y, @rename_buffer, @rename_cx, @rename_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
@@ -3622,6 +3621,7 @@ module Gori::Tui
       targets = repeater_controller.target_views
       @tag_views = targets.empty? ? [view] : targets
       @tag_buffer = view.tags.join(" ")
+      @tag_cx = @tag_buffer.size
       @tag_preedit = ""
       @tag_edit_open = true
     end
@@ -3634,16 +3634,13 @@ module Gori::Tui
 
     private def handle_tag_edit_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
         close_tag_edit
       elsif key.enter?
         apply_tag_edit(@tag_buffer)
         close_tag_edit
-      elsif key.backspace?
-        @tag_buffer = @tag_buffer[0, {@tag_buffer.size - 1, 0}.max]
-      elsif c && !ev.ctrl? && !ev.alt?
-        @tag_buffer += c
+      elsif edited = prompt_edit(ev, @tag_buffer, @tag_cx)
+        @tag_buffer, @tag_cx = edited
         @tag_preedit = "" # commit any IME preedit
       end
     end
@@ -3668,7 +3665,7 @@ module Gori::Tui
       hint = "↵ save · esc cancel · #tags space-separated"
       x = rect.x + prefix.size
       iw = {rect.right - x - hint.size - 2, 4}.max
-      screen.input_line(x, rect.y, @tag_buffer, @tag_buffer.size, @tag_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.input_line(x, rect.y, @tag_buffer, @tag_cx, @tag_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
@@ -3738,7 +3735,7 @@ module Gori::Tui
       suffix = hint_with_count(replace_target? ? "↵/↑↓ step · tab replace · esc done" : "↵/↑↓ step · esc done")
       sx = {rect.right - suffix.size, x}.max
       iw = {sx - x - 1, 0}.max
-      screen.input_line(x, rect.y, @search_buffer, @search_buffer.size, @search_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.input_line(x, rect.y, @search_buffer, @search_cx, @search_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text(sx, rect.y, suffix, no_matches? ? Theme.yellow : Theme.muted, Theme.panel)
     end
 
@@ -3761,7 +3758,7 @@ module Gori::Tui
       # Bottom row: the focused field — input_line syncs the hardware cursor here.
       rsuffix = "↵ replace all · esc done"
       rsx = {rect.right - rsuffix.size, x}.max
-      screen.input_line(x, rect.y, @search_replace_buffer, @search_replace_buffer.size, @search_preedit, Theme.text_bright, Theme.panel, width: {rsx - x - 1, 0}.max)
+      screen.input_line(x, rect.y, @search_replace_buffer, @search_replace_cx, @search_preedit, Theme.text_bright, Theme.panel, width: {rsx - x - 1, 0}.max)
       screen.text(rsx, rect.y, rsuffix, Theme.muted, Theme.panel)
     end
 
@@ -4242,7 +4239,7 @@ module Gori::Tui
         return false
       end
       notify = ov.notify_mode
-      Settings.save_probe_active_notify(notify.token)
+      status("notify choice applied — could not save to #{Settings.path}", :error) unless Settings.save_probe_active_notify(notify.token)
       # One run per flow (already background), so each target keeps its own scope decision at
       # the Outbound chokepoint — the batch changed the count, not the gate.
       ov.details.each do |d|
@@ -4414,7 +4411,7 @@ module Gori::Tui
       # its header names the flow count, so N sessions are never a surprise (P4).
       ov.on_commit = -> {
         if ov.any_checked?
-          ov.save_prefs
+          status("mine prefs applied — could not save to #{Settings.path}", :error) unless ov.save_prefs
           miner_controller.start_session(ov.seed, ov.build_config)
           started = 1
           ov.extra_seeds.each do |s|
@@ -4494,7 +4491,7 @@ module Gori::Tui
         @toast = "enable spider or bruteforce"
         return false
       end
-      ov.save_prefs
+      status("discover prefs applied — could not save to #{Settings.path}", :error) unless ov.save_prefs
       discover_controller.start_session(ov.selected_target, ov.build_config)
       switch_tab(:target)
       target_controller.select_discover

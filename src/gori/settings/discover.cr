@@ -50,7 +50,7 @@ module Gori::Settings
   # Persist the Discover overlay's last confirmed choices (called when a run starts).
   def self.save_discover_prefs(containment : String, max_depth : Int32, concurrency : Int32,
                                spider : Bool, bruteforce : Bool, extensions : Bool,
-                               keep_alive : Bool) : Nil
+                               keep_alive : Bool) : Bool
     self.discover_containment = containment
     self.discover_max_depth = max_depth
     self.discover_concurrency = concurrency

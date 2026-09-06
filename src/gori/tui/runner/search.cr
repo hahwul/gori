@@ -11,6 +11,29 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @tabs[@active_tab]?.try(&.goto_symbol)
   end
 
+  # One keystroke over a bottom prompt's `{text, caret}`: the answer, or nil when `ev` is not
+  # an edit — so a prompt's own arms (esc, ↵, ↑/↓ stepping) run first and this takes the rest.
+  # `LineEdit` carries the motions the `/` bars gained (⌃/⌥←→ by word, Home/End, Delete,
+  # ⌥⌫); ←/→ and ⌫ are the bare forms, and a printable lands AT the caret. The ^F, rename
+  # and tag prompts all typed append-only before this — strictly less than the bars beside
+  # them, on the most-typed prompt in the app.
+  private def prompt_edit(ev : Termisu::Event::Key, text : String, cx : Int32) : {String, Int32}?
+    key = ev.key
+    cx = cx.clamp(0, text.size)
+    if key.backspace?
+      return {text, cx} if cx == 0
+      {text[0, cx - 1] + text[cx..], cx - 1}
+    elsif act = LineEdit.action(ev) # before the bare arrows: a modified arrow is a different request
+      LineEdit.apply(act, text, cx)
+    elsif key.left?
+      {text, {cx - 1, 0}.max}
+    elsif key.right?
+      {text, {cx + 1, text.size}.min}
+    elsif (c = ev.char || key.to_char) && !c.control? && !ev.ctrl? && !ev.alt? # control? drops Tab/\n etc. (Space stays)
+      {text[0, cx] + c + text[cx..], cx + 1}
+    end
+  end
+
   # The ^G "go to line" prompt: digits only; Enter jumps the captured target, Esc
   # cancels. A modal mini-input (mirrors handle_palette_key) drawn over the status.
   private def handle_goto_key(ev : Termisu::Event::Key) : Nil
@@ -89,7 +112,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # every match (behind a confirm) instead of stepping. ↑/↓ step in both modes.
   private def handle_search_key(ev : Termisu::Event::Key) : Nil
     key = ev.key
-    c = ev.char || key.to_char
     if key.escape?
       close_search
     elsif key.tab? || key.back_tab?
@@ -100,24 +122,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       search_step(1)
     elsif key.up?
       search_step(-1)
-    elsif key.backspace?
-      if @search_replace
-        @search_replace_buffer = @search_replace_buffer[0, {@search_replace_buffer.size - 1, 0}.max]
+    elsif @search_replace
+      if edited = prompt_edit(ev, @search_replace_buffer, @search_replace_cx)
+        @search_replace_buffer, @search_replace_cx = edited
         @search_preedit = ""
-      else
-        @search_buffer = @search_buffer[0, {@search_buffer.size - 1, 0}.max]
-        @search_preedit = ""
-        search_refresh
       end
-    elsif c && !c.control? && !ev.ctrl? && !ev.alt? # control? drops Tab/\n etc. (Space stays)
-      if @search_replace
-        @search_replace_buffer += c
-        @search_preedit = ""
-      else
-        @search_buffer += c
-        @search_preedit = ""
-        search_refresh
-      end
+    elsif edited = prompt_edit(ev, @search_buffer, @search_cx)
+      changed = edited[0] != @search_buffer
+      @search_buffer, @search_cx = edited
+      @search_preedit = ""
+      search_refresh if changed # a caret motion keeps the hits (and the match the operator is on)
     end
   end
 
@@ -234,11 +248,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def open_search(target : Symbol) : Nil
     @search_target = target
     @search_buffer = ""
+    @search_cx = 0
     @search_preedit = ""
     @search_hits = [] of Int32
     @search_idx = 0
     @search_replace = false
     @search_replace_buffer = ""
+    @search_replace_cx = 0
     @search_open = true
   end
 

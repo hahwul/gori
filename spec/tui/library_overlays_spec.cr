@@ -285,3 +285,38 @@ describe Gori::Tui::LibraryPicker do
     h.rendered?("200 OK X: 1").should be_true
   end
 end
+
+# The filter is a `TextField` now: the caret moves, and a motion does not reset the cursor.
+describe Gori::Tui::LibraryPicker, "filter caret" do
+  private_rows2 = [
+    LibraryPicker::Row.new(0, "peel", "base64-decode > gunzip"),
+    LibraryPicker::Row.new(1, "hash", "sha256"),
+    LibraryPicker::Row.new(2, "urlx", "url-decode > url-decode"),
+  ]
+
+  # Home/End are the LIST's here (`page_key` runs first — #958), so the caret walks with ←/→
+  # and the word motions.
+  it "inserts at the caret after a word-left, and matches on the assembled query" do
+    lp = LibraryPicker.new("LOAD CHAIN", private_rows2, "chain")
+    h = OverlayHarness.new(lp)
+    h.type("zip")
+    lp.entry_count.should eq(1)
+    h.press(Termisu::Input::Key::Left, ctrl: true)
+    h.type("gun")
+    lp.query.should eq("gunzip")
+    lp.entry_count.should eq(1)
+    h.press(Termisu::Input::Key::Right, ctrl: true)
+    h.press(Termisu::Input::Key::Backspace)
+    lp.query.should eq("gunzi")
+  end
+
+  it "keeps the cursor row across a bare caret motion" do
+    lp = LibraryPicker.new("LOAD CHAIN", private_rows2, "chain")
+    h = OverlayHarness.new(lp)
+    h.press(Termisu::Input::Key::Down)
+    h.press(Termisu::Input::Key::Down)
+    lp.selected_index.should eq(2)
+    h.press(Termisu::Input::Key::Left)
+    lp.selected_index.should eq(2)
+  end
+end

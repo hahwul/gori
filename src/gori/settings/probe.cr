@@ -11,7 +11,7 @@ module Gori::Settings
   class_property probe_active_notify : String = DEFAULT_PROBE_ACTIVE_NOTIFY
 
   # Persist the "Run active scan" popup's last notification choice.
-  def self.save_probe_active_notify(notify : String) : Nil
+  def self.save_probe_active_notify(notify : String) : Bool
     self.probe_active_notify = notify
     save
   end
