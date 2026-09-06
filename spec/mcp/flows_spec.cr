@@ -45,7 +45,7 @@ describe Gori::MCP::Server do
         a = mcp_seed_flow(store, "h.test", "GET", "/a", 200)
         b = mcp_seed_flow(store, "h.test", "GET", "/b", 200)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"since":#{a}}}})
-        mcp_tool_payload(mcp_drive(store, call)[0]).as_a.map(&.["id"].as_i64).should eq([b])
+        mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a.map(&.["id"].as_i64).should eq([b])
       end
     end
 
@@ -56,11 +56,11 @@ describe Gori::MCP::Server do
         mcp_seed_flow(store, "h.test", "GET", "/c", 200)
 
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:500","limit":1}}})
-        page1 = mcp_tool_payload(mcp_drive(store, call)[0]).as_a
+        page1 = mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a
         page1.map(&.["id"].as_i64).should eq([b])
 
         cur = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:500","limit":1,"before_id":#{b}}}})
-        page2 = mcp_tool_payload(mcp_drive(store, cur)[0]).as_a
+        page2 = mcp_tool_payload(mcp_drive(store, cur)[0])["flows"].as_a
         page2.map(&.["id"].as_i64).should eq([a])
       end
     end
@@ -72,15 +72,15 @@ describe Gori::MCP::Server do
         c = mcp_seed_flow(store, "alpha.test", "GET", "/c", 200)
 
         call = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_history","arguments":{}}})
-        rows = mcp_tool_payload(mcp_drive(store, call)[0]).as_a
+        rows = mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a
         rows.map(&.["id"].as_i64).should eq([c, b, a]) # newest first
 
         q = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"host:beta"}}})
-        only = mcp_tool_payload(mcp_drive(store, q)[0]).as_a
+        only = mcp_tool_payload(mcp_drive(store, q)[0])["flows"].as_a
         only.map(&.["id"].as_i64).should eq([b])
 
         cur = %({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_history","arguments":{"before_id":#{c}}}})
-        page = mcp_tool_payload(mcp_drive(store, cur)[0]).as_a
+        page = mcp_tool_payload(mcp_drive(store, cur)[0])["flows"].as_a
         page.map(&.["id"].as_i64).should eq([b, a])
       end
     end
@@ -92,10 +92,10 @@ describe Gori::MCP::Server do
         store.add_scope_rule("include", "host", "alpha.test") # rule present, lens never enabled
 
         all = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{}}})
-        mcp_tool_payload(mcp_drive(store, all)[0]).as_a.map(&.["id"].as_i64).should eq([b, a]) # everything captured
+        mcp_tool_payload(mcp_drive(store, all)[0])["flows"].as_a.map(&.["id"].as_i64).should eq([b, a]) # everything captured
 
         scoped = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"in_scope":true}}})
-        mcp_tool_payload(mcp_drive(store, scoped)[0]).as_a.map(&.["id"].as_i64).should eq([a]) # only in-scope
+        mcp_tool_payload(mcp_drive(store, scoped)[0])["flows"].as_a.map(&.["id"].as_i64).should eq([a]) # only in-scope
       end
     end
 
@@ -107,7 +107,7 @@ describe Gori::MCP::Server do
         store.add_scope_rule("include", "host", "alpha.test")
 
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"in_scope":true,"query":"status:500"}}})
-        mcp_tool_payload(mcp_drive(store, call)[0]).as_a.map(&.["id"].as_i64).should eq([b])
+        mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a.map(&.["id"].as_i64).should eq([b])
       end
     end
 
@@ -115,7 +115,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         mcp_seed_flow(store, "alpha.test", "GET", "/a", 200)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"in_scope":true}}})
-        mcp_tool_payload(mcp_drive(store, call)[0]).as_a.should be_empty
+        mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a.should be_empty
       end
     end
   end
@@ -311,9 +311,9 @@ describe Gori::MCP::Server do
       with_store do |store|
         3.times { |i| mcp_seed_flow(store, "h#{i}.test", "GET", "/", 200) }
         as_str = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":"2"}}})
-        mcp_tool_payload(mcp_drive(store, as_str)[0]).as_a.size.should eq(2)
+        mcp_tool_payload(mcp_drive(store, as_str)[0])["flows"].as_a.size.should eq(2)
         as_float = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":2.0}}})
-        mcp_tool_payload(mcp_drive(store, as_float)[0]).as_a.size.should eq(2)
+        mcp_tool_payload(mcp_drive(store, as_float)[0])["flows"].as_a.size.should eq(2)
       end
     end
 
@@ -332,7 +332,7 @@ describe Gori::MCP::Server do
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":1e19}}})
         resp = mcp_drive(store, call)[0]
         resp["result"]["isError"]?.try(&.as_bool).should_not be_true # no OverflowError -> tool error
-        mcp_tool_payload(resp).as_a.size.should eq(2)
+        mcp_tool_payload(resp)["flows"].as_a.size.should eq(2)
       end
     end
   end

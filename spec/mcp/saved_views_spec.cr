@@ -76,10 +76,10 @@ describe "MCP saved views" do
         add_flow(store, Gori::FlowSource::Kind::Repeater, "keep.test")
         t = tools_for(store)
 
-        call_json(t, "list_history", "{}").as_a.size.should eq(3)
-        call_json(t, "list_history", %({"view":"History"})).as_a.size.should eq(2)
+        call_json(t, "list_history", "{}")["flows"].as_a.size.should eq(3)
+        call_json(t, "list_history", %({"view":"History"}))["flows"].as_a.size.should eq(2)
         # Both terms held.
-        rows = call_json(t, "list_history", %({"view":"History","query":"host:keep.test"})).as_a
+        rows = call_json(t, "list_history", %({"view":"History","query":"host:keep.test"}))["flows"].as_a
         rows.size.should eq(1)
         rows.first["host"].as_s.should eq("keep.test")
       end

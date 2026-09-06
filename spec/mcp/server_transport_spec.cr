@@ -360,7 +360,7 @@ describe Gori::MCP::Server do
         arr = mcp_drive(store, batch)[0].as_a
         arr.size.should eq(2)
         arr[0]["result"]["isError"].as_bool.should be_false
-        JSON.parse(arr[0]["result"]["content"][0]["text"].as_s).as_a.size.should eq(1)
+        JSON.parse(arr[0]["result"]["content"][0]["text"].as_s)["flows"].as_a.size.should eq(1)
         arr[1]["result"]["tools"].as_a.should_not be_empty
       end
     end

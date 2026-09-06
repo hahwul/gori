@@ -29,7 +29,7 @@ describe Gori::MCP::Server do
         mcp_seed_flow(store, "ex.test", "GET", "/", 200)
         mcp_seed_flow(store, "other.test", "GET", "/", 200)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"host:ex.test status:>=foo"}}})
-        rows = mcp_tool_payload(mcp_drive(store, call)[0]).as_a
+        rows = mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a
         rows.size.should eq(1) # host:ex.test applied, bad status term dropped
       end
     end
@@ -111,7 +111,7 @@ describe Gori::MCP::Server do
         Gori::Scope.load(store).add("include", "host", "ex.test")
         %w[in out].each do |side|
           call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"scope:#{side}","strict":true}}})
-          rows = mcp_tool_payload(mcp_drive(store, call)[0]).as_a
+          rows = mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a
           rows.map(&.["host"].as_s).should eq([side == "in" ? "ex.test" : "other.test"])
         end
       end

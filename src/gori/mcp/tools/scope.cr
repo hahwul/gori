@@ -189,8 +189,13 @@ module Gori
         end
 
         tool j, "set_scope_enabled",
-          "Turn the scope lens/gate on or off (the rules themselves are untouched)." do |s|
-          s.field "enabled", boolprop("true = filter to in-scope; false = show/allow everything"), required: true
+          "Turn the CAPTURE-side scope lens on or off (the rules themselves are untouched) — " \
+          "the Target/Sitemap \u21e7S filter. It does NOT govern whether this server may send: " \
+          "active tools (send_request, send_websocket, fuzz_*, mine_*, probe active) are gated " \
+          "on the RULES being present, whatever this flag says, so turning it off does not " \
+          "lift a SCOPE_BLOCKED refusal and turning it on does not cause one. To send at a " \
+          "target the rules do not cover, add_scope_rule or pass allow_unscoped:true." do |s|
+          s.field "enabled", boolprop("true = filter captured views to in-scope; false = show everything. Does not change what may be SENT"), required: true
         end
 
         tool j, "set_sandbox",

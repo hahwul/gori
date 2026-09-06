@@ -176,4 +176,36 @@ describe "MCP agent ergonomics" do
       end
     end
   end
+  # `Outbound` gates active sends on `Scope#configured?`, which reads the rules "REGARDLESS
+  # of the enabled flag". `list_scope` reported only `enabled`, and its schema called that
+  # "the scope lens/gate" — so `enabled:false` beside a populated rule list read as "sends
+  # are ungated", and an agent whose send came back SCOPE_BLOCKED would reach for
+  # `set_scope_enabled`, the one call that cannot change the outcome either way.
+  describe "list_scope active-send gate" do
+    it "reports the send gate as ON while the capture lens is off" do
+      with_store do |store|
+        tools = tools_for(store)
+        erg_json(tools, "add_scope_rule", %({"pattern":"in.test","kind":"include","match_type":"host"}))
+        erg_json(tools, "set_scope_enabled", %({"enabled":false}))
+
+        scope = erg_json(tools, "list_scope", "{}")
+        scope["enabled"].as_bool.should be_false # the capture lens really is off
+        scope["active_send_gate"].as_s.should eq("rules")
+        scope["active_send_gate_note"].as_s.should contain("whatever `enabled` says")
+
+        # And the gate the field describes is the one that actually answers.
+        blocked = tools.call("send_request", JSON.parse(%({"url":"http://out.test/"})))
+        blocked.is_error.should be_true
+        blocked.text.should contain("outside the project's configured scope")
+      end
+    end
+
+    it "reports `unscoped` when no rules exist, where everything is refused" do
+      with_store do |store|
+        scope = erg_json(tools_for(store), "list_scope", "{}")
+        scope["active_send_gate"].as_s.should eq("unscoped")
+        scope["active_send_gate_note"].as_s.should contain("EVERY active request is refused")
+      end
+    end
+  end
 end

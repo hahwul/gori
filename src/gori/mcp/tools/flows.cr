@@ -84,6 +84,13 @@ module Gori
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
         end
+        # One row OVER the page, then dropped. The pagination contract was documented and
+        # correct ("a page shorter than `limit` means no older rows") but it was an INFERENCE
+        # the caller had to make and then act on with a second call: a query matching 51 flows
+        # and one matching exactly 50 returned byte-identical answers, and an agent that read
+        # 50 rows as the whole story was reasoning about a truncated capture without knowing.
+        # Fetching limit+1 makes the page state a FACT the reply carries.
+        fetch = limit + 1
         rows =
           if scope_unconfigured
             [] of Store::FlowRow
@@ -91,11 +98,34 @@ module Gori
             # `view_filter` belongs in this condition and not only in the AND above: without it a
             # `view` with no `query` and no `in_scope` falls through to `recent_flows`, which
             # takes no filter at all — the call would accept the view and return everything.
-            store.search(filter, limit, before_id, since_id)
+            store.search(filter, fetch, before_id, since_id)
           else
-            store.recent_flows(limit, before_id, since_id)
+            store.recent_flows(fetch, before_id, since_id)
           end
-        Result.new(JSON.build { |j| j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared)) } } })
+        has_more = rows.size > limit
+        # `since` tails OLDEST-first, so the extra row is the NEWEST one — dropping from the
+        # end is right in both directions, since each read returns its own order already.
+        rows = rows.first(limit) if has_more
+        tailing = !since_id.nil?
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "returned", rows.size
+            j.field "limit", limit
+            # Which end of the list the caller is holding. `since` flips the order, which the
+            # schema documented and nothing in the payload did — so an agent reading rows[0]
+            # as "the newest" was right on one path and wrong on the other.
+            j.field "order", tailing ? "oldest_first" : "newest_first"
+            j.field "has_more", has_more
+            # The cursor to pass back, spelled as the argument it goes in, so continuing does
+            # not require re-deriving which end of `flows` to read the id off.
+            if last = rows.last?
+              j.field(tailing ? "next_since" : "next_before_id", last.id)
+            end
+            j.field "flows" do
+              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared)) } }
+            end
+          end
+        end)
       end
 
       # One row's user-column values as `{label, value}` pairs, or nil when none were asked for.
@@ -358,10 +388,13 @@ module Gori
           "'header:set-cookie', 'body~secret\\d+' — `~` is regex, dur is ms); " \
           "empty query returns the most recent. Returns light rows (no bodies); " \
           "use get_flow for full detail. Paginate by passing the oldest id seen as " \
-          "`before_id` (rows are newest-first); a page shorter than `limit` means no older rows. " \
+          "`before_id` — or just the reply's own `next_before_id` — and stop when `has_more` is " \
+          "false. Returns an object {flows, returned, limit, order, has_more, next_before_id | " \
+          "next_since} — not a bare array. " \
           "To TAIL new flows instead, pass `since` (the largest id you've seen): rows come back " \
-          "OLDEST-first; tail by passing the last id as the next `since`; an empty page means no " \
-          "new flows (keep your cursor). `since` and `before_id` are mutually exclusive. " \
+          "OLDEST-first (`order` says which, per reply); tail by passing `next_since` back as " \
+          "the next `since`; an empty page means no new flows (keep your cursor). `since` and " \
+          "`before_id` are mutually exclusive. " \
           "Call ql_reference for full QL syntax." do |s|
           s.field "query", strprop("gori QL filter; empty = most recent")
           s.field "limit", intprop("max rows (default 50, max 500)")

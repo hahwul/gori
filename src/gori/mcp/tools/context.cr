@@ -20,6 +20,19 @@ module Gori
             # payload said so — a caller would have to know that the allowlist deliberately reads
             # an empty include set as "block all" rather than "allow all" to derive it.
             j.field "blocks_all", scope.sandbox? && scope.include_count.zero?
+            # `enabled` is the CAPTURE-side lens (the Target/Sitemap ⇧S filter). The gate that
+            # decides whether THIS server may send — send_request, send_websocket, fuzz, mine,
+            # probe active — is `Outbound`, and it keys off `Scope#configured?`, which reads the
+            # rules "REGARDLESS of the enabled flag". So `enabled:false` beside a populated rule
+            # list did not mean "sends are ungated"; it meant the opposite of what the schema
+            # said ("whether the scope lens/gate ... [is] enabled"), and an agent whose send was
+            # refused would reach for `set_scope_enabled` — the one call that cannot fix it.
+            j.field "active_send_gate", scope.configured? ? "rules" : "unscoped"
+            j.field "active_send_gate_note",
+              scope.configured? ? "active requests (send_request, send_websocket, fuzz_*, mine_*, probe active) " \
+                                  "are matched against the rules below whatever `enabled` says; an unmatched " \
+                                  "target is refused SCOPE_BLOCKED unless you pass allow_unscoped:true" : "no scope rules are configured, so EVERY active request is refused " \
+                                                                                                          "SCOPE_BLOCKED unless you pass allow_unscoped:true — add_scope_rule to change that"
             j.field "rules" do
               j.array do
                 store.scope_rules.each do |(id, kind, match_type, pattern)|
@@ -529,7 +542,12 @@ module Gori
       # here rather than around one long block, so a new write tool cannot be added on the
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_context_tools(j : JSON::Builder) : Nil
-        tool j, "list_scope", "List the project's scope include/exclude rules, plus whether the scope lens/gate and the hard-containment sandbox are enabled." { }
+        tool j, "list_scope", "List the project's scope include/exclude rules, plus the three gates they feed: " \
+                              "`enabled` (the CAPTURE-side lens the Target/Sitemap \u21e7S filter uses), " \
+                              "`active_send_gate` (what this server may SEND — keyed on the rules EXISTING, not on " \
+                              "`enabled`, so an active call at an unmatched target is refused SCOPE_BLOCKED even " \
+                              "with `enabled:false`), and `sandbox` (hard containment; `blocks_all` when it is on " \
+                              "with no include rule)." { }
 
         tool j, "project_info",
           "Project totals: flow count, issue count, captured bytes, earliest capture time, " \
