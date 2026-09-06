@@ -667,11 +667,14 @@ module Gori::Proxy::H2
     private def warn_overflow(slot : Slot, ahead : Int32) : Nil
       return if @warned_overflow
       @warned_overflow = true
-      ::Log.warn do
-        also = ahead > 0 ? " (releasing #{ahead} stream(s) deferred ahead of it too)" : ""
-        "h2 #{@direction}: held stream #{slot.stream_id} buffered over " \
-        "#{MAX_DEFERRED_BYTES + slot.body_budget} bytes — forwarding it unedited#{also}"
-      end
+      also = ahead > 0 ? " (releasing #{ahead} stream(s) deferred ahead of it too)" : ""
+      msg = "h2 #{@direction}: held stream #{slot.stream_id} buffered over " \
+            "#{MAX_DEFERRED_BYTES + slot.body_budget} bytes — forwarded UNEDITED#{also}"
+      ::Log.warn { msg }
+      # And on screen: the queue row this operator was deciding about simply vanishes, and a
+      # `::Log.warn` under `gori tui` goes to `~/.gori/gori.log` and nowhere else. See
+      # `Interceptor#note_unheld`.
+      @interceptor.note_unheld(msg)
     end
 
     # --- hold side -----------------------------------------------------------

@@ -678,6 +678,8 @@ module Gori::Tui
             # TLS passthrough: announce hosts bypassed since the last tick. Before the Companion, so
             # a bypass notice reaches her on the same frame it is pushed.
             dirty = true if drain_passthrough_notices
+            # …and what intercept could not hold. Same placement, same reason.
+            dirty = true if drain_intercept_notices
             # Miss Ring: advance the animation beat and pick up new notifications. Like the
             # resource meter above she reports dirty ONLY when the drawn sprite/bubble
             # changes, and stops reporting at all once she dozes off (Companion::SLEEP_AFTER).
@@ -3487,6 +3489,20 @@ module Gori::Tui
           "TLS passthrough: #{entry.host} relayed without MITM (rule #{entry.pattern}) — nothing captured for it")
       end
       @passthrough_announced = seen
+      true
+    end
+
+    # Say on screen what a gate declined to hold while catch was on — an h1 body over the hold
+    # ceiling, an h2 stream released past the buffer ceiling. Both fail OPEN by design, and both
+    # recorded it with `::Log.warn` alone, which under `gori tui` lands in `~/.gori/gori.log` and
+    # nowhere the operator watching a hold queue would meet it: a message went to the origin with
+    # catch armed and the only sign was a queue row that never appeared. See
+    # `Interceptor#note_unheld`; `Jobs::Goto.new(:intercept)` because the queue is where the
+    # operator was waiting for it.
+    private def drain_intercept_notices : Bool
+      notices = @session.interceptor.drain_notices
+      return false if notices.empty?
+      notices.each { |n| @notifications.push(:warn, n, Jobs::Goto.new(:intercept), source: "app") }
       true
     end
 

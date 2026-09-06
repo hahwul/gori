@@ -2849,13 +2849,19 @@ module Gori::Proxy
     # Once per connection. Intercept is ON and this message never appeared in the queue, so the
     # operator has to be told why rather than left waiting on a hold that will not come
     # (modelled on `H2::StreamGate#warn_overflow`, which says the same thing for h2).
+    #
+    # `Interceptor#note_unheld` as well as the log line, and that is the half that makes the
+    # sentence above true: under `gori tui` a `::Log.warn` reaches neither the notification
+    # centre nor stderr — it lands in `~/.gori/gori.log` — so "the operator has to be told" was
+    # satisfied by a file nobody watching a hold queue is reading. Same objection
+    # `WS::MessageGate#note` already raises for its own two accountings.
     private def warn_hold_oversize(direction : String, len : Int64) : Nil
       return if @warned_hold_oversize
       @warned_hold_oversize = true
-      ::Log.warn do
-        "intercept: #{direction} body declares #{len} bytes, over the #{MAX_REWRITE_BODY}-byte " \
-        "hold ceiling — forwarding it unheld"
-      end
+      msg = "intercept: a #{direction} body declaring #{len} bytes is over the " \
+            "#{MAX_REWRITE_BODY}-byte hold ceiling — forwarded UNHELD"
+      ::Log.warn { msg }
+      @interceptor.try(&.note_unheld(msg))
     end
 
     # Whether the buffered response-body path applies: SOMETHING needs the whole entity, the
