@@ -13,6 +13,7 @@ require "../notes"
 require "../issues_export" # Issues::Export.one_line / .scrub_only
 require "../jwt"
 require "../authorize/engine"
+require "../tui/screen" # Screen.display_width — the cell measure every column here pads against
 
 module Gori
   module CLI
@@ -247,8 +248,31 @@ module Gori
         Store::FlowRow.absolute_form?(row.target) ? url : url.lchop("#{row.scheme}://")
       end
 
-      # A padded cell that is never flush against the one after it. `ljust(n)` alone guarantees
-      # a separator only while the value is SHORTER than the column: an HTTP method is an RFC
+      # How many TERMINAL CELLS a value occupies — the measure every column in this file pads
+      # against, and the one the TUI has always drawn with (`Screen.display_width`).
+      #
+      # `String#size` counts CODEPOINTS, and a listing padded with it under-counts a CJK or
+      # emoji name by one column per wide character: `gori run repeater list` printed
+      # `주문 조회 재전송` in a 20-column cell and put seven spaces too many after it, stepping
+      # the `→ target` column of that ONE row out of line. The TUI's History list, laid out
+      # from the same data, is exactly aligned — so this was a surface divergence, not a
+      # missing feature. `gori settings import` already measured this way (see its own
+      # `column_width`); this is that measure given one home for the whole surface.
+      #
+      # `Tui::Screen` is a surface reaching into another surface, which the layering contract
+      # allows (it gates CORE subsystems, not `cli/` ↔ `tui/`), and `display_width` is a pure
+      # function of a String — no terminal, no state.
+      def self.cell_width(s : String) : Int32
+        Tui::Screen.display_width(s)
+      end
+
+      # `String#ljust` measured in cells: the value, then the spaces it owes the column.
+      def self.pad(s : String, width : Int32) : String
+        s + " " * {width - cell_width(s), 0}.max
+      end
+
+      # A padded cell that is never flush against the one after it. `pad(n)` alone guarantees
+      # a separator only while the value is NARROWER than the column: an HTTP method is an RFC
       # 9110 token of any length, and at exactly 7 characters — `OPTIONS` and `CONNECT`, both
       # registered and both routine (CORS preflight, tunnels) — the pad produced zero spaces
       # and the row read `OPTIONShttps`, which neither an operator nor a script can split.
@@ -256,7 +280,7 @@ module Gori
       # fixed 8-cell clamp, a CLI listing has no geometry to defend, and truncating `PROPFIND`
       # to buy a gap would lose information a script is reading this line for.
       def self.pad_cell(s : String, width : Int32) : String
-        s.size < width ? s.ljust(width) : "#{s} "
+        cell_width(s) < width ? pad(s, width) : "#{s} "
       end
 
       # "#42  GET   https  example.com:443/users  200  1.2kB  3ms  [Complete]"
@@ -459,7 +483,7 @@ module Gori
       def self.mine_row_text(f : Miner::Finding) : String
         String.build do |io|
           io << (f.confidence.confirmed? ? "[+] " : "[?] ")
-          io << f.name.ljust(24)
+          io << pad(f.name, 24)
           io << "  " << f.location.label.ljust(9)
           io << "· " << f.evidence.label
           if gs = f.grpc_status
@@ -483,7 +507,7 @@ module Gori
         String.build do |io|
           io << "[" << a.category << "]"
           io << " " * {12 - a.category.size - 2, 1}.max
-          io << a.name.ljust(24) << "  " << (a.verified ? "✓ " : "") << a.note << "\n"
+          io << pad(a.name, 24) << "  " << (a.verified ? "✓ " : "") << a.note << "\n"
           io << "  " << a.token
         end
       end
@@ -631,8 +655,8 @@ module Gori
         String.build do |io|
           io << (e.enabled ? "[on ] " : "[off] ")
           io << e.kind.ljust(8)
-          io << term_safe(e.id).ljust(26)
-          io << "  " << term_safe(e.name).ljust(30)
+          io << pad(term_safe(e.id), 26)
+          io << "  " << pad(term_safe(e.name), 30)
           io << "  " << e.category
           if est = e.estimate
             io << " · " << est
@@ -651,7 +675,7 @@ module Gori
           # ONE one-line terminal-safety seam for every dynamic fuzz-row string below. Payloads
           # come from operator wordlists and the other fields come from remote responses/errors;
           # either can carry CR/LF or ANSI/OSC controls that would rewrite the surrounding row.
-          io << term_safe(r.payloads.join(", ")).ljust(24)
+          io << pad(term_safe(r.payloads.join(", ")), 24)
           io << "  " << (r.status.try(&.to_s) || (r.error ? "ERR" : "—")).ljust(4)
           io << "  " << human_size(r.length).ljust(8)
           io << "  " << "#{r.words}w".ljust(7)
@@ -830,7 +854,7 @@ module Gori
       private def self.authorize_trial_text(tr : Authorize::Trial) : String
         String.build do |io|
           io << "      "
-          io << term_safe(tr.identity).ljust(20)
+          io << pad(term_safe(tr.identity), 20)
           io << tr.verdict.label.ljust(10)
           io << tr.meta.status_text.ljust(5)
           io << (tr.meta.size.try { |s| human_size(s) } || "—").ljust(9)

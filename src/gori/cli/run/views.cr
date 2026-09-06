@@ -92,7 +92,7 @@ module Gori
           elsif views.empty?
             puts "No views match."
           else
-            w = {views.max_of?(&.name.size) || 4, 4}.max
+            w = view_name_width(views)
             views.each { |v| puts view_row(v, active, w) }
           end
         ensure
@@ -109,7 +109,16 @@ module Gori
       def self.view_row(view : SavedViews::View, active : SavedViews::View?, w : Int32) : String
         mark = (active ? active.key == view.key : view.key == SavedViews.all_view.key) ? "●" : " "
         query = view.narrowing? ? view.query : "(everything — no source term)"
-        "#{mark} #{view.badge} #{view.name.ljust(w)}  #{query}"
+        "#{mark} #{view.badge} #{CLI::Output.pad(view.name, w)}  #{query}"
+      end
+
+      # The name column's width for one listing, in TERMINAL CELLS — the measure `view_row`
+      # pads against, and `colormarker_color_width`'s twin. A view name is operator text, so a
+      # CJK one (`한글 호스트` is 6 characters and 11 cells) makes a codepoint count under-measure
+      # the column and step the query beside it out of line on that row alone. Never below 4,
+      # so a library of short names keeps the shape it has always had.
+      def self.view_name_width(views : Array(SavedViews::View)) : Int32
+        {views.max_of? { |v| CLI::Output.cell_width(v.name) } || 4, 4}.max
       end
 
       # Public for the same reason as the row above.

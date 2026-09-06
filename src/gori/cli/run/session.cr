@@ -464,7 +464,7 @@ module Gori
         mark = slot.baseline? ? "◆" : " "
         body = show_values ? session_slot_verbose(slot) : slot.summary
         rules = slot.rules.empty? ? "" : " · rules #{Env.token_list(slot.rules)}"
-        "#{mark} #{slot.name.ljust(18)} #{body}#{rules}"
+        "#{mark} #{CLI::Output.pad(slot.name, 18)} #{body}#{rules}"
       end
 
       # The same one-liner with the VALUES in it (`--show-values`), so the row a script greps
