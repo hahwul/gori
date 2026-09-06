@@ -1,5 +1,33 @@
 require "../spec_helper"
 require "../support/mcp_harness"
+require "file_utils"
+
+# The global rule library is process-wide state AND a file: every global CRUD re-reads its own
+# section from settings.json before it mutates, so an example that leaves a rule behind in the
+# suite-wide `$GORI_HOME` hands it to the next one's `Rules.merged`. This one deliberately makes
+# a delete FAIL, so it cannot clean up by deleting — it gets its own home instead, and forgets
+# the reload cache on both edges (`forget_reloaded_sections` exists for exactly this: a fixture
+# assigning the class properties behind the file's back).
+private def with_global_library(&)
+  before = Gori::Settings.rewriter_rules
+  counter = Gori::Settings.rewriter_next_rule_id
+  prev_home = ENV["GORI_HOME"]?
+  dir = File.tempname("gori-mcp-rules-globals")
+  Dir.mkdir_p(dir)
+  begin
+    ENV["GORI_HOME"] = dir
+    Gori::Settings.forget_reloaded_sections
+    Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+    Gori::Settings.rewriter_next_rule_id = 1_i64
+    yield
+  ensure
+    prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+    Gori::Settings.rewriter_rules = before
+    Gori::Settings.rewriter_next_rule_id = counter
+    Gori::Settings.forget_reloaded_sections
+    FileUtils.rm_rf(dir)
+  end
+end
 
 describe Gori::MCP::Server do
   describe "colormarker rules" do
@@ -213,6 +241,35 @@ describe Gori::MCP::Server do
       end
     end
 
+    # `ConfigLog` is recorded at the MODEL — see its header, which says one site there covers
+    # TUI, CLI and MCP at once — but this tool family wrote straight at `Store`/`Settings` and
+    # never reached it. So `rule_add`/`rule_update`/`rule_toggle`/`rule_remove` were events NO
+    # headless surface ever emitted: an agent could install a rule that injects `$SESSION` into
+    # every request, or one that answers an endpoint and never dials it, and the project's
+    # config feed carried only `agent | "create_rule ok"` — the call, never the value.
+    it "writes the config feed for every rule mutation, the way the TUI does" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"tok_SECRET","replacement":"REDACTED","name":"redact"}}})
+        id = mcp_tool_payload(mcp_drive(store, create)[0])["id"].as_i64
+        upd = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_rule","arguments":{"id":#{id},"replacement":"gone"}}})
+        mcp_tool_payload(mcp_drive(store, upd)[0])["updated"].as_bool.should be_true
+        off = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"set_rule_enabled","arguments":{"id":#{id},"enabled":false}}})
+        mcp_tool_payload(mcp_drive(store, off)[0])["enabled"].as_bool.should be_false
+        del = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_rule","arguments":{"id":#{id}}}})
+        mcp_tool_payload(mcp_drive(store, del)[0])["deleted"].as_bool.should be_true
+
+        store.flush
+        rows = store.events_recent(50, source: Gori::ConfigLog::SOURCE).rows
+        rows.map(&.kind).sort!.should eq(["rule_add", "rule_remove", "rule_toggle", "rule_update"])
+        rows.all?(&.message.includes?("redact")).should be_true
+        # By IDENTITY, never the bytes. The motivating rule is a redaction, which puts the
+        # token in the PATTERN and a harmless placeholder in the replacement, so a line that
+        # echoed either half would leak the thing the rule exists to strip.
+        rows.any?(&.message.includes?("tok_SECRET")).should be_false
+        rows.any?(&.message.includes?("REDACTED")).should be_false
+      end
+    end
+
     # Presets (#821): list_rule_presets is read-only; create_rule_from_preset installs the
     # catalog's rules through the same insert path create_rule uses, so they are ordinary rows.
     it "lists presets and installs one as ordinary Match & Replace rules" do
@@ -308,6 +365,42 @@ describe Gori::MCP::Server do
       ensure
         Gori::Settings.rewriter_rules = before
         Gori::Settings.rewriter_next_rule_id = counter
+      end
+    end
+
+    # `delete_rule` kept a LOCAL copy of the model's global delete, and it swept this project's
+    # `rewriter_overrides` UNCONDITIONALLY. By the time that ran, `rule_exists?` above had
+    # already ruled out the "no such rule" case the sweep is for — so the only way to reach it
+    # with a false answer was "settings not saved", where the rule is still in the library on
+    # disk. Clearing the override there drops this project back to the library's DEFAULT: a
+    # rule the operator had switched off here turns back ON and resumes rewriting live traffic,
+    # under a reply that says the rule is unchanged. `Rules#remove` captures which of the two
+    # it was BEFORE the delete, because afterwards they are indistinguishable.
+    it "keeps this project's override when a global delete does not commit" do
+      with_global_library do
+        with_store do |store|
+          create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"A","replacement":"B","scope":"global"}}})
+          id = mcp_tool_payload(mcp_drive(store, create)[0])["id"].as_i64
+          off = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"set_rule_enabled","arguments":{"id":#{id},"scope":"global","enabled":false}}})
+          mcp_tool_payload(mcp_drive(store, off)[0])["enabled"].as_bool.should be_false
+          store.rewriter_overrides[id]?.should be_false # off HERE, on everywhere else
+
+          # Point settings at a path whose parent is a plain file, so `save` fails and the
+          # delete answers false with the rule still in the library.
+          blocker = File.tempname("gori-mcp-settings-blocked", "")
+          File.write(blocker, "")
+          prev = Gori::Settings.path_override
+          begin
+            Gori::Settings.path_override = File.join(blocker, "settings.json")
+            del = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"delete_rule","arguments":{"id":#{id},"scope":"global"}}})
+            mcp_drive(store, del)[0]["result"]["isError"].as_bool.should be_true
+          ensure
+            Gori::Settings.path_override = prev
+            File.delete?(blocker)
+          end
+
+          store.rewriter_overrides[id]?.should be_false # still off here, as the reply says
+        end
       end
     end
 

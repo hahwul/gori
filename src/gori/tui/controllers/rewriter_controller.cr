@@ -4,6 +4,7 @@ require "../text_area"
 require "../read_pane"
 require "../../store"
 require "../../rules"
+require "../../proxy/upstream"
 require "../viewport"
 
 module Gori::Tui
@@ -313,11 +314,25 @@ module Gori::Tui
       @preview_host
     end
 
+    # The BARE host the sample names, which is what a rule's host glob is written against.
+    #
+    # `Rules.host_matches?` compares DNS labels (or an anchored glob) against the host the
+    # proxy hands the rewrite seam, and that host never carries a port: `ClientConn` splits
+    # the `Host:` header through `Upstream.split_host_port` before it rewrites anything, and
+    # the h2 relay does the same to `:authority` (`H2::HeadRewrite#request_host`, which
+    # carries the comment about the glob this exact mismatch defeats). Handing the raw header
+    # value through instead made `Host: acme.test:8443` match no glob at all — so a rule
+    # scoped `acme.test` previewed as a rule that changed nothing, indistinguishable from a
+    # pattern that missed, while on the wire it fires. Samples pasted from a captured flow are
+    # exactly the ones that carry the port.
     private def host_from_sample(text : String) : String
       text.each_line do |ln|
         # Allow both "Host:" and "host:" (HTTP/2-style lowercasing in samples).
         if ln.size >= 5 && ln[0, 5].downcase == "host:"
-          return ln[5..].strip
+          raw = ln[5..].strip
+          return raw if raw.empty?
+          host, _ = Gori::Proxy::Upstream.split_host_port(raw, 0)
+          return host.empty? ? raw : host
         end
       end
       ""
