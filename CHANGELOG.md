@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Docs: a terminal-inspired reading layout with compact topic navigation, grouped tool catalogs, and a separate book-style Playbooks space with chapter navigation in English and Korean.
+
 - CLI: the size and latency cells in `gori run` listings pick their unit the way the History column does, so a value just under a boundary rolls up instead of printing `1024.0kB` or `1000.0ms`, and a slow flow reads `3.5h` on both surfaces rather than `12600.0s` on one.
 - CLI: `gori run history` says when `--limit` cut the listing, in every format, and stops claiming it did when it did not. The page returned exactly `-n` rows in silence — so 50 matches and 5,000 printed the same thing to a script that cannot see the flags — while `--format har` guessed from `rows.size >= limit` and told an operator exporting a project of exactly 123 flows with `-n 123` to raise `-n`. The listing now over-reads one row, so the answer is exact.
 - CLI: `gori run` list columns are padded in terminal cells, so a CJK or emoji name no longer steps the columns beside it out of line. The views, repeater, session-slot, project, OAST provider/session, colour and probe-rule listings all measured the pad with `String#ljust` (codepoints), while the TUI's own lists have always drawn through the display-width measure.

@@ -37,7 +37,7 @@
     {% set lang_names = {"en": "English", "ko": "한국어"} %}
     <nav class="lang-switch" aria-label="{{ "a11y.language" | t }}">
       {% for t in page.translations %}
-      <a href="{{ base_url }}{{ t.url }}" hreflang="{{ t.code }}" lang="{{ t.code }}" aria-label="{{ lang_names[t.code] | default(t.code, true) }}" title="{{ lang_names[t.code] | default(t.code, true) }}"{% if t.is_current %} class="is-current" aria-current="true"{% endif %}>{{ t.code | upper }}</a>
+      <a href="{{ base_url }}{{ t.url }}" hreflang="{{ t.code }}" lang="{{ t.code }}" aria-label="{{ t.code | upper }}: {{ lang_names[t.code] | default(t.code, true) }}" title="{{ lang_names[t.code] | default(t.code, true) }}"{% if t.is_current %} class="is-current" aria-current="true"{% endif %}>{{ t.code | upper }}</a>
       {% endfor %}
     </nav>
     {% endif %}

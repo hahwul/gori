@@ -2,112 +2,101 @@
   var rail = document.getElementById('tocRail');
   var main = document.getElementById('main');
   if (!rail || !main) return;
-
   var heads = Array.prototype.slice.call(main.querySelectorAll('h2[id], h3[id]'));
-
-  /* Hover anchors: every linkable heading gets a quiet # for copyable URLs.
-     Runs after the TOC labels are read so the "#" never leaks into them. */
-  function addAnchors() {
-    heads.forEach(function (h) {
-      var a = document.createElement('a');
-      a.className = 'h-anchor';
-      a.href = '#' + h.id;
-      a.setAttribute('aria-label', 'Link to "' + h.textContent + '"');
-      a.textContent = '#';
-      h.appendChild(a);
-    });
-  }
-
-  if (heads.length < 2) {
-    addAnchors();
-    rail.remove();
-    return;
-  }
-
-  // Build the list: h2 = top level, h3 nested under the preceding h2.
+  var placeholder = main.querySelector('.toc-placeholder');
+  var title = rail.dataset.title || 'On this page';
+  var links = {};
+  var disclosure = document.createElement('details');
+  disclosure.className = 'toc-disclosure';
+  var summary = document.createElement('summary');
+  summary.className = 'toc-title';
+  summary.textContent = title;
+  disclosure.appendChild(summary);
   var nav = document.createElement('nav');
-  var title = document.createElement('p');
-  title.className = 'toc-title';
-  title.textContent = 'On this page';
-  var ul = document.createElement('ul');
+  nav.setAttribute('aria-label', title);
+  var list = document.createElement('ul');
   var sub = null;
 
-  heads.forEach(function (h) {
-    var li = document.createElement('li');
-    var a = document.createElement('a');
-    a.href = '#' + h.id;
-    a.textContent = h.textContent;
-    a.setAttribute('data-target', h.id);
-    li.appendChild(a);
-    if (h.tagName === 'H3') {
+  heads.forEach(function (heading) {
+    var item = document.createElement('li');
+    var link = document.createElement('a');
+    link.href = '#' + heading.id;
+    link.textContent = heading.textContent;
+    link.dataset.target = heading.id;
+    links[heading.id] = link;
+    item.appendChild(link);
+    if (heading.tagName === 'H3' && list.lastElementChild) {
       if (!sub) {
         sub = document.createElement('ul');
-        (ul.lastElementChild || ul).appendChild(sub);
+        list.lastElementChild.appendChild(sub);
       }
-      sub.appendChild(li);
+      sub.appendChild(item);
     } else {
-      ul.appendChild(li);
+      list.appendChild(item);
       sub = null;
     }
+    var anchor = document.createElement('a');
+    anchor.className = 'h-anchor';
+    anchor.href = '#' + heading.id;
+    anchor.setAttribute('aria-label', heading.textContent);
+    anchor.textContent = '#';
+    heading.appendChild(anchor);
   });
+  if (heads.length < 2) { rail.remove(); if (placeholder) placeholder.remove(); return; }
+  nav.appendChild(list);
+  disclosure.appendChild(nav);
+  rail.appendChild(disclosure);
 
-  nav.appendChild(title);
-  nav.appendChild(ul);
-  rail.appendChild(nav);
-  addAnchors();
-
-  var byId = {};
-  Array.prototype.slice.call(rail.querySelectorAll('a[data-target]')).forEach(function (a) {
-    byId[a.getAttribute('data-target')] = a;
-  });
-
-  var offset = 0;
-  function measure() {
-    var hdr = document.querySelector('.docs-header');
-    offset = (hdr ? hdr.offsetHeight : 64) + 16;
-  }
-  measure();
-
-  var activeId = null;
-  function setActive(id) {
-    if (id === activeId) return;
-    if (activeId && byId[activeId]) byId[activeId].classList.remove('active');
-    activeId = id;
-    if (id && byId[id]) byId[id].classList.add('active');
-  }
-
-  function atBottom() {
-    return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
-  }
-
-  function update() {
-    var current = heads[0].id;
-    if (atBottom()) {
-      current = heads[heads.length - 1].id;
+  // A desktop rail becomes an in-page disclosure on smaller screens.
+  // Its content and links remain the same when the viewport changes.
+  var marker = document.createComment('table of contents');
+  rail.before(marker);
+  var compact = window.matchMedia('(max-width: 1199px)');
+  function placeContents() {
+    if (compact.matches) {
+      var heading = main.querySelector('.document-heading');
+      if (placeholder) placeholder.after(rail);
+      else if (heading) heading.after(rail);
     } else {
-      for (var i = 0; i < heads.length; i++) {
-        if (heads[i].getBoundingClientRect().top <= offset) current = heads[i].id;
-        else break;
-      }
+      marker.after(rail);
     }
-    setActive(current);
+    if (placeholder) placeholder.hidden = true;
+    disclosure.open = !compact.matches;
   }
+  placeContents();
+  compact.addEventListener('change', placeContents);
 
-  var ticking = false;
-  function onScroll() {
-    if (ticking) return;
-    ticking = true;
-    window.requestAnimationFrame(function () {
-      update();
-      ticking = false;
-    });
+  var active = null;
+  function activate(id) {
+    if (active === id) return;
+    if (links[active]) { links[active].classList.remove('active'); links[active].removeAttribute('aria-current'); }
+    active = id;
+    if (links[id]) { links[id].classList.add('active'); links[id].setAttribute('aria-current', 'location'); }
   }
-
-  window.addEventListener('scroll', onScroll, { passive: true });
-  window.addEventListener('resize', function () { measure(); update(); });
-  rail.addEventListener('click', function (e) {
-    var a = e.target.closest('a[data-target]');
-    if (a) setActive(a.getAttribute('data-target'));
+  // Reconcile headings only when a section crosses the reading line. Reading
+  // their current positions here also handles jumps over several sections;
+  // cached positions would be stale after a jump in the opposite direction.
+  var observer;
+  function observeHeadings() {
+    if (observer) observer.disconnect();
+    var header = document.querySelector('.docs-header');
+    var offset = (header ? header.offsetHeight : 68) + 24;
+    observer = new IntersectionObserver(function () {
+      var current = heads[0];
+      heads.forEach(function (heading) {
+        if (heading.getBoundingClientRect().top <= offset) current = heading;
+      });
+      activate(current.id);
+    }, { rootMargin: '0px 0px -' + Math.max(0, window.innerHeight - offset) + 'px 0px', threshold: 0 });
+    heads.forEach(function (heading) { observer.observe(heading); });
+  }
+  observeHeadings();
+  window.addEventListener('resize', observeHeadings);
+  rail.addEventListener('click', function (event) {
+    var link = event.target.closest('a[data-target]');
+    if (link) activate(link.dataset.target);
   });
-  update();
+  var initial = heads[0].id;
+  try { initial = decodeURIComponent(window.location.hash.slice(1)) || initial; } catch (error) {}
+  activate(links[initial] ? initial : heads[0].id);
 })();

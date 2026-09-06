@@ -1,0 +1,24 @@
+{% set is_book = page.section == "playbooks" %}
+<div class="docs-container{% if is_book %} book-reader{% endif %}">
+  {% include "partials/sidebar.html" %}
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="{{ "docs.path" | t }}">
+      <a href="{{ base_url }}{{ lang_prefix }}/{% if is_book %}playbooks/{% endif %}">{% if is_book %}{{ "docs.book" | t }}{% else %}{{ site.title | e }}{% endif %}</a>
+      {% if not is_book %}{% for sec in site.sections %}{% if sec.name == page.section and sec.language == page_language %}<span aria-hidden="true">/</span><a href="{{ base_url }}{{ sec.url }}">{{ sec.title | e }}</a>{% endif %}{% endfor %}{% endif %}
+      {% if page.extra.group %}<span aria-hidden="true">/</span><span>{{ page.extra.group | e }}</span>{% endif %}
+    </nav>
+    <header class="document-heading">
+      {% if is_book %}
+      {% for sec in site.sections %}{% if sec.name == "playbooks" and sec.language == page_language %}
+      {% for p in sec.pages | rejectattr("is_index") | sort(attribute="weight") %}{% if p.url == page.url %}
+      <p class="chapter-label">{% if page_language != "ko" %}{{ "docs.chapter" | t }}{% endif %} <span>{{ loop.index }}</span>{% if page_language == "ko" %}{{ "docs.chapter" | t }}{% endif %} <span class="chapter-total">/ {{ loop.length }}</span></p>
+      {% endif %}{% endfor %}{% endif %}{% endfor %}
+      {% else %}<p class="doc-kicker">{% if page.section == "guide" %}{{ "nav.guide" | t }}{% elif page.section == "reference" %}{{ "nav.reference" | t }}{% else %}{{ "nav.start" | t }}{% endif %}</p>{% endif %}
+      <h1>{{ page.title | e }}</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body">{{ content }}</article>
+    {% include "partials/page-navigation.html" %}
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="{{ "docs.on_this_page" | t }}" data-title="{{ "docs.on_this_page" | t }}"></aside>
+</div>

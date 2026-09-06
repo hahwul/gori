@@ -1,0 +1,12 @@
+{% for sec in site.sections %}{% if sec.name == page.section and sec.language == page_language %}
+{% set ordered = sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
+{% for p in ordered %}{% if p.url == page.url %}
+<nav class="page-navigation" aria-label="{{ "docs.page_nav" | t }}">
+  {% if not loop.first %}{% set prev = ordered[loop.index0 - 1] %}
+  <a href="{{ base_url }}{{ prev.url }}" rel="prev"><span>← {{ "docs.previous" | t }}</span><strong>{{ prev.title | e }}</strong></a>
+  {% else %}<a href="{{ base_url }}{{ sec.url }}"><span>← {{ "docs.contents" | t }}</span><strong>{{ sec.title | e }}</strong></a>{% endif %}
+  {% if not loop.last %}{% set next = ordered[loop.index0 + 1] %}
+  <a href="{{ base_url }}{{ next.url }}" rel="next"><span>{{ "docs.next" | t }} →</span><strong>{{ next.title | e }}</strong></a>
+  {% else %}<a href="{{ base_url }}{{ lang_prefix }}/{% if page.section == "playbooks" or page.section == "getting-started" %}playbooks{% else %}reference{% endif %}/"><span>{{ "docs.overview" | t }} →</span><strong>{% if page.section == "playbooks" %}{{ "docs.book_return" | t }}{% elif page.section == "getting-started" %}{{ "docs.read_playbooks" | t }}{% else %}{{ "docs.browse_reference" | t }}{% endif %}</strong></a>{% endif %}
+</nav>
+{% endif %}{% endfor %}{% endif %}{% endfor %}

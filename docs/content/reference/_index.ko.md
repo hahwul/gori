@@ -1,14 +1,9 @@
 +++
 title = "레퍼런스"
-description = "기능 범위, CLI 명령, 설정 키, 쿼리 언어."
+description = "CLI 명령, 설정 키, 쿼리 언어."
 weight = 30
 +++
 
-gori의 기술 레퍼런스입니다.
+## 레퍼런스가 필요할 때 {#contents}
 
-## 목차 {#contents}
-
-- **[기능 매트릭스](/ko/reference/capabilities/)**: 프로토콜 범위, 진입점별 역할, 현재 한계.
-- **[CLI 레퍼런스](/ko/reference/cli/)**: 모든 서브커맨드와 플래그: `tui`, `run`, `mcp`, `ca`, `settings`, `wizard`, `tutorial`, `update`.
-- **[설정](/ko/reference/config/)**: `settings.json` 키와 `GORI_HOME` 레이아웃.
-- **[쿼리 언어](/ko/reference/query-language/)**: History, Probe, Sitemap, MCP 도구 전반에서 쓰는 필터 문법.
+명령과 플래그의 정확한 표기, 모든 `settings.json` 키, TUI·`gori run`·MCP가 공유하는 쿼리 문법을 찾을 때 이곳을 사용하세요. 작업 중심 설명이 필요하다면 [Guide](/ko/guide/)부터 읽으세요.

@@ -1932,161 +1932,6 @@ kbd {
   background: var(--line-strong);
 }
 
-.sidebar-section {
-  margin-bottom: 1.05rem;
-}
-
-/* The <symbol> sprite ships inline at the top of the sidebar partial; park it
-   out of layout without display:none, which some engines take as "never
-   render the referenced content". */
-.sidebar-icon-defs {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-}
-
-/* One glyph per section, keyed to the slug in the template. Quiet by default;
-   the open (being-read) section's icon takes the accent so the eye lands on
-   the right group when the rail is scanned. */
-.sidebar-icon {
-  flex: none;
-  width: 1rem;
-  height: 1rem;
-  color: var(--quiet);
-  transition: color var(--transition);
-}
-
-.sidebar-section[open] > .sidebar-title .sidebar-icon {
-  color: var(--accent);
-}
-
-.sidebar-title:hover .sidebar-icon {
-  color: var(--accent-strong);
-}
-
-/* Section titles are bold sans in natural case so they read as a different
-   level from the mono-caps group labels (CORE, WORKBENCHES) inside them. */
-.sidebar-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.34rem 0.75rem;
-  margin-bottom: 0.3rem;
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-size: 0.88rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  list-style: none;
-  transition: color var(--transition), background var(--transition);
-}
-
-/* Suppress the native <summary> disclosure triangle across engines. */
-.sidebar-title::-webkit-details-marker {
-  display: none;
-}
-
-/* The open section is the one being read: its title steps forward while the
-   collapsed ones stay recessed. */
-.sidebar-section[open] > .sidebar-title {
-  color: var(--heading);
-}
-
-.sidebar-title:hover {
-  color: var(--heading);
-  background: rgb(var(--ink-rgb) / 0.05);
-}
-
-.sidebar-title-text {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.sidebar-caret {
-  flex: none;
-  width: 0.9rem;
-  height: 0.9rem;
-  opacity: 0.6;
-  transition: transform var(--transition), opacity var(--transition);
-}
-
-.sidebar-section[open] > .sidebar-title .sidebar-caret {
-  transform: rotate(180deg);
-}
-
-.sidebar-title:hover .sidebar-caret {
-  opacity: 1;
-}
-
-/* A hairline rail turns the flat link pile into a tree: pages hang off their
-   section, and the active page pins a gold marker onto the rail itself. */
-.sidebar-links {
-  list-style: none;
-  margin-left: 1.05rem;
-  border-left: 1px solid var(--line);
-}
-
-.sidebar-subhead {
-  margin: 0.75rem 0 0.2rem;
-  padding: 0 0.8rem;
-  color: var(--quiet);
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.sidebar-links li {
-  margin-bottom: 0.1rem;
-}
-
-.sidebar-links a {
-  position: relative;
-  display: block;
-  padding: 0.38rem 0.7rem 0.38rem 0.8rem;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  color: var(--text);
-  font-size: 0.9rem;
-  line-height: 1.4;
-  text-decoration: none;
-  transition: color var(--transition), background var(--transition);
-}
-
-/* The marker sits on the rail (the ul border), not inside the link box. */
-.sidebar-links a::before {
-  content: "";
-  position: absolute;
-  top: 0.3rem;
-  bottom: 0.3rem;
-  left: -1px;
-  width: 2px;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  transition: background var(--transition);
-}
-
-.sidebar-links a:hover {
-  background: rgb(var(--ink-rgb) / 0.05);
-  color: var(--heading);
-}
-
-.sidebar-links a:hover::before {
-  background: var(--line-strong);
-}
-
-.sidebar-links a.active {
-  background: rgb(var(--accent-rgb) / 0.1);
-  color: var(--accent-strong);
-  font-weight: 600;
-}
-
-.sidebar-links a.active::before {
-  background: var(--accent);
-}
-
 /* The grid track already sizes and gutters the column; the cap only binds in
    the two-track range (no TOC), where the track would otherwise run wide. */
 .docs-main {
@@ -2686,36 +2531,6 @@ blockquote > :last-child,
 
 .alert-body > :last-child {
   margin-bottom: 0;
-}
-
-/* An index of page titles, nothing more: a ruled two-column list, not a grid
-   of cards sized for descriptions this listing does not carry. */
-ul.section-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 2.5rem;
-  max-width: var(--content-max-w);
-  margin: 0 0 1.6rem;
-  padding: 0;
-  list-style: none;
-}
-
-ul.section-list li {
-  margin: 0;
-  border-bottom: 1px solid var(--line);
-}
-
-ul.section-list li a {
-  display: block;
-  padding: 0.62rem 0;
-  color: var(--text);
-  font-weight: 600;
-  text-decoration: none;
-  transition: color var(--transition);
-}
-
-ul.section-list li a:hover {
-  color: var(--accent-strong);
 }
 
 nav.pagination {
@@ -3550,9 +3365,6 @@ html.search-lock body {
     font-size: 2.2rem;
   }
 
-  ul.section-list {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 520px) {
