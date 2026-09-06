@@ -29,6 +29,19 @@ private def with_globals(&)
   end
 end
 
+# Install a binding layer for the duration of the block, then put back whatever was there.
+# `Env.layer` is a per-project global, so a spec that leaked one would change what every later
+# example thinks `$SESSION` means. (File-private, like `bindings_spec`'s own.)
+private def with_layer(bindings : Gori::Bindings?, &)
+  previous = Gori::Env.layer
+  Gori::Env.layer = bindings
+  begin
+    yield
+  ensure
+    Gori::Env.layer = previous
+  end
+end
+
 describe Gori::Rules do
   # This gate backs EVERY rule op — body, ws, short_circuit, head, header — and the extract
   # rules that mint session bindings, so an over-match is how a `SetHeader $SESSION` rule
@@ -318,6 +331,38 @@ describe Gori::Rules do
       # `split_message` has taken the blank line off. Trailing bare LF, CRLF above it.
       rules.transform_message("GET / HTTP/1.1\r\nHost: a\n", Gori::Store::RuleTarget::Request, "")
         .should eq("GET / HTTP/1.1\r\nHost: a\nX-Trace: on\r\n")
+    end
+  end
+
+  # `transform_message` has two callers and they are not the same kind of act: the Rewriter's
+  # OUTPUT pane redraws a sample (`run_hooks: false`), and MCP `send_request{apply_rules:true}`
+  # puts bytes on a socket. A rule blocked on an unbound `$NAME` is SKIPPED on both — but the
+  # event that says so was suppressed for both, so the one that was a real send injected
+  # nothing and reported nothing, while the identical rule on the proxy path writes a row.
+  describe "a rule refused at a real send through transform_message" do
+    it "writes the refusal event a redraw suppresses" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        with_layer(b) do
+          rules = Gori::Rules.new(store, store.match_rules)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Auth",
+            "$SESSION", Gori::Store::RuleOp::SetHeader, Gori::Store::MatchKind::Literal,
+            "inject", "", "")
+          sample = "GET /a HTTP/1.1\r\nHost: acme.test\r\n\r\n"
+
+          # The redraw stays silent — it runs once per frame.
+          rules.transform_message(sample, Gori::Store::RuleTarget::Request, "acme.test",
+            run_hooks: false)
+          store.events_after(0, 50).any? { |e| e.kind == "unbound" }.should be_false
+
+          # The send does not: the header never went out and nothing else would say so.
+          out = rules.transform_message(sample, Gori::Store::RuleTarget::Request, "acme.test")
+          out.should_not contain("X-Auth")
+          ev = store.events_after(0, 50).find { |e| e.kind == "unbound" }.not_nil!
+          ev.message.should eq(%(rewrite rule "inject" not applied: $SESSION is not bound yet))
+        end
+      end
     end
   end
 

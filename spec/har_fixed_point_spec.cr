@@ -147,6 +147,82 @@ describe "HAR round-trip fixed point" do
   end
 end
 
+# One entry with a request body of the given shape, parsed through the real seam. `post_data`
+# is the entry's `postData` object (`text` verbatim, or `params` this rebuilds); `headers` the
+# request headers.
+private def req_head_of(post_data, headers = [] of Hash(String, String),
+                        http_version = "HTTP/1.1", body_size = -1) : String
+  entry = {
+    "startedDateTime" => "2026-01-01T00:00:00.000Z",
+    "time"            => 1,
+    "request"         => {
+      "method" => "POST", "url" => "https://acme.test/x", "httpVersion" => http_version,
+      "headers" => headers, "queryString" => [] of Hash(String, String),
+      "cookies" => [] of Hash(String, String), "headersSize" => -1, "bodySize" => body_size,
+      "postData" => post_data,
+    },
+    "response" => {
+      "status" => 200, "statusText" => "OK", "httpVersion" => http_version,
+      "headers" => [] of Hash(String, String), "cookies" => [] of Hash(String, String),
+      "content" => {"size" => 0, "mimeType" => "text/plain"},
+      "redirectURL" => "", "headersSize" => -1, "bodySize" => 0,
+    },
+    "cache"   => {} of String => String,
+    "timings" => {"send" => 0, "wait" => 1, "receive" => 0},
+  }
+  String.new(parse_har({"log" => {"version" => "1.2", "entries" => [entry]}}.to_json).flows.first.request.head)
+end
+
+# The request side of the round trip must not FRAME a body the source handed over verbatim and
+# never framed itself — an HTTP/2 POST carries its body in DATA/END_STREAM with no
+# `content-length` on the wire, and synthesizing one rewrites the operator's captured head
+# (P7) and breaks the export→import fixed point. `response_head` already states this rule; the
+# request side used to do the opposite for any body.
+describe "HAR request Content-Length synthesis" do
+  it "does not invent a Content-Length for a verbatim body the source did not frame (h2 DATA)" do
+    head = req_head_of({"mimeType" => "application/json", "text" => %({"a":1})},
+      http_version: "HTTP/2")
+    head.should_not contain("Content-Length")
+  end
+
+  it "re-emits the source's own Content-Length beside a verbatim body" do
+    head = req_head_of({"mimeType" => "application/json", "text" => %({"a":1})},
+      headers: [{"name" => "Content-Length", "value" => "99"}])
+    head.should contain("Content-Length: 7\r\n") # the true body size, not the stated 99
+  end
+
+  it "frames a verbatim body when it strips a lying Transfer-Encoding" do
+    head = req_head_of({"mimeType" => "application/json", "text" => %({"a":1})},
+      headers: [{"name" => "Transfer-Encoding", "value" => "chunked"}])
+    head.should_not contain("Transfer-Encoding")
+    head.should contain("Content-Length: 7\r\n")
+  end
+
+  it "frames a body it RECONSTRUCTED from params even when the source stated no length" do
+    head = req_head_of({"mimeType" => "application/x-www-form-urlencoded",
+                        "params"   => [{"name" => "a", "value" => "1"}]})
+    head.should contain("Content-Length: 3\r\n") # a=1
+  end
+
+  # A CAPPED h2 POST carries `bodySize` (the true wire size) beside a shorter `text` prefix and
+  # no `content-length`. The declared size must not resurrect a length on a head that framed its
+  # body implicitly — that would over-frame a prefix as if it were the whole entity.
+  it "does not resurrect a Content-Length from a capped h2 body's declared size" do
+    head = req_head_of({"mimeType" => "application/octet-stream", "text" => "abcde"},
+      http_version: "HTTP/2", body_size: 9999)
+    head.should_not contain("Content-Length")
+  end
+
+  # The suppression is scoped to a version that frames its body without one. An HTTP/1.1 verbatim
+  # body that stated no framing at all still gets a synthesized length — an unframed h1 request
+  # is not a fidelity case, it is one the origin cannot read.
+  it "still frames a verbatim HTTP/1.1 body the source left unframed" do
+    head = req_head_of({"mimeType" => "application/json", "text" => %({"a":1})},
+      http_version: "HTTP/1.1")
+    head.should contain("Content-Length: 7\r\n")
+  end
+end
+
 # One 101 entry carrying Chrome's `_webSocketMessages`, parsed through the real seam.
 private def ws_entry(messages, status = 101) : Gori::Import::Builder::FlowPair
   entry = {

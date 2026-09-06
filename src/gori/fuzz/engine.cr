@@ -302,13 +302,25 @@ module Gori::Fuzz
     # `Fuzz::Config#tls_preset`, which is where the operator's choice comes from.
     getter tls_preset : String?
 
+    # The run's TLS SNI override, or nil. BLANK IS NIL, normalised here for the same reason
+    # `tls_preset` is: "" and nil both mean "no override", and the difference between them is
+    # not cosmetic. `Upstream.dial_tls_result` passes `hostname: sni || host` to OpenSSL, and
+    # `""` is truthy in Crystal — so an empty override sends NO SNI extension and, with
+    # `verify: true` still set, performs NO hostname check on the certificate it gets back. A
+    # schema-filling MCP client sends `""` for every declared property (`fuzz_start` learned
+    # that in #937 and takes `.presence`; `sequence_start` and `mine_start` still hand the bare
+    # string through), so the normalisation belongs at the seam all three reach rather than at
+    # the one surface that remembered.
+    getter sni : String?
+
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
-                   @sni : String? = nil, @timeout : Time::Span? = nil,
+                   sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
                    keep_alive : Bool = false, idle_conns : Int32 = 0,
                    @evidence : Bool = false, @slot_overlay : Bool = true,
                    @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                    @ws_keep_key : Bool = false, tls_preset : String? = nil)
+      @sni = sni.presence
       @tls_preset = Settings.tls_preset_normalize(tls_preset)
       # h2 used to be excluded here, on the ground that "H2Engine frames its own connection
       # per send". It did, and that WAS the cost: an h2 sweep paid a TCP handshake, a TLS

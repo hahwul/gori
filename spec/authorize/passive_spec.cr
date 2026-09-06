@@ -93,6 +93,40 @@ describe Gori::Authorize::Passive do
     end
   end
 
+  # `any_identity_changes?` compares the RESOLVED overlays, and resolution used to run through
+  # `Authorize.resolve` — the SEND seam's door, which reports every `$NAME` a slot header will
+  # ship literally so a run summary can say the identity went out unauthenticated. This is a
+  # PREDICATE: it decides whether to replay at all, applies nothing to any wire, and runs on
+  # every flow the passive watcher looks at. Recording there put "session values went out
+  # LITERALLY … their responses are NOT evidence about the identity they name"
+  # (`CLI::Run.unbound_overlay_note`) into the summary of a run that DECLINED the flow and sent
+  # nothing at all — the report inventing the requests it is warning about.
+  describe "the unbound-overlay report" do
+    it "is not written by the predicate that only decides whether to replay" do
+      Gori::Env.take_unbound_overlay # drain whatever an earlier example left
+      # The canonical two-slot setup with NOTHING bound: both `$SESSION`s ship literally, so
+      # both identities resolve to the same bytes and the flow is DECLINED as `:no_effect` —
+      # nothing is sent, by construction.
+      ids = [
+        Identity.new("admin", set_headers: [{"Cookie", "sid=$SESSION"}], baseline: true,
+          rules: ["SESSION"]),
+        Identity.new("victim", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"]),
+      ]
+      Passive.skip_reason(detail, ids).should eq(:no_effect)
+      Gori::Env.take_unbound_overlay.should be_empty
+    end
+
+    # …and the seam that DOES put bytes on a wire still reports, so the fix above cannot be
+    # mistaken for switching the mechanism off.
+    it "is still written by the send seam's resolve" do
+      Gori::Env.take_unbound_overlay
+      id = Identity.new("admin", set_headers: [{"Authorization", "Bearer $SESSION"}],
+        rules: ["SESSION"])
+      Gori::Authorize.resolve(id)
+      Gori::Env.take_unbound_overlay.map(&.[1]).should eq(["SESSION"])
+    end
+  end
+
   # Passive sees a NEW flow per page load, so a flow-id key would add a row every time the
   # browser refetches — the queue would become a traffic log.
   describe ".key" do

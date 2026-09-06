@@ -257,6 +257,15 @@ describe Gori::Sequencer::Config do
       config(goal: 50_000).max_sends.should eq(50_000_i64)
     end
 
+    # `clamp(goal, GOAL_CEILING)` answers its MAX first, so a goal PAST the ceiling used to
+    # come back with a budget under its own goal — a dispatcher that stops at 50,000 sends for
+    # a 60,000-token collection, with nothing anywhere naming a ceiling. `gori run sequence
+    # --count` accepts any positive integer, so that is a reachable shape.
+    it "never budgets FEWER sends than the goal it is collecting" do
+      config(goal: 60_000).max_sends.should eq(60_000_i64)
+      config(goal: 200_000).max_sends.should eq(200_000_i64)
+    end
+
     it "honors an explicit positive max_requests exactly" do
       config(goal: 500, max_requests: 42_i64).max_sends.should eq(42_i64)
       # an explicit cap may exceed the goal-derived ceiling
