@@ -786,13 +786,20 @@ module Gori
           j.field "error", text(detail.error)
           j.field "request_head", redact_head_opt(head_text(detail.request_head), include_sensitive)
           emit_head_base64(j, "request_head", detail.request_head, include_sensitive)
+          # `source_size` ONLY when the capture cap actually cut: the number an agent needs is
+          # "2048 stored of 2,684,354,889", not "2048 of 2048". Without it `wire_truncated`
+          # said a cut happened and nothing said how big — the difference between paging the
+          # rest (there is none) and re-sending under a larger cap. `FlowDetail` already
+          # recovers the wire size by subtracting the head from the row total.
           emit_body(j, "request_body", detail.request_head, detail.request_body,
-            detail.request_body_truncated?, body_cap, body_omit, include_sensitive)
+            detail.request_body_truncated?, body_cap, body_omit, include_sensitive,
+            source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil)
           j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
           emit_head_base64(j, "response_head", detail.response_head, include_sensitive)
           j.field "sensitive_headers_redacted", true unless include_sensitive
           emit_body(j, "response_body", detail.response_head, detail.response_body,
-            detail.response_body_truncated?, body_cap, body_omit, include_sensitive)
+            detail.response_body_truncated?, body_cap, body_omit, include_sensitive,
+            source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil)
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs)
           emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,

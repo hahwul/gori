@@ -85,3 +85,88 @@ describe "get_response_body_chunk completeness" do
     end
   end
 end
+
+# `compare_flows` makes the same argument in its own source — "over a CUT diff the honest
+# answer is 'unknown', not 'the same'" — but its `truncated` only ever covered the DIFF being
+# cut (MAX_LINES, the byte cap). The cut that happens first was invisible to it: two flows the
+# capture cap stopped at the same ceiling, whose stored prefixes match, diffed to zero changes
+# and came back `identical:true` — a claim about the megabytes gori never held.
+
+private def cmp(tools : Gori::MCP::Tools, args : String) : JSON::Any
+  r = tools.call("compare_flows", JSON.parse(args))
+  fail "compare_flows errored: #{r.text}" if r.is_error
+  JSON.parse(r.text)
+end
+
+describe "compare_flows over capture-cut bodies" do
+  it "refuses `identical` when both sides are prefixes that happen to match" do
+    with_store do |store|
+      a = seed_body(store, "same-prefix", truncated: true)
+      b = seed_body(store, "same-prefix", truncated: true)
+      tools = tools_for(store)
+
+      r = cmp(tools, %({"flow_id_a":#{a},"flow_id_b":#{b}}))
+      r["changed_lines"].as_i.should eq(0) # the stored bytes really do match
+      r["identical"].as_bool.should be_false
+      r["truncated"].as_bool.should be_true
+      r["source_truncated"].as_a.map(&.as_s).should eq(["a", "b"])
+      r["source_truncated_note"].as_s.should contain("both flows")
+    end
+  end
+
+  it "names the one side that was cut" do
+    with_store do |store|
+      a = seed_body(store, "hello", truncated: true)
+      b = seed_body(store, "hello", truncated: false)
+      r = cmp(tools_for(store), %({"flow_id_a":#{a},"flow_id_b":#{b}}))
+      r["source_truncated"].as_a.map(&.as_s).should eq(["a"])
+      r["source_truncated_note"].as_s.should contain("flow a")
+      r["identical"].as_bool.should be_false
+    end
+  end
+
+  it "still calls two whole, matching bodies identical" do
+    with_store do |store|
+      a = seed_body(store, "hello", truncated: false)
+      b = seed_body(store, "hello", truncated: false)
+      r = cmp(tools_for(store), %({"flow_id_a":#{a},"flow_id_b":#{b}}))
+      r["identical"].as_bool.should be_true
+      r["truncated"].as_bool.should be_false
+      r.as_h.has_key?("source_truncated").should be_false
+    end
+  end
+
+  # `pane:"request"` must consult the REQUEST flag, not the response one.
+  it "checks the pane it is actually diffing" do
+    with_store do |store|
+      a = seed_body(store, "x", truncated: true) # response cut, request whole
+      b = seed_body(store, "x", truncated: true)
+      r = cmp(tools_for(store), %({"flow_id_a":#{a},"flow_id_b":#{b},"pane":"request"}))
+      r.as_h.has_key?("source_truncated").should be_false
+      r["identical"].as_bool.should be_true
+    end
+  end
+end
+
+# get_flow says a body was cut but never how big it really was — the difference between
+# paging the rest (there is none) and re-sending under a larger cap.
+describe "get_flow source_size on a cut body" do
+  it "reports the true wire size beside the stored prefix" do
+    with_store do |store|
+      id = seed_body(store, "0123456789", truncated: true)
+      r = tools_for(store).call("get_flow", JSON.parse(%({"id":#{id}})))
+      body = JSON.parse(r.text)["response_body"]
+      body["size"].as_i.should eq(10)
+      body["wire_truncated"].as_bool.should be_true
+      body["source_size"].as_i.should be >= 10
+    end
+  end
+
+  it "adds no source_size to a body that was captured whole" do
+    with_store do |store|
+      id = seed_body(store, "0123456789", truncated: false)
+      r = tools_for(store).call("get_flow", JSON.parse(%({"id":#{id}})))
+      JSON.parse(r.text)["response_body"].as_h.has_key?("source_size").should be_false
+    end
+  end
+end
