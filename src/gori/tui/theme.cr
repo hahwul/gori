@@ -1232,9 +1232,16 @@ module Gori::Tui
       luma(text_bright) > luma(bg) ? bg : text_bright
     end
 
+    # Called once per History row per frame. The captured spelling is upper-case in all but
+    # a hostile request, so the common case is matched as written and `upcase` (an
+    # allocation per row per frame) is paid only by a method that missed.
     def self.method_color(method : String) : Color
+      case method
+      when "GET", "HEAD", "QUERY" then return green # QUERY is safe + idempotent like GET (RFC 10008)
+      when "POST", "PUT", "PATCH", "DELETE" then return yellow
+      end
       case method.upcase
-      when "GET", "HEAD", "QUERY"           then green # QUERY is safe + idempotent like GET (RFC 10008)
+      when "GET", "HEAD", "QUERY"           then green
       when "POST", "PUT", "PATCH", "DELETE" then yellow
       else                                       muted
       end

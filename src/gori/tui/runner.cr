@@ -299,11 +299,12 @@ module Gori::Tui
       # was the bug; see `Runner.port_fallback`) — read only by `apply_settings`, to tell "the
       # operator moved the pin" apart from "the environment moved us".
       @bind_fallback = nil.as(Tuple(Int32, Int32)?)
-      @quit_armed = false           # first ^D/^C arms quit; second confirms (avoids accidental exit)
-      @resized = false              # set on a Resize event → next frame full-repaints
-      @body_h = 24                  # last body rect height (captured at render); drives PageUp/Down step size
-      @title_text = nil.as(String?) # last string emitted as the terminal-window title (memo; see sync_terminal_title)
-      @title_written = false        # have we ever written a title? gates the neutral restore on leave when the pref is "off"
+      @quit_armed = false                                 # first ^D/^C arms quit; second confirms (avoids accidental exit)
+      @resized = false                                    # set on a Resize event → next frame full-repaints
+      @body_h = 24                                        # last body rect height (captured at render); drives PageUp/Down step size
+      @title_text = nil.as(String?)                       # last string emitted as the terminal-window title (memo; see sync_terminal_title)
+      @title_key = nil.as(Tuple(String, Symbol, String)?) # the inputs that title was built from
+      @title_written = false                              # have we ever written a title? gates the neutral restore on leave when the pref is "off"
       # The circuit breaker behind `absorb_tick_error`: strikes inside TICK_ERROR_WINDOW.
       @breaker = TickBreaker.new(TICK_ERROR_LIMIT, TICK_ERROR_WINDOW)
       # The exception a full render last raised, while the reduced frame stands in for it —
@@ -494,7 +495,7 @@ module Gori::Tui
       last_dv_poll = Time.instant
       last_probe_gen = @session.store.probe_generation # committed probe_issues mutations
       last_spin = Time.instant                         # advances the background-job spinner frame
-      last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
+      last_clock = clock_minute                        # status-row wall clock; re-render only when the minute rolls over
       last_ui_ident = nil.as(UiIdentity?)              # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
       last_pub_rev = -1                                                     # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
@@ -673,7 +674,7 @@ module Gori::Tui
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
             # idle loop wakes once a minute to repaint rather than every second.
-            if (clock = clock_label) != last_clock
+            if (clock = clock_minute) != last_clock
               last_clock = clock
               dirty = true
             end
@@ -2351,8 +2352,15 @@ module Gori::Tui
     # Switching to "off" mid-session is the one exception: a title we put there would
     # otherwise freeze on whatever tab was active, so we release it to the neutral "𝓰𝓸𝓻𝓲"
     # once and go quiet from there.
+    #
+    # The three inputs are compared BEFORE the title is built: this runs at the top of every
+    # render, and building it is two interpolations plus `title_safe`'s per-char walk over the
+    # project name, all to be compared against the same string and dropped.
     private def sync_terminal_title : Nil
-      title = case Settings.terminal_title
+      key = {Settings.terminal_title, @active_tab, @session.project.name}
+      return if @title_key == key
+      @title_key = key
+      title = case key[0]
               when "off" then @title_text.nil? ? return : "𝓰𝓸𝓻𝓲"
               when "tab" then "𝓰𝓸𝓻𝓲 - #{Chrome.tab_label(@active_tab)}"
               else            "𝓰𝓸𝓻𝓲 - #{title_safe(@session.project.name)} - #{Chrome.tab_label(@active_tab)}"
@@ -2560,6 +2568,14 @@ module Gori::Tui
     # lowercase "pm" and `%P` the uppercase "PM" (GNU date has them the other way round).
     private def clock_label : String
       Time.local.to_s("%I:%M %P")
+    end
+
+    # The clock as the loop compares it — a tuple, so the 20-a-second check is two integer
+    # compares rather than a strftime and a String it throws away (the same reason
+    # `ui_state_identity` is a tuple and not the JSON it stands for).
+    private def clock_minute : {Int32, Int32}
+      t = Time.local
+      {t.hour, t.minute}
     end
 
     private def rules_label : String

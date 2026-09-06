@@ -20,9 +20,29 @@ module Gori::Settings
   # "auto" tracks the build's platform; "darwin"/"linux"/"windows" force one.
   # `keymap_overrides` is SPARSE: verb-id → chord-label strings ("ctrl-p", "shift-s").
   # An empty list = explicit unbind; an absent id = use the profile default.
-  class_property keymap_os : String = DEFAULT_KEYMAP_OS
-  class_property keymap_overrides : Hash(String, Array(String)) = {} of String => Array(String)
-  class_property command_modifier : String = DEFAULT_COMMAND_MODIFIER
+  class_getter keymap_os : String = DEFAULT_KEYMAP_OS
+  class_getter keymap_overrides : Hash(String, Array(String)) = {} of String => Array(String)
+  class_getter command_modifier : String = DEFAULT_COMMAND_MODIFIER
+
+  # Bumped by every setter above, so a memo built from the three (the parsed overrides,
+  # an expanded hint strip — `Hotkeys.expand` runs per frame) can tell "same keymap" from
+  # "same values" without comparing the Hash. The `Theme.revision` shape.
+  class_getter keymap_revision : UInt32 = 0_u32
+
+  def self.keymap_os=(v : String) : String
+    @@keymap_revision &+= 1
+    @@keymap_os = v
+  end
+
+  def self.keymap_overrides=(v : Hash(String, Array(String))) : Hash(String, Array(String))
+    @@keymap_revision &+= 1
+    @@keymap_overrides = v
+  end
+
+  def self.command_modifier=(v : String) : String
+    @@keymap_revision &+= 1
+    @@command_modifier = v
+  end
 
   # Tolerant hotkey parse: a non-object (or absent) node keeps current values. `os`
   # is normalized (unknown → "auto"); `bindings` is a sparse verb-id → chord-label

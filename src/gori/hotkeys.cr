@@ -94,9 +94,29 @@ module Gori
     # through THIS set (not raw chord_overrides), so its column can never advertise a chord
     # dispatch would drop — build_keymap and the palette must agree, so they share this one
     # filter rather than duplicating it.
+    #
+    # Memoized on the keymap revision and the registry: `expand` defaults to this and runs per
+    # FRAME (the status strip, every controller's `keys`), and rebuilding it meant parsing
+    # every override label into a Chord and two Hash builds twenty times a second.
     def self.rebindable_overrides(registry : Verb::Registry) : Hash(String, Array(Verb::Chord))
-      chord_overrides.select { |id, _| (v = registry[id]?) && rebindable?(v) }
+      key = {registry.object_id, Settings.keymap_revision}
+      if (memo = @@overrides_memo) && memo[0] == key
+        return memo[1]
+      end
+      out = chord_overrides.select { |id, _| (v = registry[id]?) && rebindable?(v) }
+      @@overrides_memo = {key, out}
+      out
     end
+
+    @@overrides_memo : {Tuple(UInt64, UInt32), Hash(String, Array(Verb::Chord))}? = nil
+
+    # Expanded hint strips, keyed on the template and everything a token can resolve
+    # through (keymap revision, registry, profile). Templates are literals — the same ~60
+    # strings frame after frame — so this is small and hits almost always; the cap is for a
+    # `body_hint` that interpolates a count into its template and would otherwise grow it
+    # one entry per distinct count.
+    EXPAND_MEMO_CAP = 512
+    @@expand_memo = {} of Tuple(String, UInt64, UInt32, String) => String
 
     # The persisted user overrides, parsed from Settings' label strings into Chords. A
     # reserved/unparseable chord is DROPPED here too (not just refused by the editor) so a
@@ -261,9 +281,25 @@ module Gori
     # verb with no default at all is left as written — visibly wrong rather than silently
     # blank, which is what `spec/hotkeys_spec.cr` / the Help spec check for.
     def self.expand(registry : Verb::Registry, template : String,
-                    overrides : Hash(String, Array(Verb::Chord)) = rebindable_overrides(registry),
+                    overrides : Hash(String, Array(Verb::Chord))? = nil,
                     profile : String = Settings.keymap_os) : String
       return template unless template.valid_encoding? && template.includes?('{')
+      # Only the DEFAULT overrides are memoizable: a caller handing in its own working set
+      # (the hotkey editor previewing an unsaved rebind) is asking about a keymap that has no
+      # revision yet.
+      if overrides
+        return expand_uncached(registry, template, overrides, profile)
+      end
+      key = {template, registry.object_id, Settings.keymap_revision, profile}
+      if hit = @@expand_memo[key]?
+        return hit
+      end
+      @@expand_memo.clear if @@expand_memo.size >= EXPAND_MEMO_CAP
+      @@expand_memo[key] = expand_uncached(registry, template, rebindable_overrides(registry), profile)
+    end
+
+    private def self.expand_uncached(registry : Verb::Registry, template : String,
+                                     overrides : Hash(String, Array(Verb::Chord)), profile : String) : String
       template.gsub(VERB_TOKEN_RE) do |token|
         id = $1
         if chord = binding_for(registry, id, overrides, profile) || default_for(registry, id, profile)

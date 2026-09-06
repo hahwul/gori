@@ -204,6 +204,17 @@ module Gori::Tui
       # reloads, re-sorts and re-filters constantly, so an index-keyed memo would retarget.
       # Dropped wholesale whenever the engine's revision moves — see `color_for`.
       @color_memo = {} of Int64 => Store::ColorRule?
+      # The three per-row strings the list builds from a row's own fields, memoized on those
+      # fields: a timestamp is parsed, localised and strftime'd, a Content-Type is split,
+      # stripped and downcased twice, and an absolute-form target is sliced — per row, per
+      # frame, for values that do not change between frames. Keyed on the VALUE (created_at,
+      # the header, the flow id for a target that is immutable per flow), never on the row
+      # object, so a row whose response lands later (its Content-Type goes from nil to a
+      # value) reads the new answer. Cleared on size like `@color_memo`; `@mime_memo` is
+      # bounded by the number of distinct Content-Types and capped for a hostile origin.
+      @time_memo = {} of Int64 => String
+      @mime_memo = {} of String => String
+      @path_memo = {} of Int64 => String
       @color_rev = 0_u64
       @detail = nil.as(Store::FlowDetail?)
       @detail_ws = nil.as(Array(Store::WsMessage)?)
@@ -2693,7 +2704,7 @@ module Gori::Tui
         if sw > 0 && (m = mark) && m.style.strip?
           screen.cell(strip_x, y, '█', Theme.mark_color(m.color), bg)
         end
-        screen.text(time_x, y, fmt_time(row.created_at), Theme.muted, bg)
+        screen.text(time_x, y, fmt_time_memo(row.created_at), Theme.muted, bg)
         # METHOD is a FIXED 8-column cell (method_x .. proto_x), so it needs its own clamp —
         # without a `width:` the limit is the whole SCREEN. RFC 9110 permits any token here and
         # the parser caps nothing, so a long method (`VERSION-CONTROL`, a smuggled
@@ -2723,7 +2734,7 @@ module Gori::Tui
         proto_color = stub ? Theme.yellow : (kind.http? ? Theme.muted : Theme.accent)
         screen.text(proto_x, y, proto_label, proto_color, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
-        screen.text(path_x, y, Url.origin_path(row.target), fg, bg, width: path_w) if path_w > 0
+        screen.text(path_x, y, origin_path_memo(row), fg, bg, width: path_w) if path_w > 0
         # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
         # a cryptic "0" indistinguishable from a still-pending "···".
         status, scolor = FlowStatus.cell(row)
@@ -2745,7 +2756,7 @@ module Gori::Tui
           screen.text(src_x, y, src.try(&.label) || "—",
             src.nil? || src.proxy? ? Theme.muted : Theme.accent, bg, width: 5)
         end
-        screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
+        screen.text(type_x, y, fmt_mime_memo(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
         screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
         render_columns_row(screen, cols_x, y, shown_cols, row, fg, bg)
@@ -2950,6 +2961,27 @@ module Gori::Tui
       t = Time.unix(created_at // 1_000_000)
       return fmt_time_relative(t) if Settings.history_time_format == "relative"
       t.to_local.to_s("%m-%d %H:%M:%S")
+    end
+
+    # `fmt_time` through the memo — for the ABSOLUTE format only. A relative age is a
+    # function of now and has to be recomputed each frame (it is `Fmt.ago`, cheap).
+    private def fmt_time_memo(created_at : Int64) : String
+      return fmt_time(created_at) if Settings.history_time_format == "relative"
+      @time_memo.fetch(created_at) { @time_memo[created_at] = fmt_time(created_at) }
+    end
+
+    MIME_MEMO_CAP = 256
+
+    private def fmt_mime_memo(ct : String?) : String
+      return "—" unless ct
+      @mime_memo.fetch(ct) do
+        @mime_memo.clear if @mime_memo.size >= MIME_MEMO_CAP
+        @mime_memo[ct] = fmt_mime(ct)
+      end
+    end
+
+    private def origin_path_memo(row : Store::FlowRow) : String
+      @path_memo.fetch(row.id) { @path_memo[row.id] = Url.origin_path(row.target) }
     end
 
     # Compact relative age from now: "3s" / "5m" / "2h" / "1d". This said it "mirrors
@@ -3265,6 +3297,11 @@ module Gori::Tui
       # describes both and the colours cannot land a column off the glyphs.
       rows = detail_rows(cw, body.h, total, ->(i : Int32) { detail_line_text(dv, i) })
       xs = detail_xscroll
+      # The search band scans a DOWNCASED copy of the whole logical line, and under wrap one
+      # minified body line can fill the viewport — so the copy is made once per logical line
+      # here, not once per drawn row (the `ReadPane` hoist; `mark_search`'s `lower:`).
+      searching = !@search_hl.empty?
+      lower = Wrap::LowerMemo.new
       rows.each_with_index do |vr, i|
         li = vr.li
         y = body.y + i
@@ -3272,13 +3309,13 @@ module Gori::Tui
         shown = Highlight.slice_chars(styled_detail_line(dv, li), vr.a, vr.b)
         shown = Highlight.slice_left(shown, xs) if xs > 0
         Highlight.draw(screen, body.x + gw, y, shown, width: cw)
-        need_plain = (focused && detail_navigable? && (li == @detail_read.cy || sel_spans)) || !@search_hl.empty?
+        need_plain = (focused && detail_navigable? && (li == @detail_read.cy || sel_spans)) || searching
         plain = need_plain ? detail_line_text(dv, li) : nil
         paint_detail_line_chrome(screen, body.x + gw, y, li, plain, focused, sel_spans, vr.a, vr.b) if plain
         # The plain-text line feeds ONLY the search overlay, so skip it when no query is
         # active (else every frame builds/scans discarded strings per row).
-        if (text = plain) && !@search_hl.empty?
-          Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs)
+        if (text = plain) && searching
+          Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, lower: lower.for(li, text))
         end
       end
       # The detail body scrolls (`@detail_scroll`) and had no gauge, while the Repeater's
@@ -3312,6 +3349,8 @@ module Gori::Tui
                   end
       rows = detail_rows(cw, body.h, total, ->(i : Int32) { lines[i] })
       xs = detail_xscroll
+      searching = !@search_hl.empty?
+      lower = Wrap::LowerMemo.new
       rows.each_with_index do |vr, i|
         y = body.y + i
         line = lines[vr.li]
@@ -3323,7 +3362,8 @@ module Gori::Tui
         styled = Highlight.slice_left(styled, xs) if xs > 0
         Highlight.draw(screen, body.x + gw, y, styled, width: cw)
         paint_detail_line_chrome(screen, body.x + gw, y, vr.li, line, focused, sel_spans, vr.a, vr.b)
-        Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs) unless @search_hl.empty?
+        next unless searching
+        Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, lower: lower.for(vr.li, line))
       end
     end
 
@@ -3677,6 +3717,8 @@ module Gori::Tui
       # otherwise accumulate an entry per flow ever seen. Cleared rather than pruned per dropped
       # id: it refills from a screenful of rows on the next frame.
       @color_memo.clear if @color_memo.size > @max_rows
+      @time_memo.clear if @time_memo.size > @max_rows
+      @path_memo.clear if @path_memo.size > @max_rows
     end
 
     # The detail content as a windowed view (request/response head + body with HTTP

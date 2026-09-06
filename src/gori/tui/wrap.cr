@@ -327,6 +327,27 @@ module Gori::Tui
     # the Decoder OUTPUT that line can be a multi-MB minified body. A caller drawing one row
     # at a time hoists it beside the line itself and hands it in; anything else omits it and
     # gets exactly the old behaviour.
+    # The downcased copy `mark_search` scans, made once per LOGICAL line across a row loop.
+    # Under wrap one minified body line can fill the viewport, and a loop that downcased the
+    # line per DRAWN row paid for a copy of it forty times a frame; `ReadPane` hoisted the
+    # copy beside its cached line, and this is that hoist as an object so the seven other
+    # row loops (History detail, Repeater response) carry one line instead of a state pair.
+    class LowerMemo
+      def initialize
+        @li = -1
+        @lower = ""
+      end
+
+      # `text`'s downcase, reused while `li` is the line it was made from.
+      def for(li : Int32, text : String) : String
+        if li != @li
+          @li = li
+          @lower = text.downcase
+        end
+        @lower
+      end
+    end
+
     def self.mark_search(screen : Screen, x : Int32, y : Int32, line : String,
                          a : Int32, b : Int32, query : String, max_x : Int32,
                          conceal : Array({Int32, Int32})? = nil, xoff : Int32 = 0,
