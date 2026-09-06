@@ -93,6 +93,9 @@ gori can write the MCP configuration for common clients for you:
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), or `$HERMES_HOME` |
+| `--install-pi` | Pi | `~/.pi/agent/mcp.json` (`mcpServers.gori`), or `$PI_CODING_AGENT_DIR` |
+
+Pi requires an MCP adapter such as [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter). Install it with `pi install npm:pi-mcp-adapter`, then restart Pi. `--install-pi` writes the MCP server configuration.
 
 Every client except Claude Desktop and Hermes keeps its config in the same place on macOS, Linux and Windows. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop follows Electron's app-data directory instead: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (defaulting to `~/.config/Claude/`) on Linux. gori reads that variable, so a Nix or home-manager session that moves it is followed too.
 
@@ -103,6 +106,7 @@ gori mcp --install-claude-code
 gori mcp --install-codex
 gori mcp --install-grok
 gori mcp --install-hermes
+gori mcp --install-pi
 gori mcp --install-claude-code --install-codex  # several clients in one run
 ```
 

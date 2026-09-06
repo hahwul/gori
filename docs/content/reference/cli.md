@@ -1150,6 +1150,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--install-agy` | Write Antigravity `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Write Grok `~/.grok/config.toml` `[mcp_servers.gori]` |
 | `--install-hermes` | Write Hermes `~/.hermes/config.yaml` `mcp_servers.gori` (or `$HERMES_HOME`) |
+| `--install-pi` | Write Pi `~/.pi/agent/mcp.json` `mcpServers.gori` (or `$PI_CODING_AGENT_DIR`); requires an MCP adapter |
 
 Several `--install-*` flags may be given in one run; each named client is configured and reported separately, and one unwritable config does not stop the others. Every other flag on the command line (`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--insecure-upstream`, and the global `--config`) is written into the installed command, with paths made absolute. Existing config files are updated in place: other entries, tables and comments survive, permissions are preserved, and the replacement is atomic.
 

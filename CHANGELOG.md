@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- MCP: `gori mcp --install-pi` configures Pi in `~/.pi/agent/mcp.json`, honoring `PI_CODING_AGENT_DIR`; requires a Pi MCP adapter (#992)
 - Docs: a terminal-inspired reading layout with compact topic navigation, grouped tool catalogs, and a separate book-style Playbooks space with chapter navigation in English and Korean.
 
 - CLI: the size and latency cells in `gori run` listings pick their unit the way the History column does, so a value just under a boundary rolls up instead of printing `1024.0kB` or `1000.0ms`, and a slow flow reads `3.5h` on both surfaces rather than `12600.0s` on one.

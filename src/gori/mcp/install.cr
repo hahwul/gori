@@ -5,7 +5,7 @@ require "../durable_file"
 module Gori
   module MCP
     # Writes client-specific MCP configuration so agents can spawn `gori mcp`.
-    # JSON clients (Claude Desktop, Claude Code, Antigravity) get an `mcpServers`
+    # JSON clients (Claude Desktop, Claude Code, Antigravity, Pi) get an `mcpServers`
     # entry; TOML clients (OpenAI Codex, Grok) get an `[mcp_servers.gori]` table;
     # YAML clients (Hermes) get an `mcp_servers:` entry. Three file formats, one shape:
     # a server named `gori` with a `command` and an `args` array.
@@ -46,7 +46,7 @@ module Gori
         {% end %}
 
       # Returns the absolute config path for *target* (`agy`, `codex`, `claude`,
-      # `claude-code`, `grok`, `hermes`). Raises on unknown targets.
+      # `claude-code`, `grok`, `hermes`, `pi`). Raises on unknown targets.
       def self.config_path(target : String) : String
         home = ENV["HOME"]? || ENV["USERPROFILE"]? || abort "HOME is not set"
         case target
@@ -64,6 +64,11 @@ module Gori
         when "grok"
           # Grok Build TUI: GROK_HOME is not standard; config lives under ~/.grok.
           File.join(home, ".grok", "config.toml")
+        when "pi"
+          # Pi's MCP adapter reads <agent dir>/mcp.json. Like its getAgentDir,
+          # trim the override and expand a leading tilde or relative path.
+          agent_dir = ENV["PI_CODING_AGENT_DIR"]?.try(&.strip).presence || File.join(home, ".pi", "agent")
+          File.join(File.expand_path(agent_dir, home: true), "mcp.json")
         when "hermes"
           # Hermes agent: `<HERMES_HOME>/config.yaml` (`hermes_constants.py` get_config_path),
           # servers under a snake_case `mcp_servers` key (`tools/mcp_tool.py`'s module docs).
@@ -249,7 +254,7 @@ module Gori
         end
       end
 
-      # --- JSON clients (Claude Desktop, Claude Code, Antigravity) -------------
+      # --- JSON clients (Claude Desktop, Claude Code, Antigravity, Pi) ---------
 
       def self.install_json(config_path : String, exe_path : String, args : Array(String)) : Nil
         # Load existing config or initialize. If the file exists but doesn't parse as a

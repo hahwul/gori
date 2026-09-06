@@ -93,6 +93,9 @@ gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍�
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), 또는 `$HERMES_HOME` |
+| `--install-pi` | Pi | `~/.pi/agent/mcp.json` (`mcpServers.gori`), 또는 `$PI_CODING_AGENT_DIR` |
+
+Pi는 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 같은 MCP 어댑터가 필요합니다. `pi install npm:pi-mcp-adapter`로 어댑터를 설치한 다음 Pi를 다시 시작하세요. `--install-pi`는 MCP 서버 설정을 기록합니다.
 
 Claude Desktop과 Hermes를 뺀 나머지 클라이언트는 macOS·Linux·Windows에서 모두 같은 위치에 설정을 둡니다. Hermes는 `$HERMES_HOME`이 설정돼 있으면 그 값을, 없으면 `~/.hermes`(Windows는 `%LOCALAPPDATA%\hermes`)를 읽습니다. Claude Desktop만 Electron의 앱 데이터 디렉터리를 따릅니다. macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)입니다. gori는 이 변수를 읽으므로 Nix나 home-manager처럼 세션에서 값을 옮겨 둔 환경도 그대로 따라갑니다.
 
@@ -103,6 +106,7 @@ gori mcp --install-claude-code
 gori mcp --install-codex
 gori mcp --install-grok
 gori mcp --install-hermes
+gori mcp --install-pi
 gori mcp --install-claude-code --install-codex  # 한 번에 여러 클라이언트
 ```
 

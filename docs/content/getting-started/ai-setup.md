@@ -21,6 +21,7 @@ gori mcp --install-codex         # OpenAI Codex
 gori mcp --install-agy           # Antigravity CLI
 gori mcp --install-grok          # Grok
 gori mcp --install-hermes        # Hermes
+gori mcp --install-pi            # Pi
 ```
 
 | Flag | Client | Config written |
@@ -31,6 +32,9 @@ gori mcp --install-hermes        # Hermes
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), or `$HERMES_HOME` |
+| `--install-pi` | Pi | `~/.pi/agent/mcp.json` (`mcpServers.gori`), or `$PI_CODING_AGENT_DIR` |
+
+Pi requires an MCP adapter such as [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter). Install it with `pi install npm:pi-mcp-adapter`, then restart Pi. `--install-pi` writes the MCP server configuration.
 
 Each command prints the file it wrote and the exact launch command it recorded. Codex and Grok use a TOML `[mcp_servers.gori]` table, and Hermes a YAML `mcp_servers:` entry, rather than JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
 

@@ -145,7 +145,11 @@ gori mcp --install-codex         # OpenAI Codex
 gori mcp --install-agy           # Antigravity CLI
 gori mcp --install-grok          # Grok
 gori mcp --install-hermes        # Hermes        (~/.hermes/config.yaml)
+gori mcp --install-pi            # Pi            (~/.pi/agent/mcp.json)
 ```
+
+Pi needs an MCP adapter, such as [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter)
+(`pi install npm:pi-mcp-adapter`). The installer honors `PI_CODING_AGENT_DIR` when set.
 
 Add `--read-only` to hand a project to an untrusted agent (read tools only, no live requests). The
 [AI Setup guide](https://gori.hahwul.com/getting-started/ai-setup/) walks through connecting an agent and
