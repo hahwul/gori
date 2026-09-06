@@ -206,6 +206,7 @@ module Gori::Miner
                 else
                   resync_expanded_body(options.request.to_slice, Env.expand_wire(options.request))
                 end
+      request = frame_unframed_body(request)
       request_target = Gori::Outbound.request_target(request)
       origin = resolve_origin(options)
 
@@ -304,6 +305,35 @@ module Gori::Miner
 
     private def self.body_size(bytes : Bytes) : Int32
       bytes.size - Env.head_body_boundary(bytes)
+    end
+
+    # ADD a `Content-Length` when the seed carries a body and declares none — once, here, so
+    # the baseline, the per-location controls and every probe are framed the same way.
+    #
+    # A request body has no close-delimited form (`Connection: close` delimits a RESPONSE), so
+    # an HTTP/1.1 origin handed a body with no length reads a ZERO-LENGTH one (RFC 7230 §3.3.3)
+    # and the octets after the blank line are the front of the next request line. Nothing the
+    # miner splices into that body can reach the application, and the run cannot tell that from
+    # a target with no hidden parameters: measured on a hand-authored `--request` form POST with
+    # a `debug` parameter the origin reflects, the mine reported `baseline: stable · 0 found ·
+    # 0 errors` and exit 0, while the same seed carrying `Content-Length: 5` found it.
+    #
+    # This is `Fuzz::Config#add_content_length_when_missing`'s default-TRUE decision (#905) at
+    # the sibling builder that was missed. It is done to the SEED rather than left to
+    # `Inject.apply`'s own `add_cl_when_missing` flag — which no surface can set, and which
+    # `Baseline`'s plain stability rounds never reach — because the baseline sends `@base`
+    # verbatim: framing only the probes would diff a body the origin read against a baseline it
+    # did not, and `Baseline#settle` reads that status split as a REFUSED width.
+    #
+    # ADD-only, never a resync. The two `ContentLength.sync` calls differ EXACTLY when the add
+    # path fired (an absent header, a non-empty body, no `Transfer-Encoding`), which is the same
+    # predicate `Fuzz::Plan.unframed_body?` asks and the reason the rule is not spelled twice.
+    # So a capture whose declared length deliberately disagrees with its body — a CL-desync
+    # probe, the reason an operator mines that endpoint at all — comes back byte-identical here;
+    # only `Inject.apply`, which changes the body itself, re-declares a length.
+    private def self.frame_unframed_body(bytes : Bytes) : Bytes
+      framed = Fuzz::ContentLength.sync(bytes, true)
+      framed == Fuzz::ContentLength.sync(bytes, false) ? bytes : framed
     end
 
     # The per-request transform hook's argv (#846), or nil when the run declared no hook. The
