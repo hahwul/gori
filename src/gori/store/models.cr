@@ -434,9 +434,27 @@ module Gori
         parts << (WsOutMessage::OPCODE_NAMES[@opcode]? || "op#{@opcode}") if control?
         parts << "fin=0" unless s.fin
         parts << "rsv=#{s.rsv}" if s.rsv != 0
-        parts << "UNMASKED" if s.masked == false && @direction == "out"
+        masking_violation.try { |word| parts << word }
         parts << "#{s.frames} frames" if s.frames > 1
         parts.empty? ? "" : "[#{parts.join(' ')}]"
+      end
+
+      # The §5.1 masking violation this row carries, or nil when the frame was masked the way
+      # its direction requires (and nil for a pre-V7 row, which does not know).
+      #
+      # BOTH violations, because §5.1 has two halves: a client→server frame MUST be masked and
+      # a server→client frame MUST NOT be. Only the outbound half was named here, so a server
+      # that masked its frames — the inbound violation, and the one a peer cannot help
+      # noticing because it has to unmask to read anything — rendered byte-identically to an
+      # ordinary reply on every capture surface at once: History's MESSAGES pane, `gori run
+      # show`, `--format json` and MCP `get_flow`. The repeater transcript spelled it out the
+      # whole time (`WsOutMessage#shape_label(to_server: false)` → `TEXT masked`), so pointing
+      # the two surfaces at the SAME origin gave two different answers about the same frame.
+      private def masking_violation : String?
+        m = shape.masked
+        return nil if m.nil?
+        return "UNMASKED" if !m && @direction == "out"
+        "MASKED" if m && @direction == "in"
       end
 
       # The part of a control frame worth reading: a CLOSE's code and reason, a ping/pong's
@@ -478,7 +496,12 @@ module Gori
         s = shape
         j.field "fin", false unless s.fin
         j.field "rsv", s.rsv if s.rsv != 0
-        s.masked.try { |mk| j.field "masked", mk unless mk }
+        # `masked` is emitted where it is the §5.1 VIOLATION for this direction and nowhere
+        # else — see `masking_violation`. It used to be emitted whenever the frame was
+        # unmasked, which is the NORM on the inbound side: every ordinary server frame carried
+        # `"masked": false` while a server that masked (the inbound violation) carried nothing
+        # at all. Both halves were backwards on the one surface that cannot look at the wire.
+        j.field "masked", s.masked if masking_violation
         j.field "frames", s.frames if s.frames > 1
         close_code.try { |c| j.field "close_code", c }
         close_reason.try { |r| j.field "close_reason", String.new(r).scrub }
@@ -553,6 +576,11 @@ module Gori
           parts << "unmasked" if shape.masked == false
         else
           parts << "masked" if shape.masked == true
+          # RECEIVED-side only: a send writes one frame per message, so a `frames` above 1 can
+          # only be something the origin did — and it is the one fact reassembly erases. See
+          # `Proxy::WS::Shape#default?(to_server)`, which stops the plain `← AAABBB` line from
+          # swallowing this.
+          parts << "#{shape.frames} frames" if shape.frames > 1
         end
         shape.mask_key.try { |k| parts << "mask=#{k.hexstring}" }
         shape.declared_len.try { |l| parts << "len=#{l}" }

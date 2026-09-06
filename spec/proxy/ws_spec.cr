@@ -327,6 +327,51 @@ describe Gori::Proxy::WS do
       _ = ts_r
     end
 
+    # A CLOSE ends the message being reassembled — §5.5.1 forbids a data frame after one, so
+    # the FIN that fragment is owed is never coming. Its bytes arrived FIRST, so its row goes
+    # first; the byte-exact pump left it to the loop's `ensure` and listed the two backwards.
+    #
+    # Written as a DIFFERENTIAL because the divergence is what made it a defect rather than a
+    # preference: `AssemblingPump` (armed by any `part: ws` rule or `proto:ws` catch, matching
+    # or not) and `Repeater::WsEngine.drain` both already recorded the pair in arrival order,
+    # so the SAME origin bytes were transcribed one way or the other depending on whether a
+    # rule for some other host happened to be live — and nothing in the transcript said which.
+    it "records a half-assembled message BEFORE the CLOSE that ended it, on either pump" do
+      # TEXT fin=0 "UNTERM", then CLOSE 1011 "oops" — the shape a server produces when it
+      # gives up mid-message.
+      frames = Bytes[0x01, 0x06, 0x55, 0x4E, 0x54, 0x45, 0x52, 0x4D] +
+               Bytes[0x88, 0x06, 0x03, 0xF3, 0x6F, 0x6F, 0x70, 0x73]
+
+      rows = [nil.as(Array({String, Int32, String})?), nil.as(Array({String, Int32, String})?)]
+      # nil = no lens at all (the byte-exact `pump`, what every ordinary socket runs);
+      # a lens whose `in` rule matches nothing = the assembling pump, byte-exact all the same.
+      [nil, WsRewriter.new(to_client: {"ZZZ-no-match", "x"})].each_with_index do |rw, i|
+        ss_r, ss_w = IO.pipe
+        tc_r, tc_w = IO.pipe
+        cs_r, cs_w = IO.pipe
+        ts_r, ts_w = IO.pipe
+        client = IO::Stapled.new(cs_r, tc_w)
+        upstream = IO::Stapled.new(ss_r, ts_w)
+        cs_w.close
+        ss_w.write(frames); ss_w.close
+
+        sink = WsSink.new
+        Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink, rw, WS_CTX)
+
+        relayed = Bytes.new(frames.size)
+        tc_r.read_fully(relayed)
+        relayed.should eq(frames) # the wire is untouched either way (P7)
+        rows[i] = sink.messages
+        _ = ts_r
+      end
+
+      order = rows.map { |r| r.not_nil!.map { |(dir, op, _)| {dir, op} } }
+      order[0].should eq([{"in", 1}, {"in", 8}]) # the fragment, THEN the close
+      order[1].should eq(order[0])               # ... and the same on the other pump
+      rows[0].not_nil!.first[2].should eq("UNTERM")
+      rows[1].not_nil!.first[2].should eq("UNTERM")
+    end
+
     it "relays frames both directions byte-exact and captures messages" do
       cs_r, cs_w = IO.pipe # client → server
       ts_r, ts_w = IO.pipe # relay → server

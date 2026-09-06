@@ -1113,6 +1113,18 @@ module Gori
                       j.field "direction", m.direction
                       j.field "opcode", m.opcode
                       j.field "frame", Store::WsOutMessage.new(m.opcode, m.payload, m.shape).shape_label(m.direction == "out")
+                      # A CLOSE's §5.5.1 code and reason as FIELDS, not only inside the base64
+                      # below. The text transcript beside this has printed them all along
+                      # (`ws_control_payload_text`), `gori run show --format json` emits them on
+                      # a captured row (`WsMessage#emit_shape_json`) and MCP `send_websocket`
+                      # emits them on this very transcript — so a script driving the CLI was the
+                      # one reader left decoding base64 to learn WHY the socket closed, which is
+                      # the single most diagnostic thing a failed WebSocket test produces.
+                      if m.opcode == 8 && m.payload.size >= 2
+                        j.field "close_code", (m.payload[0].to_i << 8) | m.payload[1].to_i
+                        reason = m.payload[2, m.payload.size - 2]
+                        j.field "close_reason", String.new(reason).scrub unless reason.empty?
+                      end
                       if m.opcode == 1
                         j.field "text", scrub(m.payload)
                         # JSON has no way to carry a byte that is not valid UTF-8, so `text`
