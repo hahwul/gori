@@ -681,6 +681,13 @@ module Gori
       @db.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?)
     end
 
+    # Latest flow timestamp, the other end of the capture window. `earliest_created_at`
+    # alone answers "when did this project start" and is read as if it answered "how old is
+    # this data" — the opposite end. Same unit and same nil-when-empty contract.
+    def latest_created_at : Int64?
+      @db.query_one?("SELECT MAX(created_at) FROM flows", as: Int64?)
+    end
+
     # Sum of all captured wire sizes (request + response) across flows. Used for
     # Project tab overview of total data volume (distinct from on-disk DB size).
     def total_size : Int64

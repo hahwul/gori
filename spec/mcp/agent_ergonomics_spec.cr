@@ -208,4 +208,36 @@ describe "MCP agent ergonomics" do
       end
     end
   end
+  # project_info is the orienting call, and `earliest_created_at` was its only timestamp — the
+  # OLDEST flow in the project, handed to an agent whose actual question is how fresh the
+  # capture is. On a long-running engagement that is wrong by the whole length of it.
+  describe "project_info capture window" do
+    it "reports both ends, not just the oldest" do
+      with_store do |store|
+        first = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_000_000_i64, scheme: "http", host: "a.test", port: 80,
+          method: "GET", target: "/1", http_version: "HTTP/1.1",
+          head: "GET /1 HTTP/1.1\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 9_000_000_i64, scheme: "http", host: "a.test", port: 80,
+          method: "GET", target: "/2", http_version: "HTTP/1.1",
+          head: "GET /2 HTTP/1.1\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+        first.should be > 0
+
+        info = erg_json(tools_for(store), "project_info", "{}")
+        info["earliest_created_at"].as_i64.should eq(1_000_000)
+        info["latest_created_at"].as_i64.should eq(9_000_000)
+        info["latest_created_at_iso"].as_s.should_not be_empty
+      end
+    end
+
+    it "leaves both null on an empty project rather than inventing a window" do
+      with_store do |store|
+        info = erg_json(tools_for(store), "project_info", "{}")
+        info["earliest_created_at"].raw.should be_nil
+        info["latest_created_at"].raw.should be_nil
+        info.as_h.has_key?("latest_created_at_iso").should be_false
+      end
+    end
+  end
 end

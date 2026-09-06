@@ -66,9 +66,17 @@ module Gori
               j.field "flows", s.count
               j.field "issues", s.count_issues
               j.field "total_bytes", s.total_size
+              # BOTH ends of the capture window. `earliest` alone was the only timestamp here,
+              # and project_info is the orienting call — an agent asking "how fresh is this
+              # capture" was handed the OLDEST flow in the project and nothing else, which for
+              # a long-running engagement is off by the whole length of it.
               j.field "earliest_created_at", s.earliest_created_at
               if ea = s.earliest_created_at
                 j.field "earliest_created_at_iso", Serialize.unix_micros_iso(ea)
+              end
+              j.field "latest_created_at", s.latest_created_at
+              if la = s.latest_created_at
+                j.field "latest_created_at_iso", Serialize.unix_micros_iso(la)
               end
             elsif reason = @bind_error
               # Unbound because the configured project FAILED to open, not because none was
