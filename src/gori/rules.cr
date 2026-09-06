@@ -764,14 +764,14 @@ module Gori
       Proxy::HeadRewriter::Stub.new(head, body, 502, rule.id, error: message)
     end
 
-    # Live preview for the Rewriter tab: apply every enabled rule for `target` over a
-    # full HTTP message (head + body split on the first blank line). Host-scoped rules
-    # use `host` (typically parsed from the sample's Host header). Empty host → only
-    # unscoped rules match. Order matches the proxy path (head rules then body rules).
+    # Apply every enabled rule for `target` over a full HTTP message (head + body split on the
+    # first blank line). Host-scoped rules use `host` (typically parsed from the sample's Host
+    # header). Empty host → only unscoped rules match. Order matches the proxy path (head rules
+    # then body rules).
     #
-    # `report: false` — a preview is a keystroke path over stored flows and must not write
-    # an "unbound binding" event per keypress. It still SKIPS such a rule, so the preview
-    # shows the operator what the proxy would really do.
+    # TWO callers, and they are not the same kind of act: the Rewriter tab's OUTPUT pane
+    # redraws a sample, and `mcp/tools/send.cr` puts bytes on a socket. The flags below are
+    # where that difference is stated.
     #
     # `run_hooks: false` is for a caller that redraws — the Rewriter tab's OUTPUT pane calls
     # this ONCE PER FRAME. A `pipe` rule there would fork the operator's command sixty times a
@@ -779,13 +779,34 @@ module Gori
     # have side effects. Such a rule is skipped instead (its region passes through) and the
     # pane says so. The default is TRUE, because the other caller — `mcp/tools/send.cr` — is a
     # real send, where the rule has to do what it says it does.
+    #
+    # `report` follows it by default, and that default is the fix rather than the shorthand.
+    # The event a refused rule writes was hard-coded OFF here on the stated ground that "a
+    # preview is a keystroke path over stored flows and must not write an event per keypress" —
+    # true of the pane, and false of the other caller. So an MCP `send_request{apply_rules:
+    # true}` whose `SetHeader $SESSION` rule was blocked on an unbound name (or on a bound one
+    # carrying a CR, `Refusal::Boundary`) injected nothing, said nothing, and answered with the
+    # origin's reply to a request the rule never touched — while the SAME rule on the proxy
+    # path writes the row that names it. `run_hooks` already answers "is this a real send"
+    # (its own doc says so), and the two questions it now drives — may this fork a process, may
+    # this write a row — have the same answer for both callers; a third caller that wants one
+    # without the other still says so.
+    #
+    # `report_refused`'s throttle is per {rule, binding revision} on THIS `Rules` INSTANCE, so
+    # what it bounds depends on who holds the instance. The proxy holds one for the life of the
+    # project and writes one row per refused rule per rebind; `mcp/tools/send.cr` builds a fresh
+    # `Rules.load(store)` per call (it wants the current rule set), so an agent looping
+    # `send_request{apply_rules: true}` against a rule that stays refused writes one row per
+    # send. That is the honest reading of an explicitly requested send — each one really did go
+    # out without the header — but it is NOT deduplicated the way the proxy path's is.
     def transform_message(text : String, target : Store::RuleTarget, host : String = "",
-                          run_hooks : Bool = true) : String
+                          run_hooks : Bool = true, report : Bool? = nil) : String
+      say = report.nil? ? run_hooks : report
       head, body, sep = split_message(text)
       new_head = String.new(apply(head.to_slice, target, Store::RulePart::Head,
-        target.request? ? @req_head_count : @resp_head_count, host, report: false, run_hooks: run_hooks))
+        target.request? ? @req_head_count : @resp_head_count, host, report: say, run_hooks: run_hooks))
       new_body = String.new(apply(body.to_slice, target, Store::RulePart::Body,
-        target.request? ? @req_body_count : @resp_body_count, host, report: false, run_hooks: run_hooks))
+        target.request? ? @req_body_count : @resp_body_count, host, report: say, run_hooks: run_hooks))
       "#{new_head}#{sep}#{new_body}"
     end
 

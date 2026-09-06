@@ -100,20 +100,24 @@ module Gori
       # may itself carry an overlay — what a run compares is baseline-vs-other, so that is what
       # decides whether there is anything to compare.
       #
-      # Over RESOLVED overlays (`Authorize.resolve`), which is the same question asked about the
-      # bytes `Engine#send_one` will actually put on the wire. The canonical two-identity setup
+      # Over RESOLVED overlays, which is the same question asked about the bytes
+      # `Engine#send_one` will actually put on the wire. The canonical two-identity setup
       # — `admin` and `victim`, both `Cookie: sid=$SESSION`, each claiming the same extract rule
       # and holding its own token — is character-for-character identical UNRESOLVED, so asking
       # before expansion answered `:no_effect` and declined the one shape this tool exists for.
+      #
+      # `Authorize.resolve_without_report` and NOT `Authorize.resolve`: this is a PREDICATE, and
+      # the report belongs to the seam that sends. See that method for what reporting from here
+      # put in a run summary.
       def self.any_identity_changes?(detail : Store::FlowDetail,
                                      identities : Array(Identity)) : Bool
         return false if identities.size < 2
         head = detail.request_head
         base_id = identities.find(&.baseline?) || identities.first
-        base = Authorize.overlay_head(head, Authorize.resolve(base_id))
+        base = Authorize.overlay_head(head, Authorize.resolve_without_report(base_id))
         identities.any? do |id|
           next false if id.same?(base_id)
-          Authorize.overlay_head(head, Authorize.resolve(id)) != base
+          Authorize.overlay_head(head, Authorize.resolve_without_report(id)) != base
         end
       end
 

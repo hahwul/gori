@@ -137,7 +137,7 @@ module Gori
         duration_us = parse_time(entry["time"]?)
 
         req_headers = headers_list(req["headers"]?)
-        req_body = post_body(req["postData"]?)
+        req_body, req_frame = post_body(req["postData"]?)
         # HAR's `bodySize` is the size the body had ON THE WIRE, which is not necessarily the
         # size of the text the file carries: `Export::Har` writes the true size beside a body
         # that was capped at capture time. Passing it through keeps that flow truncated
@@ -148,7 +148,7 @@ module Gori
         resp = nil if resp.try(&.raw).nil? # an explicit JSON `null` response is truthy as JSON::Any — treat it as absent
         unless resp
           return Builder.pending_request(created_at, url, method, req_headers, req_body,
-            http_version, req_declared,
+            http_version, req_declared, frame_body: req_frame,
             source_surface: prov.surface, source_ref: prov.ref)
         end
 
@@ -192,7 +192,7 @@ module Gori
           created_at, url, method, req_headers, req_body, http_version,
           status, reason, resp_headers, resp_body, content_type, duration_us,
           req_declared, resp_declared, connect_protocol(req_headers),
-          resp_http_version: resp_version,
+          resp_http_version: resp_version, frame_body: req_frame,
           source_surface: prov.surface, source_ref: prov.ref)
         msgs = ws_messages(entry, created_at)
         msgs.empty? ? pair : Builder::FlowPair.new(pair.request, pair.response, msgs)
@@ -363,10 +363,18 @@ module Gori
       # postData.params {name,value} — Firefox/Safari record x-www-form-urlencoded
       # POSTs as params with no text. Fall back to reconstructing the urlencoded body
       # from params so the body (and its Content-Length) aren't silently dropped.
-      private def self.post_body(node : JSON::Any?) : Bytes?
-        return nil unless node
+      #
+      # Returns {body, reconstructed}: `reconstructed` is true only when the body was REBUILT
+      # from `params`. A `text` body is the operator's bytes verbatim, so `request_head` must
+      # not frame it with a fabricated `Content-Length` the source never stated — an HTTP/2 POST
+      # exported without one (h2 frames its body with DATA/END_STREAM) has to import back with
+      # the same head it left, or the export→import fixed point breaks and a replay carries a
+      # header the capture did not (see `Builder.synthesized_length`). A `params` body IS ours to
+      # frame, since we composed it.
+      private def self.post_body(node : JSON::Any?) : {Bytes?, Bool}
+        return {nil, false} unless node
         if body = encoded_body(node["text"]?.to_s, node["encoding"]?.to_s)
-          return body
+          return {body, false}
         end
         if params = node["params"]?.try(&.as_a?)
           pairs = params.compact_map do |p|
@@ -374,9 +382,9 @@ module Gori
             next if name.empty?
             "#{URI.encode_www_form(name)}=#{URI.encode_www_form(p["value"]?.to_s)}"
           end
-          return pairs.join('&').to_slice unless pairs.empty?
+          return {pairs.join('&').to_slice, true} unless pairs.empty?
         end
-        nil
+        {nil, false}
       end
 
       private def self.response_body(resp : JSON::Any) : {Bytes?, String?, Int64?}
