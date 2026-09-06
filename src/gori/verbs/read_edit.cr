@@ -247,6 +247,9 @@ module Gori
       # `SequencerView#analysis_plain` for the projection a copy produces). `x`/`v`/`S`/`y` are all
       # free in this scope; `r`/`s`/`c` are the run/stop/configure trio.
       in_seq_analysis = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.sequencer_analysis_readable? }
+      # `y` reaches the SAMPLES list too (#964's shape): the sample's token, where the report
+      # panes copy their rows.
+      in_seq_copy = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && (ctx.sequencer_analysis_readable? || ctx.sequencer_samples_readable?) }
       r.register Verb::Definition.new(
         "sequence.select-line", "Select row", "Select the analysis row under the cursor",
         Verb::Scope::Sequencer, [Verb::Chord.new("x")],
@@ -260,12 +263,14 @@ module Gori
       r.register Verb::Definition.new(
         "sequence.copy", "Copy", "Copy the selected analysis rows, or the whole entropy report if nothing is selected",
         Verb::Scope::Sequencer, [Verb::Chord.new("y")],
-        available: in_seq_analysis, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_seq_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # The Miner's FINDING pane. Whole ROWS (label + value in two columns — see
       # `MinerView#detail_plain`). `x`/`v`/`S`/`y` are free in this scope; `r`/`s`/`p` are run,
       # stop and send-to-repeater.
       in_miner_detail = ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.miner_detail_readable? }
+      # `y` reaches the FINDINGS list too (#964's shape): the finding as one line.
+      in_miner_copy = ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && (ctx.miner_detail_readable? || ctx.miner_results_readable?) }
       r.register Verb::Definition.new(
         "mine.select-line", "Select row", "Select the finding row under the cursor",
         Verb::Scope::Miner, [Verb::Chord.new("x")],
@@ -279,7 +284,7 @@ module Gori
       r.register Verb::Definition.new(
         "mine.copy", "Copy", "Copy the selected finding rows, or the whole finding if nothing is selected",
         Verb::Scope::Miner, [Verb::Chord.new("y")],
-        available: in_miner_detail, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_miner_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       in_detail_nav = ->(ctx : Verb::ExecContext) { ctx.detail_navigable? }
       r.register Verb::Definition.new(

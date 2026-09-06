@@ -721,6 +721,19 @@ module Gori::Tui
       @probe.detail_clear_selection
     end
 
+    def probe_issue_selected? : Bool
+      !rules_tab? && !@probe.detail_open? && !@probe.selected_issue.nil?
+    end
+
+    # `y` wherever the tab is: the detail's URLs when the detail is open, else the issue row
+    # under the cursor as a report line with its affected URLs beneath (#964's shape).
+    def probe_copy : Nil
+      return probe_detail_copy if probe_detail_readable?
+      return unless (issue = @probe.selected_issue) && probe_issue_selected?
+      head = "[#{issue.severity}] #{issue.title} · #{issue.host}"
+      copy_text(issue.affected.empty? ? head : "#{head}\n#{issue.affected.join('\n')}", "issue")
+    end
+
     # `y`: the selected URLs, or every affected URL when nothing is selected. This list IS the
     # finding's evidence, and it had no copy at all.
     def probe_detail_copy : Nil

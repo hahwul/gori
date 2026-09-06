@@ -278,6 +278,21 @@ module Gori::Tui
       true
     end
 
+    # A double-click on a SAMPLES row runs ↵ on it (#969's contract): select, then open the
+    # detail. False off the list — the ANALYSIS rows are two columns with no word to select,
+    # so there the plain click stands.
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      body = body_rect_below_filter(rect)
+      return false unless v = current_view
+      return false unless v.pane_at(body, mx, my) == :samples
+      return false unless row = v.samples_row_at(body, mx, my)
+      @host.focus_body
+      v.focus_pane(:samples)
+      v.select_sample_row(row)
+      v.open_detail
+      true
+    end
+
     # Select the row under the cursor, or — a second click on the already-selected row while
     # SAMPLES already holds focus — open its detail, so the mouse matches ↵. The same
     # select-then-open every other list in the tree uses; this one took no row click at all.
@@ -316,6 +331,10 @@ module Gori::Tui
       current_view.try { |v| v.focus == :analysis || v.focus == :detail } || false
     end
 
+    def sequencer_samples_readable? : Bool
+      current_view.try { |v| v.focus == :samples && !v.selected_sample.nil? } || false
+    end
+
     def sequencer_selection_active? : Bool
       v = current_view
       return false unless v
@@ -338,10 +357,17 @@ module Gori::Tui
       v.focus == :detail ? v.detail_clear_selection : v.analysis_clear_selection
     end
 
+    # The SAMPLES list's `y`: the token under the cursor, which is what an operator quotes.
+    private def copy_sample(v : SequencerView) : Nil
+      sample = v.selected_sample || return
+      copy_text(sample.token || "", "sample ##{sample.index}")
+    end
+
     # `y`: the selected report rows, or the whole entropy report when nothing is selected. The
     # report is the finding — a randomness verdict you cannot paste into an issue is half a tool.
     def sequencer_copy : Nil
       v = current_view
+      return copy_sample(v) if v && v.focus == :samples
       return unless v && (v.focus == :analysis || v.focus == :detail)
       detail = v.focus == :detail
       sel = detail ? v.detail_selection? : v.analysis_selection?

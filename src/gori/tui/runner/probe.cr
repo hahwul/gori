@@ -194,4 +194,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def probe_detail_readable? : Bool
     probe_controller.probe_detail_readable?
   end
+
+  def probe_issue_selected? : Bool
+    probe_controller.probe_issue_selected?
+  end
 end

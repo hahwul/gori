@@ -191,6 +191,11 @@ module Gori::Tui
       @preview_focus = :list
     end
 
+    # The issue under the cursor, or nil on an empty (or fully filtered) list.
+    def selected_issue : Store::ProbeIssue?
+      @issues[@selected]?
+    end
+
     def selected_index : Int32
       @selected
     end

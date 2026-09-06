@@ -5128,7 +5128,7 @@ module Gori::Tui
       when :comparer  then comparer_controller.comparer_copy
       when :intercept then intercept_controller.intercept_preview_copy
       when :oast      then oast_controller.oast_detail_copy
-      when :probe     then probe_controller.probe_detail_copy
+      when :probe     then probe_controller.probe_copy
       when :sequencer then sequencer_controller.sequencer_copy
       when :miner     then miner_controller.miner_copy
         # List-row copies (#C12): the row under the cursor — or every marked row — as text.

@@ -284,6 +284,20 @@ module Gori::Tui
       true
     end
 
+    # A double-click on a FINDINGS row runs ↵ on it (#969's contract): select, then open the
+    # detail, whichever pane held focus before. False off the list, so the plain click stands.
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      body = body_rect_below_filter(rect)
+      return false unless v = current_view
+      return false unless v.pane_at(body, mx, my) == :results
+      return false unless row = v.results_row_at(body, mx, my)
+      @host.focus_body
+      v.focus_pane(:results)
+      v.select_result_row(row)
+      v.open_detail
+      true
+    end
+
     # Select the row under the cursor (grabbing focus from another pane on the first click),
     # or — a second click on the already-selected row while FINDINGS already holds focus —
     # open its detail, so the mouse matches ↵. History, Issues, Probe, OAST and the Fuzzer
@@ -316,6 +330,10 @@ module Gori::Tui
       current_view.try { |v| v.focus == :detail } || false
     end
 
+    def miner_results_readable? : Bool
+      current_view.try { |v| v.focus == :results && !v.selected_finding.nil? } || false
+    end
+
     def miner_selection_active? : Bool
       current_view.try(&.detail_selection?) || false
     end
@@ -336,6 +354,11 @@ module Gori::Tui
     # parameter's evidence is what goes into a report, and it had no copy at all.
     def miner_copy : Nil
       v = current_view
+      # The FINDINGS list: the finding as one line — name, where it was found, the evidence.
+      if v && v.focus == :results
+        f = v.selected_finding || return
+        return copy_text("#{f.name} · #{f.location.label} · #{f.evidence.label}", "finding")
+      end
       return unless v && v.focus == :detail
       sel = v.detail_selection?
       text = sel ? v.detail_copy_text : v.detail_copy_all

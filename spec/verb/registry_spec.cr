@@ -1589,6 +1589,18 @@ private class FakeContext < ExecContext
     false
   end
 
+  def sequencer_samples_readable? : Bool
+    false
+  end
+
+  def miner_results_readable? : Bool
+    false
+  end
+
+  def probe_issue_selected? : Bool
+    false
+  end
+
   def rewriter_scope_toggle : Nil
   end
 
