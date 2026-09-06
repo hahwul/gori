@@ -168,9 +168,17 @@ module Gori::Proxy::WS
     # in a repeater transcript is "not default", so it renders as `[TEXT unmasked] …` and
     # the plain `← ABCD` line is unreachable — a marker that fires on every frame is one
     # an operator learns to read past, which is the opposite of what §5.1 needs it for.
+    #
+    # `frames` IS consulted here, unlike in the send-side `default?` above — a received
+    # message really can span more than one frame, and that is the one fact a reassembled
+    # row cannot otherwise carry: `TEXT fin=0 "AAA"` + `CONT fin=1 "BBB"` and a single
+    # `TEXT "AAABBB"` produce identical payloads. Fragmentation is a per-frame length check
+    # and a WAF/IDS bypass on its own, and `Store::WsMessage#shape_note` has named it
+    # (`[2 frames]`) on the capture side all along — so a repeater pointed at the very same
+    # origin was the surface that could not see it.
     def default?(to_server : Bool) : Bool
       return default? if to_server
-      fin && rsv == 0 && masked != true && mask_key.nil? && declared_len.nil?
+      fin && rsv == 0 && masked != true && mask_key.nil? && declared_len.nil? && frames <= 1
     end
   end
 

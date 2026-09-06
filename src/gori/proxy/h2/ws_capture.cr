@@ -179,6 +179,14 @@ module Gori::Proxy::H2
       # reassemblers that agree until they do not.
       private def handle(frame : WS::Frame) : Nil
         unless frame.data?
+          # A CLOSE ends whatever was being reassembled (§5.5.1: no data frame follows one), and
+          # those fragments arrived BEFORE it — so the message's row goes in ahead of the CLOSE
+          # rather than being left to `finish`, which runs at the end of the stream and would
+          # list the two backwards. The h1 relay records the same pair the same way; a
+          # transcript that depends on which transport opened the socket is exactly what this
+          # reassembler exists not to produce.
+          @assembling = WS::Relay.emit_pending(@assembling, @direction, @flow_id, @sink,
+            @opcode, @shape) if frame.close?
           @controls = WS::Relay.capture_control(frame, @direction, @flow_id, @sink, @controls)
           return
         end
