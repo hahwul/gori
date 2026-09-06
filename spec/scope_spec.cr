@@ -362,8 +362,8 @@ describe Gori::Scope do
       scope.add("include", "host", "acme.test")
       scope.enable
 
-      sql = store.search(scope.filter, 50).map(&.host).sort
-      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort
+      sql = store.search(scope.filter, 50).map(&.host).sort!
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort!
       sql.should eq(mem)
       mem.should eq(["acme.test", "acme.test.", "api.acme.test."])
     end
@@ -382,8 +382,8 @@ describe Gori::Scope do
       scope.add("exclude", "host", "prod.corp")
       scope.enable
 
-      sql = store.search(scope.filter, 50).map(&.host).sort
-      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort
+      sql = store.search(scope.filter, 50).map(&.host).sort!
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort!
       sql.should eq(mem)
       mem.should eq(["stage.corp"])
       scope.excluded?(url_of("http", "prod.corp.", "/x"), "prod.corp.").should be_true
@@ -400,8 +400,8 @@ describe Gori::Scope do
       scope.add("include", "host", "acme.test.")
       scope.enable
 
-      sql = store.search(scope.filter, 50).map(&.host).sort
-      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort
+      sql = store.search(scope.filter, 50).map(&.host).sort!
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort!
       sql.should eq(mem)
       mem.should eq(["acme.test", "api.acme.test"])
     end
