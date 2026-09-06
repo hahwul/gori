@@ -125,6 +125,9 @@ module Gori
         @outbuf = IO::Memory.new
         @eof = false
         @frames = 0
+        # A trailing header block still being assembled from HEADERS + CONTINUATION fragments,
+        # or nil between blocks. See `absorb_trailers`.
+        @trailer_buf = nil.as(IO::Memory?)
       end
 
       # ------------------------------------------------------------------ handshake
@@ -633,14 +636,34 @@ module Gori
       # Keep the connection's HPACK decoder in step with a trailing block without interpreting
       # it. §2.3.2 makes the dynamic table connection-lifetime state built up ACROSS blocks, so
       # a block skipped is a table that no longer matches the peer's.
+      #
+      # ACCUMULATED to END_HEADERS first, and that is the whole of what this method has to get
+      # right. A header block is one HPACK stream that a §6.10 CONTINUATION may split anywhere
+      # — mid-integer, mid-name, mid-Huffman-symbol — so decoding each fragment on arrival is
+      # not "keeping the table in step" but the very desync this exists to prevent: the tail of
+      # a split literal reads as a fresh instruction and can INSERT a fabricated entry, which
+      # every later index then resolves against. `read_answer` above already buffers to
+      # END_HEADERS for exactly this reason; this path did not.
+      #
+      # Bounded by the same `MAX_HEADER_BLOCK` a response head is: HEADERS/CONTINUATION are not
+      # flow-controlled, so a CONTINUATION flood is otherwise unbounded. Past it the block is
+      # abandoned — the table is lost either way, and the socket is over.
       private def absorb_trailers(frame : Frame::Header) : Nil
-        block = frame.frame_type == Frame::Type::Headers ? H2Engine.header_block(frame) : frame.payload
-        @conn.decoder.decode(block) unless block.empty?
+        chunk = frame.frame_type == Frame::Type::Headers ? H2Engine.header_block(frame) : frame.payload
+        buf = (@trailer_buf ||= IO::Memory.new)
+        if buf.bytesize + chunk.size > MAX_HEADER_BLOCK
+          @trailer_buf = nil
+          return
+        end
+        buf.write(chunk)
+        return unless frame.end_headers?
+        @trailer_buf = nil
+        @conn.decoder.decode(buf.to_slice) unless buf.bytesize == 0
       rescue
         # A trailer block gori cannot decode is not a reason to lose the transcript; the socket
         # is over either way (this only runs on the stream's own frames, and an undecodable one
         # means the table is already lost).
-        nil
+        @trailer_buf = nil
       end
     end
   end
