@@ -172,11 +172,33 @@ module Gori::Tui
       @enabled = interceptor.enabled?
       @direction = interceptor.direction
       prune_marks
-      if @editing && (id = @loaded_id) && @items.none? { |it| it.id == id }
+      # The loaded buffer belongs to a hold that has left the queue (forwarded/dropped here, by
+      # a batch verb, released on toggle-off, reaped, or settled cross-process by an MCP peer).
+      # NOT gated on `@editing` any more: an operator who edits a hold and Escs back to the
+      # queue leaves `@loaded_id`/`@editor_dirty` set behind the closed editor, so a buffer for
+      # a message that no longer exists survived every release — and `held_edit_id`, which
+      # tells an agent a human is mid-edit on a hold, would have named one that was gone.
+      if (id = @loaded_id) && @items.none? { |it| it.id == id }
         @editing = false
         @loaded_id = nil
+        @editor_dirty = false
         @hex = nil # its bytes belonged to a hold that has left the queue
       end
+    end
+
+    # The held item this editor has UNSAVED changes for, or nil.
+    #
+    # Published across the #123 bridge (`Runner#publish_intercept_snapshot`) so an agent can
+    # see that a human is part-way through rewriting a hold before it forwards that hold out
+    # from under them. `HeldRow#edited` has existed since #123 and nothing ever set it, so
+    # `intercept_list` answered `edited: false` for every item forever — a field naming a fact
+    # that is real, knowable and exactly what the co-pilot loop needs.
+    #
+    # Deliberately NOT `pending_edit`: that one expands `$KEY`s and re-syncs Content-Length to
+    # BUILD the bytes, and this is asked on the publish cadence for as long as anything is held.
+    # The question here is only whether there ARE unsaved bytes.
+    def held_edit_id : Int64?
+      @editor_dirty ? @loaded_id : nil
     end
 
     # Mirror the Interceptor's COMMITTED condition into the bar's buffer.

@@ -1123,3 +1123,47 @@ describe "Intercept queue waiting age" do
     end
   end
 end
+
+# `HeldRow#edited` has existed since the #123 bridge and nothing ever set it, so
+# `intercept_list` answered `edited: false` for every item that has ever been held — while the
+# fact it names (a human is part-way through rewriting this hold) is real, knowable, and
+# exactly what an agent needs before forwarding one out from under them.
+describe "Intercept operator-edit flag" do
+  it "names the loaded hold only once it has actually been edited" do
+    tmp_interceptor do |ic|
+      three_holds(ic)
+      view = InterceptView.new
+      view.reload(ic)
+      id = view.selected_id.not_nil!
+
+      view.toggle_edit
+      view.held_edit_id.should be_nil # opened to READ: a peek is not an edit
+      view.edit_insert('X')
+      view.held_edit_id.should eq(id)
+
+      # It survives Esc back to the queue, because the unsaved bytes do — the buffer is
+      # restored when the same row is re-entered, and a forward still carries them.
+      view.stop_edit
+      view.held_edit_id.should eq(id)
+    end
+  end
+
+  # `@loaded_id`/`@editor_dirty` used to survive behind a CLOSED editor, so a buffer for a
+  # message that no longer exists outlived every release and this flag would have named it.
+  it "forgets the edit once the hold leaves the queue" do
+    tmp_interceptor do |ic|
+      three_holds(ic)
+      view = InterceptView.new
+      view.reload(ic)
+      id = view.selected_id.not_nil!
+      view.toggle_edit
+      view.edit_insert('X')
+      view.stop_edit # closed, but the buffer (and the flag) stay
+      view.held_edit_id.should eq(id)
+
+      ic.forward(id) # an MCP peer, or the reaper, settles it
+      view.reload(ic)
+      view.held_edit_id.should be_nil
+    end
+  end
+end

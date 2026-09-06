@@ -509,6 +509,7 @@ module Gori::Tui
       last_ui_ident = nil.as(UiIdentity?)              # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
       last_pub_rev = -1                                                     # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
+      last_pub_edit_id = nil.as(Int64?)                                     # #123: held item the mirrored snapshot last reported an operator edit on
       last_bridge_pub = Time.instant                                        # #123: last bridge-heartbeat write (throttled so idle never churns the WAL)
       @intercept_cmd_watermark = @session.store.latest_intercept_command_id # tail agent commands from now
       begin
@@ -629,10 +630,18 @@ module Gori::Tui
                 # command triggers the snapshot republish below in the same tick.
                 dirty = true if drain_intercept_commands
                 dirty = true if reap_stale_holds
-                if (prev = ic.revision) != last_pub_rev
+                # The held item the operator has unsaved edits for rides the snapshot as
+                # `edited`, so an agent can leave a hold alone while a human is part-way
+                # through rewriting it. It moves nil→id→nil at most a couple of times per
+                # hold (the FIRST edit lands, then the editor closes), and nothing else in
+                # this window bumps the interceptor's revision, so it needs its own trigger
+                # or the flag would be published once and never corrected.
+                edit_id = intercept_controller.held_edit_id
+                if (prev = ic.revision) != last_pub_rev || edit_id != last_pub_edit_id
                   last_pub_rev = prev
-                  publish_intercept_snapshot(ic) # queue changed → re-mirror held rows
-                  publish_intercept_bridge(ic)   # and refresh config/heartbeat immediately
+                  last_pub_edit_id = edit_id
+                  publish_intercept_snapshot(ic, edit_id) # queue changed → re-mirror held rows
+                  publish_intercept_bridge(ic)            # and refresh config/heartbeat immediately
                   last_bridge_pub = now
                 elsif now - last_bridge_pub >= INTERCEPT_HEARTBEAT_INTERVAL
                   publish_intercept_bridge(ic) # periodic liveness heartbeat (throttled)

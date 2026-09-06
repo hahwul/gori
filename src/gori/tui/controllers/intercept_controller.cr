@@ -724,6 +724,13 @@ module Gori::Tui
       @intercept.selected_id
     end
 
+    # The hold this window's editor has unsaved changes for — mirrored across the #123 bridge
+    # so an agent can see the human is mid-edit before forwarding it. See
+    # `InterceptView#held_edit_id`.
+    def held_edit_id : Int64?
+      @intercept.held_edit_id
+    end
+
     # --- marks (multi-select over the hold queue) ---
     # The two gestures that MOVE the queue cursor guard on `editing?`. The keymap can't reach
     # them there (the held-bytes editor swallows every key), but the command palette can — and

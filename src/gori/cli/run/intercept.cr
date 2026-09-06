@@ -196,7 +196,12 @@ module Gori
               # `edit_refusal` ONLY, never `head_only`: an h2 hold whose body gori could not
               # buffer is still fully editable in the head, so chipping on that would mark a
               # row uneditable when only its body is out of reach.
-              chip = r.edit_refusal ? "  [no-edit]" : ""
+              # `[editing]` before `[no-edit]`: the operator having unsaved bytes in a hold is
+              # the fact that decides whether a SCRIPT should touch it at all, and the two are
+              # not exclusive. `edited` was hardcoded false on the publish side until it was
+              # wired to the TUI editor, so this row could never have shown it.
+              chip = r.edited ? "  [editing]" : ""
+              chip += "  [no-edit]" if r.edit_refusal
               # How long the client on the other end has been blocked. `--format json` has
               # carried `age_seconds` since #123 (`Serialize.intercept_item_row`) and the TUI
               # queue draws it per row; the text listing — the one a human reads while

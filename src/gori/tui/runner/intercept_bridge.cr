@@ -9,15 +9,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # process can list/get held items. Called only when the queue changed (revision) and only
   # in the lock holder. Maps each in-memory Item to a HeldRow (wall-clock held_at_ms so the
   # MCP-side age is stable across republishes).
-  private def publish_intercept_snapshot(ic : Interceptor) : Nil
+  private def publish_intercept_snapshot(ic : Interceptor, edit_id : Int64?) : Nil
     token = @session.intercept_token
     rows = ic.pending.map do |it|
       # `edit_refusal`/`head_only` ride along so the MCP process and `gori run intercept
       # get`/`list` can say "edits cannot be applied to this message" BEFORE one is written.
       # They are known at hold time and were dropped here, which is why every cross-process
       # surface described a CRLF-carrying h2 message as ordinarily editable.
+      # `edited` is the OPERATOR's in-progress edit on this hold (`InterceptView#held_edit_id`),
+      # and it was hardcoded false — so `intercept_list` answered `edited: false` for every
+      # item that has ever been held, while the fact it names is exactly what an agent needs
+      # before forwarding a message the human is part-way through rewriting.
       Store::HeldRow.new(token, it.id, it.kind.to_s.downcase, it.method, it.host, it.port,
-        it.scheme, it.target, it.raw, it.held_at_ms, it.flow_id, false, 0_i64,
+        it.scheme, it.target, it.raw, it.held_at_ms, it.flow_id, it.id == edit_id, 0_i64,
         it.edit_refusal, it.head_only?, it.binary?)
     end
     @session.store.publish_intercept_held(token, rows)

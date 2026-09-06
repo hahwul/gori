@@ -312,7 +312,9 @@ module Gori
           "in which case mutating verbs refuse. Header values redacted unless " \
           "include_sensitive:true. An HTTP row carries head_preview + body_size; a WebSocket " \
           "row has no head at all, so it carries body_preview (omitted for a BINARY frame) and " \
-          "body_size is the whole payload." do |s|
+          "body_size is the whole payload. edited:true means the HUMAN has unsaved edits typed " \
+          "into that hold right now — forwarding it discards their work, so leave it to them " \
+          "or ask first." do |s|
           s.field "include_sensitive", boolprop("show Authorization/Cookie/etc header values instead of [REDACTED] (default false)")
         end
 
@@ -334,7 +336,9 @@ module Gori
         tool j, "intercept_forward",
           "Forward a currently-held intercept item (from intercept_list) byte-exact, letting " \
           "the request/response continue. The action is applied by the capturing gori instance " \
-          "and surfaced as a visible notification to the human operator. Returns the outcome " \
+          "and surfaced as a visible notification to the human operator. An item intercept_list " \
+          "reported as edited:true carries unsaved human edits, and a byte-exact forward " \
+          "discards them. Returns the outcome " \
           "(forwarded | no_such_item if it was already released | not_confirmed to retry)." do |s|
           s.field "item_id", intprop("held item id from intercept_list"), required: true
         end

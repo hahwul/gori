@@ -430,6 +430,10 @@ module Gori
           j.field "held_at_ms", row.held_at_ms
           j.field "held_at_iso", unix_micros_iso(row.held_at_ms * 1000)
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
+          # TRUE while the HUMAN operator has unsaved edits typed into this hold (mirrored from
+          # `InterceptView#held_edit_id`). Nothing ever set it, so it answered false for every
+          # item that has ever been held — while an agent forwarding one of these discards the
+          # operator's work, and their only sign is the note saying it was forwarded.
           j.field "edited", row.edited
           emit_edit_warning(j, row)
           j.field "body_size", body.size
