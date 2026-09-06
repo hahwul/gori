@@ -676,6 +676,7 @@ module Gori::Tui
             # Debounced QL filter: fire the deferred search once typing has paused.
             dirty = true if history_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
+            dirty = true if sitemap_controller.drain_search
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
             # idle loop wakes once a minute to repaint rather than every second.
             if (clock = clock_minute) != last_clock
