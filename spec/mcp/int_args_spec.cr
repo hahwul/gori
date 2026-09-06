@@ -141,7 +141,7 @@ describe "MCP integer arguments — refused by name, never silently defaulted" d
       tools = int_tools(store)
       {"list_history" => {"limit", "before_id", "since"},
        "list_events"  => {"limit", "since"},
-       "list_sitemap" => {"limit"},
+       "list_sitemap" => {"limit", "offset"},
        "list_issues"  => {"limit", "offset"},
        "probe_issues" => {"limit", "offset"}}.each do |tool, fields|
         fields.each do |field|

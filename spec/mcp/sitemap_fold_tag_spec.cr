@@ -29,7 +29,7 @@ private def seed(store, target : String) : Int64
 end
 
 private def row_for(res : JSON::Any, target : String) : JSON::Any
-  res.as_a.find { |r| r["target"].as_s == target }.not_nil!
+  res["entries"].as_a.find { |r| r["target"].as_s == target }.not_nil!
 end
 
 describe "MCP list_sitemap tag stamping" do

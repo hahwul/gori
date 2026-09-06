@@ -376,7 +376,7 @@ describe Gori::MCP::Server do
         mk.call("https", "HTTP/1.1", 500)
         mk.call("https", "HTTP/2", 500)
 
-        entries = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sitemap","arguments":{}}}))[0]).as_a
+        entries = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sitemap","arguments":{}}}))[0])["entries"].as_a
         entries.size.should eq(3) # http/1.1, https/1.1, https/h2 kept separate
         http = entries.find { |e| e["scheme"].as_s == "http" }.not_nil!
         http["success_count"].as_i.should eq(1)
@@ -384,7 +384,7 @@ describe Gori::MCP::Server do
         h2 = entries.find { |e| e["http_version"].as_s == "HTTP/2" }.not_nil!
         h2["error_count"].as_i.should eq(1)
 
-        collapsed = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_sitemap","arguments":{"collapse_transport":true}}}))[0]).as_a
+        collapsed = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_sitemap","arguments":{"collapse_transport":true}}}))[0])["entries"].as_a
         collapsed.size.should eq(1) # merged to one host/method/target
         collapsed[0].as_h.has_key?("scheme").should be_false
       end
@@ -406,7 +406,7 @@ describe Gori::MCP::Server do
         mk.call("/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", 500)
         mk.call("/login", 200)
 
-        entries = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sitemap","arguments":{}}}))[0]).as_a
+        entries = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sitemap","arguments":{}}}))[0])["entries"].as_a
         entries.size.should eq(2) # /search once, /login once
         search = entries.find { |e| e["target"].as_s == "/search" }.not_nil!
         search["query_variants"].as_i.should eq(2)
@@ -420,7 +420,7 @@ describe Gori::MCP::Server do
         login.as_h.has_key?("query_variants").should be_false
 
         # ...and fold_query:false is the twin of the CLI's --no-fold-query.
-        raw = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_sitemap","arguments":{"fold_query":false}}}))[0]).as_a
+        raw = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_sitemap","arguments":{"fold_query":false}}}))[0])["entries"].as_a
         raw.size.should eq(3)
         raw.map(&.["target"].as_s).should contain("/search?q=widgets")
       end
@@ -437,7 +437,7 @@ describe Gori::MCP::Server do
         mk.call("http", 80, "/x?a=1")
         mk.call("https", 443, "/x?a=2")
 
-        entries = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sitemap","arguments":{}}}))[0]).as_a
+        entries = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sitemap","arguments":{}}}))[0])["entries"].as_a
         entries.size.should eq(2) # http and https did not merge
         entries.map(&.["target"].as_s).should eq(["/x", "/x"])
         entries.map(&.["scheme"].as_s).sort!.should eq(["http", "https"])
@@ -573,14 +573,14 @@ describe "MCP sitemap tags" do
 
       # list_sitemap folds query variants by default, and the folded row is synthetic: it
       # holds no tag of its own, but it does report the memo pinned on the variant.
-      entry = mcp_ok_json(tools, "list_sitemap", "{}").as_a.first
+      entry = mcp_ok_json(tools, "list_sitemap", "{}")["entries"].as_a.first
       entry["target"].as_s.should eq("/login")
       entry["query_variants"].as_i.should eq(1)
       entry["query_targets"].as_a.map(&.as_s).should eq(["/login?a=1"])
       entry["variant_tags"].as_a.first["tag"].as_s.should eq("auth entry")
       entry.as_h.has_key?("tag").should be_false
 
-      unfolded = mcp_ok_json(tools, "list_sitemap", %({"fold_query":false})).as_a.first
+      unfolded = mcp_ok_json(tools, "list_sitemap", %({"fold_query":false}))["entries"].as_a.first
       unfolded["target"].as_s.should eq("/login?a=1")
       unfolded["tag"].as_s.should eq("auth entry")
 

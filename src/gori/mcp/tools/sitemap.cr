@@ -9,6 +9,7 @@ module Gori
       @[Tool("list_sitemap")]
       private def list_sitemap(h) : Result
         limit = clamp(optional_int_arg(h, "limit"), 200, 5000)
+        offset = (optional_int_arg(h, "offset") || 0_i64).clamp(0_i64, Int32::MAX.to_i64).to_i
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
@@ -17,53 +18,68 @@ module Gori
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
         end
-        return collapsed_sitemap(filter, limit) if bool_arg(h, "collapse_transport", false)
-        entries = store.sitemap_entries_detailed(filter, limit)
+        return collapsed_sitemap(filter, limit, offset) if bool_arg(h, "collapse_transport", false)
+        # One row OVER the page, then dropped: `has_more` costs a row instead of a second
+        # COUNT(*) over the same GROUP BY. Without it a full page and an exactly-full set are
+        # the same answer, and this tool — unlike list_history — has no id cursor an agent
+        # could probe with, so "200 endpoints" silently stood for a surface of any size.
+        rows = store.sitemap_entries_detailed(filter, limit + 1, offset: offset)
+        has_more = rows.size > limit
+        rows = rows.first(limit) if has_more
         # Folded by DEFAULT, matching `gori run sitemap` and the TUI tree: an agent mapping a
         # surface should not read one entry per fuzz payload. `fold_query:false` is the twin
         # of the CLI's --no-fold-query.
-        entries = fold_query_entries(entries, bool_arg(h, "fold_query", true))
+        entries = fold_query_entries(rows, bool_arg(h, "fold_query", true))
         tags = store.sitemap_tags
         Result.new(JSON.build do |j|
-          j.array do
-            entries.each do |e|
-              j.object do
-                j.field "scheme", Serialize.text(e.scheme)
-                j.field "host", Serialize.text(e.host)
-                j.field "port", e.port
-                j.field "http_version", Serialize.text(e.http_version)
-                j.field "method", Serialize.text(e.method)
-                j.field "target", Serialize.text(e.target)
-                # Present only on a FOLDED row: how many distinct query strings it stands
-                # for, and up to QUERY_SAMPLE_MAX of the raw targets, so a replay still has
-                # a concrete one to send (`target` alone dropped the query).
-                if e.query_variants > 0
-                  j.field "query_variants", e.query_variants
-                  j.field "query_targets" do
-                    j.array { e.query_targets.first(QUERY_SAMPLE_MAX).each { |t| j.string Serialize.text(t) } }
+          j.object do
+            j.field "returned", entries.size
+            j.field "scanned", rows.size
+            j.field "offset", offset
+            j.field "limit", limit
+            j.field "has_more", has_more
+            j.field "entries" do
+              j.array do
+                entries.each do |e|
+                  j.object do
+                    j.field "scheme", Serialize.text(e.scheme)
+                    j.field "host", Serialize.text(e.host)
+                    j.field "port", e.port
+                    j.field "http_version", Serialize.text(e.http_version)
+                    j.field "method", Serialize.text(e.method)
+                    j.field "target", Serialize.text(e.target)
+                    # Present only on a FOLDED row: how many distinct query strings it stands
+                    # for, and up to QUERY_SAMPLE_MAX of the raw targets, so a replay still has
+                    # a concrete one to send (`target` alone dropped the query).
+                    if e.query_variants > 0
+                      j.field "query_variants", e.query_variants
+                      j.field "query_targets" do
+                        j.array { e.query_targets.first(QUERY_SAMPLE_MAX).each { |t| j.string Serialize.text(t) } }
+                      end
+                      emit_variant_tags(j, e, tags)
+                    end
+                    j.field "statuses", e.statuses
+                    j.field "count", e.count
+                    j.field "success_count", e.ok
+                    j.field "error_count", e.errors
+                    j.field "first_seen", e.first_seen
+                    j.field "first_seen_iso", Serialize.unix_micros_iso(e.first_seen)
+                    j.field "last_seen", e.last_seen
+                    j.field "last_seen_iso", Serialize.unix_micros_iso(e.last_seen)
+                    # The operator's free-text memo for this endpoint, when one is pinned. The key
+                    # is the tree's node path, which includes any query string.
+                    # NOT on a folded row, which is synthetic: `Sitemap.stamp_tags!` bars a tag on
+                    # a `grouped` node ("the tag key is the path WITH the query", fold_queries_node!),
+                    # so the TUI tree and `gori run sitemap` both leave it bare — and this stamped
+                    # one anyway, which made set_sitemap_tag's "will not show in list_sitemap or
+                    # the TUI" warning a lie about half of itself. The tags on a fold's variants
+                    # are keyed by the path WITH the query and ride `variant_tags` above, exactly
+                    # as a `{uuid}` fold's children keep their own; list_sitemap_tags (or
+                    # fold_query:false) is where the rest show.
+                    if e.query_variants == 0 && (tag = tags[{e.host, sitemap_tag_path(e.target)}]?)
+                      j.field "tag", Serialize.text(tag)
+                    end
                   end
-                  emit_variant_tags(j, e, tags)
-                end
-                j.field "statuses", e.statuses
-                j.field "count", e.count
-                j.field "success_count", e.ok
-                j.field "error_count", e.errors
-                j.field "first_seen", e.first_seen
-                j.field "first_seen_iso", Serialize.unix_micros_iso(e.first_seen)
-                j.field "last_seen", e.last_seen
-                j.field "last_seen_iso", Serialize.unix_micros_iso(e.last_seen)
-                # The operator's free-text memo for this endpoint, when one is pinned. The key
-                # is the tree's node path, which includes any query string.
-                # NOT on a folded row, which is synthetic: `Sitemap.stamp_tags!` bars a tag on
-                # a `grouped` node ("the tag key is the path WITH the query", fold_queries_node!),
-                # so the TUI tree and `gori run sitemap` both leave it bare — and this stamped
-                # one anyway, which made set_sitemap_tag's "will not show in list_sitemap or
-                # the TUI" warning a lie about half of itself. The tags on a fold's variants
-                # are keyed by the path WITH the query and ride `variant_tags` above, exactly
-                # as a `{uuid}` fold's children keep their own; list_sitemap_tags (or
-                # fold_query:false) is where the rest show.
-                if e.query_variants == 0 && (tag = tags[{e.host, sitemap_tag_path(e.target)}]?)
-                  j.field "tag", Serialize.text(tag)
                 end
               end
             end
@@ -287,15 +303,25 @@ module Gori
 
       # The legacy collapsed sitemap (distinct host/method/target only), for
       # collapse_transport:true.
-      private def collapsed_sitemap(filter : QL::Filter, limit : Int32) : Result
-        entries = store.sitemap_entries(filter, limit)
+      private def collapsed_sitemap(filter : QL::Filter, limit : Int32, offset : Int32) : Result
+        entries = store.sitemap_entries(filter, limit + 1, offset: offset)
+        has_more = entries.size > limit
+        entries = entries.first(limit) if has_more
         Result.new(JSON.build do |j|
-          j.array do
-            entries.each do |(host, method, target)|
-              j.object do
-                j.field "host", Serialize.text(host)
-                j.field "method", Serialize.text(method)
-                j.field "target", Serialize.text(target)
+          j.object do
+            j.field "returned", entries.size
+            j.field "offset", offset
+            j.field "limit", limit
+            j.field "has_more", has_more
+            j.field "entries" do
+              j.array do
+                entries.each do |(host, method, target)|
+                  j.object do
+                    j.field "host", Serialize.text(host)
+                    j.field "method", Serialize.text(method)
+                    j.field "target", Serialize.text(target)
+                  end
+                end
               end
             end
           end
@@ -320,9 +346,16 @@ module Gori
           "replay. Counts and the seen window are summed over the variants, and any memo " \
           "pinned on a variant is reported under `variant_tags`. Pass " \
           "fold_query:false for one entry per query string. Pass collapse_transport:true " \
-          "for the legacy host/method/target-only view. Optional QL `query` filter." do |s|
+          "for the legacy host/method/target-only view. Optional QL `query` filter. " \
+          "Returns an object {entries, returned, scanned, offset, limit, has_more} — not a " \
+          "bare array. `has_more:true` means the surface is LARGER than this page: advance " \
+          "`offset` (or narrow `query`) until it is false, or you are mapping a fraction of " \
+          "the capture and cannot tell. `limit`/`offset` page the raw endpoint rows BEFORE " \
+          "query-folding — `scanned` is how many that was — so one folded entry can continue " \
+          "onto the next page." do |s|
           s.field "query", strprop("gori QL filter")
-          s.field "limit", intprop("max entries (default 200, max 5000)")
+          s.field "limit", intprop("max endpoint rows scanned per page, before query-folding (default 200, max 5000)")
+          s.field "offset", intprop("skip this many endpoint rows — the page cursor (default 0). The ordering is total, so paging with it is deterministic and reaches every endpoint")
           s.field "fold_query", boolprop("fold the query-string variants of one path into a single entry (default true); false lists one entry per query string")
           s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false)")
