@@ -551,16 +551,16 @@ module Gori::Tui
       when :custom
         c = row.custom.not_nil!
         on = !c.enabled
-        ok = if c.global?
-               # settings.json, not the project DB — there is no transaction and so no commit
-               # flag to read. Only the PROJECT writer can report a rolled-back batch.
-               Settings.set_scan_rule_enabled(c.id, on)
-               true
-             else
-               store.set_probe_custom_rule_enabled(c.id.to_i64, on)
-             end
+        # BOTH writers answer. `Settings.set_scan_rule_enabled` returns whether the section
+        # reached disk — `Settings.save` refuses outright after a half-read load, and it puts
+        # the array back when the write did not commit — and this branch used to throw that
+        # answer away behind a comment claiming settings.json had no commit flag to read. It
+        # does, `apply_custom_rule` below already acts on it, and a global scan rule the strip
+        # says is off while it is still matching (or still on while it is not) is the same
+        # false negative that refusal exists to prevent.
+        ok = c.global? ? Settings.set_scan_rule_enabled(c.id, on) : store.set_probe_custom_rule_enabled(c.id.to_i64, on)
         unless ok
-          @host.status("rule \"#{c.title}\" NOT changed (project busy)")
+          @host.status("rule \"#{c.title}\" NOT changed (#{write_cause(c.scope)})")
           return
         end
         @host.status(on ? "enabled rule \"#{c.title}\"" : "disabled rule \"#{c.title}\"")
@@ -602,9 +602,13 @@ module Gori::Tui
       @host.confirm("DELETE PROBE RULE",
         "Delete custom rule “#{c.title}”? Existing findings from it are kept until cleared.",
         confirm_label: "delete", danger: true) do
-        c.global? ? Settings.delete_scan_rule(c.id) : @host.session.store.delete_probe_custom_rule(c.id.to_i64)
+        ok = remove_custom_rule(c.id, c.scope, @host.session.store)
         reload_rules
-        @host.status("probe rule deleted: #{c.title}")
+        # The delete answers, and dropping that answer said "deleted" over a rule that is
+        # still installed and still matching — the row `reload_rules` redraws one line later
+        # then contradicts the strip. `Settings.delete_scan_rule`'s own comment names the
+        # stake: "an operator removing a noisy rule has to be able to trust that sentence".
+        @host.status(ok ? "probe rule deleted: #{c.title}" : "rule \"#{c.title}\" NOT deleted (#{write_cause(c.scope)}) — it is still scanning")
       end
     end
 
@@ -616,7 +620,11 @@ module Gori::Tui
       return false unless ov.valid?
       store = @host.session.store
       if id = ov.edit_id
-        if ov.scope == ov.edit_scope
+        # `CustomRuleOverlay.editing` sets the pair together, so a non-nil `edit_id` always
+        # carries one; the fallback only keeps this branch off the "moved between libraries"
+        # path for a form that somehow has an id and no origin.
+        from = ov.edit_scope || ov.scope
+        if ov.scope == from
           if ov.scope == "global"
             # settings.json answers the same "did it COMMIT" question as the project writer
             # below: `Settings.save` refuses outright after a half-read load, and a rolled-back
@@ -638,24 +646,61 @@ module Gori::Tui
             end
           end
         else
-          ov.edit_scope == "global" ? Settings.delete_scan_rule(id) : store.delete_probe_custom_rule(id.to_i64)
-          insert_custom_rule(ov, store)
+          # A scope change is a MOVE between the two libraries, and both halves answer. INSERT
+          # FIRST: a refused insert after a committed delete loses the rule outright, while a
+          # refused delete after a committed insert only leaves a duplicate — which the strip
+          # can name and the operator can remove. Neither answer was read at all, so the pair
+          # could do either and still report "updated custom rule".
+          unless insert_custom_rule(ov, store)
+            @host.status("rule \"#{ov.rule_title}\" NOT moved (#{write_cause(ov.scope)}) — " \
+                         "it is still #{from}")
+            return false
+          end
+          unless remove_custom_rule(id, from, store)
+            # Saved, so the form closes; the leftover is named because only the operator can
+            # clear it, and until they do the same rule files findings twice.
+            reload_rules
+            @host.status("rule \"#{ov.rule_title}\" added to the #{ov.scope} library but the " \
+                         "#{from} copy could NOT be removed (#{write_cause(from)}) — delete it there")
+            return true
+          end
         end
         @host.status("updated custom rule")
       else
-        insert_custom_rule(ov, store)
+        unless insert_custom_rule(ov, store)
+          @host.status("rule \"#{ov.rule_title}\" NOT added (#{write_cause(ov.scope)}) — " \
+                       "nothing is scanning for it")
+          return false
+        end
         @host.status("added custom rule")
       end
       reload_rules
       true
     end
 
-    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store) : Nil
+    # Whether the new rule reached its library. Both writers report a refusal in their own
+    # dialect: `add_scan_rule` answers "" (the `0_i64` of this family's id type) and
+    # `insert_probe_custom_rule` answers 0 — NOT nil — for a batch that never committed, and
+    # 0 is TRUTHY in Crystal, which is the trap `Probe::Triage.promote` names.
+    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store) : Bool
       if ov.scope == "global"
-        Settings.add_scan_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
+        !Settings.add_scan_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind,
+          ov.pattern, ov.severity.label).empty?
       else
-        store.insert_probe_custom_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
+        store.insert_probe_custom_rule(ov.rule_title, ov.description, ov.side, ov.region,
+          ov.kind, ov.pattern, ov.severity) != 0
       end
+    end
+
+    # Drop a custom rule from the library its `scope` names; whether the write committed.
+    private def remove_custom_rule(id : String, scope : String, store : Store) : Bool
+      scope == "global" ? Settings.delete_scan_rule(id) : store.delete_probe_custom_rule(id.to_i64)
+    end
+
+    # The cause clause for a refused write, by the library it was aimed at — the two strings
+    # the edit branch above already uses, spelled once.
+    private def write_cause(scope : String) : String
+      scope == "global" ? "settings not writable" : "project busy"
     end
 
     private def reload_rules : Nil
