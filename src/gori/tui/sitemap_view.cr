@@ -658,16 +658,22 @@ module Gori::Tui
       @tag_targets = [] of {String, String}
     end
 
-    # Apply the committed memo to every pinned target in place (blank clears it) and exit the
-    # editor. No re-derive — the tree structure is unchanged, so the selection stays put and
-    # draw_row reads the fresh tags live. Each target is looked up by its (host, path) key
-    # rather than off the cursor, so a mid-edit reload that moved the selection (or a set of
-    # marks the cursor was never on) still stamps the right nodes; a key the tree no longer
-    # holds is skipped and picked up by the next reload from the store.
-    def apply_tag(text : String) : Nil
+    # Apply the committed memo in place (blank clears it) and exit the editor. No re-derive —
+    # the tree structure is unchanged, so the selection stays put and draw_row reads the fresh
+    # tags live. Each target is looked up by its (host, path) key rather than off the cursor,
+    # so a mid-edit reload that moved the selection (or a set of marks the cursor was never
+    # on) still stamps the right nodes; a key the tree no longer holds is skipped and picked
+    # up by the next reload from the store.
+    #
+    # `committed` is which of the pinned targets the STORE actually took, and it is an
+    # argument rather than an assumption: `Store#set_sitemap_tag` answers whether the write
+    # landed, and stamping a refused one paints a memo that is on nobody's disk and that the
+    # next reload silently takes back. Nil means "all of them", for a caller with nothing to
+    # report.
+    def apply_tag(text : String, committed : Array({String, String})? = nil) : Nil
       value = text.blank? ? nil : text
       index = node_index
-      @tag_targets.each { |key| index[key]?.try(&.tag=(value)) }
+      (committed || @tag_targets).each { |key| index[key]?.try(&.tag=(value)) }
       cancel_tag
     end
 

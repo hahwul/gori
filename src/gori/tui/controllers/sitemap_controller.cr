@@ -404,11 +404,22 @@ module Gori::Tui
       end
       text = @sitemap.tag_buffer
       store = @host.session.store
-      targets.each { |(host, path)| store.set_sitemap_tag(host, path, text) }
-      @sitemap.apply_tag(text) # stamp every target in place — keeps the selection, no re-derive
+      # The store answers whether each write COMMITTED (`set_sitemap_tag`'s own comment: the
+      # answer exists because dropping it "made every caller report the change for a
+      # rolled-back batch"). This dropped it, so a project whose writer a peer held reported
+      # "tagged", stamped the memo onto the tree, and let the next reload take it back with no
+      # word — the memo was on nobody's disk. Stamp what landed, name what did not; MCP's
+      # `set_sitemap_tag` already refuses in the same terms.
+      committed = targets.select { |(host, path)| store.set_sitemap_tag(host, path, text) }
+      @sitemap.apply_tag(text, committed) # stamp in place — keeps the selection, no re-derive
       # A `tag:` filter must re-evaluate against the changed tags (the in-place stamp
       # doesn't re-filter), else the just-tagged node stays hidden / a cleared tag shown.
       reload if @sitemap.filtering?
+      refused = targets.size - committed.size
+      if refused > 0
+        return @host.status(
+          "#{paths(refused)} NOT #{text.empty? ? "cleared" : "tagged"} (project busy) — try again", :error)
+      end
       n = targets.size
       @host.status(
         if text.empty?
