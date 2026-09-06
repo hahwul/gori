@@ -3032,7 +3032,7 @@ module Gori::Tui
     # Feed messages are prose and some are written across several source lines; a newline drawn
     # into a row would leave a hole in the list. The band below shows the whole thing.
     def self.act_one_line(message : String) : String
-      message.gsub(/\s+/, " ").strip
+      message.scrub.gsub(/\s+/, " ").strip
     end
 
     # The three-state filter bar, the grammar the OAST callbacks list already uses: the input

@@ -263,7 +263,7 @@ module Gori
     def self.expand(registry : Verb::Registry, template : String,
                     overrides : Hash(String, Array(Verb::Chord)) = rebindable_overrides(registry),
                     profile : String = Settings.keymap_os) : String
-      return template unless template.includes?('{')
+      return template unless template.valid_encoding? && template.includes?('{')
       template.gsub(VERB_TOKEN_RE) do |token|
         id = $1
         if chord = binding_for(registry, id, overrides, profile) || default_for(registry, id, profile)

@@ -304,9 +304,14 @@ module Gori::Tui
       @body_h = 24                  # last body rect height (captured at render); drives PageUp/Down step size
       @title_text = nil.as(String?) # last string emitted as the terminal-window title (memo; see sync_terminal_title)
       @title_written = false        # have we ever written a title? gates the neutral restore on leave when the pref is "off"
-      # Timestamps of raises absorbed by the run loop, trimmed to TICK_ERROR_WINDOW — the
-      # circuit breaker behind `absorb_tick_error`.
-      @tick_errors = [] of Time::Instant
+      # The circuit breaker behind `absorb_tick_error`: strikes inside TICK_ERROR_WINDOW.
+      @breaker = TickBreaker.new(TICK_ERROR_LIMIT, TICK_ERROR_WINDOW)
+      # The exception a full render last raised, while the reduced frame stands in for it —
+      # nil once a key asks for the real frame again. See `absorb_tick_error`.
+      @safe_frame = nil.as(Exception?)
+      # A frame owed to the operator by something that could not set the tick's own `dirty`
+      # (the error path runs in the tick's rescue, after that local has gone out of scope).
+      @render_pending = false
 
       # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
       # time; an unmigrated tab is absent and still runs through the case ladders
@@ -507,6 +512,7 @@ module Gori::Tui
           # Wrapped in place rather than extracted so the `last_*` cursors above survive the
           # error: a recovered tick carries on from where it was instead of re-running every
           # poll and reload from scratch.
+          phase = :input # which half of the tick a raise came from — see `absorb_tick_error`
           begin
             ev = @term.poll_event(50)
             dirty = false
@@ -699,13 +705,20 @@ module Gori::Tui
               last_ui_ident = ident
               last_ui_write = now
             end
+            # A frame the error path owes (its toast, or the reduced frame) — that path runs in
+            # the rescue below, after this tick's `dirty` is gone, so it leaves a note instead.
+            if @render_pending
+              @render_pending = false
+              dirty = true
+            end
+            phase = :render
             render if dirty
           rescue ex : Gori::Error
             # gori's own errors keep their designed exit: `CLI.run` rescues these and aborts
             # with the operator-facing message, which is a deliberate answer, not a crash.
             raise ex
           rescue ex
-            raise ex unless absorb_tick_error(ex)
+            raise ex unless absorb_tick_error(ex, phase)
           end
           break unless @outcome == :running
         end
@@ -728,7 +741,12 @@ module Gori::Tui
         # "𝓰𝓸𝓻𝓲 - acme - Notes" mustn't linger. The shell's prompt overwrites it again after
         # quit. Skipped when we never wrote a title (pref "off"), so gori leaves the
         # terminal's own title alone end to end.
-        @term.title = "𝓰𝓸𝓻𝓲" if @title_written
+        # `rescue`d: on a tty that has gone away this write is the second raise in the same
+        # unwind, and it would replace the one that says why the session ended.
+        begin
+          @term.title = "𝓰𝓸𝓻𝓲" if @title_written
+        rescue IO::Error
+        end
       end
       @outcome
     end
@@ -778,20 +796,41 @@ module Gori::Tui
     #
     # The trace goes to <GORI_HOME>/gori.log, which `App#run_tui` binds before entering the
     # alt screen, so logging here cannot garble the display it is reporting about.
-    private def absorb_tick_error(ex : Exception) : Bool
+    #
+    # `phase` is which half of the tick raised. A raise from the INPUT half (a key handler, a
+    # channel drain, a timer) is one hostile event going past: it counts as a strike, the
+    # toast says so, and the next frame draws as usual. A raise from the RENDER half is a
+    # different animal — the same frame is asked for again 50ms later, so with a deterministic
+    # bug three strikes were ~150ms, and the recovery toast was drawn by the very render that
+    # kept failing: the operator saw a backtrace, never the toast. So a full render's failure
+    # does not strike. It puts the REDUCED frame up instead (`render_safe_frame`: chrome and
+    # status row, the error where the body was), which stays until a key asks for the real
+    # frame again — every retry is the operator's, not the clock's, and the tab bar still works
+    # so they can leave the tab that cannot draw. Only the reduced frame failing too (the
+    # chrome itself is broken, nothing left to fall back to) strikes like an input raise.
+    private def absorb_tick_error(ex : Exception, phase : Symbol) : Bool
       now = Time.instant
-      @tick_errors.reject! { |t| now - t > TICK_ERROR_WINDOW }
-      @tick_errors << now
-      ::Log.error(exception: ex) { "TUI tick raised (#{@tick_errors.size}/#{TICK_ERROR_LIMIT} in #{TICK_ERROR_WINDOW})" }
-      return false if @tick_errors.size >= TICK_ERROR_LIMIT
+      # The frame that raised is half-drawn, so force a full repaint rather than a cell diff
+      # against a screen state no complete render ever produced. And ask for that frame: this
+      # runs in the tick's rescue, where the tick's own `dirty` is out of reach.
+      @resized = true
+      @render_pending = true
+      if phase == :render && @safe_frame.nil?
+        ::Log.error(exception: ex) { "TUI render raised — showing the reduced frame" }
+        @safe_frame = ex
+        status("#{@active_tab} failed to draw — any key retries · details in gori.log (#{ex.class}: #{ex.message})", :error)
+        return true
+      end
+      count = @breaker.record(now)
+      ::Log.error(exception: ex) { "TUI #{phase} tick raised (#{count}/#{TICK_ERROR_LIMIT} in #{TICK_ERROR_WINDOW})" }
+      return false if @breaker.tripped?(now)
       # `status`, not a bare `@toast =`: `status_line` only prefers a toast over the
       # companion's bubble when `@toast_at` is fresher than `@companion.bubble_at`, so
       # assigning the message without its timestamp lost the race to any bubble Miss Ring
       # happened to be holding — and the breaker's one operator-visible signal never showed.
-      status("recovered from an internal error — details in gori.log (#{ex.class}: #{ex.message})")
-      # The frame that raised is half-drawn, so force a full repaint rather than a cell diff
-      # against a screen state no complete render ever produced.
-      @resized = true
+      # `:error`, so it reaches the notification centre as well (#960): the toast is gone on
+      # the next keypress, and this is the one message an operator should be able to re-read.
+      status("recovered from an internal error — details in gori.log (#{ex.class}: #{ex.message})", :error)
       true
     end
 
@@ -1109,6 +1148,11 @@ module Gori::Tui
     @paste_stall = PasteStall.new
 
     private def handle(ev : Termisu::Event::Any) : Nil
+      # A key retires the reduced frame (see `absorb_tick_error`): the next render is the
+      # real one, and if it fails again the reduced frame simply comes back. Keys only —
+      # xterm mode 1002 reports pointer motion continuously, and a drag would otherwise retry
+      # (and log) the broken render at the mouse's rate.
+      @safe_frame = nil if ev.is_a?(Termisu::Event::Key)
       # A PasteStart arriving while a paste is ALREADY open means the previous one was abandoned
       # (its marker lost) and a new one is beginning. Close the old one first, or there is no
       # start transition for the new one and it silently inherits the abandoned paste's
@@ -2341,6 +2385,10 @@ module Gori::Tui
       end
 
       layout = Layout.compute(w, h, statusline_active?)
+      if failed = @safe_frame
+        render_safe_frame(screen, layout, failed)
+        return
+      end
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
         listen: listen_chip_label,
         scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
@@ -2391,6 +2439,54 @@ module Gori::Tui
       flush_screen
     end
 
+    # The frame drawn while a full render is failing (see `absorb_tick_error`): the top bar,
+    # the tab menu and the status row exactly as `render` draws them, and the error where the
+    # body would be. Nothing pane-owned is asked to draw — the body, the companion, overlays,
+    # the prompts and the controllers' hint strips are all suspects — so this frame can only
+    # fail if the chrome itself is broken. The tab menu is kept LIVE (focus, active tab) so
+    # 1-9 / ←→ still read as what they do: the way out of a tab that cannot draw.
+    private def render_safe_frame(screen : Screen, layout : Layout, ex : Exception) : Nil
+      Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
+        listen: listen_chip_label,
+        scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
+        sandbox: sandbox_label,
+        unread: @notifications.unread, capturing: @session.capturing?,
+        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
+        listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
+        authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
+      Chrome.render_rule(screen, layout.rule)
+      vis_tabs, hid_tabs = Chrome.split_tabs(Settings.tab_prefs, force: @active_tab)
+      Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
+        focused: @focus == :menu && !@menu_more,
+        tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
+        hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more,
+        numbered: Settings.tab_numbers?)
+      body = layout.body
+      # A message may carry wire bytes or newlines (an IndexError's does not, a parser's may):
+      # one line, valid UTF-8, or the frame meant to report the crash would be the next one.
+      detail = "#{ex.class}: #{ex.message}".scrub.gsub(/\s+/, " ")
+      lines = [
+        "the #{@active_tab} tab failed to draw",
+        detail,
+        "",
+        "any key retries · 1-9 or ←/→ switch tab · the trace is in gori.log",
+      ]
+      y = body.y + {(body.h - lines.size) // 2, 0}.max
+      lines.each_with_index do |line, i|
+        break if y + i >= body.bottom
+        color = i == 0 ? Theme.red : (i == 1 ? Theme.text : Theme.muted)
+        screen.text(body.x + 2, y + i, line, color, Theme.bg, width: {body.w - 4, 0}.max)
+      end
+      Chrome.render_status(screen, layout.status, focus: focus_label,
+        hints: Hotkeys.retag(status_line || SAFE_FRAME_HINT),
+        activity: activity_chip, resource: @resource.label, time: clock_label,
+        companion: nil)
+      @term.hide_cursor
+      flush_screen
+    end
+
+    SAFE_FRAME_HINT = "any key retries · 1-9 switch tab · ^D quit"
+
     # The space menu (bottom-right popup) + the copy-as picker (centered) + the
     # bottom-anchored input prompts, all drawn last and orthogonal to @overlay so
     # they float over whatever's underneath (a tab body or the History detail).
@@ -2412,6 +2508,14 @@ module Gori::Tui
       # forces a full repaint since the diff would otherwise leave stale cells.
       @backend.flush(sync: @resized)
       @resized = false
+    rescue ex : IO::Error
+      # The tty went away (the terminal closed, the ssh session dropped). Absorbing this
+      # would spend the tick breaker on three writes to a dead fd and then end the process
+      # with a backtrace; a `Gori::Error` takes the designed exit instead — `run`'s ensure
+      # unwinds, `CLI.run` prints the one line. Narrow on purpose: only the flush is inside,
+      # so a `File::Error` (also an `IO::Error`) from a pane's own file write elsewhere in the
+      # tick is still that pane's to report, not a "terminal closed".
+      raise Gori::Error.new("terminal closed: #{ex.message}")
     end
 
     private def scope_label : String
