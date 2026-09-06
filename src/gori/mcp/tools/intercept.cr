@@ -316,7 +316,9 @@ module Gori
           "in which case mutating verbs refuse. Header values redacted unless " \
           "include_sensitive:true. An HTTP row carries head_preview + body_size; a WebSocket " \
           "row has no head at all, so it carries body_preview (omitted for a BINARY frame) and " \
-          "body_size is the whole payload." do |s|
+          "body_size is the whole payload. operator_editing:true means the HUMAN has unsaved " \
+          "edits typed into that hold right now — forwarding, editing or dropping it discards " \
+          "their work, so leave it to them or ask first." do |s|
           s.field "include_sensitive", boolprop("show Authorization/Cookie/etc header values instead of [REDACTED] (default false)")
         end
 
@@ -338,7 +340,9 @@ module Gori
         tool j, "intercept_forward",
           "Forward a currently-held intercept item (from intercept_list) byte-exact, letting " \
           "the request/response continue. The action is applied by the capturing gori instance " \
-          "and surfaced as a visible notification to the human operator. Returns the outcome " \
+          "and surfaced as a visible notification to the human operator. An item intercept_list " \
+          "reported as operator_editing:true carries unsaved human edits, and a byte-exact " \
+          "forward discards them. Returns the outcome " \
           "(forwarded | no_such_item if it was already released | not_confirmed to retry)." do |s|
           s.field "item_id", intprop("held item id from intercept_list"), required: true
         end
@@ -346,7 +350,9 @@ module Gori
         tool j, "intercept_drop",
           "Drop a currently-held intercept item: the proxy answers the client a canned 502 and " \
           "the message never reaches its destination. Applied by the capturing instance and " \
-          "surfaced to the human. Returns dropped | no_such_item | not_confirmed." do |s|
+          "surfaced to the human. An item intercept_list reported as operator_editing:true " \
+          "carries unsaved human edits, and dropping it destroys them along with the message. " \
+          "Returns dropped | no_such_item | not_confirmed." do |s|
           s.field "item_id", intprop("held item id from intercept_list"), required: true
         end
 
@@ -360,8 +366,11 @@ module Gori
           "(NO variable expansion — a " \
           "security tool forwards exactly what you send). In `raw`, a lone LF in the HEADER " \
           "block becomes CRLF so a hand-typed message still frames; the BODY is untouched. " \
+          "An item intercept_list reported as operator_editing:true has unsaved human edits in " \
+          "it, and your bytes replace them wholesale. " \
           "Applied by the capturing instance + surfaced to the human. Returns " \
-          "forwarded (edited:true, content_length_synced) | no_such_item | not_confirmed." do |s|
+          "forwarded (edited:true — meaning YOUR edit was applied, content_length_synced) | " \
+          "no_such_item | not_confirmed." do |s|
           s.field "item_id", intprop("held item id from intercept_list"), required: true
           s.field "raw", strprop("the full edited HTTP wire message as text (request/status line + headers + body)")
           s.field "raw_base64", strprop("the full edited wire message, base64 — byte-exact; use this for a binary body")

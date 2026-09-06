@@ -229,6 +229,8 @@ The mutating half (`intercept_forward`, `intercept_forward_edit`, `intercept_dro
 
 Agent actions are visible, not silent. Each one lands in the notification center tagged as coming from an agent, rendered differently from your own actions, so you can see what a co-pilot did to traffic while you were reading another tab.
 
+It reads the other way too. A row `intercept_list` returns with `operator_editing: true` is one you have unsaved changes typed into right now, so an agent can leave that message to you instead of forwarding, editing or dropping it and discarding your work.
+
 One safety rule is worth knowing before you leave an agent running. A held message normally waits forever for a human decision, which is what you want when you are the only one at the keyboard. Once an agent attaches to the intercept queue in that session, gori arms a 30 second auto-forward for items nobody is watching, so a client that dies mid-hold cannot wedge the connection indefinitely. A session with no agent attached never auto-forwards.
 
 ## One Call at a Time

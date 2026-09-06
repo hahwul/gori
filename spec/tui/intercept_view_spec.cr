@@ -624,6 +624,49 @@ describe "Intercept filter bar" do
     end
   end
 
+  # The bar reads `@enabled`/`@direction` back from the Interceptor every reload; the condition
+  # was a write-only local buffer. An MCP `intercept_set_filter` / `gori run intercept filter`
+  # reaches the SAME Interceptor through the #123 drain, so the gate narrowed while this bar
+  # painted its idle hint — and the next keystroke here pushed the empty buffer back over it.
+  it "mirrors a condition set by another surface" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      ic.set_filter("host:api.example.com") # as the MCP/CLI drain does
+      view.reload(ic)
+      view.query.should eq("host:api.example.com")
+
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      backend.row(0).includes?("host:api.example.com").should be_true
+
+      # And it keeps tracking: a peer clearing the condition clears the bar.
+      ic.set_filter("")
+      view.reload(ic)
+      view.query.should eq("")
+    end
+  end
+
+  # While `/` is open the local buffer is the source — every keystroke pushes it down — so the
+  # mirror must not fight the caret. It resumes once the bar closes, even though the revision
+  # it skipped will not come round again.
+  it "does not mirror over the bar while the condition is being typed" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+      "host:acme".each_char { |c| view.query_insert(c) }
+      ic.set_filter(view.query) # what the controller does on every keystroke
+      view.reload(ic)
+      view.query.should eq("host:acme") # not clobbered mid-word
+
+      view.stop_query
+      ic.set_filter("method:POST") # a peer, after the bar closed, with no further revision
+      view.reload(ic)
+      view.query.should eq("method:POST")
+    end
+  end
+
   it "edits the condition query inline" do
     tmp_interceptor do |ic|
       view = InterceptView.new
@@ -988,6 +1031,225 @@ describe "Intercept verbs (P1)" do
         view.replace_editor("DELETE /wiped HTTP/1.1")
         view.effective_method_target(it_ws).should eq({"GET", "/ws"})
       end
+    end
+  end
+end
+
+# The other two surfaces say this before an edit is written — `gori run intercept get` prints
+# the reason above the head, MCP's `intercept_get` emits `edit_refusal`/`head_only_note` — and
+# the guide claims this one does too. It did not: the card opened a plain `e:EDIT` badge and
+# the operator learned at `f` that the edit could never be applied.
+describe "Intercept edit caveats" do
+  it "badges a hold gori will apply no edit to, before the editor opens" do
+    tmp_interceptor do |ic|
+      it0 = ic.enqueue_request("GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, method: "GET",
+        target: "/", host: "a", port: 80, scheme: "http",
+        edit_refusal: "a CR/LF in a header value has no faithful HTTP/1.1 text form").not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
+      backend.contains?("NO-EDIT").should be_true # on the card border, editor still closed
+
+      caveat = view.selected_edit_caveat.not_nil!
+      caveat.badge.should eq("NO-EDIT")
+      caveat.note.should contain("edits cannot be applied")
+      caveat.note.should contain(it0.edit_refusal.not_nil!)
+    end
+  end
+
+  # A caveat, NOT a refusal: a head edit applies and only a body has nowhere to go, so the
+  # badge must not read as "this message cannot be edited".
+  it "badges a head-only h2 hold separately" do
+    tmp_interceptor do |ic|
+      ic.enqueue_request("POST /up HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, method: "POST",
+        target: "/up", host: "a", port: 80, scheme: "http", head_only: true).not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
+      backend.contains?("HEAD-ONLY").should be_true
+      backend.contains?("NO-EDIT").should be_false
+
+      view.selected_edit_caveat.not_nil!.note.should contain("ADDS A BODY")
+    end
+  end
+
+  it "says nothing for an ordinary editable hold" do
+    tmp_interceptor do |ic|
+      ic.enqueue_request("GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, method: "GET",
+        target: "/", host: "a", port: 80, scheme: "http").not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      view.selected_edit_caveat.should be_nil
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
+      backend.contains?("NO-EDIT").should be_false
+      backend.contains?("HEAD-ONLY").should be_false
+      backend.contains?("e:EDIT").should be_true
+    end
+  end
+end
+
+# The class header has claimed a "waiting age" column since the tab was written and the row
+# never drew one, while MCP's `intercept_item_row` emits `age_seconds` and the #123 reaper
+# releases on a deadline. A hold is a real client blocked; how long it has waited is the
+# queue's second fact after what it is.
+describe "Intercept queue waiting age" do
+  it "right-aligns the age on a queue row" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      row = (0...8).find { |y| backend.row(y).includes?("acme.test/login") }.not_nil!
+      backend.row(row).should match(/\d+s/)
+    end
+  end
+
+  # The message's identity outranks its clock: the age rides the row's SLACK, so a pane too
+  # narrow to carry both keeps the host+target whole and simply shows no clock. A fixed column
+  # would have cost every label four cells on a pane that is already `body.w // 3`.
+  it "drops the age before it eats the label on a narrow pane" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(56, 8) # left pane is w//3 → ~16 cells of interior
+      view.render(Screen.new(backend), Rect.new(0, 0, 56, 8))
+      row = (0...8).find { |y| backend.row(y).includes?("GET acme") }.not_nil!
+      backend.row(row).should_not match(/\d+s/) # no clock, and the label kept its cells
+    end
+  end
+end
+
+# `HeldRow#edited` has existed since the #123 bridge and nothing ever set it, so
+# `intercept_list` answered `edited: false` for every item that has ever been held — while the
+# fact it names (a human is part-way through rewriting this hold) is real, knowable, and
+# exactly what an agent needs before forwarding one out from under them.
+describe "Intercept operator-edit flag" do
+  it "names the loaded hold only once it has actually been edited" do
+    tmp_interceptor do |ic|
+      three_holds(ic)
+      view = InterceptView.new
+      view.reload(ic)
+      id = view.selected_id.not_nil!
+
+      view.toggle_edit
+      view.held_edit_id.should be_nil # opened to READ: a peek is not an edit
+      view.edit_insert('X')
+      view.held_edit_id.should eq(id)
+
+      # It survives Esc back to the queue, because the unsaved bytes do — the buffer is
+      # restored when the same row is re-entered, and a forward still carries them.
+      view.stop_edit
+      view.held_edit_id.should eq(id)
+    end
+  end
+
+  # `@loaded_id`/`@editor_dirty` used to survive behind a CLOSED editor, so a buffer for a
+  # message that no longer exists outlived every release and this flag would have named it.
+  it "forgets the edit once the hold leaves the queue" do
+    tmp_interceptor do |ic|
+      three_holds(ic)
+      view = InterceptView.new
+      view.reload(ic)
+      id = view.selected_id.not_nil!
+      view.toggle_edit
+      view.edit_insert('X')
+      view.stop_edit # closed, but the buffer (and the flag) stay
+      view.held_edit_id.should eq(id)
+
+      ic.forward(id) # an MCP peer, or the reaper, settles it
+      view.reload(ic)
+      view.held_edit_id.should be_nil
+    end
+  end
+end
+
+# Review follow-ups on the batch above.
+describe "Intercept review follow-ups" do
+  # The clock keys on the SAME test the label does: a marked row paints its host+target bright,
+  # and keying the age on `selected` alone left it muted beside a bright label.
+  it "paints a marked row's age as brightly as its label" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.toggle_mark # marks row 0, cursor steps to row 1
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
+      row = (0...10).find { |y| backend.row(y).includes?("acme.test/one") }.not_nil!
+      line = backend.row(row)
+      age_x = line.index(/\d+s/).not_nil!
+      label_x = line.index("GET acme.test/one").not_nil!
+      backend.fg_at(age_x, row).should eq(backend.fg_at(label_x, row))
+    end
+  end
+
+  # Everything this tab draws comes from a local Interceptor only the lock holder's proxy ever
+  # reaches. In a second window the bar painted a catch state nothing gates through.
+  it "says view-only rather than painting another window's gate" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10), holding: false)
+      backend.row(0).should contain("view-only")
+
+      # …and the holder's own bar is unchanged.
+      held = MemoryBackend.new(110, 10)
+      view.render(Screen.new(held), Rect.new(0, 0, 110, 10))
+      held.row(0).should_not contain("view-only")
+      held.contains?("/ condition").should be_true
+    end
+  end
+
+  # Tab into the detail pane opens the editor exactly as ↵/e do, so it owes the same sentence
+  # — the caveat exists to be read BEFORE the operator types.
+  it "exposes the caveat however the editor is entered" do
+    tmp_interceptor do |ic|
+      ic.enqueue_request("GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, method: "GET",
+        target: "/", host: "a", port: 80, scheme: "http",
+        edit_refusal: "a CR/LF in a header value has no faithful HTTP/1.1 text form").not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      view.pane_advance(1) # the focus ring's door into the editor
+      view.editing?.should be_true
+      view.selected_edit_caveat.not_nil!.note.should contain("edits cannot be applied")
+    end
+  end
+end
+
+describe "Gori::Interceptor.age_label" do
+  # ONE definition, shared by the TUI queue column and `gori run intercept list`.
+  it "reads in seconds, then minutes, then hours, and never negative" do
+    Gori::Interceptor.age_label(0).should eq("0s")
+    Gori::Interceptor.age_label(59).should eq("59s")
+    Gori::Interceptor.age_label(60).should eq("1m00s")
+    Gori::Interceptor.age_label(3599).should eq("59m59s")
+    Gori::Interceptor.age_label(3600).should eq("1h00m")
+    Gori::Interceptor.age_label(7380).should eq("2h03m")
+    Gori::Interceptor.age_label(-5).should eq("0s")
+  end
+end
+
+describe "Gori::Interceptor#drain_notices" do
+  # The fast path used to hand back a shared constant array; a caller that appended to it
+  # would leave every later drain reporting notices nobody recorded.
+  it "never hands out a shared empty array" do
+    tmp_interceptor do |ic|
+      first = ic.drain_notices
+      first.should be_empty
+      first << "mutated by a caller"
+      ic.drain_notices.should be_empty
+    end
+  end
+
+  it "caps what a proxy fiber can queue when nobody is draining" do
+    tmp_interceptor do |ic|
+      (Gori::Interceptor::NOTICE_CAP + 5).times { |i| ic.note_unheld("n#{i}") }
+      ic.drain_notices.size.should eq(Gori::Interceptor::NOTICE_CAP)
+      ic.drain_notices.should be_empty
     end
   end
 end

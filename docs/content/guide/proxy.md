@@ -35,7 +35,9 @@ Press `i` to enable **Intercept**. When on, matching requests (and optionally re
 
 The queue takes the same **multi-select** as the History list ([Marking flows](#marking-flows), below): `t` marks the held message under the cursor and steps down, `Shift-↑` / `Shift-↓` extend a contiguous range, `Shift-T` marks the whole queue, and `Esc` clears. Forward (`f`) and drop (`d`) then act on **the marks if any are set, else the cursor row**, so a burst of holds can be released or killed in one keystroke. `Shift-F` still forwards the entire queue whether anything is marked or not. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count; a mark disappears the moment its message leaves the queue, so the count never outlives what is on screen.
 
-Reading a held message needs no marks and no editor: `Shift-←` / `Shift-→` scroll the preview sideways and `PgUp` / `PgDn` / `Home` / `End` scroll it vertically, leaving the held bytes untouched.
+Reading a held message needs no marks and no editor. The preview soft-wraps, so nothing runs off to the side; scroll it with the wheel, or press `↵` / `e` to open the editor, where `PgUp` / `PgDn` page the text. `PgUp` / `PgDn` / `Home` / `End` page the **queue**, the same list `↑` / `↓` walk, as they do on every other list tab.
+
+Each row carries how long its message has been waiting, so a burst of holds reads as a queue and not just a list — a hold is a real client blocked on your decision. The catch bar above it shows the condition that is actually armed, including one an agent set through MCP or `gori run intercept filter`. And when a gate cannot hold something it was armed for — a body over the buffer ceiling, which is forwarded rather than truncated — it says so in the notification centre instead of leaving you waiting on a row that will never appear.
 
 ### What gets held
 

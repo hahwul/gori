@@ -505,9 +505,11 @@ module Gori::Tui
       last_probe_gen = @session.store.probe_generation # committed probe_issues mutations
       last_spin = Time.instant                         # advances the background-job spinner frame
       last_clock = clock_minute                        # status-row wall clock; re-render only when the minute rolls over
+      last_hold_tick = Time.instant                    # advances the Intercept queue's waiting-age column
       last_ui_ident = nil.as(UiIdentity?)              # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
       last_pub_rev = -1                                                     # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
+      last_pub_edit_id = nil.as(Int64?)                                     # #123: held item the mirrored snapshot last reported an operator edit on
       last_bridge_pub = Time.instant                                        # #123: last bridge-heartbeat write (throttled so idle never churns the WAL)
       @intercept_cmd_watermark = @session.store.latest_intercept_command_id # tail agent commands from now
       begin
@@ -628,16 +630,34 @@ module Gori::Tui
                 # command triggers the snapshot republish below in the same tick.
                 dirty = true if drain_intercept_commands
                 dirty = true if reap_stale_holds
-                if (prev = ic.revision) != last_pub_rev
+                # The held item the operator has unsaved edits for rides the snapshot as
+                # `edited`, so an agent can leave a hold alone while a human is part-way
+                # through rewriting it. It moves nil→id→nil at most a couple of times per
+                # hold (the FIRST edit lands, then the editor closes), and nothing else in
+                # this window bumps the interceptor's revision, so it needs its own trigger
+                # or the flag would be published once and never corrected.
+                edit_id = intercept_controller.held_edit_id
+                if (prev = ic.revision) != last_pub_rev || edit_id != last_pub_edit_id
                   last_pub_rev = prev
-                  publish_intercept_snapshot(ic) # queue changed → re-mirror held rows
-                  publish_intercept_bridge(ic)   # and refresh config/heartbeat immediately
+                  last_pub_edit_id = edit_id
+                  publish_intercept_snapshot(ic, edit_id) # queue changed → re-mirror held rows
+                  publish_intercept_bridge(ic)            # and refresh config/heartbeat immediately
                   last_bridge_pub = now
                 elsif now - last_bridge_pub >= INTERCEPT_HEARTBEAT_INTERVAL
                   publish_intercept_bridge(ic) # periodic liveness heartbeat (throttled)
                   last_bridge_pub = now
                 end
               end
+            end
+            # Advance the Intercept queue's waiting-age column. A held message blocks a real
+            # client and the #123 reaper releases one on a deadline, so the age has to move on
+            # its own — nothing else bumps the interceptor's revision while a queue sits still.
+            # Gated on the tab being UP and something actually held, so the idle loop keeps its
+            # once-a-minute clock wake rather than a once-a-second one.
+            if @active_tab == :intercept && now - last_hold_tick >= HOLD_AGE_INTERVAL &&
+               @session.interceptor.pending_count > 0
+              last_hold_tick = now
+              dirty = true
             end
             # Animate the bottom-bar background-job spinner: while any job runs, advance the
             # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
@@ -658,6 +678,8 @@ module Gori::Tui
             # TLS passthrough: announce hosts bypassed since the last tick. Before the Companion, so
             # a bypass notice reaches her on the same frame it is pushed.
             dirty = true if drain_passthrough_notices
+            # …and what intercept could not hold. Same placement, same reason.
+            dirty = true if drain_intercept_notices
             # Miss Ring: advance the animation beat and pick up new notifications. Like the
             # resource meter above she reports dirty ONLY when the drawn sprite/bubble
             # changes, and stops reporting at all once she dozes off (Companion::SLEEP_AFTER).
@@ -788,6 +810,11 @@ module Gori::Tui
 
     # How fast the bottom-bar background-job spinner advances (only while a job runs).
     SPINNER_INTERVAL = 120.milliseconds
+
+    # How often the Intercept queue's waiting-age column repaints while the tab is up and
+    # something is held. One second because the column's own unit is seconds — a slower tick
+    # would show a number that is visibly behind the clock the operator is reading it against.
+    HOLD_AGE_INTERVAL = 1.second
 
     # Per-tick cap on coalesced printable-char events (a paste). Large enough that a
     # typical paste applies in one render tick; still bounds a pathological stream.
@@ -3462,6 +3489,20 @@ module Gori::Tui
           "TLS passthrough: #{entry.host} relayed without MITM (rule #{entry.pattern}) — nothing captured for it")
       end
       @passthrough_announced = seen
+      true
+    end
+
+    # Say on screen what a gate declined to hold while catch was on — an h1 body over the hold
+    # ceiling, an h2 stream released past the buffer ceiling. Both fail OPEN by design, and both
+    # recorded it with `::Log.warn` alone, which under `gori tui` lands in `~/.gori/gori.log` and
+    # nowhere the operator watching a hold queue would meet it: a message went to the origin with
+    # catch armed and the only sign was a queue row that never appeared. See
+    # `Interceptor#note_unheld`; `Jobs::Goto.new(:intercept)` because the queue is where the
+    # operator was waiting for it.
+    private def drain_intercept_notices : Bool
+      notices = @session.interceptor.drain_notices
+      return false if notices.empty?
+      notices.each { |n| @notifications.push(:warn, n, Jobs::Goto.new(:intercept), source: "app") }
       true
     end
 

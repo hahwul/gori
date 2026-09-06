@@ -99,6 +99,13 @@ describe "intercept hold body ceiling" do
         receive_within(seen, what: "the forwarded request head").should contain("POST /upload")
         ic.pending_count.should eq(0)
         logs.check(:warn, /over the .* hold ceiling/).entry.message.should contain("request")
+        # …and where the operator will actually meet it. A `::Log.warn` under `gori tui` lands in
+        # `~/.gori/gori.log` and nowhere else, so on its own it left catch armed, a message on
+        # the wire, and a queue row that simply never appeared.
+        notices = ic.drain_notices
+        notices.size.should eq(1)
+        notices[0].should contain("forwarded UNHELD")
+        ic.drain_notices.should be_empty # drained once, not re-announced every tick
 
         client.close
       end

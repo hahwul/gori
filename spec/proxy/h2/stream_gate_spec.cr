@@ -1342,6 +1342,14 @@ describe Gori::Proxy::H2::StreamGate do
       rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free"))))
       settle
       head_of(rig.to_origin, 3_u32).should eq(request("/free"))
+
+      # And the operator is told, where they will meet it. The row they were deciding about
+      # simply vanishes from the queue, and a `::Log.warn` under `gori tui` reaches
+      # `~/.gori/gori.log` and nothing else — see `Interceptor#note_unheld`.
+      notices = ic.drain_notices
+      notices.size.should eq(1)
+      notices[0].should contain("forwarded UNEDITED")
+      ic.drain_notices.should be_empty # once per gate, not re-announced every tick
     end
   end
 

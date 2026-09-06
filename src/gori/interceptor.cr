@@ -236,11 +236,80 @@ module Gori
       # from proxy fibers). The TUI compares it to know when to re-render, since
       # the queue mutates without any flow event. Atomic → lock-free read.
       @revision = Atomic(Int32).new(0)
+      # Messages a gate declined to hold while catch was on, and a lock-free count of them so
+      # the shell's per-tick drain costs one atomic read when there is nothing — see
+      # `note_unheld`.
+      @notices = [] of String
+      @notice_count = Atomic(Int32).new(0)
     end
 
     # Lock-free snapshot of the change counter (see @revision).
     def revision : Int32
       @revision.get
+    end
+
+    # How long a message has been HELD, as the narrowest string that still reads.
+    #
+    # One definition, because three surfaces show it and they must not drift: the TUI queue's
+    # own column (`InterceptView#render_held_age`, from the monotonic `Item#held_at`) and
+    # `gori run intercept list` (from the bridge row's wall-clock `held_at_ms`). It lives here
+    # rather than in either because neither owns the other, and it is pure so a spec can pin
+    # the thresholds without a queue.
+    #
+    # Floors at zero: the CLI reads a stamp written by the PUBLISHING instance's clock, and a
+    # reader whose own clock is behind it must not print "held -3s".
+    def self.age_label(seconds : Int) : String
+      secs = {seconds, 0}.max
+      return "#{secs}s" if secs < 60
+      return "#{secs // 60}m#{(secs % 60).to_s.rjust(2, '0')}s" if secs < 3600
+      "#{secs // 3600}h#{(secs % 3600 // 60).to_s.rjust(2, '0')}m"
+    end
+
+    # --- what intercept could NOT hold ---------------------------------------
+    #
+    # A gate can decline to hold a message that catch was armed for: an h1 body whose declared
+    # length is over `ClientConn::MAX_REWRITE_BODY`, or an h2 stream released past
+    # `H2::StreamGate::MAX_DEFERRED_BYTES`. Both fail OPEN, which is the right disposition —
+    # capping the read would truncate the very upload the operator wanted to edit — but both
+    # recorded it with `::Log.warn` alone, and under `gori tui` a `Log` line reaches neither
+    # the notification centre nor stderr. It lands in `~/.gori/gori.log`, which is precisely
+    # the silence the WebSocket gate refuses in `WS::MessageGate#note` ("a `gori.log` only an
+    # operator who knew to tail it ever reads"). So with catch ON a message went to the origin
+    # unheld and the only thing on screen was a queue row that never appeared.
+    #
+    # They collect HERE because the Interceptor is the object both gates already hold and the
+    # shell already reads every tick, and because "what the catch missed" is the catch's own
+    # accounting. Each site latches its warning once per connection, and the buffer is capped
+    # anyway: a proxy fiber must not grow it without bound when nobody is draining (a
+    # lock-holding TUI parked on another tab drains on its tick, but a `Session` used headless
+    # never does).
+    NOTICE_CAP = 16
+
+    # Record one, from a PROXY fiber. Deliberately not a revision bump: this is not queue
+    # state, and a notice must not make the TUI re-snapshot a queue that did not change.
+    def note_unheld(text : String) : Nil
+      @mutex.synchronize do
+        return if @notices.size >= NOTICE_CAP
+        @notices << text
+        # Set UNDER the lock: the count is the drain's lock-free "is there anything" test, and
+        # reading `@notices.size` outside it races the very fiber this method serialises.
+        @notice_count.set(@notices.size)
+      end
+    end
+
+    # Take everything recorded since the last call. Lock-free when there is nothing, which is
+    # every tick of a proxy that is holding what it was asked to.
+    # A FRESH empty array on the fast path, never a shared constant: the return type is a
+    # mutable `Array(String)`, and a caller that appended to a shared one would leave every
+    # later drain reporting notices nobody recorded.
+    def drain_notices : Array(String)
+      return Array(String).new(0) if @notice_count.get == 0
+      @mutex.synchronize do
+        out = @notices
+        @notices = [] of String
+        @notice_count.set(0)
+        out
+      end
     end
 
     def enabled? : Bool

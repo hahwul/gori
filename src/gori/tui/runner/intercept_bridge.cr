@@ -9,15 +9,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # process can list/get held items. Called only when the queue changed (revision) and only
   # in the lock holder. Maps each in-memory Item to a HeldRow (wall-clock held_at_ms so the
   # MCP-side age is stable across republishes).
-  private def publish_intercept_snapshot(ic : Interceptor) : Nil
+  private def publish_intercept_snapshot(ic : Interceptor, edit_id : Int64?) : Nil
     token = @session.intercept_token
     rows = ic.pending.map do |it|
       # `edit_refusal`/`head_only` ride along so the MCP process and `gori run intercept
       # get`/`list` can say "edits cannot be applied to this message" BEFORE one is written.
       # They are known at hold time and were dropped here, which is why every cross-process
       # surface described a CRLF-carrying h2 message as ordinarily editable.
+      # `edited` is the OPERATOR's in-progress edit on this hold (`InterceptView#held_edit_id`),
+      # and it was hardcoded false — so `intercept_list` answered `edited: false` for every
+      # item that has ever been held, while the fact it names is exactly what an agent needs
+      # before forwarding a message the human is part-way through rewriting.
       Store::HeldRow.new(token, it.id, it.kind.to_s.downcase, it.method, it.host, it.port,
-        it.scheme, it.target, it.raw, it.held_at_ms, it.flow_id, false, 0_i64,
+        it.scheme, it.target, it.raw, it.held_at_ms, it.flow_id, it.id == edit_id, 0_i64,
         it.edit_refusal, it.head_only?, it.binary?)
     end
     @session.store.publish_intercept_held(token, rows)
@@ -182,6 +186,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def reap_stale_holds : Bool
     return false if @intercept_max_hold_ms <= 0
     return false if @active_tab == :intercept # human is watching the queue → never clobber
+    # The hold the operator has unsaved bytes typed into is the strongest form of "somebody is
+    # watching this one", and the reaper forwards `it.raw` — so it threw the edit away with a
+    # toast that said only "auto-forwarded". `edited` is published across the bridge precisely
+    # so a REMOTE agent leaves such a hold alone; gori's own auto-forward has to honour it
+    # first. Nil (no edit anywhere) leaves every item eligible, as before.
+    editing = intercept_controller.held_edit_id
     ic = @session.interceptor
     pending = ic.pending
     return false if pending.empty?
@@ -195,6 +205,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     now_ms = Time.utc.to_unix_ms
     reaped = false
     pending.each do |it|
+      next if it.id == editing # the operator is mid-edit on this one
       watched = {it.held_at_ms, viewed[it.id]? || 0_i64}.max
       next if now_ms - watched < @intercept_max_hold_ms
       # original bytes (fail-open), same as toggle-off / release_all. A false answer means

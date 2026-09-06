@@ -196,11 +196,32 @@ module Gori
               # `edit_refusal` ONLY, never `head_only`: an h2 hold whose body gori could not
               # buffer is still fully editable in the head, so chipping on that would mark a
               # row uneditable when only its body is out of reach.
-              chip = r.edit_refusal ? "  [no-edit]" : ""
-              puts "##{r.item_id}  [#{r.kind}]  #{method} #{CLI::Output.term_safe(intercept_row_where(r))}  (#{body.size}b body)#{chip}"
+              # `[editing]` before `[no-edit]`: the operator having unsaved bytes in a hold is
+              # the fact that decides whether a SCRIPT should touch it at all, and the two are
+              # not exclusive. `edited` was hardcoded false on the publish side until it was
+              # wired to the TUI editor, so this row could never have shown it. (`--format
+              # json` names it `operator_editing`, for the reason `Serialize` gives there.)
+              chip = r.edited ? "  [editing]" : ""
+              chip += "  [no-edit]" if r.edit_refusal
+              # How long the client on the other end has been blocked. `--format json` has
+              # carried `age_seconds` since #123 (`Serialize.intercept_item_row`) and the TUI
+              # queue draws it per row; the text listing — the one a human reads while
+              # deciding what to release first — was the surface without a clock.
+              puts "##{r.item_id}  [#{r.kind}]  #{method} #{CLI::Output.term_safe(intercept_row_where(r))}  " \
+                   "(#{body.size}b body, held #{held_age_label(now_ms - r.held_at_ms)})#{chip}"
             end
           end
         end
+      end
+
+      # A held message's waiting age, from the wall-clock delta the bridge row carries. The
+      # wording is `Interceptor.age_label`'s — ONE definition, shared with the TUI queue's own
+      # column, so a change to the thresholds cannot leave the list a script reads disagreeing
+      # with the queue the operator reads. `{ms, 0}.max` before the divide, not after: Crystal
+      # floors integer division, so a raw `-5000 // 1000` is -5 and only the clamp keeps a
+      # reader whose clock is behind the publishing instance's from printing "held -5s".
+      def self.held_age_label(ms : Int64) : String
+        Gori::Interceptor.age_label(({ms, 0_i64}.max // 1000).to_i)
       end
 
       # How much of a held WebSocket payload `intercept get` prints as text. A WS message runs

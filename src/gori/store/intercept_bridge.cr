@@ -7,10 +7,22 @@ module Gori
     INTERCEPT_BRIDGE_KEY = "intercept_bridge"
 
     # Mirror the currently-held intercept queue for `token` into intercept_held so the MCP
-    # process can list/get it. INSERT OR IGNORE writes each item's raw BLOB exactly ONCE (held
-    # bytes are immutable), DELETEs items no longer held, and DELETEs rows from any other
+    # process can list/get it. Each item's raw BLOB is written exactly ONCE (held bytes are
+    # immutable), items no longer held are DELETEd, and so are rows from any other
     # (dead-session) token — all in one writer transaction, so a rapid hold/forward cycle
     # doesn't re-write large bodies every publish.
+    #
+    # `edited` is the one column a republish must be able to CHANGE — it tracks whether the
+    # operator has unsaved edits on that hold, which flips long after the row was first
+    # written — so the upsert updates it and leaves everything else, `raw` above all, alone.
+    # As a plain `INSERT OR IGNORE` the flag was frozen at whatever it was when the item was
+    # first mirrored, which for every hold is `false`.
+    #
+    # The `WHERE` on that DO UPDATE is what keeps the paragraph above true. Without it SQLite
+    # takes the update branch for every already-present row on every republish — reading the
+    # existing record and rewriting it, held BLOB included — and a condition typed into the
+    # catch bar republishes on every keystroke. With it, an unchanged flag is a no-op again,
+    # exactly as `OR IGNORE` was.
     def publish_intercept_held(token : String, rows : Array(HeldRow)) : Nil
       exec_task ->(c : DB::Connection) {
         c.exec("DELETE FROM intercept_held WHERE session_token <> ?", token)
@@ -23,8 +35,9 @@ module Gori
           c.exec("DELETE FROM intercept_held WHERE session_token = ? AND item_id NOT IN (#{placeholders})", args: keep)
           rows.each do |r|
             # `raw` through `Store.blob_slot`: the column is `BLOB NOT NULL`, an empty slice binds
-            # SQL NULL, and `OR IGNORE` then SWALLOWS the violation — the row simply never
-            # appears. A zero-length WebSocket frame is valid (RFC 6455; the same empty heartbeat
+            # SQL NULL, and the `OR IGNORE` this INSERT used to carry then SWALLOWED the
+            # violation — the row simply never appeared. A zero-length WebSocket frame is valid
+            # (RFC 6455; the same empty heartbeat
             # `insert_ws_one` has its own `X\'\'` branch for) and it is held like any other, so
             # `intercept_list`/`intercept_get` and `gori run intercept` saw a queue with that item
             # MISSING while the gate kept its fiber blocked — nothing on those surfaces could
@@ -33,8 +46,10 @@ module Gori
             args = [token, r.item_id, r.kind, r.method, r.host, r.port, r.scheme, r.target, r.flow_id] of DB::Any
             slot = Store.blob_slot(args, r.raw)
             args << r.held_at_ms << (r.edited ? 1 : 0) << r.edit_refusal << (r.head_only? ? 1 : 0) << (r.binary? ? 1 : 0)
-            c.exec("INSERT OR IGNORE INTO intercept_held (session_token, item_id, kind, method, host, port, scheme, target, flow_id, raw, held_at_ms, edited, edit_refusal, head_only, binary) " \
-                   "VALUES (?,?,?,?,?,?,?,?,?,#{slot},?,?,?,?,?)", args: args)
+            c.exec("INSERT INTO intercept_held (session_token, item_id, kind, method, host, port, scheme, target, flow_id, raw, held_at_ms, edited, edit_refusal, head_only, binary) " \
+                   "VALUES (?,?,?,?,?,?,?,?,?,#{slot},?,?,?,?,?) " \
+                   "ON CONFLICT(session_token, item_id) DO UPDATE SET edited = excluded.edited " \
+                   "WHERE intercept_held.edited IS NOT excluded.edited", args: args)
           end
         end
         nil

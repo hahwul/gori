@@ -430,7 +430,18 @@ module Gori
           j.field "held_at_ms", row.held_at_ms
           j.field "held_at_iso", unix_micros_iso(row.held_at_ms * 1000)
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
-          j.field "edited", row.edited
+          # TRUE while the HUMAN operator has unsaved edits typed into this hold (mirrored from
+          # `InterceptView#held_edit_id`). Nothing ever set it, so it answered false for every
+          # item that has ever been held — while an agent forwarding one of these discards the
+          # operator's work, and their only sign is the note saying it was forwarded.
+          #
+          # `operator_editing`, NOT the column's own name: `intercept_forward_edit`'s ack has
+          # long emitted `edited: true` meaning "the edit you sent was applied", so one key
+          # across one tool family would have carried two opposite subjects — "a human is
+          # rewriting this, leave it" and "your rewrite went out". Renaming this side is free
+          # because it could never be true before now, so no caller can be reading it for
+          # signal; the ack keeps the name its own meaning has always had.
+          j.field "operator_editing", row.edited
           emit_edit_warning(j, row)
           j.field "body_size", body.size
           if row.ws?
@@ -488,7 +499,7 @@ module Gori
           j.field "flow_id", row.flow_id if row.flow_id
           j.field "held_at_ms", row.held_at_ms
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
-          j.field "edited", row.edited
+          j.field "operator_editing", row.edited # see the list projection above
           emit_edit_warning(j, row)
           # `head`/`body_preview` split by kind, for the reason `held_head_and_body` states.
           if row.ws?
