@@ -100,6 +100,9 @@ describe "CLI::Output.human_size" do
   it "rolls up rather than naming a quantity outside its own unit" do
     Gori::CLI::Output.human_size(1_048_570_i64).should eq("1.0MB")
     Gori::CLI::Output.human_size(1_073_741_300_i64).should eq("1.0GB")
+    # The two share the RULE, not the spelling: `Fmt` writes a whole number at and above 10,
+    # so a size in the last half-cell of a unit is `1023.5kB` here and `1.0MB` there. This is
+    # one input where they land on the same string, not a promise that they always do.
     Gori::CLI::Output.human_size(1_048_570_i64).should eq(Gori::Tui::Fmt.size(1_048_570_i64))
   end
 

@@ -704,6 +704,15 @@ module Gori
         report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
         if report.written == 0
           STDERR.puts "gori run history: #{empty_har_note(query, view)}"
+          # ...and, if the page was CUT, that the export never saw the rest. An empty HAR is
+          # normally "this project has nothing exportable", and for a project of imported URLs
+          # or in-flight flows the newest `-n` can all lack a response while older ones carry
+          # one: `--format har -n 50` then said only "no flows written to the HAR" and sent its
+          # operator away from 150 flows that `-n 200` would have exported. The cut is a fact
+          # here (`limit_probe`), so say it rather than let the empty note stand for it.
+          if note = history_truncation_note(truncated, limit)
+            STDERR.puts "gori run history: #{note}"
+          end
         elsif truncated
           # A file handed to someone else must not quietly be the newest 50 of 5000.
           #

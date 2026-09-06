@@ -280,7 +280,10 @@ module Gori
       # fixed 8-cell clamp, a CLI listing has no geometry to defend, and truncating `PROPFIND`
       # to buy a gap would lose information a script is reading this line for.
       def self.pad_cell(s : String, width : Int32) : String
-        cell_width(s) < width ? pad(s, width) : "#{s} "
+        # Measured ONCE: the branch and the pad both need the width, and a grapheme walk over a
+        # non-ASCII value is not free on a row loop that runs per listing line.
+        w = cell_width(s)
+        w < width ? s + " " * (width - w) : "#{s} "
       end
 
       # "#42  GET   https  example.com:443/users  200  1.2kB  3ms  [Complete]"
@@ -480,15 +483,22 @@ module Gori
       end
 
       # "[+] debug                 query    · length"
+      #
+      # `term_safe` on the two dynamic fields, the same one-line seam the fuzz row below
+      # states its reason for: the NAME is a line of the operator's own parameter wordlist
+      # (nothing scrubs one on the way in), and the grpc-message is a header value the ORIGIN
+      # chose. Either can carry CR/LF or an ANSI/OSC sequence that rewrites the surrounding
+      # row — and a scrubbed name is also the one this cell can measure, since a control byte
+      # is zero cells wide and would pad the column past its width.
       def self.mine_row_text(f : Miner::Finding) : String
         String.build do |io|
           io << (f.confidence.confirmed? ? "[+] " : "[?] ")
-          io << pad(f.name, 24)
+          io << pad(term_safe(f.name), 24)
           io << "  " << f.location.label.ljust(9)
           io << "· " << f.evidence.label
           if gs = f.grpc_status
             io << "  grpc " << gs << ' ' << Proxy::H2::Grpc.status_name(gs)
-            io << " · " << f.grpc_message if f.grpc_message
+            (msg = f.grpc_message) && (io << " · " << term_safe(msg))
           end
         end
       end
@@ -1212,8 +1222,12 @@ module Gori
       # The unit is picked from the value this method WILL PRINT — one decimal — and not from
       # the raw quotient, so a size just under a boundary rolls up instead of naming a quantity
       # outside its own scale: 1,048,570 bytes is 1023.99 KiB, and the raw test printed it as
-      # `1024.0kB`. That is the rule `Tui::Fmt.size` states for the History column, and this is
-      # the same fact rendered on the other surface — the two must not disagree about it.
+      # `1024.0kB`. That is the RULE `Tui::Fmt.size` states for the History column, and it is
+      # the rule — not the rendering — that the two surfaces share: `Fmt` writes a whole number
+      # at and above 10, so its own boundary test is `.round`, and a size in the last half-cell
+      # of a unit (1,048,100 bytes) is `1023.5kB` here and `1.0MB` there. Both are inside their
+      # own scale, which is all this rule promises; do not pin the two spellings equal for an
+      # arbitrary input.
       def self.human_size(bytes : Int64) : String
         return "#{bytes}B" if bytes < 1024
         v = bytes / 1024.0
