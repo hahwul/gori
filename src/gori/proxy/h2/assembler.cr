@@ -77,6 +77,21 @@ module Gori::Proxy::H2
       # CPU inside `@mutex`, which on Crystal's single-threaded scheduler freezes the
       # TUI, every other connection and the Store writer fiber (P6).
       getter trailer_seen = Set(String).new
+      # Pseudo-header names a TRAILING block carried, which RFC 9113 §8.1 forbids in a trailer
+      # section. Kept apart from `trailer_names` rather than filed with it: the marker's
+      # contract is "look these names up in the head above", and `synth_response` /
+      # `synth_request` never emit a pseudo-header as a field — so a `:status` listed there was
+      # a dangling reference, pointing at a name no surface can show. It is a finding, not a
+      # trailer, so it goes to the flow's `advisory` (see `note_trailer_pseudo`). Same
+      # Array + Set pair as above, for the same O(N^2) reason.
+      getter trailer_pseudo = [] of String
+      getter trailer_pseudo_seen = Set(String).new
+      # The status of an INTERIM header block that arrived after the final response — the one
+      # §8.1 violation that has a name of its own (RFC 9110 §15.2: a 1xx precedes the final
+      # response, it is not one). Kept apart from `trailer_pseudo` so the advisory can name the
+      # event the way `Repeater::H2Engine`'s `late_interim` clause does: one wire fact, one
+      # sentence, whichever surface the operator is reading.
+      property trailer_interim : Int32? = nil
     end
 
     private class Stream
@@ -377,10 +392,7 @@ module Gori::Proxy::H2
         # frame log authoritative; the ensure below still clears header_buf.
         raise Gori::Error.new("h2 cumulative header list too large") if side.header_bytes + added > HPACK::Decoder::MAX_HEADER_LIST
         side.header_bytes += added
-        # Remember WHICH names these are before they lose their identity in the merge —
-        # after the concat a `grpc-status` that arrived in a trailer reads exactly like one
-        # sent in the response head, and for gRPC the trailer is the call's real status.
-        decoded.each { |(n, _)| side.trailer_names << n if side.trailer_seen.add?(n) }
+        record_trailer_names(side, decoded)
         existing.concat(decoded)
       else
         # First block, OR a status-bearing response block. An interim 1xx (100/103)
@@ -395,12 +407,39 @@ module Gori::Proxy::H2
         # Both halves, or the index would keep suppressing a name for a head that is gone.
         side.trailer_names.clear
         side.trailer_seen.clear
+        side.trailer_pseudo.clear
+        side.trailer_pseudo_seen.clear
+        side.trailer_interim = nil
       end
     ensure
       # Always reset, even if decode raised (feed rescues HPACK/framing errors and
       # keeps processing the connection) — otherwise the next HEADERS/CONTINUATION
       # fragment would append to a stale block and decode garbage.
       side.header_buf.clear
+    end
+
+    # File a trailing block's field names, BEFORE the merge dissolves them into the head —
+    # after the concat a `grpc-status` that arrived in a trailer reads exactly like one sent in
+    # the response head, and for gRPC the trailer is the call's real status.
+    #
+    # A pseudo-header among them is filed separately: RFC 9113 §8.1 forbids one in a trailer
+    # section outright, and it is not a field any surface will show — see `Side#trailer_pseudo`.
+    # The reported status is unaffected either way, because `emit_response` reads the FIRST
+    # `:status` off the merged list and the head's own comes first; NAMING the violation is what
+    # was missing, and it is the half that matters, since a trailing `:status` is what an h2
+    # response-splitting probe produces. An interim one gets its own record so the advisory can
+    # call it what `Repeater::H2Engine` calls it (see `note_trailer_pseudo`).
+    private def record_trailer_names(side : Side, decoded : Array({String, String})) : Nil
+      decoded.each do |(name, value)|
+        unless name.starts_with?(':')
+          side.trailer_names << name if side.trailer_seen.add?(name)
+          next
+        end
+        side.trailer_pseudo << name if side.trailer_pseudo_seen.add?(name)
+        next unless name == ":status" && side.trailer_interim.nil?
+        code = value.to_i?
+        side.trailer_interim = code if code && 100 <= code < 200
+      end
     end
 
     # Server push (RFC 7540 §6.6): PUSH_PROMISE (server→client) carries a
@@ -498,6 +537,7 @@ module Gori::Proxy::H2
       return if stream.flow_id # already emitted
       headers = stream.req.headers.not_nil!
       note_extended_connect(stream, headers)
+      note_trailer_pseudo(stream, stream.req, "request")
       method = pseudo(headers, ":method") || "GET"
       path = pseudo(headers, ":path") || "/"
       scheme = pseudo(headers, ":scheme") || "https"
@@ -530,6 +570,7 @@ module Gori::Proxy::H2
       flow_id = stream.flow_id
       return unless flow_id # request not yet projected (rare interleaving) — drop
       headers = stream.resp.headers.not_nil!
+      note_trailer_pseudo(stream, stream.resp, "response")
       status = (pseudo(headers, ":status") || "0").to_i? || 0
       cap = stream.resp.body
       body = cap.total == 0 ? nil : cap.to_slice
@@ -544,6 +585,48 @@ module Gori::Proxy::H2
         body_truncated: cap.truncated?, body_size: cap.total,
         content_type: content_type, content_encoding: content_encoding, state: state, error: error,
         ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream)))
+    end
+
+    # A trailing header block carried a pseudo-header, which RFC 9113 §8.1 forbids in a
+    # trailer section. Recorded as an advisory on the flow because nothing else on disk can
+    # show it: the field never reaches the stored head (`synth_response` emits only the status
+    # line and the regular fields), and it is deliberately kept out of `X-Gori-Trailers` too —
+    # so a `:status` in a trailer block was invisible on every surface while the raw frame log
+    # had it all along.
+    #
+    # It is worth a sentence rather than a silent drop for the reason the sibling `late_interim`
+    # clause in `Repeater::H2Engine` is: a trailing `:status` is exactly what an h2
+    # response-splitting probe produces, and "the origin answered twice" is the finding. The
+    # capture projection already reports the head's own status (`emit_response` reads the FIRST
+    # `:status` off the merged list), so this names what gori refused to act on.
+    #
+    # Called from both emit paths: an h2 request may carry a trailer section too, and the
+    # direction is what tells an operator which peer did it.
+    private def note_trailer_pseudo(stream : Stream, side : Side, direction : String) : Nil
+      names = side.trailer_pseudo
+      return if names.empty?
+      late = direction == "response" ? side.trailer_interim : nil
+      text = if late
+               # The named special case, worded as `Repeater::H2Engine`'s `late_interim` clause
+               # words it: an interim status is what an h2 response-splitting probe produces,
+               # and "the origin answered twice" reads nothing like "a pseudo-header was in the
+               # wrong section". Unlike the repeater, the capture path KEEPS the block's regular
+               # fields (marked as trailers): they are the payload such a probe is looking for,
+               # and a proxy that drops them has thrown away the finding.
+               #
+               # Response direction only. A `:status` a CLIENT put in a request trailer section
+               # is not a late interim of anything — there is no final response of its own for
+               # it to follow — so it takes the general §8.1 sentence below, which is true of it.
+               "the origin sent an interim #{late} header block AFTER its final response " \
+               "(RFC 9110 §15.2: a 1xx precedes the final response, it is not one). Its fields " \
+               "are recorded as trailers; the status reported here is the final response's"
+             else
+               plural = names.size == 1 ? "" : "s"
+               "the #{direction}'s trailing header block carried the pseudo-header#{plural} " \
+               "#{names.join(", ")}, which RFC 9113 §8.1 forbids in a trailer section — " \
+               "gori did not act on #{names.size == 1 ? "it" : "them"}"
+             end
+      stream.advisories << text unless stream.advisories.includes?(text)
     end
 
     # The stream's advisories as one newline-joined column value, or nil when there are none.

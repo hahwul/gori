@@ -179,6 +179,10 @@ module Gori
       # response — an RFC 9110 §15.2 violation the operator has to be told about, because it is
       # what an h2 response-splitting / header-injection probe produces and what a buggy
       # gateway emits. It rides alongside the final response rather than replacing it.
+      # `trailer_pseudo` is its non-interim sibling: the pseudo-header names a TRAILING block
+      # carried, which RFC 9113 §8.1 forbids outright. Same reason it is reported rather than
+      # obeyed — a `:status` in a trailer section is a second answer to a question the response
+      # head has already answered.
       private record Reply,
         status : Int32,
         headers : Array({String, String}),
@@ -189,7 +193,8 @@ module Gori
         trailers : Array(String)?,
         timed_out : Bool,
         final_seen : Bool,
-        late_interim : Int32? = nil
+        late_interim : Int32? = nil,
+        trailer_pseudo : Array(String)? = nil
 
       # One h2 CONNECTION and the state that outlives a single request on it.
       #
@@ -485,6 +490,14 @@ module Gori
                    "(RFC 9110 §15.2: a 1xx precedes the final response, it is not one). The " \
                    "1xx and its fields were discarded; the status, headers and body reported " \
                    "here are the final response's"
+        end
+        # …and its non-interim sibling, standing alone for the same reason: the response is
+        # intact, and a pseudo-header in a trailer section is itself the finding.
+        if pseudo = reply.trailer_pseudo
+          parts << "the origin's trailing header block carried the pseudo-header" \
+                   "#{pseudo.size == 1 ? "" : "s"} #{pseudo.join(", ")}, which RFC 9113 §8.1 " \
+                   "forbids in a trailer section. gori did not act on #{pseudo.size == 1 ? "it" : "them"} " \
+                   "— the status reported here is the response head's own"
         end
         parts.empty? ? nil : parts.join(" — ")
       end
@@ -934,10 +947,11 @@ module Gori
         goaway = flow.goaway # the origin's stated reason for hanging up
         rst = flow.rst       # the origin's stated reason for killing the stream
         trailers = nil.as(Array(String)?)
-        late_interim = nil.as(Int32?) # a 1xx block that arrived AFTER the final response
-        final_seen = false            # the final (non-interim) response header block is absorbed
-        end_stream_pending = false    # END_STREAM seen on a HEADERS frame whose block isn't closed yet
-        timed_out = false             # the read ended on an idle timeout, not on a closed socket
+        late_interim = nil.as(Int32?)           # a 1xx block that arrived AFTER the final response
+        trailer_pseudo = nil.as(Array(String)?) # pseudo-headers a TRAILING block carried (§8.1)
+        final_seen = false                      # the final (non-interim) response header block is absorbed
+        end_stream_pending = false              # END_STREAM seen on a HEADERS frame whose block isn't closed yet
+        timed_out = false                       # the read ended on an idle timeout, not on a closed socket
         pending = flow.pending
         at = 0
         progress = Time.instant # last time this exchange's stream actually moved
@@ -1050,9 +1064,9 @@ module Gori
             # status). Defer completion until END_HEADERS.
             end_stream_pending = frame.end_stream?
             if frame.end_headers?
-              status, final_seen, trailers, late_interim =
+              status, final_seen, trailers, late_interim, trailer_pseudo =
                 merge_block(header_buf, decoder, headers, status, final_seen, trailers,
-                  late_interim, end_stream_pending)
+                  late_interim, trailer_pseudo, end_stream_pending)
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Continuation
@@ -1061,9 +1075,9 @@ module Gori
             break if header_buf.bytesize + frame.payload.size > MAX_HEADER_BLOCK # flood — abort
             header_buf.write(frame.payload)
             if frame.end_headers?
-              status, final_seen, trailers, late_interim =
+              status, final_seen, trailers, late_interim, trailer_pseudo =
                 merge_block(header_buf, decoder, headers, status, final_seen, trailers,
-                  late_interim, end_stream_pending)
+                  late_interim, trailer_pseudo, end_stream_pending)
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Data
@@ -1112,14 +1126,14 @@ module Gori
         end
 
         Reply.new(status, headers, body.size == 0 ? nil : body.to_slice, clean_eos,
-          goaway, rst, trailers, timed_out, final_seen, late_interim)
+          goaway, rst, trailers, timed_out, final_seen, late_interim, trailer_pseudo)
       end
 
       # Fold one COMPLETED header block into the response being assembled, and decide what the
-      # block IS. Returns the updated `(status, final_seen, trailers, late_interim)`; `headers`
-      # is written through, as `absorb` already did.
+      # block IS. Returns the updated `(status, final_seen, trailers, late_interim,
+      # trailer_pseudo)`; `headers` is written through, as `absorb` already did.
       #
-      # Four shapes reach here and only two of them used to be told apart:
+      # Five shapes reach here and only two of them used to be told apart:
       #
       #   1. the final response head            → keep everything
       #   2. an interim 1xx BEFORE it           → drop its fields (§15.2: they precede the final
@@ -1129,6 +1143,10 @@ module Gori
       #   3. a real trailers block after it     → keep the fields, record their NAMES as trailers
       #   4. an interim 1xx AFTER it            → the origin violated §15.2; drop the block and
       #                                           report it, do not let it become the response
+      #   5. a trailers block carrying a        → RFC 9113 §8.1 forbids a pseudo-header in a
+      #      pseudo-header                        trailer section; keep the real response's
+      #                                           status, keep the regular fields as trailers,
+      #                                           and report the violation
       #
       # 4 was being handled as 2-and-3 at once: `absorb` overwrote the status with the 1xx's,
       # `note_trailers` filed its field under trailers, and `headers.clear` — guarded on
@@ -1138,32 +1156,53 @@ module Gori
       # `status: 103` with no headers and the real 200 gone. That is precisely what an h2
       # response-splitting probe produces, so gori was reporting a successful injection as a
       # benign informational response.
+      #
+      # 5 is the same hole one status range over, and it survived that fix because the guard
+      # asked `interim?` rather than "did a trailer carry a status at all". A
+      # `HEADERS(:status 200, set-cookie)` + DATA + `HEADERS(:status 500)` came back as
+      # **HTTP/2 500** wearing the 200's own headers — the capture path reads the FIRST
+      # `:status` off the merged list (`Assembler#emit_response`) and reported 200 for the very
+      # same wire, so the two surfaces answered differently about one response. `absorb` now
+      # hands back THIS BLOCK's status instead of folding it into the running one, which is
+      # what makes "a trailing block may not restate the status" expressible at all.
       private def self.merge_block(header_buf : IO::Memory, decoder : HPACK::Decoder,
                                    headers : Array({String, String}), status : Int32,
                                    final_seen : Bool, trailers : Array(String)?,
-                                   late_interim : Int32?,
-                                   end_stream_pending : Bool) : {Int32, Bool, Array(String)?, Int32?}
+                                   late_interim : Int32?, trailer_pseudo : Array(String)?,
+                                   end_stream_pending : Bool) : {Int32, Bool, Array(String)?, Int32?, Array(String)?}
         count_before = headers.size
-        status_before = status
-        status, names = absorb(header_buf, decoder, headers, status)
+        block_status, names, pseudo = absorb(header_buf, decoder, headers)
         if final_seen
-          if interim?(status)
-            # Shape 4. Drop exactly what THIS block added — not the whole array — and give the
-            # final response its status back. The event itself is not swallowed: `exchange`
-            # turns `late_interim` into a named clause on the Result.
-            late_interim = status
+          if block_status && interim?(block_status)
+            # Shape 4. Drop exactly what THIS block added — not the whole array. `status` is
+            # left alone by construction now, so the final response keeps its own. The event
+            # is not swallowed: `exchange` turns `late_interim` into a named clause.
+            late_interim = block_status
             headers.pop(headers.size - count_before)
-            status = status_before
           else
-            trailers = note_trailers(trailers, names, true) # shape 3
+            trailers = note_trailers(trailers, names, true)      # shape 3
+            trailer_pseudo = note_pseudo(trailer_pseudo, pseudo) # …and shape 5 on top of it
           end
         else
+          # Only a block that CARRIES a status sets one; a head with no `:status` leaves the
+          # running value where it was, exactly as the old `value.to_i? || status` did.
+          status = block_status || status
           final_seen = !interim?(status)
           # Shape 2. Not when END_STREAM rode on the interim block itself: the stream is over,
           # no final response is coming, and `no_response` reports that instead.
           headers.clear if !end_stream_pending && !final_seen
         end
-        {status, final_seen, trailers, late_interim}
+        {status, final_seen, trailers, late_interim, trailer_pseudo}
+      end
+
+      # The pseudo-header names a TRAILING block carried, accumulated in arrival order and
+      # deduplicated — one hostile stream can send the same name in block after block, and the
+      # clause names what was wrong, not how many times.
+      private def self.note_pseudo(seen : Array(String)?, names : Array(String)) : Array(String)?
+        return seen if names.empty?
+        seen ||= [] of String
+        names.each { |n| seen << n unless seen.includes?(n) }
+        seen
       end
 
       # Names decoded from a header block that arrived AFTER the final response block are
@@ -1216,22 +1255,41 @@ module Gori
         "h2 RST_STREAM #{name} on stream #{frame.stream_id}"
       end
 
-      # Decode a completed header block, splitting :status from regular headers. Returns the
-      # status and the REGULAR field names this block contributed, so the caller can tell a
-      # trailing block's fields from the response head's (see `note_trailers`).
+      # Decode a completed header block, splitting the pseudo-headers off the regular fields.
+      # Returns THIS BLOCK's own `:status` (nil when it carried none), the REGULAR field names
+      # it contributed — so the caller can tell a trailing block's fields from the response
+      # head's (see `note_trailers`) — and the names of every pseudo-header in it, which
+      # RFC 9113 §8.1 forbids in a trailer section.
+      #
+      # Both halves of "the block's own, first one only" are load-bearing, and each used to be
+      # a way for a header block to report a status the response never had:
+      #
+      #   * folding the value into the RUNNING status let a trailing block replace the final
+      #     response's — see `merge_block` shape 5;
+      #   * taking the LAST `:status` within one block disagreed with the capture projection,
+      #     which reads the first (`HeadCodec.pseudo` is a `find`). §8.3 makes a duplicated
+      #     pseudo-header malformed either way, so neither reading is "right" — but gori
+      #     answering 200 in History and 500 in the Repeater for one wire is a bug on its own.
       private def self.absorb(buf : IO::Memory, decoder : HPACK::Decoder,
-                              headers : Array({String, String}), status : Int32) : {Int32, Array(String)}
+                              headers : Array({String, String})) : {Int32?, Array(String), Array(String)}
         names = [] of String
+        pseudo = [] of String
+        status = nil.as(Int32?)
+        seen_status = false
         decoder.decode(buf.to_slice).each do |(name, value)|
-          if name == ":status"
-            status = value.to_i? || status
-          elsif !name.starts_with?(':')
+          if name.starts_with?(':')
+            pseudo << name
+            if name == ":status" && !seen_status
+              seen_status = true
+              status = value.to_i?
+            end
+          else
             headers << {name, value}
             names << name
           end
         end
         buf.clear
-        {status, names}
+        {status, names, pseudo}
       end
 
       # An interim (informational) response: its header fields precede — and are not part
