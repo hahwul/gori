@@ -29,6 +29,10 @@ module Gori::Tui
 
     QUERY_FIELDS = Probe::Filter::FIELDS
 
+    # The bar's field vocabulary — see `IssuesView::QUERY_KNOWN`, the sibling bar over the
+    # sibling backend.
+    QUERY_KNOWN = ->(f : String, op : Char) { Probe::Filter.known_field?(f, regex: op == '~') }
+
     getter query : String
     getter mode : Probe::Mode
 
@@ -729,7 +733,8 @@ module Gori::Tui
         screen.text(rect.x + 1, y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD))
+          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
+            known: QUERY_KNOWN))
         return
       end
       # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable,

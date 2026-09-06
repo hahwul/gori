@@ -37,6 +37,50 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  # The `/` bar is coloured from the SAME predicate the parser dispatches on — see the twin
+  # example in spec/tui/probe_view_spec.cr. Both the LIVE bar and the applied-query readout
+  # go through it, because the readout is what you scan to check how the filter is being read.
+  it "paints a misspelled filter field as free text, in the editor and in the readout" do
+    with_store do |store|
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      view.start_query
+      "hsot:acme".each_char { |c| view.query_insert(c) }
+
+      editing = MemoryBackend.new(80, 10)
+      view.render(Screen.new(editing), Rect.new(0, 0, 80, 10))
+      at = editing.row(0).index("hsot:acme").not_nil!
+      editing.fg_at(at, 0).should eq(Theme.muted)
+
+      view.stop_query
+      applied = MemoryBackend.new(80, 10)
+      view.render(Screen.new(applied), Rect.new(0, 0, 80, 10))
+      at2 = applied.row(0).index("hsot:acme").not_nil!
+      applied.fg_at(at2, 0).should eq(Theme.muted)
+      # …and `acme` is not a VALUE either: the backend free-texts the whole token, so the
+      # readout leaves it in the base colour rather than the brighter value one.
+      applied.fg_at(at2 + 5, 0).should eq(Theme.text)
+    end
+  end
+
+  it "still paints a real field, alias included, as a field" do
+    with_store do |store|
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      view.start_query
+      "sev:>=high".each_char { |c| view.query_insert(c) }
+
+      view.stop_query
+      backend = MemoryBackend.new(80, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 80, 10))
+      at = backend.row(0).index("sev:>=high").not_nil!
+      backend.fg_at(at, 0).should eq(Theme.syn_header)
+      backend.fg_at(at + 4, 0).should eq(Theme.text_bright) # `>=high` IS a value here
+    end
+  end
+
   it "renders CVSS score in list row and CVSS chip in detail" do
     with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil,

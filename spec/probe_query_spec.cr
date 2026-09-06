@@ -421,3 +421,31 @@ describe Gori::Probe::Filter do
     end
   end
 end
+
+# The vocabulary the Probe filter bar PAINTS with must be the vocabulary the parser
+# DISPATCHES on — see the twin block in spec/issues_query_spec.cr.
+describe Gori::Probe::Filter do
+  describe ".known_field?" do
+    it "answers for every spelling `build_term` dispatches on, and no other" do
+      Gori::Probe::Filter::KNOWN.each { |n| Gori::Probe::Filter.known_field?(n).should be_true }
+      Gori::Probe::Filter.known_field?("CAT").should be_true
+      Gori::Probe::Filter.known_field?("hsot").should be_false
+      Gori::Probe::Filter.known_field?("title").should be_false # Issues has it; Probe does not
+      Gori::Probe::Filter.known_field?("code", regex: true).should be_false
+    end
+
+    # A KNOWN name with an empty value is a field term, which this backend passes everything
+    # for; an unknown name is not a field at all and the whole `foo:` token free-texts.
+    it "agrees with `build_term` on which names are fields" do
+      issue = make_issue("missing_csp", title: "Missing CSP", host: "acme.test")
+      Gori::Probe::Filter::KNOWN.each do |name|
+        hits?("#{name}:", issue).should be_true
+      end
+      hits?("hsot:", issue).should be_false
+    end
+
+    it "keeps FIELDS a completion list of canonical names only" do
+      Gori::Probe::Filter::FIELDS.should eq(["severity:", "status:", "category:", "host:", "code:"])
+    end
+  end
+end

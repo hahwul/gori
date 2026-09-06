@@ -27,7 +27,14 @@ module Gori::Tui
     include PreviewPane
     include IssuePresentation
 
-    QUERY_FIELDS = %w[severity: status: host: title: cvss:]
+    QUERY_FIELDS = Issues::Filter::FIELDS
+
+    # The bar's field vocabulary, asked per separator (`FilterAst.spans`). Without it an
+    # unrecognised `hsot:` rendered in the same confident blue as a real field — the one
+    # visible signal an operator has while typing, saying the opposite of the truth, since
+    # `Issues::Filter` free-texts the whole token and it matches nothing. `SEPS_FIELD` below
+    # already keeps `~` out of the question; this keeps a MISSPELLED name out of it too.
+    QUERY_KNOWN = ->(f : String, op : Char) { Issues::Filter.known_field?(f, regex: op == '~') }
 
     def initialize
       @all = [] of Store::Issue    # the raw store list (severity-desc)
@@ -971,7 +978,8 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD))
+          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
+            known: QUERY_KNOWN))
         return
       end
       # One right-anchored chain — see HistoryView#render_ql_bar.
@@ -984,7 +992,8 @@ module Gori::Tui
         # The committed query stays highlighted — this readout is what you scan to
         # check how the active filter is actually being read.
         qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD),
+        screen.styled_text(qx, rect.y, @query,
+          Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  cvss:>=7  status:open  status:closed  host:", Theme.muted, width: left_w)
