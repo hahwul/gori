@@ -3700,7 +3700,7 @@ module Gori::Tui
     end
 
     # What the import worker reports back, drained on the tick (`drain_import_events`).
-    private record ImportProgress, job : Int32, done : Int32, total : Int32
+    private record ImportProgress, job : Int32, done : Int32, total : Int32?
     private record ImportDone, job : Int32, label : String, path : String, result : Import::Result?, error : String?
     private alias ImportEvent = ImportProgress | ImportDone
 
@@ -3709,10 +3709,10 @@ module Gori::Tui
     # frame until it was done. The shape is `FuzzerController#fuzz_save_results`: the worker
     # fiber writes to the store and sends events; the shell applies them on its own fiber.
     #
-    # HONEST LIMIT: only the INSERT phase yields (per 2000-row chunk, and the store write
-    # itself does) and cancels. The PARSE — `File.read` + `JSON.parse` of the whole file for a
-    # HAR — is one synchronous call on a single-threaded scheduler, so a very large file still
-    # holds the frame while it is parsed; a streaming reader is the follow-up that removes it.
+    # A HAR — the one import that gets big — is read and written as a stream (`Har.each_flow`
+    # paces itself, and `Import.import_har_stream` writes a chunk at a time), so the frame keeps
+    # drawing for the whole of it and the count on the chip is live. The other formats are
+    # small by nature and still parse in one call before their chunks go in.
     private def apply_import(kind : Symbol, label : String, path : String) : Nil
       if @import_job
         @toast = "an import is already running — cancel it from the palette (Import: cancel) or wait"
@@ -3723,12 +3723,12 @@ module Gori::Tui
       @import_cancel = false
       store = @session.store
       events = @import_events
-      status("importing #{label} — parsing #{File.basename(path)}…", :busy)
+      status("importing #{label} — #{File.basename(path)}…", :busy)
       spawn(name: "gori-import") do
         begin
           result = Import.import_file(store, kind, path, Gori::FlowSource::Surface::Tui,
             cancelled: -> { @import_cancel },
-            progress: ->(done : Int32, total : Int32) { events.send(ImportProgress.new(job, done, total)) })
+            progress: ->(done : Int32, total : Int32?) { events.send(ImportProgress.new(job, done, total)) })
           events.send(ImportDone.new(job, label, path, result, nil))
         rescue ex
           events.send(ImportDone.new(job, label, path, nil, ex.message || ex.class.name))
@@ -3745,7 +3745,7 @@ module Gori::Tui
           any = true
           case ev
           in ImportProgress
-            @jobs.progress(ev.job, ev.done, ev.total, "#{ev.done}/#{ev.total} flows")
+            @jobs.progress(ev.job, ev.done, ev.total, Runner.import_progress_note(ev.done, ev.total))
           in ImportDone
             finish_import(ev)
           end
@@ -3754,6 +3754,11 @@ module Gori::Tui
         end
       end
       any
+    end
+
+    # The activity note: "1200/5000 flows" when the total is known, "1200 flows" for a stream.
+    def self.import_progress_note(done : Int32, total : Int32?) : String
+      total ? "#{done}/#{total} flows" : "#{done} flows"
     end
 
     private def finish_import(ev : ImportDone) : Nil
