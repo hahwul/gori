@@ -190,3 +190,22 @@ describe "Chrome.split_tabs" do
     end
   end
 end
+
+# `split_tabs` is called once per frame and memoized on (prefs, force). The memo has to
+# answer a CHANGED layout with a fresh reconcile, including an in-place edit of the very
+# array it was handed — the tabs overlay mutates `Settings.tab_prefs` entries in place.
+describe "Chrome.split_tabs memo" do
+  it "returns the same visible strip for the same inputs and a new one after a prefs edit" do
+    prefs = [{"history", true}, {"project", true}, {"miner", false}]
+    vis1, hid1 = Chrome.split_tabs(prefs, force: :history)
+    vis1.map(&.first).should contain(:project)
+    hid1.map(&.first).should contain(:miner)
+    prefs[1] = {"project", false} # in place, the shape the overlay writes
+    vis2, hid2 = Chrome.split_tabs(prefs, force: :history)
+    vis2.map(&.first).should_not contain(:project)
+    hid2.map(&.first).should contain(:project)
+    # a different `force` with the same prefs is a different answer too
+    vis3, _ = Chrome.split_tabs(prefs, force: :project)
+    vis3.map(&.first).should contain(:project)
+  end
+end

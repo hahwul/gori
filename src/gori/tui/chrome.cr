@@ -139,13 +139,26 @@ module Gori::Tui
     # both every frame (the menu strip + the ⋯ hidden count); calling visible_tabs and
     # hidden_tabs separately rebuilt reconcile's catalog hashes twice per frame for the same
     # output. Pure function of prefs, so folding the two into one pass is byte-identical.
+    #
+    # Memoized on its two inputs: this runs once per FRAME (`Runner#render`), and `reconcile`
+    # is three catalog Hashes, a quadratic insert walk and four array passes for an answer
+    # that changes only when the operator edits the tab layout or switches tab. A tuple
+    # equality over ≤25 small entries is what the hit costs; the prefs are copied into the
+    # memo so a later in-place edit of the live array cannot make a stale hit look fresh.
     def self.split_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : {Array({Symbol, String}), Array({Symbol, String})}
+      if (memo = @@split_memo) && memo[1] == force && memo[0] == prefs
+        return memo[2]
+      end
       ann = reconcile(prefs)
       vis = ann.select { |(_, _, v)| v }.map { |(s, l, _)| {s, l} }
       append_forced(ann, vis, force)
       hidden = ann.reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
-      {vis, hidden}
+      out = {vis, hidden}
+      @@split_memo = {prefs.dup, force, out}
+      out
     end
+
+    @@split_memo : {Array({String, Bool}), Symbol?, {Array({Symbol, String}), Array({Symbol, String})}}? = nil
 
     # The "more" affordance label — a ⋯ ellipsis plus the hidden-tab count, so the bar
     # reads "there are N tabs tucked away here" at a glance.
