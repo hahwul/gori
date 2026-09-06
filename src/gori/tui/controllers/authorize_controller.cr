@@ -914,6 +914,27 @@ module Gori::Tui
       true
     end
 
+    # The list up top and the detail below are two scroll targets, and the notch goes to the
+    # one UNDER THE POINTER (the #956 contract every other split tab keeps): over the request
+    # rows it moves the cursor, anywhere else it scrolls the detail as it always did.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      if @view.list_contains?(mx, my)
+        @view.move_row(step)
+        return true
+      end
+      handle_wheel(step)
+    end
+
+    # A click on a request row selects it (the detail below follows); the filter bar takes a
+    # click as `/`. The only list-bearing tab that took no click at all until now.
+    def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      @host.focus_body
+      if i = @view.list_row_at(mx, my)
+        @view.select_row(i)
+      end
+      true
+    end
+
     # --- the request-list `/` filter (a text sub-mode the shell claims ahead of the focus ring) ---
     def querying? : Bool
       @view.filter_editing?

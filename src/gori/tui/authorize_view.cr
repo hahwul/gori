@@ -508,6 +508,10 @@ module Gori::Tui
     # ── render ────────────────────────────────────────────────────────────────
 
     def render(screen : Screen, rect : Rect, focused : Bool) : Nil
+      # Published for the hit-tests below; cleared first so a frame that draws no list (empty,
+      # nothing matching) cannot leave last frame's rows clickable.
+      @list_rows_rect = Rect.new(0, 0, 0, 0)
+      @detail_rect = Rect.new(0, 0, 0, 0)
       return render_empty(screen, rect) if @entries.empty?
       clamp_trial
       y = render_header(screen, rect, rect.y)
@@ -533,7 +537,44 @@ module Gori::Tui
       render_list(screen, rect, y, list_bottom, focused)
       divider_y = list_bottom
       render_divider(screen, rect, divider_y)
+      @detail_rect = Rect.new(rect.x, divider_y + 1, rect.w, {rect.bottom - divider_y - 1, 0}.max)
       render_detail(screen, rect.x, divider_y + 1, rect.right, rect.bottom, focused)
+    end
+
+    # --- mouse hit-tests, against the geometry the LAST frame drew --------------------
+
+    @list_rows_rect = Rect.new(0, 0, 0, 0)
+    @detail_rect = Rect.new(0, 0, 0, 0)
+
+    # The VISIBLE index of the request row under (mx, my), or nil off the list. The window is
+    # the one `render_list` drew (`@list_scroll`), never re-derived here — a hit-test must
+    # invert the window, not move it (the `OastController#callback_row_at` rule).
+    def list_row_at(mx : Int32, my : Int32) : Int32?
+      r = @list_rows_rect
+      return nil if r.empty? || !r.contains?(mx, my)
+      i = @list_scroll + (my - r.y)
+      i >= 0 && i < visible.size ? i : nil
+    end
+
+    def list_contains?(mx : Int32, my : Int32) : Bool
+      r = @list_rows_rect
+      !r.empty? && r.contains?(mx, my)
+    end
+
+    def detail_contains?(mx : Int32, my : Int32) : Bool
+      r = @detail_rect
+      !r.empty? && r.contains?(mx, my)
+    end
+
+    # Put the cursor on visible row `i` — a click. Same resets as `move_row`: the identity
+    # sub-cursor and the detail scroll belong to the request they were made on.
+    def select_row(i : Int32) : Nil
+      n = visible.size
+      return if n == 0
+      @sel = i.clamp(0, n - 1)
+      @tsel = 0
+      @trial_scroll = 0
+      @detail_scroll = 0
     end
 
     # The shared onboarding card (figure + card, degrading to lines on a short pane), the same
@@ -572,6 +613,7 @@ module Gori::Tui
       vis = visible
       @list_scroll = Viewport.scroll_to_show(@sel, @list_scroll, rows, vis.size)
       top = y
+      @list_rows_rect = Rect.new(rect.x, top, rect.w, rows)
       rows.times do |n|
         i = @list_scroll + n
         break unless (src = vis[i]?) && (e = @entries[src]?)
