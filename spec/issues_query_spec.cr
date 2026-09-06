@@ -134,3 +134,35 @@ describe "Issues::Filter — cvss:" do
     filtered("-cvss:>=7.0", all).map(&.id).should eq([3_i64, 4_i64])
   end
 end
+
+# The vocabulary the filter bar PAINTS with must be the vocabulary the parser DISPATCHES on.
+# They were two lists, and only the parser's had the aliases: `hsot:acme` rendered in the same
+# confident blue as a real field while the whole token free-texted and matched nothing, which
+# is the one visible signal an operator has while typing.
+describe Gori::Issues::Filter do
+  describe ".known_field?" do
+    it "answers for every spelling `build_term` dispatches on, and no other" do
+      Issues::Filter::KNOWN.each { |name| Issues::Filter.known_field?(name).should be_true }
+      Issues::Filter.known_field?("SEV").should be_true # names are matched case-insensitively
+      Issues::Filter.known_field?("hsot").should be_false
+      Issues::Filter.known_field?("resp.status").should be_false
+      # Only QL and the intercept gate implement `~`; this backend free-texts `title~admin`.
+      Issues::Filter.known_field?("title", regex: true).should be_false
+    end
+
+    # The pin, so the two cannot drift: a KNOWN name with an empty value is a field term, and
+    # `match_term` passes every issue for one. An unknown name is not a field at all — the
+    # whole `foo:` token free-texts over title+host and matches nothing here.
+    it "agrees with `build_term` on which names are fields" do
+      issue = fnd("Reflected XSS in search", Store::Severity::High, Store::Status::Open, "app.example.com")
+      Issues::Filter::KNOWN.each do |name|
+        Issues::Filter.parse("#{name}:").matches?(issue).should be_true
+      end
+      Issues::Filter.parse("hsot:").matches?(issue).should be_false
+    end
+
+    it "keeps FIELDS a completion list of canonical names only" do
+      Issues::Filter::FIELDS.should eq(["severity:", "status:", "host:", "title:", "cvss:"])
+    end
+  end
+end

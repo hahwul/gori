@@ -14,6 +14,17 @@ private def view_store(&)
   end
 end
 
+# Where `text` starts on the rendered grid — the filter bar's row is layout-dependent (the
+# MODE band sits above it), so the examples below locate it rather than pinning a row number.
+private def find_cell(backend, text : String) : {Int32, Int32}
+  (0...backend.size[1]).each do |y|
+    if x = backend.row(y).index(text)
+      return {x, y}
+    end
+  end
+  raise "#{text.inspect} is not on the rendered grid"
+end
+
 private def seed(store, code, host)
   store.upsert_probe_issue(
     Gori::Probe::Detection.new(code, "headers", host, "https://#{host}/", "t", Gori::Store::Severity::Low))
@@ -51,6 +62,41 @@ describe Gori::Tui::ProbeView do
 
       view.toggle_show_closed                                # reveal it
       view.toggle_dismiss(store).try(&.open?).should be_true # un-dismiss
+    end
+  end
+
+  # The `/` bar is coloured from the SAME predicate the parser dispatches on, so a token
+  # painted as a field is one the backend really implements. Without `known` an unrecognised
+  # `hsot:` rendered in the same confident blue as `host:` — the one visible signal while
+  # typing, saying the opposite of the truth, since the whole token free-texts and matches
+  # nothing.
+  it "paints a misspelled filter field as free text, not as a field" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      view = Gori::Tui::ProbeView.new
+      view.reload(store)
+      view.start_query
+      "hsot:acme".each_char { |c| view.query_insert(c) }
+
+      backend = MemoryBackend.new(80, 10)
+      view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 80, 10))
+      x, y = find_cell(backend, "hsot:acme")
+      backend.fg_at(x, y).should eq(Gori::Tui::Theme.muted) # SpanKind::UnknownField
+    end
+  end
+
+  it "still paints a real field, alias included, as a field" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      view = Gori::Tui::ProbeView.new
+      view.reload(store)
+      view.start_query
+      "cat:tech".each_char { |c| view.query_insert(c) }
+
+      backend = MemoryBackend.new(80, 10)
+      view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 80, 10))
+      x, y = find_cell(backend, "cat:tech")
+      backend.fg_at(x, y).should eq(Gori::Tui::Theme.syn_header)
     end
   end
 

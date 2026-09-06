@@ -13,6 +13,34 @@ module Gori
     #   status:open sev:>=high    → only OPEN issues at High or Critical
     #   -status:resolved host:api → not-resolved AND host contains "api"
     class Filter
+      # The bar's whole vocabulary: canonical name => every spelling `build_term` dispatches
+      # on. ONE table, because the two questions asked of it drift apart otherwise — the
+      # Tab-completion list and the highlighter's "do I implement this field" predicate are
+      # the same knowledge, and an alias missing from the second paints `sev:>=high` (the
+      # spelling this class's own doc comment uses) as a typo. `issues_query_spec` pins every
+      # entry here against `build_term` rather than trusting the pair to stay in step.
+      ALIASES = {
+        "severity" => ["severity", "sev"],
+        "status"   => ["status", "st"],
+        "host"     => ["host"],
+        "title"    => ["title"],
+        "cvss"     => ["cvss"],
+      }
+
+      # Canonical names, separator included, in completion order — what `IssuesView` splices
+      # over a half-typed token on ↹.
+      FIELDS = ALIASES.keys.map { |n| "#{n}:" }
+
+      KNOWN = ALIASES.values.flatten.to_set
+
+      # Does this backend implement `name`, with this separator? The predicate
+      # `FilterAst.spans` asks before painting a token as a FIELD (see its `known` argument).
+      # `regex` is always false here: only QL and the intercept gate implement `~`, so a
+      # `title~admin` is free-texted whole and must not be coloured as a match nobody performs.
+      def self.known_field?(name : String, regex : Bool = false) : Bool
+        !regex && KNOWN.includes?(name.downcase)
+      end
+
       # One parsed clause. `op` only matters for ordinal (severity) comparisons.
       private record Term, kind : Symbol, op : Symbol, text : String, negate : Bool
 

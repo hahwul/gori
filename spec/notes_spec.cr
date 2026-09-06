@@ -80,4 +80,62 @@ describe Gori::Notes do
       cjk.should eq("#{"가" * Gori::Notes::FILENAME_MAX_CHARS}.md")
     end
   end
+  # The id allocator is a HIGH-WATER MARK, and `merge` used to rebuild it from the surviving
+  # notes alone — so a save could hand it BACK, and the next `create` re-minted an id an
+  # earlier note had already used. That breaks the merge's own premise ("`mine` carry
+  # cross-session-unique ids, so a peer's new note can't be mistaken for an edit of ours"):
+  # the two notes with one id fold into one, and whichever text merged last wins.
+  describe ".merge" do
+    it "never hands the id allocator back below what the persisted set already spent" do
+      # Notes 2..4 were created and deleted by a peer, so nothing surviving carries their ids —
+      # only `next_id` remembers them. This session opened before any of that and still counts
+      # from 2.
+      persisted = Gori::Notes::Doc.new(0, [Gori::Notes::NoteEntry.new(1_i64, "kept")], 5_i64)
+      mine = [Gori::Notes::NoteEntry.new(1_i64, "kept, edited")]
+
+      merged = Gori::Notes.merge(persisted, mine, Set(Int64).new, 1_i64, 2_i64)
+
+      merged.notes.map(&.id).should eq([1_i64])
+      merged.next_id.should eq(5_i64)
+    end
+
+    it "still advances past a surviving id the persisted allocator had not reached" do
+      persisted = Gori::Notes::Doc.new(0, [Gori::Notes::NoteEntry.new(1_i64, "kept")], 2_i64)
+      mine = [Gori::Notes::NoteEntry.new(1_i64, "kept"), Gori::Notes::NoteEntry.new(9_i64, "new")]
+      Gori::Notes.merge(persisted, mine, Set(Int64).new, 9_i64, 10_i64).next_id.should eq(10_i64)
+    end
+  end
+  # `entity_links` rows are keyed by (Note, id), and nothing else ever reclaims them. Only the
+  # TUI dropped a closed note's links, and it dropped them on the KEYPRESS — before the
+  # document that removes the note had been written — so a refused save left the note alive
+  # with its evidence links already destroyed. Both engine entry points do it after the commit
+  # now, which also covers `gori run notes delete` and MCP `delete_note`.
+  describe "link cleanup" do
+    it "drops a deleted note's links once the write has committed" do
+      with_store do |store|
+        id = Gori::Notes.create(store, "evidence").not_nil!
+        store.add_link(Gori::Store::LinkOwnerKind::Note, id, Gori::Store::LinkRefKind::Flow, 7_i64)
+        store.list_links(Gori::Store::LinkOwnerKind::Note, id).size.should eq(1)
+
+        Gori::Notes.delete(store, id).should eq(Gori::Notes::Write::Committed)
+        store.list_links(Gori::Store::LinkOwnerKind::Note, id).should be_empty
+      end
+    end
+
+    it "drops them for a whole-session save that closed the note, and leaves a survivor's alone" do
+      with_store do |store|
+        closed = Gori::Notes.create(store, "closing").not_nil!
+        kept = Gori::Notes.create(store, "keeping").not_nil!
+        store.add_link(Gori::Store::LinkOwnerKind::Note, closed, Gori::Store::LinkRefKind::Flow, 7_i64)
+        store.add_link(Gori::Store::LinkOwnerKind::Note, kept, Gori::Store::LinkRefKind::Flow, 8_i64)
+
+        merged = Gori::Notes.save(store, [Gori::Notes::NoteEntry.new(kept, "keeping")],
+          Set{closed}, kept, 3_i64).not_nil!
+        merged.notes.map(&.id).should eq([kept])
+
+        store.list_links(Gori::Store::LinkOwnerKind::Note, closed).should be_empty
+        store.list_links(Gori::Store::LinkOwnerKind::Note, kept).size.should eq(1)
+      end
+    end
+  end
 end
