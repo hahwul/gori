@@ -288,3 +288,37 @@ describe Gori::Hotkeys do
     end
   end
 end
+
+# `expand` runs per frame and is memoized on the keymap revision; the memo must turn over
+# the moment a binding changes, or a rebind would keep advertising the old chord until the
+# process restarted.
+describe "Gori::Hotkeys.expand memo" do
+  it "re-expands after Settings.keymap_overrides changes" do
+    reg = Gori::Verbs.registry
+    prev = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+      Gori::Hotkeys.expand(reg, "{fuzz.run} run").should eq("^R run")
+      Gori::Settings.keymap_overrides = {"fuzz.run" => ["ctrl-s"]}
+      Gori::Hotkeys.expand(reg, "{fuzz.run} run").should eq("^S run")
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+      Gori::Hotkeys.expand(reg, "{fuzz.run} run").should eq("^R run")
+    ensure
+      Gori::Settings.keymap_overrides = prev
+    end
+  end
+
+  it "bumps the keymap revision on every keymap setter" do
+    r0 = Gori::Settings.keymap_revision
+    os, mod = Gori::Settings.keymap_os, Gori::Settings.command_modifier
+    begin
+      Gori::Settings.keymap_os = os
+      Gori::Settings.command_modifier = mod
+      Gori::Settings.keymap_overrides = Gori::Settings.keymap_overrides
+    ensure
+      Gori::Settings.keymap_os = os
+      Gori::Settings.command_modifier = mod
+    end
+    (Gori::Settings.keymap_revision - r0).should be >= 3_u32
+  end
+end
