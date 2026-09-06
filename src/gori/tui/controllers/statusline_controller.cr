@@ -126,7 +126,7 @@ module Gori::Tui
         break if room <= 0
         mem.write(room >= n ? chunk : chunk[0, room])
       end
-      String.new(mem.to_slice)
+      String.new(mem.to_slice).scrub
     end
 
     # First line of `s`, without a trailing CR (the statusline is one row). `s` is

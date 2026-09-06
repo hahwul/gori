@@ -269,3 +269,32 @@ describe AuthorizeIdentitiesOverlay do
     b.contains?("a adds one").should be_true
   end
 end
+
+# The cursor has to survive the row under it being deleted: a stale `@selected` past the end
+# is the TUI's systemic crash shape (an IndexError on the next paint, three of them and the
+# tick breaker ends the session).
+describe AuthorizeIdentitiesOverlay, "cursor after a delete" do
+  private_ids2 = [
+    Identity.as_captured,
+    Identity.new("admin", set_headers: [{"Cookie", "s=A"}]),
+    Identity.new("guest", set_headers: [{"Cookie", "s=G"}]),
+  ]
+
+  it "keeps the selection on a real row when the LAST row is deleted, and still paints" do
+    ov = AuthorizeIdentitiesOverlay.new(private_ids2, 2) # cursor on the last row
+    ov.on_change = ->(_l : Array(Identity)) { true }
+    ov.handle_key(okey(Termisu::Input::Key::LowerD, 'd'))
+    ov.identities.size.should eq(2)
+    ov.selected.should eq(1)
+    render(ov)
+    ov.handle_key(okey(Termisu::Input::Key::LowerD, 'd'))
+    ov.identities.size.should eq(1)
+    ov.selected.should eq(0)
+    render(ov)
+    # the last identity is refused, not deleted — and the cursor stays where it can paint
+    ov.handle_key(okey(Termisu::Input::Key::LowerD, 'd'))
+    ov.identities.size.should eq(1)
+    ov.selected.should eq(0)
+    render(ov)
+  end
+end

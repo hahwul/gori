@@ -193,7 +193,7 @@ module Gori::Tui
     # A saved spec can carry newlines (a short-circuit stub body); collapse so one entry is
     # always exactly one row and can never push the rows below it out of alignment.
     private def oneline(s : String) : String
-      s.gsub(/[\r\n\t]+/, " ")
+      s.scrub.gsub(/[\r\n\t]+/, " ")
     end
   end
 end

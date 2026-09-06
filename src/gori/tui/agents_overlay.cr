@@ -58,7 +58,7 @@ module Gori::Tui
 
     def self.safe_client(name : String?) : String?
       return nil unless name
-      cleaned = name.gsub(/\p{C}/, "").gsub(/\s+/, " ").strip
+      cleaned = name.scrub.gsub(/\p{C}/, "").gsub(/\s+/, " ").strip
       return nil if cleaned.empty?
       Screen.fit(cleaned, CLIENT_MAX_CELLS)
     end

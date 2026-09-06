@@ -127,7 +127,8 @@ module Gori::Tui
     # Flip show/hide of the selected tab. Refuses (false) to hide the last visible one
     # so the bar can never go empty; the caller toasts the refusal.
     def toggle_selected : Bool
-      sym, label, vis = @items[@selected]
+      return false unless item = @items[@selected]?
+      sym, label, vis = item
       return false if vis && visible_count <= 1
       @items[@selected] = {sym, label, !vis}
       true

@@ -95,6 +95,7 @@ require "./tui/input_idle_backoff_patch" # carried termisu patch — see the fil
 require "./tui/geometry"
 require "./tui/theme"
 require "./tui/screen"
+require "./tui/tick_breaker"
 require "./tui/frame"
 require "./tui/brand"
 require "./tui/highlight"
