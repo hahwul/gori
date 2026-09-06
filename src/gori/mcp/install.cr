@@ -163,7 +163,7 @@ module Gori
       def self.build_args(db_path : String? = nil, project : String? = nil,
                           read_only : Bool = false, insecure_upstream : Bool = false,
                           use_active_project : Bool = false, no_project : Bool = false,
-                          config_path : String? = nil) : Array(String)
+                          config_path : String? = nil, tools_spec : String? = nil) : Array(String)
         args = ["mcp"]
         # expand_path throughout (not realpath): neither the db nor the config need exist yet
         # — `gori mcp` creates the db on first serve, and realpath raises File::NotFoundError
@@ -181,6 +181,9 @@ module Gori
         args << "--read-only" if read_only
         args << "--insecure-upstream" if insecure_upstream
         args << "--use-active-project" if use_active_project
+        if spec = tools_spec.try(&.presence)
+          args << "--tools=#{spec}"
+        end
         args
       end
 
@@ -234,11 +237,11 @@ module Gori
                            db_path : String? = nil, project : String? = nil,
                            read_only : Bool = false, insecure_upstream : Bool = false,
                            use_active_project : Bool = false, no_project : Bool = false,
-                           settings_path : String? = nil) : Array(Outcome)
+                           settings_path : String? = nil, tools_spec : String? = nil) : Array(Outcome)
         # Built once, outside the loop: every target writes the identical argv, and building
         # it here is what lets each Outcome carry exactly what was installed.
         args = build_args(db_path, project, read_only, insecure_upstream, use_active_project,
-          no_project, settings_path)
+          no_project, settings_path, tools_spec)
         targets.uniq.map do |target|
           Outcome.new(target, install_argv(target, exe_path, args), nil, args)
         rescue ex

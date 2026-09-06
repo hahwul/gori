@@ -26,6 +26,7 @@ require "../probe"
 require "./serialize"
 require "./request_builder"
 require "./tool"
+require "./tool_filter"
 require "./tools/authorize"
 require "./tools/compare"
 require "./tools/diff"
@@ -264,7 +265,7 @@ module Gori
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil,
-                     @bind_error : String? = nil)
+                     @bind_error : String? = nil, @tool_filter : ToolFilter? = nil)
         # The binding table (#501) is built ONCE per bound project and kept, not rebuilt per
         # call: an MCP server is long-lived and IS an extraction source — `send_request` goes
         # through `Repeater::Sender`, so a `$SESSION` bound by a login here has to still be
@@ -789,6 +790,17 @@ module Gori
         h.keys.reject { |k| allowed.includes?(k) || k.starts_with?('_') }
       end
 
+      # The refusal for a real tool this server was started without, or nil when `name` is
+      # either advertised or not a tool at all (`dispatch_tool` answers the latter).
+      private def filtered_out(name : String) : Result?
+        f = @tool_filter
+        return nil unless f
+        return nil if f.allows?(name) || !TOOL_NAMES.includes?(name)
+        err("tool '#{name}' is not served by this gori MCP server: it was started with " \
+            "--tools=#{f.spec.inspect}, which advertises #{f.size} of #{TOOL_NAMES.size} tools. " \
+            "Everything available is in tools/list.", "UNKNOWN_TOOL")
+      end
+
       # tool name → declared property names, harvested from `list` itself so the validator
       # cannot drift from the advertised schema (a hand-maintained second list would).
       # Built once per process, on the first call that needs it.
@@ -862,6 +874,13 @@ module Gori
         # dispatch; runs inside this method's rescue, so a store read error becomes an
         # INTERNAL result rather than crashing the loop.
         refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
+        # A tool the filter hid must be REFUSED, not quietly answered: `declared_args` is
+        # harvested from `list`, so a hidden tool has no declared arg set, `unknown_args`
+        # returns nil, and dispatch would run it with every argument unchecked — a tool
+        # absent from tools/list but fully live underneath.
+        if hidden = filtered_out(name)
+          return hidden
+        end
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
                      "Accepted: #{declared_args[name].to_a.sort.join(", ")}",
@@ -1750,6 +1769,12 @@ module Gori
       # Emits one {name, description, inputSchema} object. The block declares
       # properties on a builder; `required` names are tracked and emitted.
       private def tool(j : JSON::Builder, name : String, description : String, & : SchemaBuilder ->) : Nil
+        # The ONE place every schema is emitted, which is why `--tools` filters here rather
+        # than in the 30 `list_*_tools` methods: a tool added tomorrow is covered by
+        # construction. `declared_args` is harvested from this same output, so a filtered-out
+        # tool also leaves the argument validator — `call` refuses it by name before that
+        # matters (see `filtered_out`).
+        return if (f = @tool_filter) && !f.allows?(name)
         sb = SchemaBuilder.new
         yield sb
         j.object do

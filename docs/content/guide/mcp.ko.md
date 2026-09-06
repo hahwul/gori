@@ -63,6 +63,20 @@ gori mcp --read-only
 
 알아둘 만한 부수 효과가 하나 있습니다. 전문 검색(`body:`)이 읽는 인덱스는 캡처 커밋과 분리되어 만들어지는데, 읽기 전용 서버는 그 인덱스를 만들 수 없습니다. 아직 인덱싱되지 않은 flow가 남아 있으면 그런 질의는 부분 인덱스로 답하는 대신 `FTS_BACKLOG`로 거부됩니다. gori로 프로젝트를 열거나 `--read-only`를 빼고 실행해서 인덱스를 비우세요.
 
+## 노출할 도구 고르기 {#choosing-which-tools-are-exposed}
+
+gori는 MCP 도구를 약 160개 제공한다. 클라이언트는 첫 질문을 던지기 전에 이 목록 전체를 모델 컨텍스트에 싣고 세션 내내 유지한다 — 대략 43,000 토큰이다. `--read-only`는 53개(~12,000 토큰)로 줄여주지만 축이 하나뿐이다. `--tools`는 직접 고르게 해준다:
+
+```bash
+gori mcp --tools='list_*,get_*,ql_*,project_info,send_request'   # 정찰 + 재전송, ~11k 토큰
+gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워크벤치만 제외
+gori mcp --tools='*,-intercept_*'                                # 같은 뜻을 명시적으로
+```
+
+스펙은 도구 이름과 `*` 글롭을 쉼표로 나열한 것이고 왼쪽부터 적용된다. `-`를 앞에 붙인 항목은 빼낸다. 도구 이름이 이미 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로, 글롭만으로 별도 카탈로그 없이 그룹이 생긴다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 그대로 동작한다.
+
+아무것도 매치하지 않는 패턴은 조용히 좁히는 대신 시작 시 중단하며 후보를 제안한다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 도구가 빠진 서버는 그 기능이 아예 없는 gori와 구분되지 않기 때문이다. 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절한다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록된다.
+
 ## TUI에서 에이전트 보기 {#seeing-an-agent-from-the-tui}
 
 MCP 서버가 프로젝트에 붙어 있는 동안 gori가 이를 보여줍니다. 프로젝트 선택창에서는 해당 행에 `mcp` 표시가 붙고(둘 이상이면 `mcp×2`), 프로젝트를 열면 상단 바에 클릭 가능한 `mcp:<client>` 칩이 나타납니다. 칩을 클릭하거나 명령 팔레트에서 `app.agents`를 실행하면 붙어 있는 에이전트를 나열하는 카드가 열립니다. 이름·버전·pid·연결 시각·읽기 전용 여부가 표시됩니다. 이름은 클라이언트의 `clientInfo` 핸드셰이크에서 오고, `--read-only`로 시작한 서버는 거기서 읽기 전용으로 표시됩니다. 행은 프로세스가 종료되는 즉시 스스로 사라지므로, 칩과 카드는 항상 지금 붙어 있는 것만 반영합니다.
@@ -96,7 +110,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 고정 engagement를 박아 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 
-`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 그대로 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`)는 물론 `--read-only`, `--insecure-upstream`, `--config`까지 포함되므로 클라이언트가 띄우는 커맨드가 입력한 그대로가 됩니다. 경로는 절대 경로로 변환됩니다. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하기 때문입니다.
+`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 그대로 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`)는 물론 `--read-only`, `--tools`, `--insecure-upstream`, `--config`까지 포함되므로 클라이언트가 띄우는 커맨드가 입력한 그대로가 됩니다. 경로는 절대 경로로 변환됩니다. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하기 때문입니다.
 
 ## 도구 {#tools}
 
