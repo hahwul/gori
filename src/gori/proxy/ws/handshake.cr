@@ -71,10 +71,13 @@ module Gori::Proxy::WS
     # WebSocket branch entirely and was relayed as an opaque byte tunnel — no frames
     # captured, no `part: ws` rule, no `proto:ws` hold — on a socket gori can decode.
     # Two predicates for one field-value is what let that disagreement exist.
+    #
+    # `HeaderList#lists?` and not a `get?(…).split(',')` of its own, for the half that fix
+    # missed: RFC 9110 §5.3 lets a list-valued field arrive as repeated field LINES, and `get?`
+    # reads only the last of them — so `Upgrade: h2c` + `Upgrade: websocket` was recognised
+    # while the same pair the other way round was not.
     def self.upgrades_to_websocket?(headers : Codec::HeaderList) : Bool
-      upgrade = headers.get?("Upgrade")
-      return false unless upgrade
-      upgrade.split(',').any? { |token| token.strip.compare("websocket", case_insensitive: true) == 0 }
+      headers.lists?("Upgrade", "websocket")
     end
 
     # True when this raw head still carries a `Sec-WebSocket-Extensions` line.

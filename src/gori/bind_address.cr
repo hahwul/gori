@@ -1,3 +1,5 @@
+require "socket" # Socket::IPAddress — see `wildcard?`
+
 module Gori
   # One place that answers the two DIFFERENT questions a proxy bind address gets asked.
   # They read like the same question and stop being one the moment the bind is a wildcard:
@@ -11,9 +13,10 @@ module Gori
   # and feeding it to a browser's --proxy-server launches a browser that proxies nothing
   # (the bug this module exists to kill). Both surfaces resolve a wildcard to loopback.
   #
-  # Deliberately a leaf with NO requires: `capture_status` (a json-only sidecar read by
+  # Deliberately a leaf with no GORI requires: `capture_status` (a json-only sidecar read by
   # the project picker) and `proxy/conn/self_page` (deep inside the proxy) both need it,
-  # and neither may grow a dependency on the other's subtree.
+  # and neither may grow a dependency on the other's subtree. `socket` is stdlib and is not
+  # one of those subtrees.
   module BindAddress
     # Appended to a wildcard bind's display. "localhost" alone is typeable but hides that
     # LAN devices can reach this listener too — and that reachability is the entire reason
@@ -23,11 +26,26 @@ module Gori
     # Every spelling of "bind to every interface" that Settings.bind_host_error accepts,
     # plus blank — blank is caller-defaulted to loopback (SetupWizard#effective_ip) and
     # is just as undialable as 0.0.0.0 until it is.
+    #
+    # The ADDRESS decides it, not a list of strings. `bind_host_error` accepts anything
+    # `Socket::IPAddress.valid_v6?` does, and RFC 4291 §2.2 gives the all-zero address many
+    # spellings (`::`, `::0`, `0:0:0:0:0:0:0:0`, `0000:…:0000`, `::0.0.0.0`) — so a hand-kept
+    # list is a list a spelling escapes, and what escapes is `dial_host` handing the browser
+    # launcher and the setup page an address nothing can connect to. `Upstream.unspecified?`
+    # parses for the same reason. A host that does not parse is a HOSTNAME (`bind_host_error`
+    # accepts those too) and is never a wildcard; blank is answered before the parse, because
+    # it is the caller-defaulted case rather than an address at all.
     def self.wildcard?(host : String) : Bool
-      case normalize(host)
-      when "", "0.0.0.0", "::", "::0", "0:0:0:0:0:0:0:0" then true
-      else                                                    false
-      end
+      h = normalize(host)
+      return true if h.empty?
+      !!parse_ip(h).try(&.unspecified?)
+    end
+
+    # `h` as an IP literal, or nil when it is a hostname. No DNS: this is a string question.
+    private def self.parse_ip(h : String) : Socket::IPAddress?
+      Socket::IPAddress.new(h, 0)
+    rescue Socket::Error
+      nil
     end
 
     # The concrete host a client ON THIS MACHINE should dial to reach a listener bound to
@@ -74,15 +92,26 @@ module Gori
       end
     end
 
-    # Only the CANONICAL loopback spellings become "localhost". A non-canonical 127.x
+    # Only the CANONICAL loopback ADDRESSES become "localhost". A non-canonical 127.x
     # (127.0.0.2, a second loopback alias someone bound on purpose) stays literal: dialing
-    # "localhost" would not reach it, so collapsing it would print an address that lies.
+    # "localhost" would not reach it, so collapsing it would print an address that lies —
+    # which is why this is an equality against 127.0.0.1 / ::1 and NOT `IPAddress#loopback?`,
+    # whose 127/8 (and `::ffff:127.0.0.1`) reading is exactly the wider set that would lie.
+    #
+    # Compared as ADDRESSES for the reason `wildcard?` states one predicate up: the hand-kept
+    # list this replaced knew `0:0:0:0:0:0:0:1` and not `0000:0000:…:0001` or `::0:1`, all of
+    # which `bind_host_error` accepts, so the same bind read as "localhost:8070" or as a raw
+    # literal depending on how the operator spelled it. `localhost` itself is a NAME and never
+    # parses, so it stays a string test.
     private def self.localhost_alias?(host : String) : Bool
-      case normalize(host)
-      when "localhost", "127.0.0.1", "::1", "0:0:0:0:0:0:0:1" then true
-      else                                                         false
-      end
+      h = normalize(host)
+      return true if h == "localhost"
+      return false unless ip = parse_ip(h)
+      ip == CANONICAL_V4_LOOPBACK || ip == CANONICAL_V6_LOOPBACK
     end
+
+    private CANONICAL_V4_LOOPBACK = Socket::IPAddress.new("127.0.0.1", 0)
+    private CANONICAL_V6_LOOPBACK = Socket::IPAddress.new("::1", 0)
 
     private def self.normalize(host : String) : String
       strip_brackets(host.strip).downcase

@@ -347,6 +347,66 @@ describe Gori::Scope do
     end
   end
 
+  # A TRAILING ROOT DOT is the same name to every resolver and reaches the store verbatim —
+  # gori captures the `Host:` bytes, and a browser sends the dot when the user types one. The
+  # dialect folds it now, so the SQL lens has to fold it in the same place or a flow is in
+  # scope at every live gate and hidden from History (the failure the bracket example below
+  # pins, one spelling over).
+  it "SQL filter reaches a trailing-root-dot flow host, like every live gate does" do
+    with_store do |store|
+      flows = [{"acme.test.", "/a"}, {"api.acme.test.", "/b"}, {"acme.test", "/c"},
+               {"other.test.", "/d"}]
+      flows.each { |(h, t)| capture(store, h, t) }
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.enable
+
+      sql = store.search(scope.filter, 50).map(&.host).sort!
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort!
+      sql.should eq(mem)
+      mem.should eq(["acme.test", "acme.test.", "api.acme.test."])
+    end
+  end
+
+  # The EXCLUDE direction is the one that matters: a carve-out an operator wrote to keep a
+  # host OUT stopped holding for the dotted spelling, so the request reached the origin under
+  # a Sandbox that had been told not to allow it.
+  it "an EXCLUDE host rule covers the trailing-root-dot spelling too" do
+    with_store do |store|
+      flows = [{"prod.corp", "/x"}, {"prod.corp.", "/x"}, {"stage.corp", "/x"}]
+      flows.each { |(h, t)| capture(store, h, t) }
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "string", "corp") # a URL include the dotted host still matches
+      scope.add("exclude", "host", "prod.corp")
+      scope.enable
+
+      sql = store.search(scope.filter, 50).map(&.host).sort!
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort!
+      sql.should eq(mem)
+      mem.should eq(["stage.corp"])
+      scope.excluded?(url_of("http", "prod.corp.", "/x"), "prod.corp.").should be_true
+    end
+  end
+
+  # A PATTERN carrying the dot was the mirror: storable, and matching nothing at all.
+  it "a host rule typed WITH the root dot is not a dead rule" do
+    with_store do |store|
+      flows = [{"acme.test", "/a"}, {"api.acme.test", "/b"}, {"other.test", "/c"}]
+      flows.each { |(h, t)| capture(store, h, t) }
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test.")
+      scope.enable
+
+      sql = store.search(scope.filter, 50).map(&.host).sort!
+      mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort!
+      sql.should eq(mem)
+      mem.should eq(["acme.test", "api.acme.test"])
+    end
+  end
+
   # A half-bracketed oddity must peel the same on both sides — the reason HOST_BARE is the
   # pair test and not `trim(host, '[]')`, which would have peeled one and left the other.
   it "peels a bracket pair the way HostPattern.bare does, not one bracket at a time" do

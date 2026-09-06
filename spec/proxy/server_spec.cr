@@ -150,6 +150,35 @@ private def start_origin(body : String, seen : Channel(String)) : Int32
   port
 end
 
+# A PERSISTENT origin: same as start_origin, but it answers `Content-Length` with no
+# `Connection` field at all and keeps the socket open. Needed wherever the assertion is about
+# gori's OWN keep-alive decision — `start_origin`'s `Connection: close` propagates into
+# `keep_alive?` and would close the client leg whatever the request said.
+private def start_keepalive_origin(body : String, seen : Channel(String)) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    # `spawn_with`, never `spawn do … conn … end`: the block would close over the LOOP
+    # VARIABLE, which the next `accept?` reassigns before the fiber runs (see spec_helper).
+    # This helper is the KEEP-ALIVE origin, so a second leg to it is the normal case and the
+    # trap is live — both fibers would then serve the second socket while the first is never
+    # read, and the client on it blocks until the GC finalises the orphan.
+    while accepted = origin.accept?
+      spawn_with(accepted) do |conn|
+        while head = Gori::Proxy::Codec::Http1.read_head(conn)
+          seen.send(String.new(head).lines.first)
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n" << body
+          conn.flush
+        end
+      rescue
+      ensure
+        conn.close rescue nil
+      end
+    end
+  end
+  port
+end
+
 # An origin that reads the request BODY (per its framing) and reports it on `seen_body`,
 # then replies with `resp_body`. `chunked` frames the reply as Transfer-Encoding: chunked
 # (one chunk) so the response-body M&R path exercises de-chunk → re-frame.
@@ -545,6 +574,73 @@ describe Gori::Proxy::Server do
     seen.receive.should eq("GET /abs?x=1 HTTP/1.1") # rewritten to origin-form
     # but the captured request preserves the original absolute-form target (P7)
     sink.requests.first.target.should eq("http://127.0.0.1:#{origin_port}/abs?x=1")
+  end
+
+  # RFC 3986 §3.1: a scheme is case-insensitive, and gori captures the request line verbatim,
+  # so `GET HTTP://host/p` really does reach the forward-proxy branch. Reading it with a
+  # case-SENSITIVE prefix pair sent it down the ORIGIN-FORM path instead: the dial then came
+  # from the `Host` header while the absolute-form line stayed on the wire — so gori forwarded
+  # a proxy-only request line to an origin, and `Url.request_url` (case-INSENSITIVE) handed
+  # scope, Sandbox and History the OTHER authority. RFC 9112 §3.2.2 makes the absolute form
+  # authoritative for a proxy; `Host` is to be ignored when it disagrees.
+  it "routes an absolute-form target whose scheme is not lowercase by the URI, not Host" do
+    # ONE channel for both origins, so whichever gori actually dialled reports its own request
+    # line and the assertion can never deadlock on the origin that was skipped.
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("ok", seen)
+    decoy_port = start_origin("decoy", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET HTTP://127.0.0.1:#{origin_port}/abs?x=1 HTTP/1.1\r\nHost: 127.0.0.1:#{decoy_port}\r\n\r\n"
+    client.flush
+    body = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen.receive.should eq("GET /abs?x=1 HTTP/1.1") # the URI's origin, origin-form
+    body.should contain("ok")                       # …and not the Host header's origin
+    body.should_not contain("decoy")
+    req = sink.requests.first
+    req.host.should eq("127.0.0.1")
+    req.port.should eq(origin_port)
+    req.target.should eq("HTTP://127.0.0.1:#{origin_port}/abs?x=1") # client's bytes, verbatim
+  end
+
+  # RFC 9110 §5.3: repeated field lines of a list-valued field are the comma-joined field. So
+  # `Connection: close` + `Connection: keep-alive` carries `close`, whichever line came first —
+  # and `HeaderList#get?` returns only the LAST line, so the token could hide in an earlier one.
+  # The client leg is where that is observable: gori kept the socket open for a request that
+  # had asked it to close, and only the idle timeout ended it.
+  it "honours Connection: close when it arrives on an earlier repeated field line" do
+    seen = Channel(String).new(2)
+    done = Channel(Nil).new(2)
+    origin_port = start_keepalive_origin("ok", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds # gori holding the leg open must FAIL, not hang the suite
+    client << "GET /a HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Connection: close\r\nConnection: keep-alive\r\n\r\n"
+    client.flush
+    # `gets_to_end` returns only on EOF, so it completes exactly when gori closed the leg.
+    body = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen.receive.should eq("GET /a HTTP/1.1")
+    body.should contain("ok")
   end
 
   it "captures an SSE (text/event-stream) response streamed to close" do

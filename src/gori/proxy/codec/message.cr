@@ -56,6 +56,67 @@ module Gori::Proxy::Codec
     def has?(name : String) : Bool
       @entries.any? { |h| h.name.compare(name, case_insensitive: true) == 0 }
     end
+
+    # Does the LIST-valued field `name` carry `token` as one of its members? Case-insensitive
+    # on both halves, and across EVERY field line of that name.
+    #
+    # That last part is the whole reason this exists rather than `get?(name).split(',')` at each
+    # caller. RFC 9110 §5.3 makes repeated field lines of a list-valued field exactly equivalent
+    # to one comma-joined line, so `Connection: close` + `Connection: keep-alive` carries BOTH —
+    # while `get?` returns the LAST line only, and the token an answer turns on can sit in an
+    # earlier one. Two callers ask this question — `Connection` on both keep-alive decisions,
+    # and the WebSocket handshake's `Upgrade` — and each reads a token whose presence decides
+    # what gori does with the socket. (`Repeater::ConnPool#connection_token?` and
+    # `Probe::Passive::Tech#websocket?` still carry copies of it; they belong to other
+    # subsystems and are named here so the next reader finds them.)
+    #
+    # Allocation-free on the miss, which is the common case for both: the whole point of asking
+    # `Connection` per message is that most messages carry no such token.
+    def lists?(name : String, token : String) : Bool
+      @entries.any? do |h|
+        h.name.compare(name, case_insensitive: true) == 0 && HeaderList.list_member?(h.value, token)
+      end
+    end
+
+    # Is `token` one of `value`'s comma-separated members, with OWS trimmed? Byte-wise over the
+    # value so a long `Connection`/`Upgrade` field costs no Array and no per-member String.
+    protected def self.list_member?(value : String, token : String) : Bool
+      bytes = value.to_slice
+      start = 0
+      pos = 0
+      while pos <= bytes.size
+        if pos == bytes.size || bytes.unsafe_fetch(pos) == 0x2c_u8 # ',' — or the value's end
+          return true if member_equals?(bytes, start, pos, token)
+          start = pos + 1
+        end
+        pos += 1
+      end
+      false
+    end
+
+    # `bytes[from...to]`, OWS-trimmed, compared to `token` (ASCII case-insensitive).
+    private def self.member_equals?(bytes : Bytes, from : Int32, to : Int32, token : String) : Bool
+      while from < to && ows?(bytes.unsafe_fetch(from))
+        from += 1
+      end
+      while to > from && ows?(bytes.unsafe_fetch(to - 1))
+        to -= 1
+      end
+      return false unless to - from == token.bytesize
+      needle = token.to_slice
+      (to - from).times do |i|
+        return false unless lower(bytes.unsafe_fetch(from + i)) == lower(needle.unsafe_fetch(i))
+      end
+      true
+    end
+
+    private def self.lower(b : UInt8) : UInt8
+      b >= 0x41_u8 && b <= 0x5a_u8 ? b | 0x20_u8 : b # ASCII 'A'..'Z'
+    end
+
+    private def self.ows?(b : UInt8) : Bool
+      b == 0x20_u8 || b == 0x09_u8
+    end
   end
 
   # A captured HTTP/1.1 request. `raw_head` is the byte-exact request-line +
