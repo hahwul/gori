@@ -262,5 +262,48 @@ module Gori::Tui
       fake.syncs.should be > 0
       Gori::Tui.buffers_identical(eager.buffer, fake.buffer, 30, 8).should be_nil
     end
+
+    # `fill_span` is the bulk path `Screen#fill` takes now; it must leave the grid exactly as
+    # the per-cell path did, and the only place the two can disagree is a wide glyph the span
+    # touches: its lead just outside the span's left edge, its continuation just past the
+    # right edge, or both halves inside. Each is drawn, then filled over, then compared
+    # against eager forwarding of the same sequence.
+    it "fills over a wide glyph at either edge and inside a span identically to eager" do
+      w, h = 20, 4
+      fake = FakeTerm.new(w, h)
+      eager = EagerRefBackend.new(w, h)
+      buffered = TermisuBackend.new(fake)
+      bscreen = Screen.new(buffered)
+      escreen = Screen.new(eager)
+      [bscreen, escreen].each do |sc|
+        sc.fill(Rect.new(0, 0, w, h), Theme.bg)
+        sc.text(4, 0, "中", Theme.text)                 # lead at 4, continuation at 5
+        sc.fill(Rect.new(5, 0, 6, 1), Theme.accent_bg) # span starts ON the continuation → lead orphaned
+        sc.text(4, 1, "中", Theme.text)
+        sc.fill(Rect.new(0, 1, 5, 1), Theme.accent_bg) # span ends ON the lead → continuation orphaned
+        sc.text(4, 2, "中文", Theme.text)
+        sc.fill(Rect.new(2, 2, 8, 1), Theme.accent_bg) # both halves inside
+        sc.text(w - 2, 3, "中", Theme.text)
+        sc.fill(Rect.new(w - 4, 3, 40, 1), Theme.accent_bg) # clipped at the right edge
+        sc.fill(Rect.new(-3, 3, 5, 1), Theme.selection_dim) # clipped at the left edge
+      end
+      buffered.flush
+      Gori::Tui.buffers_identical(eager.buffer, fake.buffer, w, h).should be_nil
+    end
+
+    it "clips a fill that leaves the screen entirely without writing anything" do
+      w, h = 10, 3
+      fake = FakeTerm.new(w, h)
+      buffered = TermisuBackend.new(fake)
+      screen = Screen.new(buffered)
+      screen.fill(Rect.new(0, 0, w, h), Theme.bg)
+      buffered.flush
+      fake.reset_counts
+      screen.fill(Rect.new(w, 0, 5, h), Theme.accent_bg)  # off the right
+      screen.fill(Rect.new(0, h, w, 2), Theme.accent_bg)  # off the bottom
+      screen.fill(Rect.new(-5, 0, 5, h), Theme.accent_bg) # off the left
+      buffered.flush
+      fake.set_calls.should eq(0)
+    end
   end
 end

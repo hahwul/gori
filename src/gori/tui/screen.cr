@@ -22,6 +22,15 @@ module Gori::Tui
     # ioctl). No-op for recording backends, which size themselves at construction.
     def resize(w : Int32, h : Int32) : Nil
     end
+
+    # Blank `w` cells from (x, y) in `bg` — what `Screen#fill` does per row, and the first
+    # thing every frame does to the whole screen. The default is the per-cell path, so a
+    # recording backend needs nothing; `TermisuBackend` overrides it with a grid write that
+    # skips the glyph work a blank never needs (see there). Same contract as `put` for the
+    # trailing half of a wide glyph the span lands on: the orphaned lead is cleared.
+    def fill_span(x : Int32, y : Int32, w : Int32, fg : Color, bg : Color) : Nil
+      w.times { |i| put(x + i, y, ' ', fg, bg, Attribute::None) }
+    end
   end
 
   # The production backend for a real terminal. Rather than forwarding every `put`
@@ -111,6 +120,37 @@ module Gori::Tui
       end
     end
 
+    # The bulk form of `put` for a run of blanks. `Screen#fill` paints the WHOLE screen this
+    # way at the top of every frame (10 000 cells at 200×50) and ~150 more sites fill a card
+    # or a selected row, so the per-cell path — `Screen#cell`'s bounds check and ASCII intern,
+    # then `put`'s bounds check, `accepted_width` (a slice fetch), a `cont?` fetch and a
+    # `GridCell.new` — was the frame's single largest fixed cost, spent on cells that are all
+    # the same known-width-1 blank. One struct, written straight into the grid.
+    #
+    # The wide-glyph rule is `put`'s, applied only where it can matter: a continuation cell at
+    # the span's FIRST column means its lead sits just outside on the left and is orphaned
+    # (cleared, as termisu clears it); a continuation just PAST the span means its lead was
+    # inside and has just been overwritten, so it is cleared too. A continuation INSIDE the
+    # span is simply overwritten along with its lead.
+    def fill_span(x : Int32, y : Int32, w : Int32, fg : Color, bg : Color) : Nil
+      return unless y >= 0 && y < @h
+      if x < 0
+        w += x
+        x = 0
+      end
+      w = @w - x if x + w > @w
+      return if w <= 0
+      blank = GridCell.new(" ", fg, bg, Attribute::None)
+      idx = y * @w + x
+      @back.unsafe_put(idx - 1, GridCell.blank) if x > 0 && @back.unsafe_fetch(idx).cont?
+      stop = idx + w
+      while idx < stop
+        @back.unsafe_put(idx, blank)
+        idx += 1
+      end
+      @back.unsafe_put(stop, GridCell.blank) if x + w < @w && @back.unsafe_fetch(stop).cont?
+    end
+
     # The column width termisu will render `g` at (1 or 2), or 0 if termisu's set_cell would
     # REJECT it — mirroring its guards so our grid only ever holds cells termisu accepts. A
     # single byte is width-1 EXCEPT a C0 control / DEL, which termisu rejects (buffer's
@@ -141,16 +181,25 @@ module Gori::Tui
       full = @full || sync
       i = 0
       n = @back.size
+      # (x, y) are carried rather than derived: `i % @w` and `i // @w` are two integer
+      # divisions per forwarded cell, and a `sync` forwards every cell on the screen.
+      x = 0
+      y = 0
       while i < n
         b = @back.unsafe_fetch(i)
         if full || b != @front.unsafe_fetch(i)
           # Advance @front only when the cell was actually accepted (or is a continuation
           # termisu builds from its lead). If termisu rejects a write it leaves the cell
           # unchanged, so caching it as sent would make the diff skip the still-wrong cell.
-          accepted = b.cont? || @term.set_cell(i % @w, i // @w, b.grapheme, fg: b.fg, bg: b.bg, attr: b.attr)
+          accepted = b.cont? || @term.set_cell(x, y, b.grapheme, fg: b.fg, bg: b.bg, attr: b.attr)
           @front.unsafe_put(i, b) if accepted
         end
         i += 1
+        x += 1
+        if x == @w
+          x = 0
+          y += 1
+        end
       end
       @full = false
       sync ? @term.sync : @term.render
@@ -504,10 +553,17 @@ module Gori::Tui
       cur_x
     end
 
+    # Clipped here, once per rect, so the backend's span write never has to. `Theme.text` as
+    # the fg is what the per-cell path always wrote (the diff compares fg too, so a blank
+    # with a different fg would count as a changed cell every frame).
     def fill(rect : Rect, bg : Color) : Nil
-      (rect.y...rect.bottom).each do |yy|
-        (rect.x...rect.right).each { |xx| cell(xx, yy, ' ', Theme.text, bg) }
-      end
+      x0 = {rect.x, 0}.max
+      x1 = {rect.right, @width}.min
+      return if x1 <= x0
+      y0 = {rect.y, 0}.max
+      y1 = {rect.bottom, @height}.min
+      fg = Theme.text
+      (y0...y1).each { |yy| @backend.fill_span(x0, yy, x1 - x0, fg, bg) }
     end
 
     def hline(x : Int32, y : Int32, w : Int32, ch : Char = '─',
