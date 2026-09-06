@@ -1010,10 +1010,16 @@ module Gori::Tui
     # The queue/detail split, then the `↓` dropdown OVER it — drawn last unconditionally, since
     # the body below returns early on the empty-queue path and that is exactly when an operator
     # is most likely to be editing the condition. Mirrors HistoryView / SitemapView.
+    # `holding` is whether THIS window owns the project's capture lock. Everything this tab
+    # draws — the chips, the condition, the queue — comes from a local `Interceptor` that only
+    # the lock holder's proxy ever reaches, so in a second window the bar was painting a catch
+    # state nothing gates through while the real gate ran in another process. The controller
+    # already refuses to let those controls be changed here; the bar has to stop claiming them.
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
-               listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
+               listen : {String, Int32}? = nil, capturing : Bool = true,
+               holding : Bool = true) : Nil
       return if rect.empty?
-      render_panes(screen, rect, focused, listen: listen, capturing: capturing)
+      render_panes(screen, rect, focused, listen: listen, capturing: capturing, holding: holding)
       render_query_popup(screen, rect)
     end
 
@@ -1030,8 +1036,9 @@ module Gori::Tui
     end
 
     private def render_panes(screen : Screen, rect : Rect, focused : Bool = true, *,
-                             listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
-      render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused)
+                             listen : {String, Int32}? = nil, capturing : Bool = true,
+                             holding : Bool = true) : Nil
+      render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused, holding)
       render_suggestions(screen, rect, rect.y + FILTER_BAR_H) if @querying
       body = body_rect(rect)
       return if body.empty?
@@ -1050,7 +1057,8 @@ module Gori::Tui
     # The top filter bar: while editing the condition it's a single input line
     # (`catch › …`); otherwise a catch-direction chip, the committed condition (or a
     # field hint), and a right-aligned held count. Mirrors History's QL bar.
-    private def render_filter_bar(screen : Screen, rect : Rect, focused : Bool) : Nil
+    private def render_filter_bar(screen : Screen, rect : Rect, focused : Bool,
+                                  holding : Bool = true) : Nil
       return if rect.empty?
       if @querying
         screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
@@ -1075,6 +1083,15 @@ module Gori::Tui
       rx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2, chips)
 
       left_w = {rx - x, 0}.max
+      # A window that does not hold the capture lock reads this tab off an `Interceptor` no
+      # proxy fiber ever reaches, so the chips left of here describe a local object and the
+      # condition slot has nothing true to put in it. Say which window this is instead of
+      # painting a gate state that belongs to another process.
+      unless holding
+        screen.text(x, rect.y, "view-only — the catch running on this project is another window's",
+          Theme.orange, width: left_w)
+        return
+      end
       if @query.blank?
         screen.text(x, rect.y, IDLE_HINT, Theme.muted, width: left_w)
       else
@@ -1220,8 +1237,12 @@ module Gori::Tui
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
         label = row_label(it)
         width = {inner.w - 6, 1}.max
-        render_held_age(screen, inner, y, it, now, bg, selected, Screen.draw_width(label), width)
-        screen.text(inner.x + 5, y, label, selected || marked ? Theme.text_bright : Theme.text, bg, width: width)
+        # `selected || marked`, the SAME test the label uses one line down: a marked row paints
+        # its host+target bright, and keying the clock on `selected` alone left it muted beside
+        # a bright label, reading as a different row.
+        lit = selected || marked
+        render_held_age(screen, inner, y, it, now, bg, lit, Screen.draw_width(label), width)
+        screen.text(inner.x + 5, y, label, lit ? Theme.text_bright : Theme.text, bg, width: width)
       end
       Frame.scroll_gauge(screen, inner, @items.size, @scroll, focused)
     end
@@ -1243,24 +1264,22 @@ module Gori::Tui
     # needs them keeps them and the row simply carries no clock. The queue's own scroll gauge
     # takes the same "only when it earns the column" line.
     private def render_held_age(screen : Screen, inner : Rect, y : Int32, it : Interceptor::Item,
-                                now : Time::Instant, bg : Color, selected : Bool,
+                                now : Time::Instant, bg : Color, lit : Bool,
                                 label_w : Int32, width : Int32) : Nil
       age = held_age(it, now)
       w = Screen.draw_width(age)
       return if label_w > width - w - 1 # no slack: the label needs every cell it has
       # `right - 1 - w`: the label's own run stops one cell short of the card's inner right
       # edge (`inner.w - 6` cells from `inner.x + 5`), so the age ends exactly where it could.
-      screen.text(inner.right - 1 - w, y, age, selected ? Theme.text_bright : Theme.muted, bg)
+      screen.text(inner.right - 1 - w, y, age, lit ? Theme.text_bright : Theme.muted, bg)
     end
 
-    # How long a message has been held, as the narrowest string that still reads. Monotonic
-    # (`Item#held_at`), never the wall clock: a hold is measured against the client that is
-    # waiting on it, and a system clock step must not make one look older or newer than it is.
+    # How long a message has been held. MONOTONIC (`Item#held_at`), never the wall clock: a
+    # hold is measured against the client that is waiting on it, and a system clock step must
+    # not make one look older or newer than it is. The wording is `Interceptor.age_label`'s,
+    # shared with `gori run intercept list` so the two surfaces cannot drift.
     private def held_age(it : Interceptor::Item, now : Time::Instant) : String
-      secs = (now - it.held_at).total_seconds.to_i
-      return "#{secs}s" if secs < 60
-      return "#{secs // 60}m#{(secs % 60).to_s.rjust(2, '0')}s" if secs < 3600
-      "#{secs // 3600}h#{(secs % 3600 // 60).to_s.rjust(2, '0')}m"
+      Interceptor.age_label((now - it.held_at).total_seconds.to_i)
     end
 
     # Paint a queue row's background band + gutter glyph, returning the bg every cell on that

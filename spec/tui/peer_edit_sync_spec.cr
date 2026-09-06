@@ -769,3 +769,25 @@ describe "Runner.quit_decision with an Issues writeup in conflict" do
     end
   end
 end
+
+# `edited` is mirrored across the #123 bridge so a REMOTE agent leaves a hold the operator is
+# rewriting alone. gori's own auto-forward has to honour it first: the reaper forwards
+# `it.raw`, so it threw the edit away under a toast that said only "auto-forwarded".
+describe "the auto-forward reaper and an in-progress edit" do
+  it "skips the hold the operator has unsaved bytes in" do
+    # Source-pinned for the reason the ui-state gate above is: `Runner.new` appears nowhere
+    # under spec/ (it owns a terminal), and the reaper only runs on the tick.
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "intercept_bridge.cr"))
+    body = src.lines.reject(&.lstrip.starts_with?('#')).join('\n')
+    reap = body[/^ *private def reap_stale_holds.*?\n *end\n/m]
+    reap.should_not be_nil
+    reap.not_nil!.should contain("held_edit_id")
+    # The skip is INSIDE the per-item loop and BEFORE the forward: reading the edit id and
+    # then forwarding every item anyway is the shape this pins against.
+    loop_at = reap.not_nil!.index("pending.each").not_nil!
+    skip_at = reap.not_nil!.index("next if it.id == editing").not_nil!
+    fwd_at = reap.not_nil!.index("ic.forward(it.id)").not_nil!
+    skip_at.should be > loop_at
+    fwd_at.should be > skip_at
+  end
+end

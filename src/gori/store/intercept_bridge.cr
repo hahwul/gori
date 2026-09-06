@@ -17,6 +17,12 @@ module Gori
     # written — so the upsert updates it and leaves everything else, `raw` above all, alone.
     # As a plain `INSERT OR IGNORE` the flag was frozen at whatever it was when the item was
     # first mirrored, which for every hold is `false`.
+    #
+    # The `WHERE` on that DO UPDATE is what keeps the paragraph above true. Without it SQLite
+    # takes the update branch for every already-present row on every republish — reading the
+    # existing record and rewriting it, held BLOB included — and a condition typed into the
+    # catch bar republishes on every keystroke. With it, an unchanged flag is a no-op again,
+    # exactly as `OR IGNORE` was.
     def publish_intercept_held(token : String, rows : Array(HeldRow)) : Nil
       exec_task ->(c : DB::Connection) {
         c.exec("DELETE FROM intercept_held WHERE session_token <> ?", token)
@@ -42,7 +48,8 @@ module Gori
             args << r.held_at_ms << (r.edited ? 1 : 0) << r.edit_refusal << (r.head_only? ? 1 : 0) << (r.binary? ? 1 : 0)
             c.exec("INSERT INTO intercept_held (session_token, item_id, kind, method, host, port, scheme, target, flow_id, raw, held_at_ms, edited, edit_refusal, head_only, binary) " \
                    "VALUES (?,?,?,?,?,?,?,?,?,#{slot},?,?,?,?,?) " \
-                   "ON CONFLICT(session_token, item_id) DO UPDATE SET edited = excluded.edited", args: args)
+                   "ON CONFLICT(session_token, item_id) DO UPDATE SET edited = excluded.edited " \
+                   "WHERE intercept_held.edited IS NOT excluded.edited", args: args)
           end
         end
         nil

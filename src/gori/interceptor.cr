@@ -248,6 +248,23 @@ module Gori
       @revision.get
     end
 
+    # How long a message has been HELD, as the narrowest string that still reads.
+    #
+    # One definition, because three surfaces show it and they must not drift: the TUI queue's
+    # own column (`InterceptView#render_held_age`, from the monotonic `Item#held_at`) and
+    # `gori run intercept list` (from the bridge row's wall-clock `held_at_ms`). It lives here
+    # rather than in either because neither owns the other, and it is pure so a spec can pin
+    # the thresholds without a queue.
+    #
+    # Floors at zero: the CLI reads a stamp written by the PUBLISHING instance's clock, and a
+    # reader whose own clock is behind it must not print "held -3s".
+    def self.age_label(seconds : Int) : String
+      secs = {seconds, 0}.max
+      return "#{secs}s" if secs < 60
+      return "#{secs // 60}m#{(secs % 60).to_s.rjust(2, '0')}s" if secs < 3600
+      "#{secs // 3600}h#{(secs % 3600 // 60).to_s.rjust(2, '0')}m"
+    end
+
     # --- what intercept could NOT hold ---------------------------------------
     #
     # A gate can decline to hold a message that catch was armed for: an h1 body whose declared
@@ -268,9 +285,6 @@ module Gori
     # never does).
     NOTICE_CAP = 16
 
-    # The shared empty result, so the per-tick drain on an idle proxy allocates nothing.
-    NO_NOTICES = [] of String
-
     # Record one, from a PROXY fiber. Deliberately not a revision bump: this is not queue
     # state, and a notice must not make the TUI re-snapshot a queue that did not change.
     def note_unheld(text : String) : Nil
@@ -285,8 +299,11 @@ module Gori
 
     # Take everything recorded since the last call. Lock-free when there is nothing, which is
     # every tick of a proxy that is holding what it was asked to.
+    # A FRESH empty array on the fast path, never a shared constant: the return type is a
+    # mutable `Array(String)`, and a caller that appended to a shared one would leave every
+    # later drain reporting notices nobody recorded.
     def drain_notices : Array(String)
-      return NO_NOTICES if @notice_count.get == 0
+      return Array(String).new(0) if @notice_count.get == 0
       @mutex.synchronize do
         out = @notices
         @notices = [] of String

@@ -86,7 +86,8 @@ module Gori::Tui
       shell = BodyChrome.shell_focused(focus, multi_pane: !@intercept.empty?)
       BodyChrome.framed(screen, rect, shell) do |inner|
         @intercept.render(screen, inner, focused: body_focused,
-          listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
+          listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?,
+          holding: @host.session.capturing_lock_held?)
       end
     end
 
@@ -222,7 +223,13 @@ module Gori::Tui
     # stays up for as long as the card does; this is the one keystroke that can say why.
     private def open_editor : Nil
       @intercept.toggle_edit
-      return unless @intercept.editing?
+      announce_editor_mode if @intercept.editing?
+    end
+
+    # What the operator has to know the moment the buffer opens, whichever door they came
+    # through. The caveat outranks the key list: "gori will not apply an edit to this message"
+    # is the sentence that decides whether to type at all.
+    private def announce_editor_mode : Nil
       if caveat = @intercept.selected_edit_caveat
         @host.status(caveat.note)
       elsif @intercept.hex_editing?
@@ -539,8 +546,14 @@ module Gori::Tui
     end
 
     # --- focus ring (list ◂▸ detail editor) ---
+    # Tab into the detail pane opens the editor exactly as `↵`/`e` do, so it owes the same
+    # sentence: the caveat exists to be read BEFORE the operator types, and emitting it from
+    # `open_editor` alone skipped one of the two doors into the buffer.
     def pane_advance(dir : Int32) : Bool
-      @intercept.pane_advance(dir)
+      was = @intercept.editing?
+      moved = @intercept.pane_advance(dir)
+      announce_editor_mode if moved && !was && @intercept.editing?
+      moved
     end
 
     def focus_first : Nil
@@ -548,7 +561,9 @@ module Gori::Tui
     end
 
     def focus_last : Nil
+      was = @intercept.editing?
       @intercept.focus_last
+      announce_editor_mode if !was && @intercept.editing?
     end
 
     # --- verbs (delegated from the Runner's ExecContext; also called inline above) ---
@@ -567,9 +582,14 @@ module Gori::Tui
     # defect was found on it; `c` (direction) and `/` (condition) are the same object, the
     # same bar, and the same lie — a window painting `c:REQ` beside a condition it typed,
     # over a gate in another process that reads neither.
+    # "outside this tab", because `c` here is `intercept.direction`. `capture.toggle` is a
+    # GLOBAL `c` and `Runner#resolve_verb_id` gives a scoped binding precedence whenever the
+    # scoped verb is available — `intercept.direction` carries no `available:` predicate, so it
+    # always is. Naming a bare `c` therefore pointed the operator at the very key that had just
+    # refused them, and pressing it again printed the same sentence.
     private def catch_control_allowed? : Bool
       return true if @host.session.capturing_lock_held?
-      @host.status("view-only — this window is not holding traffic; press c to take over capture")
+      @host.status("view-only — this window is not holding traffic; take over capture with c outside this tab")
       false
     end
 

@@ -186,6 +186,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def reap_stale_holds : Bool
     return false if @intercept_max_hold_ms <= 0
     return false if @active_tab == :intercept # human is watching the queue → never clobber
+    # The hold the operator has unsaved bytes typed into is the strongest form of "somebody is
+    # watching this one", and the reaper forwards `it.raw` — so it threw the edit away with a
+    # toast that said only "auto-forwarded". `edited` is published across the bridge precisely
+    # so a REMOTE agent leaves such a hold alone; gori's own auto-forward has to honour it
+    # first. Nil (no edit anywhere) leaves every item eligible, as before.
+    editing = intercept_controller.held_edit_id
     ic = @session.interceptor
     pending = ic.pending
     return false if pending.empty?
@@ -199,6 +205,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     now_ms = Time.utc.to_unix_ms
     reaped = false
     pending.each do |it|
+      next if it.id == editing # the operator is mid-edit on this one
       watched = {it.held_at_ms, viewed[it.id]? || 0_i64}.max
       next if now_ms - watched < @intercept_max_hold_ms
       # original bytes (fail-open), same as toggle-off / release_all. A false answer means

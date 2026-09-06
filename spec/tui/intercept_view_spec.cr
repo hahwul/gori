@@ -1167,3 +1167,89 @@ describe "Intercept operator-edit flag" do
     end
   end
 end
+
+# Review follow-ups on the batch above.
+describe "Intercept review follow-ups" do
+  # The clock keys on the SAME test the label does: a marked row paints its host+target bright,
+  # and keying the age on `selected` alone left it muted beside a bright label.
+  it "paints a marked row's age as brightly as its label" do
+    tmp_interceptor do |ic|
+      view = three_holds(ic)
+      view.toggle_mark # marks row 0, cursor steps to row 1
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
+      row = (0...10).find { |y| backend.row(y).includes?("acme.test/one") }.not_nil!
+      line = backend.row(row)
+      age_x = line.index(/\d+s/).not_nil!
+      label_x = line.index("GET acme.test/one").not_nil!
+      backend.fg_at(age_x, row).should eq(backend.fg_at(label_x, row))
+    end
+  end
+
+  # Everything this tab draws comes from a local Interceptor only the lock holder's proxy ever
+  # reaches. In a second window the bar painted a catch state nothing gates through.
+  it "says view-only rather than painting another window's gate" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10), holding: false)
+      backend.row(0).should contain("view-only")
+
+      # …and the holder's own bar is unchanged.
+      held = MemoryBackend.new(110, 10)
+      view.render(Screen.new(held), Rect.new(0, 0, 110, 10))
+      held.row(0).should_not contain("view-only")
+      held.contains?("/ condition").should be_true
+    end
+  end
+
+  # Tab into the detail pane opens the editor exactly as ↵/e do, so it owes the same sentence
+  # — the caveat exists to be read BEFORE the operator types.
+  it "exposes the caveat however the editor is entered" do
+    tmp_interceptor do |ic|
+      ic.enqueue_request("GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, method: "GET",
+        target: "/", host: "a", port: 80, scheme: "http",
+        edit_refusal: "a CR/LF in a header value has no faithful HTTP/1.1 text form").not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      view.pane_advance(1) # the focus ring's door into the editor
+      view.editing?.should be_true
+      view.selected_edit_caveat.not_nil!.note.should contain("edits cannot be applied")
+    end
+  end
+end
+
+describe "Gori::Interceptor.age_label" do
+  # ONE definition, shared by the TUI queue column and `gori run intercept list`.
+  it "reads in seconds, then minutes, then hours, and never negative" do
+    Gori::Interceptor.age_label(0).should eq("0s")
+    Gori::Interceptor.age_label(59).should eq("59s")
+    Gori::Interceptor.age_label(60).should eq("1m00s")
+    Gori::Interceptor.age_label(3599).should eq("59m59s")
+    Gori::Interceptor.age_label(3600).should eq("1h00m")
+    Gori::Interceptor.age_label(7380).should eq("2h03m")
+    Gori::Interceptor.age_label(-5).should eq("0s")
+  end
+end
+
+describe "Gori::Interceptor#drain_notices" do
+  # The fast path used to hand back a shared constant array; a caller that appended to it
+  # would leave every later drain reporting notices nobody recorded.
+  it "never hands out a shared empty array" do
+    tmp_interceptor do |ic|
+      first = ic.drain_notices
+      first.should be_empty
+      first << "mutated by a caller"
+      ic.drain_notices.should be_empty
+    end
+  end
+
+  it "caps what a proxy fiber can queue when nobody is draining" do
+    tmp_interceptor do |ic|
+      (Gori::Interceptor::NOTICE_CAP + 5).times { |i| ic.note_unheld("n#{i}") }
+      ic.drain_notices.size.should eq(Gori::Interceptor::NOTICE_CAP)
+      ic.drain_notices.should be_empty
+    end
+  end
+end

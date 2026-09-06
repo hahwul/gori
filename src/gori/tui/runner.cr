@@ -809,12 +809,12 @@ module Gori::Tui
     UI_STATE_TAKEOVER = 60.seconds
 
     # How fast the bottom-bar background-job spinner advances (only while a job runs).
+    SPINNER_INTERVAL = 120.milliseconds
+
     # How often the Intercept queue's waiting-age column repaints while the tab is up and
     # something is held. One second because the column's own unit is seconds — a slower tick
     # would show a number that is visibly behind the clock the operator is reading it against.
     HOLD_AGE_INTERVAL = 1.second
-
-    SPINNER_INTERVAL = 120.milliseconds
 
     # Per-tick cap on coalesced printable-char events (a paste). Large enough that a
     # typical paste applies in one render tick; still bounds a pathological stream.

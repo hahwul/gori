@@ -199,7 +199,8 @@ module Gori
               # `[editing]` before `[no-edit]`: the operator having unsaved bytes in a hold is
               # the fact that decides whether a SCRIPT should touch it at all, and the two are
               # not exclusive. `edited` was hardcoded false on the publish side until it was
-              # wired to the TUI editor, so this row could never have shown it.
+              # wired to the TUI editor, so this row could never have shown it. (`--format
+              # json` names it `operator_editing`, for the reason `Serialize` gives there.)
               chip = r.edited ? "  [editing]" : ""
               chip += "  [no-edit]" if r.edit_refusal
               # How long the client on the other end has been blocked. `--format json` has
@@ -213,15 +214,14 @@ module Gori
         end
       end
 
-      # A held message's waiting age, from the wall-clock delta the bridge row carries. Same
-      # shape the TUI queue's own column uses (`InterceptView#held_age`); public and pure so a
-      # spec can pin it without a live capturing instance. A negative delta (the publishing
-      # instance's clock is ahead of this one's) floors at zero rather than printing "-3s".
+      # A held message's waiting age, from the wall-clock delta the bridge row carries. The
+      # wording is `Interceptor.age_label`'s — ONE definition, shared with the TUI queue's own
+      # column, so a change to the thresholds cannot leave the list a script reads disagreeing
+      # with the queue the operator reads. `{ms, 0}.max` before the divide, not after: Crystal
+      # floors integer division, so a raw `-5000 // 1000` is -5 and only the clamp keeps a
+      # reader whose clock is behind the publishing instance's from printing "held -5s".
       def self.held_age_label(ms : Int64) : String
-        secs = {ms, 0_i64}.max // 1000
-        return "#{secs}s" if secs < 60
-        return "#{secs // 60}m#{(secs % 60).to_s.rjust(2, '0')}s" if secs < 3600
-        "#{secs // 3600}h#{(secs % 3600 // 60).to_s.rjust(2, '0')}m"
+        Gori::Interceptor.age_label(({ms, 0_i64}.max // 1000).to_i)
       end
 
       # How much of a held WebSocket payload `intercept get` prints as text. A WS message runs
