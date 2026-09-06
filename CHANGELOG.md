@@ -124,6 +124,7 @@
 - Miner: a seeded request that carries a body but declares no `Content-Length` is now framed before the run, so its form/JSON/multipart probes reach the application. Without it an HTTP/1.1 origin read a zero-length body and the mine reported `0 found` over a request the target never read a body from (#905's Fuzzer fix, at the sibling builder).
 - Miner: stopping a mine (`^X`, `gori run mine` Ctrl-C, MCP `mine_stop`) now ends the retry chain too. Every in-flight worker used to send `--retries` more requests after the stop, and MCP's ceilings scale that to 1000 requests and minutes of wall clock each.
 - OAST: a listener whose provider refuses every poll no longer keeps its session marked as the freshly-polled one. The probe out-of-band minter plants payloads against that session, so a rotated api key or an expired webhook token used to send every blind SSRF/XXE callback to a listener nobody was reading, and the scan reported clean.
+- Workbench senders read a BLANK TLS SNI override as no override. An empty `sni` reached OpenSSL as the hostname, which sends no SNI extension and skips the certificate hostname check — with verification still on — and MCP `sequence_start` / `mine_start` pass one straight through when a schema-filling client fills every property.
 
 ## v0.4.0
 
