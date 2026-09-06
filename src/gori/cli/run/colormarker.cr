@@ -71,7 +71,7 @@ module Gori
         elsif colors.empty?
           puts "No custom colours configured."
         else
-          colors.each { |c| puts "#{c.name.ljust(16)} #{c.hex}" }
+          colors.each { |c| puts "#{CLI::Output.pad(c.name, 16)} #{c.hex}" }
         end
       end
 
@@ -186,13 +186,13 @@ module Gori
         name = r.name.empty? ? "" : " [#{r.name}]"
         scope = "#{r.scope.badge}#{r.overridden? ? "*" : ""}"
         cond = r.match_filter.empty? ? "(every flow)" : r.match_filter
-        "#{scope}##{r.id} [#{mark}] #{r.style.label.ljust(5)} #{r.color.ljust(color_w)}#{name}  #{cond}"
+        "#{scope}##{r.id} [#{mark}] #{r.style.label.ljust(5)} #{CLI::Output.pad(r.color, color_w)}#{name}  #{cond}"
       end
 
       # The colour column's width for one listing: the longest colour name in it, never narrower
       # than the built-in default so a list of built-ins keeps the shape it has always had.
       def self.colormarker_color_width(rules : Array(Store::ColorRule)) : Int32
-        {rules.max_of?(&.color.size) || 6, 6}.max
+        {rules.max_of? { |r| CLI::Output.cell_width(r.color) } || 6, 6}.max
       end
 
       # `--scope` on every rule subcommand: WHICH store the id names (or, on list, which half

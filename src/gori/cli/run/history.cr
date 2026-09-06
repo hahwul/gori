@@ -506,7 +506,7 @@ module Gori
                 abort "gori run history: #{err}"
               end
               begin
-                store.search(combined, limit, raise_on_error: true)
+                store.search(combined, limit_probe(limit), raise_on_error: true)
               rescue ex
                 store.close
                 abort "gori run history: query #{q.inspect} failed: #{ex.message}"
@@ -528,14 +528,18 @@ module Gori
               # PARSES but SQLite still refuses to run (hand-edited settings.json, a peer's
               # write), and a raw Crystal backtrace is not an answer an operator can act on.
               begin
-                store.search(combined, limit, raise_on_error: true)
+                store.search(combined, limit_probe(limit), raise_on_error: true)
               rescue ex
                 store.close
                 abort "gori run history: view #{view_name.inspect} failed: #{ex.message}"
               end
             else
-              store.recent_flows(limit)
+              store.recent_flows(limit_probe(limit))
             end
+          # The over-read row is the CUT, not a row to print — drop it before anything reads
+          # `rows` (the HAR writer, the per-row `--column` reads and the counts all take the
+          # page).
+          rows, truncated = limit_page(rows, limit)
           # Ad-hoc `--column` specs REPLACE the project's set rather than adding to it: the flag
           # is the operator saying "this listing, these values", and a set half-configured in
           # the TUI and half on the command line is a row whose meaning depends on a file the
@@ -562,8 +566,12 @@ module Gori
             # `--format har` run in any project that has a column, which is stderr noise in a
             # script rather than a warning about anything they did.
             STDERR.puts "gori run history: --column is not carried by --format har (the values are in each entry's headers/content)" unless column_specs.empty?
-            emit_har(store, rows, query, view_label, limit)
+            emit_har(store, rows, query, view_label, limit, truncated)
           elsif format == :json
+            # Said on STDERR in the streaming formats too, for the reason the empty note below
+            # gives: STDOUT is a pipe, and the consumer reading it cannot see the flags the
+            # command was invoked with.
+            (note = history_truncation_note(truncated, limit)) && STDERR.puts("gori run history: #{note}")
             # The same sentence the text and HAR branches print, on the same channel. JSON-Lines
             # answered an empty listing with ZERO bytes and a silent STDERR — so "I saw no
             # traffic" and "a standing --view/--in-scope lens excluded all of it" read identically
@@ -577,6 +585,7 @@ module Gori
           elsif rows.empty?
             STDERR.puts empty_listing_note(query, view_label, in_scope)
           else
+            (note = history_truncation_note(truncated, limit)) && STDERR.puts("gori run history: #{note}")
             rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared)) }
           end
         ensure
@@ -617,6 +626,39 @@ module Gori
         "no flows#{query ? " match #{query.inspect}" : ""}#{scoped}#{viewed}"
       end
 
+      # The sentence a listing cut by `--limit` prints, or nil when the page WAS the whole
+      # answer. The empty-listing note above says why a listing is short at the bottom end;
+      # this is the same duty at the top, and it was the one lens on this command that never
+      # spoke: `gori run history` returned exactly `-n` rows and said nothing, so a project
+      # holding 50 matches and one holding 5,000 printed the identical page. Both of the other
+      # surfaces already answer it — MCP's `list_history` carries `has_more`/`next_before_id`,
+      # and `gori run fuzz show`, in this same tree, prints "showing 1-200 of 5000".
+      #
+      # No total: counting the matches of an arbitrary QL filter is a second full query over
+      # the same rows, and this listing is already the answer. What the reader needs is that
+      # there IS more and which flag moves it, which the over-read below establishes exactly.
+      #
+      # Pure and public for the reason `empty_listing_note` is: the command ends in `exit`.
+      def self.history_truncation_note(truncated : Bool, limit : Int32) : String?
+        return nil unless truncated
+        "showing the newest #{limit} — more rows match. Raise -n/--limit, or narrow with -q."
+      end
+
+      # One row past the page, so the cut is a FACT rather than the `rows.size >= limit` guess
+      # a scan-shaped cap (`gori run sitemap`) has to settle for: a query matching exactly
+      # `--limit` rows must not claim there are more. Clamped at `Int32::MAX`, which
+      # `parse_count` accepts and `+ 1` would wrap to a negative limit.
+      def self.limit_probe(limit : Int32) : Int32
+        limit == Int32::MAX ? limit : limit + 1
+      end
+
+      # Split an over-read back into {the page, was there more}. Generic because the three
+      # branches that fill `rows` return the same shape and none of them should have to
+      # remember to drop the probe row.
+      def self.limit_page(rows : Array(T), limit : Int32) : {Array(T), Bool} forall T
+        rows.size > limit ? {rows.first(limit), true} : {rows, false}
+      end
+
       # The HAR half of the same sentence — parenthesised rather than prose because it trails a
       # `gori run history:` prefix, and both lenses for the same reason as above: an export that
       # is empty because a standing view excluded everything must not read like one taken against
@@ -638,7 +680,7 @@ module Gori
       # skipped, bodies capped — goes to STDERR, because a silently short export is exactly
       # the failure this file keeps having to fix.
       private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
-                                view : String?, limit : Int32) : Nil
+                                view : String?, limit : Int32, truncated : Bool) : Nil
         details = rows.reverse.each.compact_map { |r| store.get_flow(r.id) }
         # The transcript lookup. `Export::Har.log` calls this for EVERY flow, including the
         # ones that are plainly HTTP — deliberately, and it is the point of #742: "does this
@@ -662,10 +704,23 @@ module Gori
         report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
         if report.written == 0
           STDERR.puts "gori run history: #{empty_har_note(query, view)}"
-        elsif rows.size >= limit
-          # A file handed to someone else must not quietly be the newest 50 of 5000. The
-          # listing formats share this default, but there a short page is obvious on screen
-          # and in a HAR it is not, so say it out loud.
+          # ...and, if the page was CUT, that the export never saw the rest. An empty HAR is
+          # normally "this project has nothing exportable", and for a project of imported URLs
+          # or in-flight flows the newest `-n` can all lack a response while older ones carry
+          # one: `--format har -n 50` then said only "no flows written to the HAR" and sent its
+          # operator away from 150 flows that `-n 200` would have exported. The cut is a fact
+          # here (`limit_probe`), so say it rather than let the empty note stand for it.
+          if note = history_truncation_note(truncated, limit)
+            STDERR.puts "gori run history: #{note}"
+          end
+        elsif truncated
+          # A file handed to someone else must not quietly be the newest 50 of 5000.
+          #
+          # `truncated` and not `rows.size >= limit`: the old test could not tell a cut page
+          # from a complete one that happened to be exactly `--limit` long, so
+          # `--format har -n 123` against a project holding exactly 123 flows told its
+          # operator to raise `-n` for flows that do not exist. The listing over-reads by one
+          # row (`limit_probe`), which answers it outright.
           STDERR.puts "gori run history: stopped at the --limit of #{limit} flow#{limit == 1 ? "" : "s"}; raise -n to export more"
         end
       end

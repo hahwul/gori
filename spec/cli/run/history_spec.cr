@@ -351,11 +351,13 @@ describe "gori run history — CLI::Output rows" do
 
   it "rolls human_us over to seconds" do
     Gori::CLI::Output.human_us(1_000_000_i64).should eq("1.0s")
-    # Both formatters share ONE rounding edge, and it is deliberate: the tier check runs
-    # before round1, so a value just under a boundary prints as the rounded boundary.
-    # Pinned here so it reads as a known edge rather than a formatter bug.
-    Gori::CLI::Output.human_us(999_999_i64).should eq("1000.0ms")
-    Gori::CLI::Output.human_size(1_048_575_i64).should eq("1024.0kB")
+    # The boundary edge these two used to be pinned at — `1000.0ms` and `1024.0kB` — was
+    # pinned as deliberate ("the tier check runs before round1"), and the example above it
+    # is titled "no '1024.0MB'". Both cannot be true, and `Tui::Fmt` settles it: the unit
+    # comes from the value that will be PRINTED, so a size or a latency never names a
+    # quantity outside its own scale. See spec/cli/output_spec.cr for the whole rule.
+    Gori::CLI::Output.human_us(999_999_i64).should eq("1.0s")
+    Gori::CLI::Output.human_size(1_048_575_i64).should eq("1.0MB")
   end
 end
 
@@ -1099,5 +1101,41 @@ describe "gori run show --format raw" do
     Gori::CLI::Run.raw_truncation_notes_for_spec(detail, false, true).size.should eq(1)
     Gori::CLI::Run.raw_truncation_notes_for_spec(detail, false, true).first.should contain("response body")
     Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, true).size.should eq(2)
+  end
+end
+
+# The `--limit` cut, said out loud.
+#
+# `gori run history` returned exactly `-n` rows and said nothing, so a script (or an
+# operator) could not tell a project holding 50 matches from one holding 5,000 — the one
+# question a capped listing raises. Both of the other two surfaces already answer it:
+# MCP's `list_history` carries `has_more` + `next_before_id`, and the sibling command in
+# this very tree, `gori run fuzz show`, prints "showing 1-200 of 5000" on STDERR.
+#
+# The listing over-reads by one row to decide, so the answer is EXACT rather than the
+# `rows.size >= limit` guess `gori run sitemap` has to make — that read is a scan whose
+# cap cannot be probed, this one is a page.
+describe "gori run history — the --limit cut" do
+  it "says nothing when the listing is the whole answer" do
+    Gori::CLI::Run.history_truncation_note(false, 50).should be_nil
+  end
+
+  it "names the flag and the number when the cut hid rows" do
+    note = Gori::CLI::Run.history_truncation_note(true, 50)
+    note.should_not be_nil
+    note.not_nil!.should contain("50")
+    note.not_nil!.should contain("--limit")
+  end
+
+  it "reads the over-read row as 'there are more', and drops it from the listing" do
+    # limit 3, four rows came back → the fourth is the probe, not a row to print.
+    Gori::CLI::Run.limit_page([1, 2, 3, 4], 3).should eq({[1, 2, 3], true})
+    Gori::CLI::Run.limit_page([1, 2, 3], 3).should eq({[1, 2, 3], false})
+    Gori::CLI::Run.limit_page([1, 2], 3).should eq({[1, 2], false})
+  end
+
+  it "asks the store for one row past the page, without overflowing the flag's own maximum" do
+    Gori::CLI::Run.limit_probe(50).should eq(51)
+    Gori::CLI::Run.limit_probe(Int32::MAX).should eq(Int32::MAX)
   end
 end

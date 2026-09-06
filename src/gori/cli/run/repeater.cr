@@ -235,7 +235,7 @@ module Gori
                 # that a stored preset is visible ("`repeater list` and the TUI chip both name
                 # a browser") — a claim that was not true of this listing.
                 tls = r.tls_preset.try { |t| "  tls:#{t}" } || ""
-                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{name.ljust(20)}  → #{r.target}#{tls}"
+                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{CLI::Output.pad(name, 20)}  → #{r.target}#{tls}"
               end
             end
           end

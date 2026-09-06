@@ -168,7 +168,7 @@ module Gori
             ts = pr.last_modified.try(&.to_local.to_s("%Y-%m-%d %H:%M")) || "—"
             id = registry.id_of(pr) || "—"
             flows = row.flows.try(&.to_s) || "?"
-            puts "#{project_row_marker(row)} #{pr.name.ljust(24)}  #{id.ljust(8)}  #{ts}  " \
+            puts "#{project_row_marker(row)} #{CLI::Output.pad(pr.name, 24)}  #{id.ljust(8)}  #{ts}  " \
                  "#{CLI::Output.human_size(pr.db_size).rjust(8)}  #{flows.rjust(6)} flows"
           end
         end
