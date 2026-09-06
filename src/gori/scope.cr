@@ -380,8 +380,13 @@ module Gori
     # Spelled as the pair test rather than `trim(host, '[]')` so it peels exactly what
     # `HostPattern.bare` peels: a half-bracketed oddity like `[::1` keeps its bracket on both
     # sides of the parity, instead of the two disagreeing again in the other direction.
-    HOST_BARE = "(CASE WHEN substr(host, 1, 1) = '[' AND substr(host, -1) = ']' " \
-                "THEN substr(host, 2, length(host) - 2) ELSE host END)"
+    #
+    # The `rtrim(…, '.')` is the other half of that same peel — `HostPattern.bare` strips every
+    # trailing ROOT DOT (see its comment for why `acme.test.` is the same host), and SQLite's
+    # `rtrim(X, '.')` removes exactly the run of trailing dots Crystal's `rstrip('.')` does.
+    # Outside the bracket CASE, in that order, because that is the order `bare` applies them.
+    HOST_BARE = "rtrim((CASE WHEN substr(host, 1, 1) = '[' AND substr(host, -1) = ']' " \
+                "THEN substr(host, 2, length(host) - 2) ELSE host END), '.')"
 
     # A SQL filter selecting in-scope flows (QL::EMPTY when inactive). The URL the
     # string/regex rules see is `scheme || '://' || host || target` — the same value

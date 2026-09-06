@@ -124,6 +124,7 @@
 - Proxy: a forward-proxy request whose absolute-form target spells the scheme in any case (`GET HTTP://host/p`) is now routed by that URI. It used to be read as origin-form, so gori dialled the `Host` header instead, forwarded the proxy-only request line to the origin, and gave scope, Sandbox and History the other authority.
 - Proxy: a `Connection` (or WebSocket `Upgrade`) token is found on any of the field's repeated lines, not only the last. RFC 9110 §5.3 makes `Connection: close` + `Connection: keep-alive` one list carrying both, and gori read only the second — so a request asking to close was kept alive, and an upstream socket the origin was about to close was parked for reuse.
 - Proxy: a wildcard bind is recognised by its ADDRESS, so every RFC 4291 spelling of the all-zero address (`0000:…:0000`, `0::0`, `::0.0.0.0`) resolves to loopback for display and for the browser launcher instead of handing out a literal nothing can connect to.
+- Scope, TLS passthrough and upstream routing: a trailing root dot names the same host, so `acme.test.` now matches a rule written for `acme.test` (and a rule typed with the dot is no longer a rule nothing can match). It was a string compare before, which let the dotted spelling walk past a scope EXCLUDE, a passthrough entry and a route rule alike.
 
 ## v0.4.0
 
