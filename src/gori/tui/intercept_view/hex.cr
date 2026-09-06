@@ -116,13 +116,27 @@ class Gori::Tui::InterceptView
     # It used to read READ-ONLY here, which was an accurate label for a refusal that should
     # not have existed.
     if it.binary?
-      Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "e", "HEX", @editing)
+      x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "e", "HEX", @editing)
+      render_edit_caveat(screen, rect, it, x, min_x)
       return
     end
     x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "e", "EDIT", @editing)
-    return unless @editing
-    return if @loaded_ws # a WS payload has no head — the sync never runs on it
-    Frame.toggle_badge(screen, x, rect.y, min_x, "^L", "CL", @sync_content_length)
+    # `@loaded_ws`: a WS payload has no head — the sync never runs on it.
+    x = Frame.toggle_badge(screen, x, rect.y, min_x, "^L", "CL", @sync_content_length) if @editing && !@loaded_ws
+    render_edit_caveat(screen, rect, it, x, min_x)
+  end
+
+  # `NO-EDIT` / `HEAD-ONLY`, chained left of the edit badges — see `InterceptView#edit_caveat`
+  # for what the two mean and why they are two. Drawn whether or not the editor is open,
+  # because the point of it is to be read BEFORE `e`: a filled pill rather than a muted chip,
+  # since this is a property of the message and not a toggle with an off state.
+  private def render_edit_caveat(screen : Screen, rect : Rect, it : Interceptor::Item,
+                                 right_edge : Int32, min_x : Int32) : Nil
+    caveat = edit_caveat(it) || return
+    label = " #{caveat.badge} "
+    x = right_edge - Screen.draw_width(label)
+    return if x < min_x
+    Frame.tag_chip(screen, x, rect.y, label, caveat.color)
   end
 
   # A WebSocket message is ALL body: no start line, no headers, no head/body separator to

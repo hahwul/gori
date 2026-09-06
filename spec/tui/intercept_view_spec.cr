@@ -1034,3 +1034,59 @@ describe "Intercept verbs (P1)" do
     end
   end
 end
+
+# The other two surfaces say this before an edit is written — `gori run intercept get` prints
+# the reason above the head, MCP's `intercept_get` emits `edit_refusal`/`head_only_note` — and
+# the guide claims this one does too. It did not: the card opened a plain `e:EDIT` badge and
+# the operator learned at `f` that the edit could never be applied.
+describe "Intercept edit caveats" do
+  it "badges a hold gori will apply no edit to, before the editor opens" do
+    tmp_interceptor do |ic|
+      it0 = ic.enqueue_request("GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, method: "GET",
+        target: "/", host: "a", port: 80, scheme: "http",
+        edit_refusal: "a CR/LF in a header value has no faithful HTTP/1.1 text form").not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
+      backend.contains?("NO-EDIT").should be_true # on the card border, editor still closed
+
+      caveat = view.selected_edit_caveat.not_nil!
+      caveat.badge.should eq("NO-EDIT")
+      caveat.note.should contain("edits cannot be applied")
+      caveat.note.should contain(it0.edit_refusal.not_nil!)
+    end
+  end
+
+  # A caveat, NOT a refusal: a head edit applies and only a body has nowhere to go, so the
+  # badge must not read as "this message cannot be edited".
+  it "badges a head-only h2 hold separately" do
+    tmp_interceptor do |ic|
+      ic.enqueue_request("POST /up HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, method: "POST",
+        target: "/up", host: "a", port: 80, scheme: "http", head_only: true).not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
+      backend.contains?("HEAD-ONLY").should be_true
+      backend.contains?("NO-EDIT").should be_false
+
+      view.selected_edit_caveat.not_nil!.note.should contain("ADDS A BODY")
+    end
+  end
+
+  it "says nothing for an ordinary editable hold" do
+    tmp_interceptor do |ic|
+      ic.enqueue_request("GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, method: "GET",
+        target: "/", host: "a", port: 80, scheme: "http").not_nil!
+      view = InterceptView.new
+      view.reload(ic)
+      view.selected_edit_caveat.should be_nil
+      backend = MemoryBackend.new(110, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 110, 10))
+      backend.contains?("NO-EDIT").should be_false
+      backend.contains?("HEAD-ONLY").should be_false
+      backend.contains?("e:EDIT").should be_true
+    end
+  end
+end

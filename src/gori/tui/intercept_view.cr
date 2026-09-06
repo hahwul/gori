@@ -564,6 +564,45 @@ module Gori::Tui
       {id, Fuzz::ContentLength.sync(raw, add_when_missing: true)}
     end
 
+    # What gori will do with an EDIT to a held message, said BEFORE one is written: the badge
+    # that rides the detail card's border for as long as the message is on screen, and the one
+    # sentence the status line carries when the editor opens.
+    record EditCaveat, badge : String, color : Color, note : String
+
+    # The caveat for one held message, or nil when an edit simply applies.
+    #
+    # The other two surfaces have said this since R3-F1 — `gori run intercept get` prints the
+    # reason ABOVE the head ("printed before the head so the operator reads it before writing
+    # one") and MCP's `intercept_get` emits `edit_refusal` / `head_only_note` — and the guide
+    # claims this one does too ("The intercept editor, `gori run intercept get` and the MCP
+    # `intercept_get` tool all say which kind of hold you have before you write an edit"). It
+    # did not: the TUI, the surface where an edit is most likely to be TYPED, opened a plain
+    # `e:EDIT` card and let the operator compose a whole edit, only answering at `f` with "edit
+    # NOT applied". That is the normal case for a CRLF-injection probe, which INDUCES exactly
+    # the head this refusal describes.
+    #
+    # Two states and not one, for the reason `Store::HeldRow#head_only_note` gives: a refusal
+    # means gori will apply NO edit to this message, while head-only means a head edit applies
+    # normally and only a body has nowhere to go. Reporting the caveat as a refusal would mark
+    # an editable message uneditable.
+    def edit_caveat(it : Interceptor::Item) : EditCaveat?
+      if reason = it.edit_refusal
+        return EditCaveat.new("NO-EDIT", Theme.red, "edits cannot be applied to this message — #{reason}")
+      end
+      return nil unless it.head_only?
+      # The one-line form of `Store::HeldRow#head_only_note`, which is the same fact written
+      # for a terminal that can spend a paragraph on it. Both stay a CAVEAT, never a refusal.
+      EditCaveat.new("HEAD-ONLY", Theme.yellow,
+        "this HTTP/2 hold covers the HEAD only — a head edit applies, but one that ADDS A BODY " \
+        "will be refused (its DATA frames stream past the gate untouched)")
+    end
+
+    # The caveat for the hold the detail pane is showing — what `↵`/`e` is about to open an
+    # editor on, so the controller can say it in the same keystroke.
+    def selected_edit_caveat : EditCaveat?
+      selected_item.try { |it| edit_caveat(it) }
+    end
+
     # Why gori would REFUSE the current pending edit, or nil when it would apply it.
     #
     # A QUERY beside `pending_edit`, not a change to it: the editor keeps showing what the

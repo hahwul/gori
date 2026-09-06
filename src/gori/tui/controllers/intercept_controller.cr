@@ -216,10 +216,18 @@ module Gori::Tui
     # payload (opcode 2) opens the HEX one, everything else the TextArea. It used to open
     # NOTHING on binary and say so; the status line now names the keys instead, because the
     # gestures in the byte editor are not the ones the operator just left.
+    # The caveat comes FIRST when there is one: "gori will not apply an edit to this message"
+    # outranks "here are the keys", and it is the sentence the operator has to read before
+    # typing rather than after forwarding (see `InterceptView#edit_caveat`). The border badge
+    # stays up for as long as the card does; this is the one keystroke that can say why.
     private def open_editor : Nil
       @intercept.toggle_edit
-      return unless @intercept.hex_editing?
-      @host.status("binary WebSocket message — hex edit: 0-9a-f overtype, Ins/Del/⌫ bytes")
+      return unless @intercept.editing?
+      if caveat = @intercept.selected_edit_caveat
+        @host.status(caveat.note)
+      elsif @intercept.hex_editing?
+        @host.status("binary WebSocket message — hex edit: 0-9a-f overtype, Ins/Del/⌫ bytes")
+      end
     end
 
     # esc over a mark set hands the marks back first — the reflex clear, mirroring History,
