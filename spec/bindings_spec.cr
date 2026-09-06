@@ -322,6 +322,29 @@ describe Gori::Bindings do
         end
       end
 
+      # `remove_header` names a header and writes NOTHING, so its `replacement` is a dead
+      # field — but every CRUD surface stores whatever was in the value slot when the op was
+      # picked (the TUI form skips the `value:` row rather than clearing it; the CLI and MCP
+      # take `--value` / `replacement` verbatim). Resolving it anyway let that dead field
+      # disarm the rule: the header stopped being stripped the moment the binding went
+      # unbound, and the operator was told a name the op never reads was to blame.
+      it "does not let a dead $KEY in remove_header's replacement disarm the rule" do
+        with_store do |store|
+          b = Gori::Bindings.load(store)
+          b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+          with_layer(b) do
+            rules = Gori::Rules.new(store, store.match_rules)
+            rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "Cookie",
+              "$SESSION", Gori::Store::RuleOp::RemoveHeader, Gori::Store::MatchKind::Literal,
+              "strip", "", "")
+            head = "GET / HTTP/1.1\r\nHost: acme.test\r\nCookie: sid=1\r\n\r\n".to_slice
+            String.new(rules.rewrite_request(head, "acme.test"))
+              .should eq("GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+            store.events_after(0, 50).any? { |e| e.kind == "unbound" }.should be_false
+          end
+        end
+      end
+
       # Same dedupe as the unbound half: one row per (rule, binding revision), or a rule
       # injecting into every proxied request writes one store row per message.
       it "says it once per rule per binding revision, not once per message" do

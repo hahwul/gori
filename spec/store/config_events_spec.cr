@@ -35,6 +35,24 @@ private def cfg_store(surface : Gori::FlowSource::Surface? = Gori::FlowSource::S
   end
 end
 
+# The global rule library is a FILE (settings.json) as much as it is memory: every global CRUD
+# re-reads its own section before it mutates, so an example that writes one has to own the home
+# it writes into or the next example reads it back. Same shape as `spec/rules_spec.cr`'s helper.
+private def with_global_home(&)
+  prev_home = ENV["GORI_HOME"]?
+  dir = File.tempname("gori-config-events-globals")
+  Dir.mkdir_p(dir)
+  begin
+    ENV["GORI_HOME"] = dir
+    Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+    Gori::Settings.rewriter_next_rule_id = 1_i64
+    yield
+  ensure
+    prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(dir)
+  end
+end
+
 private def config_events(store : Gori::Store) : Array(Gori::Store::EventRow)
   store.flush
   store.events_recent(100, source: Gori::ConfigLog::SOURCE).rows
@@ -166,6 +184,32 @@ describe "rewrite rule audit lines" do
       row.message.should contain("strip auth")
       row.message.should_not contain("SECRET-TOKEN")
       row.message.should_not contain("REDACTED-PLACEHOLDER")
+    end
+  end
+
+  # `toggle_default` (⇧X in the Rewriter tab, `--everywhere` on the CLI) moves the standing
+  # policy every project WITHOUT an override follows, which reaches further than the
+  # per-project `toggle` beside it — and it was the one mutator on `Rules` that recorded
+  # nothing at all, so the single gesture that changes what rewrites traffic outside this
+  # engagement was the one the audit trail could not see.
+  it "records a flip of a global rule's default" do
+    cfg_store do |store|
+      with_global_home do
+        rules = Gori::Rules.load(store)
+        rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head,
+          "Content-Security-Policy", "", op: Gori::Store::RuleOp::RemoveHeader,
+          name: "strip csp", scope: Gori::Store::RuleScope::Global).should be_true
+        id = Gori::Settings.rewriter_rules.first.id
+        rules.toggle_default(id).should be_true
+        store.flush
+
+        row = config_events(store).find { |e| e.kind == "rule_toggle" }.not_nil!
+        row.message.should contain("global rewrite rule disabled by default in every project")
+        row.message.should contain("strip csp")
+        row.message.should contain("##{id}")
+        # By identity, like every other line here — never the header the rule names.
+        row.message.should_not contain("Content-Security-Policy")
+      end
     end
   end
 

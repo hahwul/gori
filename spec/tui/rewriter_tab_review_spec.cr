@@ -419,6 +419,34 @@ describe "Gori::Tui::RewriterController (tab review)" do
     end
   end
 
+  # `Rules.host_matches?` is written against the BARE host — that is what `ClientConn` and the
+  # h2 relay hand the rewrite seam, both of them splitting the port off first. The preview pane
+  # read the `Host:` header raw, so a sample pasted out of a captured flow (`Host: acme.test:8443`
+  # is what a non-443 target looks like) matched no glob at all: a host-scoped rule previewed as
+  # a rule that changed nothing, which is indistinguishable from a pattern that missed — on the
+  # one screen that exists to try a rule before it rewrites live traffic.
+  describe "the preview host is the bare host, as the wire sees it" do
+    it "drops the port so a host-scoped rule previews the way it fires" do
+      with_rewriter_controller do |ctl, _host, session|
+        session.rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "X-Trace", "on", op: Gori::Store::RuleOp::AddHeader, host: "acme.test").should be_true
+        ctl.@preview_input.set_text("GET / HTTP/1.1\nHost: acme.test:8443\n\nhi\n")
+        render(ctl)
+
+        ctl.preview_host.should eq("acme.test")
+        ctl.@out.copy_all.should contain("X-Trace: on")
+      end
+    end
+
+    it "leaves an IPv6 literal whole" do
+      with_rewriter_controller do |ctl, _host, _session|
+        ctl.@preview_input.set_text("GET / HTTP/1.1\nHost: [::1]:8443\n\n")
+        render(ctl)
+        ctl.preview_host.should eq("::1")
+      end
+    end
+  end
+
   describe "page keys move the focused list" do
     it "steps and clamps the rules list" do
       with_rewriter_controller do |ctl, _, session|

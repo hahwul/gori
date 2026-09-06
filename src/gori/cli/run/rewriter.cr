@@ -117,29 +117,24 @@ module Gori
         preset = Gori::RulePresets.find(name) ||
                  abort("gori run rewriter preset add: unknown preset '#{name}' (available: #{Gori::RulePresets.keys.join(", ")})")
 
-        if scope.global?
-          committed = 0
-          preset.rules.each do |spec|
-            id = Settings.add_rewriter_rule(spec.target.label, spec.part.label, spec.pattern,
-              spec.replacement, spec.op.label, spec.match_kind.label, spec.name, "", "", !disabled)
-            committed += 1 unless id == 0
-          end
-          abort "gori run rewriter preset add: failed to persist rules (settings not writable)" if committed == 0
-          puts "Installed preset \"#{preset.name}\": #{committed} global rule#{committed == 1 ? "" : "s"}#{disabled ? " (disabled)" : ""} — they apply in every project."
-          return
-        end
-
+        # A global rule needs no project — it lives in settings.json — but one is resolved for
+        # BOTH scopes, because `Gori::Rules` is where the write and its audit line live and it
+        # is built over a store. See `cmd_rewriter_add` for the whole argument.
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          committed = 0
-          preset.rules.each do |spec|
-            id = store.insert_rule(spec.target, spec.part, spec.pattern, spec.replacement,
-              spec.op, spec.match_kind, spec.name, "", !disabled)
-            committed += 1 unless id == 0
+          committed = Gori::Rules.load(store).add_preset(preset, scope: scope, enabled: !disabled)
+          if committed == 0
+            abort "gori run rewriter preset add: failed to persist rules " \
+                  "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
           end
-          abort "gori run rewriter preset add: failed to persist rules (store busy or unwritable)" if committed == 0
-          puts "Installed preset \"#{preset.name}\": #{committed} rule#{committed == 1 ? "" : "s"}#{disabled ? " (disabled)" : ""} added."
+          suffix = committed == 1 ? "" : "s"
+          state = disabled ? " (disabled)" : ""
+          if scope.global?
+            puts "Installed preset \"#{preset.name}\": #{committed} global rule#{suffix}#{state} — they apply in every project."
+          else
+            puts "Installed preset \"#{preset.name}\": #{committed} rule#{suffix}#{state} added."
+          end
         ensure
           store.close
         end
@@ -594,23 +589,26 @@ module Gori
         check_ws_part(op, part, "add")
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
-        # A global rule needs no project at all — it lives in settings.json — but resolving one
-        # anyway keeps `--project` meaningful on every subcommand and costs a store open that
-        # the surrounding surface already pays for.
-        if scope.global?
-          id = Settings.add_rewriter_rule(target.label, part.label, f, value, op.label,
-            match.label, name, host, body_file, !disabled)
-          abort "gori run rewriter add: failed to persist rule (settings not writable)" if id == 0
-          puts "Global rule ##{id} added — it applies in every project."
-          return
-        end
-
+        # A global rule needs no project at all — it lives in settings.json — but one is
+        # resolved for both scopes, and it is not only that `--project` stays meaningful on
+        # every subcommand. `Gori::Rules` is the ONE write path (AGENTS.md §2), and it is where
+        # `ConfigLog` is recorded — at the MODEL, so that one site covers TUI, CLI and MCP
+        # (see the ConfigLog header, which names the CLI as the surface that gets forgotten).
+        # Writing straight at `Settings`/`Store` from here skipped it, so `rule_add` was an
+        # event no headless surface ever emitted: installing a rule that strips an
+        # `Authorization` header, or one that answers an endpoint without ever dialling it,
+        # left the project's config feed with nothing to show for it. The model needs a store
+        # to write that line into, so a global add resolves one too.
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          id = store.insert_rule(target, part, f, value, op, match, name, host, !disabled, body_file: body_file)
-          abort "gori run rewriter add: failed to persist rule (store busy or unwritable)" if id == 0
-          puts "Rule ##{id} added."
+          id = Gori::Rules.load(store).create(target, part, f, value, op, match, name, host,
+            body_file, scope: scope, enabled: !disabled)
+          if id == 0
+            abort "gori run rewriter add: failed to persist rule " \
+                  "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
+          end
+          puts scope.global? ? "Global rule ##{id} added — it applies in every project." : "Rule ##{id} added."
         ensure
           store.close
         end
@@ -687,28 +685,31 @@ module Gori
         abort "gori run rewriter rm: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run rewriter rm: invalid rule id '#{positional[0]}'")
 
-        # A project that had overridden this rule keeps a row pointing at the id, and this
-        # surface cannot reach every project's DB to sweep it. It stays inert: global ids come
-        # from a monotonic counter and are never reused, so nothing can inherit the override.
-        if scope.global?
-          abort "gori run rewriter rm: no global rule with id #{id}" unless Settings.rewriter_rules.any? { |r| r.id == id }
-          abort "gori run rewriter rm: settings not writable (nothing was deleted)" unless Settings.delete_rewriter_rule(id)
-          puts "Global rule ##{id} deleted — from every project."
-          return
-        end
-
+        # Both scopes go through `Gori::Rules` and therefore resolve a project — see
+        # `cmd_rewriter_add` for why the model owns the write. For a GLOBAL rule the model also
+        # sweeps THIS project's `rewriter_overrides` entry once the rule is really gone; ANOTHER
+        # project that had overridden it keeps a row pointing at the id, which this surface
+        # cannot reach. That one stays inert: global ids come from a monotonic counter and are
+        # never reused, so nothing can inherit it.
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          unless store.match_rules.any? { |r| r.id == id }
+          exists =
+            if scope.global?
+              Settings.rewriter_rules.any? { |r| r.id == id }
+            else
+              store.match_rules.any? { |r| r.id == id }
+            end
+          unless exists
             store.close
-            abort "gori run rewriter rm: no rule with id #{id}"
+            abort "gori run rewriter rm: no #{scope.global? ? "global " : ""}rule with id #{id}"
           end
-          unless store.delete_rule(id)
+          unless Gori::Rules.load(store).remove(id, scope)
             store.close
-            abort "gori run rewriter rm: project is busy (write did not commit) — try again"
+            abort scope.global? ? "gori run rewriter rm: settings not writable (nothing was deleted)" \
+                                   : "gori run rewriter rm: project is busy (write did not commit) — try again"
           end
-          puts "Rule ##{id} deleted."
+          puts scope.global? ? "Global rule ##{id} deleted — from every project." : "Rule ##{id} deleted."
         ensure
           store.close
         end
@@ -743,43 +744,40 @@ module Gori
           abort "gori run rewriter #{action}: --everywhere needs --scope=global — a project rule has no default"
         end
 
-        # The rule's own default, read once: `everywhere` writes it, and the per-project branch
-        # below compares against it to decide between an override and dropping one.
-        default = nil.as(Bool?)
-        if scope.global?
-          rule = Settings.rewriter_rules.find { |r| r.id == id }
-          abort "gori run rewriter #{action}: no global rule with id #{id}" unless rule
-          default = rule.enabled
-          if everywhere
-            abort "gori run rewriter #{action}: settings not writable (the rule is unchanged)" unless Settings.set_rewriter_rule_enabled(id, enable)
-            puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} by default (every project without an override)."
-            return
-          end
+        if scope.global? && !Settings.rewriter_rules.any? { |r| r.id == id }
+          abort "gori run rewriter #{action}: no global rule with id #{id}"
         end
 
+        # Both scopes resolve a project, `--everywhere` included: `Gori::Rules` owns the write
+        # and its audit line, and it is built over a store. See `cmd_rewriter_add`.
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          if scope.global?
-            # Same disposition `Rules#toggle` writes: agreeing with the default DROPS the
-            # override rather than pinning it, so this project keeps following the library.
-            ok = default == enable ? store.clear_rewriter_override(id) : store.set_rewriter_override(id, enable)
-            unless ok
+          rules = Gori::Rules.load(store)
+          if everywhere
+            # The library's own default. `set_default`, not `set_enabled`: the latter writes
+            # THIS project's override, and agreeing with the default drops it rather than
+            # pinning it — the disposition the Rewriter tab's `x` has.
+            unless rules.set_default(id, enable)
               store.close
-              abort "gori run rewriter #{action}: project is busy (write did not commit) — try again"
+              abort "gori run rewriter #{action}: settings not writable (the rule is unchanged)"
             end
-            puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} in project #{project.name}."
+            puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} by default (every project without an override)."
             return
           end
-          unless store.match_rules.any? { |r| r.id == id }
+          unless scope.global? || store.match_rules.any? { |r| r.id == id }
             store.close
             abort "gori run rewriter #{action}: no rule with id #{id}"
           end
-          unless store.set_rule_enabled(id, enable)
+          unless rules.set_enabled(id, enable, scope)
             store.close
             abort "gori run rewriter #{action}: project is busy (write did not commit) — try again"
           end
-          puts "Rule ##{id} #{enable ? "enabled" : "disabled"}."
+          if scope.global?
+            puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} in project #{project.name}."
+          else
+            puts "Rule ##{id} #{enable ? "enabled" : "disabled"}."
+          end
         ensure
           store.close
         end

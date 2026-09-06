@@ -177,7 +177,22 @@ module Gori
             op : Store::RuleOp = Store::RuleOp::Replace, match_kind : Store::MatchKind = Store::MatchKind::Literal,
             name : String = "", host : String = "", body_file : String = "",
             scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true) : Bool
-      return false if pattern.empty?
+      create(target, part, pattern, replacement, op, match_kind, name, host, body_file,
+        scope: scope, enabled: enabled) != 0
+    end
+
+    # `add`, answering the new rule's ID rather than only whether the write committed (0 = it
+    # did not, the same "did it land" contract `Store#insert_rule` has). The headless surfaces
+    # ECHO that id back — `gori run rewriter add` prints it, MCP's `create_rule` returns it —
+    # and having to re-find the row by its fields afterwards would pick the wrong twin among
+    # duplicates. Everything else about the two is identical, which is the point: there is one
+    # write path, so the shape normalization, the commit answer and the audit line below cannot
+    # differ between a rule an operator typed in the TUI and one an agent created.
+    def create(target : Store::RuleTarget, part : Store::RulePart, pattern : String, replacement : String,
+               op : Store::RuleOp = Store::RuleOp::Replace, match_kind : Store::MatchKind = Store::MatchKind::Literal,
+               name : String = "", host : String = "", body_file : String = "",
+               scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true) : Int64
+      return 0_i64 if pattern.empty?
       target, part = normalize_shape(op, target, part)
       # Both writers already answered — a global add returns the new id (0 = not written),
       # a project add the same through `insert_rule`'s `exec_task`. This threw it away, so a
@@ -198,7 +213,7 @@ module Gori
       # redacting a token before it leaves — so who installed one belongs in the audit trail
       # beside the scope rules. WHAT it matches deliberately does not; see `rule_phrase`.
       ConfigLog.record(@store, "rule_add", "#{Rules.scope_word(scope)} rewrite rule added — #{Rules.rule_phrase(new_id, name, target, part)}") if ok
-      ok
+      ok ? new_id : 0_i64
     end
 
     # Install every rule of a preset (#821) through the SAME `add` path manual authoring uses
@@ -400,16 +415,26 @@ module Gori
     def toggle(id : Int64, scope : Store::RuleScope = Store::RuleScope::Project) : Bool
       rule = rules.find { |r| r.id == id && r.scope == scope }
       return false unless rule
+      set_enabled(id, !rule.enabled?, scope)
+    end
+
+    # The ABSOLUTE form of `toggle` — "make it this", not "flip it" — which is what a headless
+    # surface is given (`gori run rewriter enable 3`, MCP `set_rule_enabled{enabled}`) where the
+    # TUI has a keypress. Both spellings land here, so the override disposition, the commit
+    # answer and the audit line cannot differ between them.
+    def set_enabled(id : Int64, enabled : Bool, scope : Store::RuleScope = Store::RuleScope::Project) : Bool
+      rule = rules.find { |r| r.id == id && r.scope == scope }
+      return false unless rule
       ok =
         if scope.global?
-          set_effective(id, !rule.enabled?)
+          set_effective(id, enabled)
         else
-          @store.set_rule_enabled(id, !rule.enabled?)
+          @store.set_rule_enabled(id, enabled)
         end
       refresh
       # Enabling and disabling is the same act as installing and removing, as far as what
       # actually rewrites traffic is concerned.
-      state = rule.enabled? ? "disabled" : "enabled"
+      state = enabled ? "enabled" : "disabled"
       ConfigLog.record(@store, "rule_toggle", "#{Rules.scope_word(scope)} rewrite rule #{state} — #{Rules.rule_phrase(rule.id, rule.name, rule.target, rule.part)}") if ok
       ok
     end
@@ -419,8 +444,29 @@ module Gori
     def toggle_default(id : Int64) : Bool
       rule = Settings.rewriter_rules.find { |r| r.id == id }
       return false unless rule
-      ok = Settings.set_rewriter_rule_enabled(id, !rule.enabled)
+      set_default(id, !rule.enabled)
+    end
+
+    # The absolute form of `toggle_default`, for the same reason `set_enabled` exists.
+    #
+    # Audited for the reason `set_enabled` is — "enabling and disabling is the same act as
+    # installing and removing, as far as what actually rewrites traffic is concerned" — and
+    # this is the LOUDER of the two: `set_enabled` writes one project's disagreement, this
+    # moves the standing policy every project without one follows. It was the only mutator on
+    # this class that recorded nothing, so the one gesture that reaches outside the engagement
+    # was the one the audit trail could not see. The line names the project it was made from
+    # (there is no other store to write it to) and says the change is not confined to it.
+    def set_default(id : Int64, enabled : Bool) : Bool
+      rule = Settings.rewriter_rules.find { |r| r.id == id }
+      return false unless rule
+      ok = Settings.set_rewriter_rule_enabled(id, enabled)
       refresh
+      if ok
+        r = rule.to_rule
+        ConfigLog.record(@store, "rule_toggle",
+          "global rewrite rule #{enabled ? "enabled" : "disabled"} by default in every project — " \
+          "#{Rules.rule_phrase(r.id, r.name, r.target, r.part)}")
+      end
       ok
     end
 
@@ -841,6 +887,16 @@ module Gori
       # expands `$KEY` across the WHOLE string, and for an argv that is an argument-injection
       # primitive — see `pipe_argv`. It resolves per element instead.
       return pipe_apply(text, rule, target, part, host, report, pipe_deadline) if rule.op.pipe?
+      # `RemoveHeader` names a header and WRITES NOTHING, so `replacement` is a dead field on
+      # it — and resolving it anyway let that dead field disarm the rule. Every CRUD surface
+      # stores whatever was in the value slot when the op was chosen: the TUI form keeps the
+      # `value:` buffer while `op:` cycles past "remove header" (the row is skipped, not
+      # cleared), and `gori run rewriter add --op=remove_header --value=…` / the MCP
+      # `create_rule` persist it verbatim. So a leftover `$SESSION` there stopped the rule
+      # stripping its header the moment the binding went unbound, and wrote a "not applied:
+      # $SESSION is not bound yet" event about a name the op never reads. Answered BEFORE the
+      # resolve, the way `Pipe` is, rather than inside the `case` below it.
+      return head_remove_header(text, rule.pattern) if rule.op.remove_header?
       repl = replacement_for(rule)
       if repl.is_a?(Refused)
         report_refused(rule, repl) if report
@@ -867,7 +923,7 @@ module Gori
         end
       in Store::RuleOp::AddHeader    then head_add_header(text, rule.pattern, repl)
       in Store::RuleOp::SetHeader    then head_set_header(text, rule.pattern, repl)
-      in Store::RuleOp::RemoveHeader then head_remove_header(text, rule.pattern)
+      in Store::RuleOp::RemoveHeader then text # handled above, before the `$KEY` resolve
       in Store::RuleOp::ShortCircuit then text # answers, never rewrites — `apply` filters it out
       in Store::RuleOp::Pipe         then text # handled above, before the whole-string resolve
       end
@@ -1068,10 +1124,14 @@ module Gori
     end
 
     # Whether this rule writes into the HEAD of a message, which is where a value carrying
-    # CR/LF can forge a header line or a whole second request. The three header ops write
+    # CR/LF can forge a header line or a whole second request. `AddHeader`/`SetHeader` write
     # header lines by construction; a `Replace` is judged by its `part`. See
     # `Bindings.boundary_forging?` for why the check lives at the injection site rather than
     # at extraction: a CR/LF in a BODY forges nothing and body injection is a designed case.
+    #
+    # `RemoveHeader` is head-scoped too and is listed for that reason, but nothing reaches
+    # here for it any more: `apply_rule` answers that op before resolving a replacement it
+    # never reads.
     private def head_scoped?(rule : Store::MatchRule) : Bool
       return true if rule.op.set_header? || rule.op.add_header? || rule.op.remove_header?
       # A pipe rule's "replacement" is an ARGV, not text spliced into a message: a `$KEY` in it

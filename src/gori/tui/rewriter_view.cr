@@ -146,7 +146,11 @@ module Gori::Tui
           on ? Attribute::Bold : Attribute::None)
         break if x >= strip.right
       end
-      screen.text(x + 1, strip.y, "[/] switch", Theme.muted, Theme.bg,
+      # `↹`, not the `[`/`]` this used to name: the sub-tab ring moved onto the shell's
+      # focus-ring hook (`RewriterController#pane_advance`) and the bracket keys were never
+      # rebound, so the strip was advertising two dead keys — while the footer one row down
+      # said `↹ section`. The strip is the closer of the two to the thing it switches.
+      screen.text(x + 1, strip.y, "↹ switch", Theme.muted, Theme.bg,
         width: {strip.right - x - 1, 0}.max) if x + 1 < strip.right
     end
 
