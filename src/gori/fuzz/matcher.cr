@@ -7,8 +7,9 @@ require "../ascii_bytes"
 module Gori::Fuzz
   # gRPC facts a fuzz run needs off raw wire bytes: the CALL's outcome (which for gRPC is
   # never the h2 `:status` — that is 200 by definition — but the `grpc-status` /
-  # `grpc-message` trailers the Assembler merges into the response head), and whether an
-  # OUTGOING request's body still frames as gRPC after a payload was spliced into it.
+  # `grpc-message` trailers the Assembler merges into the response head, or, for grpc-web,
+  # the TRAILER frame inside the body), and whether an OUTGOING request's body still frames
+  # as gRPC after a payload was spliced into it.
   #
   # Both answers already existed one surface away — `run show --format json`, MCP `get_flow`,
   # the Repeater head and the TUI transcript all read them off a STORED flow through
@@ -21,31 +22,51 @@ module Gori::Fuzz
     # by a response that really carries a gRPC status, so a non-gRPC sweep costs one byte
     # scan per response and nothing else.
     STATUS_NEEDLE = "grpc-status".to_slice
+    # The other place a call's outcome can be: grpc-web declares itself in the content-type
+    # and then ships its trailers INSIDE the body. Scanned for before the body is looked at,
+    # so an ordinary HTTP response still costs one allocation-free pass and nothing else.
+    WEB_NEEDLE = "grpc-web".to_slice
 
-    # `{grpc-status, grpc-message}` off a response head, or `{nil, nil}` when it carries no
-    # gRPC status at all (an ordinary HTTP response, or a gRPC one whose origin sent no
-    # trailer — the TUI calls that last case out as `⚠ no grpc-status trailer`).
+    # `{grpc-status, grpc-message}` for a response, or `{nil, nil}` when it carries no gRPC
+    # status at all (an ordinary HTTP response, or a gRPC one whose origin sent no trailer —
+    # the TUI calls that last case out as `⚠ no grpc-status trailer`).
     #
     # LAST value wins, matching `Codec::Message#get?`'s `reverse_each`: the trailers are
     # merged in after the initial HEADERS block, and the gRPC rule is that the trailer is the
     # call's real status — an origin that "promotes" a `grpc-status: 0` into the head must not
     # be able to hide the 7 it actually sent.
-    def self.response(head : Bytes?) : {Int32?, String?}
-      return {nil, nil} unless head && AsciiBytes.contains_ci?(head, STATUS_NEEDLE)
-      code = nil.as(Int32?)
-      msg = nil.as(String?)
-      # scrub: a head is wire bytes and a hostile `grpc-message` is not guaranteed to be
-      # valid UTF-8 — best-effort parsing, never a raise on the result path.
-      String.new(head).scrub.each_line do |raw|
-        line = raw.rstrip
-        next unless idx = line.index(':')
-        value = line[(idx + 1)..].strip
-        case line[0, idx].strip.downcase
-        when "grpc-status"  then code = value.to_i?
-        when "grpc-message" then msg = value.presence
+    #
+    # `body` is REQUIRED, and is not a widening of an otherwise head-only reader: for grpc-web
+    # the body is the ONLY place the outcome exists. Native gRPC ends a call in HTTP/2
+    # trailers, which reach every reader here already merged into the head; grpc-web is
+    # HTTP/1-shaped and carries the same two keys as an in-band TRAILER frame. So a grpc-web
+    # sweep against an origin that answered `grpc-status: 7 PERMISSION_DENIED` to every call
+    # was byte-identical to one against an origin that allowed them all — the exact failure
+    # this module was written to remove, one transport over. No default argument: a caller
+    # that has a response has its body too, and a default is how a surface goes on quietly
+    # answering the old way.
+    def self.response(head : Bytes?, body : Bytes?) : {Int32?, String?}
+      return {nil, nil} unless head
+      if AsciiBytes.contains_ci?(head, STATUS_NEEDLE)
+        code = nil.as(Int32?)
+        msg = nil.as(String?)
+        # scrub: a head is wire bytes and a hostile `grpc-message` is not guaranteed to be
+        # valid UTF-8 — best-effort parsing, never a raise on the result path.
+        String.new(head).scrub.each_line do |raw|
+          line = raw.rstrip
+          next unless idx = line.index(':')
+          value = line[(idx + 1)..].strip
+          case line[0, idx].strip.downcase
+          when "grpc-status"  then code = value.to_i?
+          when "grpc-message" then msg = value.presence
+          end
         end
+        # The head answered. A Trailers-Only grpc-web response lands here too, which is why
+        # this wins over the body rather than the other way round.
+        return {code, msg} if code
       end
-      {code, msg}
+      return {nil, nil} unless body && AsciiBytes.contains_ci?(head, WEB_NEEDLE)
+      Proxy::H2::Grpc.trailer_status(Gori::MediaType.of(head), body)
     end
 
     # Does this REQUEST declare a gRPC content-type? Read once per run off the template's
@@ -433,8 +454,10 @@ module Gori::Fuzz
       body = decode(raw)
       status = raw.response.try(&.status)
       # The call's real outcome for a gRPC target — `status` is 200 for every gRPC response
-      # there is. Nil (and free) for any other response: see `GrpcVerdict.response`.
-      grpc_status, grpc_message = GrpcVerdict.response(raw.head)
+      # there is. Nil (and free) for any other response: see `GrpcVerdict.response`. The
+      # CONTENT-DECODED body, because grpc-web keeps the outcome in a frame inside it and an
+      # origin is free to gzip that body like any other.
+      grpc_status, grpc_message = GrpcVerdict.response(raw.head, body)
       length = body.size.to_i64
       words, lines = count_metrics(body)
 

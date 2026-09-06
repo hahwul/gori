@@ -3997,7 +3997,13 @@ module Gori::Tui
       msgs.each_with_index do |m, i|
         if m.trailer
           lines << "▸ trailer  #{m.data.size}b"
-          Proxy::H2::Grpc.trailer_headers(m.data).each { |k, v| lines << "  #{k}: #{v}" }
+          # `status_label`, so this pane names the code the way the Repeater transcript does.
+          # For a grpc-web flow this row is the ONLY place the call's outcome appears (there
+          # are no HTTP trailers to merge into the head), and `grpc-status: 7` on its own asks
+          # the operator to go look the number up.
+          Proxy::H2::Grpc.trailer_headers(m.data).each do |k, v|
+            lines << "  #{k}: #{k == "grpc-status" ? Proxy::H2::Grpc.status_label(v) : v}"
+          end
         else
           lines << "▸ message ##{i + 1}  #{m.data.size}b#{m.compressed ? "  (compressed)" : ""}"
           lines.concat(grpc_payload_lines(m, tree, binding))

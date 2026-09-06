@@ -166,7 +166,7 @@ module Gori
           # a granted call from `7 PERMISSION_DENIED`; the call status is in the `grpc-status`
           # trailer, which every row now carries. Numeric spec (7, >0, 1-16) — a `2xx` class
           # means nothing for a gRPC code.
-          p.on("--mg=SPEC", "Match gRPC status from the grpc-status trailer (e.g. 7, >0, 1-16)") { |v| matcher.match_grpc = v }
+          p.on("--mg=SPEC", "Match gRPC status from the grpc-status trailer, or grpc-web's in-body trailer frame (e.g. 7, >0, 1-16)") { |v| matcher.match_grpc = v }
           p.on("--fg=SPEC", "Filter out gRPC status") { |v| matcher.filter_grpc = v }
           p.on("--ms=SPEC", "Match response size (e.g. 1500,>1000)") { |v| matcher.match_size = v }
           p.on("--fs=SPEC", "Filter out response size") { |v| matcher.filter_size = v }

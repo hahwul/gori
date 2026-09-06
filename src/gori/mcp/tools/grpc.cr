@@ -58,8 +58,13 @@ module Gori
           # "no descriptors") is a stable answer, and re-asking spends a request for a
           # sentence that is already fixed.
           code = outcome.transport? ? "NETWORK_ERROR" : "REFLECTION_FAILED"
+          # The NOTES ride along, as they do on the success path and as `gori run grpc reflect`
+          # prints them to stderr: "3 of 4 symbols answered NOT_FOUND" is what turns "returned
+          # no descriptors" into something an agent can act on, and dropping them left the
+          # sentence with nothing under it.
           return err(err_text, code, field: "url", retryable: outcome.transport?,
-            details: JSON.parse({"target" => client.target, "service" => outcome.service}.to_json))
+            details: JSON.parse({"target" => client.target, "service" => outcome.service,
+                                 "notes" => outcome.notes}.to_json))
         end
 
         set = outcome.descriptor_set

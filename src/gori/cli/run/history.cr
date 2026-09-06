@@ -1118,9 +1118,21 @@ module Gori
             end
             if residual > 0
               j.field "residual_bytes", residual
-              j.field "framing_error",
-                "the last #{residual} byte#{residual == 1 ? "" : "s"} are not a complete gRPC frame — " \
-                "a length prefix claiming more than arrived, or a body cut short"
+              # ONE author for the sentence (`Grpc.framing_error`): it was hand-copied here and
+              # into `Mcp::Serialize`, which is how two surfaces come to describe one body
+              # differently.
+              j.field "framing_error", Proxy::H2::Grpc.framing_error(residual)
+            end
+            # The CALL's outcome when grpc-web put it in this body. Native gRPC ends in HTTP/2
+            # trailers, which are already in the head this projection sits beside; grpc-web has
+            # none, so without this the one fact that separates a granted call from a denied one
+            # (the HTTP status is 200 for both) was reachable only by hand-parsing a trailer
+            # frame's `headers` map further down.
+            gs, gm = Proxy::H2::Grpc.trailer_status(msgs)
+            if gs
+              j.field "grpc_status", gs
+              j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+              j.field "grpc_message", gm.scrub if gm
             end
             j.field "messages" do
               j.array do

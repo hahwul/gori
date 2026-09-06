@@ -543,6 +543,12 @@ describe "gori run show --format json" do
       m["protobuf"]?.should be_nil
       m["headers"]["grpc-status"].as_s.should eq("5")
       m["headers"]["grpc-message"].as_s.should eq("not found")
+      # …and the CALL's outcome beside the frames, so nothing has to hand-parse that map.
+      # grpc-web has no HTTP trailers, so this body is the only copy of it.
+      msgs = json["response"]["grpc_messages"]
+      msgs["grpc_status"].as_i.should eq(5)
+      msgs["grpc_status_name"].as_s.should eq("NOT_FOUND")
+      msgs["grpc_message"].as_s.should eq("not found")
     end
 
     # A length prefix that lies about the payload size is one of the standard gRPC parser

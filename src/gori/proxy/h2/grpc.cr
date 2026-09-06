@@ -90,16 +90,31 @@ module Gori::Proxy::H2
       STATUS_NAMES[code]? || "CODE#{code}"
     end
 
+    # A `grpc-status` VALUE as a surface prints it: the octets the origin sent, plus the name
+    # they map to. A non-numeric value is its own label — an origin's malformed status is the
+    # finding, not something to replace with a guess.
+    def self.status_label(value : String) : String
+      n = value.strip.to_i?
+      n ? "#{value} #{status_name(n)}" : value
+    end
+
     # Parse a grpc-web TRAILER frame payload: ASCII HTTP/1-style `name: value`
     # lines (CR, LF, or CRLF terminated). Header names are lowercased (gRPC metadata
     # keys are case-insensitive). Surfaces grpc-status / grpc-message that grpc-web
     # carries INSIDE the body, unlike native gRPC-over-h2 where they arrive as HTTP/2
     # trailers.
+    #
+    # `LINE_END`, not `each_line`: that one splits on LF alone, so a producer terminating
+    # with a bare CR — which the paragraph above has always promised to accept — folded the
+    # whole frame into ONE header whose value carried every remaining line. `grpc-status`
+    # then read as `0\rgrpc-message: …`, a value nothing parses as a code.
+    LINE_END = /\r\n|[\r\n]/
+
     def self.trailer_headers(data : Bytes) : Hash(String, String)
       headers = {} of String => String
       # scrub: a hostile/truncated trailer frame is not guaranteed to be valid UTF-8,
       # and this is parsed straight off the wire — best-effort parsing, not a raise.
-      String.new(data).scrub.each_line do |raw|
+      String.new(data).scrub.split(LINE_END) do |raw|
         line = raw.rstrip
         next if line.empty?
         next unless idx = line.index(':')
@@ -108,6 +123,43 @@ module Gori::Proxy::H2
         headers[name] = line[(idx + 1)..].strip
       end
       headers
+    end
+
+    # The gRPC CALL's outcome as grpc-web carries it: `{grpc-status, grpc-message}` read out
+    # of the body's in-band TRAILER frame, or `{nil, nil}` when this body has none.
+    #
+    # Native gRPC ends a call in HTTP/2 trailers, and every reader in gori gets those already
+    # merged into the response HEAD (`HeadCodec.synth_response` for a replay, the Assembler's
+    # trailer merge for a capture) — so reading the head was enough, and every surface did
+    # exactly that. grpc-web has no trailers to merge: it is HTTP/1-shaped by design and
+    # carries the same two keys as a FRAME inside the body, flagged 0x80. The head of a
+    # grpc-web response therefore says nothing about whether the call was granted or denied,
+    # and neither did any surface that only read it.
+    #
+    # The LAST trailer frame wins, the same rule the head reader applies to a merged trailer:
+    # a `grpc-status: 0` a gateway put in front must not hide the code the origin actually
+    # ended on. A frame carrying a `grpc-message` but no `grpc-status` is not an outcome and
+    # is skipped — the pair travels together.
+    def self.trailer_status(content_type : String?, body : Bytes?) : {Int32?, String?}
+      b = body || return {nil, nil}
+      return {nil, nil} if b.empty? || !grpc?(content_type)
+      trailer_status(scan_body(content_type, b)[0])
+    end
+
+    # :ditto: — for a caller that has already deframed the body. The projections scan once and
+    # then ask, rather than paying a second scan (and, for grpc-web-text, a second base64
+    # decode) to answer a question about the frames they are holding.
+    def self.trailer_status(msgs : Array(Message)) : {Int32?, String?}
+      code = nil.as(Int32?)
+      message = nil.as(String?)
+      msgs.each do |m|
+        next unless m.trailer
+        fields = trailer_headers(m.data)
+        next unless raw = fields["grpc-status"]?
+        code = raw.strip.to_i?
+        message = fields["grpc-message"]?.try(&.presence)
+      end
+      {code, message}
     end
 
     # The inverse of `messages` for ONE message: the 5-byte length prefix (1-byte

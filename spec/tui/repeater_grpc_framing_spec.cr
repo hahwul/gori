@@ -353,6 +353,27 @@ describe "RepeaterView gRPC over HTTP/1.1 (grpc-web)" do
     end
   end
 
+  # The transcript used to read the call's outcome off the response HEAD only. grpc-web has no
+  # HTTP trailers — the status is a FRAME in the body, which the rows right above already draw
+  # — so the pane printed `⚠ no grpc-status trailer` directly beneath the trailer it was
+  # looking for, about the one fact a gRPC operator reads this pane for.
+  it "reads a grpc-web call's status out of the response body's trailer frame" do
+    grpc_tmp_store do |store|
+      view = def_web.call(store, "application/grpc-web+proto", Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41])
+      resp_head = "HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web+proto\r\n\r\n"
+      body = Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41] +
+             Gori::Proxy::H2::Grpc.frame(false, "grpc-status: 7\r\ngrpc-message: denied\r\n".to_slice, trailer: true)
+      resp = Gori::Proxy::Codec::Http1.parse_response_head(resp_head.to_slice)
+      view.apply(Gori::Repeater::Result.new(resp_head.to_slice, body, resp, 5000_i64))
+
+      backend = MemoryBackend.new(160, 24)
+      view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
+      # The STATUS row (not the trailer row above it, which always drew the raw headers).
+      backend.contains?("✗ grpc-status: 7 PERMISSION_DENIED · denied").should be_true
+      backend.contains?("no grpc-status trailer").should be_false
+    end
+  end
+
   # Space ▸ Duplicate must clone the grpc-web-text framing, not just the gRPC fields:
   # `duplicate_from` dropped `@grpc_web_text`, so the clone sent RAW binary framing under an
   # `application/grpc-web-text` head (and, with reframe off, read the first five base64

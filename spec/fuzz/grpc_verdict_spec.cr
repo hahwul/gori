@@ -287,18 +287,51 @@ describe "fuzz over gRPC" do
   end
 end
 
+# A grpc-web body: `count` protobuf message frames, then the in-band TRAILER frame that
+# carries the call's outcome — the shape every browser gRPC client sees.
+private def web_body(status : String, message : String? = nil) : Bytes
+  io = IO::Memory.new
+  io.write(Gori::Proxy::H2::Grpc.frame(false, Bytes[0x0a, 0x02, 0x68, 0x69]))
+  text = "grpc-status: #{status}\r\n"
+  text += "grpc-message: #{message}\r\n" if message
+  io.write(Gori::Proxy::H2::Grpc.frame(false, text.to_slice, trailer: true))
+  io.to_slice
+end
+
 describe F::GrpcVerdict do
   it "reads the LAST grpc-status, so a head-promoted 0 cannot hide the trailer's 7" do
     head = ("HTTP/2 200\r\ncontent-type: application/grpc\r\n" +
             "grpc-status: 0\r\ngrpc-message: all good\r\n" +
             "grpc-status: 7\r\ngrpc-message: nope\r\n\r\n").to_slice
-    code, msg = F::GrpcVerdict.response(head)
+    code, msg = F::GrpcVerdict.response(head, nil)
     code.should eq(7)
     msg.should eq("nope")
   end
 
   it "answers nil for a response with no gRPC status at all" do
-    F::GrpcVerdict.response("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice).should eq({nil, nil})
-    F::GrpcVerdict.response(nil).should eq({nil, nil})
+    F::GrpcVerdict.response("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice, nil).should eq({nil, nil})
+    F::GrpcVerdict.response(nil, nil).should eq({nil, nil})
+  end
+
+  it "reads grpc-web's outcome out of the BODY, where it is the only copy" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web+proto\r\n\r\n".to_slice
+    F::GrpcVerdict.response(head, web_body("7", "denied")).should eq({7, "denied"})
+  end
+
+  it "reads it through grpc-web-text's base64 too" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web-text\r\n\r\n".to_slice
+    body = Base64.strict_encode(web_body("5")).to_slice
+    F::GrpcVerdict.response(head, body).should eq({5, nil})
+  end
+
+  it "lets a Trailers-Only grpc-web head win over the body" do
+    head = ("HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web+proto\r\n" +
+            "grpc-status: 16\r\n\r\n").to_slice
+    F::GrpcVerdict.response(head, web_body("0")).should eq({16, nil})
+  end
+
+  it "does not read a body the response never declared as grpc-web" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n".to_slice
+    F::GrpcVerdict.response(head, web_body("7")).should eq({nil, nil})
   end
 end

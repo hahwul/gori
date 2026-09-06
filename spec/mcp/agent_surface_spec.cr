@@ -789,6 +789,11 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
     g.as_h.has_key?("framing_error").should be_false
     g["messages"][1]["trailer"].as_bool.should be_true
     g["messages"][1]["headers"]["grpc-status"].as_s.should eq("3")
+    # …and the CALL's outcome named once, beside the frames. grpc-web has no HTTP trailers,
+    # so this body is the only copy of it and the flow's response headers carry none — an
+    # agent had to hand-parse the trailer frame's header map to tell a grant from a denial.
+    g["grpc_status"].as_i.should eq(3)
+    g["grpc_status_name"].as_s.should eq("INVALID_ARGUMENT")
   end
 
   # #823: the `.proto` lens rides ALONGSIDE the raw tree, so an agent gets `role = ROLE_ADMIN`
