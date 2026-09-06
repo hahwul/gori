@@ -424,6 +424,11 @@ module Gori::Miner
         return raw if attempts >= @config.retries || Miner.permanent_refusal?(raw.error) || @stopped.call
         attempts += 1
         sleep @config.retry_pause
+        # Re-read AFTER the pause too. The check above only catches a stop that had already
+        # landed when the send returned; one that arrives during `retry_pause` — the window a
+        # 500 ms default makes the LIKELY one — used to buy the calibration another real
+        # request at the target. Same both-sides discipline as the engine's own chain.
+        return raw if @stopped.call
       end
     end
 
