@@ -691,6 +691,25 @@ describe "intercept in a VIEW-ONLY window" do
     end
   end
 
+  # `i` grew the guard when the defect was found on it; `c` and `/` are the same object, the
+  # same bar and the same lie — a window painting `c:REQ` beside a condition it typed, over a
+  # gate in another process that reads neither.
+  it "refuses the catch direction and the catch condition too" do
+    with_sessions(2) do |sessions|
+      _, viewer = sessions
+      host = PeerSyncHost.new(viewer)
+      ctrl = Gori::Tui::InterceptController.new(host)
+
+      ctrl.intercept_cycle_direction
+      viewer.interceptor.direction.both?.should be_true # unchanged
+      host.last_status.should contain("view-only")
+
+      ctrl.intercept_query
+      ctrl.view.querying?.should be_false # the bar never opened, so no keystroke can push one
+      host.last_status.should contain("view-only")
+    end
+  end
+
   it "still toggles in the window that holds capture" do
     with_sessions(1) do |sessions|
       session = sessions.first
@@ -699,6 +718,12 @@ describe "intercept in a VIEW-ONLY window" do
       ctrl.intercept_toggle
       session.interceptor.enabled?.should be_true
       host.last_status.should contain("intercept ON")
+
+      # And the other two, so the guard is not simply "the lock holder can do nothing either".
+      ctrl.intercept_cycle_direction
+      session.interceptor.direction.request_only?.should be_true
+      ctrl.intercept_query
+      ctrl.view.querying?.should be_true
     end
   end
 end

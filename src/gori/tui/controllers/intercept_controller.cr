@@ -552,19 +552,29 @@ module Gori::Tui
     end
 
     # --- verbs (delegated from the Runner's ExecContext; also called inline above) ---
+
+    # Only the capture-lock holder may change what gets caught. A view-only second instance on
+    # the same project holds no traffic of its own — the requests are blocked in the OTHER
+    # process's `Interceptor` — so a flip here mutates a local object that gates nothing,
+    # paints the bar as though it had, and leaves the operator waiting at an empty queue for
+    # held traffic that was never coming. Worse in the other direction: the tick republishes
+    # the bridge only from the lock holder (see `Runner#run`), so this window's state was a
+    # promise it could not keep — the real holder went on catching what it was already
+    # catching. Same tiebreak, and the same wording as the bind-error toast on entry, so
+    # "view-only" means one thing across the UI.
+    #
+    # ALL THREE catch controls, not just the master toggle. `i` grew this guard when the
+    # defect was found on it; `c` (direction) and `/` (condition) are the same object, the
+    # same bar, and the same lie — a window painting `c:REQ` beside a condition it typed,
+    # over a gate in another process that reads neither.
+    private def catch_control_allowed? : Bool
+      return true if @host.session.capturing_lock_held?
+      @host.status("view-only — this window is not holding traffic; press c to take over capture")
+      false
+    end
+
     def intercept_toggle : Nil
-      # Only the capture-lock holder may flip catch. A view-only second instance on the same
-      # project holds no traffic of its own — the requests are blocked in the OTHER process's
-      # `Interceptor` — so toggling here flipped a local flag that gates nothing, painted the
-      # bar ON, and left the operator waiting at an empty queue for held traffic that was never
-      # coming. Worse in the other direction: the tick republishes the bridge only from the
-      # lock holder (see `Runner#run`), so this window's "intercept off" was a promise it could
-      # not keep — the real holder went on catching. Same tiebreak, and the same wording as the
-      # bind-error toast on entry, so "view-only" means one thing across the UI.
-      unless @host.session.capturing_lock_held?
-        @host.status("view-only — this window is not holding traffic; press c to take over capture")
-        return
-      end
+      return unless catch_control_allowed?
       result = @host.session.interceptor.toggle
       @intercept.reload(@host.session.interceptor)
       @host.status(toggle_status(result))
@@ -682,17 +692,21 @@ module Gori::Tui
       # the operator's only record of how many irreversible decisions just went out.
       n = ic.forward_all(overrides)
       @intercept.reload(ic)
-      @host.status("forwarded all (#{n})")
+      # `forwarded all (0)` reads as a bulk release that found nothing to release, which on the
+      # one verb whose whole point is that it is irreversible is worth spelling out.
+      @host.status(n == 0 ? "nothing held — forward all released no messages" : "forwarded all (#{n})")
     end
 
     # Open the catch-condition filter bar (a query that narrows which messages hold).
     def intercept_query : Nil
+      return unless catch_control_allowed?
       @intercept.start_query(@host.session.store) # store backs `host:` Tab-completion
       @host.status("catch condition: host: method: path: status: scheme: · ↹ complete · ↵ apply · esc clear")
     end
 
     # Cycle which leg(s) to hold: all → requests → responses → all.
     def intercept_cycle_direction : Nil
+      return unless catch_control_allowed?
       dir = @host.session.interceptor.cycle_direction
       @intercept.reload(@host.session.interceptor)
       @host.status("intercept catch: #{direction_phrase(dir)}")
