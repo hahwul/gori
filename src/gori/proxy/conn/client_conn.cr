@@ -2405,7 +2405,21 @@ module Gori::Proxy
       end
 
       target = req.target
-      if target.starts_with?("http://") || target.starts_with?("https://")
+      # `Url.absolute_form?` and not a `starts_with?("http://")` pair — the one home, for the
+      # reason `pinned_origin_head` below states and the SOCKS5 listener already paid for. RFC
+      # 3986 §3.1 makes a scheme case-insensitive and gori keeps the request line verbatim (P7),
+      # so `GET HTTP://host/p` really arrives here. The case-SENSITIVE pair read it as ORIGIN
+      # form, which broke the same two things twice over: gori forwarded a proxy-only request
+      # line to an origin (a lenient CDN/gateway routes on its authority, so gori's own forward
+      # chose a destination the operator never named), and the dial came from the `Host` header
+      # while `Url.request_url` — case-INSENSITIVE — handed scope, Sandbox and History the URI's
+      # authority instead. RFC 9112 §3.2.2 makes the absolute form authoritative for a proxy and
+      # `Host` the field to ignore when the two disagree.
+      #
+      # `URI.parse` lower-cases the scheme, so `scheme` below is `"http"`/`"https"` whatever the
+      # client spelled — the form every downstream reader (the recorded flow's `scheme` column,
+      # the default port, `Url.request_url`) already assumes.
+      if Gori::Url.absolute_form?(target)
         uri = URI.parse(target)
         scheme = uri.scheme || "http"
         host = uri.host || ""

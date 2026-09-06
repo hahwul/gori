@@ -547,6 +547,43 @@ describe Gori::Proxy::Server do
     sink.requests.first.target.should eq("http://127.0.0.1:#{origin_port}/abs?x=1")
   end
 
+  # RFC 3986 §3.1: a scheme is case-insensitive, and gori captures the request line verbatim,
+  # so `GET HTTP://host/p` really does reach the forward-proxy branch. Reading it with a
+  # case-SENSITIVE prefix pair sent it down the ORIGIN-FORM path instead: the dial then came
+  # from the `Host` header while the absolute-form line stayed on the wire — so gori forwarded
+  # a proxy-only request line to an origin, and `Url.request_url` (case-INSENSITIVE) handed
+  # scope, Sandbox and History the OTHER authority. RFC 9112 §3.2.2 makes the absolute form
+  # authoritative for a proxy; `Host` is to be ignored when it disagrees.
+  it "routes an absolute-form target whose scheme is not lowercase by the URI, not Host" do
+    # ONE channel for both origins, so whichever gori actually dialled reports its own request
+    # line and the assertion can never deadlock on the origin that was skipped.
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("ok", seen)
+    decoy_port = start_origin("decoy", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET HTTP://127.0.0.1:#{origin_port}/abs?x=1 HTTP/1.1\r\nHost: 127.0.0.1:#{decoy_port}\r\n\r\n"
+    client.flush
+    body = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen.receive.should eq("GET /abs?x=1 HTTP/1.1") # the URI's origin, origin-form
+    body.should contain("ok")                       # …and not the Host header's origin
+    body.should_not contain("decoy")
+    req = sink.requests.first
+    req.host.should eq("127.0.0.1")
+    req.port.should eq(origin_port)
+    req.target.should eq("HTTP://127.0.0.1:#{origin_port}/abs?x=1") # client's bytes, verbatim
+  end
+
   it "captures an SSE (text/event-stream) response streamed to close" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)
