@@ -405,3 +405,24 @@ describe "Gori::Env.head_body_separator" do
     Gori::Env.head_body_boundary(bytes).should eq(bytes.size)
   end
 end
+
+# `--format json` has carried `age_seconds` since #123; the text listing — the one a human
+# reads while deciding what to release first — had no clock at all. Same shape the TUI queue's
+# own column uses.
+describe "Gori::CLI::Run.held_age_label" do
+  it "reads in seconds, then minutes, then hours" do
+    Gori::CLI::Run.held_age_label(0_i64).should eq("0s")
+    Gori::CLI::Run.held_age_label(4_200_i64).should eq("4s")
+    Gori::CLI::Run.held_age_label(59_999_i64).should eq("59s")
+    Gori::CLI::Run.held_age_label(60_000_i64).should eq("1m00s")
+    Gori::CLI::Run.held_age_label(3_599_000_i64).should eq("59m59s")
+    Gori::CLI::Run.held_age_label(3_600_000_i64).should eq("1h00m")
+    Gori::CLI::Run.held_age_label(7_380_000_i64).should eq("2h03m")
+  end
+
+  # The held row's stamp is the PUBLISHING instance's wall clock; a reader whose own clock is
+  # behind it must not print "held -3s".
+  it "floors a clock skewed the other way at zero" do
+    Gori::CLI::Run.held_age_label(-5_000_i64).should eq("0s")
+  end
+end

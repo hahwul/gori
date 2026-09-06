@@ -197,10 +197,26 @@ module Gori
               # buffer is still fully editable in the head, so chipping on that would mark a
               # row uneditable when only its body is out of reach.
               chip = r.edit_refusal ? "  [no-edit]" : ""
-              puts "##{r.item_id}  [#{r.kind}]  #{method} #{CLI::Output.term_safe(intercept_row_where(r))}  (#{body.size}b body)#{chip}"
+              # How long the client on the other end has been blocked. `--format json` has
+              # carried `age_seconds` since #123 (`Serialize.intercept_item_row`) and the TUI
+              # queue draws it per row; the text listing — the one a human reads while
+              # deciding what to release first — was the surface without a clock.
+              puts "##{r.item_id}  [#{r.kind}]  #{method} #{CLI::Output.term_safe(intercept_row_where(r))}  " \
+                   "(#{body.size}b body, held #{held_age_label(now_ms - r.held_at_ms)})#{chip}"
             end
           end
         end
+      end
+
+      # A held message's waiting age, from the wall-clock delta the bridge row carries. Same
+      # shape the TUI queue's own column uses (`InterceptView#held_age`); public and pure so a
+      # spec can pin it without a live capturing instance. A negative delta (the publishing
+      # instance's clock is ahead of this one's) floors at zero rather than printing "-3s".
+      def self.held_age_label(ms : Int64) : String
+        secs = {ms, 0_i64}.max // 1000
+        return "#{secs}s" if secs < 60
+        return "#{secs // 60}m#{(secs % 60).to_s.rjust(2, '0')}s" if secs < 3600
+        "#{secs // 3600}h#{(secs % 3600 // 60).to_s.rjust(2, '0')}m"
       end
 
       # How much of a held WebSocket payload `intercept get` prints as text. A WS message runs

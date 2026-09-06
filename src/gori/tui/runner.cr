@@ -505,6 +505,7 @@ module Gori::Tui
       last_probe_gen = @session.store.probe_generation # committed probe_issues mutations
       last_spin = Time.instant                         # advances the background-job spinner frame
       last_clock = clock_minute                        # status-row wall clock; re-render only when the minute rolls over
+      last_hold_tick = Time.instant                    # advances the Intercept queue's waiting-age column
       last_ui_ident = nil.as(UiIdentity?)              # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
       last_pub_rev = -1                                                     # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
@@ -638,6 +639,16 @@ module Gori::Tui
                   last_bridge_pub = now
                 end
               end
+            end
+            # Advance the Intercept queue's waiting-age column. A held message blocks a real
+            # client and the #123 reaper releases one on a deadline, so the age has to move on
+            # its own — nothing else bumps the interceptor's revision while a queue sits still.
+            # Gated on the tab being UP and something actually held, so the idle loop keeps its
+            # once-a-minute clock wake rather than a once-a-second one.
+            if @active_tab == :intercept && now - last_hold_tick >= HOLD_AGE_INTERVAL &&
+               @session.interceptor.pending_count > 0
+              last_hold_tick = now
+              dirty = true
             end
             # Animate the bottom-bar background-job spinner: while any job runs, advance the
             # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
@@ -787,6 +798,11 @@ module Gori::Tui
     UI_STATE_TAKEOVER = 60.seconds
 
     # How fast the bottom-bar background-job spinner advances (only while a job runs).
+    # How often the Intercept queue's waiting-age column repaints while the tab is up and
+    # something is held. One second because the column's own unit is seconds — a slower tick
+    # would show a number that is visibly behind the clock the operator is reading it against.
+    HOLD_AGE_INTERVAL = 1.second
+
     SPINNER_INTERVAL = 120.milliseconds
 
     # Per-tick cap on coalesced printable-char events (a paste). Large enough that a

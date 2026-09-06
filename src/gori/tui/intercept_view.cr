@@ -1185,6 +1185,7 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       @list_last_h = inner.h
       ensure_visible(inner.h)
+      now = Time.instant
       (0...inner.h).each do |i|
         idx = @scroll + i
         break if idx >= @items.size
@@ -1195,9 +1196,49 @@ module Gori::Tui
         bg = row_band(screen, inner, y, selected: selected, marked: marked, focused: focused)
         badge, bcolor = kind_badge(it.kind)
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
-        screen.text(inner.x + 5, y, row_label(it), selected || marked ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
+        label = row_label(it)
+        width = {inner.w - 6, 1}.max
+        render_held_age(screen, inner, y, it, now, bg, selected, Screen.draw_width(label), width)
+        screen.text(inner.x + 5, y, label, selected || marked ? Theme.text_bright : Theme.text, bg, width: width)
       end
       Frame.scroll_gauge(screen, inner, @items.size, @scroll, focused)
+    end
+
+    # The row's right-aligned WAITING AGE — drawn in the row's own SLACK, never out of the
+    # label's cells.
+    #
+    # This column has been in the class header since the tab was written ("REQ/RES badge,
+    # method, host+target, waiting age") and was never drawn, while both other surfaces
+    # answer it: MCP's `intercept_item_row` emits `age_seconds` and the #123 reaper releases
+    # on a deadline. A hold is a real client blocked — a browser tab spinning, a script at
+    # its timeout — so how long it has been waiting is the queue's second fact after what it
+    # is.
+    #
+    # Second because it is: a fixed column would have taken four cells off EVERY label, and
+    # this pane is `body.w // 3`, so on an 80-column terminal that is `GET acme.test/` for a
+    # request whose path is the reason it is held. `Screen#text` clips and does not pad, so a
+    # label with room to spare leaves those cells free and the age can ride them; a label that
+    # needs them keeps them and the row simply carries no clock. The queue's own scroll gauge
+    # takes the same "only when it earns the column" line.
+    private def render_held_age(screen : Screen, inner : Rect, y : Int32, it : Interceptor::Item,
+                                now : Time::Instant, bg : Color, selected : Bool,
+                                label_w : Int32, width : Int32) : Nil
+      age = held_age(it, now)
+      w = Screen.draw_width(age)
+      return if label_w > width - w - 1 # no slack: the label needs every cell it has
+      # `right - 1 - w`: the label's own run stops one cell short of the card's inner right
+      # edge (`inner.w - 6` cells from `inner.x + 5`), so the age ends exactly where it could.
+      screen.text(inner.right - 1 - w, y, age, selected ? Theme.text_bright : Theme.muted, bg)
+    end
+
+    # How long a message has been held, as the narrowest string that still reads. Monotonic
+    # (`Item#held_at`), never the wall clock: a hold is measured against the client that is
+    # waiting on it, and a system clock step must not make one look older or newer than it is.
+    private def held_age(it : Interceptor::Item, now : Time::Instant) : String
+      secs = (now - it.held_at).total_seconds.to_i
+      return "#{secs}s" if secs < 60
+      return "#{secs // 60}m#{(secs % 60).to_s.rjust(2, '0')}s" if secs < 3600
+      "#{secs // 3600}h#{(secs % 3600 // 60).to_s.rjust(2, '0')}m"
     end
 
     # Paint a queue row's background band + gutter glyph, returning the bg every cell on that

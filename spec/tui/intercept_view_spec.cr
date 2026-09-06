@@ -1090,3 +1090,36 @@ describe "Intercept edit caveats" do
     end
   end
 end
+
+# The class header has claimed a "waiting age" column since the tab was written and the row
+# never drew one, while MCP's `intercept_item_row` emits `age_seconds` and the #123 reaper
+# releases on a deadline. A hold is a real client blocked; how long it has waited is the
+# queue's second fact after what it is.
+describe "Intercept queue waiting age" do
+  it "right-aligns the age on a queue row" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      row = (0...8).find { |y| backend.row(y).includes?("acme.test/login") }.not_nil!
+      backend.row(row).should match(/\d+s/)
+    end
+  end
+
+  # The message's identity outranks its clock: the age rides the row's SLACK, so a pane too
+  # narrow to carry both keeps the host+target whole and simply shows no clock. A fixed column
+  # would have cost every label four cells on a pane that is already `body.w // 3`.
+  it "drops the age before it eats the label on a narrow pane" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(56, 8) # left pane is w//3 → ~16 cells of interior
+      view.render(Screen.new(backend), Rect.new(0, 0, 56, 8))
+      row = (0...8).find { |y| backend.row(y).includes?("GET acme") }.not_nil!
+      backend.row(row).should_not match(/\d+s/) # no clock, and the label kept its cells
+    end
+  end
+end
