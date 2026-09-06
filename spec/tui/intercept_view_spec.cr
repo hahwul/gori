@@ -624,6 +624,49 @@ describe "Intercept filter bar" do
     end
   end
 
+  # The bar reads `@enabled`/`@direction` back from the Interceptor every reload; the condition
+  # was a write-only local buffer. An MCP `intercept_set_filter` / `gori run intercept filter`
+  # reaches the SAME Interceptor through the #123 drain, so the gate narrowed while this bar
+  # painted its idle hint — and the next keystroke here pushed the empty buffer back over it.
+  it "mirrors a condition set by another surface" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      ic.set_filter("host:api.example.com") # as the MCP/CLI drain does
+      view.reload(ic)
+      view.query.should eq("host:api.example.com")
+
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      backend.row(0).includes?("host:api.example.com").should be_true
+
+      # And it keeps tracking: a peer clearing the condition clears the bar.
+      ic.set_filter("")
+      view.reload(ic)
+      view.query.should eq("")
+    end
+  end
+
+  # While `/` is open the local buffer is the source — every keystroke pushes it down — so the
+  # mirror must not fight the caret. It resumes once the bar closes, even though the revision
+  # it skipped will not come round again.
+  it "does not mirror over the bar while the condition is being typed" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+      "host:acme".each_char { |c| view.query_insert(c) }
+      ic.set_filter(view.query) # what the controller does on every keystroke
+      view.reload(ic)
+      view.query.should eq("host:acme") # not clobbered mid-word
+
+      view.stop_query
+      ic.set_filter("method:POST") # a peer, after the bar closed, with no further revision
+      view.reload(ic)
+      view.query.should eq("method:POST")
+    end
+  end
+
   it "edits the condition query inline" do
     tmp_interceptor do |ic|
       view = InterceptView.new

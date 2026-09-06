@@ -131,6 +131,10 @@ module Gori::Tui
       # same bytes): READ and EDIT must not disagree about what a row is in one pane.
       @preview = ReadPane.new(wrap: true)
       @reload_rev = -1 # Interceptor#revision the queue snapshot was last taken at (-1 ⇒ never)
+      # Interceptor#revision the COMMITTED condition was last mirrored at — see `reload`. Its
+      # own counter, not `@reload_rev`: the mirror is skipped while the bar is being typed in,
+      # and folding the two would mark the skipped revision as done and leave the bar stale.
+      @filter_rev = -1
       # Multi-select marks (#442's model, ported to the hold queue), keyed by ITEM ID rather
       # than row index: a forward/drop of an earlier entry shifts every index below it, so an
       # index-keyed set would silently retarget on the next revision tick. Unlike History there
@@ -154,6 +158,7 @@ module Gori::Tui
     # If the edited item vanished (forwarded/dropped/released), drop edit mode.
     def reload(interceptor : Interceptor) : Nil
       rev = interceptor.revision
+      mirror_condition(interceptor, rev)
       return if rev == @reload_rev
       @reload_rev = rev
       prev_id = @items[@selected]?.try(&.id)
@@ -172,6 +177,28 @@ module Gori::Tui
         @loaded_id = nil
         @hex = nil # its bytes belonged to a hold that has left the queue
       end
+    end
+
+    # Mirror the Interceptor's COMMITTED condition into the bar's buffer.
+    #
+    # The bar used to be a write-only local buffer: `@enabled` and `@direction` were read back
+    # from the Interceptor every reload, the condition was not. So a condition set by the other
+    # two surfaces — MCP `intercept_set_filter`, `gori run intercept filter`, both of which
+    # reach the SAME `Interceptor` through the #123 command drain — narrowed the live gate while
+    # this bar kept painting its idle hint. The operator then watched an empty queue with
+    # nothing on screen saying why, and the next keystroke in `/` pushed the local (empty)
+    # buffer back over the agent's condition.
+    #
+    # Skipped while the bar is being typed in: there the local buffer IS the source (every
+    # keystroke pushes it down with `set_filter`), and mirroring would fight the caret. `rev`
+    # is tracked separately for exactly that reason — see `@filter_rev`.
+    private def mirror_condition(interceptor : Interceptor, rev : Int32) : Nil
+      return if @querying || @filter_rev == rev
+      @filter_rev = rev
+      source = interceptor.filter_source
+      return if source == @query
+      @query = source
+      @qcx = source.size
     end
 
     # Drop marks whose held item has left the queue — forwarded/dropped here, by a batch
