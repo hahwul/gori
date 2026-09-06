@@ -112,6 +112,15 @@ module Gori::Tui
 
     def move(dr : Int32, dc : Int32, size : Int32, line_at : Int32 -> String, selecting : Bool = false) : Nil
       return if size <= 0
+      # Clamp `@cy` into the CURRENT document before anything reads a line off it. The owner
+      # swaps the response document under this cursor on a re-send, a diff/hex toggle, a WS
+      # transport flip and a reveal, zeroing scroll but NOT the caret — so a caret parked deep
+      # in a long response, followed by a `→`/`l` after the reply came back short (or a 1-line
+      # diff), reached the `dc != 0` branches below with a stale `@cy` and `line_at.call(@cy)`
+      # raised `IndexError`. Three such raises inside 10s trip the tick-error limit and take
+      # the whole TUI down (`Runner#absorb_tick_error`). The vertical branch already re-clamps;
+      # this makes the horizontal one safe too, at the one place every `move` passes through.
+      @cy = @cy.clamp(0, size - 1)
       if selecting
         @anchor ||= {@cy, @cx}
         if dr != 0

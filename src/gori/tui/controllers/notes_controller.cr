@@ -119,14 +119,14 @@ module Gori::Tui
       case
       when key.enter? then @notes.enter_insert!
       when c == 'i'   then @notes.enter_insert!
-      when key.up?
+      when nav_up?(ev)
         if @notes.at_top?
           save_notes
           @host.request_focus(:subtabs)
         else
           @notes.read_move(-1, 0, selecting: selecting)
         end
-      when key.down?                  then @notes.read_move(1, 0, selecting: selecting)
+      when nav_down?(ev)              then @notes.read_move(1, 0, selecting: selecting)
       when key.left?                  then @notes.read_move(0, -1, selecting: selecting)
       when key.right?                 then @notes.read_move(0, 1, selecting: selecting)
       when @notes.read_motion_key(ev) then nil # Page keys + ⇧Home/⇧End — the shared editor set
@@ -210,6 +210,24 @@ module Gori::Tui
 
     def handle_wheel(step : Int32) : Bool
       @notes.scroll_view(step)
+      true
+    end
+
+    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
+    # The note editor in INSERT mode — the one state with a caret to paste at. Notes was the
+    # one multi-line editor still taking a paste as N keystrokes (Repeater and Fuzzer opted in
+    # when the bulk path landed), and it is the tab a whole response body or writeup gets
+    # pasted INTO, so a 200-line paste cost 200 undo snapshots, 200 highlight rebuilds and
+    # 200 frames, and `⌃Z` then took it back one character at a time. No content-level
+    # refusal here, unlike those two: a note has no `§` marker to guard, so whatever the
+    # clipboard holds is legal text.
+    def accepts_bulk_paste? : Bool
+      @notes.insert_mode?
+    end
+
+    def paste_text(text : String) : Bool
+      return false unless @notes.paste(text)
+      report_replaced(@notes.last_replaced) # a paste over a selection REPLACES it, like a typed char
       true
     end
 
@@ -413,12 +431,11 @@ module Gori::Tui
       # its dirty flag — but a "duplicated note" line would paint over the refusal `save_notes`
       # just posted, which is the one thing the operator needs to see.
       saved = save_notes
-      targets = target_subtab_indices
       msg = "duplicated note"
-      if targets.size > 1
-        batch = duplicate_marked_subtabs(targets, "note") { |i| @notes.duplicate_at(i) }
+      if refs = batch_subtab_refs
+        batch = duplicate_marked_subtabs(refs, "note") { |i| @notes.duplicate_at(i) }
         unless batch
-          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
           return
         end
         msg = batch
@@ -436,10 +453,9 @@ module Gori::Tui
     # (`target_subtab_indices` — the one target rule). A lone blank note still closes without
     # asking; a batch always asks, because it can discard notes that are not on screen.
     def notes_close : Nil
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE NOTES", "Close #{marked_subtab_phrase(targets.size)}?\nTheir text will be discarded.",
-          confirm_label: "close", danger: true) { close_marked_notes(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE NOTES", "Close #{marked_subtab_phrase(refs.size)}?\nTheir text will be discarded.",
+          confirm_label: "close", danger: true) { close_marked_notes(refs) }
         return
       end
       if @notes.current_blank?
@@ -450,8 +466,8 @@ module Gori::Tui
         confirm_label: "close", danger: true) { do_notes_close }
     end
 
-    private def close_marked_notes(idxs : Array(Int32)) : Nil
-      msg = close_marked_subtabs(idxs)
+    private def close_marked_notes(refs : Array(SubtabRef)) : Nil
+      msg = close_marked_subtabs(refs)
       refresh_link_preview
       @host.status(msg)
       @host.resolve_subtab_focus
@@ -470,12 +486,22 @@ module Gori::Tui
       @host.status("closed note (#{@notes.count} open)")
     end
 
-    # Close note `idx` and drop its links. Notes keeps ≥1 — closing the last one leaves a
-    # fresh blank note behind (NotesView#close_note_at).
+    # Close note `idx`. Notes keeps ≥1 — closing the last one leaves a fresh blank note behind
+    # (NotesView#close_note_at).
+    #
+    # A note that IS on disk keeps its `entity_links` until `Notes.save` drops them, once the
+    # write has committed. Dropping them on the keypress destroyed the operator's evidence
+    # against a document that had not been written yet, so a save the project's writer then
+    # refused left the note on disk with its links already gone.
+    #
+    # A note this session minted and never saved is the other half: nothing on disk can bring
+    # it back, so no later commit will ever reach its links and they would sit in
+    # `entity_links` for the life of the project. That one is dropped here, where the only
+    # copy of it is being discarded (`NotesView#unpersisted?`).
     private def close_note_at(idx : Int32) : Nil
-      if closed_id = @notes.close_note_at(idx)
-        @host.session.store.delete_links_for_owner(Store::LinkOwnerKind::Note, closed_id)
-      end
+      return unless closed_id = @notes.close_note_at(idx)
+      return unless @notes.unpersisted?(closed_id)
+      @host.session.store.delete_links_for_owner(Store::LinkOwnerKind::Note, closed_id)
     end
 
     # Copy selection (or current line) in READ mode.

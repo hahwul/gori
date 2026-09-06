@@ -90,6 +90,16 @@ describe Gori::Tui::CopyMenu do
       opt(opts, 'x').should be_nil
     end
 
+    # A line that does not frame AND resolves to no URL (no target base, no Host): the code
+    # rows are gone either way, but the cURL row is where the reason is said, and gating it on
+    # the guessed URL dropped that comment in exactly the case with the least to go on.
+    it "keeps the cURL refusal note when the unframable line also resolves to no URL" do
+      opts = CopyMenu.request_options("GET /echo?a=b c&d=e HTTP/1.1\r\n\r\n", "")
+      opt(opts, 'u').should be_nil
+      opt(opts, 'y').should be_nil
+      opt(opts, 'l').not_nil!.text.should start_with("# no command:")
+    end
+
     it "omits body/cookie rows when the request has neither (GET, no cookie)" do
       get = "GET /health HTTP/1.1\r\nHost: h\r\n\r\n"
       opts = CopyMenu.request_options(get, "http://h")

@@ -446,6 +446,15 @@ module Gori::Proxy::WS
         frame = WS.read_body(src, h) || break
         dst.write(frame.raw)
         dst.flush
+        # A CLOSE ends the message being reassembled: §5.5.1 forbids data frames after one, so
+        # the FIN this fragment is owed is never coming. Its bytes arrived BEFORE the CLOSE, so
+        # its row goes in first — the `ensure` below would otherwise emit it AFTER, putting the
+        # transcript out of arrival order. `AssemblingPump#forward_control` (`flush_withheld`
+        # then the CLOSE) and `WsEngine.drain` both already record the pair this way, so a
+        # `TEXT fin=0 "unterminated"` followed by a CLOSE was listed in one order on a socket
+        # with a `part: ws` rule armed and the other order on a socket without one — the same
+        # origin bytes, and the reader had no way to know which they were looking at.
+        assembling = emit_pending(assembling, direction, flow_id, sink, message_opcode, shape) if frame.close?
         controls = capture_control(frame, direction, flow_id, sink, controls)
         shape.note(frame) if frame.data?
         assembling = capture_frame(frame, assembling, direction, flow_id, sink, message_opcode, shape)

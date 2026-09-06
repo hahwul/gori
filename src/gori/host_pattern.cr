@@ -12,10 +12,30 @@ module Gori
   # callers evaluate the same patterns repeatedly on the proxy hot path — per captured row
   # for scope and per destination dial for routing/passthrough.
   module HostPattern
-    # "[::1]" → "::1". Host matching compares bare forms so an IPv6 pattern matches whether
-    # the host arrived bracketed (some URL paths) or bare (the CONNECT/tunnel path).
+    # The form both sides of a host match compare: a SURROUNDING bracket pair peeled, and every
+    # TRAILING ROOT DOT stripped.
+    #
+    # Brackets, because an IPv6 host arrives bracketed on some URL paths and bare on the
+    # CONNECT/tunnel path, and a pattern must reach both.
+    #
+    # The root dot, because `acme.test.` and `acme.test` are one name to every resolver and gori
+    # captures the `Host:` bytes as they arrived — a browser sends the dot when the user types
+    # one, which is exactly why the dotted spelling is a standing WAF/cache bypass. To a string
+    # compare it was a different host, so `acme.test.` escaped a scope EXCLUDE, a TLS-passthrough
+    # entry and an upstream route written for `acme.test`, each in the permissive direction; and a
+    # pattern typed WITH the dot was a rule no request could ever match. `OverrideHost.key` folds
+    # it on the host-override table and `Upstream.strip_root_dot` on the self-loop gate, both for
+    # this reason — this is the third table and the one the other two cite.
+    #
+    # `rstrip` rather than `chomp`, like `OverrideHost.key`: the pathological `acme.test..` folds
+    # too instead of leaving a dot behind that still matches nothing.
+    #
+    # A GLOB pattern is matched against the UN-bared text (see `matches_bare?`), so a glob typed
+    # with a trailing dot stays a rule that matches nothing — exactly as a bracketed glob does,
+    # and `Scope.sql_native_host?` keeps the SQL lens agreeing with it either way.
     def self.bare(host : String) : String
-      (host.starts_with?('[') && host.ends_with?(']')) ? host[1...-1] : host
+      h = (host.starts_with?('[') && host.ends_with?(']')) ? host[1...-1] : host
+      h.ends_with?('.') ? h.rstrip('.') : h
     end
 
     # One pattern with its derived forms precomputed: the lowercased text, its bracket-free

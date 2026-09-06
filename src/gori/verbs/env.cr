@@ -18,6 +18,10 @@ module Gori
         Verb::Scope::Env, [Verb::Chord.new("a")]) { |ctx| ctx.env_add_var; nil }
 
       r.register Verb::Definition.new(
+        "env.copy-var", "Copy", "Copy the selected variable as KEY=VALUE",
+        Verb::Scope::Env, [Verb::Chord.new("y")], available: have_var) { |ctx| ctx.read_copy; nil }
+
+      r.register Verb::Definition.new(
         "env.edit-var", "Edit env var", "Edit the selected environment variable in place",
         Verb::Scope::Env, [Verb::Chord.new("e")], available: have_var) { |ctx| ctx.env_edit_var; nil }
 

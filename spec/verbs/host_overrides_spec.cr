@@ -12,7 +12,7 @@ describe "Gori::Verbs.register_host_overrides" do
      "hostoverride.delete-entry" => "d",
     }.each do |id, key|
       r[id].scope.should eq(Gori::Verb::Scope::HostOverrides)
-      r[id].chords.should eq([Gori::Verb::Chord.new(key)])
+      r[id].chords.should eq([typed_chord(key)])
       # The Project scope binds the same letters to scope.add-rule/edit-rule/delete-rule.
       r[id].scope.should_not eq(Gori::Verb::Scope::Project)
     end

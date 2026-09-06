@@ -6,6 +6,7 @@ require "../../env"
 module Gori
   module MCP
     class Tools
+      @[Tool("list_issues")]
       private def list_issues(h) : Result
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
@@ -26,6 +27,7 @@ module Gori
         end)
       end
 
+      @[Tool("get_issue")]
       private def get_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -34,6 +36,7 @@ module Gori
         Result.new(JSON.build { |j| Serialize.issue(j, f, store) })
       end
 
+      @[Tool("create_issue", gated: true, agent_action: true)]
       private def create_issue(h) : Result
         title = str(h, "title")
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.empty?
@@ -89,6 +92,7 @@ module Gori
         end)
       end
 
+      @[Tool("update_issue", gated: true, agent_action: true)]
       private def update_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -146,6 +150,7 @@ module Gori
       # Remove an issue outright (the TUI Issues tab's delete). Distinct from status
       # "resolved"/"false-positive", which keep it in the report — this drops it, along with
       # its entity links (Store#delete_issue clears those in the same transaction).
+      @[Tool("delete_issue", gated: true, agent_action: true)]
       private def delete_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id

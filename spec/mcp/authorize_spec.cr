@@ -6,19 +6,6 @@ require "socket"
 # (with sleeps that yield to the job fiber) against a local origin. The IO::Memory server
 # harness never yields between scripted lines, so a polled async job cannot progress there.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpauthz", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # An origin that either serves the same page to everyone (`enforce: false` — a broken
 # access-control target) or refuses a request carrying no Cookie (`enforce: true`). One
 # connection per request, because `Authorize::Engine.live` deliberately does not keep-alive.
@@ -111,7 +98,7 @@ describe "MCP authorize tools" do
       port = start_authz_origin(enforce: false)
       with_store do |store|
         flow = seed_authz_flow(store, port)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start", {
           "flow_ids"       => [flow],
           "identities"     => anon,
@@ -172,7 +159,7 @@ describe "MCP authorize tools" do
       port = start_authz_origin(enforce: true)
       with_store do |store|
         flow = seed_authz_flow(store, port)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start", {
           "flow_ids"       => flow, # a bare id, not an array
           "identities"     => anon,
@@ -199,7 +186,7 @@ describe "MCP authorize tools" do
           Gori::Authorize::Identity.as_captured,
           Gori::Authorize::Identity.new("anon", remove_headers: ["Cookie"]),
         ]))
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start",
           {"flow_ids" => [flow], "allow_unscoped" => true}.to_json)
         start["identities"].as_a.map(&.as_s).should eq(["as-captured", "anon"])
@@ -212,7 +199,7 @@ describe "MCP authorize tools" do
       with_store do |store|
         get = seed_authz_flow(store, port, target: "/admin")
         post = seed_authz_flow(store, port, method: "POST", target: "/admin/delete")
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start", {
           "query"          => "host:127.0.0.1",
           "identities"     => anon,
@@ -246,7 +233,7 @@ describe "MCP authorize tools" do
       port = start_authz_origin(enforce: true)
       with_store do |store|
         flow = seed_authz_flow(store, port)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start", {
           "flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true,
         }.to_json)
@@ -259,7 +246,15 @@ describe "MCP authorize tools" do
         row["bypass_count"].as_i.should eq(0)
 
         stop = call_json(tools, "authorize_stop", %({"job_id":#{job_id.to_json}}))
-        stop["status"].as_s.should eq("stopping")
+        # No phantom "stopping". This used to assert that literal unconditionally, which the
+        # very next comment shows was unpinnable: a one-request run may already have finished
+        # before the stop landed, and the old hard-coded reply claimed "stopping" for a job
+        # that was `done`. The reply now carries the status the job is ACTUALLY in, plus the
+        # flag saying a stop was asked for — the same contract stop_job has always had.
+        stop["stop_requested"].as_bool.should be_true
+        stop["status"].as_s.should_not eq("stopping")
+        ["running", "done", "stopped"].should contain(stop["status"].as_s)
+        stop["stopped"].as_bool.should eq(stop["status"].as_s != "running")
         final = drain_job(tools, job_id)
         # A one-request run may well have finished before the stop landed; either terminal
         # state is correct, and neither may be :running.
@@ -277,7 +272,7 @@ describe "MCP authorize tools" do
   describe "PlanError arms" do
     it "NoTarget: neither flow_ids nor query" do
       with_store do |store|
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         r = call_result(tools, "authorize_start", {"identities" => anon}.to_json)
         r.is_error.should be_true
         r.error_code.should eq("INVALID_ARGUMENT")
@@ -289,7 +284,7 @@ describe "MCP authorize tools" do
 
     it "NoFlows: ids that no longer exist, and a query that matched nothing" do
       with_store do |store|
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         byid = call_result(tools, "authorize_start", {"flow_ids" => [98765], "identities" => anon}.to_json)
         byid.error_code.should eq("NOT_FOUND")
         byid.text.should contain("list_history")
@@ -305,7 +300,7 @@ describe "MCP authorize tools" do
     it "BadQuery: a query that compiles to no clause is refused, not run as match-all" do
       with_store do |store|
         seed_authz_flow(store, 1)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         r = call_result(tools, "authorize_start",
           {"query" => "status:>=foo", "identities" => anon, "allow_unscoped" => true}.to_json)
         r.is_error.should be_true
@@ -318,7 +313,7 @@ describe "MCP authorize tools" do
     it "NoIdentities: names the argument for an inline set and the tab for the project's" do
       with_store do |store|
         flow = seed_authz_flow(store, 1)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         # An explicit-but-empty set: the baseline alone would be judged against itself.
         inline = call_result(tools, "authorize_start",
           {"flow_ids" => [flow], "identities" => [] of String}.to_json)
@@ -339,7 +334,7 @@ describe "MCP authorize tools" do
       with_store do |store|
         # A POST is not a safe method to repeat, so it is skipped unless asked for by name.
         post = seed_authz_flow(store, 1, method: "POST", target: "/pay")
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         r = call_result(tools, "authorize_start",
           {"flow_ids" => [post], "identities" => anon, "allow_unscoped" => true}.to_json)
         r.is_error.should be_true
@@ -358,7 +353,7 @@ describe "MCP authorize tools" do
       port = start_authz_origin(enforce: true)
       with_store do |store|
         flow = seed_authz_flow(store, port)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         blocked = call_result(tools, "authorize_start",
           {"flow_ids" => [flow], "identities" => anon}.to_json)
         blocked.is_error.should be_true
@@ -379,7 +374,7 @@ describe "MCP authorize tools" do
       with_store do |store|
         flow = seed_authz_flow(store, 1)
         store.add_scope_rule("include", "host", "only.example.com")
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         r = call_result(tools, "authorize_start", {"flow_ids" => [flow], "identities" => anon}.to_json)
         r.error_code.should eq("SCOPE_BLOCKED")
         r.text.should contain("127.0.0.1")
@@ -396,7 +391,7 @@ describe "MCP authorize tools" do
         flow = seed_authz_flow(store, port)
         store.add_scope_rule("include", "host", "only.example.com")
         store.set_setting(Gori::Scope::SETTING_SANDBOX, "1")
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start",
           {"flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true}.to_json)
         status = drain_job(tools, start["job_id"].as_s)
@@ -418,7 +413,7 @@ describe "MCP authorize tools" do
       port = dead_authz_port
       with_store do |store|
         flow = seed_authz_flow(store, port)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start",
           {"flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true}.to_json)
         status = drain_job(tools, start["job_id"].as_s)
@@ -447,7 +442,7 @@ describe "MCP authorize tools" do
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: drop, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: nil, content_type: nil))
         store.add_scope_rule("include", "host", "127.0.0.1")
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start",
           {"flow_ids" => [keep, drop], "identities" => anon}.to_json)
         start["scope_gate"].as_s.should eq("allowlist")
@@ -461,7 +456,7 @@ describe "MCP authorize tools" do
   describe "listing and gating" do
     it "lists all four tools alongside its siblings, and hides them all in read-only" do
       with_store do |store|
-        full = tool_names(Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false))
+        full = tool_names(tools_for(store))
         %w[authorize_start authorize_status authorize_results authorize_stop].each do |n|
           full.should contain(n)
         end
@@ -489,7 +484,7 @@ describe "MCP authorize tools" do
 
     it "declares every schema well-formed and rejects an undeclared argument" do
       with_store do |store|
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         listed = JSON.parse(JSON.build { |j| tools.list(j) }).as_a
           .select(&.["name"].as_s.starts_with?("authorize_"))
         listed.size.should eq(4)
@@ -512,7 +507,7 @@ describe "MCP authorize tools" do
       with_store do |store|
         a = seed_authz_flow(store, 1, target: "/a")
         b = seed_authz_flow(store, 1, target: "/b")
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         base = {"identities" => anon, "allow_unscoped" => true}
         ["#{a},#{b}", "[#{a},#{b}]"].each do |spelling|
           start = call_json(tools, "authorize_start", base.merge({"flow_ids" => spelling}).to_json)
@@ -527,7 +522,7 @@ describe "MCP authorize tools" do
 
     it "names a non-integer flow id instead of dropping it" do
       with_store do |store|
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         r = call_result(tools, "authorize_start", {"flow_ids" => ["7", "oops"], "identities" => anon}.to_json)
         r.is_error.should be_true
         r.error_code.should eq("INVALID_ARGUMENT")
@@ -541,7 +536,7 @@ describe "MCP authorize tools" do
     it "refuses boolean garbage by name instead of running a different test" do
       with_store do |store|
         flow = seed_authz_flow(store, 1)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         # {flag, a legal STRING spelling that still lets the run start}
         {"unsafe_methods" => "false", "verify" => "false", "allow_unscoped" => "true"}.each do |flag, legal|
           # `flag` is written LAST, so it overrides the allow_unscoped default below it.
@@ -561,7 +556,7 @@ describe "MCP authorize tools" do
     it "refuses a malformed identities string rather than degrading it to an empty set" do
       with_store do |store|
         flow = seed_authz_flow(store, 1)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         r = call_result(tools, "authorize_start",
           {"flow_ids" => [flow], "identities" => "{not json"}.to_json)
         r.is_error.should be_true
@@ -574,7 +569,7 @@ describe "MCP authorize tools" do
       port = start_authz_origin(enforce: true)
       with_store do |store|
         flow = seed_authz_flow(store, port)
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         start = call_json(tools, "authorize_start",
           {"flow_ids" => [flow], "identities" => anon.to_json, "allow_unscoped" => true}.to_json)
         start["identities"].as_a.map(&.as_s).should eq(["as-captured", "anonymous"])
@@ -587,7 +582,7 @@ describe "MCP authorize tools" do
         # One flow, many identities: the cap is on the PRODUCT, so either factor can trip it.
         flow = seed_authz_flow(store, 1)
         idents = (1..2100).map { |i| {"name" => "id#{i}", "remove" => ["Cookie"]} }
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         r = call_result(tools, "authorize_start",
           {"flow_ids" => [flow], "identities" => idents, "allow_unscoped" => true}.to_json)
         r.is_error.should be_true
@@ -598,7 +593,7 @@ describe "MCP authorize tools" do
 
     it "reports an unknown job id as NOT_FOUND on all three pollers" do
       with_store do |store|
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         %w[authorize_status authorize_results authorize_stop].each do |name|
           call_result(tools, name, %({"job_id":"az_999"})).error_code.should eq("NOT_FOUND")
           call_result(tools, name, "{}").error_code.should eq("INVALID_ARGUMENT")
@@ -661,7 +656,7 @@ describe "MCP authorize tools" do
     port = start_conditional_origin
     with_store do |store|
       flow = seed_conditional_flow(store, port)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       start = call_json(tools, "authorize_start", {
         "flow_ids"       => [flow],
         "identities"     => anon,
@@ -688,7 +683,7 @@ describe "MCP authorize tools" do
     port = start_authz_origin(enforce: false)
     with_store do |store|
       flow = seed_authz_flow(store, port)
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = call_result(tools, "authorize_start", {
         "flow_ids"   => [flow],
         "identities" => [

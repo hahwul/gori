@@ -17,18 +17,22 @@ module Gori
       # --- content pane (Body) navigation: arrow keys / hjkl ---
       r.register Verb::Definition.new(
         "body.down", "Select next flow", "Move selection down", Verb::Scope::Body,
-        [Verb::Chord.new("down"), Verb::Chord.new("j")], hidden: true) { |ctx| ctx.move_selection(1); nil }
+        # `available: in_history` — Body is shared with Help and the Project settings pane,
+        # and these two were the only Body verbs without the gate.
+        [Verb::Chord.new("down"), Verb::Chord.new("j")], available: in_history, hidden: true) { |ctx| ctx.move_selection(1); nil }
 
       r.register Verb::Definition.new(
         "body.up", "Select previous flow", "Move selection up", Verb::Scope::Body,
-        [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.move_selection(-1); nil }
+        [Verb::Chord.new("up"), Verb::Chord.new("k")], available: in_history, hidden: true) { |ctx| ctx.move_selection(-1); nil }
 
       # (No left/h → tab bar here: ← was an easy overshoot when walking back out of
       #  the detail's REQ/RES panes. esc (body.to-menu) / ↑-at-top go up instead.)
 
       r.register Verb::Definition.new(
         "body.open", "Open flow detail", "View the selected request/response", Verb::Scope::Body,
-        [Verb::Chord.new("enter"), Verb::Chord.new("right"), Verb::Chord.new("l")],
+        # `o` too: Sitemap, Probe, Issues, Discover and the Activity feed all open a row's flow
+        # on `o`, and History was the one list where the same key was silent.
+        [Verb::Chord.new("enter"), Verb::Chord.new("right"), Verb::Chord.new("l"), Verb::Chord.new("o")],
         available: history_selected, mnemonic: 'o', group: :view) { |ctx| ctx.open_detail; nil }
 
       r.register Verb::Definition.new(
@@ -439,8 +443,8 @@ module Gori
         available: in_repeater, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
 
       # --- detail view ---
-      # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and only
-      # returns to the list once past REQUEST; → walks forward (REQ→RES→FRAMES).
+      # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and → forward
+      # (REQ→RES→FRAMES); both clamp at the ends, so neither ever closes the detail.
       r.register Verb::Definition.new(
         "detail.close", "Close detail", "Return to the History list", Verb::Scope::HistoryDetail,
         [Verb::Chord.new("escape"), Verb::Chord.new("q")],
@@ -593,6 +597,17 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
+      # The RESULTS pane's three lenses. They were raw `key.lower_o?` arms in the controller —
+      # no palette row, no space-menu row, and the hotkey editor offered the letters as free.
+      r.register Verb::Definition.new(
+        "fuzz.sort", "Cycle sort", "RESULTS: cycle the sort column (index → status → length → …)",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("o")], available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
+      r.register Verb::Definition.new(
+        "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, mnemonic: 'm', section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }
+      r.register Verb::Definition.new(
+        "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, mnemonic: 'g', section: :results) { |ctx| ctx.fuzz_toggle_dist; nil }
       # Shift-S is intentionally READ-mode-only: in a template editor it remains a literal
       # uppercase S. Ctrl-S already edits the target's SNI and cannot be repurposed.
       r.register Verb::Definition.new(
@@ -759,6 +774,11 @@ module Gori
       r.register Verb::Definition.new(
         "mine.stop", "Stop mining", "Stop the running mine", Verb::Scope::Miner,
         [Verb::Chord.new("x", ctrl: true)], available: in_miner, mnemonic: 's') { |ctx| ctx.mine_stop; nil }
+      # `section: :results` is load-bearing: `mine.find-subtab` holds 'f' in the :tab section,
+      # and validate_menu_keys! checks COMMON ∪ each section — a COMMON 'f' would raise at boot.
+      r.register Verb::Definition.new(
+        "mine.filter", "Filter findings", "Filter the FINDINGS table by parameter / location / evidence",
+        Verb::Scope::Miner, [Verb::Chord.new("/")], available: in_miner, mnemonic: 'f', section: :results) { |ctx| ctx.mine_filter; nil }
       # Send the selected finding (injected into the session request) to Repeater. COMMON so
       # it's reachable from summary/results/detail; gated on a selected finding. 'R', not 'p':
       # `fuzz.repeater` had to move off `r` too and its comment names 'R' as "the letter the

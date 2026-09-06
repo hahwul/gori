@@ -220,15 +220,18 @@ module Gori::Tui
     # preview of how the query will be PARSED: a lowercase `or`, a quoted "AND", and a
     # `(` sitting inside a value all stay plain, because none of them group anything.
     # Characters no span covers (the whitespace between terms) keep `base`.
-    # `seps` must match what the BACKEND behind this bar actually splits on — only QL
-    # implements `~`, so the four bars that don't pass `SEPS_FIELD` and `title~admin`
-    # stays plain there, because that is how it will be matched (as free text).
-    # `known` is the backend's field vocabulary — see `FilterAst.spans`. Without it an
-    # unrecognised `hsot:` renders in the same confident blue as a real field, which is the one
-    # visible signal an operator has while typing, and it says the opposite of the truth.
+    # `seps` must match what the BACKEND behind this bar actually splits on — only QL and the
+    # intercept gate implement `~`, so the bars over Probe, Issues and the Repeater sub-tabs pass
+    # `SEPS_FIELD` and `title~admin` stays plain there, because that is how it will be matched
+    # (as free text). The intercept bar used to pass `SEPS_FIELD` too, from before its backend
+    # learned `~`, and painted `host~^api\.` as a plain word while the gate ran it as a regex.
+    # `known` is the backend's field vocabulary, asked per separator — see `FilterAst.spans`.
+    # Without it an unrecognised `hsot:` renders in the same confident blue as a real field,
+    # which is the one visible signal an operator has while typing, and it says the opposite of
+    # the truth.
     def self.filter_query(query : String, base : Color = Theme.text,
                           seps : String = FilterAst::SEPS_FIELD_REGEX,
-                          known : Proc(String, Bool)? = nil) : Array(Color)
+                          known : Proc(String, Char, Bool)? = nil) : Array(Color)
       colors = Array(Color).new(query.size, base)
       FilterAst.spans(query, seps, known).each do |span|
         fg = case span.kind

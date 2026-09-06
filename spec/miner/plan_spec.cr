@@ -3,25 +3,8 @@ require "../spec_helper"
 private alias M = Gori::Miner
 
 # The builder takes the Outbound as an argument (Layer-1 strictness differs per surface on
-# purpose), so the equivalence check uses one ungated decision for all three — the gate is
+# purpose), so the equivalence check uses one ungated_outbound decision for all three — the gate is
 # not what is under test here, `spec/outbound_spec.cr` owns that.
-private def ungated : Gori::Outbound
-  ungated_outbound
-end
-
-private def with_store(&)
-  path = File.tempname("gori-miner-plan", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # `HostOverrides` needs a Store to load from (and to persist edits into).
 private def store_backed_overrides(&)
   with_store { |store| yield Gori::HostOverrides.load(store) }
@@ -47,7 +30,7 @@ private record Shape,
   max_requests : Int64?
 
 private def shape_of(options : M::PlanOptions) : Shape
-  plan = M::Plan.build(options, ungated)
+  plan = M::Plan.build(options, ungated_outbound)
   Shape.new(scheme: plan.origin.scheme, host: plan.origin.host, port: plan.origin.port,
     http2: plan.http2?, locations: plan.config.locations,
     buckets: plan.config.locations.map { |l| plan.config.bucket_for(l) },
@@ -148,7 +131,7 @@ describe Gori::Miner::Plan do
   end
 
   it "mines every candidate name at every resolved location" do
-    plan = M::Plan.build(surface_cases[0].cli.call, ungated)
+    plan = M::Plan.build(surface_cases[0].cli.call, ungated_outbound)
     plan.config.locations.should eq([M::Location::Query, M::Location::Form])
     plan.names.should contain("is_admin") # the compiled-in list, not an empty run
     plan.names.uniq.size.should eq(plan.names.size)
@@ -169,7 +152,7 @@ describe Gori::Miner::Plan do
       cfg.timeout = 11.seconds
       plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "https://t.test:8443",
         http2: true, locations: [M::Location::Query], config: cfg, verify: false,
-        sni: "sni.test", overrides: overrides), ungated)
+        sni: "sni.test", overrides: overrides), ungated_outbound)
       plan.sender.origin.should eq(Gori::Fuzz::Origin.new("https", "t.test", 8443))
       plan.sender.@http2.should be_true
       plan.sender.@verify.should be_false
@@ -187,12 +170,12 @@ describe Gori::Miner::Plan do
     File.write(path, "# a comment\nzzcustomparam\n\nzzotherparam\n")
     cfg = config
     cfg.user_wordlist = path
-    plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated)
+    plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated_outbound)
     plan.names.should contain("zzcustomparam")
     plan.names.should contain("zzotherparam")
     plan.names.should_not contain("# a comment")
     # Exactly two more than the same run without the file — comment/blank lines dropped.
-    builtin_only = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: config), ungated)
+    builtin_only = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: config), ungated_outbound)
     plan.names.size.should eq(builtin_only.names.size + 2)
   ensure
     File.delete?(path) if path
@@ -201,7 +184,7 @@ describe Gori::Miner::Plan do
   describe "transport" do
     it "gives the run a keep-alive pool, sized to its concurrency" do
       cfg = config(concurrency: 7)
-      plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated)
+      plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated_outbound)
       # One parked socket per worker fiber is the most that can ever be checked out at once.
       plan.pool.should_not be_nil
       plan.sender.pool.should be(plan.pool)
@@ -210,7 +193,7 @@ describe Gori::Miner::Plan do
     it "runs connection-per-send when keep-alive is off" do
       cfg = config
       cfg.keep_alive = false
-      plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated)
+      plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated_outbound)
       plan.pool.should be_nil
     end
 
@@ -221,7 +204,7 @@ describe Gori::Miner::Plan do
       # connection serially, so the same `keep_alive` knob now means the same thing whichever
       # protocol the seed selected.
       plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "https://t.test",
-        http2: true, config: config), ungated)
+        http2: true, config: config), ungated_outbound)
       plan.pool.should be_a(Gori::Repeater::H2Pool)
     end
   end
@@ -230,7 +213,7 @@ describe Gori::Miner::Plan do
     it "detects the applicable defaults when the surface named none" do
       # A GET with no body: Form/Json cannot apply, so the default is query only.
       plan = M::Plan.build(M::PlanOptions.new("GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n",
-        target: "http://t.test", config: config), ungated)
+        target: "http://t.test", config: config), ungated_outbound)
       plan.config.locations.should eq([M::Location::Query])
     end
 
@@ -238,7 +221,7 @@ describe Gori::Miner::Plan do
       # The CLI warns per location rather than dropping it, so the run still carries it.
       plan = M::Plan.build(M::PlanOptions.new("GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n",
         target: "http://t.test", locations: [M::Location::Query, M::Location::Form],
-        config: config), ungated)
+        config: config), ungated_outbound)
       plan.config.locations.should eq([M::Location::Query, M::Location::Form])
       plan.inapplicable.should eq([M::Location::Form])
     end
@@ -267,14 +250,14 @@ describe Gori::Miner::Plan do
       # resolved set has to be the one instance everybody holds.
       cfg = config
       cfg.locations.should eq([M::Location::Query]) # the Config default, pre-build
-      M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated)
+      M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated_outbound)
       cfg.locations.should eq([M::Location::Query, M::Location::Form])
     end
 
     it "spreads one bucket size over the RESOLVED locations, not the requested ones" do
       cfg = config
       M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", bucket: 7,
-        config: cfg), ungated)
+        config: cfg), ungated_outbound)
       cfg.bucket_for(M::Location::Query).should eq(7)
       cfg.bucket_for(M::Location::Form).should eq(7) # detected, never named by the caller
       cfg.bucket_for(M::Location::Cookies).should eq(M::Config::DEFAULT_BUCKETS[M::Location::Cookies])
@@ -291,7 +274,7 @@ describe Gori::Miner::Plan do
       Gori::Settings.project_env_vars = [] of {String, String}
       plan = M::Plan.build(M::PlanOptions.new(
         "GET /p?t=$A HTTP/1.1\r\nHost: t.test\r\n\r\n",
-        default_target: "http://$A.test", config: config), ungated)
+        default_target: "http://$A.test", config: config), ungated_outbound)
       plan.origin.host.should eq("$B.test")
       String.new(plan.request).should start_with("GET /p?t=$B HTTP/1.1\r\n")
       # The gate matches on this string, so it has to be the EXPANDED target too.
@@ -306,7 +289,7 @@ describe Gori::Miner::Plan do
       Gori::Settings.env_vars = [{"HOST", "api.test"}]
       Gori::Settings.project_env_vars = [] of {String, String}
       plan = M::Plan.build(M::PlanOptions.new("GET /a HTTP/1.1\r\nHost: h\r\n\r\n",
-        target: "https://$HOST", config: config), ungated)
+        target: "https://$HOST", config: config), ungated_outbound)
       {plan.origin.scheme, plan.origin.host, plan.origin.port}.should eq({"https", "api.test", 443})
     ensure
       Gori::Settings.env_vars = [] of {String, String}
@@ -328,7 +311,7 @@ describe Gori::Miner::Plan do
       plan = M::Plan.build(M::PlanOptions.new(
         "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
         "Content-Length: #{body.bytesize}\r\n\r\n#{body}",
-        target: "http://t.test", locations: [M::Location::Json], config: config), ungated)
+        target: "http://t.test", locations: [M::Location::Json], config: config), ungated_outbound)
       wire = String.new(plan.request)
       sent_body = wire.split("\r\n\r\n", 2)[1]
       sent_body.should eq(%({"a":"99999-EVIL-ENV","b":"x"}))
@@ -351,7 +334,7 @@ describe Gori::Miner::Plan do
       plan = M::Plan.build(M::PlanOptions.new(
         "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
         "Content-Length: #{body.bytesize}\r\n\r\n#{body}",
-        target: "http://t.test", locations: [M::Location::Json], config: config), ungated)
+        target: "http://t.test", locations: [M::Location::Json], config: config), ungated_outbound)
       wire = String.new(plan.request)
       sent_body = wire.split("\r\n\r\n", 2)[1]
       sent_body.should eq(%({"a":"z"}))
@@ -372,7 +355,7 @@ describe Gori::Miner::Plan do
       raw = "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
             "Content-Length: 99\r\n\r\n{\"a\":\"x\"}"
       plan = M::Plan.build(M::PlanOptions.new(raw, target: "http://t.test",
-        locations: [M::Location::Json], config: config), ungated)
+        locations: [M::Location::Json], config: config), ungated_outbound)
       String.new(plan.request).should eq(raw)
     ensure
       Gori::Settings.env_vars = [] of {String, String}
@@ -387,7 +370,7 @@ describe Gori::Miner::Plan do
       Gori::Settings.project_env_vars = [] of {String, String}
       plan = M::Plan.build(M::PlanOptions.new(
         "GET /a?x=1 HTTP/1.1\r\nHost: t.test\r\nUser-Agent: $UA\r\n\r\n",
-        target: "http://t.test", locations: [M::Location::Query], config: config), ungated)
+        target: "http://t.test", locations: [M::Location::Query], config: config), ungated_outbound)
       wire = String.new(plan.request)
       wire.should eq("GET /a?x=1 HTTP/1.1\r\nHost: t.test\r\nUser-Agent: gori-probe-agent\r\n\r\n")
       wire.downcase.should_not contain("content-length")
@@ -405,7 +388,7 @@ describe Gori::Miner::Plan do
       raw = "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
             "Content-Length: 4\r\n\r\n{\"a\":\"$id\"}"
       plan = M::Plan.build(M::PlanOptions.new(raw, evidence: true, target: "http://t.test",
-        locations: [M::Location::Json], config: config), ungated)
+        locations: [M::Location::Json], config: config), ungated_outbound)
       String.new(plan.request).should eq(raw)
     ensure
       Gori::Settings.env_vars = [] of {String, String}
@@ -424,7 +407,7 @@ describe Gori::Miner::Plan do
       plan = M::Plan.build(M::PlanOptions.new(
         "POST /api HTTP/1.1\nHost: t.test\nContent-Type: application/json\n" \
         "Content-Length: #{body.bytesize}\n\n#{body}",
-        target: "http://t.test", locations: [M::Location::Json], config: config), ungated)
+        target: "http://t.test", locations: [M::Location::Json], config: config), ungated_outbound)
       wire = String.new(plan.request)
       sent_body = wire.split("\r\n\r\n", 2)[1]
       sent_body.should eq(%({"a":"99999-EVIL-ENV"}))
@@ -444,7 +427,7 @@ describe Gori::Miner::Plan do
       plan = M::Plan.build(M::PlanOptions.new(
         "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
         "Transfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n9\r\n$id\r\n0\r\n\r\n",
-        target: "http://t.test", locations: [M::Location::Json], config: config), ungated)
+        target: "http://t.test", locations: [M::Location::Json], config: config), ungated_outbound)
       String.new(plan.request).should contain("Content-Length: 5\r\n")
     ensure
       Gori::Settings.env_vars = [] of {String, String}
@@ -480,7 +463,7 @@ describe Gori::Miner::Plan do
             locations: [M::Location::Query], config: config, verify: false, overrides: ov)
         end
 
-        pinned = M::Plan.build(opts.call(overrides), ungated)
+        pinned = M::Plan.build(opts.call(overrides), ungated_outbound)
         result = pinned.sender.send(req.to_slice)
         result.error.should be_nil
         String.new(result.head).should start_with("HTTP/1.1 204")
@@ -491,7 +474,7 @@ describe Gori::Miner::Plan do
         # Control run: the SAME plan without the overrides cannot reach that listener —
         # `miner.test` is a reserved TLD with no address. Without this arm the assertion
         # above would also pass if the override had never been applied.
-        bare = M::Plan.build(opts.call(nil), ungated)
+        bare = M::Plan.build(opts.call(nil), ungated_outbound)
         bare.sender.send(req.to_slice).error.should_not be_nil
       end
     ensure
@@ -502,14 +485,14 @@ describe Gori::Miner::Plan do
   describe "refusals" do
     it "reports NoTarget when neither an explicit nor a flow target is given" do
       ex = expect_raises(M::PlanError) do
-        M::Plan.build(M::PlanOptions.new(CRLF_RAW, config: config), ungated)
+        M::Plan.build(M::PlanOptions.new(CRLF_RAW, config: config), ungated_outbound)
       end
       ex.reason.should eq(M::PlanError::Reason::NoTarget)
     end
 
     it "reports BadTarget with the expanded string a surface quotes back" do
       ex = expect_raises(M::PlanError) do
-        M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "::::", config: config), ungated)
+        M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "::::", config: config), ungated_outbound)
       end
       ex.reason.should eq(M::PlanError::Reason::BadTarget)
       ex.detail.should eq("::::")
@@ -521,7 +504,7 @@ describe Gori::Miner::Plan do
       # anyway would ignore what the operator just said.
       ex = expect_raises(M::PlanError) do
         M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test",
-          locations: [] of M::Location, config: config), ungated)
+          locations: [] of M::Location, config: config), ungated_outbound)
       end
       ex.reason.should eq(M::PlanError::Reason::NoLocations)
     end
@@ -530,7 +513,7 @@ describe Gori::Miner::Plan do
       cfg = config
       cfg.user_wordlist = File.tempname("gori-miner-missing", ".txt")
       ex = expect_raises(M::PlanError) do
-        M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated)
+        M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated_outbound)
       end
       ex.reason.should eq(M::PlanError::Reason::Wordlist)
       ex.detail.should_not be_nil
@@ -545,7 +528,7 @@ describe Gori::Miner::Plan do
       cfg = config
       cfg.user_wordlist = dir
       ex = expect_raises(M::PlanError) do
-        M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated)
+        M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated_outbound)
       end
       ex.reason.should eq(M::PlanError::Reason::Wordlist)
     ensure
@@ -556,7 +539,7 @@ describe Gori::Miner::Plan do
       # The order every surface's error text inherits: with both wrong, the missing
       # target is what gets reported.
       ex = expect_raises(M::PlanError) do
-        M::Plan.build(M::PlanOptions.new(CRLF_RAW, locations: [] of M::Location, config: config), ungated)
+        M::Plan.build(M::PlanOptions.new(CRLF_RAW, locations: [] of M::Location, config: config), ungated_outbound)
       end
       ex.reason.should eq(M::PlanError::Reason::NoTarget)
     end

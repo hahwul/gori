@@ -20,14 +20,14 @@ module Gori
           acao_all = resp.headers.get_all("Access-Control-Allow-Origin")
           return unless acao_all.size == 1
           acao = acao_all.first.strip
-          creds = resp.headers.get?("Access-Control-Allow-Credentials").try(&.downcase.strip) == "true"
+          creds = allows_credentials?(resp)
           if acao == "*"
             # `*` + Allow-Credentials is REJECTED by browsers (the credentialed request fails),
             # so the combination is a non-functional misconfiguration — NOT more exploitable than
             # a bare wildcard. Keep it Medium and say so, rather than inflating to High.
             acc << cors(ctx, "cors_wildcard", "Permissive CORS (Access-Control-Allow-Origin: *)",
               Store::Severity::Medium, creds ? "with credentials (browser-rejected combination)" : nil)
-          elsif acao.downcase == "null"
+          elsif acao == "null"
             sev = creds ? Store::Severity::High : Store::Severity::Medium
             acc << cors(ctx, "cors_null_origin", "CORS allows the null origin",
               sev, creds ? "with credentials" : nil)
@@ -40,6 +40,13 @@ module Gori
               "CORS reflects a cross-origin request Origin with credentials",
               Store::Severity::High, origin.strip[0, 80])
           end
+        end
+
+        # https://fetch.spec.whatwg.org/#cors-protocol-and-credentials requires the
+        # case-sensitive byte string "true". Repeated fields combine to a rejected comma-list.
+        private def allows_credentials?(resp : Proxy::Codec::RawResponse) : Bool
+          credentials = resp.headers.get_all("Access-Control-Allow-Credentials")
+          credentials.size == 1 && credentials.first.strip == "true"
         end
 
         # The request Origin is a DIFFERENT origin (scheme, host, OR port) from the page.

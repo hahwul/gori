@@ -437,13 +437,14 @@ module Gori::CLI
   # Column padding by TERMINAL WIDTH, not codepoint count. `ljust` measures `String#size`, so a
   # CJK rule name — two cells per character — under-padded its column and stepped the command
   # beside it out of line, in a listing whose whole purpose is to be read carefully before a
-  # command is armed. `Screen.display_width` is the measure the TUI already draws with.
+  # command is armed. `Output.cell_width` is that measure, now shared with every `gori run`
+  # listing that pads an operator-typed name.
   private def self.column_width(s : String) : Int32
-    Tui::Screen.display_width(s)
+    Output.cell_width(s)
   end
 
   private def self.pad(s : String, width : Int32) : String
-    s + " " * {width - column_width(s), 0}.max
+    Output.pad(s, width)
   end
 
   # A string from a profile, safe to put on a terminal: scrubbed to valid UTF-8, with every

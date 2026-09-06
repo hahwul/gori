@@ -491,6 +491,22 @@ module Gori::Tui
       place_at_offset(caret)
     end
 
+    # `set_text` for text that came back from OUTSIDE — the external editor (^E). The old
+    # text is one undo step away and the caret stays where it was (clamped to the new
+    # length), so a note edited at line 400 comes back to line 400, not to line 1 with no
+    # ^Z. Everything else `set_text` resets — selection, composition, the completion
+    # popup, the typing run — is reset here too, since all of it indexed the old buffer.
+    def replace_from_outside(text : String) : Nil
+      at = cursor_offset
+      push_undo
+      @lines, @eols = split_wire(text)
+      @preedit = ""
+      @styled = nil
+      @edits += 1
+      @conceal_spans = [] of {Int32, Int32} unless @conceal_spans.empty?
+      place_at_offset(at) # clamps, clears the anchor, breaks the run, closes the popup
+    end
+
     # `set_text`/`replace_all` for a transform that was COMPUTED over `#text` — the CR-free
     # LF projection — and must not be allowed to write that projection back.
     #

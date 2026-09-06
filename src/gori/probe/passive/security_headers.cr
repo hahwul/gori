@@ -1,4 +1,5 @@
 require "./rule"
+require "../../ascii_bytes"
 
 module Gori
   module Probe
@@ -17,6 +18,17 @@ module Gori
         # HSTS max-age under 1 day is almost always a mistake (or intentional disable-in-progress).
         # Longer "short" thresholds (e.g. 6 months) are too noisy during staged rollouts.
         SHORT_HSTS_MAX_AGE = 86_400_i64
+        private HSTS_MAX_AGE       = "max-age".to_slice
+
+        # Every Referrer-Policy token a browser recognises. A comma-separated field is a fallback
+        # list for older clients: the LAST recognised token wins, including across repeated
+        # physical fields after HTTP field combination. Unknown tokens do not displace the last
+        # recognised one.
+        REFERRER_POLICIES = Set{
+          "no-referrer", "no-referrer-when-downgrade", "origin",
+          "origin-when-cross-origin", "same-origin", "strict-origin",
+          "strict-origin-when-cross-origin", "unsafe-url",
+        }
 
         def info : RuleInfo
           RuleInfo.new("security_headers", "Security headers",
@@ -54,13 +66,100 @@ module Gori
           !((300..399).includes?(status) || status == 204)
         end
 
-        # HSTS with no max-age, or max-age=0 (RFC 6797: instructs the UA to DROP the policy), is
-        # effectively disabled even though the header is present — `check` treats a nil/0 age as
-        # disabled and anything under SHORT_HSTS_MAX_AGE as short, off this single parse.
+        # HSTS with no max-age, max-age=0 (RFC 6797: instructs the UA to DROP the policy), a
+        # malformed value, or a duplicate max-age directive is effectively disabled. Match the
+        # directive NAME and its whole decimal value: the old unanchored PCRE read
+        # `x-max-age=0; max-age=31536000` as disabled and `max-age=31536000junk` as valid.
+        # This is a byte parser rather than `split(';')`: HSTS runs on every HTTPS response, and
+        # the captured header projection may contain invalid UTF-8. It allocates nothing, never
+        # sanitizes the wire bytes (P7), and accumulates with an explicit Int64 overflow guard.
+        # The normal valid-header path is ~6x faster than the old PCRE and 144 B lighter
+        # (bench/probe_security_headers_bench).
         private def hsts_max_age(value : String) : Int64?
-          m = value.scrub.downcase.match(/max-age\s*=\s*"?(\d+)/) # scrub: a non-UTF-8 byte makes the PCRE match raise (cf. cors.cr)
-          return nil if m.nil?
-          m[1].to_i64?
+          bytes = value.to_slice
+          found = false
+          parsed = nil.as(Int64?)
+          start = 0
+          loop do
+            finish = byte_index(bytes, start, 0x3b_u8) # ;
+            left = skip_ows(bytes, start, finish)
+            eq = byte_index(bytes, left, 0x3d_u8, finish) # =
+            name_end = trim_ows_end(bytes, left, eq)
+
+            if max_age_name?(bytes, left, name_end)
+              return nil if found # RFC 6797 §8.1: duplicate directives invalidate the field
+              found = true
+              return nil if eq == finish # max-age with no value
+              bounds = hsts_value_bounds(bytes, eq + 1, finish) || return nil
+              parsed = decimal_i64(bytes, bounds[0], bounds[1]) || return nil
+            end
+
+            break if finish == bytes.size
+            start = finish + 1
+          end
+          found ? parsed : nil
+        end
+
+        private def max_age_name?(bytes : Bytes, start : Int32, finish : Int32) : Bool
+          finish - start == HSTS_MAX_AGE.size &&
+            AsciiBytes.starts_with_ci?(bytes[start, HSTS_MAX_AGE.size], HSTS_MAX_AGE)
+        end
+
+        # Value bounds after OWS and one optional matching quote pair. A one-sided quote makes the
+        # directive invalid; quotes are syntax and are excluded from the returned half-open span.
+        private def hsts_value_bounds(bytes : Bytes, start : Int32, finish : Int32) : {Int32, Int32}?
+          left = skip_ows(bytes, start, finish)
+          right = trim_ows_end(bytes, left, finish)
+          return nil if left == right
+          opens = bytes.unsafe_fetch(left) == 0x22_u8
+          closes = bytes.unsafe_fetch(right - 1) == 0x22_u8
+          return {left, right} unless opens || closes
+          return nil unless opens && closes && right - left >= 2
+          {left + 1, right - 1}
+        end
+
+        private def decimal_i64(bytes : Bytes, start : Int32, finish : Int32) : Int64?
+          return nil if start == finish
+          value = 0_i64
+          i = start
+          while i < finish
+            byte = bytes.unsafe_fetch(i)
+            return nil unless 0x30_u8 <= byte <= 0x39_u8
+            digit = (byte - 0x30_u8).to_i64
+            return nil if value > (Int64::MAX - digit) // 10
+            value = value * 10 + digit
+            i += 1
+          end
+          value
+        end
+
+        private def byte_index(bytes : Bytes, start : Int32, needle : UInt8,
+                               finish : Int32 = bytes.size) : Int32
+          i = start
+          while i < finish && bytes.unsafe_fetch(i) != needle
+            i += 1
+          end
+          i
+        end
+
+        private def skip_ows(bytes : Bytes, start : Int32, finish : Int32) : Int32
+          i = start
+          while i < finish && ows?(bytes.unsafe_fetch(i))
+            i += 1
+          end
+          i
+        end
+
+        private def trim_ows_end(bytes : Bytes, start : Int32, finish : Int32) : Int32
+          i = finish
+          while i > start && ows?(bytes.unsafe_fetch(i - 1))
+            i -= 1
+          end
+          i
+        end
+
+        private def ows?(byte : UInt8) : Bool
+          byte == 0x20_u8 || byte == 0x09_u8
         end
 
         private def check_doc_headers(ctx : Context, h, acc : Array(Detection)) : Nil
@@ -125,16 +224,25 @@ module Gori
         end
 
         private def check_referrer_policy(ctx : Context, h, acc : Array(Detection)) : Nil
-          rp = h.get?("Referrer-Policy")
-          if rp.nil?
-            acc << hdr(ctx, "missing_referrer_policy", "Missing Referrer-Policy", Store::Severity::Info)
+          present = false
+          effective = nil.as(String?)
+          # Referrer-Policy is a list field, so repeated lines concatenate in wire order. Iterate
+          # the HeaderList directly rather than allocating get_all's intermediate Array.
+          h.each do |header|
+            next unless header.name.compare("Referrer-Policy", case_insensitive: true) == 0
+            present = true
+            header.value.scrub.downcase.split(',').each do |raw|
+              token = raw.strip
+              effective = token if REFERRER_POLICIES.includes?(token)
+            end
+          end
+          if !present || effective.nil?
+            acc << hdr(ctx, "missing_referrer_policy", "Missing or ineffective Referrer-Policy", Store::Severity::Info)
             return
           end
-          # Comma-separated multi-token policies are allowed (fallback list); flag only when a
-          # token is exactly unsafe-url. no-referrer-when-downgrade is the browser default and
-          # too common to flag without drowning signal.
-          tokens = rp.scrub.downcase.split(',').map(&.strip).reject(&.empty?)
-          if tokens.includes?("unsafe-url")
+          # Only the effective (last recognised) fallback matters. no-referrer-when-downgrade is
+          # the browser default and too common to flag without drowning signal.
+          if effective == "unsafe-url"
             acc << hdr(ctx, "weak_referrer_policy", "Weak Referrer-Policy (unsafe-url)",
               Store::Severity::Low, "unsafe-url")
           end

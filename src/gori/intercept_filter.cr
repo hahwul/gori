@@ -17,7 +17,8 @@ module Gori
   #   proto:ws         the application protocol — and the WebSocket hold's OPT-IN
   #   header:x-trace   substring of the head bytes of the message in hand
   #   body:token       substring of the body bytes in hand — see "what is in hand" below
-  #   host~^api\.      `~` is regex, on host / path / url / header / body (QL's REGEX_FIELDS)
+  #   host~^api\.      `~` is regex, on host / path / url / method / scheme / header / body
+  #                    (QL's REGEX_FIELDS, less the sides this backend has no columns for)
   #   token            bare word → substring over method/host/target
   #
   # `status:` only matches a response (a request has no status, so a status term
@@ -113,6 +114,8 @@ module Gori
           when :host   then InterceptFilter.regex_hit?(rx, s.host)
           when :path   then InterceptFilter.regex_hit?(rx, s.target)
           when :url    then InterceptFilter.regex_hit?(rx, s.url)
+          when :method then InterceptFilter.regex_hit?(rx, s.method)
+          when :scheme then InterceptFilter.regex_hit?(rx, s.scheme)
           when :header then (h = s.head) ? InterceptFilter.regex_hit?(rx, h) : false
           when :body   then (p = s.payload) ? InterceptFilter.regex_hit?(rx, p) : false
           else              false
@@ -165,11 +168,26 @@ module Gori
     # list. That is why the surfaces where such a condition can be TYPED or SAVED name it —
     # `ExtractRuleOverlay#invalid_reason` refuses it outright (an extract rule persists), and the
     # intercept bar paints the field muted (`GATE_KNOWN`) and notes it beside the condition.
-    UNSUPPORTED_FIELDS = %w[scope]
+    # DERIVED, not typed out, because it was typed out and drifted: `scope` was the only member
+    # while ELEVEN more QL fields fell through `field_symbol`'s else to free text — the exact
+    # degradation the paragraph above refuses for `scope`. `FIELDS`' own comment already names
+    # them ("`size:`/`respsize:`/`dur:` need an exchange that has FINISHED, and `stub:` needs a
+    # capture decision that has not been made"), so the list QL implements minus the list this
+    # backend implements IS the answer, and the two can no longer disagree: adding a field to
+    # `FIELDS` retires its refusal in the same edit. Aliases resolve first, so `res.body:` is
+    # refused for the reason `resp.body:` is rather than free-texting past the check.
+    UNSUPPORTED_FIELDS = begin
+      names = QL::FIELDS.reject { |f| FIELDS.includes?(f) }
+      QL::FIELD_ALIASES.each do |from, to|
+        names << from unless FIELDS.includes?(to)
+      end
+      names
+    end
 
     # Does `source` name a field this backend refuses? For a surface that has to SAY so; reads
     # `QL.fields_used`, the tokenizer both backends compile through, so it reports exactly the
-    # tokens that would act as fields (a quoted `"scope:in"` free-texts and is not one).
+    # tokens that would act as fields — a quoted `"scope:in"` included, since the grammar strips
+    # quotes before either backend splits a token and `parse_term` refuses it just the same.
     def self.unsupported_fields(source : String) : Array(String)
       QL.fields_used(source).map(&.name).uniq!.select! { |n| UNSUPPORTED_FIELDS.includes?(n) }
     end
@@ -185,8 +203,34 @@ module Gori
       bad = unsupported_fields(source).first?
       return nil unless bad
       "`#{bad}:` is not available in a live-message condition (an intercept catch condition or " \
-      "an extract rule's when:) — the project's scope rules are not part of a message. " \
+      "an extract rule's when:) — #{unanswerable_because(bad)}. " \
       "History, colour rules and MCP `query` answer it."
+    end
+
+    # WHY the field in hand cannot be answered here, as the middle clause of that one sentence.
+    # Each arm reads off the same "what is in hand" table the class header lays out: a gate holds
+    # ONE message, mid-flight, before any capture decision — so what it lacks is the finished
+    # exchange, the stored row, and the project around it, in that order.
+    private def self.unanswerable_because(field : String) : String
+      case QL::FIELD_ALIASES[field]? || field
+      when "scope"
+        "the project's scope rules are not part of a message"
+      when "size", "reqsize", "respsize", "dur"
+        "an exchange that has not finished has no size or duration yet"
+      when "stub"
+        "whether a body was stored is a CAPTURE decision, made after this gate"
+      when "src"
+        "a flow's source is recorded when it is captured, not while it is in flight"
+      when .includes?('.')
+        # The `req.`/`resp.` half. A gate stands on one leg and already knows which, so the
+        # side prefix is not narrowing anything — it is naming bytes that are not in hand.
+        "a gate holds ONE leg, so `#{field.split('.').last}:` already means the message in hand"
+      else
+        # A field QL grows that this backend has not implemented. Generic on purpose: a wrong
+        # reason reads worse than no reason, and the arms above are what a new field earns once
+        # somebody decides which of them it belongs to.
+        "a message in flight carries no such value"
+      end
     end
 
     # Static value pools for the low-cardinality fields (mirrors History's). `host:`
@@ -437,23 +481,7 @@ module Gori
         return nil if value.empty?
         return Term.new(:never, text.downcase, term.negate?)
       end
-      if sep == ti
-        # An unknown field, or one QL does not offer `~` on, free-texts the whole token — the
-        # same fallback `QL.regex_cond` takes, so `size~1` means the same thing in both.
-        return Term.new(:text, text.downcase, term.negate?) unless REGEX_FIELDS.includes?(field)
-        return nil if value.empty?
-        # Compiled ONCE, here, never per message. A pattern that will not compile becomes a
-        # never-match term rather than an exception on the proxy path — mirroring QL, where an
-        # invalid `~` compiles to a never-match clause. Both surfaces that let an operator SAVE
-        # such a condition (`Colormarker.unusable_reason`, and the intercept bar's own note)
-        # refuse it where it is typed, which is the place it can still be fixed.
-        pattern = begin
-          Regex.new(value)
-        rescue
-          return Term.new(:never, value, term.negate?)
-        end
-        return Term.new(field, value, term.negate?, pattern)
-      end
+      return regex_term(field, value, text, term.negate?) if sep == ti
 
       # An unknown field → free-text the WHOLE token (mirrors QL / Issues::Filter), so a
       # typo'd field like `hsot:evil.com` searches literally instead of silently matching "evil.com".
@@ -462,9 +490,41 @@ module Gori
       Term.new(field, fold(field, value), term.negate?)
     end
 
+    # The `~` half of `parse_term`. An unknown field free-texts the whole token; a field this
+    # backend HAS but offers no `~` on (`status~5..`) is DROPPED — the two roads `QL.regex_cond`
+    # takes, so a term means the same thing in both bars. Free-texting the known one searched the
+    # target for the literal `status~5..`, which matches nothing and looks like a regex that
+    # found nothing.
+    private def self.regex_term(field : Symbol, value : String, text : String, negate : Bool) : Term?
+      unless REGEX_FIELDS.includes?(field)
+        return field == :text ? Term.new(:text, text.downcase, negate) : nil
+      end
+      return nil if value.empty?
+      # Compiled ONCE, here, never per message. A pattern that will not compile becomes a
+      # never-match term rather than an exception on the proxy path — mirroring QL, where an
+      # invalid `~` compiles to a never-match clause. Both surfaces that let an operator SAVE
+      # such a condition (`Colormarker.unusable_reason`, and the intercept bar's own note)
+      # refuse it where it is typed, which is the place it can still be fixed.
+      pattern = begin
+        Regex.new(value)
+      rescue
+        return Term.new(:never, value, negate)
+      end
+      Term.new(field, value, negate, pattern)
+    end
+
     # The fields `~` is accepted on, as Term symbols. QL's `REGEX_FIELDS` in this backend's
-    # vocabulary — the same five, so a pattern that is a regex in the filter bar is a regex here.
-    REGEX_FIELDS = [:host, :path, :url, :header, :body]
+    # vocabulary — the same names (less the `req.`/`resp.` sides, which a single message has no
+    # two of), so a pattern that is a regex in the filter bar is a regex here.
+    REGEX_FIELDS = [:host, :path, :url, :method, :scheme, :header, :body]
+
+    # Does this backend implement `name` — and, with `regex: true`, under the `~` operator? The
+    # highlighter's predicate (`InterceptView::GATE_KNOWN`), shaped like `QL.known_field?` so the
+    # two bars ask their backends the same question.
+    def self.known_field?(name : String, regex : Bool = false) : Bool
+      return false unless FIELDS.includes?(name)
+      !regex || REGEX_FIELDS.includes?(field_symbol(name))
+    end
 
     # Case-fold a term's value ONCE, at parse time, into the form `raw_match?` compares
     # against. `:status` is folded too — `status_match?` tests a literal lowercase 'x',

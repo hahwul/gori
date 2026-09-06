@@ -20,24 +20,6 @@ require "../spec_helper"
 # an agent reaches this state. Sibling coverage for `create_repeater` / `update_repeater`
 # lives in `spec/mcp/repeater_wire_field_provenance_spec.cr`.
 
-private def with_store(&)
-  path = File.tempname("gori-sendtarget", ".db")
-  store = Gori::Store.open(path)
-  prev_env = Gori::Settings.project_env_vars
-  prev_layer = Gori::Env.layer
-  begin
-    yield store
-  ensure
-    Gori::Env.layer = prev_layer
-    Gori::Settings.project_env_vars = prev_env
-    Gori::Env.bump_highlight_rev
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # An origin that names the backend node that answered — the header the extract rule reads.
 private def with_edge_origin(&)
   server = TCPServer.new("127.0.0.1", 0)
@@ -93,7 +75,7 @@ end
 
 describe "MCP send_request(save_as_repeater) keeps the author's target" do
   it "saves a target that collides with a live session binding verbatim" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         pin_edge_host(store, port)
@@ -116,7 +98,7 @@ describe "MCP send_request(save_as_repeater) keeps the author's target" do
   # raised `UnresolvedEnv` naming `$edge` — in the very process where `$edge` WAS bound, since
   # the send path only consults env vars.
   it "leaves the saved row replayable" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         pin_edge_host(store, port)
@@ -138,7 +120,7 @@ describe "MCP send_request(save_as_repeater) keeps the author's target" do
   # the way in. The rule is "does this field become bytes the origin sees", not "did the author
   # type it" — pinned here so the fix is not read as "stop masking everything".
   it "still masks the tab NAME, which never reaches a socket" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         pin_edge_host(store, port)
@@ -159,7 +141,7 @@ describe "MCP send_request(save_as_repeater) keeps the author's target" do
   # (`effective_request`, the description of the bytes that went out) is unchanged, and it was
   # never masked, before or after.
   it "does not change the reply the agent reads" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         pin_edge_host(store, port)
@@ -182,7 +164,7 @@ describe "MCP send_request(save_as_repeater) keeps the author's target" do
   # holds the value that was actually reached and stays sendable. `mask_secrets` was the one
   # thing that could take a resolvable target and make it unresolvable.
   it "stores the resolved dial tuple for a url the author wrote with a $KEY" do
-    with_store do |store|
+    with_store_env do |store|
       with_edge_origin do |port|
         Gori::Env.save_project(store, [{"EDGEHOST", "127.0.0.1"}])
         res = drive(store, call("send_request",
@@ -198,7 +180,7 @@ describe "MCP send_request(save_as_repeater) keeps the author's target" do
   # CONTROL: with no binding rule at all, the row is the same either way. Pins that the fix is
   # about the collision and not a general change of what gets stored.
   it "stores the same target when nothing collides" do
-    with_store do |store|
+    with_store_env do |store|
       with_edge_origin do |port|
         res = drive(store, call("send_request",
           %({"url":"http://127.0.0.1:#{port}/vhost","method":"GET",) +

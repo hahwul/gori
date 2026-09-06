@@ -10,19 +10,6 @@ private def gzip(data : String) : Bytes
   io.to_slice
 end
 
-private def with_store(&)
-  path = File.tempname("gori-sarif", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A GET flow with an optional response, the fixture every case below starts from.
 private def seed_flow(store : Gori::Store, *, target : String = "/a", method : String = "GET",
                       req_head : String? = nil, req_body : Bytes? = nil,

@@ -56,7 +56,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       open_links_overlay(owner_kind, owner_id, cursor: lo.selected)
       return
     end
-    picker.on_close = -> { open_links_overlay(owner_kind, owner_id) }
+    # Back on the row the pick was made from, like the "nothing to link" branch above.
+    cursor = lo.selected
+    picker.on_close = -> { open_links_overlay(owner_kind, owner_id, cursor: cursor) }
     open_overlay(picker)
   end
 

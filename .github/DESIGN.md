@@ -306,6 +306,14 @@ Rendering is a pure function of state. Views hold ephemeral display and edit sta
 `Host` (P5). Overlays are modal cards centred over the body. Theming is a `Palette` record,
 with built-in and user themes switched at runtime.
 
+History searches and host completions run in controller-owned cooperative fibers. Each
+controlled Store read holds its own pooled connection and yields through SQLite's progress
+handler; putting a synchronous SQLite call in a fiber alone does not release the scheduler.
+The controller publishes only the current query generation, retaining the previous rows
+with a searching indicator until then. Capture updates queue one subsequent refresh, while
+query, scope and view changes cancel obsolete work. Store close cancels and drains controlled
+reads before closing the pool; no progress handler is installed on the writer connection.
+
 Width is measured, never assumed: `Screen.draw_width` reports the cells a string will
 occupy, and views that draw per grapheme cluster sum the width per cluster so a wide
 character is never half-drawn.
@@ -2038,7 +2046,6 @@ yet is a one-line `insert_event` in its own change. This one surfaces what was a
 including the level the feed spells two ways, `"warn"` everywhere and `"warning"` from the
 Sequencer, which the filter matches as a set because rows already on disk cannot be respelled.
 
-
 **The feed had to learn WHO, and the answer already existed.** The first cut recorded what agents
 and engines did; a scope rule the operator edited in the TUI and one an agent rewrote through MCP
 were indistinguishable, on the one surface whose job is telling them apart. `flows` had answered
@@ -2162,3 +2169,142 @@ in the one direction [P4](#p4) refuses. The no-overlay answer already has a name
 `as-captured`. A `$NAME` in a slot's own header value is the one `$NAME` in gori guaranteed to be
 a reference and never a payload, so resolving it takes nothing literal away from the operator's
 bytes.
+
+### 2026-09-04: TLS to an upstream proxy is a new scheme, and the proxy leg has its own trust
+
+Refines: [P0](#p0), [P4](#p4), [P5](#p5). Issue #3.
+
+An upstream HTTP CONNECT proxy could only be reached in cleartext. `https://` in
+`network.upstream_proxy` was already accepted and already meant *the plaintext form* — a
+compatibility reading that predates gori speaking TLS to a proxy at all.
+
+**The scheme was not reclaimed.** Redefining `https://` would have moved every existing
+operator's egress onto a ClientHello their proxy may not answer, on upgrade, with no edit — the
+one shape [P4](#p4) refuses. So `https://` keeps its meaning byte-for-byte and
+`Settings::UPSTREAM_TLS_KIND` (`http+tls`) is the new spelling, used as BOTH the rule `kind` and
+the URI scheme because those two grammars name one transport and a second word for it is how
+they drift. The ambiguity is *reported* rather than enforced: `upstream_proxy_advisory` names
+both fixes, `upstream_proxy_warnings` emits it at the two sites `outbound_tls_warnings` already
+uses, and editing the split proxy fields in either settings editor normalizes the stored value
+to `http://` on save. An untouched value is never rewritten. A portless `http+tls` address
+defaults to 443, not 8080: falling back to the plaintext default would dial the cleartext
+listener of the same appliance.
+
+**The proxy leg's trust policy is separate from the origin's, and that separation is the
+feature.** `network.upstream_proxy_ca` and `network.upstream_proxy_insecure` govern it;
+`verify_upstream` / `--insecure-upstream` and the `outbound_tls` table do not, and cannot.
+`-k` is a statement about one broken origin, and letting it also stop authenticating the proxy
+that carries every session would disarm the one hop the operator did not choose to inspect.
+Mechanically the two are separate SSL_CTX caches — the origin's key is
+`{verify, alpn, outbound-TLS policy}`, all three of which belong to the destination, so sharing
+it would present an origin's client certificate to the proxy and offer `h2` on a leg that only
+ever speaks an HTTP/1.1 CONNECT. SNI and the verified name are the PROXY's own hostname, never
+the origin's and never a hostname override: an override is a resolver override for the
+destination an operator names in a request, and applying it to the proxy would let one table row
+redirect the hop carrying the credential. A rejected proxy certificate says so in the proxy's
+terms and explicitly declines to offer `--insecure-upstream` as the fix.
+
+**The TLS wrap happens before any request byte.** `CONNECT` names the origin and
+`Proxy-Authorization` is a reusable credential; in the plaintext form both are readable by
+anything on the path to the proxy. `dial_via_proxy` therefore wraps first and writes second, and
+the spec asserts this from the fixture's side — the proxy reports only what it read *after* the
+handshake. An `https://` origin through such a proxy is TLS inside TLS, and the origin's
+certificate is still verified end to end under its own policy.
+
+**Every dial entry point now returns `IO?`.** `Upstream.dial`/`dial_result` handed back a
+`TCPSocket?`, which cannot represent a TLS socket to a proxy. Widening it was mechanical
+everywhere except `HttpTransport.wrap_tls`, because the proxy, Repeater, Fuzzer and Miner paths
+already read and wrote an `IO` — the h1/h2/WS engines and `ConnPool` were typed that way from
+the start. Close ownership stays exact: the TLS wrapper takes `sync_close: true`, so closing the
+returned socket closes the descriptor, and `close_proxy_leg` covers the window between the
+connect and the wrap where the constructor has raised and nothing else owns the fd
+(`Socket::Client.new` frees the SSL object but does not close the io it was handed).
+
+Per-rule TLS fields were deliberately not added ([P0](#p0)): one policy covers every `http+tls`
+hop today, and a second TLS proxy with a different trust anchor is what should force the table
+column.
+
+<a id="d-2026-09-04-ws-over-h2"></a>
+
+### 2026-09-04: RFC 8441 replaces the handshake, so the transport is an `IO` and not a second engine
+
+Refines: [P1](#p1), [P7](#p7). Issue #733.
+
+gori captured a WebSocket opened over HTTP/2 and could not re-open one. The gap was never the
+frames — RFC 8441 §5.1 replaces the WebSocket HANDSHAKE and nothing else, so an h2 socket carries
+the byte-identical RFC 6455 frames an HTTP/1.1 one carries, and `H2::WsCapture` already read them
+with the same codec the h1 relay runs. What was missing was a way to OPEN the socket, and every
+surface said so in its own words: three seeds refused, `gori run repeater <flow-id>` sent the
+operator to a session route that also refused, and the TUI handed over a plain HTTP tab plus a
+status line explaining what it was not carrying.
+
+The seam is an `IO`. `Repeater::H2WsStream` does the extended CONNECT and then presents that
+stream's DATA payloads as a byte stream, and `WsEngine`'s scripted exchange — `run_session` →
+`exchange` → `drain` → `finish` — runs over it unchanged. A second engine would have meant a
+second `DrainState`, a second set of the three §5.4 reassembly moments, a second answer to "did
+the peer close", and a second copy of five capture caps, for a protocol whose frames do not differ
+at all ([P1](#p1)). The capture side had already drawn this line for the same reason: `WsCapture`
+is a reassembler over one codec, not a second parser.
+
+The accounting is borrowed, not re-derived. `H2Engine::SendFlow`, `apply_settings`, `credit`,
+`write_header_block`, `window_update`, `ack`, `goaway_reason`, `rst_reason` and the two frame
+strippers went public for this, the way `exchange` went public for `H2Pool`. A flow-control window
+kept in two places is how the halves of one connection start disagreeing, and `H2Engine`'s own
+history has three defects of exactly that shape recorded in its comments.
+
+The BYTES pick the transport, never a flag. An extended CONNECT head and an `Upgrade:` head are
+two handshakes for one protocol, and the capture says which it was: `Proxy::WS.extended_connect_request?`
+reads the `CONNECT` line plus the `X-Gori-Protocol` marker that `HeadCodec.synth_request` writes
+for the `:protocol` pseudo-header, and `WsEngine.send` branches on it. This is the rule
+`Repeater::Plan` already followed in picking `WsEngine` over `Engine` — it reads the FINAL wire,
+not the stored text — and it is what keeps a surface from being able to disagree with the request
+it is about to send. `WsEngine.replayable?` is the one predicate every seed, gate and engine choice
+asks; `upgrade_request?` stays the h1 half alone, because it is also what selects the h1 dial.
+
+Nothing is invented ([P7](#p7)). `:protocol` comes from the head's own marker line, which
+`H2Engine.parse_request` now folds back into the pseudo-header it was projected from — the exact
+inverse of the synthesis, and the fix for a captured extended CONNECT that used to go out as an
+ordinary h2 request carrying gori's diagnostic line as a regular field. `:method` and `:path` are
+the request line's, and a header the operator kept is a header the origin sees. An h1 handshake is
+not fabricated so that the seed can dial, which was the refusal's own argument and remains right.
+
+Every way this fails is REPORTED, because the failure mode a replay path must not have is looking
+like a clean run with an empty transcript. An origin that does not advertise
+SETTINGS_ENABLE_CONNECT_PROTOCOL is a refusal naming the setting — RFC 8441 §3 forbids sending the
+stream without it, so gori does not try and see. A non-2xx is a refusal carrying the origin's own
+head, so `answered?` is true exactly as it is for a 403 to an h1 upgrade. A RST_STREAM, a GOAWAY
+or a send window that never reopens raises `IO::Error` carrying the peer's stated reason, which
+the drain already turns into `DrainState#gone_reason` and from there into the result's note, with
+the frames already exchanged kept. And `keep_key` says it has nothing to keep rather than being
+ignored: §5.1 carries no `Sec-WebSocket-Key`.
+
+One knob's meaning narrows. `--http2` + a WebSocket script was refused outright; it is now refused
+only against an `Upgrade:` handshake, since HTTP/2 has no upgrade mechanism (RFC 9113 §8.1) and an
+extended CONNECT IS the h2 form — where `http2` is true by construction from the seed. The
+`ws_http_only` / `^V` escape hatch has two stops rather than three on such a tab: WebSocket, or
+the CONNECT as a plain h2 request. There is no HTTP/1.1 form of those bytes, and offering one
+would have sent `CONNECT /chat` down an h1 socket, where it names a host and not a path.
+
+Out of scope, deliberately: HTTP/3, and Match & Replace or per-message intercept on an h2 socket.
+Those two still need a length-CHANGING DATA rewrite, which is what #492 step 5 was closed over,
+and the capture advisory keeps saying so.
+
+### 2026-09-05 — History reads yield and cancel without changing QL
+
+Debouncing limits how often a search starts, not how long SQLite owns the single scheduler
+thread. A result limit bounds returned rows, not the work needed to find them. History now
+uses opt-in Store query controls: an exclusively checked-out read connection installs a
+progress handler that yields periodically and interrupts cancelled work. The writer never
+gets this handler, and Store close drains controlled reads before finalizing connections.
+
+The controller owns one search worker and one host-completion worker, each with one
+replaceable pending request. Query generations prevent obsolete results from being
+published; capture updates wait for completion and queue one refresh. Previous rows stay
+navigable with an explicit searching indicator. QL predicates, full-project coverage and
+the result cap stay unchanged, including short body terms and byte-safe regex matching.
+
+`bench/history_filter_bench.cr` measures query time, scheduler gaps, allocations, cancellation
+and capture throughput on 10k/100k/500k fixtures. With 500k 1KB bodies, an absent body regex
+held the scheduler for 2.7–3.0 seconds synchronously versus 9–11 ms with query controls;
+allocations and total query time were comparable. This is cooperative scheduling, not a
+hard deadline: a single regex callback or filesystem operation cannot be preempted.

@@ -12,6 +12,7 @@ require "../store"
 require "../issues_query"
 require "../links"
 require "./preview_split"
+require "./line_edit"
 require "./issue_presentation"
 
 module Gori::Tui
@@ -19,13 +20,21 @@ module Gori::Tui
   # severity-sorted list + a detail with inline-editable notes and a severity
   # control. Created from a flow (History `F`) or blank (`n`).
   class IssuesView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # The list-over-preview layout and the severity/status vocabulary, both shared with
     # the sibling tab that lists the same records through the other lens.
     include PreviewSplit
     include PreviewPane
     include IssuePresentation
 
-    QUERY_FIELDS = %w[severity: status: host: title: cvss:]
+    QUERY_FIELDS = Issues::Filter::FIELDS
+
+    # The bar's field vocabulary, asked per separator (`FilterAst.spans`). Without it an
+    # unrecognised `hsot:` rendered in the same confident blue as a real field — the one
+    # visible signal an operator has while typing, saying the opposite of the truth, since
+    # `Issues::Filter` free-texts the whole token and it matches nothing. `SEPS_FIELD` below
+    # already keeps `~` out of the question; this keeps a MISSPELLED name out of it too.
+    QUERY_KNOWN = ->(f : String, op : Char) { Issues::Filter.known_field?(f, regex: op == '~') }
 
     def initialize
       @all = [] of Store::Issue    # the raw store list (severity-desc)
@@ -435,6 +444,13 @@ module Gori::Tui
     # store list is still in display order AND still places marks the active filter hides.
     # An id missing from @all was deleted by a peer session; dropping it here is the same
     # "a stale mark simply fails to resolve" rule the batch handlers follow.
+    # The rows `y` copies from the LIST: the marks if any, else the cursor row — each as
+    # `[severity] title (host)`, one per line.
+    def copy_rows_text : String
+      rows = @marks.empty? ? [@issues[@selected]?].compact : @all.select { |f| @marks.includes?(f.id) }
+      rows.map { |f| "[#{f.severity.label}] #{f.title}#{f.host ? " (#{f.host})" : ""}" }.join("\n")
+    end
+
     def marked_ids : Array(Int64)
       return [] of Int64 if @marks.empty?
       @all.compact_map { |f| f.id if @marks.includes?(f.id) }
@@ -787,6 +803,14 @@ module Gori::Tui
       end
     end
 
+    @list_last_h = 0 # rows the last list frame drew — the PgUp/PgDn step (list_page_rows)
+
+    # One screenful of the list, for PgUp/PgDn: the rows the last frame drew minus two of
+    # overlap (the History convention).
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       render_filter_bar(screen, rect)
       screen.text(rect.x + 1, rect.y + 1, "SEV", Theme.muted)
@@ -795,6 +819,7 @@ module Gori::Tui
       Frame.inner_divider(screen, rect, rect.y + 2, border: Frame.pane_border(focused))
       top = rect.y + 3
       list_h = {rect.bottom - top, 0}.max
+      @list_last_h = list_h
 
       if @issues.empty?
         render_empty_list(screen, rect, top)
@@ -902,7 +927,10 @@ module Gori::Tui
       screen.fill(body, Theme.selection_dim) if active
       bg = active ? Theme.selection_dim : Theme.bg
       lines = issues_preview_lines(f)
-      sc = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
+      # Write the clamp back (as Probe's twin does) so overscrolling a short preview can't
+      # inflate @preview_scroll and leave later scroll-up presses dead until it drains back.
+      @preview_scroll = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
+      sc = @preview_scroll
       w = {body.w - 2, 0}.max
       (0...body.h).each do |i|
         li = sc + i
@@ -950,7 +978,8 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD))
+          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
+            known: QUERY_KNOWN))
         return
       end
       # One right-anchored chain — see HistoryView#render_ql_bar.
@@ -963,7 +992,8 @@ module Gori::Tui
         # The committed query stays highlighted — this readout is what you scan to
         # check how the active filter is actually being read.
         qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD),
+        screen.styled_text(qx, rect.y, @query,
+          Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  cvss:>=7  status:open  status:closed  host:", Theme.muted, width: left_w)

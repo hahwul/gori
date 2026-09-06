@@ -18,7 +18,7 @@ group = "워크벤치"
 
 ## 두 개의 렌즈 {#two-lenses}
 
-하나의 세션, 두 개의 뷰이며 `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다 — INPUT에는 ` ^T:→ENCODE `, HEADER에는 ` ^T:→DECODE ` — 클릭해도 키와 똑같이 동작합니다:
+하나의 세션, 두 개의 뷰이며 `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` ^T:→ENCODE `, HEADER에는 ` ^T:→DECODE `). 클릭해도 키와 똑같이 동작합니다:
 
 - **Decode**: INPUT에 토큰을 붙여 넣으면 header, payload, signature가 실시간으로 디코드됩니다. 그 아래에는 생성된 **공격 페이로드**를 고를 수 있는 목록이 있습니다.
 - **Encode**: HEADER와 PAYLOAD를 JSON으로 편집하고, 알고리즘을 선택하며(`Ctrl-A`로 `HS256` / `HS384` / `HS512` / `none` 순환), SECRET을 설정하면 재서명된 토큰이 OUTPUT에 실시간으로 나타납니다.
@@ -50,7 +50,7 @@ gori run jwt eyJhbGci... --attacks             # print the attack payloads
 cat token.txt | gori run jwt --attacks         # token from stdin
 ```
 
-토큰은 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수한 로컬 연산입니다). `--format`은 `text` 또는 `json`입니다. `--encode`에서 `--set KEY=VALUE`는 claim 하나를 패치하고(반복 가능 — 값이 JSON으로 파싱되면 그 타입을 유지하므로 `admin=true`는 불리언, `role=admin`은 문자열입니다), `--payload JSON`은 claim 객체 전체를 교체합니다. 둘은 상호 배타적입니다. [CLI Reference](/ko/reference/cli/#run-jwt)를 참고하세요.
+토큰은 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수한 로컬 연산입니다). `--format`은 `text` 또는 `json`입니다. `--encode`에서 `--set KEY=VALUE`는 claim 하나를 패치하고(반복 가능. 값이 JSON으로 파싱되면 그 타입을 유지하므로 `admin=true`는 불리언, `role=admin`은 문자열입니다), `--payload JSON`은 claim 객체 전체를 교체합니다. 둘은 상호 배타적입니다. [CLI Reference](/ko/reference/cli/#run-jwt)를 참고하세요.
 
 MCP에서는 `jwt_decode` / `jwt_encode` / `jwt_attacks`가 네트워크나 상태를 건드리지 않으므로 `--read-only`에서도 사용할 수 있는 read 도구입니다. `jwt_encode`도 같은 `set` / `payload` claim 편집을 받습니다.
 

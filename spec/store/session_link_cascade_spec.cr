@@ -1,19 +1,6 @@
 require "../spec_helper"
 
 # In-memory Store on a tempfile (mirrors spec/store/entity_links_spec.cr).
-private def with_store(&)
-  path = File.tempname("gori-links", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Closing a Fuzzer/Miner sub-tab must take that session's `entity_links` rows with it, for the
 # reason `delete_repeater` states: a link that outlives its session is a pointer with nothing
 # to check it.

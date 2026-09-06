@@ -42,6 +42,7 @@ private MAXIMAL_PROFILE = <<-JSON
   {
     "theme": "goriday",
     "mouse": false,
+    "mouse_drag": "copy",
     "pretty_bodies": false,
     "layout": { "history_preview": true, "history_list_order": "oldest" },
     "statusline": { "command": "echo hi" },
@@ -81,6 +82,7 @@ private MAXIMAL_PROFILE = <<-JSON
 private def with_every_section_populated(&)
   pretty = Gori::Settings.pretty_bodies_default
   mouse = Gori::Settings.mouse
+  mouse_drag = Gori::Settings.mouse_drag
   hist_preview = Gori::Settings.history_preview
   hist_order = Gori::Settings.history_list_order
   statusline = Gori::Settings.statusline_command
@@ -123,6 +125,7 @@ private def with_every_section_populated(&)
   ensure
     Gori::Settings.pretty_bodies_default = pretty
     Gori::Settings.mouse = mouse
+    Gori::Settings.mouse_drag = mouse_drag
     Gori::Settings.history_preview = hist_preview
     Gori::Settings.history_list_order = hist_order
     Gori::Settings.statusline_command = statusline

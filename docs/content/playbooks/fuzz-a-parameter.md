@@ -7,13 +7,13 @@ weight = 40
 group = "The manual loop"
 +++
 
-You have a captured request with a parameter worth pushing on. This playbook marks one value in it, throws a payload set at that single spot, and reads the responses for the one that behaves differently — the whole Intruder-style loop, in the TUI and headless. Budget about ten minutes.
+You have a captured request with a parameter worth pushing on. This playbook marks one value in it, throws a payload set at that single spot, and reads the responses for the one that behaves differently: the whole Intruder-style loop, in the TUI and headless. Budget about ten minutes.
 
-> **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) first, so your target is scoped — the Fuzzer refuses an out-of-scope host with `SCOPE_BLOCKED`. Have one captured flow in **History** that carries a parameter: a query key, a JSON field, a header. Only fuzz a target you are authorized to test; the examples use `api.example.com` as a stand-in.
+> **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) first, so your target is scoped; the Fuzzer refuses an out-of-scope host with `SCOPE_BLOCKED`. Have one captured flow in **History** that carries a parameter: a query key, a JSON field, a header. Only fuzz a target you are authorized to test; the examples use `api.example.com` as a stand-in.
 
 ## 1. Send a request to the Fuzzer
 
-Everything starts from a real captured request, so you fuzz the exact bytes the app sent rather than a hand-typed approximation. In **History**, select the flow that carries the parameter and press `Shift-I`. gori copies it into the **Fuzzer** tab and switches you there — the same move as `Ctrl-R` to Repeater, one tab further along. Headless, the flow id is the source:
+Everything starts from a real captured request, so you fuzz the exact bytes the app sent rather than a hand-typed approximation. In **History**, select the flow that carries the parameter and press `Shift-I`. gori copies it into the **Fuzzer** tab and switches you there, the same move as `Ctrl-R` to Repeater, one tab further along. Headless, the flow id is the source:
 
 ```bash
 gori run fuzz <flow-id>
@@ -25,7 +25,7 @@ A source can also be a raw request file (`--request`) or stdin, but a captured f
 
 ## 2. Mark a position
 
-The Fuzzer sends the template verbatim except where you mark a position. Wrap the value to vary in `§…§` markers: put the cursor on it and press `Ctrl-A` to auto-mark the common params (query keys, form and JSON fields), or type the markers by hand around anything else — a header value, a path segment.
+The Fuzzer sends the template verbatim except where you mark a position. Wrap the value to vary in `§…§` markers: put the cursor on it and press `Ctrl-A` to auto-mark the common params (query keys, form and JSON fields), or type the markers by hand around anything else: a header value, a path segment.
 
 How markers and payloads combine is the **mode**, set in CONFIG:
 
@@ -48,7 +48,7 @@ gori run fuzz <flow-id> --auto --mode sniper
 
 A payload set is what gets substituted into the marker. Start with a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`) for a fast first pass with no file, or point at a wordlist, an explicit list, a numeric range, or a brute-force character set.
 
-One thing to know before you run: **a payload spliced into a query-string or form-urlencoded body value is URL-encoded for you.** A raw space or `<` there would end the request-target or break the framing, so gori percent-encodes it — the same thing `--encode url` always did, now without having to remember it. Everywhere else the bytes go on the wire as written: a path segment, a JSON or raw body, a header and a cookie value, because a `%2F` in a traversal probe is a different test than the one you marked. `--no-encode` turns the default off when the raw byte *is* the payload — and when the payload is already a percent-escape, since `%` gets encoded like anything else: `%00` goes out as `%2500`, so a null-byte or overlong-UTF-8 probe aimed at the origin's own decoder arrives as plain text instead. Processors transform each payload on the way out — prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace — and an `--encode` among them replaces the default rather than stacking on top of it. The others do not: a prefix, a case fold, a hash or a regex replace says what the payload is, not how the wire spells it, so a query or form position still encodes their output. Put the cursor inside a marker and press `Ctrl-Y` to open its processor chain, which previews the value through every step before a single request goes out.
+One thing to know before you run: **a payload spliced into a query-string or form-urlencoded body value is URL-encoded for you.** A raw space or `<` there would end the request-target or break the framing, so gori percent-encodes it, the same thing `--encode url` always did, now without having to remember it. Everywhere else the bytes go on the wire as written: a path segment, a JSON or raw body, a header and a cookie value, because a `%2F` in a traversal probe is a different test than the one you marked. `--no-encode` turns the default off when the raw byte *is* the payload, and when the payload is already a percent-escape, since `%` gets encoded like anything else: `%00` goes out as `%2500`, so a null-byte or overlong-UTF-8 probe aimed at the origin's own decoder arrives as plain text instead. Processors transform each payload on the way out (prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace), and an `--encode` among them replaces the default rather than stacking on top of it. The others do not: a prefix, a case fold, a hash or a regex replace says what the payload is, not how the wire spells it, so a query or form position still encodes their output. Put the cursor inside a marker and press `Ctrl-Y` to open its processor chain, which previews the value through every step before a single request goes out.
 
 ```bash
 gori run fuzz <flow-id> --auto --mode sniper --wordlist params.txt
@@ -58,7 +58,7 @@ gori run fuzz <flow-id> --auto --mode sniper --wordlist params.txt
 
 ## 4. Set a matcher and run
 
-A matcher decides which responses are worth your attention, so the results table surfaces signal instead of every reply. Filter on status, size, words, lines, or a body regex — ffuf-style — and turn on **auto-calibration** so a noisy baseline (a soft 404, a catch-all 200) doesn't drown the real hits. Press `Ctrl-R` to run.
+A matcher decides which responses are worth your attention, so the results table surfaces signal instead of every reply. Filter on status, size, words, lines, or a body regex, ffuf-style, and turn on **auto-calibration** so a noisy baseline (a soft 404, a catch-all 200) doesn't drown the real hits. Press `Ctrl-R` to run.
 
 Headless, the matcher flags are `--mc`/`--fc` (status), `--ms`/`--fs` (size), `--mw`/`--fw` (words), `--ml`/`--fl` (lines), `--mt`/`--ft` (round-trip time in ms), `--mr`/`--fr` (body regex), and `--ac` to auto-calibrate:
 
@@ -74,15 +74,15 @@ gori run fuzz <flow-id> \
 
 ### When the only difference is the clock
 
-A time-based blind payload — `' OR SLEEP(5)--`, `; ping -c 10 127.0.0.1`, a `pg_sleep` — comes back with the same status, the same byte length, the same words and the same body as the payload that did nothing. Every dimension above is blind to it, so it is the one class of finding a sweep could report only by accident. `--mt` names it directly:
+A time-based blind payload (`' OR SLEEP(5)--`, `; ping -c 10 127.0.0.1`, a `pg_sleep`) comes back with the same status, the same byte length, the same words and the same body as the payload that did nothing. Every dimension above is blind to it, so it is the one class of finding a sweep could report only by accident. `--mt` names it directly:
 
 ```bash
 gori run fuzz <flow-id> --auto -w sleep-payloads.txt --mt '>=4500' --timeout 15
 ```
 
-The unit is milliseconds. A send that **timed out** counts as a match on `--mt` — a payload that pushed the origin past your own timeout is the loudest version of the same signal, and it used to be discarded as an error while the sleep that failed came back in 40 ms and got reported. Nothing else changes: a refused or unreachable send is still not a result, and combining `--mt` with `--mc 200` still needs a response, which a timeout does not have. `--retries` also stops re-sending a timeout on a `--mt` run — that row is the finding, not a failed send, so retrying it would only buy another full timeout of wall clock and another request at the origin.
+The unit is milliseconds. A send that **timed out** counts as a match on `--mt`, because a payload that pushed the origin past your own timeout is the loudest version of the same signal, and it used to be discarded as an error while the sleep that failed came back in 40 ms and got reported. Nothing else changes: a refused or unreachable send is still not a result, and combining `--mt` with `--mc 200` still needs a response, which a timeout does not have. `--retries` also stops re-sending a timeout on a `--mt` run; that row is the finding, not a failed send, so retrying it would only buy another full timeout of wall clock and another request at the origin.
 
-Timing is noisy — a shared origin, a slow hop, one unlucky pause — so treat a `--mt` row as a lead to re-send by hand, the same as any other match.
+Timing is noisy (a shared origin, a slow hop, one unlucky pause), so treat a `--mt` row as a lead to re-send by hand, the same as any other match.
 
 <figure class="tui-shot">
   <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab: a captured request template with one value wrapped in marker highlights, the payload set and attack mode in the CONFIG pane, a filling results table, and a status and size distribution sidebar">
@@ -93,7 +93,7 @@ Timing is noisy — a shared origin, a slow hop, one unlucky pause — so treat 
 
 ## 5. Read results and seed the next step
 
-The finding is the row that doesn't match its neighbours — an unexpected `200` or `500` where the rest `404`, or a length that jumps when one payload lands differently. That row is a lead, not a conclusion: from a result, its `Space` menu sends it on to the **Repeater**, or to the **Comparer** to diff it against the baseline, so you keep probing the one payload that stood out by hand.
+The finding is the row that doesn't match its neighbours: an unexpected `200` or `500` where the rest `404`, or a length that jumps when one payload lands differently. That row is a lead, not a conclusion: from a result, its `Space` menu sends it on to the **Repeater**, or to the **Comparer** to diff it against the baseline, so you keep probing the one payload that stood out by hand.
 
 To keep the complete run, leave the editor in READ mode and press **`Shift-S`** after it finishes. During the sweep gori privately spools every full request/wire/response row to disk while the pane stays bounded to 5,000 rows / 64 MiB; Shift-S promotes the complete spool into the project. The latest successful run reopens automatically as a bounded window with its Fuzzer session; **Space → Run history** selects an older run, while CLI/MCP can page the whole archive. Headless, make persistence explicit and inspect it by id:
 
@@ -106,7 +106,7 @@ gori run fuzz show RUN_ID RESULT_INDEX --format json
 
 The original `gori run fuzz …` remains ephemeral, so an existing script does not start growing the project database after an upgrade.
 
-Hidden parameters the app never named at all are a different job. Where the Fuzzer varies a value you can see, the **Miner** guesses candidate names the server accepts but doesn't advertise — see [Param Miner](/guide/scanning/#param-miner).
+Hidden parameters the app never named at all are a different job. Where the Fuzzer varies a value you can see, the **Miner** guesses candidate names the server accepts but doesn't advertise; see [Param Miner](/guide/scanning/#param-miner).
 
 ## Next Steps
 

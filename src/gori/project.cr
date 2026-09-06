@@ -96,7 +96,18 @@ module Gori
       "could not open '#{@name}': #{ex.message.presence || ex.class}"
     end
 
-    # Best-effort last-activity time (DB file mtime), for the picker.
+    # Best-effort last-activity time, for the picker.
+    #
+    # The NEWER of the db file's mtime and the write-ahead log's, not the db file's alone.
+    # gori runs SQLite in WAL mode, so a live session's writes land in `<db>-wal` and the
+    # main file's mtime does not move until a CHECKPOINT — which happens when the last
+    # connection closes. Reading only the db file therefore reports "last active" as the
+    # moment the project was CREATED for the entire time it is open: the Project tab drew
+    # `Activity` older than `Created`, and every peer reading a live project (MCP
+    # `list_projects`, `gori run project list`, a second TUI's picker) saw the same stale
+    # value. `Store.captured_flows` already guards the OPPOSITE direction (a read-only
+    # census's close checkpoints and would stamp a project "just active", so it puts the
+    # mtime back); this is the direction that was never covered.
     #
     # `File.info?` + rescue, not `File.exists?` then `File.info`: that pair is a TOCTOU
     # window a PEER closes routinely — `ProjectRegistry#delete` and MCP `delete_project`
@@ -104,18 +115,49 @@ module Gori
     # raises `File::NotFoundError` out of `ProjectRegistry#list`'s `sort_by!`, the picker's
     # row render and MCP `list_projects`. `File.info?` closes the vanish case; the rescue
     # covers the one it does not (an unreadable parent raises `File::AccessDeniedError`).
+    # Both probes take that stance, and a missing WAL (checkpointed and cleaned up, or a
+    # journal_mode that never made one) is simply nil rather than an error.
     # `disk_size` below already takes exactly this stance per entry.
     def last_modified : Time?
-      File.info?(@db_path).try(&.modification_time)
+      db = mtime_of(@db_path)
+      wal = mtime_of("#{@db_path}-wal")
+      return db unless wal
+      return wal unless db
+      db > wal ? db : wal
+    end
+
+    private def mtime_of(path : String) : Time?
+      File.info?(path).try(&.modification_time)
     rescue File::Error
       nil
     end
 
-    # On-disk size of the SQLite DB (shown as "DB Size" in the Project tab).
+    # On-disk size of the SQLite DB FILE — the main file only, deliberately: it is reported
+    # as `db_size` by MCP `list_projects`/`project_info` and by `gori run project`, where it
+    # means "the database", and widening it would move an agent-facing number. What an
+    # operator wants to read as "how much room is this project taking" is `disk_size` below,
+    # which counts the WAL and the sidecars; the Project tab's overview row uses that one.
     def db_size : Int64
       File.info?(@db_path).try(&.size) || 0_i64
     rescue File::Error
       0_i64
+    end
+
+    # The database as it stands right now: the main file PLUS its write-ahead log.
+    #
+    # `db_size` alone answers "how big is the db file", which in WAL mode is not the same
+    # question as "how much data does this project hold": until a checkpoint runs, every
+    # captured flow lives in `<db>-wal` and the main file stays at whatever size it was
+    # created. The Project tab's DB Size row read 4.0 KB for a project holding 3.1 MB of
+    # capture. `-shm` is deliberately NOT counted — it is a shared-memory index, not data,
+    # and it would put a fixed 32 KiB on top of every empty project.
+    #
+    # Unlike `disk_size` this is safe for a `--db PATH` project: it names two files rather
+    # than walking a directory gori does not own.
+    def db_size_with_wal : Int64
+      db_size + (File.info?("#{@db_path}-wal").try(&.size) || 0_i64)
+    rescue File::Error
+      db_size
     end
 
     # Total bytes of every file under the project directory (DB + WAL/SHM + the dotfile

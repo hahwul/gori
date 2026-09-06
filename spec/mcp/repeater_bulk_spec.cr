@@ -5,24 +5,8 @@ require "../spec_helper"
 # validation and the per-id reporting are the point — a handler called directly would skip
 # `unknown_args` and the schema the reply is supposed to match.
 
-private def with_store(&)
-  path = File.tempname("gori-repeaterbulk", ".db")
-  store = Gori::Store.open(path)
-  prev_env = Gori::Settings.project_env_vars
-  begin
-    yield store
-  ensure
-    Gori::Settings.project_env_vars = prev_env
-    Gori::Env.bump_highlight_rev
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def tools(store)
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 private def call_json(store, name, args : String) : JSON::Any
@@ -55,7 +39,7 @@ end
 
 describe "MCP repeater tab numbers" do
   it "reports tui_index beside db_id, in the order the TUI paints the strip" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       sessions = call_json(store, "get_repeater_context", "{}")["sessions"].as_a
       sessions.map { |s| s["db_id"].as_i64 }.should eq(ids)
@@ -64,7 +48,7 @@ describe "MCP repeater tab numbers" do
   end
 
   it "numbers a session the same way RepeaterController#subtab_labels does" do
-    with_store do |store|
+    with_store_env do |store|
       seed_three(store)
       rows = store.repeaters_meta
       # `subtab_labels` is `map_with_index { |tab, i| "#{i + 1}:…" }` over a list sorted by
@@ -76,7 +60,7 @@ describe "MCP repeater tab numbers" do
   end
 
   it "keeps the numbers ABSOLUTE when a filter narrows the listing" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_json(store, "update_repeaters", %({"ids":[#{ids[1]}],"tags_add":"idor"}))
       got = call_json(store, "get_repeater_context", %({"filter":"tag:idor"}))
@@ -88,7 +72,7 @@ describe "MCP repeater tab numbers" do
   end
 
   it "reports the number a session HAD when it is deleted, and that the rest shifted" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       j = call_json(store, "delete_repeater", %({"id":#{ids[1]}}))
       j["id"].as_i64.should eq(ids[1])
@@ -102,7 +86,7 @@ describe "MCP repeater tab numbers" do
   end
 
   it "does not renumber-note a delete that took the LAST tab" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       j = call_json(store, "delete_repeater", %({"id":#{ids[2]}}))
       j["was_tui_index"].as_i.should eq(3)
@@ -111,7 +95,7 @@ describe "MCP repeater tab numbers" do
   end
 
   it "carries tui_index on create and update" do
-    with_store do |store|
+    with_store_env do |store|
       seed_three(store)
       created = call_json(store, "create_repeater",
         %({"target":"https://d.test","request":"GET /d HTTP/1.1\\r\\n\\r\\n"}))
@@ -121,7 +105,7 @@ describe "MCP repeater tab numbers" do
   end
 
   it "appends at the end even when the stored positions are sparse" do
-    with_store do |store|
+    with_store_env do |store|
       first = seed_three(store)[0]
       # The shape a legacy project is in: positions {0, 1, 9}.
       store.set_repeater_positions([first])
@@ -135,7 +119,7 @@ end
 
 describe "MCP move_repeater" do
   it "moves a session to an absolute tab number and returns the resulting order" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       j = call_json(store, "move_repeater", %({"id":#{ids[2]},"to_index":1}))
       j["from_index"].as_i.should eq(3)
@@ -148,7 +132,7 @@ describe "MCP move_repeater" do
   end
 
   it "nudges one place with direction" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_json(store, "move_repeater", %({"id":#{ids[0]},"direction":"down"}))
       store.repeaters.map(&.id).should eq([ids[1], ids[0], ids[2]])
@@ -158,7 +142,7 @@ describe "MCP move_repeater" do
   end
 
   it "reports a no-op placement as a success, not a failure" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       j = call_json(store, "move_repeater", %({"id":#{ids[1]},"to_index":2}))
       j["moved"].as_bool.should be_false
@@ -167,7 +151,7 @@ describe "MCP move_repeater" do
   end
 
   it "REFUSES an out-of-range to_index rather than clamping it" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       r = call_err(store, "move_repeater", %({"id":#{ids[0]},"to_index":9}))
       r.text.should contain("outside this workbench")
@@ -177,7 +161,7 @@ describe "MCP move_repeater" do
   end
 
   it "refuses to_index and direction together" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_err(store, "move_repeater", %({"id":#{ids[0]},"to_index":2,"direction":"down"}))
         .text.should contain("not both")
@@ -185,7 +169,7 @@ describe "MCP move_repeater" do
   end
 
   it "refuses a nudge past the end, naming where it already is" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_err(store, "move_repeater", %({"id":#{ids[2]},"direction":"down"}))
         .text.should contain("already at the end")
@@ -193,7 +177,7 @@ describe "MCP move_repeater" do
   end
 
   it "refuses an unknown direction by naming the accepted values" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_err(store, "move_repeater", %({"id":#{ids[0]},"direction":"sideways"}))
         .text.should contain("up|down")
@@ -201,7 +185,7 @@ describe "MCP move_repeater" do
   end
 
   it "reports NOT_FOUND for an id that is not a session" do
-    with_store do |store|
+    with_store_env do |store|
       seed_three(store)
       call_err(store, "move_repeater", %({"id":9999,"to_index":1})).error_code.should eq("NOT_FOUND")
     end
@@ -210,7 +194,7 @@ end
 
 describe "MCP delete_repeaters" do
   it "refuses without confirm, naming the count, and deletes NOTHING" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       r = call_err(store, "delete_repeaters", %({"ids":[#{ids[0]},#{ids[1]}]}))
       r.error_code.should eq("CONFIRM_REQUIRED")
@@ -220,7 +204,7 @@ describe "MCP delete_repeaters" do
   end
 
   it "refuses the WHOLE call when any id is unknown, with zero writes" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       r = call_err(store, "delete_repeaters", %({"ids":[#{ids[0]},4242],"confirm":true}))
       r.error_code.should eq("NOT_FOUND")
@@ -230,7 +214,7 @@ describe "MCP delete_repeaters" do
   end
 
   it "deletes the named set, reports each tab's old number, and renumbers the rest" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       j = call_json(store, "delete_repeaters", %({"ids":[#{ids[0]},#{ids[2]}],"confirm":true}))
       j["deleted_count"].as_i.should eq(2)
@@ -244,7 +228,7 @@ describe "MCP delete_repeaters" do
   end
 
   it "accepts a comma list and a bare id, and collapses a repeated id" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_json(store, "delete_repeaters", %({"ids":"#{ids[0]},#{ids[0]}","confirm":true}))["deleted_count"].as_i.should eq(1)
       call_json(store, "delete_repeaters", %({"ids":#{ids[1]},"confirm":true}))["deleted_count"].as_i.should eq(1)
@@ -253,7 +237,7 @@ describe "MCP delete_repeaters" do
   end
 
   it "names a non-integer entry instead of dropping it" do
-    with_store do |store|
+    with_store_env do |store|
       seed_three(store)
       call_err(store, "delete_repeaters", %({"ids":["1","nope"],"confirm":true}))
         .text.should contain("nope")
@@ -262,7 +246,7 @@ describe "MCP delete_repeaters" do
   end
 
   it "refuses an empty ids list" do
-    with_store do |store|
+    with_store_env do |store|
       seed_three(store)
       call_err(store, "delete_repeaters", %({"ids":[],"confirm":true})).error_code.should eq("INVALID_ARGUMENT")
     end
@@ -271,7 +255,7 @@ end
 
 describe "MCP update_repeaters" do
   it "adds tags to several sessions, keeping the ones they already had" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_json(store, "update_repeater", %({"id":#{ids[0]},"tags":"auth"}))
       j = call_json(store, "update_repeaters", %({"ids":[#{ids[0]},#{ids[1]}],"tags_add":"idor,#done"}))
@@ -283,7 +267,7 @@ describe "MCP update_repeaters" do
   end
 
   it "removes tags case-insensitively and clears the column when none are left" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_json(store, "update_repeaters", %({"ids":[#{ids[0]}],"tags_set":"IDOR auth"}))
       call_json(store, "update_repeaters", %({"ids":[#{ids[0]}],"tags_remove":"idor"}))
@@ -294,7 +278,7 @@ describe "MCP update_repeaters" do
   end
 
   it "refuses tags_set together with tags_add" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_err(store, "update_repeaters", %({"ids":[#{ids[0]}],"tags_set":"x","tags_add":"y"}))
         .text.should contain("not both")
@@ -302,14 +286,14 @@ describe "MCP update_repeaters" do
   end
 
   it "refuses a call that would change nothing" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       call_err(store, "update_repeaters", %({"ids":[#{ids[0]}]})).text.should contain("nothing to change")
     end
   end
 
   it "affixes a stored name" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       j = call_json(store, "update_repeaters", %({"ids":[#{ids[0]}],"name_prefix":"[P1] ","name_suffix":" ✓"}))
       j["updated"][0]["name"].as_s.should eq("[P1] a ✓")
@@ -319,7 +303,7 @@ describe "MCP update_repeaters" do
   end
 
   it "NAMES the sessions whose derived label it had to materialise" do
-    with_store do |store|
+    with_store_env do |store|
       id = call_json(store, "create_repeater",
         %({"target":"https://n.test","request":"POST /pay HTTP/1.1\\r\\nHost: n.test\\r\\n\\r\\n"}))["id"].as_i64
       j = call_json(store, "update_repeaters", %({"ids":[#{id}],"name_prefix":"[P1] "}))
@@ -330,7 +314,7 @@ describe "MCP update_repeaters" do
   end
 
   it "refuses the whole call when any id is unknown" do
-    with_store do |store|
+    with_store_env do |store|
       ids = seed_three(store)
       r = call_err(store, "update_repeaters", %({"ids":[#{ids[0]},777],"tags_add":"x"}))
       r.error_code.should eq("NOT_FOUND")
@@ -341,7 +325,7 @@ end
 
 describe "MCP create_repeaters" do
   it "seeds one tab per flow, in the order given, with a prefix and shared tags" do
-    with_store do |store|
+    with_store_env do |store|
       f1 = seed_flow(store, "GET", "/one")
       f2 = seed_flow(store, "POST", "/two")
       j = call_json(store, "create_repeaters",
@@ -356,7 +340,7 @@ describe "MCP create_repeaters" do
   end
 
   it "refuses the WHOLE call when any flow is unknown, creating nothing" do
-    with_store do |store|
+    with_store_env do |store|
       f1 = seed_flow(store, "GET", "/one")
       r = call_err(store, "create_repeaters", %({"flow_ids":[#{f1},31337]}))
       r.error_code.should eq("NOT_FOUND")
@@ -366,7 +350,7 @@ describe "MCP create_repeaters" do
   end
 
   it "appends after the sessions already in the workbench" do
-    with_store do |store|
+    with_store_env do |store|
       existing = seed_three(store)
       f1 = seed_flow(store, "GET", "/one")
       j = call_json(store, "create_repeaters", %({"flow_ids":[#{f1}]}))
@@ -376,7 +360,7 @@ describe "MCP create_repeaters" do
   end
 
   it "refuses an empty flow_ids list" do
-    with_store do |store|
+    with_store_env do |store|
       call_err(store, "create_repeaters", %({"flow_ids":[]})).error_code.should eq("INVALID_ARGUMENT")
     end
   end

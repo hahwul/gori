@@ -24,22 +24,9 @@ private def ws_flow(store : Gori::Store) : Int64
   id
 end
 
-private def tmp_store(&)
-  path = File.tempname("gori-gqlws", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe "GraphQL over WebSocket — the headless surfaces" do
   it "emits `graphql_ws` from the shared DecodedView emitter (CLI json + MCP get_flow)" do
-    tmp_store do |store|
+    with_store do |store|
       id = ws_flow(store)
       detail = store.get_flow(id).not_nil!
       json = JSON.parse(JSON.build do |j|
@@ -65,7 +52,7 @@ describe "GraphQL over WebSocket — the headless surfaces" do
   end
 
   it "reaches MCP get_flow's projection" do
-    tmp_store do |store|
+    with_store do |store|
       id = ws_flow(store)
       detail = store.get_flow(id).not_nil!
       projection = Gori::MCP::Serialize.flow_detail_json(detail, store.ws_messages(id))
@@ -74,7 +61,7 @@ describe "GraphQL over WebSocket — the headless surfaces" do
   end
 
   it "emits nothing for a socket that carries no GraphQL" do
-    tmp_store do |store|
+    with_store do |store|
       id = ws_flow(store)
       store.ws_messages(id) # sanity: the flow exists
       json = JSON.parse(JSON.build do |j|

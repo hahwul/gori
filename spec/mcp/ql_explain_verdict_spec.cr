@@ -12,19 +12,6 @@ require "../spec_helper"
 # turns BOTH into a QUERY_SYNTAX refusal, so a caller that explained first was told its query
 # would run.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpqlx", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def explain(store, query : String) : JSON::Any
   tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
   r = tools.call("ql_explain", JSON::Any.new({"query" => JSON::Any.new(query)}))
@@ -92,6 +79,44 @@ describe "MCP ql_explain verdict" do
     with_store do |store|
       w = explain(store, "host:example.com body~[")["warnings"].as_a.map(&.as_s)
       w.find(&.includes?("invalid regex")).not_nil!.should contain("REFUSE")
+    end
+  end
+
+  # An unknown field free-texts its whole token, so it COMPILES — which is why it arrived in
+  # `applied_terms` with nothing anywhere saying the query could only ever return nothing. This
+  # tool exists to predict what the read tools do, and they refuse it now.
+  it "names a field QL does not implement instead of reporting it as applied" do
+    with_store do |store|
+      j = explain(store, "methd:GET")
+      unknown = j["unknown_fields"].as_a
+      unknown.size.should eq(1)
+      unknown[0]["name"].as_s.should eq("methd")
+      unknown[0]["did_you_mean"].as_s.should eq("method")
+      j["refused_by_query_tools"].as_bool.should be_true
+      list_history_error(store, "methd:GET").should_not be_nil
+    end
+  end
+
+  it "says the token is searched as text, which is why it matches nothing" do
+    with_store do |store|
+      w = explain(store, "methd:GET")["warnings"].as_a.map(&.as_s)
+      line = w.find(&.includes?("no such field")).not_nil!
+      line.should contain("did you mean `method:`")
+      line.should contain("lenient")
+    end
+  end
+
+  it "leaves did_you_mean null when nothing is close enough to name" do
+    with_store do |store|
+      explain(store, "xyzzy:foo")["unknown_fields"][0]["did_you_mean"].raw.should be_nil
+    end
+  end
+
+  it "reports no unknown field for a token that names none" do
+    with_store do |store|
+      {"http://acme.test/x", "acme.test:8443", "login", "host:example.com"}.each do |q|
+        explain(store, q)["unknown_fields"].as_a.should be_empty
+      end
     end
   end
 end

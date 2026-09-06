@@ -1,6 +1,6 @@
 +++
 title = "엔게이지먼트 준비"
-description = "프로젝트를 만들고, 스코프를 그리고, 테스트를 샌드박스 안에 가둡니다 — 모든 액티브 도구가 발동 전에 확인하는 가드레일입니다."
+description = "프로젝트를 만들고, 스코프를 그리고, 테스트를 샌드박스 안에 가둡니다. 모든 액티브 도구가 발동 전에 확인하는 가드레일입니다."
 weight = 10
 
 [extra]
@@ -34,9 +34,9 @@ gori run project scope add --kind=include --type=host  --pattern=api.example.com
 gori run project scope add --kind=exclude --type=regex --pattern='\.(css|js|png|woff2?)$'
 ```
 
-스코프는 **허용 목록(allowlist)** 으로 평가됩니다. include 규칙 중 하나 이상이 매칭하고 exclude 규칙이 하나도 매칭하지 않을 때 플로우가 스코프 안에 듭니다. 이 정의가 다음 두 단계를 좌우합니다.
+스코프는 **허용 목록(allowlist)**으로 평가됩니다. include 규칙 중 하나 이상이 매칭하고 exclude 규칙이 하나도 매칭하지 않을 때 플로우가 스코프 안에 듭니다. 이 정의가 다음 두 단계를 좌우합니다.
 
-**체크포인트.** `gori run project scope`(또는 SCOPE 카드)에 두 규칙이 모두 나열됩니다. 아직 걸러지거나 차단되는 것은 없습니다 — 경계를 서술했을 뿐입니다.
+**체크포인트.** `gori run project scope`(또는 SCOPE 카드)에 두 규칙이 모두 나열됩니다. 아직 걸러지거나 차단되는 것은 없습니다. 경계를 서술했을 뿐입니다.
 
 ## 3. 스코프 렌즈로 시야 좁히기 {#3-focus-your-view-with-the-scope-lens}
 
@@ -54,13 +54,13 @@ gori run project sandbox on
 
 켜져 있는 동안 프록시는 스코프가 허용하는 요청만 흘려보내고, 나머지는 origin에 닿기 전에 차단합니다. 차단된 요청은 `X-Gori-Sandbox: blocked` 헤더를 단 `403`으로 돌아오며(HTTP/2에서는 스트림이 취소됩니다), 그 시도는 여전히 중단된 플로우로 기록되어 무엇이 빠져나가려 했는지 볼 수 있습니다.
 
-스코프가 허용 목록이므로 **include 규칙이 없는 샌드박스는 모든 것을 차단합니다** — 스코프를 먼저 그린 이유가 바로 이것입니다. 켜져 있는 내내 상단 바에 빨간 `sandbox` 칩이 켜져 있습니다.
+스코프가 허용 목록이므로 **include 규칙이 없는 샌드박스는 모든 것을 차단합니다**. 스코프를 먼저 그린 이유가 바로 이것입니다. 켜져 있는 내내 상단 바에 빨간 `sandbox` 칩이 켜져 있습니다.
 
 **체크포인트.** `sandbox` 칩이 켜져 있습니다. 스코프 밖 사이트로의 요청은 실패하고, `api.example.com`으로의 요청은 통과합니다. 다시 자유롭게 다니려면 샌드박스를 끄세요.
 
 ## 5. DNS를 건드리지 않고 호스트 리다이렉트 (선택) {#5-redirect-a-host-without-touching-dns-optional}
 
-대상의 이름이 공개 DNS가 아닌 다른 곳으로 — 스테이징 서버, 로컬 인스턴스로 — 해석되어야 한다면, **Project → HOST OVERRIDES** 카드에 **host override**를 추가하세요. TCP 다이얼 대상만 바꿀 뿐, SNI·인증서 이름·`Host` 헤더는 원래 이름 그대로라 서버는 평범한 요청으로 봅니다:
+대상의 이름이 공개 DNS가 아닌 다른 곳(스테이징 서버, 로컬 인스턴스)으로 해석되어야 한다면, **Project → HOST OVERRIDES** 카드에 **host override**를 추가하세요. TCP 다이얼 대상만 바꿀 뿐, SNI·인증서 이름·`Host` 헤더는 원래 이름 그대로라 서버는 평범한 요청으로 봅니다:
 
 ```bash
 gori run project host-override add --host=api.example.com --ip=10.0.0.1

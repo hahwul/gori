@@ -204,6 +204,19 @@ module Gori::Tui
       end
     end
 
+    # Whether a keystroke that arrived INSIDE A BRACKETED PASTE may reach `handle_key`.
+    #
+    # A paste over a modal is delivered key by key (the bulk path is body-only), and every
+    # pasted line break arrives as ↵. On a one-line form ↵ is COMMIT, so pasting
+    # `/tmp/a.har⏎` submitted the import and typed whatever followed into the pane the shell
+    # restored; on a confirm card a pasted `y` was an answer. The default lets text through
+    # and holds back ↵: a one-line field takes the first line and the operator sees the rest
+    # refused rather than acted on. A multi-line editor overrides to take ↵ as the newline
+    # it is; the confirm card overrides to take nothing — a clipboard is not a decision.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      !ev.key.enter?
+    end
+
     # Runs on a :commit outcome; returns true when the overlay should close (false keeps
     # it open — e.g. a validation error keeps the form up). Supplied at the open-site.
     property on_commit : Proc(Bool)?
@@ -300,13 +313,22 @@ module Gori::Tui
       text_fields.each { |f| break if f.click_to_cursor(mx, my, selecting: true) }
     end
 
-    # Two presses in the same cell inside the double-click window. Selects the word under
-    # the pointer; return false to fall back to the ordinary single-click behaviour (which,
-    # for a modal, includes the click-away dismiss — so a modal that answers true here is
-    # also saying "this press was text, not a dismiss").
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
-      text_fields.each { |f| return true if f.select_word_at(mx, my) }
-      false
+    # Two presses in the same cell inside the double-click window. An OUTCOME, like
+    # `handle_key` / `handle_click`, plus one more value:
+    #
+    #   :pass   — not mine; the shell delivers the second press as an ordinary click (which,
+    #             for a modal, includes the click-away dismiss — so any other answer is also
+    #             saying "this press was text or a row, not a dismiss")
+    #   :stay   — taken, card stays up (a word selected, an inline row opened)
+    #   :cancel / :commit — taken, and the card closes the way the key outcomes close it
+    #
+    # The default selects the word under the pointer in whichever listed field was drawn
+    # there. A LIST card overrides to run what ↵ runs on the row — and a list whose ↵ hands
+    # off to a form (`AuthorizeIdentitiesOverlay`, `ColumnsOverlay`) needs `:cancel` to do
+    # that, which is why this is a Symbol and not the Bool the tab tier answers with.
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      text_fields.each { |f| return :stay if f.select_word_at(mx, my) }
+      :pass
     end
 
     # Place the caret in whichever listed field was drawn under the pointer, collapsing any
@@ -329,6 +351,53 @@ module Gori::Tui
     # Move the selected field by a signed step (↑/↓ and the scroll wheel share this).
     # Default no-op; form overlays override it. Button-only modals leave it inert.
     def move(step : Int32) : Nil
+    end
+
+    # --- the list-card contract: PgUp/PgDn/Home/End over whatever rows a card draws --------
+    #
+    # `PickerOverlay` had this for the five pickers (#958); the nine list CARDS — notifications,
+    # agents, listeners, passthrough, tabs, columns, hosts, env, hotkeys — each hand-rolled
+    # ↑/↓ and walked a 100-entry ring one row at a time. A card takes part by answering
+    # `entry_count`, keeping `set_selected`, recording the rows its last frame drew in
+    # `@list_last_h`, and taking `page_key(ev)` as one arm of its key ladder.
+
+    @list_last_h = 0 # rows the last frame drew — the PgUp/PgDn step
+
+    # Navigable rows. Zero (the default) leaves `page_key` inert.
+    def entry_count : Int32
+      0
+    end
+
+    # Put the cursor on row `idx` (clamped). Default no-op; list cards override it.
+    def set_selected(idx : Int32) : Nil
+    end
+
+    # PgUp/PgDn/Home/End over the list, one page being the rows the last frame drew. True
+    # when `ev` was one of the four, so a key ladder can take it as one arm.
+    def page_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when key.page_up?   then move(-{@list_last_h, 1}.max)
+      when key.page_down? then move({@list_last_h, 1}.max)
+      when key.home?      then set_selected(0)
+      when key.end?       then set_selected(entry_count - 1)
+      else                     return false
+      end
+      true
+    end
+
+    # The one line a card draws when `area` cannot hold it: "<what> · esc to close" (or the
+    # `closing` a card with unsaved edits prefers, e.g. "esc saves & closes"). Forty-odd cards
+    # each spelled this out; the wording stays theirs, the paint and the empty-area guard are
+    # here. Class-level so a card that is not an `Overlay` (the confirm dialog, the settings
+    # view) draws the same line.
+    def self.too_small(screen : Screen, area : Rect, what : String, closing : String = "esc to close") : Nil
+      return if area.empty?
+      screen.text(area.x + 1, area.y, "#{what} · #{closing}", Theme.muted, Theme.bg, width: {area.w - 1, 0}.max)
+    end
+
+    def render_too_small(screen : Screen, area : Rect, what : String, closing : String = "esc to close") : Nil
+      Overlay.too_small(screen, area, what, closing)
     end
 
     # A scroll-wheel notch over the modal (already ±3-scaled). Defaults to a field move, so

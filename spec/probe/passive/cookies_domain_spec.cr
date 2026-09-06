@@ -2,19 +2,6 @@ require "../../spec_helper"
 
 # --- file-local harness (mirrors spec/probe/passive/jwt_spec.cr's private with_store/capture_flow) ---
 
-private def with_store(&)
-  path = File.tempname("gori-cookie-domain-rule", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture_flow(store, resp_head : String = "HTTP/1.1 200 OK\r\n\r\n", *,
                          scheme = "https", host = "acme.test", target = "/", status = 200,
                          content_type : String? = "text/html", body : String? = nil,

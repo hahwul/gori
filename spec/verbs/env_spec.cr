@@ -9,7 +9,7 @@ describe "Gori::Verbs.register_env" do
   it "keeps a/e/d in the Env scope, distinct from the panes above it" do
     {"env.add-var" => "a", "env.edit-var" => "e", "env.delete-var" => "d"}.each do |id, key|
       r[id].scope.should eq(Gori::Verb::Scope::Env)
-      r[id].chords.should eq([Gori::Verb::Chord.new(key)])
+      r[id].chords.should eq([typed_chord(key)])
       # The same letters in the sibling panes belong to DIFFERENT verbs in DIFFERENT
       # scopes; sharing a scope would make one set silently shadow the other.
       r[id].scope.should_not eq(Gori::Verb::Scope::Project)

@@ -69,7 +69,7 @@ describe "Gori::Verbs.register_decoder" do
     r["decoder.copy"].available?(in_decoder).should be_false
     r["decoder.copy"].available?(in_decoder(read: true)).should be_true
     r["decoder.copy"].chords.should eq([
-      Gori::Verb::Chord.new("y"), Gori::Verb::Chord.new("y", ctrl: true),
+      typed_chord("y"), typed_chord("y", ctrl: true),
     ])
     verb_intents(r, "decoder.copy").should eq([:read_copy])
 

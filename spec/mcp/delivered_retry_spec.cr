@@ -9,19 +9,6 @@ require "../spec_helper"
 # The complements matter as much as the cases: a plain silent origin and a plain connect
 # refusal MUST stay retryable, or the fix has traded one wrong answer for another.
 
-private def with_store(&)
-  path = File.tempname("gori-delivered", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def drive(store, *lines) : Array(JSON::Any)
   input = IO::Memory.new(lines.join('\n') + "\n")
   output = IO::Memory.new

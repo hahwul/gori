@@ -46,7 +46,7 @@ private def with_env_store(&)
 end
 
 private def env_tools(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 # Upgrade, echo the one client frame back, close. Enough to prove a send actually

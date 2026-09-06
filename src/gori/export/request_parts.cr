@@ -21,13 +21,18 @@ module Gori
         headers : Array({String, String}),
         body : String
 
-      # {method, url, version, headers, body} for a request, or nil when there is no resolvable
-      # URL — the one case a serializer has nothing runnable to emit, matching `Curl.text`.
+      # {method, url, version, headers, body} for a request, or nil when there is nothing
+      # runnable to emit — matching `Curl.text`, and for its two reasons: no request line to
+      # resolve a URL from, or a request line gori cannot FRAME, whose `parts[1]` is some token
+      # other than the request-target (see `Curl.request_line_refusal`). Refusing here covers
+      # all five code serializers at once — the parse living in one place is what this module
+      # is for, and a per-serializer guard is how six of them drift.
       def self.from_wire(wire : String, target : String) : Parts?
         head, body = Curl.split_message(wire)
         lines = Curl.split_lines(head)
         request_line = lines.first? || ""
         return nil if request_line.strip.empty?
+        return nil if Curl.request_line_refusal(request_line)
         header_lines = lines.size > 1 ? lines[1..] : [] of String
         method, req_target, version = Curl.parse_request_line(request_line)
         url = Curl.resolve_url(req_target, target, header_lines)

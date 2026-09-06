@@ -114,7 +114,7 @@ describe "MCP send_request(record_history) records the wire" do
         row.sent_by_gori?.should be_true
 
         # …and it reaches the agent through both projections, or the agent cannot tell either.
-        listed = tool_payload(drive(store, call("list_history", %({"limit":1}), 1))[0]).as_a
+        listed = tool_payload(drive(store, call("list_history", %({"limit":1}), 1))[0])["flows"].as_a
         listed[0]["source"].as_s.should eq("repeater")
         listed[0]["source_surface"].as_s.should eq("mcp")
         detail = tool_payload(drive(store, call("get_flow", %({"id":#{flow_id}}), 1))[0])

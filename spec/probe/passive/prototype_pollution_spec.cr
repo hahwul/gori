@@ -1,42 +1,12 @@
 require "../../spec_helper"
+require "../../support/probe_harness"
 require "compress/gzip"
 
 # --- file-local harness (mirrors spec/probe_spec.cr) -----------------------------------
-private def with_store(&)
-  path = File.tempname("gori-protopoll", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Insert a flow + response and return its full FlowDetail (what the analyzer feeds Passive).
-private def capture_flow(store, resp_head : String, *, scheme = "https", host = "acme.test",
-                         target = "/", status = 200, content_type : String? = "text/html",
-                         body : String? = nil, method = "GET", req_headers = "",
-                         req_body : String? = nil) : Gori::Store::FlowDetail
-  head = String.build do |io|
-    io << method << " " << target << " HTTP/1.1\r\nHost: " << host << "\r\n" << req_headers << "\r\n"
-  end
-  req = Gori::Store::CapturedRequest.new(
-    created_at: 1_000_i64, scheme: scheme, host: host, port: scheme == "https" ? 443 : 80,
-    method: method, target: target, http_version: "HTTP/1.1",
-    head: head.to_slice, body: req_body.try(&.to_slice), source: Gori::FlowSource::Kind::Proxy)
-  id = store.insert_flow(req)
-  store.update_response(Gori::Store::CapturedResponse.new(
-    flow_id: id, status: status, head: resp_head.to_slice, body: body.try(&.to_slice),
-    reason: "OK", content_type: content_type, duration_us: 1_i64))
-  store.get_flow(id).not_nil!
-end
-
 # Run passive analysis on one flow and return the detections (ungrouped).
 private def analyze(store, **kw) : Array(Gori::Probe::Detection)
-  Gori::Probe::Passive.analyze(capture_flow(store, **kw))
+  Gori::Probe::Passive.analyze(probe_capture_flow(store, **kw))
 end
 
 private def codes_of(dets : Array(Gori::Probe::Detection)) : Array(String)

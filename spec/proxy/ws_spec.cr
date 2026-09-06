@@ -134,7 +134,40 @@ private class WsRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+# A socket-like IO that never EOFs and hands back one byte per `read` — the shape of a peer
+# trickling a frame's payload to keep a naive `read_fully?` alive forever.
+private class TrickleIO < IO
+  def read(slice : Bytes) : Int32
+    return 0 if slice.empty?
+    slice[0] = 0x41_u8
+    1
+  end
+
+  def write(slice : Bytes) : Nil
+  end
+end
+
 describe Gori::Proxy::WS do
+  describe ".read_body deadline bound" do
+    it "raises rather than reading forever once the deadline has passed (anti-trickle)" do
+      # A 1000-byte frame header; the body is supplied by a peer that never stops dribbling.
+      h = Gori::Proxy::WS.read_header(IO::Memory.new(Bytes[0x81, 0x7E, 0x03, 0xE8])).not_nil!
+      h.len.should eq(1000_u64)
+      expect_raises(IO::TimeoutError) do
+        Gori::Proxy::WS.read_body(TrickleIO.new, h,
+          deadline: Time.instant - 1.second, idle: 3.seconds)
+      end
+    end
+
+    it "reads the whole payload when it arrives before the deadline" do
+      h = Gori::Proxy::WS.read_header(IO::Memory.new(Bytes[0x81, 0x7E, 0x03, 0xE8])).not_nil!
+      body = Bytes.new(1000, 0x41_u8)
+      frame = Gori::Proxy::WS.read_body(IO::Memory.new(body), h,
+        deadline: Time.instant + 5.seconds, idle: 3.seconds).not_nil!
+      frame.payload.size.should eq(1000)
+    end
+  end
+
   describe ".read_frame" do
     it "parses + unmasks a client (masked) text frame, preserving raw bytes" do
       frame = Gori::Proxy::WS.read_frame(IO::Memory.new(MASKED_HI)).not_nil!
@@ -292,6 +325,51 @@ describe Gori::Proxy::WS do
       # ...so History must not be missing the 6 it relayed itself.
       sink.messages.should eq([{"in", 1, "MARKER"}, {"in", 1, "UNTERM"}])
       _ = ts_r
+    end
+
+    # A CLOSE ends the message being reassembled — §5.5.1 forbids a data frame after one, so
+    # the FIN that fragment is owed is never coming. Its bytes arrived FIRST, so its row goes
+    # first; the byte-exact pump left it to the loop's `ensure` and listed the two backwards.
+    #
+    # Written as a DIFFERENTIAL because the divergence is what made it a defect rather than a
+    # preference: `AssemblingPump` (armed by any `part: ws` rule or `proto:ws` catch, matching
+    # or not) and `Repeater::WsEngine.drain` both already recorded the pair in arrival order,
+    # so the SAME origin bytes were transcribed one way or the other depending on whether a
+    # rule for some other host happened to be live — and nothing in the transcript said which.
+    it "records a half-assembled message BEFORE the CLOSE that ended it, on either pump" do
+      # TEXT fin=0 "UNTERM", then CLOSE 1011 "oops" — the shape a server produces when it
+      # gives up mid-message.
+      frames = Bytes[0x01, 0x06, 0x55, 0x4E, 0x54, 0x45, 0x52, 0x4D] +
+               Bytes[0x88, 0x06, 0x03, 0xF3, 0x6F, 0x6F, 0x70, 0x73]
+
+      rows = [nil.as(Array({String, Int32, String})?), nil.as(Array({String, Int32, String})?)]
+      # nil = no lens at all (the byte-exact `pump`, what every ordinary socket runs);
+      # a lens whose `in` rule matches nothing = the assembling pump, byte-exact all the same.
+      [nil, WsRewriter.new(to_client: {"ZZZ-no-match", "x"})].each_with_index do |rw, i|
+        ss_r, ss_w = IO.pipe
+        tc_r, tc_w = IO.pipe
+        cs_r, cs_w = IO.pipe
+        ts_r, ts_w = IO.pipe
+        client = IO::Stapled.new(cs_r, tc_w)
+        upstream = IO::Stapled.new(ss_r, ts_w)
+        cs_w.close
+        ss_w.write(frames); ss_w.close
+
+        sink = WsSink.new
+        Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink, rw, WS_CTX)
+
+        relayed = Bytes.new(frames.size)
+        tc_r.read_fully(relayed)
+        relayed.should eq(frames) # the wire is untouched either way (P7)
+        rows[i] = sink.messages
+        _ = ts_r
+      end
+
+      order = rows.map { |r| r.not_nil!.map { |(dir, op, _)| {dir, op} } }
+      order[0].should eq([{"in", 1}, {"in", 8}]) # the fragment, THEN the close
+      order[1].should eq(order[0])               # ... and the same on the other pump
+      rows[0].not_nil!.first[2].should eq("UNTERM")
+      rows[1].not_nil!.first[2].should eq("UNTERM")
     end
 
     it "relays frames both directions byte-exact and captures messages" do

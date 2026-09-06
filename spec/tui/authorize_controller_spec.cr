@@ -557,16 +557,30 @@ describe Gori::Tui::AuthorizeController do
   # identities configured, stepping back one row meant seven presses — and seven response
   # panes redrawn on the way to the one being read. `move_trial(-1)` was already there; no key
   # reached it.
+  #
+  # Through `pane_advance`, the focus-ring hook — not a ⇥ arm in `handle_body_key`, which the
+  # shell never reaches with that key: the Runner claims ⇥/⇧⇥ for the ring BEFORE the body
+  # sees a keystroke, so the arms that used to sit there passed green and did nothing live.
   describe "the identity sub-cursor" do
-    it "steps backwards on ⇧⇥" do
+    it "steps backwards on ⇧⇥ and forwards on ⇥, through the focus ring" do
       with_authorize_controller do |c, _, session|
         id = seed_capture(session.store, "/orders", "session=A")
         c.seed_flows([id])
         entry = c.view.entries.first
         c.view.apply_result(entry.id, two_identity_target)
         c.view.selected_trial.not_nil!.identity.should eq("as-captured")
-        c.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::BackTab)).should be_true
+        c.pane_advance(-1).should be_true
         c.view.selected_trial.not_nil!.identity.should eq("anonymous")
+        c.pane_advance(1).should be_true
+        c.view.selected_trial.not_nil!.identity.should eq("as-captured")
+        # The key itself is NOT a body key any more — the ring owns it.
+        c.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::BackTab)).should be_false
+      end
+    end
+
+    it "lets the ring leave for the tab bar when there is nothing to step through" do
+      with_authorize_controller do |c, _, _|
+        c.pane_advance(1).should be_false
       end
     end
   end

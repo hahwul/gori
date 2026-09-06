@@ -274,7 +274,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       with_seed_store(seed_body) do |(path, id, wire)|
         store = Gori::Store.open(path)
         begin
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           text, target, http2, evidence = tools.fuzz_template_source_for_spec(%({"flow_id":#{id}}))
           seed_assertions.call(text, wire)
           evidence.should be_true
@@ -290,7 +290,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       with_seed_store(plain_body) do |(path, id, wire)|
         store = Gori::Store.open(path)
         begin
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           text, _, _, _ = tools.fuzz_template_source_for_spec(%({"flow_id":#{id}}))
           text.to_slice.to_a.should eq(wire)
         ensure
@@ -304,7 +304,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       with_seed_store(plain_body) do |(path, _, _)|
         store = Gori::Store.open(path)
         begin
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           draft = "GET /?x=§1§ HTTP/1.1\r\nHost: h.test\r\n\r\n"
           text, _, _, evidence = tools.fuzz_template_source_for_spec(%({"template":#{draft.to_json}}))
           text.should eq(draft)
@@ -322,7 +322,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       with_repeater_store("http://r.test", "GET /r?q=§SEED§ HTTP/1.1\r\nHost: r.test\r\n\r\n") do |(path, id)|
         store = Gori::Store.open(path)
         begin
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           text, target, http2, evidence = tools.fuzz_template_source_for_spec(%({"repeater_id":#{id}}))
           Gori::Fuzz::Template.parse(text).position_count.should eq(0)
           text.should contain("§§SEED§§")
@@ -339,7 +339,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       with_repeater_store("https://r.test", "GET /s HTTP/1.1\r\nHost: r.test\r\n\r\n", sni: "pinned.example") do |(path, id)|
         store = Gori::Store.open(path)
         begin
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           _, _, _, _, sni = tools.fuzz_template_source_for_spec(%({"repeater_id":#{id}}))
           sni.should eq("pinned.example")
         ensure
@@ -354,7 +354,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       with_repeater_store("http://r.test", "GET /r HTTP/1.1\r\nHost: r.test\r\n\r\n") do |(path, id)|
         store = Gori::Store.open(path)
         begin
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           expect_raises(Gori::MCP::Tools::FuzzArgError, /ONE template source/) do
             tools.fuzz_template_source_for_spec(%({"template":"GET / HTTP/1.1\\r\\n\\r\\n","repeater_id":#{id}}))
           end
@@ -375,7 +375,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       with_repeater_store("http://r.test", handshake) do |(path, id)|
         store = Gori::Store.open(path)
         begin
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           text, target, _http2, evidence = tools.fuzz_template_source_for_spec(%({"repeater_id":#{id}}))
           Gori::Proxy::WS.upgrade_request?(text).should be_true
           target.should eq("http://r.test")

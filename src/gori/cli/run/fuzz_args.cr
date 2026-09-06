@@ -19,7 +19,12 @@ module Gori
         abort "gori run fuzz: invalid --numbers '#{v}' (use FROM-TO[:STEP])" unless from && to
         step = step_part.empty? ? 1_i64 : (step_part.to_i64? || abort("gori run fuzz: invalid --numbers step '#{step_part}'"))
         abort "gori run fuzz: --numbers step must not be 0" if step == 0
-        Fuzz::NumberRange.new(from, to, step)
+        range = Fuzz::NumberRange.new(from, to, step)
+        # `10-1` (a typo for `1-10`) is an EMPTY range: the run printed `· 0 requests ·`, sent
+        # nothing and exited 0 as `done`. A descending range is spelled with a negative step
+        # (`10-1:-1`), which this leaves alone.
+        abort "gori run fuzz: --numbers '#{v}' is empty — FROM is past TO for step #{step} (a descending range is FROM-TO:-STEP)" if range.size == 0
+        range
       end
 
       # `--preset NAME` or `--preset NAME:FILE` (a user file merged into the built-in set,
@@ -39,6 +44,9 @@ module Gori
         max = max_s.empty? ? min : max_s.to_i?
         abort "gori run fuzz: invalid --brute lengths '#{lens}' (use MIN-MAX)" unless min && max
         abort "gori run fuzz: --brute MIN (#{min}) is greater than MAX (#{max})" if min > max
+        # `BruteForce` floors MIN at 1 silently; `abc:0-2` then sent 12 payloads under a banner
+        # that counted them, minus the empty string the operator asked for. Refused by name.
+        abort "gori run fuzz: --brute MIN must be at least 1 (got #{min}); use --null-payloads for an empty payload" if min < 1
         Fuzz::BruteForce.new(charset, min, max)
       end
 

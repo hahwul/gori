@@ -115,7 +115,7 @@ module Gori::Tui
       v = current_view
       if v.nil?
         key = ev.key
-        if key.escape? || key.up? || key.lower_k?
+        if key.escape? || nav_up?(ev) # `k` only BARE — see TabController#nav_up?
           @host.request_focus(:menu)
           return true
         end
@@ -278,6 +278,21 @@ module Gori::Tui
       true
     end
 
+    # A double-click on a SAMPLES row runs ↵ on it (#969's contract): select, then open the
+    # detail. False off the list — the ANALYSIS rows are two columns with no word to select,
+    # so there the plain click stands.
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      body = body_rect_below_filter(rect)
+      return false unless v = current_view
+      return false unless v.pane_at(body, mx, my) == :samples
+      return false unless row = v.samples_row_at(body, mx, my)
+      @host.focus_body
+      v.focus_pane(:samples)
+      v.select_sample_row(row)
+      v.open_detail
+      true
+    end
+
     # Select the row under the cursor, or — a second click on the already-selected row while
     # SAMPLES already holds focus — open its detail, so the mouse matches ↵. The same
     # select-then-open every other list in the tree uses; this one took no row click at all.
@@ -316,6 +331,10 @@ module Gori::Tui
       current_view.try { |v| v.focus == :analysis || v.focus == :detail } || false
     end
 
+    def sequencer_samples_readable? : Bool
+      current_view.try { |v| v.focus == :samples && !v.selected_sample.nil? } || false
+    end
+
     def sequencer_selection_active? : Bool
       v = current_view
       return false unless v
@@ -338,10 +357,17 @@ module Gori::Tui
       v.focus == :detail ? v.detail_clear_selection : v.analysis_clear_selection
     end
 
+    # The SAMPLES list's `y`: the token under the cursor, which is what an operator quotes.
+    private def copy_sample(v : SequencerView) : Nil
+      sample = v.selected_sample || return
+      copy_text(sample.token || "", "sample ##{sample.index}")
+    end
+
     # `y`: the selected report rows, or the whole entropy report when nothing is selected. The
     # report is the finding — a randomness verdict you cannot paste into an issue is half a tool.
     def sequencer_copy : Nil
       v = current_view
+      return copy_sample(v) if v && v.focus == :samples
       return unless v && (v.focus == :analysis || v.focus == :detail)
       detail = v.focus == :detail
       sel = detail ? v.detail_selection? : v.analysis_selection?
@@ -428,13 +454,25 @@ module Gori::Tui
 
     def handle_wheel(step : Int32) : Bool
       if v = current_view
-        case v.focus
-        when :samples  then v.samples_move(step)
-        when :analysis then v.analysis_wheel(step) # viewport only — ↑/↓ are the cursor
-        when :detail   then v.detail_wheel(step)   # viewport only — ↑/↓ are the cursor
-        end
+        wheel_pane(v, v.focus, step)
       end
       true
+    end
+
+    # Pointer-aware: the pane under the cursor scrolls, keyboard focus stays put.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return true unless v = current_view
+      pane = v.pane_at(body_rect_below_filter(rect), mx, my)
+      wheel_pane(v, pane || v.focus, step)
+      true
+    end
+
+    private def wheel_pane(v : SequencerView, pane : Symbol, step : Int32) : Nil
+      case pane
+      when :samples  then v.samples_move(step)
+      when :analysis then v.analysis_wheel(step) # viewport only — ↑/↓ are the cursor
+      when :detail   then v.detail_wheel(step)   # viewport only — ↑/↓ are the cursor
+      end
     end
 
     def commit : Nil
@@ -825,18 +863,17 @@ module Gori::Tui
     # (`target_subtab_indices` — the one target rule).
     def request_close : Nil
       return unless tab = current_tab_obj
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE SEQUENCERS", "Close #{marked_subtab_phrase(targets.size)}?\nEach config and its collected tokens are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE SEQUENCERS", "Close #{marked_subtab_phrase(refs.size)}?\nEach config and its collected tokens are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
       @host.confirm("CLOSE SEQUENCER", "Close sequencing session “#{tab.view.summary}”?\nIts config and collected tokens are discarded.",
         confirm_label: "close", danger: true) { close_tab }
     end
 
-    private def close_marked_sessions(idxs : Array(Int32)) : Nil
-      @host.status(close_marked_subtabs(idxs))
+    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
+      @host.status(close_marked_subtabs(refs))
       @host.resolve_subtab_focus
     end
 

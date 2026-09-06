@@ -7,19 +7,6 @@ require "compress/gzip"
 # What is pinned here is the part of the feature that has no visible symptom until the column
 # has already shown the operator a value from the wrong message.
 
-private def tmp_store(&)
-  path = File.tempname("gori-dc", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def detail(request_head : String, response_head : String,
                    request_body : String? = nil, response_body : String? = nil) : Gori::Store::FlowDetail
   row = Gori::Store::FlowRow.new(
@@ -276,7 +263,7 @@ describe Gori::DisplayColumns do
 
   describe "the project's ordered list" do
     it "keeps insertion order, moves a column, and persists both" do
-      tmp_store do |store|
+      with_store do |store|
         a = store.insert_display_column("A", Gori::ExtractKind::Header, "x-a")
         b = store.insert_display_column("B", Gori::ExtractKind::Header, "x-b")
         c = store.insert_display_column("C", Gori::ExtractKind::Header, "x-c")
@@ -307,7 +294,7 @@ describe Gori::DisplayColumns do
     # Unlike `extract_rules`, two columns MAY share a label: the same header off the request and
     # off the response is a comparison, not a mistake, and nothing keys a column by name.
     it "allows two columns under one label" do
-      tmp_store do |store|
+      with_store do |store|
         store.insert_display_column("ID", Gori::ExtractKind::Header, "x-id")
         store.insert_display_column("ID", Gori::ExtractKind::Header, "x-id",
           side: Gori::MessageSide::Request).should_not eq(0)
@@ -318,7 +305,7 @@ describe Gori::DisplayColumns do
     # A hand-edited or peer-written row must cost that column its meaning, never the History
     # render path that reads this list every frame.
     it "degrades an unreadable kind/side to a default instead of raising" do
-      tmp_store do |store|
+      with_store do |store|
         store.insert_display_column("X", Gori::ExtractKind::Header, "x-a")
         store.flush
         store.@db.exec("UPDATE display_columns SET kind = 'nonsense', side = 'sideways'")

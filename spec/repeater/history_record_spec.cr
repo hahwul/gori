@@ -2,19 +2,6 @@ require "../spec_helper"
 
 # `Repeater::HistoryRecord` — the opt-in write that `gori run repeater send --record-history`
 # (and any future TUI verb) uses to enter a workbench send into History (#749).
-private def with_store(&)
-  path = File.tempname("gori-rephist", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def plan_for(raw : String) : Gori::Repeater::Plan
   Gori::Repeater::Plan.build(
     Gori::Repeater::PlanOptions.new([raw.to_slice], default_target: "http://t.test"),

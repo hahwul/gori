@@ -6,19 +6,6 @@ require "../spec_helper"
 # which `Secrets::PATTERNS` screens out (mirrors spec/probe_spec.cr's AWS_KEY_ID).
 private AWS_KEY_ID = "AKIA" + "3ZQF7XKPL2WVNB6D"
 
-private def with_store(&)
-  path = File.tempname("gori-probe-scan", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A completed 101 upgrade — the shape `scan_flows` reads WebSocket frames for.
 private def capture_ws_flow(store) : Int64
   head = "GET /ws HTTP/1.1\r\nHost: acme.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"

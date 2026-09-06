@@ -4,19 +4,6 @@ require "json"
 
 include Gori::Tui
 
-private def tmp_store(&)
-  path = File.tempname("gori-notes", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Type a string into the view, honouring embedded newlines.
 private def type(view : NotesView, text : String) : Nil
   text.each_char { |c| c == '\n' ? view.newline : view.insert(c) }
@@ -36,7 +23,7 @@ end
 
 describe Gori::Tui::NotesView do
   it "shows the scratchpad guide on a blank note" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       backend = render_text(view, 80, 14)
@@ -46,7 +33,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "loads, edits inline, and persists the note set as JSON" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
 
@@ -66,7 +53,7 @@ describe Gori::Tui::NotesView do
   it "soft-merge reload keeps caret when note text is unchanged (data_version poll)" do
     # Regression: full reload rebuilt every TextArea, zeroing caret/scroll on every
     # store write (capture, ui_state, …) even when the note body was identical.
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       view.enter_insert!
@@ -86,7 +73,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "reload is a no-op while dirty (never clobbers in-progress typing)" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       type(view, "draft")
@@ -98,7 +85,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "soft-merge picks up a peer note body change for a clean buffer" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       type(view, "local")
@@ -123,7 +110,7 @@ describe Gori::Tui::NotesView do
   # undo stack cleared. Hit whenever Notes was open without body focus (notes_locked? only covers
   # active_tab == :notes && focus == :body), and on every tab-away-and-back.
   it "soft-merge keeps caret, scroll and undo when a CRLF-stored note matches the LF buffer" do
-    tmp_store do |store|
+    with_store do |store|
       body = (1..8).map { |i| "line #{i}" }.join('\n')
       view = NotesView.new
       view.reload(store)
@@ -159,7 +146,7 @@ describe Gori::Tui::NotesView do
   # ignore \r, not content. A CRLF peer body with different text still replaces the buffer (and
   # lands as LF, since set_text strips \r).
   it "soft-merge still applies a CRLF-stored peer edit whose content actually changed" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       type(view, "alpha\nbravo")
@@ -193,7 +180,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "keeps multiple notes as independent sub-tabs across a reload" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       type(view, "first")
@@ -216,7 +203,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "does not clobber a peer session's notes on save (concurrent editing)" do
-    tmp_store do |store|
+    with_store do |store|
       seed = NotesView.new # an existing note in the project
       seed.reload(store)
       type(seed, "hi")
@@ -292,7 +279,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "migrates a legacy single-note document into the first note" do
-    tmp_store do |store|
+    with_store do |store|
       store.set_setting("notes", "legacy body")
       view = NotesView.new
       view.reload(store)
@@ -302,7 +289,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "prefers the JSON set over the legacy key once both exist" do
-    tmp_store do |store|
+    with_store do |store|
       store.set_setting("notes", "stale legacy")
       store.set_setting("notes.docs", %({"cur":0,"notes":["fresh"]}))
       view = NotesView.new
@@ -313,7 +300,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "switches the active note with switch_note" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       type(view, "one")
@@ -325,7 +312,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "switch_note_by_id selects the matching note" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       type(view, "one")
@@ -343,7 +330,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "duplicate_current clones the active note's text into a new sibling (new id)" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       type(view, "shared body")
@@ -359,7 +346,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "exposes current_index for arrow-key sub-tab navigation" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       view.current_index.should eq(0)
@@ -371,7 +358,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "always keeps at least one note open on close" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       view.count.should eq(1)
@@ -384,7 +371,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "falls back to a single empty note on malformed JSON" do
-    tmp_store do |store|
+    with_store do |store|
       store.set_setting("notes.docs", "not json {{{")
       view = NotesView.new
       view.reload(store)
@@ -393,7 +380,7 @@ describe Gori::Tui::NotesView do
   end
 
   it "clears the current note's text without closing the sub-tab" do
-    tmp_store do |store|
+    with_store do |store|
       view = NotesView.new
       view.reload(store)
       type(view, "scratch")
@@ -405,12 +392,77 @@ describe Gori::Tui::NotesView do
   end
 
   it "save is a no-op when nothing was edited" do
-    tmp_store do |store|
+    with_store do |store|
       store.set_setting("notes.docs", %({"cur":0,"notes":["kept"]}))
       view = NotesView.new
       view.reload(store)
       view.save(store) # not dirty → must not overwrite
       saved_notes(store).should eq(["kept"])
+    end
+  end
+
+  # `dirty?` is the lock that keeps a peer's commit from reloading this note (`locked?`), and
+  # it is what makes the next esc / sub-tab switch rewrite the whole document — so a key that
+  # changed nothing must not raise it. The Repeater and Fuzzer editors gate the same three keys.
+  it "does not dirty a clean note on a ⌃Z, ⌫ or ⌦ that changed nothing" do
+    with_store do |store|
+      store.set_setting("notes.docs", %({"cur":0,"notes":["kept"]}))
+      view = NotesView.new
+      view.reload(store)
+      view.enter_insert!
+      view.undo # empty undo stack
+      view.dirty?.should be_false
+      view.home
+      view.backspace # buffer start
+      view.dirty?.should be_false
+      view.goto_line(1)
+      view.end_of_line
+      view.delete # buffer end
+      view.dirty?.should be_false
+      view.current_text.should eq("kept")
+      # …and the same keys still dirty it when they do change the buffer.
+      view.backspace
+      view.current_text.should eq("kep")
+      view.dirty?.should be_true
+    end
+  end
+
+  # A paste is one edit, not N keystrokes: it lands in one splice and one ⌃Z takes all of it
+  # back (per-keystroke delivery cost a snapshot per character and undid one at a time).
+  it "splices a bulk paste in as one undo step, in INSERT only" do
+    with_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "head")
+      view.save(store)
+      view.dirty?.should be_false
+
+      view.paste("nope").should be_false # READ has no caret to paste at — the Runner replays it
+      view.current_text.should eq("head")
+      view.dirty?.should be_false
+
+      view.enter_insert!
+      view.paste("\nGET /a HTTP/1.1\nHost: x\n").should be_true
+      view.current_text.should eq("head\nGET /a HTTP/1.1\nHost: x\n")
+      view.dirty?.should be_true
+      view.undo
+      view.current_text.should eq("head")
+    end
+  end
+
+  it "a paste over a selection replaces it and reports how much" do
+    with_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      view.enter_insert!
+      type(view, "alpha beta")
+      view.home
+      # ⇧→ ×5 selects "alpha" in the editor's own selection model.
+      5.times { view.motion_key(Termisu::Event::Key.new(Termisu::Input::Key::Right, Termisu::Input::Modifier::Shift)) }
+      view.selection?.should be_true
+      view.paste("omega").should be_true
+      view.current_text.should eq("omega beta")
+      view.last_replaced.should eq(5)
     end
   end
 end

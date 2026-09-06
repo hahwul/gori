@@ -57,7 +57,7 @@ module Gori
         raise Error.new("#{detail}#{dial_error.try(&.because) || ""}")
       end
 
-      tls ? wrap_tls(tcp, host, verify_tls) : tcp.as(IO)
+      tls ? wrap_tls(tcp, host, verify_tls) : tcp
     end
 
     private def self.build_client(io : IO, host : String, port : Int32, tls : Bool,
@@ -73,7 +73,9 @@ module Gori
       client
     end
 
-    private def self.wrap_tls(tcp : TCPSocket, host : String,
+    # `IO`, not `TCPSocket`: an `http+tls://` upstream proxy hands back a TLS socket to the
+    # proxy, and the origin's own TLS is then nested inside it (see Proxy::Upstream).
+    private def self.wrap_tls(tcp : IO, host : String,
                               verify : Bool) : OpenSSL::SSL::Socket::Client
       context = OpenSSL::SSL::Context::Client.new
       if verify

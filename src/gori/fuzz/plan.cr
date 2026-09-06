@@ -613,10 +613,10 @@ module Gori::Fuzz
     #
     # `ws_messages` non-nil IS the "this is a WebSocket run" bit — see `PlanOptions#ws_messages`
     # — so the only question left here is whether the run is COHERENT, and there is exactly one
-    # way it can fail to be: frames with no handshake to ride. `WsEngine.upgrade_request?` is
-    # the single source of truth for "is this a WebSocket gori can re-establish" (`ws_engine.cr`
-    # says so), and it is asked of the MARKED text rather than the raw options, so a `--mark`
-    # that landed inside `Upgrade: websocket` is judged on the head that will actually be sent.
+    # way it can fail to be: frames with no handshake to ride. `WsEngine.replayable?` is the
+    # single source of truth for "is this a WebSocket gori can re-establish" (`ws_engine.cr`
+    # says so), and its two halves are asked separately below because `--http2` means something
+    # different to each.
     #
     # Every surface also refuses this before `Plan.build`, in its own idiom and before anything
     # dials. This is the backstop, not the report.
@@ -632,23 +632,33 @@ module Gori::Fuzz
       # it: a captured socket the client never wrote to, or one whose only `out` rows were
       # gori's own `[gori]` advisories, seeds an EMPTY list — and a bare `Array` is truthy.
       return nil if sources.empty?
-      # `Proxy::WS.upgrade_request?`, not `WsEngine`'s delegate: that predicate's documented
-      # home is the codec, and `WsEngine.upgrade_request?` is where the REPEATER asks it.
-      # Same bytes, same answer, one home.
-      unless Gori::Proxy::WS.upgrade_request?(String.new(handshake.render(handshake.default_payloads)))
+      # `Proxy::WS`, not `WsEngine`'s delegates: those predicates' documented home is the
+      # codec, and `WsEngine` is where the REPEATER asks them. Same bytes, same answer, one
+      # home. Asked of the MARKED text, so a `--mark` that landed inside the handshake is
+      # judged on the head that will actually be sent.
+      rendered = String.new(handshake.render(handshake.default_payloads))
+      upgrade = Gori::Proxy::WS.upgrade_request?(rendered)
+      # RFC 8441 extended CONNECT is the OTHER handshake for the same protocol, and `WsEngine`
+      # re-establishes it (#733). It is therefore a coherent carrier for a frame script, and
+      # the refusal that used to stand here — "`--http2` and a WebSocket script cannot
+      # combine" — would now refuse the very shape a captured h2 socket seeds.
+      extended = Gori::Proxy::WS.extended_connect_request?(rendered)
+      unless upgrade || extended
         raise WsError.new("#{sources.size} WebSocket frame#{sources.size == 1 ? "" : "s"} were given, " \
-                          "but this template declares no `Upgrade: websocket` handshake for them to ride. " \
+                          "but this template declares no WebSocket handshake for them to ride — neither " \
+                          "an `Upgrade: websocket` request nor an RFC 8441 extended CONNECT. " \
                           "Seed from a WebSocket flow or repeater session, or drop the frames to sweep it as HTTP")
       end
-      # RFC 8441 extended CONNECT is a real WebSocket that this path cannot re-establish:
-      # `WsEngine` writes an h1 upgrade and accepts nothing but a 101. Refused rather than
-      # degraded, because degrading would sweep the CONNECT as an ordinary h2 request and
-      # report rows about an exchange that carried no frames.
-      if options.http2?
-        raise WsError.new("--http2 and a WebSocket script cannot combine: gori re-establishes a " \
-                          "WebSocket with an HTTP/1.1 upgrade handshake and accepts nothing but a 101 " \
-                          "(RFC 8441 extended CONNECT has no send path). Sweep it over HTTP/1.1, or drop " \
-                          "the frames to sweep the handshake itself as an h2 request")
+      # `--http2` still cannot combine with an RFC 6455 UPGRADE handshake: RFC 9113 §8.1 has no
+      # h1 upgrade mechanism, so there is nothing for the flag to send. It is the SEED's own
+      # transport that decides for an extended CONNECT, and `http2` is true there by
+      # construction (`http2 = force_h2 || seed.http2`), which is why the test is on the
+      # handshake shape and not on the flag alone.
+      if options.http2? && !extended
+        raise WsError.new("--http2 and an `Upgrade: websocket` script cannot combine: HTTP/2 has no " \
+                          "upgrade mechanism (RFC 9113 §8.1), so a WebSocket over h2 is opened by an " \
+                          "RFC 8441 extended CONNECT instead — which this template is not. Sweep it over " \
+                          "HTTP/1.1, or drop the frames to sweep the handshake itself as an h2 request")
       end
       if options.config.race_count
         raise WsError.new("--race and a WebSocket script cannot combine: a race group is N byte-identical " \

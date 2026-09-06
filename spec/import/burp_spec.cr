@@ -5,19 +5,6 @@ require "../spec_helper"
 # The point of this format (versus HAR/Postman/OpenAPI) is that the wire bytes survive
 # unchanged, so most of these examples compare stored head bytes to the source bytes.
 
-private def with_store(&)
-  path = File.tempname("gori-burp", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_xml(xml : String, &)
   path = File.tempname("gori-burp", ".xml")
   File.write(path, xml)

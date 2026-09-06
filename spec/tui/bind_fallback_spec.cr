@@ -28,19 +28,6 @@ include Gori::Tui
 # NOT asserted here: the rebind itself. `Runner` needs a live tty, so `apply_settings` is
 # represented by its extracted predicate (`port_fallback_stands?`) rather than driven.
 
-private def tmp_store(&)
-  path = File.tempname("gori-bindfb", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # `Gori::Settings` is process-global class state SHARED with every other spec file, so each
 # example restores the same baseline `project_view_spec.cr` assumes — on both sides, since a
 # leaked project override would silently flip an example over there depending on file order.
@@ -61,7 +48,7 @@ end
 
 describe "startup port fallback" do
   it "leaves a PROJECT pin pinned, so editing another network field cannot re-pin the fallback" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       # The operator pinned 8080 for this project (global stays 8070).
       store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "8080")

@@ -102,6 +102,26 @@ describe Gori::Tui::HelpView do
       # And back to the defaults once the override is gone — the sheet is rebuilt per call.
       HelpView.shortcut_rows(registry).find(&.b.==("pick flow A · flow B")).not_nil!.a.should eq("a · b")
     end
+
+    # The `y` + `^Y` Copy pairs are rebindable since #932 — the READ letter moves, `^Y` is
+    # pinned — and the Repeater's row followed while the Fuzzer, JWT and Cookie rows stayed
+    # literal, so one rebind moved one row out of four.
+    it "move the READ letter of every Copy pair and keep the pinned ^Y" do
+      registry = Gori::Verbs.registry
+      prev = Gori::Settings.keymap_overrides
+      begin
+        Gori::Settings.keymap_overrides = {
+          "fuzzer.copy" => ["shift-y"], "jwt.copy" => ["shift-y"], "cookie.copy" => ["shift-y"],
+        }
+        rows = HelpView.shortcut_rows(registry)
+        copy_rows = rows.select(&.b.starts_with?("copy selection/pane"))
+        copy_rows.size.should eq(3)
+        copy_rows.map(&.a).uniq!.should eq(["⇧Y · ^Y"])
+      ensure
+        Gori::Settings.keymap_overrides = prev
+      end
+      HelpView.shortcut_rows(registry).select(&.b.starts_with?("copy selection/pane")).map(&.a).uniq!.should eq(["y · ^Y"])
+    end
   end
 
   describe "the Query page" do

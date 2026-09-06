@@ -10,6 +10,7 @@ module Gori
       # credential/token lives (see `gori run project env`'s own `TOKEN=secret`
       # example), and this response can flow through a hosted LLM. Pass
       # include_sensitive:true to see the actual values.
+      @[Tool("list_env", env_refresh: true)]
       private def list_env(h) : Result
         include_sensitive = bool_arg(h, "include_sensitive", false)
         Result.new(JSON.build do |j|
@@ -48,6 +49,7 @@ module Gori
         Serialize::AUTH_SCHEMES.includes?(head.downcase) ? head : nil
       end
 
+      @[Tool("set_env_var", gated: true, agent_action: true, env_refresh: true)]
       private def set_env_var(h) : Result
         key = str(h, "key").try(&.strip)
         return err("missing required 'key'", "INVALID_ARGUMENT", field: "key") if key.nil? || key.empty?
@@ -64,6 +66,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "key", key; j.field "set", true } })
       end
 
+      @[Tool("delete_env_var", gated: true, agent_action: true, env_refresh: true)]
       private def delete_env_var(h) : Result
         key = str(h, "key").try(&.strip)
         return err("missing required 'key'", "INVALID_ARGUMENT", field: "key") if key.nil? || key.empty?

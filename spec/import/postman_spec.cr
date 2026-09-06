@@ -3,19 +3,6 @@ require "../spec_helper"
 # src/gori/import/postman.cr — Postman Collection v2.0/v2.1 → response-less History flows.
 # Inline temp files rather than fixtures, matching spec/import/import_spec.cr.
 
-private def with_store(&)
-  path = File.tempname("gori-postman", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_collection(json : String, &)
   path = File.tempname("gori", ".postman_collection.json")
   File.write(path, json)

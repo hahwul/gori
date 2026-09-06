@@ -90,24 +90,33 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ select · ↵ open · c clear · esc close"
+      if flash = @flash
+        return "#{flash} · ↑/↓ select · ↵ open · esc close"
+      end
+      "↑/↓ select · ↵ open · y copy · c clear · esc close"
     end
+
+    # The copy verdict, shown in the hint until the next key: this card has no host to toast
+    # through, and the centre exists to keep the one message an operator cannot afford to
+    # lose — being unable to put it on the clipboard was the gap.
+    @flash : String? = nil
 
     # Formerly Runner#handle_notifications_key. ↵ commits (the open-site's closure jumps
     # to the selected note's result); `c` empties the store in place and stays open.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       c = ev.char
+      @flash = nil
       if ev.ctrl? && k.lower_p?
         @on_palette.try(&.call)
       elsif k.escape?
         return :cancel
-      elsif k.up?
-        move(-1)
-      elsif k.down?
-        move(1)
+      elsif nav_key(ev)
+        # ↑/↓, PgUp/PgDn/Home/End
       elsif k.enter?
         return :commit
+      elsif c == 'y' && !ev.ctrl? && !ev.alt?
+        copy_selected
       elsif c == 'c' && !ev.ctrl? && !ev.alt?
         # Guarded, and not merely for tidiness. `Event::Key#char` is `@char || key.to_char`,
         # so `^C` reports 'c' — and this branch WIPES the whole store. It used to be
@@ -155,6 +164,29 @@ module Gori::Tui
       @anchor = list[@selected]?.try(&.id)
     end
 
+    # ↑/↓ and the four page keys (`Overlay#page_key`) as one arm of `handle_key`.
+    private def nav_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.up?
+        move(-1)
+      elsif key.down?
+        move(1)
+      else
+        return page_key(ev)
+      end
+      true
+    end
+
+    private def copy_selected : Nil
+      unless note = selected_note
+        @flash = "nothing to copy"
+        return
+      end
+      text = note.message
+      written = Clipboard.copy(text)
+      @flash = "copied #{written}b#{Clipboard.note(written, text)}"
+    end
+
     def selected_note : Notifications::Note?
       list = notes
       list[index_in(list)]?
@@ -173,7 +205,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "notifications need a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "notifications need a larger window")
         return
       end
       # ONE reversed copy per frame, and one resolved cursor: `notes` allocates, draw_row
@@ -185,6 +217,7 @@ module Gori::Tui
       Frame.border_meta(screen, box, "NOTIFICATIONS", meta, bg: Theme.panel)
 
       cap = list_capacity(box)
+      @list_last_h = cap
       if list.empty?
         screen.text(box.x + 3, box.y + 2, "(no notifications yet)", Theme.muted, Theme.panel) if cap > 0
         return

@@ -12,6 +12,7 @@ module Gori
       # create_repeater) but had no way to read or remove one, so an agent could attach evidence
       # it could never review or correct. These are the read/unlink halves.
 
+      @[Tool("list_links")]
       private def list_links(h) : Result
         owner = link_owner(h)
         return owner if owner.is_a?(Result)
@@ -51,6 +52,7 @@ module Gori
 
       # add_link — attach an evidence pointer. Idempotent: Store#add_link returns nil when the
       # exact (owner, ref) pair already exists, which is a success, not a failure.
+      @[Tool("add_link", gated: true, agent_action: true)]
       private def add_entity_link(h) : Result
         owner = link_owner(h)
         return owner if owner.is_a?(Result)
@@ -68,6 +70,7 @@ module Gori
 
       # remove_link — detach by the (owner, ref) pair, so a caller that knows what it linked
       # need not first look up the link row's own id.
+      @[Tool("remove_link", gated: true, agent_action: true)]
       private def remove_entity_link(h) : Result
         owner = link_owner(h)
         return owner if owner.is_a?(Result)

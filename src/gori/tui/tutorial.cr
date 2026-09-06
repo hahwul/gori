@@ -350,8 +350,7 @@ module Gori::Tui
       case @step
       when Step::Navigate
         ch = Tutorial.bare_char(ev)
-        if nav_switch_key?(ev) || key.down? || key.enter? || ch == 'j' ||
-           ch == '[' || ch == ']'
+        if nav_switch_key?(ev) || key.down? || key.enter? || ch == 'j'
           start_nav_live
           handle_live_shell_key(ev, practice: false)
           return
@@ -390,7 +389,7 @@ module Gori::Tui
     #
     # Body focus in the mock does NOT suppress them, though it used to "to prevent
     # accidental jumps". Nothing in the mock's body binds n or b — the shell reads arrows,
-    # hjkl, ⇥, ↵, i, space, ^P, digits and [ ] — so the suppression protected no gesture and
+    # hjkl, ⇥, ↵, i, space, ^P and digits — so the suppression protected no gesture and
     # only made two advertised keys dead: `footer_hint` goes on printing "n next · b back" in
     # exactly that state, and on a short terminal, where the mock does not draw at all, one ↓
     # left the user pressing them at a blank card with nothing to explain why. Free keys, and
@@ -450,24 +449,21 @@ module Gori::Tui
       @step.practice? || (@step.navigate? && @nav_live)
     end
 
-    # Shared shell keyboard model for Navigate (live) and Practice — closer to the
-    # real app: [ / ] switch tabs anywhere, esc back to tabs, ⇥ panes, ↑/↓ list,
-    # ↵ opens detail / INS on the request, ^P / space openers.
+    # Shared shell keyboard model for Navigate (live) and Practice — the real app's:
+    # ←/→ on the bar and 1-9 from anywhere switch tabs, esc back to tabs, ⇥ panes, ↑/↓
+    # list, ↵ opens detail / INS on the request, ^P / space openers.
+    #
+    # No [ / ] here: the mock used to cycle tabs on them, and the lesson advertised it as
+    # "[ / ] from anywhere" — a binding the real app does not have (there, [ / ] switch a
+    # tab's SUB-tabs, e.g. Rewriter's rules/extract/bindings). A move that works only in the
+    # tutorial is the one thing a tutorial must not teach.
     private def handle_live_shell_key(ev : Termisu::Event::Key, *, practice : Bool) : Nil
       key = ev.key
       # Bare, never the letter a chord happens to carry — ^L used to switch a tab and tick
       # Practice's "switch" goal. See Tutorial.bare_char.
       bare = Tutorial.bare_char(ev)
 
-      # Global tab cycle (real app: [ / ] from anywhere).
-      if bare == '['
-        switch_tab(-1)
-        return
-      end
-      if bare == ']'
-        switch_tab(1)
-        return
-      end
+      # Digit jump (real app: 1-9 from anywhere).
       if (ch = bare) && ch >= '1' && ch <= '9'
         idx = ch.ord - '1'.ord
         if idx < TABS.size
@@ -772,7 +768,7 @@ module Gori::Tui
       key = ev.key
       return true if key.left? || key.right?
       ch = Tutorial.bare_char(ev)
-      ch == 'h' || ch == 'l' || ch == '[' || ch == ']'
+      ch == 'h' || ch == 'l'
     end
 
     private def palette_open_key?(ev : Termisu::Event::Key) : Bool
@@ -1388,8 +1384,11 @@ module Gori::Tui
       ix = box.x + 2
       iw = {box.w - 4, 1}.max
       y = box.y + 2
+      # Every key named here is one the real app binds the same way (Help → TABS & FOCUS).
+      # The second line names the SUBTABS level some tabs (Repeater, Notes) put between the
+      # bar and the body: a user taught two levels stalls on the first tab that has three.
       detail = [
-        "←/→ on the bar · [ / ] from anywhere · 1-9 jump",
+        "←/→ on the bar · 1-9 jump · Repeater/Notes add a SUBTABS strip first",
         "↓ or ↵ into the body · ↑ back to tabs · ↓ list · esc · ⇥ panes",
       ]
       keep, sy = Tutorial.lesson_split(box, fixed: 2, detail: detail.size)
@@ -1481,7 +1480,9 @@ module Gori::Tui
       screen.text(ix, y, "Editors open in READ — navigate, select, copy, open the menu.", Theme.text_bright, Theme.panel, width: iw)
       y += 1
       if keep > 0
-        screen.text(ix, y, "press i or ↵ to enter INS and type · esc returns to READ (safe by default)",
+        # ≤ 74 columns: the 80-column card's interior. The longer form of this line lost its
+        # closing "(safe by default)" to the ellipsis at exactly the size most users run.
+        screen.text(ix, y, "i or ↵ → INS and type · esc → READ (safe by default)",
           Theme.muted, Theme.panel, width: iw)
         y += 1
       end
@@ -1577,12 +1578,15 @@ module Gori::Tui
       ix = box.x + 2
       iw = {box.w - 4, 1}.max
       y = box.y + 2
+      # Step 2 names the HTTPS hurdle: a proxy that cannot read TLS is where a first session
+      # actually stalls, and neither the wizard nor this tour said so. `Open browser` is the
+      # path that needs nothing else; any other client has to trust the CA (`gori ca`).
       steps = [
         {"1.", "run  gori  — start the TUI (proxy on your bind address)"},
-        {"2.", "browse via Project, or point a client at the proxy"},
+        {"2.", "Project → Open browser (CA trusted for you) · other clients: gori ca"},
         {"3.", "History — pick a captured flow"},
         {"4.", "^R — send it to Repeater · edit (i) · send again"},
-        {"5.", "Help tab — full cheat-sheet anytime"},
+        {"5.", Hotkeys.retag("Help tab — full cheat-sheet · re-open this tour: ^P → Guided tour")},
       ]
       gaps = Tutorial.prose_gaps(box, steps.size + 3, 2)
       screen.text(ix, y, "That's the tour — here's a first real session:", Theme.text_bright, Theme.panel, width: iw)
@@ -1744,7 +1748,10 @@ module Gori::Tui
       mw = 16
       mh = SPACE_ROWS.size + 2
       mx = shell.right - mw - 1
-      my = {shell.bottom - mh, shell.y}.max
+      # One row up from the shell's floor: the panes' bottom border sits on `shell.bottom - 1`,
+      # and a menu whose own border landed on that row drew `╰────╰────╯╯` — two frames
+      # fused where a popup should float clear of the pane it is over.
+      my = {shell.bottom - mh - 1, shell.y}.max
       return unless mx > shell.x
       rect = Rect.new(mx, my, mw, mh)
       @space_rect = rect if live

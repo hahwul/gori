@@ -161,8 +161,7 @@ module Gori
         http2 : Bool,
         rewrote_request_line : Bool = false,
         ws_messages : Array(Store::WsOutMessage)? = nil,
-        notice_rows_dropped : Int32 = 0,
-        ws_h2_frames_unseeded : Int32 = 0
+        notice_rows_dropped : Int32 = 0
 
       # Seed through `FlowRequest.build`, exactly as `gori run repeater create --flow` and
       # `send_request{flow_id}` do. Hand-assembling head+body here skipped all three things
@@ -195,13 +194,13 @@ module Gori
         target = built.target
         request = String.new(built.bytes)
 
-        # The gate is `WsEngine.upgrade_request?` and not `row.status == 101` (#742). A seed
-        # has to produce a session `send_websocket` can actually run, and `WsEngine` opens a
-        # socket exactly one way: an HTTP/1.1 `Upgrade:` handshake answered 101. The status
-        # was that handshake's, standing in for the handshake itself — so a WebSocket
-        # captured over RFC 8441 extended CONNECT (#733: `CONNECT`, answered `200`) took the
-        # ordinary-HTTP path and its frames went nowhere, unmentioned.
-        if Proxy::WS.upgrade_request?(String.new(flow.request_head)) && seed_ws_messages
+        # The gate is `WsEngine.replayable?` and not `row.status == 101` (#742). A seed has to
+        # produce a session `send_websocket` can actually run, and `WsEngine` re-opens a socket
+        # from either handshake: an HTTP/1.1 `Upgrade:` head, or an RFC 8441 extended CONNECT
+        # over h2 (#733: `CONNECT`, answered `200`). The status was the h1 handshake's,
+        # standing in for the handshake itself — so the h2 shape took the ordinary-HTTP path
+        # and its frames went nowhere, unmentioned.
+        if Repeater::WsEngine.replayable?(String.new(flow.request_head)) && seed_ws_messages
           # Opcode and raw bytes, both kept. The `&& m.text?` filter dropped every captured
           # BINARY out-frame with no warning at all (the CLI at least printed one), and the
           # `.scrub` rewrote an invalid-UTF-8 TEXT payload to U+FFFD before it was stored —
@@ -214,25 +213,12 @@ module Gori
           msgs = rows.map { |m| Store::WsOutMessage.new(m.opcode, m.payload, CLI::Run.seed_shape(m.shape)) }
           return FlowSeed.new(target, request, built.http2, built.rewrote_request_line,
             ws_messages: msgs, notice_rows_dropped: dropped)
-        elsif flow.websocket? && seed_ws_messages
-          # A WebSocket gori captured over HTTP/2 (RFC 8441 extended CONNECT). The session
-          # is still created — the CONNECT request is a real h2 request and `send_request`
-          # will send it — but the frames are NOT seeded, because there is no h2 WebSocket
-          # send path to replay them over: `WsEngine` writes an h1 upgrade, and the
-          # `ws_http_only` seam moves a session between the WS engine and a plain send of
-          # the same handshake bytes, never onto a different WebSocket transport.
-          #
-          # Fabricating an h1 handshake to make the seed dial would put a request the client
-          # never sent into the operator's session under the flow's provenance. So the agent
-          # is TOLD, in the reply that would otherwise have looked like an ordinary success.
-          # `get_flow` returns the transcript, which is where it is readable.
-          return FlowSeed.new(target, request, built.http2, built.rewrote_request_line,
-            ws_h2_frames_unseeded: store.count_ws_messages(flow_id))
         end
 
         FlowSeed.new(target, request, built.http2, built.rewrote_request_line)
       end
 
+      @[Tool("create_repeater", gated: true, agent_action: true)]
       private def create_repeater(h) : Result
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
@@ -269,7 +255,6 @@ module Gori
         ws_messages_override = nil.as(Array(Store::WsOutMessage)?)
         rewrote_request_line = false
         notice_rows_dropped = 0
-        ws_h2_frames_unseeded = 0
 
         if flow_id
           flow = store.get_flow(flow_id)
@@ -287,7 +272,6 @@ module Gori
           http2 = seed.http2 if http2_val.nil?
           ws_messages_override = seed.ws_messages
           notice_rows_dropped = seed.notice_rows_dropped
-          ws_h2_frames_unseeded = seed.ws_h2_frames_unseeded
         end
         return Result.new("missing required 'target'", is_error: true) if target.nil? || target.empty?
         return Result.new("missing required 'request'", is_error: true) if request.nil? || request.empty?
@@ -317,8 +301,9 @@ module Gori
         # spelling to hand every row it seeds.
         tags = present?(h, "tags") ? repeater_tags_arg(h) : nil
 
-        # WebSocket mode check — on the bytes that will be STORED and sent, not a projection.
-        is_ws = Repeater::WsEngine.upgrade_request?(request)
+        # WebSocket mode check — on the bytes that will be STORED and sent, not a projection,
+        # and over both handshakes (`replayable?`).
+        is_ws = Repeater::WsEngine.replayable?(request)
 
         # Read and REFUSED before the insert, like the frames below: an unknown preset name
         # applies nothing, so a session stored with one would dial with gori's bare hello on
@@ -418,17 +403,6 @@ module Gori
             if notice_rows_dropped > 0
               j.field "ws_notice_rows_dropped", notice_rows_dropped
               j.field "note", CLI::Run.ws_notice_dropped_note(notice_rows_dropped)
-            end
-            # A socket captured over HTTP/2. The session was created from a real request, so
-            # this is not an error — but it holds none of the frames, and an agent that asked
-            # for a repeater from a WebSocket flow would otherwise have to infer that from a
-            # missing `ws_out_message_count`.
-            if ws_h2_frames_unseeded > 0
-              j.field "ws_frames_not_seeded", ws_h2_frames_unseeded
-              j.field "note", "flow #{flow_id} is a WebSocket over HTTP/2 (RFC 8441 extended CONNECT): " \
-                              "its #{ws_h2_frames_unseeded} captured frame#{ws_h2_frames_unseeded == 1 ? " was" : "s were"} NOT seeded. " \
-                              "gori re-establishes a socket only from an HTTP/1.1 Upgrade handshake, and this capture " \
-                              "has none, so send_websocket cannot replay it. The transcript is readable with get_flow."
             end
           end
         })
@@ -586,6 +560,7 @@ module Gori
         Settings.tls_preset_normalize(raw)
       end
 
+      @[Tool("update_repeater", gated: true, agent_action: true)]
       private def update_repeater(h) : Result
         id = int(h, "id")
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
@@ -708,6 +683,7 @@ module Gori
         Result.new(ex.message || "invalid repeater arguments", is_error: true)
       end
 
+      @[Tool("delete_repeater", gated: true, agent_action: true)]
       private def delete_repeater(h) : Result
         id = int(h, "id")
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
@@ -830,6 +806,7 @@ module Gori
       # narrow: it is a DESTINATION, not a selector. A stale `to_index` puts the tab somewhere
       # else; a stale index in `id`'s place would act on a different session entirely, which is
       # why `id` stays a database id everywhere (see `repeater_tui_index`).
+      @[Tool("move_repeater", gated: true, agent_action: true)]
       private def move_repeater(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -912,6 +889,7 @@ module Gori
       # Every flow is checked to EXIST before the first insert (`flow_row`, the row-only probe
       # — `get_flow` materialises both BLOBs and is read one flow at a time inside the loop, so
       # a long list never holds every response in memory at once).
+      @[Tool("create_repeaters", gated: true, agent_action: true)]
       private def create_repeaters(h) : Result
         flow_ids = id_list_arg(h, "flow_ids")
         if flow_ids.empty?
@@ -936,7 +914,7 @@ module Gori
         name_prefix = str(h, "name_prefix").try { |v| Env.mask_secrets(v) }
         tags = present?(h, "tags") ? repeater_tags_arg(h) : nil
 
-        created = [] of {Int64, Int64, String?, Bool, Int32, Int32}
+        created = [] of {Int64, Int64, String?, Bool, Int32}
         failed = [] of {Int64, String}
         pos = store.next_repeater_position
 
@@ -956,7 +934,11 @@ module Gori
             position: pos
           )
           next failed << {fid, "store busy or unwritable"} if id == 0
-          pos += 1
+          # Saturating, for the same reason `next_repeater_position` saturates: a base already
+          # at `Int32::MAX` (a poisoned `create_repeater{position}`) would otherwise overflow
+          # this `Int32` on the second insert of the batch and abort mid-loop, leaving the
+          # rows already committed unreported.
+          pos = pos < Int32::MAX ? pos + 1 : Int32::MAX
 
           # Named off the bytes just stored, not off a re-read of the row: the round trip
           # would answer the same thing and cost a query, and it would have to assert the row
@@ -968,7 +950,7 @@ module Gori
             store.update_repeater_ws_messages(id, msgs)
           end
           created << {fid, id, name, seed.rewrote_request_line,
-                      seed.notice_rows_dropped, seed.ws_h2_frames_unseeded}
+                      seed.notice_rows_dropped}
         end
 
         rows = store.repeaters_mcp
@@ -977,7 +959,7 @@ module Gori
             j.field "created_count", created.size
             j.field("created") do
               j.array do
-                created.each do |(fid, id, name, rewrote, dropped, unseeded)|
+                created.each do |(fid, id, name, rewrote, dropped)|
                   j.object do
                     j.field "flow_id", fid
                     j.field "id", id
@@ -985,7 +967,6 @@ module Gori
                     repeater_tui_index(id, rows).try { |n| j.field "tui_index", n }
                     j.field "request_line_rewritten", true if rewrote
                     j.field "ws_notice_rows_dropped", dropped if dropped > 0
-                    j.field "ws_frames_not_seeded", unseeded if unseeded > 0
                   end
                 end
               end
@@ -1013,6 +994,7 @@ module Gori
       # the workbench holds now, and a session created since the listing would be deleted
       # without ever having been read. Narrow the listing (`get_repeater_context{filter}`),
       # then pass the ids it returned.
+      @[Tool("delete_repeaters", gated: true, agent_action: true)]
       private def delete_repeaters(h) : Result
         sel = repeater_bulk_selection(h, "ids")
         return sel if sel.is_a?(Result)
@@ -1079,6 +1061,7 @@ module Gori
       # transport flags and WebSocket frames — a bulk tool that could reach those would let one
       # call change what many sessions PUT ON THE WIRE, and no per-id report makes that
       # reviewable. Everything this writes is a caption the strip paints.
+      @[Tool("update_repeaters", gated: true, agent_action: true)]
       private def update_repeaters(h) : Result
         sel = repeater_bulk_selection(h, "ids")
         return sel if sel.is_a?(Result)

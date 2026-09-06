@@ -17,19 +17,6 @@ require "./support/memory_backend"
 
 private alias HeadCodec = Gori::Proxy::H2::HeadCodec
 
-private def with_store(&)
-  path = File.tempname("gori-wsh2", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A WebSocket captured over HTTP/2, projected the way `H2::Assembler#emit_request` /
 # `#emit_response` do it: `:method CONNECT`, the `:protocol` pseudo-header re-added by
 # `HeadCodec` as its `X-Gori-Protocol` marker line, and the origin's `200`. The head comes out
@@ -139,19 +126,23 @@ describe "Store::FlowDetail#websocket? — one predicate, both transports" do
     end
   end
 
-  # `WsEngine.upgrade_request?` is the NARROWER question the repeater seeds ask: not "is this
-  # a WebSocket" but "is this one gori can re-open". The engine dials an h1 `Upgrade:`
-  # handshake and accepts nothing but a 101 back, so an h2 socket is a WebSocket it cannot
-  # open — and a seed that answered otherwise would hand over a `^R` that cannot connect.
-  it "is NOT the same question the repeater seeds ask" do
+  # `WsEngine.replayable?` is the question the repeater seeds ask: not "is this a WebSocket"
+  # but "is this one gori can re-open". Since #733 both handshakes answer yes, and each is
+  # recognised by its OWN half — the h1 predicate must not start matching an extended CONNECT,
+  # because it is also what picks the h1 transport.
+  it "is the same question the repeater seeds ask, over both transports" do
     with_store do |store|
       h2 = h2_ws_flow(store, [{"out", 1, "hi".to_slice}])
       h2.websocket?.should be_true
+      Gori::Repeater::WsEngine.replayable?(String.new(h2.request_head)).should be_true
       Gori::Repeater::WsEngine.upgrade_request?(String.new(h2.request_head)).should be_false
+      Gori::Repeater::WsEngine.extended_connect_request?(String.new(h2.request_head)).should be_true
 
       h1 = h1_ws_flow(store, [{"out", 1, "hi".to_slice}])
       h1.websocket?.should be_true
+      Gori::Repeater::WsEngine.replayable?(String.new(h1.request_head)).should be_true
       Gori::Repeater::WsEngine.upgrade_request?(String.new(h1.request_head)).should be_true
+      Gori::Repeater::WsEngine.extended_connect_request?(String.new(h1.request_head)).should be_false
     end
   end
 end
@@ -347,29 +338,25 @@ describe "HAR export of a WebSocket captured over HTTP/2" do
 end
 
 describe "MCP create_repeater seeded from a socket" do
-  # The seed is refused, and NAMED. `WsEngine` opens a socket with an h1 `Upgrade:` handshake
-  # and this capture has none; making it dial would mean gori inventing a `GET … Upgrade:
-  # websocket` request with a `Sec-WebSocket-Key` the client never sent, and storing it under
-  # this flow's provenance. The `ws_http_only` seam does not help — it moves a session between
-  # the WS engine and a plain send of the SAME bytes, not onto a second WebSocket transport.
-  it "does not seed frames from an h2 socket, and says so" do
+  # The frames ARE seeded now (#733): `WsEngine` re-opens an RFC 8441 extended CONNECT, so a
+  # session created from one can replay the exchange. This used to be a refusal with a
+  # `ws_frames_not_seeded` count and a note explaining that there was no h2 send path.
+  it "seeds frames from an h2 socket" do
     with_store do |store|
       detail = h2_ws_flow(store, [{"out", 1, "a".to_slice}, {"out", 1, "b".to_slice}])
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("create_repeater", JSON.parse(%({"flow_id": #{detail.row.id}})))
       r.is_error.should be_false
       j = JSON.parse(r.text)
-      j["ws_frames_not_seeded"].as_i.should eq(2)
-      j["note"].as_s.should contain("HTTP/2")
-      j["note"].as_s.should contain("get_flow")
-      j.as_h.has_key?("ws_out_message_count").should be_false
+      j["ws_out_message_count"].as_i.should eq(2)
+      j.as_h.has_key?("ws_frames_not_seeded").should be_false
     end
   end
 
   it "still seeds frames from an h1 socket" do
     with_store do |store|
       detail = h1_ws_flow(store, [{"out", 1, "a".to_slice}, {"out", 1, "b".to_slice}])
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       r = tools.call("create_repeater", JSON.parse(%({"flow_id": #{detail.row.id}})))
       r.is_error.should be_false
       j = JSON.parse(r.text)

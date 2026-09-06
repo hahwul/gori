@@ -8,19 +8,6 @@ private alias Q = Gori::Sequencer
 # HERE is the mapping — the TUI arm of #367 was exactly a surface that assembled a correct
 # plan out of incomplete options, and a builder-level spec cannot see that.
 
-private def with_store(&)
-  path = File.tempname("gori-seqview", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # One-shot loopback HTTP responder; returns {server, port}. The caller closes the server.
 private def loopback_responder(reply : String) : {TCPServer, Int32}
   server = TCPServer.new("127.0.0.1", 0)

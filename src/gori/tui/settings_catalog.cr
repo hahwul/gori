@@ -65,7 +65,7 @@ module Gori::Tui
       Section.new(:display, "settings.display", "Display",
         "Message-body rendering: default detail pane, list time format, line numbers, preview size", :appearance, :form),
       Section.new(:layout, "settings.layout", "Layout",
-        "History list Req/Res preview and Sitemap default expand depth", :appearance, :form),
+        "History list Req/Res preview, Sitemap default expand depth, tab-bar numbers", :appearance, :form),
       Section.new(:companion, "settings.companion", "Companion",
         "Miss Ring — the mascot in the body's bottom-right corner, her motion, and her notices", :appearance, :form),
       # Editor & Keys
@@ -77,6 +77,11 @@ module Gori::Tui
       # text-editing prefs.
       Section.new(:keys, "settings.keys", "Keys",
         "Pick the modifier for gori's built-in shortcuts (^P ^N ^W ^1-9)", :editor, :form),
+      # Mouse sits beside Keys, not in Editor: both configure INPUT, and the Mouse toggle spent
+      # its life as a lone row under "Editor" — the one heading an operator looking for pointer
+      # behaviour would not open. It brings the drag-release mode with it.
+      Section.new(:mouse, "settings.mouse", "Mouse",
+        "Click/scroll navigation, and whether releasing a drag also copies the selection", :editor, :form),
       Section.new(:env, "settings.env", "Env",
         "Global environment variables for $KEY substitution in requests", :editor, :opener, resettable: false),
       Section.new(:hotkeys, "settings.hotkeys", "Hotkeys",

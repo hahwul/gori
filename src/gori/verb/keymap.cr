@@ -25,12 +25,53 @@ module Gori
         new(by_scope)
       end
 
-      # The chords that actually bind `verb` under `os` + `overrides` (user > OS > base).
+      # The chords that actually bind `verb` under `os` + `overrides` (user > OS > base),
+      # with the verb's PINNED chords (see `pinned_chords`) always kept.
       def self.effective_chords(verb : Definition,
                                 os : OsProfile::Os = OsProfile.active,
                                 overrides : Hash(String, Array(Chord)) = NO_OVERRIDES) : Array(Chord)
-        return overrides[verb.id] if overrides.has_key?(verb.id)
+        if overrides.has_key?(verb.id)
+          # The override replaces the REBINDABLE half only. Order matters: the user's chord
+          # stays first, because `binding_for` advertises `.first?` — the row, the palette
+          # column and every hint strip must show what the operator just bound, not the pin.
+          return (overrides[verb.id] + pinned_chords(verb)).uniq
+        end
         OsProfile.overrides_for(os)[verb.id]? || verb.chords
+      end
+
+      # The declared chords a user rebind may NOT move, because they mean something the
+      # bare key cannot.
+      #
+      # Exactly one shape qualifies: a verb declaring one PLAIN key plus that same key with
+      # Ctrl — the `y` + `^Y` Copy pairs. The two are not aliases for convenience. Bare `y`
+      # is READ mode's copy; `^Y` is the copy key in INS, where `y` is a literal character
+      # that would REPLACE the selection being copied, and it is deliberately the same chord
+      # on every tab that has a text editor. Letting a rebind of `y` carry `^Y` off with it
+      # would leave those panes with no way at all to copy an INS selection — which is why
+      # `Hotkeys.rebindable?` used to refuse the whole pair rather than risk it, hiding eight
+      # Copy verbs from the editor with no row and no reason. Pinning the Ctrl half is what
+      # lets the bare half be offered.
+      #
+      # Kept even for an explicit UNBIND (`[]`): "y should do nothing here" is a statement
+      # about READ mode, and it must not silently disarm INS copy as well.
+      def self.pinned_chords(verb : Definition) : Array(Chord)
+        cs = verb.chords
+        return NO_PINS unless cs.size == 2
+        a, b = cs[0], cs[1]
+        return NO_PINS unless a.key == b.key
+        plain, ctrl = a.ctrl ? {b, a} : {a, b}
+        return NO_PINS unless plain_chord?(plain) && ctrl_only?(ctrl)
+        [ctrl]
+      end
+
+      NO_PINS = [] of Chord
+
+      private def self.plain_chord?(c : Chord) : Bool
+        !c.ctrl && !c.alt && !c.shift
+      end
+
+      private def self.ctrl_only?(c : Chord) : Bool
+        c.ctrl && !c.alt && !c.shift
       end
 
       # Turn Settings' string overrides into Chord overrides (one place; unparseable

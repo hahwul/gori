@@ -2,19 +2,6 @@ require "../../spec_helper"
 
 # --- file-local harness (mirrors spec/probe_spec.cr's private with_store/capture_flow) ---
 
-private def with_store(&)
-  path = File.tempname("gori-cleartext", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture_flow(store, *, scheme = "http", host = "shop.acme.test",
                          method = "POST", target = "/login",
                          req_content_type : String? = "application/x-www-form-urlencoded",
@@ -67,7 +54,21 @@ describe Gori::Probe::Passive::CleartextCredentials do
     with_store do |store|
       found = dets(store, req_content_type: "application/json",
         req_body: %({"email":"a@b.test","password":"hunter2"}))
-      found.select { |d| d.code == "cleartext_credentials" }.size.should eq(1)
+      found.count { |d| d.code == "cleartext_credentials" }.should eq(1)
+    end
+  end
+
+  it "continues past JSON UI state and covers exact client-secret names" do
+    with_store do |store|
+      dets(store, req_content_type: "application/json",
+        req_body: %({"showPassword":"false","password":"hunter2"}))
+        .count(&.code.== "cleartext_credentials").should eq(1)
+      dets(store, req_content_type: "application/json",
+        req_body: %({"client_secret":"s3cr3t"}))
+        .count(&.code.== "cleartext_credentials").should eq(1)
+      dets(store, req_content_type: "application/json",
+        req_body: %({"apiKey":"s3cr3t"}))
+        .count(&.code.== "cleartext_credentials").should eq(1)
     end
   end
 

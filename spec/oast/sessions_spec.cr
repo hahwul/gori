@@ -6,19 +6,6 @@ private alias O = Gori::Oast
 # only implementation of it, so `gori run oast` and the MCP oast_* tools could register and
 # die but never come back to a session whose payloads are still planted. These cases pin the
 # behaviour all three surfaces now share.
-private def with_store(&)
-  path = File.tempname("gori-oast-sessions", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # An Http seam that records what it was asked for and answers a canned body — enough to prove
 # release/resume dial (or, for the raising one, that a failure is handled the documented way).
 private class RecordingHttp < O::Http

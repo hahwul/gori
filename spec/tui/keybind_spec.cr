@@ -38,6 +38,15 @@ describe Gori::Tui::Keybind do
       chord(Key::Enter).should eq(Chord.new("enter"))
     end
 
+    # The Runner's unbound-key hint and its page routing both lean on this: PgUp/PgDn/Home/End
+    # never become a chord, so they reach `body_scroll` and never the "nothing bound" line.
+    it "yields no chord for the page and edge keys" do
+      chord(Key::PageUp).should be_nil
+      chord(Key::PageDown).should be_nil
+      chord(Key::Home).should be_nil
+      chord(Key::End).should be_nil
+    end
+
     it "maps Escape to \"escape\"" do
       chord(Key::Escape).should eq(Chord.new("escape"))
     end

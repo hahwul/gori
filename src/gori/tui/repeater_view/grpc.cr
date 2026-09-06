@@ -245,10 +245,8 @@ class Gori::Tui::RepeaterView
           rows << {"← trailer  #{m.data.size}b", Theme.green}
           Proxy::H2::Grpc.trailer_headers(m.data).each do |k, v|
             if k == "grpc-status"
-              n = v.to_i?
-              ok = n == 0
-              name = n ? Proxy::H2::Grpc.status_name(n) : v
-              rows << {"    #{k}: #{v} #{name}", ok ? Theme.green : Theme.red}
+              ok = v.strip.to_i? == 0
+              rows << {"    #{k}: #{Proxy::H2::Grpc.status_label(v)}", ok ? Theme.green : Theme.red}
             else
               rows << {"    #{k}: #{v}", Theme.muted}
             end
@@ -265,15 +263,30 @@ class Gori::Tui::RepeaterView
 
   # grpc-status/grpc-message arrive as response trailers (absorbed into the synth
   # head by H2Engine), so they're plain response headers here.
+  #
+  # …for NATIVE gRPC. grpc-web has no HTTP trailers to absorb: it carries the same two keys
+  # as a TRAILER frame inside the body, which `grpc_response_rows` has already drawn one row
+  # up. Reading only the head therefore printed `⚠ no grpc-status trailer` directly beneath
+  # the trailer it was looking for — the transcript contradicting itself about the one fact a
+  # gRPC operator is reading it for, since the HTTP status is 200 for a denial as much as for
+  # a grant. `Grpc.trailer_status` is the same reader the Fuzzer/Miner/Sequencer verdict uses.
   private def grpc_status_row(result : Repeater::Result) : {String, Color}
     resp = result.response
-    code = resp.try(&.headers.get?("grpc-status"))
-    return {"⚠ no grpc-status trailer", Theme.yellow} unless code
-    n = code.to_i?
-    ok = n == 0
-    name = n ? Proxy::H2::Grpc.status_name(n) : code
-    msg = resp.try(&.headers.get?("grpc-message"))
-    {"#{ok ? "✓" : "✗"} grpc-status: #{code} #{name}#{msg ? " · #{msg}" : ""}", ok ? Theme.green : Theme.red}
+    if code = resp.try(&.headers.get?("grpc-status"))
+      return grpc_status_line(code, resp.try(&.headers.get?("grpc-message")))
+    end
+    n, msg = Proxy::H2::Grpc.trailer_status(Gori::MediaType.of(result.head), result.body)
+    return {"⚠ no grpc-status trailer", Theme.yellow} unless n
+    grpc_status_line(n.to_s, msg)
+  end
+
+  # One status row, however the code was found. `shown` is the value as the wire spelled it,
+  # and `status_label` names it — a non-numeric `grpc-status` is an origin's own answer, so it
+  # is printed as itself rather than repeated as its own "name".
+  private def grpc_status_line(shown : String, msg : String?) : {String, Color}
+    ok = shown.strip.to_i? == 0
+    {"#{ok ? "✓" : "✗"} grpc-status: #{Proxy::H2::Grpc.status_label(shown)}#{msg ? " · #{msg}" : ""}",
+     ok ? Theme.green : Theme.red}
   end
 
   # One response message's payload, under its `← message #N` header. PRETTY (`p`, the same

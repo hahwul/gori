@@ -3,19 +3,6 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
-private def tmp_store(&)
-  path = File.tempname("gori-hv-cm", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def add_flow(store, method = "GET", target = "/search", status : Int32? = 200,
                      content_type : String? = "application/json", host = "h.test")
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -53,7 +40,7 @@ describe "History — Colormarker row marks" do
   # without an engine — which is every construction site outside HistoryController, and every
   # existing History spec — must render exactly as it did before this feature existed.
   it "reserves no column and paints nothing when there is no engine" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store)
       view = HistoryView.new
       view.reload(store)
@@ -66,7 +53,7 @@ describe "History — Colormarker row marks" do
 
   it "reserves no column when the only enabled rule is a full-row one" do
     with_globals do
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store)
         cm = Gori::Colormarker.load(store)
         cm.add("host:h.test", RED, FULL)
@@ -82,7 +69,7 @@ describe "History — Colormarker row marks" do
 
   it "shifts the fixed left block by two and paints a swatch for a strip rule" do
     with_globals do
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store)
         cm = Gori::Colormarker.load(store)
         cm.add("host:h.test", RED, STRIP)
@@ -108,7 +95,7 @@ describe "History — Colormarker row marks" do
     with_globals do
       begin
         Theme.set_custom_marks({"coral" => "#ff6b6b"})
-        tmp_store do |store|
+        with_store do |store|
           add_flow(store)
           cm = Gori::Colormarker.load(store)
           cm.add("host:h.test", "coral", STRIP) # a custom name, not a built-in word
@@ -133,7 +120,7 @@ describe "History — Colormarker row marks" do
   # easiest bug in the feature to ship.
   it "fills the whole row for a full-row rule, gaps included" do
     with_globals do
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store)
         add_flow(store) # row 0 is always the cursor row; assert on the one below it
         cm = Gori::Colormarker.load(store)
@@ -160,7 +147,7 @@ describe "History — Colormarker row marks" do
   # so a selected coloured row reads as both rather than as one or the other.
   it "mixes the hue into the selection band rather than replacing it" do
     with_globals do
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store)
         cm = Gori::Colormarker.load(store)
         cm.add("host:h.test", RED, FULL)
@@ -182,7 +169,7 @@ describe "History — Colormarker row marks" do
 
   it "keeps the mark bar on a marked coloured row" do
     with_globals do
-      tmp_store do |store|
+      with_store do |store|
         id = add_flow(store)
         cm = Gori::Colormarker.load(store)
         cm.add("host:h.test", RED, FULL)
@@ -206,7 +193,7 @@ describe "History — Colormarker row marks" do
   # row would keep its pending colour for the rest of the session.
   it "re-asks a row's colour when its response lands" do
     with_globals do
-      tmp_store do |store|
+      with_store do |store|
         id = add_flow(store, status: nil)
         add_flow(store) # newer, so it takes the cursor row and leaves the pending one plain
         cm = Gori::Colormarker.load(store)
@@ -235,7 +222,7 @@ describe "History — Colormarker row marks" do
   # revision counter IS the notification.
   it "repaints from a rule change with no explicit invalidation" do
     with_globals do
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store)
         add_flow(store)
         cm = Gori::Colormarker.load(store)
@@ -260,7 +247,7 @@ describe "History — Colormarker row marks" do
   # existing spec pins has to survive it being armed.
   it "keeps PATH legible at 65 columns with the swatch column armed" do
     with_globals do
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store)
         cm = Gori::Colormarker.load(store)
         cm.add("host:h.test", RED, STRIP)

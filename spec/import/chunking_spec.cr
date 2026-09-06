@@ -67,3 +67,33 @@ describe "Import::Result shortfall" do
     Gori::Import::Result.new(count: 4).short?.should be_false
   end
 end
+
+# The TUI runs an import as a background job (`Runner#apply_import`): between chunks the
+# worker polls `cancelled` and reports `progress`, so a palette cancel stops after the chunk
+# being written and the activity chip can show a count. Neither changes the numbers that
+# come back — a cancelled import is a short one, and the caller says so.
+describe "Import.insert_all cancel + progress" do
+  it "reports the running count after every chunk" do
+    chunk_store do |store|
+      n = Gori::Import::IMPORT_CHUNK + 3
+      seen = [] of {Int32, Int32?}
+      Gori::Import.insert_all(store, (0...n).map { |i| pair(i) },
+        progress: ->(done : Int32, total : Int32?) { seen << {done, total} })
+      seen.should eq([{Gori::Import::IMPORT_CHUNK, n}, {n, n}])
+    end
+  end
+
+  it "stops after the chunk in flight once cancelled, keeping what was written" do
+    chunk_store do |store|
+      n = Gori::Import::IMPORT_CHUNK * 3
+      chunks = 0
+      cancelled = false
+      committed, attempted = Gori::Import.insert_all(store, (0...n).map { |i| pair(i) },
+        cancelled: -> { cancelled },
+        progress: ->(_done : Int32, _total : Int32?) { chunks += 1; cancelled = chunks >= 1 })
+      committed.should eq(Gori::Import::IMPORT_CHUNK) # one chunk landed, the flag stopped the second
+      attempted.should eq(n)
+      store.count.should eq(Gori::Import::IMPORT_CHUNK.to_i64)
+    end
+  end
+end

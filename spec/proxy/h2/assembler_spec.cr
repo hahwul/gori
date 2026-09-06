@@ -165,6 +165,64 @@ describe Gori::Proxy::H2::Assembler do
     String.new(resp.head).should contain("grpc-status")      # the trailer is still recorded
   end
 
+  # …and it SAYS so. Keeping the head's own status was only half the answer: nothing on disk
+  # showed that the origin had restated it. The field never reaches the stored head
+  # (`synth_response` emits the status line and the regular fields, never a pseudo-header),
+  # and listing `:status` in `X-Gori-Trailers` pointed a reader at a name no surface can show.
+  # A trailing `:status` is what an h2 response-splitting probe produces, so it is a finding,
+  # and `advisory` is where a finding gori has about a flow lives.
+  it "reports a pseudo-header in a trailer section, and keeps it out of the trailer marker" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    head = Gori::Proxy::H2::HPACK::Encoder.new.encode([
+      {":status", "200"}, {"content-type", "application/grpc"},
+    ])
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, head))
+    trailer = Gori::Proxy::H2::HPACK::Encoder.new.encode([
+      {":status", "500"}, {"grpc-status", "13"},
+    ])
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, trailer))
+
+    resp = sink.responses.first
+    advisory = resp.advisory.to_s
+    advisory.should contain("RFC 9113 §8.1")
+    advisory.should contain(":status")
+    advisory.should contain("response")
+    # The marker names only what a reader can actually find in the head above it.
+    String.new(resp.head).should contain("#{Gori::Proxy::H2::HeadCodec::TRAILER_MARKER}: grpc-status")
+    String.new(resp.head).should_not contain("#{Gori::Proxy::H2::HeadCodec::TRAILER_MARKER}: :status")
+  end
+
+  # An INTERIM status in that trailing block is the same §8.1 violation with a name of its own,
+  # and it is the one an h2 response-splitting probe actually produces. `Repeater::H2Engine`
+  # has reported it as an RFC 9110 §15.2 clause since the interim-handover fix; the capture
+  # path said nothing, so the two surfaces described one wire two ways. It keeps the block's
+  # regular fields where the repeater discards them — on a proxy those fields ARE the finding.
+  it "names a late interim block the way the repeater does, and keeps its fields" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    head = Gori::Proxy::H2::HPACK::Encoder.new.encode([
+      {":status", "200"}, {"content-type", "text/plain"},
+    ])
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, head))
+    assembler.feed("in", data_frame(1_u32, 0_u8, "final-body"))
+    late = Gori::Proxy::H2::HPACK::Encoder.new.encode([{":status", "103"}, {"link", "</a>"}])
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, late))
+
+    resp = sink.responses.first
+    resp.status.should eq(200)
+    advisory = resp.advisory.to_s
+    advisory.should contain("interim 103")
+    advisory.should contain("RFC 9110 §15.2")
+    # The injected field stays visible, marked as what it was.
+    String.new(resp.head).should contain("link: </a>")
+    String.new(resp.head).should contain("#{Gori::Proxy::H2::HeadCodec::TRAILER_MARKER}: link")
+  end
+
   it "carries a request body across DATA frames" do
     sink = RecSink.new
     assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)

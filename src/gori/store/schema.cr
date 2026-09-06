@@ -840,7 +840,8 @@ module Gori
       # `repeaters.ws_http_only` is the operator's override of gori's WebSocket AUTO-DETECTION.
       #
       # Whether a Repeater tab is a WebSocket tab has never been stored: it is re-derived from
-      # the request bytes on every load (`WsEngine.upgrade_request?` — an `Upgrade:` header),
+      # the request bytes on every load (`WsEngine.replayable?` — an `Upgrade:` header, or the
+      # `CONNECT` + `X-Gori-Protocol: websocket` pair of an RFC 8441 handshake),
       # and that verdict decides the engine `^R` dials, the split request pane, the transcript
       # response, and — the part that is easy to miss — whether diff, pretty-print, hex edit,
       # minimize, group send, Match&Replace and the h1/h2 toggle are available at all. They are

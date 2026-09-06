@@ -1,5 +1,6 @@
 require "json"
 require "../../store"
+require "../../rules"
 
 module Gori
   module MCP
@@ -7,6 +8,7 @@ module Gori
       # Every rule that applies to this project, in apply order: the GLOBAL library first, then
       # the project's own rows. `id` is unique only WITHIN a scope, so every row carries its
       # `scope` and the mutation tools take one alongside the id.
+      @[Tool("list_rules")]
       private def list_rules(h) : Result
         want = nil.as(Store::RuleScope?)
         if present?(h, "scope")
@@ -92,6 +94,7 @@ module Gori
             "'200 OK', then headers, then a blank line and the body)", "INVALID_ARGUMENT", field: "replacement")
       end
 
+      @[Tool("create_rule", gated: true, agent_action: true)]
       private def create_rule(h) : Result
         pattern = str(h, "pattern")
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
@@ -125,13 +128,17 @@ module Gori
         # Atomic disabled creation: insert already-disabled so there is no window
         # where a just-created rule is live before a follow-up disable call.
         enabled = bool_arg(h, "enabled", true)
-        id =
-          if scope.global?
-            Settings.add_rewriter_rule(target.label, part.label, pattern, replacement, op.label,
-              match_kind.label, name, host, body_file, enabled)
-          else
-            store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled, body_file: body_file)
-          end
+        # Through `Gori::Rules`, not straight at the two stores: `ConfigLog` is recorded at the
+        # MODEL on purpose (see its header — "a per-surface producer would be three copies, and
+        # the CLI is the one that gets forgotten"), and this whole tool family was writing past
+        # it. So `rule_add`/`rule_update`/`rule_toggle`/`rule_remove` were events NO headless
+        # surface ever emitted: an agent could install a rule that injects `$SESSION` into every
+        # request, or one that answers an endpoint itself and never dials it, and the project's
+        # config feed carried only `agent | "create_rule ok"` — which by that header's own
+        # argument cannot carry the VALUE. `create` is `add` answering the new id, which this
+        # tool echoes.
+        id = rules_model.create(target, part, pattern, replacement, op, match_kind, name, host,
+          body_file, scope: scope, enabled: enabled)
         if id == 0
           return busy(scope.global? ? "failed to persist global rule (settings not writable)" : "failed to persist rule (store busy or unwritable)")
         end
@@ -152,6 +159,7 @@ module Gori
 
       # The response-modification preset catalog (#821), read-only, so it sits with the other
       # list tools rather than behind the action gate. `create_rule_from_preset` installs one.
+      @[Tool("list_rule_presets")]
       private def list_rule_presets : Result
         Result.new(JSON.build do |j|
           j.array do
@@ -182,10 +190,11 @@ module Gori
       end
 
       # Install a preset's rules as ordinary Match & Replace rules, through the SAME
-      # `insert_rule` / `Settings.add_rewriter_rule` path `create_rule` uses (P1) — an installed
-      # rule is indistinguishable from a hand-authored one and is editable/disable-able/
-      # deletable (P4). Returns the ids created; a partial write (some rows committed, one
-      # refused) reports what landed rather than pretending it was all-or-nothing.
+      # `Gori::Rules#create` path `create_rule` uses (P1) — an installed rule is
+      # indistinguishable from a hand-authored one and is editable/disable-able/deletable (P4).
+      # Returns the ids created; a partial write (some rows committed, one refused) reports
+      # what landed rather than pretending it was all-or-nothing.
+      @[Tool("create_rule_from_preset", gated: true, agent_action: true)]
       private def create_rule_from_preset(h) : Result
         key = str(h, "preset")
         return err("missing required 'preset' (see list_rule_presets)", "INVALID_ARGUMENT", field: "preset") if key.nil? || key.empty?
@@ -195,16 +204,12 @@ module Gori
         return scope if scope.is_a?(Result)
         enabled = bool_arg(h, "enabled", true)
 
+        model = rules_model
         ids = [] of Int64
         preset.rules.each do |spec|
-          id =
-            if scope.global?
-              Settings.add_rewriter_rule(spec.target.label, spec.part.label, spec.pattern,
-                spec.replacement, spec.op.label, spec.match_kind.label, spec.name, "", "", enabled)
-            else
-              store.insert_rule(spec.target, spec.part, spec.pattern, spec.replacement,
-                spec.op, spec.match_kind, spec.name, "", enabled)
-            end
+          id = model.create(spec.target, spec.part, spec.pattern, spec.replacement,
+            spec.op, spec.match_kind, spec.name, host: "", body_file: "",
+            scope: scope, enabled: enabled)
           ids << id unless id == 0
         end
         if ids.empty?
@@ -224,6 +229,7 @@ module Gori
         err(ex.message || "invalid preset arguments", "INVALID_ARGUMENT")
       end
 
+      @[Tool("update_rule", gated: true, agent_action: true)]
       private def update_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -256,20 +262,18 @@ module Gori
         if bad = pipe_shape_error(op, replacement)
           return bad
         end
-        updated =
-          if scope.global?
-            Settings.update_rewriter_rule(id, target.label, part.label, pattern, replacement,
-              op.label, match_kind.label, name, host, body_file)
-          else
-            store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host, body_file)
-          end
+        model = rules_model
+        # Through the model — see `create_rule` for why the whole family had to move.
+        updated = model.update(id, target, part, pattern, replacement, op, match_kind, name,
+          host, body_file, scope: scope)
         return busy("rule not updated (store busy or unwritable); the rule is unchanged") unless updated
         if present?(h, "enabled")
           en = bool_arg(h, "enabled", existing.enabled?)
           # For a global rule this is THIS project's answer, exactly as `set_rule_enabled`
           # means it — changing the library's default is `set_rule_enabled` + everywhere.
-          ok = scope.global? ? set_global_rule_enabled_here(id, en) : store.set_rule_enabled(id, en)
-          return busy("rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless ok
+          unless model.set_enabled(id, en, scope)
+            return busy("rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry")
+          end
         end
         Result.new(JSON.build do |j|
           j.object do
@@ -289,6 +293,7 @@ module Gori
       # transform the live proxy uses (regex / header ops / host-scope all reflected)
       # over recent flows. Nothing is written. Approximate: response bodies are scanned
       # as STORED (possibly compressed) wire bytes.
+      @[Tool("preview_rule", gated: true)]
       private def preview_rule(h) : Result
         pattern = str(h, "pattern")
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
@@ -401,6 +406,7 @@ module Gori
       # For a global rule this writes THIS PROJECT's override by default — the same meaning `x`
       # has in the Rewriter tab. `everywhere: true` changes the library's own default instead,
       # which reaches every project that has not overridden it.
+      @[Tool("set_rule_enabled", gated: true, agent_action: true)]
       private def set_rule_enabled(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -411,14 +417,11 @@ module Gori
         everywhere = bool_arg(h, "everywhere", false)
         return err("'everywhere' needs scope=global — a project rule has no default", "INVALID_ARGUMENT", field: "everywhere") if everywhere && !scope.global?
         return not_found("no #{scope.label} rule with id #{id}") unless rule_exists?(id, scope)
-        ok =
-          if !scope.global?
-            store.set_rule_enabled(id, enabled)
-          elsif everywhere
-            Settings.set_rewriter_rule_enabled(id, enabled)
-          else
-            set_global_rule_enabled_here(id, enabled)
-          end
+        # Through the model — see `create_rule`. `set_default` is the library's own default;
+        # `set_enabled` is this project's answer, and for a GLOBAL rule that is an override,
+        # dropped rather than pinned when it agrees with the default.
+        model = rules_model
+        ok = everywhere ? model.set_default(id, enabled) : model.set_enabled(id, enabled, scope)
         return busy("enable/disable NOT applied (store busy or unwritable); the rule is unchanged and may still be rewriting live traffic") unless ok
         Result.new(JSON.build do |j|
           j.object do
@@ -430,31 +433,36 @@ module Gori
         end)
       end
 
-      # Make a global rule effectively `enabled` in THIS project. Agreeing with the library's
-      # default CLEARS the override instead of pinning it, so the project keeps following a
-      # later change to that default — the disposition `Rules#toggle` documents.
-      private def set_global_rule_enabled_here(id : Int64, enabled : Bool) : Bool
-        rule = Settings.rewriter_rules.find { |r| r.id == id }
-        return false unless rule
-        rule.enabled == enabled ? store.clear_rewriter_override(id) : store.set_rewriter_override(id, enabled)
-      end
-
+      @[Tool("delete_rule", gated: true, agent_action: true)]
       private def delete_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         return not_found("no #{scope.label} rule with id #{id}") unless rule_exists?(id, scope)
-        ok =
-          if scope.global?
-            deleted = Settings.delete_rewriter_rule(id)
-            store.clear_rewriter_override(id) # this project's disagreement dies with the rule
-            deleted
-          else
-            store.delete_rule(id)
-          end
-        return busy("rule NOT deleted (store busy or unwritable); it is unchanged and may still be rewriting live traffic") unless ok
+        # Through the model — see `create_rule` for the audit half. It also fixes what the
+        # local copy got wrong: this swept `rewriter_overrides` UNCONDITIONALLY, and by the
+        # time it ran `rule_exists?` had already ruled out the "no such rule" case that sweep
+        # is for. So the only way to reach it with a false answer was "settings not saved" —
+        # the rule is still in the library on disk — and clearing the override there drops
+        # this project back to the library's DEFAULT: a rule the operator had switched off
+        # here turns back ON and resumes rewriting live traffic, under a reply that says the
+        # rule is unchanged. `Rules#remove` captures which of the two it was BEFORE the
+        # delete, because afterwards they are indistinguishable.
+        unless rules_model.remove(id, scope)
+          return busy("rule NOT deleted (store busy or unwritable); it is unchanged and may still be rewriting live traffic")
+        end
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "scope", scope.label; j.field "deleted", true } })
+      end
+
+      # The Match & Replace MODEL over this project's store, built per call — the same shape
+      # `Scope.load(store)` is used with next door, and for the same reason: `ConfigLog` is
+      # recorded at the model, so a surface that writes past it emits no config event at all.
+      # A throwaway instance is right here because `gori mcp` is not the process holding the
+      # proxy's live snapshot; the `refresh` each mutation does is one settings read plus one
+      # table read, and the running gori picks the change up through its own reload tick.
+      private def rules_model : Gori::Rules
+        Gori::Rules.load(store)
       end
 
       # Whether a Match&Replace rule id exists IN THAT SCOPE. A full read (neither store has a
@@ -489,6 +497,7 @@ module Gori
         end
       end
 
+      @[Tool("list_extract_rules")]
       private def list_extract_rules : Result
         rules = store.extract_rules
         Result.new(JSON.build do |j|
@@ -579,6 +588,7 @@ module Gori
         err("'pos_end' must be greater than 'pos_start' for kind=position", "INVALID_ARGUMENT", field: "pos_end")
       end
 
+      @[Tool("create_extract_rule", gated: true, agent_action: true)]
       private def create_extract_rule(h) : Result
         name = extract_name_arg(str(h, "name"))
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
@@ -627,6 +637,7 @@ module Gori
         busy("extract rule created but the disable did not persist (store busy or unwritable); retry")
       end
 
+      @[Tool("update_extract_rule", gated: true, agent_action: true)]
       private def update_extract_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -664,6 +675,7 @@ module Gori
         end)
       end
 
+      @[Tool("set_extract_rule_enabled", gated: true, agent_action: true)]
       private def set_extract_rule_enabled(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -674,6 +686,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
       end
 
+      @[Tool("delete_extract_rule", gated: true, agent_action: true)]
       private def delete_extract_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id

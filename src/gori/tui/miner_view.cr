@@ -11,6 +11,7 @@ require "../fuzz"
 require "../repeater/flow_request"
 require "./subtab_clone"
 require "./viewport"
+require "./row_filter"
 require "./subtab_marks"
 
 module Gori::Tui
@@ -52,6 +53,10 @@ module Gori::Tui
       @baseline_note = nil.as(String?)
       @progress = Miner::Progress.new(0, 0, 0, 0, 0)
       @results = [] of Miner::Finding
+      @results_rev = 0        # bumped on every change to @results — the `/` filter's memo key
+      @filter = RowFilter.new # the FINDINGS `/` filter
+      @vis = [] of Int32      # visible result indices, memoised over {rev, query}
+      @vis_key = {-1, ""}
 
       @focus = :summary
       @sel = 0
@@ -128,6 +133,8 @@ module Gori::Tui
       @running = false
       @stop_requested = false
       @results.clear
+      @results_rev += 1
+      @filter = RowFilter.new # a clone starts with no lens of its own
       @progress = Miner::Progress.new(0, 0, 0, 0, 0)
       @sel = 0
       @scroll = 0
@@ -241,14 +248,64 @@ module Gori::Tui
 
     # --- results nav ---
     def results_move(d : Int32) : Nil
-      return if @results.empty?
-      @sel = (@sel + d).clamp(0, @results.size - 1)
+      n = visible.size
+      return if n == 0
+      @sel = (@sel + d).clamp(0, n - 1)
     end
 
     def open_detail : Nil
-      return if @results.empty?
+      return if visible.empty?
       @finding.reset
       @focus = :detail
+    end
+
+    # --- the FINDINGS `/` filter -------------------------------------------------------------
+    # A lens over `@results`: `visible` is the list the cursor, the draw loop and the
+    # hit-tests walk; `@results` itself is what the engine appends to and what `found_count`
+    # reports.
+    def filter_start : Nil
+      close_detail if @focus == :detail
+      focus_pane(:results)
+      @filter.start
+    end
+
+    def filter_editing? : Bool
+      @filter.editing?
+    end
+
+    def filter_hint : String
+      @filter.hint
+    end
+
+    def handle_filter_key(ev : Termisu::Event::Key) : Bool
+      prev = visible[@sel]?
+      @filter.handle_key(ev)
+      @sel = (prev && visible.index(prev)) || @sel.clamp(0, {visible.size - 1, 0}.max)
+      true
+    end
+
+    def set_filter_preedit(text : String) : Bool
+      @filter.set_preedit(text)
+    end
+
+    private def visible : Array(Int32)
+      key = {@results_rev, @filter.query}
+      return @vis if key == @vis_key
+      @vis = (0...@results.size).select { |i| @filter.matches?(result_haystack(@results[i])) }
+      @vis_key = key
+      @vis
+    end
+
+    private def result_haystack(f : Miner::Finding) : String
+      "#{f.name} #{f.location.label} #{f.evidence.label} #{f.confidence.label} #{f.canary}"
+    end
+
+    # {bar, list} for the FINDINGS card's interior — the bar takes the first row only while
+    # shown. One derivation for the render and both hit-tests.
+    private def results_bands(res : Rect) : {Rect?, Rect}
+      inner = res.inset(1, 1)
+      return {nil, inner} unless @filter.shown? && inner.h > 0
+      {Rect.new(inner.x, inner.y, inner.w, 1), Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)}
     end
 
     # ↑/↓ (⇧ to select) walk the FINDING's fields; the wheel scrolls the viewport.
@@ -336,6 +393,7 @@ module Gori::Tui
       @running = true
       @stop_requested = false
       @results.clear
+      @results_rev += 1
       @sel = 0
       @progress = Miner::Progress.new(0, 0, 0, 0, 0)
       @baseline_warning = nil
@@ -376,6 +434,7 @@ module Gori::Tui
 
     def append_finding(f : Miner::Finding) : Nil
       @results << f
+      @results_rev += 1
     end
 
     def found_count : Int32
@@ -383,7 +442,8 @@ module Gori::Tui
     end
 
     def selected_finding : Miner::Finding?
-      @results[@sel]?
+      src = visible[@sel]?
+      src ? @results[src]? : nil
     end
 
     # --- engine ---
@@ -567,9 +627,11 @@ module Gori::Tui
     end
 
     private def render_results(screen : Screen, rect : Rect, focused : Bool) : Nil
+      vis = visible
       Frame.card(screen, rect, "FINDINGS", border: Frame.pane_border(focused), bg: Theme.bg)
-      Frame.border_meta(screen, rect, "FINDINGS", @results.size.to_s)
-      inner = rect.inset(1, 1)
+      Frame.border_meta(screen, rect, "FINDINGS", @filter.active? ? "#{vis.size}/#{@results.size}" : @results.size.to_s)
+      bar, inner = results_bands(rect)
+      @filter.render_bar(screen, bar) if bar
       # A card under 3 rows has no interior — `inset` floors the height at 0 but keeps
       # `inner.y` one row down, so an unguarded placeholder lands OUTSIDE the pane.
       return if inner.h <= 0 || inner.w <= 0
@@ -591,16 +653,20 @@ module Gori::Tui
         TrafficEmptyState.render(screen, inner, variant: :miner_results, running: @running)
         return
       end
+      if vis.empty? # results exist, none match the query
+        screen.text(inner.x + 1, inner.y, @filter.no_match_line("findings"), Theme.muted, Theme.bg, width: {inner.w - 2, 0}.max)
+        return
+      end
       header_row(screen, inner)
       cap = inner.h - 1
       ensure_visible(cap)
       cap.times do |i|
         idx = @scroll + i
-        break if idx >= @results.size
-        draw_result(screen, inner, idx, inner.y + 1 + i, focused)
+        break if idx >= vis.size
+        draw_result(screen, inner, vis[idx], idx == @sel, inner.y + 1 + i, focused)
       end
       # Gauge over the rows region (below the header), aligned to what @scroll windows.
-      Frame.scroll_gauge(screen, Rect.new(inner.x, inner.y + 1, inner.w, cap), @results.size, @scroll, focused)
+      Frame.scroll_gauge(screen, Rect.new(inner.x, inner.y + 1, inner.w, cap), vis.size, @scroll, focused)
     end
 
     private def header_row(screen : Screen, inner : Rect) : Nil
@@ -614,9 +680,8 @@ module Gori::Tui
       {inner.w - 38, 12}.max
     end
 
-    private def draw_result(screen : Screen, inner : Rect, idx : Int32, py : Int32, focused : Bool) : Nil
-      f = @results[idx]
-      sel = idx == @sel
+    private def draw_result(screen : Screen, inner : Rect, idx : Int32, sel : Bool, py : Int32, focused : Bool) : Nil
+      f = @results[idx] # `idx` is the SOURCE index; `sel` was decided over the visible list
       bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       screen.fill(Rect.new(inner.x, py, inner.w, 1), bg)
       screen.cell(inner.x, py, sel ? '▎' : ' ', Theme.accent, bg)
@@ -631,7 +696,7 @@ module Gori::Tui
     # `cap` is the rows region — `inner.h - 1`, the column header above it is not scrolled —
     # and `@results` is what the draw loop walks.
     private def ensure_visible(cap : Int32) : Nil
-      @scroll = Viewport.scroll_to_show(@sel, @scroll, cap, @results.size)
+      @scroll = Viewport.scroll_to_show(@sel, @scroll, cap, visible.size)
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -715,12 +780,12 @@ module Gori::Tui
       return nil if @focus == :detail || @results.empty?
       _, res = pane_rects(rect)
       return nil if res.empty? || !res.contains?(mx, my)
-      inner = res.inset(1, 1)
+      _, inner = results_bands(res)
       return nil if inner.h <= 0 || inner.w <= 0
       i = my - (inner.y + 1) # rows start one line below the header
       return nil if i < 0 || i >= {inner.h - 1, 0}.max
       idx = @scroll + i
-      idx < @results.size ? idx : nil
+      idx < visible.size ? idx : nil # a VISIBLE index — what @sel holds
     end
 
     # The row a click on the scroll gauge asks for. The gauge rides the frame's right hairline,
@@ -730,15 +795,15 @@ module Gori::Tui
       return nil if @focus == :detail
       _, res = pane_rects(rect)
       return nil if res.empty?
-      inner = res.inset(1, 1)
+      _, inner = results_bands(res)
       return nil if inner.h <= 0 || inner.w <= 0
       # Rows start one line below the header — the band the draw hands the gauge.
       Frame.scroll_gauge_row(Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1),
-        @results.size, mx, my)
+        visible.size, mx, my)
     end
 
     def select_result_row(idx : Int32) : Nil
-      @sel = idx.clamp(0, {@results.size - 1, 0}.max)
+      @sel = idx.clamp(0, {visible.size - 1, 0}.max)
     end
 
     def results_selected_index : Int32

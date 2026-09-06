@@ -20,6 +20,7 @@ module Gori
       # of them: it dials a FRESH connection per identity on purpose (`Engine.live`), so a
       # ten-flow selection under three identities is thirty handshakes.
 
+      @[Tool("authorize_start", gated: true, agent_action: true)]
       private def authorize_start(h) : Result
         allow_unscoped = bool_arg(h, "allow_unscoped", false)
         ob = outbound(allow_unscoped)
@@ -159,6 +160,7 @@ module Gori
         end
       end
 
+      @[Tool("authorize_status", gated: true)]
       private def authorize_status(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
@@ -195,11 +197,14 @@ module Gori
       # The verdicts, per replayed request. The headline fields come FIRST and are computed
       # over the whole job, never over the page: a bypass on request 40 must not be invisible
       # to a caller who read page 1 and stopped.
+      @[Tool("authorize_results", gated: true)]
       private def authorize_results(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        limit = clamp(optional_int_arg(h, "limit"), 50, 500)
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, 50, 500)
         page = ajob.results[offset, limit]? || [] of Authorize::Target
         Result.new(JSON.build do |j|
           j.object do
@@ -215,6 +220,8 @@ module Gori
             j.field "returned", page.size
             j.field "offset", offset
             j.field "total_available", ajob.results.size
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "page_complete", offset + page.size >= ajob.results.size
             j.field "has_more", offset + page.size < ajob.results.size
             j.field "job_complete", ajob.status != :running
@@ -227,11 +234,12 @@ module Gori
         end)
       end
 
+      @[Tool("authorize_stop", gated: true, agent_action: true)]
       private def authorize_stop(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
         ajob.stop
-        Result.new(JSON.build { |j| j.object { j.field "job_id", ajob.id; j.field "status", "stopping" } })
+        stop_and_report(ajob)
       end
 
       private def lookup_authorize_job(h) : AuthorizeJob | Result
@@ -445,6 +453,13 @@ module Gori
       # refusals carry DIFFERENT machine codes (a bad query is not a missing argument, and an
       # out-of-scope selection is a SCOPE_BLOCKED an agent's policy acts on).
       private def build_authorize_plan(h, ob : Outbound) : Authorize::Plan | Result
+        # Before the builder, because the failure it produces is `NoFlows` — "no captured flows
+        # matched query \"methd:GET\" — widen it", which sends the caller to loosen a query whose
+        # only problem is a misspelled field name. Same refusal `list_history` gives (see
+        # `ql_unknown_field_error`), so the two doors into the same history agree.
+        if (q = str(h, "query")) && (unknown = ql_unknown_field_error(h, q))
+          return unknown
+        end
         options = Authorize::PlanOptions.new(store,
           flow_ids: authorize_flow_ids(h),
           query: str(h, "query"),
@@ -647,6 +662,7 @@ module Gori
           s.field "flow_ids", authorize_flow_ids_prop
           s.field "query", strprop("QL query over history whose rows are replayed too (same grammar as " \
                                    "list_history — call ql_reference). Appended after flow_ids")
+          s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — a typo free-texts its whole token, selects no rows, and reads as \"nothing matched, widen it\"")
           s.field "limit", intprop("max rows the query may contribute (default #{Authorize::Plan::DEFAULT_LIMIT}, " \
                                    "max #{AUTHORIZE_MAX_FLOWS}) — every row becomes one request PER identity")
           s.field "identities", authorize_identities_prop

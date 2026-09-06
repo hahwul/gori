@@ -89,7 +89,7 @@ module Gori
       r.register Verb::Definition.new(
         "rewriter.toggle-default", "Enable/disable everywhere",
         "Flip a global rule's default — what every project that hasn't overridden it follows",
-        Verb::Scope::Rewriter, [Verb::Chord.new("x", shift: true)],
+        Verb::Scope::Rewriter, [] of Verb::Chord, # menu-only: ⇧X is the wipe chord on five tabs, and this one asked no confirm
         available: global_rule, mnemonic: 'X', section: :rules) { |ctx| ctx.rewriter_toggle_default; nil }
     end
   end

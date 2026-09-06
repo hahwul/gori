@@ -42,6 +42,10 @@ module Gori::Tui
       ev.is_a?(Termisu::Event::Key) ? dealias(ev) : ev
     end
 
+    # The bare `i` every editor pane reads as "enter INSERT" — compared against in the Runner
+    # before the keymap, for the read-only panes that sit beside an editor.
+    INSERT_CHORD = Verb::Chord.new("i")
+
     def self.from_event(ev : Termisu::Event::Key) : Verb::Chord?
       key = ev.key
       shift = ev.shift?

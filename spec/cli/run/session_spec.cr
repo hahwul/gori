@@ -13,19 +13,6 @@ require "json"
 
 private alias Slot = Gori::SessionSlot
 
-private def with_store(&)
-  path = File.tempname("gori-clislots", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe "gori run session — projections" do
   it "renders a row with the baseline diamond and header NAMES only" do
     slot = Slot.new("admin", [{"Cookie", "session=SUPERSECRET"}], ["X-Debug"], true, ["SESSION"])

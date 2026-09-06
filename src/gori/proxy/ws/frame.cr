@@ -1,3 +1,5 @@
+require "../h2/head_codec" # PROTOCOL_MARKER — see `extended_connect_request?`
+
 module Gori::Proxy::WS
   # RFC 6455 opcodes.
   OP_CONT  = 0x0_u8
@@ -73,6 +75,49 @@ module Gori::Proxy::WS
     protocol.compare(PROTOCOL_TOKEN, case_insensitive: true) == 0
   end
 
+  # A request head declares an RFC 8441 extended CONNECT for a WebSocket — the HTTP/2 twin of
+  # `upgrade_request?`, and the second shape `Repeater::WsEngine` can re-open (#733).
+  #
+  # It reads exactly the two facts `H2::HeadCodec.synth_request` writes for such a stream and
+  # nothing else: a `CONNECT` request line, and the `X-Gori-Protocol` marker carrying the
+  # `websocket` token. That marker line IS the `:protocol` pseudo-header — the synthesizer
+  # renames any peer field of the same name (`peer_field_name`) and the rewrite path passes no
+  # protocol at all, so it cannot be forged from the wire — which is what makes reading it back
+  # a sound inverse rather than a guess.
+  #
+  # Here, beside `upgrade_request?`, for the reason that predicate names: the readers live
+  # outside the proxy (`Repeater::WsEngine`, `Repeater::Plan`, `Fuzz::Plan`, and one gate per
+  # surface), and two spellings of "is this a WebSocket gori can re-establish" is how the h1
+  # half already drifted three times.
+  #
+  # NOT `Store::FlowDetail#websocket?`, which additionally requires that the origin ANSWERED —
+  # a 101 or a 2xx. This is a question about the REQUEST alone, because that is what a replay
+  # re-sends: a capture whose extended CONNECT drew a 403 is still a handshake gori can put
+  # back on the wire, exactly as a refused h1 upgrade is.
+  def self.extended_connect_request?(head : String) : Bool
+    scrubbed = head.scrub
+    return false unless connect_line?(scrubbed)
+    marker = Gori::Proxy::H2::HeadCodec::PROTOCOL_MARKER
+    scrubbed.each_line do |line|
+      break if line.empty? || line == "\r" # end of head; the body is not a header block
+      name, sep, value = line.partition(':')
+      next if sep.empty?
+      next unless name.compare(marker, case_insensitive: true) == 0
+      return protocol_token?(value.strip)
+    end
+    false
+  end
+
+  # The start line names the CONNECT method. Case-SENSITIVE: an h2 `:method` is a token the
+  # origin compares byte-for-byte (RFC 9113 §8.3.1), the projection writes the pseudo-header
+  # verbatim, and an operator who edits it to `connect` has written a different method — which
+  # this must report as such rather than quietly treat as the same request.
+  private def self.connect_line?(head : String) : Bool
+    line = head.each_line.first? || return false
+    method, sep, _ = line.partition(' ')
+    !sep.empty? && method == "CONNECT"
+  end
+
   # The RSV1..RSV3 nibble of the first header octet (RFC 6455 §5.2), shifted down so
   # RSV1 = 4, RSV2 = 2, RSV3 = 1. Parsing used to read `b0 & 0x80` and `b0 & 0x0f` and
   # nothing between them, so the three extension bits existed nowhere above the socket:
@@ -123,9 +168,17 @@ module Gori::Proxy::WS
     # in a repeater transcript is "not default", so it renders as `[TEXT unmasked] …` and
     # the plain `← ABCD` line is unreachable — a marker that fires on every frame is one
     # an operator learns to read past, which is the opposite of what §5.1 needs it for.
+    #
+    # `frames` IS consulted here, unlike in the send-side `default?` above — a received
+    # message really can span more than one frame, and that is the one fact a reassembled
+    # row cannot otherwise carry: `TEXT fin=0 "AAA"` + `CONT fin=1 "BBB"` and a single
+    # `TEXT "AAABBB"` produce identical payloads. Fragmentation is a per-frame length check
+    # and a WAF/IDS bypass on its own, and `Store::WsMessage#shape_note` has named it
+    # (`[2 frames]`) on the capture side all along — so a repeater pointed at the very same
+    # origin was the surface that could not see it.
     def default?(to_server : Bool) : Bool
       return default? if to_server
-      fin && rsv == 0 && masked != true && mask_key.nil? && declared_len.nil?
+      fin && rsv == 0 && masked != true && mask_key.nil? && declared_len.nil? && frames <= 1
     end
   end
 
@@ -326,13 +379,22 @@ module Gori::Proxy::WS
   # Reads the payload for an already-read `Header` into ONE wire buffer
   # (header + payload) reused as `raw` for byte-exact forwarding, unmasking a copy
   # for `payload`. The caller MUST have checked `h.len <= MAX_FRAME`.
-  def self.read_body(io : IO, h : Header) : Frame?
+  #
+  # `deadline` bounds the WHOLE payload read by wall clock (with `idle` as the per-read cap):
+  # without it, a peer that trickles the payload a byte at a time — each byte arriving inside
+  # the socket's per-read timeout, resetting it — pins `read_fully?` for as long as it likes,
+  # a hang a security tool must survive on a target it does not trust. Default nil keeps the
+  # exact prior behaviour, so the relay's `read_frame` path is byte-for-byte unchanged; only
+  # the WS repeater engine passes a deadline.
+  def self.read_body(io : IO, h : Header, *, deadline : Time::Instant? = nil,
+                     idle : Time::Span? = nil) : Frame?
     hlen = h.bytes.size
     n = h.len.to_i
     buf = Bytes.new(hlen + n)
     h.bytes.copy_to(buf[0, hlen])
     if n > 0
-      return nil unless io.read_fully?(buf[hlen, n])
+      ok = deadline ? fill_to_deadline?(io, buf[hlen, n], deadline, idle) : io.read_fully?(buf[hlen, n])
+      return nil unless ok
     end
 
     payload =
@@ -346,6 +408,33 @@ module Gori::Proxy::WS
 
     Frame.new(h.fin?, h.opcode, payload, buf, h.rsv, h.masked?,
       h.masked? ? h.mask_key.dup : nil)
+  end
+
+  # Fill `slice` from `io`, bounded by an absolute `deadline`. Caps each read at
+  # `min(idle, remaining)` and raises `IO::TimeoutError` once the deadline passes, so a peer
+  # trickling a frame forever (bytes inside every per-read timeout, resetting it) can no
+  # longer pin the read. Returns false on EOF / short read. The per-read timeout is restored
+  # to `idle` on the way out — the value the drain wants between frames. Reached ONLY when a
+  # `deadline` is passed; `read_frame` passes none, so the relay path never enters here.
+  private def self.fill_to_deadline?(io : IO, slice : Bytes, deadline : Time::Instant,
+                                     idle : Time::Span?) : Bool
+    return true if slice.size == 0
+    begin
+      off = 0
+      while off < slice.size
+        now = Time.instant
+        raise IO::TimeoutError.new("websocket frame did not finish before the drain deadline") if now >= deadline
+        remaining = deadline - now
+        per = idle && idle < remaining ? idle : remaining
+        io.read_timeout = per if io.responds_to?(:read_timeout=)
+        read = io.read(slice[off, slice.size - off])
+        return false if read == 0
+        off += read
+      end
+      true
+    ensure
+      io.read_timeout = idle if idle && io.responds_to?(:read_timeout=)
+    end
   end
 
   # Unmask `src` into `dst` (RFC 6455 §5.3: `dst[i] = src[i] ^ key[i % 4]`). Every

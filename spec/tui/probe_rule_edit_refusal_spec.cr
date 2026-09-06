@@ -232,6 +232,20 @@ private def widened_global_form(id : String) : CustomRuleOverlay
     severity: Gori::Store::Severity::High, scope: "global", enabled: true))
 end
 
+# A fresh form — no `edit_id`, so `apply_custom_rule` takes the ADD path.
+private def new_form(scope : String) : CustomRuleOverlay
+  CustomRuleOverlay.new(title: "leaky", description: "finds a debug header", scope: scope,
+    side: "response", region: "header", kind: "string", severity: "high", pattern: "X-Debug")
+end
+
+# The same rule with its SCOPE cycled — `scope != edit_scope`, which routes the save down the
+# move-between-libraries branch.
+private def moved_form(id : String, *, from : String, to : String) : CustomRuleOverlay
+  CustomRuleOverlay.new(title: "leaky", description: "finds a debug header", scope: to,
+    side: "response", region: "header", kind: "string", severity: "high", pattern: "X-Debug",
+    edit_id: id, edit_scope: from)
+end
+
 describe "Gori::Tui::ProbeController#apply_custom_rule" do
   it "saves a project-scope edit and reports it" do
     with_probe_controller do |controller, host, session|
@@ -291,6 +305,124 @@ describe "Gori::Tui::ProbeController#apply_custom_rule" do
         # And the library still matches on the old pattern, exactly as the strip says.
         Gori::Settings.scan_rules.first.pattern.should eq("X-Debug")
       end
+    end
+  end
+
+  # The ADD path never read its writer's answer at all, while the EDIT path three lines up
+  # refuses in detail. `insert_probe_custom_rule` answers 0 — not nil — for a batch that never
+  # committed, and 0 is TRUTHY in Crystal, so a rolled-back add closed the form over a rule
+  # that does not exist and reported "added custom rule".
+  it "refuses an add the project writer did not take, and keeps the form open" do
+    with_probe_controller do |controller, host, session|
+      session.store.close
+
+      controller.apply_custom_rule(new_form("project")).should be_false
+      host.statuses.last.should eq(
+        %(rule "leaky" NOT added (project busy) — nothing is scanning for it))
+      host.statuses.should_not contain("added custom rule")
+    end
+  end
+
+  it "refuses an add settings.json did not take" do
+    with_probe_controller do |controller, host, _session|
+      with_global_scan_rule(refused: true) do |_id|
+        before = Gori::Settings.scan_rules.size
+        controller.apply_custom_rule(new_form("global")).should be_false
+        host.statuses.last.should eq(
+          %(rule "leaky" NOT added (settings not writable) — nothing is scanning for it))
+        Gori::Settings.scan_rules.size.should eq(before)
+      end
+    end
+  end
+
+  it "saves an add and reports it" do
+    with_probe_controller do |controller, host, session|
+      controller.apply_custom_rule(new_form("project")).should be_true
+      host.statuses.last.should eq("added custom rule")
+      session.store.probe_custom_rules.map(&.title).should eq(["leaky"])
+    end
+  end
+
+  # A scope change is a MOVE between the two libraries. Neither half's answer was read, so a
+  # refused insert after a committed delete lost the rule outright while the strip still said
+  # "updated custom rule". The insert runs FIRST now, so a refusal leaves the rule where it was.
+  it "leaves a moved rule in its old library when the new one refuses the insert" do
+    with_probe_controller do |controller, host, session|
+      row_id = session.store.insert_probe_custom_rule("leaky", "finds a debug header", "response",
+        "header", "string", "X-Debug", Gori::Store::Severity::Info)
+      with_global_scan_rule(refused: true) do |_id|
+        controller.apply_custom_rule(moved_form(row_id.to_s, from: "project", to: "global"))
+          .should be_false
+        host.statuses.last.should eq(
+          %(rule "leaky" NOT moved (settings not writable) — it is still project))
+        host.statuses.should_not contain("updated custom rule")
+      end
+      # The project copy is untouched: nothing was deleted before the insert was attempted.
+      session.store.probe_custom_rules.map(&.title).should eq(["leaky"])
+    end
+  end
+
+  # A move is an INSERT into the other library, and both writers default a NEW rule to
+  # enabled while the form carries no `enabled` field — so a rule the operator had turned off
+  # started scanning again the moment its scope was cycled, with the strip saying only
+  # "updated custom rule". The bit rides along now.
+  it "carries a disabled rule's OFF state across a scope change" do
+    with_probe_controller do |controller, host, session|
+      row_id = session.store.insert_probe_custom_rule("leaky", "finds a debug header", "response",
+        "header", "string", "X-Debug", Gori::Store::Severity::Info, enabled: false)
+
+      with_global_scan_rule(refused: false) do |_id|
+        controller.apply_custom_rule(moved_form(row_id.to_s, from: "project", to: "global"))
+          .should be_true
+        host.statuses.last.should eq("updated custom rule")
+        # NOT by title/pattern: the harness seeds an unrelated `s1` that shares both.
+        moved = Gori::Settings.scan_rules.find { |r| r.id != "s1" }
+        moved.not_nil!.enabled.should be_false
+      end
+      session.store.probe_custom_rules.should be_empty
+    end
+  end
+end
+
+describe "Gori::Tui::ProbeController#rules_toggle_selected" do
+  # The project branch has refused since it was written; the GLOBAL one called
+  # `Settings.set_scan_rule_enabled` and then hard-coded `true`, behind a comment claiming
+  # settings.json had no commit flag to read. It has one — `apply_custom_rule` in the same
+  # file already acts on it — so a global scan rule the strip said was off could still be
+  # matching, which is the reverse of the false negative that refusal exists to prevent.
+  it "refuses a global toggle settings.json did not take" do
+    with_probe_controller do |controller, host, session|
+      with_global_scan_rule(refused: true) do |_id|
+        controller.rules.reload(session.store)
+        controller.rules.move(999)
+        controller.rules.selected_row.not_nil!.custom.not_nil!.global?.should be_true
+
+        controller.rules_toggle_selected
+
+        host.statuses.last.should eq(%(rule "leaky" NOT changed (settings not writable)))
+        host.statuses.should_not contain(%(disabled rule "leaky"))
+        # …and the rule is still enabled, exactly as the strip says.
+        Gori::Settings.scan_rules.first.enabled.should be_true
+      end
+    end
+  end
+end
+
+describe "Gori::Tui::ProbeController#rules_delete" do
+  it "refuses and says the rule is still scanning when the delete does not commit" do
+    with_probe_controller do |controller, host, session|
+      id = session.store.insert_probe_custom_rule("leaky", "finds a debug header", "response",
+        "header", "string", "X-Debug", Gori::Store::Severity::Info)
+      controller.rules.reload(session.store)
+      controller.rules.move(999) # custom rules are the last section, so the last row is ours
+      controller.rules.selected_row.not_nil!.custom.not_nil!.id.should eq(id.to_s)
+
+      session.store.close # every write from here answers false
+      controller.rules_delete
+
+      host.statuses.last.should eq(
+        %(rule "leaky" NOT deleted (project busy) — it is still scanning))
+      host.statuses.should_not contain("probe rule deleted: leaky")
     end
   end
 end

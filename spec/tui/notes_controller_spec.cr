@@ -208,3 +208,83 @@ describe "Gori::Tui::NotesController — the link preview row" do
     end
   end
 end
+
+# Bulk paste opt-in (TabController#accepts_bulk_paste?). Notes was the one multi-line editor
+# still taking a paste keystroke by keystroke — the Repeater and Fuzzer opted in when the bulk
+# path landed — and it is the tab a response body or a whole writeup gets pasted into.
+describe "Gori::Tui::NotesController — bracketed paste in bulk" do
+  it "takes a paste in bulk only while the note is in INSERT" do
+    with_notes_controller do |controller|
+      view = controller.view
+      view.exit_insert!                              # `notes_new` (the helper's setup) drops into INSERT; start from READ
+      controller.accepts_bulk_paste?.should be_false # READ: no caret, and the Runner refuses the paste
+      controller.paste_text("x").should be_false
+      view.current_text.should eq("")
+
+      view.enter_insert!
+      controller.accepts_bulk_paste?.should be_true
+      controller.paste_text("line 1\nline 2").should be_true
+      view.current_text.should eq("line 1\nline 2")
+      view.dirty?.should be_true
+    end
+  end
+
+  it "says how many characters a paste replaced, like a typed character does" do
+    with_notes_controller do |controller|
+      view = controller.view
+      host = controller.@host.as(NotesFakeHost)
+      view.enter_insert!
+      "old text".each_char { |c| view.insert(c) }
+      view.home
+      8.times { view.motion_key(Termisu::Event::Key.new(Termisu::Input::Key::Right, Termisu::Input::Modifier::Shift)) }
+      controller.paste_text("new").should be_true
+      view.current_text.should eq("new")
+      host.statuses.last.should eq("replaced 8 chars — ^Z to undo")
+    end
+  end
+end
+
+# Closing a note drops its `entity_links` — but WHEN depends on whether the note is on disk,
+# and the two halves fail in opposite directions.
+#
+# A PERSISTED note's links wait for `Notes.save` to commit: dropping them on the keypress
+# destroyed the operator's evidence against a document that had not been written yet, so a save
+# the project's writer then refused left the note on disk with its links already gone.
+#
+# A note this session minted and never saved is the other half: nothing on disk can bring it
+# back, so no later commit ever reaches its links and they would sit in `entity_links` for the
+# life of the project. That one is dropped at the close.
+describe "Gori::Tui::NotesController — a closed note's links" do
+  it "drops them at once for a note that was never persisted" do
+    with_notes_controller do |controller|
+      controller.notes_new
+      id = controller.view.current_note_id
+      controller.view.unpersisted?(id).should be_true
+      store = controller.@host.as(NotesFakeHost).session.store
+      store.add_link(Gori::Store::LinkOwnerKind::Note, id, Gori::Store::LinkRefKind::Flow, 7_i64)
+
+      controller.notes_close
+
+      store.list_links(Gori::Store::LinkOwnerKind::Note, id).should be_empty
+    end
+  end
+
+  it "leaves a PERSISTED note's links to the save, so a refused write cannot destroy them" do
+    with_notes_controller do |controller|
+      controller.notes_new
+      id = controller.view.current_note_id
+      store = controller.@host.as(NotesFakeHost).session.store
+      store.add_link(Gori::Store::LinkOwnerKind::Note, id, Gori::Store::LinkRefKind::Flow, 7_i64)
+      controller.save_notes.should be_true
+      controller.view.unpersisted?(id).should be_false # the commit made it persisted
+
+      controller.notes_close
+
+      # Still there at the close…
+      store.list_links(Gori::Store::LinkOwnerKind::Note, id).size.should eq(1)
+      # …and gone once the document that removes the note has committed.
+      controller.save_notes.should be_true
+      store.list_links(Gori::Store::LinkOwnerKind::Note, id).should be_empty
+    end
+  end
+end

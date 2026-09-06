@@ -72,7 +72,54 @@ private def start_garbling_tls_ws_origin(echo_first : Bool = true) : Int32
   port
 end
 
+# A plaintext origin that upgrades, then answers with ONE frame header advertising a payload
+# larger than MAX_FRAME (too big to buffer), a few real bytes, and a hold. `read_frame` returns
+# nil for both this and EOF, so the drain used to read the peer's answer as "the connection
+# ended"; the fix reads the header first and records the oversized frame.
+private def start_oversized_frame_ws_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    conn = origin.accept?
+    origin.close rescue nil
+    next unless conn
+    begin
+      conn.read_timeout = 5.seconds
+      wstf_upgrade(conn)
+      len = WS::MAX_FRAME + 1
+      hdr = IO::Memory.new
+      hdr.write_byte(0x81_u8) # FIN + TEXT
+      hdr.write_byte(0x7f_u8) # 64-bit length follows
+      (0..7).each { |i| hdr.write_byte((len >> (56 - i * 8)).to_u8!) }
+      conn.write(hdr.to_slice)
+      conn.write(Bytes.new(16, 0x41_u8))
+      conn.flush
+      sleep 300.milliseconds
+    rescue
+    ensure
+      conn.close rescue nil
+    end
+  end
+  port
+end
+
 describe Gori::Repeater::WsEngine do
+  describe "an oversized server frame after the upgrade" do
+    it "records it as a truncation, not as a closed connection" do
+      port = start_oversized_frame_ws_origin
+      result = WsEngine.send(WSTF_UPGRADE, [] of WsEngine::OutMsg,
+        scheme: "http", host: "127.0.0.1", port: port,
+        verify_upstream: false, idle: 500.milliseconds)
+
+      # The peer ANSWERED, with a frame gori could not buffer. Reporting `peer_gone` would
+      # delete both the fact and the frame; instead the truncation is named and a marker row
+      # sits in the transcript.
+      result.upgraded?.should be_true
+      result.truncated.not_nil!.should contain("per-frame cap")
+      result.messages.any? { |m| String.new(m.payload).includes?("per-frame cap") }.should be_true
+    end
+  end
+
   describe "a transport failure AFTER the upgrade" do
     it "keeps the transcript and reports it as a note, not as a failed handshake" do
       port = start_garbling_tls_ws_origin

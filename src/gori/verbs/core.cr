@@ -159,7 +159,9 @@ module Gori
 
       r.register Verb::Definition.new(
         "scope.toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
-        Verb::Scope::Body, [Verb::Chord.new("s", shift: true)],
+        # Menu-only: the Global `s` (scope.toggle-lens) reaches this pane already, and the ⇧S
+        # twin was a second key for the same flip in the same tab.
+        Verb::Scope::Body, [] of Verb::Chord,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
 
       # --- Project tab SCOPE pane: the rule-list action menu (space) + its a/e/d keys.
@@ -173,6 +175,9 @@ module Gori
       r.register Verb::Definition.new(
         "scope.add-rule", "Add scope rule", "Open the popup to add an include/exclude rule",
         Verb::Scope::Project, [Verb::Chord.new("a")]) { |ctx| ctx.scope_add_rule; nil }
+      r.register Verb::Definition.new(
+        "scope.copy-rule", "Copy", "Copy the selected scope rule as `kind match-type pattern`",
+        Verb::Scope::Project, [Verb::Chord.new("y")], available: scope_rule) { |ctx| ctx.read_copy; nil }
       r.register Verb::Definition.new(
         "scope.edit-rule", "Edit scope rule", "Open the popup to edit the selected scope rule",
         Verb::Scope::Project, [Verb::Chord.new("e")], available: scope_rule) { |ctx| ctx.scope_edit_rule; nil }
@@ -352,6 +357,12 @@ module Gori
       r.register Verb::Definition.new(
         "help.query", "Query language reference", "Show the filter/query language reference in a popup (Help's Query page)",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_help_query(:ql); nil }
+      # `help.tour` carries "tour"; the title carries "guided" and "tutorial" reaches it
+      # through the description — the three words a user who saw the wizard's offer, the
+      # docs, or the `gori tutorial` verb might type.
+      r.register Verb::Definition.new(
+        "help.tour", "Guided tour", "Run the interactive tutorial (gori tutorial) here, then return to this session",
+        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_tutorial; nil }
 
       # Discover is a sub-tab under Target, so it gets its own "Go to" (Target's own jump
       # lands on the last-active sub-tab).

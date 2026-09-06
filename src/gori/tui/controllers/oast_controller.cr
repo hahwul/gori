@@ -70,6 +70,13 @@ module Gori::Tui
       def active? : Bool
         (p = @poller) ? p.running? : false
       end
+
+      # Running AND its last poll reached the provider. `active?` alone is "a fiber is looping",
+      # which a listener whose endpoint refuses every poll satisfies forever — see
+      # `Oast::Poller#answering?` for what reads this apart.
+      def answering? : Bool
+        (p = @poller) ? (p.running? && p.answering?) : false
+      end
     end
 
     # A displayed callback row (decoupled from the DB id; dedup is by (session, uid)).
@@ -230,13 +237,13 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if callbacks_sub?
-        return "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ←/esc back" if @cb_detail
+        return keys("↑/↓ move · ⇧arrows select · y copy · {oast.select-line} line · space cmds · ←/esc back") if @cb_detail
         return "type to filter · ↵ keep · esc clear" if @filter_editing
         keys("↑/↓ select · ‹/› provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds")
       else
         # `x on/off` and `↵/e edit` — the vocabulary the three sibling rule lists use. Toggle was
         # `t` here alone, and ↵ has always opened the editor without the hint saying so.
-        "↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · esc sub-tabs"
+        keys("↑/↓ select · {oast.add-provider} add · ↵/{oast.edit-provider} edit · {oast.toggle-provider} on/off · {oast.delete-provider} delete · space cmds · esc sub-tabs")
       end
     end
 
@@ -1263,16 +1270,13 @@ module Gori::Tui
 
     private def handle_providers_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      c = ev.char || key.to_char
       case
       when key.escape?             then @host.request_focus(:subtabs)
       when key.up?, key.lower_k?   then prov_row_up
       when key.down?, key.lower_j? then @prov_sel = {@prov_sel + 1, {@providers.size - 1, 0}.max}.min
-      when key.enter?, c == 'e'    then open_edit_provider
-      when c == 'a'                then open_add_provider
-      when c == 'x'                then toggle_provider
-      when c == 'd'                then delete_provider
-      else                              return false
+      when key.enter?              then open_edit_provider
+        # `a`/`e`/`x`/`d` are chords now (`verbs/oast.cr`) — they fall through to the keymap.
+      else return false
       end
       true
     end
@@ -1320,16 +1324,11 @@ module Gori::Tui
       # payload bar (2 rows) — no row action; body is the filter + table card below
       body = Rect.new(content.x, content.y + 2, content.w, content.h - 2)
       return if body.h < 1
-      table = if body.h >= 2
-                if my == body.y
-                  start_cb_filter unless @filter_editing
-                  return
-                end
-                Rect.new(body.x, body.y + 1, body.w, body.h - 1)
-              else
-                body
-              end
-      return unless idx = callback_row_at(table, mx, my)
+      if body.h >= 2 && my == body.y
+        start_cb_filter unless @filter_editing
+        return
+      end
+      return unless (table = callbacks_table(content)) && (idx = callback_row_at(table, mx, my))
       @filter_editing = false # a row click commits the filter, like History's list click
       if idx == @cb_sel
         @cb_detail = true
@@ -1338,6 +1337,31 @@ module Gori::Tui
         @cb_sel = idx
         sync_scroll
       end
+    end
+
+    # The CALLBACKS table card's rect inside `content` — under the two-row payload bar and
+    # the filter row — or nil when the pane is too short for one. The single derivation the
+    # click, the double-click and the filter-row test share.
+    private def callbacks_table(content : Rect) : Rect?
+      return nil if content.h < 2
+      body = Rect.new(content.x, content.y + 2, content.w, content.h - 2)
+      return nil if body.h < 1
+      body.h >= 2 ? Rect.new(body.x, body.y + 1, body.w, body.h - 1) : body
+    end
+
+    # A double-click on a callback row runs ↵ on it (#969's contract): select and open the
+    # detail in one gesture, where the click's select-then-open needs two.
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless callbacks_sub? && !@cb_detail
+      content = BodyChrome.content_rect(rect, strip: true)
+      return false unless (table = callbacks_table(content)) && (idx = callback_row_at(table, mx, my))
+      @host.focus_body
+      @filter_editing = false
+      @cb_sel = idx
+      sync_scroll
+      @cb_detail = true
+      @cb_pane.reset
+      true
     end
 
     # Hit-test a click against the CALLBACKS table card (mirrors render_callback_table).
@@ -1428,13 +1452,21 @@ module Gori::Tui
     # a listener here, switch tabs, and a probe scan still mints against it. Throttled to
     # SESSION_HEARTBEAT and skipped entirely when nothing is listening, so an idle project writes
     # nothing. Does not mark the tick `applied`: it changes no on-screen state.
+    #
+    # `answering?`, not `active?`. The stamp is a LIVENESS signal, not a "we tried" counter: the
+    # minter plants payloads against the most-recently-polled session, so a listener whose
+    # endpoint 401s (a rotated api key) or 404s (an expired webhook token) on every tick used to
+    # keep winning that pick — and win it harder the longer it stayed broken — while every blind
+    # SSRF/XXE payload it minted called home to nobody and the scan reported clean. A failing
+    # poll must leave the row looking exactly as stale as the listener behind it is, which is the
+    # rule `gori run oast resume` already follows (it stamps only for a poll that answered).
     private def heartbeat_active_sessions : Nil
       return if @listeners.empty?
       now = Time.instant
       return if now - @last_session_heartbeat < SESSION_HEARTBEAT
       @last_session_heartbeat = now
       store = @host.session.store
-      @listeners.each { |l| store.touch_oast_session(l.session.id) if l.active? }
+      @listeners.each { |l| store.touch_oast_session(l.session.id) if l.answering? }
     end
 
     # Move @cb_sel back onto the callback identified by `key` after live inserts shifted the

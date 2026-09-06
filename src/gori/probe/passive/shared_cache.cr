@@ -43,7 +43,7 @@ module Gori
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
-          parts = CacheControl.parse(resp.headers.get?("Cache-Control"))
+          parts = ctx.cache_control
           check_set_cookie(ctx, resp, parts, acc)
           check_cors_vary(ctx, resp, parts, acc)
         end

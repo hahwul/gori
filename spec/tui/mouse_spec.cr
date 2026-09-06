@@ -7,19 +7,6 @@ include Gori::Tui
 # path (the anti-drift contract), so they can be unit-tested without a terminal.
 # These guard the geometry the Runner's handle_mouse relies on.
 
-private def tmp_store(&)
-  path = File.tempname("gori-mouse", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture(store, host, method, target)
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
@@ -100,7 +87,7 @@ end
 
 describe "SitemapView#row_at / #marker_hit?" do
   it "maps a click row to the visible node, and the marker cell toggles" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       view = SitemapView.new
       view.reload(store)
@@ -121,7 +108,7 @@ end
 
 describe "HistoryView#list_row_at / select-first" do
   it "maps a click to the flow row (newest-first) and select_row updates the selection" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a")
       add_flow(store, "POST", "/b")
       view = HistoryView.new

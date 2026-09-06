@@ -124,7 +124,13 @@ module Gori
     # into the MIDDLE of a strip the operator had arranged. `set_repeater_positions` keeps the
     # space dense from here on; this makes an already-sparse project append correctly too.
     def next_repeater_position : Int32
-      @db.scalar("SELECT COALESCE(MAX(position), -1) + 1 FROM repeaters").as(Int64).to_i32
+      # Saturate rather than `.to_i32`-overflow. A caller can store `position: Int32::MAX`
+      # (MCP `create_repeater` accepts the whole Int32 range), and `MAX(position) + 1` then
+      # overflows `Int32` — an `OverflowError` that crashed the very next "new tab" on EVERY
+      # surface, the TUI's `persist_new_repeater` (no rescue) included. Saturating parks the
+      # new row at the end instead; a reorder renumbers the space dense again.
+      nxt = @db.scalar("SELECT COALESCE(MAX(position), -1) + 1 FROM repeaters").as(Int64)
+      nxt > Int32::MAX ? Int32::MAX : nxt.to_i32
     end
 
     # Returns the new row id (or 0 if the store is closing — the caller normalizes

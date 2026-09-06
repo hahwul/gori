@@ -9,19 +9,6 @@ require "./spec_helper"
 # "no `$` → the identical string, for every op and every match kind" property is pinned for
 # each combination rather than argued.
 
-private def with_store(&)
-  path = File.tempname("gori-bindings", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Install a binding layer for the duration of the block, then put back whatever was there.
 # `Env.layer` is a per-project global (like `Settings.project_env_vars`), so a spec that
 # leaked one would change what every later example thinks `$SESSION` means.
@@ -331,6 +318,29 @@ describe Gori::Bindings do
             events.any? { |e| e.kind == "boundary_refused" }.should be_false
             ev = events.find { |e| e.kind == "unbound" }.not_nil!
             ev.message.should eq(%(rewrite rule "inject" not applied: $SESSION is not bound yet))
+          end
+        end
+      end
+
+      # `remove_header` names a header and writes NOTHING, so its `replacement` is a dead
+      # field — but every CRUD surface stores whatever was in the value slot when the op was
+      # picked (the TUI form skips the `value:` row rather than clearing it; the CLI and MCP
+      # take `--value` / `replacement` verbatim). Resolving it anyway let that dead field
+      # disarm the rule: the header stopped being stripped the moment the binding went
+      # unbound, and the operator was told a name the op never reads was to blame.
+      it "does not let a dead $KEY in remove_header's replacement disarm the rule" do
+        with_store do |store|
+          b = Gori::Bindings.load(store)
+          b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+          with_layer(b) do
+            rules = Gori::Rules.new(store, store.match_rules)
+            rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "Cookie",
+              "$SESSION", Gori::Store::RuleOp::RemoveHeader, Gori::Store::MatchKind::Literal,
+              "strip", "", "")
+            head = "GET / HTTP/1.1\r\nHost: acme.test\r\nCookie: sid=1\r\n\r\n".to_slice
+            String.new(rules.rewrite_request(head, "acme.test"))
+              .should eq("GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+            store.events_after(0, 50).any? { |e| e.kind == "unbound" }.should be_false
           end
         end
       end

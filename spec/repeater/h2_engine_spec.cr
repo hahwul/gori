@@ -49,8 +49,8 @@ private def start_tls_origin(advertise_h2 : Bool) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
-    while conn = origin.accept?
-      spawn do
+    while accepted = origin.accept?
+      spawn_with(accepted) do |conn|
         ssl = OpenSSL::SSL::Socket::Server.new(conn, ctx, sync_close: true)
         # Longer than any example's own timeout. At 2s a second connection on a loaded runner
         # could start its handshake after this fiber had closed, and the example then compared
@@ -766,6 +766,45 @@ private def start_h2_origin_grpc(trailers_only : Bool) : Int32
   port
 end
 
+# An origin whose header blocks restate `:status` where they may not. `where` picks the
+# violation: `:trailer` answers 200 + body and then a TRAILING block carrying `:status 500`
+# (RFC 9113 8.1 forbids a pseudo-header in a trailer section); `:duplicate` puts two
+# `:status` fields in the ONE response head (8.3 makes that malformed). Both are shapes an
+# h2 response-splitting probe produces, and in both the question is which status gori
+# reports.
+private def start_h2_origin_restated_status(where : Symbol) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    send_server_preface(conn)
+    loop do
+      f = Frame.read(conn)
+      break if f.nil?
+      break if f.frame_type.in?(Frame::Type::Headers, Frame::Type::Data) && f.end_stream?
+    end
+    enc = HPACK::Encoder.new
+    if where == :duplicate
+      blk = enc.encode([{":status", "200"}, {":status", "500"}, {"content-type", "text/plain"}])
+      conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, blk).to_bytes)
+      conn.write(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, 1_u32, "body".to_slice).to_bytes)
+    else
+      blk = enc.encode([{":status", "200"}, {"content-type", "text/plain"}, {"set-cookie", "real=1"}])
+      conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, blk).to_bytes)
+      conn.write(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, "body".to_slice).to_bytes)
+      tb = enc.encode([{":status", "500"}, {"x-trailer", "1"}])
+      conn.write(Frame::Header.new(Frame::Type::Headers.value,
+        Frame::END_HEADERS | Frame::END_STREAM, 1_u32, tb).to_bytes)
+    end
+    conn.flush
+    sleep 0.2.seconds
+    conn.close
+  end
+  port
+end
+
 # An origin that DRIPS flow-control window: it advertises SETTINGS_INITIAL_WINDOW_SIZE 0 and
 # then grants `per_grant` bytes on the connection AND the stream every `interval`, `grants`
 # times, before closing. A throttling gateway looks like this, and so does a DoS-shaped answer
@@ -1181,6 +1220,19 @@ describe Gori::Repeater::H2Engine do
   # EXACTLY" and changed nothing this encoder does, so an operator was told the bytes were
   # exact when the names had been folded. An uppercase name is malformed h2 a conformant peer
   # must reject — which is the point of typing one.
+  # A header NAME carrying a non-UTF-8 byte is expressible over h2 (HPACK strings are
+  # length-prefixed octets). `String#downcase` emits U+FFFD for such a byte, silently altering
+  # the operator's bytes (P7); the fold must touch ASCII A–Z alone.
+  it "folds only ASCII A–Z in a header name, keeping a non-UTF-8 byte byte-exact" do
+    req = IO::Memory.new
+    req << "GET / HTTP/1.1\r\nHost: h\r\n"
+    req.write(Bytes[0x58, 0x2D, 0x46, 0xFF, 0x4F]) # "X-F", 0xFF, "O"
+    req << ": v\r\n\r\n"
+    headers, _ = Gori::Repeater::H2Engine.parse_request(req.to_slice, "http", "h", 80, false, false)
+    want = Bytes[0x78, 0x2D, 0x66, 0xFF, 0x6F] # "x-f", 0xFF, "o" — only the letters folded
+    headers.any? { |(n, v)| n.to_slice == want && v == "v" }.should be_true
+  end
+
   it "preserves field-name case under preserve_field_case" do
     seen = Channel({Array({String, String}), Array({String, Int32})}).new(1)
     port = start_h2_origin_recording(seen)
@@ -2072,6 +2124,40 @@ describe Gori::Repeater::H2Engine do
       head = String.new(result.head)
       head.should contain("grpc-status: 5")
       head.should_not contain(Gori::Proxy::H2::HeadCodec::TRAILER_MARKER)
+    end
+
+    # `absorb` folded every block's `:status` into the RUNNING status, and `merge_block`'s
+    # only guard on a trailing one was `interim?`. So a 500 in a trailer section walked
+    # straight past it and became the reported status, wearing the 200's own headers — while
+    # the CAPTURE path answered 200 for the identical wire (`Assembler#emit_response` reads
+    # the first `:status` off the merged list). One response, two gori surfaces, two answers.
+    it "does not let a status-bearing TRAILER become the response's status" do
+      result = Gori::Repeater::H2Engine.send(
+        "GET /p HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+        scheme: "http", host: "127.0.0.1", port: start_h2_origin_restated_status(:trailer),
+        verify_upstream: false, timeout: 5.seconds)
+      head = String.new(result.head)
+      head.should contain("HTTP/2 200") # was: HTTP/2 500
+      head.should_not contain("HTTP/2 500")
+      result.response.try(&.status).should eq(200)
+      head.should contain("set-cookie: real=1") # the real head survives
+      head.should contain("x-trailer: 1")       # and the trailer's REGULAR field is still kept
+      # …and the violation is a clause on the Result, the way a late 1xx already was.
+      result.error.to_s.should contain("RFC 9113 §8.1")
+      result.error.to_s.should contain(":status")
+    end
+
+    # The same fold, one block earlier: a duplicated pseudo-header is malformed either way
+    # (§8.3), so neither reading is "right" — but the capture projection takes the FIRST
+    # `:status` (`HeadCodec.pseudo` is a `find`), and gori must not answer 200 in History and
+    # 500 in the Repeater about one wire.
+    it "reads the FIRST :status when one block carries two, as the capture projection does" do
+      result = Gori::Repeater::H2Engine.send(
+        "GET /p HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+        scheme: "http", host: "127.0.0.1", port: start_h2_origin_restated_status(:duplicate),
+        verify_upstream: false, timeout: 5.seconds)
+      String.new(result.head).should contain("HTTP/2 200") # was: HTTP/2 500
+      result.response.try(&.status).should eq(200)
     end
   end
 

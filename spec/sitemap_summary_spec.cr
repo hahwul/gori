@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-smap", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture(store : Gori::Store, method : String, target : String, status : Int32) : Nil
   head = "#{method} #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n"
   id = store.insert_flow(Gori::Store::CapturedRequest.new(

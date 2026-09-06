@@ -1,4 +1,5 @@
 require "termisu"
+require "socket"
 require "./geometry"
 require "./screen"
 require "./theme"
@@ -55,6 +56,27 @@ module Gori::Tui
     BIND_ROWS      = 8 # heading, gap, ip, port, gap, 2 info lines, status
     COMPANION_ROWS = 7 # heading, gap, 2 offer rows, gap, motion row, info line
     REVIEW_ROWS    = 9 # title, gap, 4 recap rows, gap, 2 offer rows
+
+    # Interior row offsets (from the card's top border) of the rows a click can land on. ONE
+    # home each, read by the renderer AND the mouse hit-test, so a row cannot move on screen
+    # and leave its click target behind — the theme list already shares its geometry that
+    # way (`theme_list_w`); these are the same rule for the fixed-layout steps, which used to
+    # take no clicks at all. Their ◉/◯ rows are drawn exactly like the theme rows that DO
+    # take a click, so a mouse user read them as clickable and found them dead.
+    BIND_FIELD_ROW       = 4 # Bind IP; Bind Port is the row under it
+    COMPANION_OFFER_ROW  = 4 # "Show Miss Ring"; "No mascot" is the row under it
+    COMPANION_MOTION_ROW = COMPANION_OFFER_ROW + 3
+    REVIEW_RECAP_ROW     = 4 # four recap rows; Shortcuts (the editable one) is the last
+    REVIEW_SHORTCUTS_ROW = REVIEW_RECAP_ROW + 3
+    REVIEW_OFFER_ROW     = REVIEW_SHORTCUTS_ROW + 2 # "Take the guided tour"; "Skip" under it
+
+    # The footer while esc is armed — widest first, like `footer_hints`. The long form is
+    # the one place the wizard says how to come back: `skip` writes settings.json, so on
+    # the first-run path a skipped wizard is gone for good unless the user knows the verb.
+    ESC_ARMED_HINTS = [
+      "esc again to skip setup · re-run later: gori wizard · any other key stays",
+      "esc again to skip · any other key stays",
+    ]
 
     # ONE size floor for every step, DERIVED from the tallest rather than hand-counted. It used
     # to be checked per step against each step's own rows, and the steps don't agree — BIND
@@ -127,6 +149,12 @@ module Gori::Tui
       @cursor = @ip.size # per-field caret (mid-string edit, like SettingsView)
       @preedit = ""      # live IME composition for the focused bind field
       @status = nil.as(String?)
+      # The "host:port" the user has already been told is in use and pressed ↵ on again —
+      # see `advance_from_bind`. Cleared by any edit to either field (`set_bind_value`).
+      @port_warned = nil.as(String?)
+      # esc at any step arms the skip; a second esc skips. See `handle_escape` for why one
+      # press is not enough — the same reason Tutorial#handle_escape gives.
+      @esc_armed = false
       # Theme step.
       @theme_name = Theme.canonical(Settings.theme)
       @theme_baseline = Theme.active_name # reverted on skip
@@ -214,10 +242,15 @@ module Gori::Tui
     private def handle_key(ev : Termisu::Event::Key) : Nil
       @preedit = "" # any committed key ends an in-progress IME composition
       key = ev.key
-      if ev.ctrl_c? || key.escape?
-        skip # Esc / ^C exits the wizard (revert preview, persist defaults)
+      if ev.ctrl_c?
+        skip # ^C exits the wizard at once (revert preview, persist defaults)
         return
       end
+      if key.escape?
+        handle_escape
+        return
+      end
+      @esc_armed = false # any other key is intent to stay (see handle_escape)
       # Below the floor NOTHING but the two keys above is accepted. `fits?` gates rendering, and
       # while it was the only gate the "terminal too small" screen stayed fully navigable: four
       # blind ↵ presses walked Bind → Companion → Review → `finish` and committed a bind/theme/companion the
@@ -230,6 +263,27 @@ module Gori::Tui
       when Step::Appearance then handle_theme_key(ev)
       when Step::Companion  then handle_companion_key(ev)
       when Step::Review     then handle_review_key(ev)
+      end
+    end
+
+    # esc skips the wizard — on a DELIBERATE second press.
+    #
+    # One press used to do it, and `skip` is not a dismissal: it writes settings.json with
+    # the defaults, which is the first-run gate, so on that path the wizard never comes back.
+    # Yet the press that lands here is very often not a request to leave — it is the
+    # "cancel this edit" reflex in a text field (the BIND step opens with the caret in one),
+    # or the "go back" esc the rest of gori teaches. A wizard that four screens of setup can
+    # vanish from on one reflex is the defect Tutorial#handle_escape already fixed for the
+    # tour; this is the same fix. `render_footer` announces the armed state and every other
+    # key or click disarms it, so nobody can be stranded in a mode they cannot see — which is
+    # why the too-small screen, which paints no footer, opts out: its own message says "esc
+    # to skip" and means one press.
+    private def handle_escape : Nil
+      return skip unless fits?(*@backend.size)
+      if @esc_armed
+        skip
+      else
+        @esc_armed = true
       end
     end
 
@@ -298,14 +352,21 @@ module Gori::Tui
         # declined her still stage a non-default motion, which #finish would then persist —
         # materializing a "companion" section in settings.json for someone who said no. Settings
         # only omits that section while EVERY field is factory-default.
-        # CYCLES the three, in the order the settings view lists them, and rides
-        # Settings::COMPANION_MOTIONS so a fourth mode reaches the wizard by existing
-        # rather than by someone remembering this line.
-        modes = Settings::COMPANION_MOTIONS.to_a
-        i = modes.index(@companion_motion) || 0
-        step = key.left? ? -1 : 1
-        @companion_motion = modes[(i + step) % modes.size]
+        cycle_companion_motion(key.left? ? -1 : 1)
       end
+    end
+
+    # CYCLES the three motions, in the order the settings view lists them, and rides
+    # Settings::COMPANION_MOTIONS so a fourth mode reaches the wizard by existing rather
+    # than by someone remembering this line. Shared by ←/→ and a click on the motion row.
+    private def cycle_companion_motion(step : Int32) : Nil
+      modes = Settings::COMPANION_MOTIONS.to_a
+      i = modes.index(@companion_motion) || 0
+      @companion_motion = modes[(i + step) % modes.size]
+    end
+
+    private def toggle_modifier : Nil
+      @modifier = @modifier == "alt" ? "ctrl" : "alt"
     end
 
     # Review step: ↑/↓ pick the tour offer; ←/→ flip the command modifier; ↵ finishes
@@ -317,7 +378,7 @@ module Gori::Tui
       elsif key.up? || key.down?
         @offer = @offer == :tour ? :skip : :tour
       elsif key.left? || key.right?
-        @modifier = @modifier == "alt" ? "ctrl" : "alt"
+        toggle_modifier
       elsif key.back_tab?
         @step = Step::Companion
         # The failed-save footer says "↵ retry", and ↵ only retries HERE (elsewhere it
@@ -349,8 +410,33 @@ module Gori::Tui
         @status = "invalid port (0-65535)"
         return
       end
+      # A port something else already listens on is the one bind mistake this screen can
+      # catch before the proxy fails to start on it. A warning, not a refusal: the thing on
+      # that port may be about to go away (a previous gori, say), so ↵ again keeps the value.
+      # `@port_warned` remembers which value was warned about; an edit clears it, so a
+      # different in-use port is warned about afresh.
+      key = "#{effective_ip}:#{@port.strip}"
+      if @port_warned != key && SetupWizard.port_in_use?(effective_ip, @port.strip.to_i)
+        @port_warned = key
+        @status = "port #{@port.strip} is in use on #{effective_ip} · ↵ again to keep it"
+        return
+      end
       @status = nil
       @step = Step::Appearance
+    end
+
+    # Whether something already listens on `host`:`port` — a probe bind, released at once.
+    # ONLY "address in use" counts: a host this machine cannot bind (a remote IP, a typo
+    # that parses) is not this screen's question, and a sandbox that forbids binding at all
+    # must not turn every port into a warning. Port 0 is "any free port" and is never in use.
+    def self.port_in_use?(host : String, port : Int32) : Bool
+      return false if port <= 0
+      TCPServer.new(host, port).close
+      false
+    rescue ex : Socket::BindError
+      ex.os_error == Errno::EADDRINUSE
+    rescue Socket::Error | IO::Error
+      false
     end
 
     private def valid_port?(s : String) : Bool
@@ -364,6 +450,7 @@ module Gori::Tui
 
     private def set_bind_value(v : String) : Nil
       @bind_field == :ip ? (@ip = v) : (@port = v)
+      @port_warned = nil # a changed bind is a new question (see advance_from_bind)
     end
 
     private def switch_bind_field(f : Symbol) : Nil
@@ -493,8 +580,52 @@ module Gori::Tui
         end
         return
       end
+      @esc_armed = false # a click is intent to stay (see handle_escape)
+      w, h = @backend.size
+      box = step_card(w, h)
       case @step
       when Step::Appearance then click_theme(mx, my)
+      when Step::Bind       then click_bind(box, mx, my)
+      when Step::Companion  then click_companion(box, mx, my)
+      when Step::Review     then click_review(box, mx, my)
+      end
+    end
+
+    # The interior row of `box` a click at `my` lands on, or nil outside the card's
+    # interior columns/rows. Offsets are from the card's top border, matching the *_ROW
+    # constants.
+    private def card_row(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless box.x < mx < box.right - 1 && box.y < my < box.bottom - 1
+      my - box.y
+    end
+
+    # A click on a field focuses it (caret at the end, as ↑/↓ do).
+    private def click_bind(box : Rect, mx : Int32, my : Int32) : Nil
+      case card_row(box, mx, my)
+      when BIND_FIELD_ROW     then switch_bind_field(:ip)
+      when BIND_FIELD_ROW + 1 then switch_bind_field(:port)
+      end
+    end
+
+    # A click on an offer row picks it; on the motion row, cycles her motion (as → does).
+    private def click_companion(box : Rect, mx : Int32, my : Int32) : Nil
+      case card_row(box, mx, my)
+      when COMPANION_OFFER_ROW     then @companion_enabled = true
+      when COMPANION_OFFER_ROW + 1 then @companion_enabled = false
+      when COMPANION_MOTION_ROW    then cycle_companion_motion(1) if @companion_enabled
+      end
+    end
+
+    # A click on an offer row picks it, and a click on the row ALREADY picked confirms —
+    # the picker's "click row · click again opens" rule — so a mouse user has a way to
+    # finish that isn't the keyboard. The Shortcuts recap row toggles, as ←/→ do.
+    private def click_review(box : Rect, mx : Int32, my : Int32) : Nil
+      case card_row(box, mx, my)
+      when REVIEW_SHORTCUTS_ROW then toggle_modifier
+      when REVIEW_OFFER_ROW
+        @offer == :tour ? finish : (@offer = :tour)
+      when REVIEW_OFFER_ROW + 1
+        @offer == :skip ? finish : (@offer = :skip)
       end
     end
 
@@ -635,13 +766,10 @@ module Gori::Tui
       screen.text({w - prog.size - 2, 0}.max, 0, prog, Theme.muted, Theme.bg)
     end
 
+    # Four screens, counted as four: REVIEW used to be labelled "review" after "step 3 of 3",
+    # which read as a step past the end. Same shape as the tour's "n/7".
     private def progress_label : String
-      case @step
-      when Step::Bind       then "step 1 of 3"
-      when Step::Appearance then "step 2 of 3"
-      when Step::Companion  then "step 3 of 3"
-      else                       "review"
-      end
+      "step #{@step.value + 1} of #{Step.values.size}"
     end
 
     private def card_title : String
@@ -654,6 +782,14 @@ module Gori::Tui
     end
 
     private def render_footer(screen : Screen, w : Int32, h : Int32) : Nil
+      # The armed esc outranks everything else on this row, the failed-save notice included:
+      # it is the one state where the next keystroke ends the wizard, and it lasts exactly
+      # until the next key or click (after which the notice is back).
+      if @esc_armed
+        hint = ESC_ARMED_HINTS.find { |s| Screen.draw_width(s) <= w } || ESC_ARMED_HINTS.last
+        screen.text({(w - Screen.draw_width(hint)) // 2, 0}.max, h - 1, hint, Theme.yellow, Theme.bg)
+        return
+      end
       # A failed write displaces the key hint rather than taking a card row of its own:
       # REVIEW's interior is already exactly `content_rows` tall, so a row there would push
       # MIN_H from 15 to 16 and lock out terminals that can otherwise finish setup.
@@ -704,7 +840,7 @@ module Gori::Tui
       ix = box.x + 3
       iw = {box.w - 6, 1}.max
       screen.text(ix, box.y + 2, "Global default bind (projects inherit this)", Theme.text, Theme.panel, width: iw)
-      fy = box.y + 4
+      fy = box.y + BIND_FIELD_ROW
       render_field(screen, box, fy, "Bind IP", @ip, @bind_field == :ip)
       render_field(screen, box, fy + 1, "Bind Port", @port, @bind_field == :port)
       # Two muted lines: this is the *global* layer only. Projects may pin their own
@@ -840,13 +976,13 @@ module Gori::Tui
       iw = {(band || (box.right - 1)) - ix, 1}.max
       screen.text(ix, box.y + 2, "A mascot in the corner, off unless you want her.",
         Theme.text, Theme.panel, width: iw)
-      ry = box.y + 4
+      ry = box.y + COMPANION_OFFER_ROW
       render_offer_row(screen, box, ry, "Show Miss Ring", @companion_enabled, band)
       render_offer_row(screen, box, ry + 1, "No mascot", !@companion_enabled, band)
       # Only while she is on — a motion row under "No mascot" offers a setting for
       # something that isn't there, and its ←/→ hint would advertise a key that (rightly)
       # does nothing in that state.
-      screen.text(ix, ry + 3, "Motion   #{companion_motion_recap}", Theme.muted, Theme.panel, width: iw) if @companion_enabled
+      screen.text(ix, box.y + COMPANION_MOTION_ROW, "Motion   #{companion_motion_recap}", Theme.muted, Theme.panel, width: iw) if @companion_enabled
       # Say the cost out loud: she is the one piece of chrome that repaints while you are
       # at the keyboard, which is why she is opt-in at all.
       screen.text(ix, ry + 4, "She reacts to results, then dozes off after 90s idle.",
@@ -879,16 +1015,24 @@ module Gori::Tui
     private def render_review(screen : Screen, box : Rect) : Nil
       ix = box.x + 3
       y = box.y + 2
-      screen.text(ix, y, "You're all set!", Theme.text_bright, Theme.panel, width: {box.w - 6, 1}.max)
-      y += 2
+      iw = {box.w - 6, 1}.max
+      tx = screen.text(ix, y, "You're all set!", Theme.text_bright, Theme.panel, width: iw)
+      # How to come back, on the one screen every finishing user reads — only when the whole
+      # phrase fits after the headline, since a clipped "re-run anytime: gori wi…" is worse
+      # than none. (The armed-esc footer says the same thing to a user who is leaving.)
+      rerun = "re-run anytime: gori wizard"
+      screen.text(tx + 3, y, rerun, Theme.muted, Theme.panel) if tx + 3 + rerun.size <= box.right - 1
+      y = box.y + REVIEW_RECAP_ROW
       recap_labels = ["Proxy (global)", "Theme", "Miss Ring", "Shortcuts"]
       vx = ix + recap_labels.max_of { |l| Screen.draw_width(l) } + 2 # +2 = min visible gap before the value column
       recap(screen, box, ix, vx, y, "Proxy (global)", "#{effective_ip}:#{@port.strip}"); y += 1
       recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 1
       recap(screen, box, ix, vx, y, "Miss Ring", @companion_enabled ? "on · #{@companion_motion}" : "off"); y += 1
-      # The only EDITABLE recap row (←/→). Spell out both the chords it moves and the
-      # macOS caveat — a user who picks ⌥ without Option-as-Meta would see nothing happen.
-      recap(screen, box, ix, vx, y, "Shortcuts", modifier_recap); y += 2
+      # The only EDITABLE recap row (←/→, or a click). Spell out both the chords it moves
+      # and the macOS caveat — a user who picks ⌥ without Option-as-Meta would see nothing
+      # happen.
+      recap(screen, box, ix, vx, box.y + REVIEW_SHORTCUTS_ROW, "Shortcuts", modifier_recap)
+      y = box.y + REVIEW_OFFER_ROW
       # No prompt line above the offer: the two rows below say "Take the guided tour" /
       # "Skip — finish setup" in full, so "New to gori? Take a quick tour of the TUI:" was
       # restating them. Dropping it is what keeps the Miss Ring recap row free — adding a

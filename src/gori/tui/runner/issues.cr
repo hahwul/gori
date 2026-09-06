@@ -11,7 +11,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # The primary supplies the title/host/evidence; it is the CURSOR row when that is itself a
     # target, else the oldest mark — never `ids.first`, which follows the display order and would
     # hand a different flow the title after a history_list_order flip.
-    primary = history_controller.primary_target_flow_id
+    # `@detail_pin` first: filed from the drill-in, the flow on screen is the primary even when
+    # the list underneath holds marks (the controller only knows the marks and the cursor).
+    primary = @detail_pin || history_controller.primary_target_flow_id
     # Find the first target that still resolves rather than dead-ending on a stale primary: with
     # 5 marks and the primary deleted from another surface, giving up would silently discard four
     # live marks with no form and no toast.

@@ -14,19 +14,6 @@ module Gori::CLI::Run
   end
 end
 
-private def with_store(&)
-  path = File.tempname("gori-cli-oast-sessions", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A custom-http endpoint that answers one poll with one logged request. custom-http is the one
 # provider whose `resume` is a no-op and whose poll is a plain GET, so a resume streams here
 # without a single line of provider-specific scaffolding.

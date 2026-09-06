@@ -85,10 +85,6 @@ private def seed_body_flow(store, needle : String, target : String = "/a") : Int
   id
 end
 
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-end
-
 private def call_result(tools, name, args : String) : Gori::MCP::Tools::Result
   tools.call(name, JSON.parse(args))
 end
@@ -162,7 +158,7 @@ describe "MCP drain_fts_or_error on a WRITABLE store whose drain lost the writer
       tools = tools_for(store)
       r = call_result(tools, "list_history", %({"query":"body:needlethree"}))
       r.is_error.should be_false
-      rows = JSON.parse(r.text).as_a
+      rows = JSON.parse(r.text)["flows"].as_a
       rows.size.should eq(1)
       rows[0]["id"].as_i64.should eq(id)
       store.fts_backlog.should eq(0) # the drain did happen — this is not a pre-indexed pass
@@ -180,7 +176,7 @@ describe "MCP drain_fts_or_error on a WRITABLE store whose drain lost the writer
         r = call_result(tools, "list_history", %({"query":"host:acme.test"}))
       end
       r.is_error.should be_false
-      JSON.parse(r.text).as_a.size.should eq(1)
+      JSON.parse(r.text)["flows"].as_a.size.should eq(1)
     end
   end
 end

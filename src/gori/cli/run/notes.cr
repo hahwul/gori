@@ -5,6 +5,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("notes", help: [
+        {"notes [<n>]", "Read or write the project's notes (list, <n>, --all, create, delete)"},
+      ])]
       private def self.cmd_notes(args : Array(String)) : Nil
         case sub = args.first?
         when "create"       then cmd_notes_create(args[1..])

@@ -135,17 +135,11 @@ describe Gori::AltSvc do
   end
 
   describe "the h3 notice's wiring" do
-    it "is emitted by BOTH transports from the one constructor" do
-      # One wording or two events. `AltSvc` owns the words precisely so an operator comparing
-      # an h1 flow with an h2 one is reading the same fact — the reason `removal_note` is
-      # shared, applied to its mirror.
-      %w[src/gori/proxy/conn/client_conn.cr src/gori/proxy/h2/head_rewrite.cr].each do |path|
-        src = File.read(File.join(__DIR__, "..", path))
-        src.should contain("private def note_alt_svc_kept")
-        src.should contain("Gori::AltSvc.kept_note(kept)")
-      end
-    end
-
+    # What the notice SAYS and WHEN it is logged are asserted on the transports themselves:
+    # spec/proxy/alt_svc_strip_spec.cr (h1) and spec/proxy/h2/head_rewrite_spec.cr both pin the
+    # flow advisory to `AltSvc.kept_note` and the gori.log line to once per host per session.
+    # The two examples left here pin design choices no behaviour can express — WHICH view each
+    # transport detects on, and that the h2 notice is not gated on a rule engine.
     it "detects on the view each transport's own bytes have" do
       # NOT one shared helper, and that is the point. h1 asks `strip_h3` (and throws the bytes
       # away) because the parsed projection is a different view of the same head — see the
@@ -165,16 +159,6 @@ describe Gori::AltSvc do
       # REQUEST direction keeps its own gates — a rule, or `notice_unreachable`'s extractor.
       src = File.read(File.join(__DIR__, "..", "src/gori/proxy/h2/relay.cr"))
       src.should contain(%(if rw || @extractor || direction == "in"))
-    end
-
-    it "is announced to gori.log once per host per SESSION, not per connection" do
-      # This half fires in the DEFAULT configuration (`strip_alt_svc` is off) against origins
-      # that mostly advertise h3, and a browser opens several connections per origin. The
-      # strip's per-connection latches beside it were affordable only because it is opt-in.
-      %w[src/gori/proxy/conn/client_conn.cr src/gori/proxy/h2/head_rewrite.cr].each do |path|
-        File.read(File.join(__DIR__, "..", path))
-          .should contain("Settings.first_alt_svc_h3_notice?")
-      end
     end
   end
 

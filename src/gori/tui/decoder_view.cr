@@ -8,6 +8,7 @@ require "./read_pane"
 require "./text_read_state"
 require "./viewport"
 require "./gutter"
+require "./text_field"
 require "../decoder"
 require "./subtab_marks"
 
@@ -28,6 +29,11 @@ module Gori::Tui
     # Custom sub-tab chip label (nil = derive from the chain spec); set by rename.
     property name : String? = nil
 
+    # How much of a step's output feeds its PIPELINE preview. A multiple of 3 so the
+    # base64 of the prefix IS the prefix of the base64 (no phantom padding mid-row), and
+    # far wider than any row: the draw clamps to the card.
+    PREVIEW_BYTES = 3072
+
     @prefer : Decoder::RenderAs? = nil # nil = auto
     @prefer_idx : Int32 = 0
     @last_step_count : Int32 = 0
@@ -40,6 +46,14 @@ module Gori::Tui
     # clipboard. Built in the same pass, and 1:1 with @out_lines (see `output_copy_text`).
     @out_raw : Array(String) = [] of String
     @out_dirty : Bool = true
+    # The PIPELINE rows' one-line previews, one per step, rebuilt on the same dirty flag.
+    # These were derived per FRAME — `Decoder.display` over each step's WHOLE output (a
+    # base64 pass for binary), then a char-by-char sanitize — to fill one ~75-cell row:
+    # three 16 MiB intermediates cost 1.5 s a frame, and a frame is anything that redraws
+    # (proxy traffic, the status tick, mouse motion), not just a Decoder edit. Now bounded
+    # to `PREVIEW_BYTES` of each step and cached until the next recompute.
+    @step_previews : Array(String) = [] of String
+    @steps_dirty : Bool = true
     # The OUTPUT pane's caret, selection, both scroll axes and its whole draw. Gutter on: these
     # rows ARE source lines of the decoded text, and ^G-style line references only mean
     # something with numbers beside them.
@@ -141,6 +155,9 @@ module Gori::Tui
 
     # CHAIN — a framed single-line spec field with a "›" prompt; gold when focused.
     # Only the focused field shows the block caret (matches Repeater's target row).
+    # The value is WINDOWED around the caret (`chain_window`) like every TextField: a spec
+    # wider than the card — an `exec:` argv, a long library chain — used to clip at the
+    # border with the caret off-screen, so every further keystroke was blind.
     private def render_chain(screen : Screen, card : Rect, chain : String, chain_cx : Int32,
                              chain_pre : String, active : Bool) : Nil
       Frame.card(screen, card, "CHAIN", bg: Theme.bg, border: Frame.pane_border(active))
@@ -148,12 +165,20 @@ module Gori::Tui
       return if c.h <= 0
       screen.text(c.x, c.y, "› ", Theme.accent, Theme.bg)
       fg = active ? Theme.text_bright : Theme.text
-      vw = {c.w - 2, 1}.max
       if active
-        screen.input_line(c.x + 2, c.y, chain, chain_cx, chain_pre, fg, Theme.bg, width: vw)
+        off, vw = chain_window(card, chain, chain_cx, chain_pre)
+        screen.input_line(c.x + 2, c.y, chain[off..], chain_cx - off, chain_pre, fg, Theme.bg, width: vw)
       else
-        screen.text(c.x + 2, c.y, chain, fg, Theme.bg, width: vw)
+        screen.text(c.x + 2, c.y, chain, fg, Theme.bg, width: {c.w - 2, 1}.max)
       end
+    end
+
+    # The CHAIN field's horizontal window: {first visible char index, field width}. Shared
+    # by the draw above and the controller's click handler, which must rebase the clicked
+    # column by the same offset or a click into a scrolled spec lands `off` chars early.
+    def chain_window(card : Rect, chain : String, chain_cx : Int32, chain_pre : String) : {Int32, Int32}
+      vw = {card.inset(1, 1).w - 2, 1}.max
+      {TextField.window_start(chain, chain_cx, chain_pre, vw), vw}
     end
 
     # PIPELINE — a read-only card (never focusable), one row per step.
@@ -181,23 +206,43 @@ module Gori::Tui
           Theme.muted, Theme.bg, width: rect.w) if rect.h > 0
         return
       end
+      previews = step_previews(result)
       (0...rect.h).each do |i|
         s = result.steps[i]?
         break unless s
         y = rect.y + i
         x = screen.text(rect.x, y, "#{i + 1} ", Theme.muted, Theme.bg)
-        if s.ok? && (data = s.output)
-          x = screen.text(x, y, s.name, Theme.text_bright, Theme.bg)
-          x = screen.text(x, y, " › ", Theme.muted, Theme.bg)
-          screen.text(x, y, preview(data), Theme.text, Theme.bg, width: {rect.right - x, 0}.max)
+        # Every run is width-clamped, the NAME included: an `exec:` step's name is its whole
+        # argv, and unclamped it ran over the card's right border and left the trailing
+        # status (the failure reason, most of all) a zero-width draw.
+        if s.ok?
+          x = screen.text(x, y, s.name, Theme.text_bright, Theme.bg, width: room(rect, x))
+          x = screen.text(x, y, " › ", Theme.muted, Theme.bg, width: room(rect, x))
+          screen.text(x, y, previews[i]? || "", Theme.text, Theme.bg, width: room(rect, x))
         elsif s.state.skipped?
-          x = screen.text(x, y, s.name, Theme.muted, Theme.bg)
-          screen.text(x, y, " — skipped", Theme.muted, Theme.bg, width: {rect.right - x, 0}.max)
+          x = screen.text(x, y, s.name, Theme.muted, Theme.bg, width: room(rect, x))
+          screen.text(x, y, " — skipped", Theme.muted, Theme.bg, width: room(rect, x))
         else
-          x = screen.text(x, y, s.name, Theme.red, Theme.bg)
-          screen.text(x, y, " ✗ #{s.error}", Theme.red, Theme.bg, width: {rect.right - x, 0}.max)
+          x = screen.text(x, y, s.name, Theme.red, Theme.bg, width: room(rect, x))
+          screen.text(x, y, " ✗ #{s.error}", Theme.red, Theme.bg, width: room(rect, x))
         end
       end
+    end
+
+    # Cells left on a row from `x` to the card's edge (a method, not a closure: this is the
+    # per-frame path, and a closure over the reassigned `x` allocates per row).
+    private def room(rect : Rect, x : Int32) : Int32
+      {rect.right - x, 0}.max
+    end
+
+    # The cached one-line previews (see `@step_previews`). A step that produced nothing
+    # (failed / skipped / held) gets "" — its row draws a status instead.
+    private def step_previews(result : Decoder::ChainResult) : Array(String)
+      if @steps_dirty
+        @step_previews = result.steps.map { |s| (s.ok? && (d = s.output)) ? preview(d) : "" }
+        @steps_dirty = false
+      end
+      @step_previews
     end
 
     # The OUTPUT card's interior. Everything below `output_lines` — the scroll clamps, the
@@ -354,13 +399,27 @@ module Gori::Tui
       end
     end
 
-    # The OUTPUT bytes for clipboard copy (empty string when the chain failed).
+    # The OUTPUT pane's whole text for clipboard copy — the same text `output_copy_text`
+    # (the selection copy) reads, so the two Copy verbs agree: a failed chain's `✗ step:
+    # reason` line is what the pane shows, and "copy all" on a pane with text in it used to
+    # answer "nothing to copy" while `y` copied that line.
     def output_copy(result : Decoder::ChainResult) : String
-      (b = result.output) ? Decoder.display(b, @prefer)[0] : ""
+      output_raw_text(result)
     end
 
-    # A single-line, control-char-sanitized preview of one step's bytes.
+    # A single-line, control-char-sanitized preview of one step's bytes — of its first
+    # `PREVIEW_BYTES` only (a row never shows more). The cut is backed off to a UTF-8
+    # boundary so a text prefix stays text; a blob whose invalid bytes lie PAST the cut
+    # previews as text where the OUTPUT card (which judges the whole value) shows base64 —
+    # a preview's honest limit, and cheaper than a full scan per step per recompute.
     private def preview(bytes : Bytes) : String
+      if bytes.size > PREVIEW_BYTES
+        cut = PREVIEW_BYTES
+        while cut > PREVIEW_BYTES - 3 && (bytes[cut] & 0xC0) == 0x80 # a continuation byte
+          cut -= 1
+        end
+        bytes = bytes[0, cut]
+      end
       s, _ = Decoder.display(bytes)
       sanitize_row(s)
     end
@@ -387,10 +446,15 @@ module Gori::Tui
       String.build(text.bytesize) { |io| text.each_char { |ch| io << (ch.control? ? '·' : ch) } }
     end
 
+    # The pane is RESET with the re-encode: HEX/B64 is one line where text was many, so a
+    # caret or ⇧-selection carried over sits at coordinates the new text does not have — no
+    # caret drawn, `y` copying "" (or a hex fragment at the old offsets), and ↑ needing two
+    # presses to reach CHAIN. Different text, fresh cursor — `ReadPane#source`'s own rule.
     def cycle_out_mode : Nil
       @prefer_idx = (@prefer_idx + 1) % PREFER_CYCLE.size
       @prefer = PREFER_CYCLE[@prefer_idx]
       @out_dirty = true # re-encode the output for the new mode
+      @out.reset
     end
 
     # Hit-test the OUTPUT card's ` ^X:MODE ` badge (same geometry as render_output_card).
@@ -413,7 +477,15 @@ module Gori::Tui
     # the cached output lines (the content changed).
     def reset_output_scroll : Nil
       @out_dirty = true
+      @steps_dirty = true
       @out.reset
+    end
+
+    # The result was re-derived but its OUTPUT text did not move (`library_changed` keeps the
+    # operator's place then) — the PIPELINE rows may still differ, since a saved name's
+    # recipe changing alters an INTERMEDIATE while the final answer stays the same.
+    def invalidate_previews : Nil
+      @steps_dirty = true
     end
   end
 

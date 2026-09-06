@@ -2405,7 +2405,21 @@ module Gori::Proxy
       end
 
       target = req.target
-      if target.starts_with?("http://") || target.starts_with?("https://")
+      # `Url.absolute_form?` and not a `starts_with?("http://")` pair — the one home, for the
+      # reason `pinned_origin_head` below states and the SOCKS5 listener already paid for. RFC
+      # 3986 §3.1 makes a scheme case-insensitive and gori keeps the request line verbatim (P7),
+      # so `GET HTTP://host/p` really arrives here. The case-SENSITIVE pair read it as ORIGIN
+      # form, which broke the same two things twice over: gori forwarded a proxy-only request
+      # line to an origin (a lenient CDN/gateway routes on its authority, so gori's own forward
+      # chose a destination the operator never named), and the dial came from the `Host` header
+      # while `Url.request_url` — case-INSENSITIVE — handed scope, Sandbox and History the URI's
+      # authority instead. RFC 9112 §3.2.2 makes the absolute form authoritative for a proxy and
+      # `Host` the field to ignore when the two disagree.
+      #
+      # `URI.parse` lower-cases the scheme, so `scheme` below is `"http"`/`"https"` whatever the
+      # client spelled — the form every downstream reader (the recorded flow's `scheme` column,
+      # the default port, `Url.request_url`) already assumes.
+      if Gori::Url.absolute_form?(target)
         uri = URI.parse(target)
         scheme = uri.scheme || "http"
         host = uri.host || ""
@@ -2436,9 +2450,9 @@ module Gori::Proxy
     #     History lens read was a completely different authority from the one gori dialled —
     #     `http://evil.example.com/` for a connection pinned to `127.0.0.1:19090`.
     #
-    # `Url.absolute_form?` rather than the branch below's `starts_with?("http://")`: RFC 3986
-    # §3.1 makes the scheme case-insensitive, and a `HTTP://` target is the same instruction to
-    # a lenient recipient.
+    # `Url.absolute_form?` here and in `resolve_forward` above, one predicate on both paths:
+    # RFC 3986 §3.1 makes the scheme case-insensitive, and a `HTTP://` target is the same
+    # instruction to a lenient recipient.
     private def pinned_origin_head(req : Codec::RawRequest) : Bytes
       return req.raw_head unless Gori::Url.absolute_form?(req.target)
       # `URI::Error`/`OverflowError` here is the malformed-target case `handle_request` already
@@ -2849,13 +2863,19 @@ module Gori::Proxy
     # Once per connection. Intercept is ON and this message never appeared in the queue, so the
     # operator has to be told why rather than left waiting on a hold that will not come
     # (modelled on `H2::StreamGate#warn_overflow`, which says the same thing for h2).
+    #
+    # `Interceptor#note_unheld` as well as the log line, and that is the half that makes the
+    # sentence above true: under `gori tui` a `::Log.warn` reaches neither the notification
+    # centre nor stderr — it lands in `~/.gori/gori.log` — so "the operator has to be told" was
+    # satisfied by a file nobody watching a hold queue is reading. Same objection
+    # `WS::MessageGate#note` already raises for its own two accountings.
     private def warn_hold_oversize(direction : String, len : Int64) : Nil
       return if @warned_hold_oversize
       @warned_hold_oversize = true
-      ::Log.warn do
-        "intercept: #{direction} body declares #{len} bytes, over the #{MAX_REWRITE_BODY}-byte " \
-        "hold ceiling — forwarding it unheld"
-      end
+      msg = "intercept: a #{direction} body declaring #{len} bytes is over the " \
+            "#{MAX_REWRITE_BODY}-byte hold ceiling — forwarded UNHELD"
+      ::Log.warn { msg }
+      @interceptor.try(&.note_unheld(msg))
     end
 
     # Whether the buffered response-body path applies: SOMETHING needs the whole entity, the
@@ -3142,9 +3162,9 @@ module Gori::Proxy
     private def keep_alive?(req : Codec::RawRequest, resp : Codec::RawResponse,
                             resp_framing : Codec::BodyFraming) : Bool
       return false if resp_framing.close_delimited? # body ends at close
-      return false if connection_lists?(req.headers.get?("Connection"), "close")
-      return false if connection_lists?(resp.headers.get?("Connection"), "close")
-      req.version == "HTTP/1.1" || connection_lists?(req.headers.get?("Connection"), "keep-alive")
+      return false if req.headers.lists?("Connection", "close")
+      return false if resp.headers.lists?("Connection", "close")
+      req.version == "HTTP/1.1" || req.headers.lists?("Connection", "keep-alive")
     end
 
     # Whether the ORIGIN will keep its connection open after this response, so its
@@ -3161,9 +3181,9 @@ module Gori::Proxy
     private def origin_keep_alive?(sent_req : Codec::RawRequest, resp : Codec::RawResponse,
                                    resp_framing : Codec::BodyFraming) : Bool
       return false if resp_framing.close_delimited?
-      return false if connection_lists?(sent_req.headers.get?("Connection"), "close")
-      return false if connection_lists?(resp.headers.get?("Connection"), "close")
-      resp.version == "HTTP/1.1" || connection_lists?(resp.headers.get?("Connection"), "keep-alive")
+      return false if sent_req.headers.lists?("Connection", "close")
+      return false if resp.headers.lists?("Connection", "close")
+      resp.version == "HTTP/1.1" || resp.headers.lists?("Connection", "keep-alive")
     end
 
     # Whether a request may be transparently REPLAYED on a fresh connection after a
@@ -3187,15 +3207,6 @@ module Gori::Proxy
     # a bodyless framing keeps the capture unallocated.
     private def capture_hint(framing : Codec::BodyFraming, length : Int64) : Int64
       framing.length? ? length : 0_i64
-    end
-
-    # True when a Connection header field lists `token` (case-insensitive) as one of its
-    # comma-separated connection-options — e.g. `Connection: keep-alive, close` carries BOTH
-    # `keep-alive` and `close`. Comparing the whole value (the old header_token) missed a
-    # token embedded in such a list, so a peer signalling close would be parked as persistent.
-    private def connection_lists?(value : String?, token : String) : Bool
-      return false unless value
-      value.downcase.split(',').any? { |t| t.strip == token }
     end
 
     private def now_us : Int64

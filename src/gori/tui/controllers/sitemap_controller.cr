@@ -14,6 +14,13 @@ module Gori::Tui
       @sitemap = SitemapView.new
       @sitemap.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
       @query_reload_at = nil.as(Time::Instant?)
+      # The `/` bar's reload off the main fiber (the History #967 shape): one running read
+      # and one replaceable request. A superseded read is cancelled and its answer dropped
+      # by generation, so a fast typist never sees an older query's tree land last.
+      @search_generation = 0_i64
+      @search_control = nil.as(Store::QueryControl?)
+      @search_pending = nil.as({Store, SitemapView::ReloadPlan, Int64}?)
+      @search_results = Channel({Int64, SitemapView::ReloadPlan, {Array({String, String, String}), Hash({String, String}, String)}?}).new(1)
     end
 
     def view : SitemapView
@@ -33,6 +40,10 @@ module Gori::Tui
       end_range_gesture # a page key is cursor nav, like ↑/↓
       @sitemap.move(delta)
       true
+    end
+
+    def page_rows : Int32?
+      @sitemap.list_page_rows
     end
 
     # esc clears the marks. Runs BEFORE the Sitemap keymap, so this shadows sitemap.to-menu
@@ -66,6 +77,41 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       handle_click_content(rect.inset(1, 1), mx, my)
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      handle_double_click_content(rect.inset(1, 1), mx, my)
+    end
+
+    # `y`: every marked row as `host/path`, one per line — or the cursor row's seed, which is
+    # the host for a host row and `host/path` below it (the string `a` would scope). The tree
+    # carries no scheme, so this is the URL minus its scheme, the way the rows read.
+    def copy_row : Nil
+      keys = @sitemap.marked_keys
+      text = if keys.empty?
+               @sitemap.selected_scope_seed.try(&.[:pattern]) || ""
+             else
+               keys.map { |(host, path)| "#{host}#{path}" }.join("\n")
+             end
+      copy_text(text, keys.size > 1 ? "#{keys.size} paths" : nil)
+    end
+
+    # The universal tree gesture: a double-click on a row's LABEL folds or unfolds a folder
+    # and opens a leaf's flow (what `o` does). Expand/collapse used to answer only on the
+    # one-column ▾/▸ marker, and a double-click there was a net no-op — the first press of
+    # the pair had already toggled, the second toggled back. So the marker column is
+    # swallowed here (true, nothing done): the pair reads as one toggle. Off every row it
+    # answers false and the shell delivers the second press as an ordinary click.
+    def handle_double_click_content(content : Rect, mx : Int32, my : Int32) : Bool
+      return false unless ri = @sitemap.row_at(content, mx, my)
+      return true if @sitemap.marker_hit?(content, mx, ri)
+      @sitemap.select_index(ri)
+      if @sitemap.leaf_at?(ri)
+        @host.sitemap_open_flow
+      else
+        @sitemap.toggle_at(ri)
+      end
+      true
     end
 
     # Click hit-test against the content rect directly (TargetController passes the rect
@@ -125,10 +171,10 @@ module Gori::Tui
       # Marks survive a filter change, so the `/` affordance stays up while they're set.
       # `space tag`, not `⇧T`: tagging is menu-only now — ⇧T meant "mark all" in every other
       # marked list, so a hand that learnt `t`/⇧T there opened a text prompt here.
-      return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · space tag · space cmds · esc clears marks") if @sitemap.mark_count > 0
+      return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.copy} copy · space cmds (tag) · esc clears marks") if @sitemap.mark_count > 0
       # `space cmds` on BOTH branches. The mark-set branch above named it and this one did not,
       # so the same tab advertised the space menu only while marks happened to be set.
-      keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · ↵/→ expand · space cmds · esc sub-tabs")
+      keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · ↵/→ expand · {sitemap.copy} copy · space cmds · esc sub-tabs")
     end
 
     # Live IME composition flows to whichever text field is open (the QL filter bar or
@@ -154,8 +200,72 @@ module Gori::Tui
     # Re-derive the tree from the store under the current scope filter + `/` query
     # (both held by the view). Public so the scope-lens toggle (a cross-tab action
     # mediated by the shell) can refresh it.
+    # A synchronous reload (tab entry, an external change, an import) supersedes any read the
+    # bar has in flight — its answer would otherwise land AFTER this one, showing an older
+    # query's tree.
     def reload : Nil
+      invalidate_search
+      @sitemap.searching = false
       @sitemap.reload(@host.session.store)
+    end
+
+    private def invalidate_search : Nil
+      @search_generation += 1
+      @search_control.try(&.cancel)
+      @search_pending = nil
+    end
+
+    # The debounced flush: compile the query here, read on a worker, build on return.
+    private def request_reload(store : Store) : Nil
+      invalidate_search
+      unless plan = @sitemap.prepare_reload
+        @sitemap.searching = false # an invalid residual settled the tree by itself
+        return
+      end
+      @sitemap.searching = true
+      @search_pending = {store, plan, @search_generation}
+      start_search
+    end
+
+    private def start_search : Nil
+      return if @search_control
+      return unless pending = @search_pending
+      @search_pending = nil
+      store, plan, generation = pending
+      control = Store::QueryControl.new
+      @search_control = control
+      results = @search_results
+      view = @sitemap
+      spawn(name: "gori-sitemap-search") do
+        result = nil.as({Array({String, String, String}), Hash({String, String}, String)}?)
+        begin
+          control.check!
+          result = view.fetch_reload(store, plan, control)
+        rescue Store::QueryCancelled
+          # Superseded/closed is not a failed query and never means an empty tree.
+        rescue ex
+          ::Log.warn { "sitemap worker failed: #{ex.message}" }
+        ensure
+          results.send({generation, plan, result})
+        end
+      end
+    end
+
+    # Called each run-loop tick: land a finished read. True when it did (→ a frame).
+    def drain_search : Bool
+      select
+      when done = @search_results.receive
+        @search_control = nil
+        generation, plan, result = done
+        if generation == @search_generation
+          @sitemap.searching = false
+          @sitemap.apply_reload(result[0], result[1], plan) if result
+        end
+        start_search
+        true
+      else
+        false
+      end
     end
 
     # --- QL filter bar (a text sub-mode; the shell claims it before the focus ring) ---
@@ -164,7 +274,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       store = @host.session.store
-      return true if query_nav(key)
+      return true if query_nav(ev)
       case
       when key.enter?  then query_enter
       when key.escape? then query_escape(store)
@@ -189,8 +299,12 @@ module Gori::Tui
     # gate CI runs, and "move something" is a different question from "what does this key do".
     # `↓`/`↑` were dead in this bar before the dropdown — a one-line field has no second row to
     # move a caret to — which is why they could be claimed without displacing anything.
-    private def query_nav(key) : Bool
+    private def query_nav(ev : Termisu::Event::Key) : Bool
+      key = ev.key
       case
+      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
+        @sitemap.query_edit(act)
+        schedule_query_reload if LineEdit.mutating?(act)
       when key.down?  then @sitemap.popup_down
       when key.up?    then @sitemap.popup_up
       when key.left?  then @sitemap.query_move(-1)
@@ -215,6 +329,8 @@ module Gori::Tui
       return @sitemap.popup_close if @sitemap.popup_open?
       @query_reload_at = nil
       @sitemap.cancel_query
+      invalidate_search
+      @sitemap.searching = false
       @sitemap.reload(store)
     end
 
@@ -236,7 +352,7 @@ module Gori::Tui
     private def flush_query_reload : Nil
       return unless @query_reload_at
       @query_reload_at = nil
-      @sitemap.reload(@host.session.store)
+      request_reload(@host.session.store)
     end
 
     # `/` — focus the QL filter bar (verb-dispatched).
@@ -288,14 +404,30 @@ module Gori::Tui
       end
       text = @sitemap.tag_buffer
       store = @host.session.store
-      targets.each { |(host, path)| store.set_sitemap_tag(host, path, text) }
-      @sitemap.apply_tag(text) # stamp every target in place — keeps the selection, no re-derive
+      # The store answers whether each write COMMITTED (`set_sitemap_tag`'s own comment: the
+      # answer exists because dropping it "made every caller report the change for a
+      # rolled-back batch"). This dropped it, so a project whose writer a peer held reported
+      # "tagged", stamped the memo onto the tree, and let the next reload take it back with no
+      # word — the memo was on nobody's disk. Stamp what landed, name what did not; MCP's
+      # `set_sitemap_tag` already refuses in the same terms.
+      committed = targets.select { |(host, path)| store.set_sitemap_tag(host, path, text) }
+      @sitemap.apply_tag(text, committed) # stamp in place — keeps the selection, no re-derive
       # A `tag:` filter must re-evaluate against the changed tags (the in-place stamp
       # doesn't re-filter), else the just-tagged node stays hidden / a cleared tag shown.
       reload if @sitemap.filtering?
+      # `blank?`, not `empty?`: a memo of nothing but spaces is a CLEAR everywhere the write
+      # lands — `Store#set_sitemap_tag` DELETEs on `tag.blank?` and `apply_tag` stamps nil on
+      # the same test — so an `empty?` here said `tagged: "  "` over a tag that had just been
+      # removed, and named a refused clear "NOT tagged". Same predicate, same sentence.
+      cleared = text.blank?
+      refused = targets.size - committed.size
+      if refused > 0
+        return @host.status(
+          "#{paths(refused)} NOT #{cleared ? "cleared" : "tagged"} (project busy) — try again", :error)
+      end
       n = targets.size
       @host.status(
-        if text.empty?
+        if cleared
           n == 1 ? "tag cleared" : "cleared #{n} tags"
         else
           n == 1 ? "tagged: #{text}" : "tagged #{paths(n)}: #{text}"

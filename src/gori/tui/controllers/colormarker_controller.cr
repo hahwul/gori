@@ -59,6 +59,11 @@ module Gori::Tui
       Settings.colormarker_colors
     end
 
+    # `y`: the selected rule's match filter — the QL that paints the row, pasteable into a bar.
+    def colormarker_copy : Nil
+      copy_text(selected_rule.try(&.match_filter) || "")
+    end
+
     def selected_rule : Store::ColorRule?
       rule_list[@sel]?
     end
@@ -142,9 +147,9 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @focus == :colors
-        "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc tabs"
+        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.delete} delete · space cmds · esc tabs")
       else
-        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.delete} delete · space cmds · ↹ colours")
+        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.copy} copy · {colormarker.delete} delete · space cmds · ↹ colours")
       end
     end
 
@@ -173,7 +178,34 @@ module Gori::Tui
         @host.open_space_menu
         return true
       end
+      # Every modified chord defers to the keymap, the same gate the ten sibling controllers
+      # open with. Both pane handlers below read `ev.char || key.to_char`, and termisu decodes
+      # Ctrl+A as `(LowerA, Modifier::Ctrl)` while `Event::Key#char` falls back to
+      # `key.to_char` — so without this line `^A` arrived carrying `'a'` and the colours pane's
+      # `c == 'a'` arm opened ADD CUSTOM COLOUR. `^E` is worse than a surprise: it is in
+      # `Hotkeys::CLAIMED_CTRL_LETTERS` (the global "open in $EDITOR"), whose contract is that
+      # a controller may only hardcode Ctrl guards listed there. `^A`/`^X` are neither claimed
+      # nor reserved, so the hotkey editor binds them and the binding was shadowed here.
+      # This tab has no text editor, so nothing below needs to see a modified chord — except
+      # the colours pane's two REBINDABLE chords, checked first because a `chord_of?` match is
+      # exact, modifiers included, so a rebind onto a Ctrl chord still reaches its action.
+      return true if @focus == :colors && handle_colors_chord(ev)
+      return false if ev.ctrl? || ev.alt?
       @focus == :colors ? handle_colors_key(ev, key) : handle_rules_key(ev, key)
+    end
+
+    # The chords the colours strip names for add/delete — `{colormarker.add} add ·
+    # {colormarker.delete} delete` — not the literal letters, which stopped matching the
+    # strip the moment either verb was rebound (`TabController#chord_of?`).
+    private def handle_colors_chord(ev : Termisu::Event::Key) : Bool
+      if chord_of?(ev, "colormarker.add")
+        customcolor_add
+      elsif chord_of?(ev, "colormarker.delete")
+        customcolor_delete
+      else
+        return false
+      end
+      true
     end
 
     private def handle_rules_key(ev : Termisu::Event::Key, key) : Bool
@@ -198,8 +230,7 @@ module Gori::Tui
       when key.up?, c == 'k'    then colors_up
       when key.down?, c == 'j'  then colors_down
       when key.enter?, c == 'e' then customcolor_edit
-      when c == 'a'             then customcolor_add
-      when c == 'd'             then customcolor_delete
+        # `a`/`d` — the add/delete chords — are answered in `handle_colors_chord` above.
       else
         # Defer everything else to the keymap. A rule chord (x/s/⇧J/…) resolves to a verb whose
         # `available?` is gated on the POLICY pane being focused, so it is a no-op here rather
@@ -283,6 +314,21 @@ module Gori::Tui
     # ensure_visible brings the viewport along.
     def handle_wheel(step : Int32) : Bool
       @focus == :colors ? move_color_sel(step) : move_sel(step)
+      true
+    end
+
+    # RULES and COLOURS sit side by side, so the notch goes to the pane under the pointer,
+    # not the focused one (#956); off both panes it falls back to the focused pane.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      inner = BodyChrome.frame_inner(rect)
+      rules_r, colors_r = @view.pane_rects(inner)
+      if !colors_r.empty? && colors_r.contains?(mx, my)
+        move_color_sel(step)
+      elsif !rules_r.empty? && rules_r.contains?(mx, my)
+        move_sel(step)
+      else
+        return handle_wheel(step)
+      end
       true
     end
 

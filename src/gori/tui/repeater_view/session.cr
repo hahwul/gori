@@ -60,7 +60,7 @@ class Gori::Tui::RepeaterView
   end
 
   def replace_edit_buffer(text : String) : Nil
-    req_editor.set_text(text)
+    req_editor.replace_from_outside(text)
     mark_req_edit
   end
 
@@ -298,7 +298,8 @@ class Gori::Tui::RepeaterView
     @scx = @sni.size
     @target_field = :url
 
-    is_ws = !ws_messages.nil? || Repeater::WsEngine.upgrade_request?(request)
+    # `replayable?`, so a stored RFC 8441 handshake restores as the WebSocket tab it is (#733).
+    is_ws = !ws_messages.nil? || Repeater::WsEngine.replayable?(request)
     # The stored override only means anything on a tab that HOLDS a handshake; a row that
     # carries it without one (a request edited out of upgrade shape by a peer) reads as the
     # plain HTTP tab it now is, rather than a tab claiming to override a mode it isn't in.
@@ -408,6 +409,14 @@ class Gori::Tui::RepeaterView
     @grpc_reframe = src.@grpc_reframe # a send knob, so the clone sends what the source would
     @grpc_compressed = src.@grpc_compressed
     @grpc_payload = src.@grpc_payload.dup # carry any hex-edited payload into the clone
+    # `@grpc_web_text` and the residual decide HOW the body is framed on the wire
+    # (`grpc_send_body`): grpc-web-text base64-encodes the 5-byte-prefixed frame, plain gRPC
+    # does not. Omitting them left the clone at the `false` default, so a duplicated
+    # `application/grpc-web-text` tab sent raw binary framing (and, with reframe off,
+    # `grpc_stale_frame` read the first five BASE64 characters as the length prefix) — a
+    # request the source would never send.
+    @grpc_web_text = src.@grpc_web_text
+    @grpc_req_residual = src.@grpc_req_residual
     @grpc_lines_cache = nil
 
     @decode_kind = src.@decode_kind

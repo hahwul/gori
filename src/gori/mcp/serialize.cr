@@ -430,7 +430,18 @@ module Gori
           j.field "held_at_ms", row.held_at_ms
           j.field "held_at_iso", unix_micros_iso(row.held_at_ms * 1000)
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
-          j.field "edited", row.edited
+          # TRUE while the HUMAN operator has unsaved edits typed into this hold (mirrored from
+          # `InterceptView#held_edit_id`). Nothing ever set it, so it answered false for every
+          # item that has ever been held — while an agent forwarding one of these discards the
+          # operator's work, and their only sign is the note saying it was forwarded.
+          #
+          # `operator_editing`, NOT the column's own name: `intercept_forward_edit`'s ack has
+          # long emitted `edited: true` meaning "the edit you sent was applied", so one key
+          # across one tool family would have carried two opposite subjects — "a human is
+          # rewriting this, leave it" and "your rewrite went out". Renaming this side is free
+          # because it could never be true before now, so no caller can be reading it for
+          # signal; the ack keeps the name its own meaning has always had.
+          j.field "operator_editing", row.edited
           emit_edit_warning(j, row)
           j.field "body_size", body.size
           if row.ws?
@@ -488,7 +499,7 @@ module Gori
           j.field "flow_id", row.flow_id if row.flow_id
           j.field "held_at_ms", row.held_at_ms
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
-          j.field "edited", row.edited
+          j.field "operator_editing", row.edited # see the list projection above
           emit_edit_warning(j, row)
           # `head`/`body_preview` split by kind, for the reason `held_head_and_body` states.
           if row.ws?
@@ -786,13 +797,20 @@ module Gori
           j.field "error", text(detail.error)
           j.field "request_head", redact_head_opt(head_text(detail.request_head), include_sensitive)
           emit_head_base64(j, "request_head", detail.request_head, include_sensitive)
+          # `source_size` ONLY when the capture cap actually cut: the number an agent needs is
+          # "2048 stored of 2,684,354,889", not "2048 of 2048". Without it `wire_truncated`
+          # said a cut happened and nothing said how big — the difference between paging the
+          # rest (there is none) and re-sending under a larger cap. `FlowDetail` already
+          # recovers the wire size by subtracting the head from the row total.
           emit_body(j, "request_body", detail.request_head, detail.request_body,
-            detail.request_body_truncated?, body_cap, body_omit, include_sensitive)
+            detail.request_body_truncated?, body_cap, body_omit, include_sensitive,
+            source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil)
           j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
           emit_head_base64(j, "response_head", detail.response_head, include_sensitive)
           j.field "sensitive_headers_redacted", true unless include_sensitive
           emit_body(j, "response_body", detail.response_head, detail.response_body,
-            detail.response_body_truncated?, body_cap, body_omit, include_sensitive)
+            detail.response_body_truncated?, body_cap, body_omit, include_sensitive,
+            source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil)
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs)
           emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,
@@ -842,9 +860,20 @@ module Gori
             end
             if residual > 0
               j.field "residual_bytes", residual
-              j.field "framing_error",
-                "the last #{residual} byte#{residual == 1 ? "" : "s"} are not a complete gRPC frame — " \
-                "a length prefix claiming more than arrived, or a body cut short"
+              # ONE author for the sentence (`Grpc.framing_error`) — it was hand-copied here and
+              # into `CLI::Run::History`, which is how two surfaces come to describe one body
+              # differently.
+              j.field "framing_error", Proxy::H2::Grpc.framing_error(residual)
+            end
+            # The CALL's outcome when grpc-web put it in this body. Native gRPC ends in HTTP/2
+            # trailers, which reach the agent in this flow's response headers; grpc-web has
+            # none, so without this an agent could only get it by hand-parsing a trailer frame's
+            # `headers` map — and the HTTP status is 200 for a denial as much as for a grant.
+            gs, gm = Proxy::H2::Grpc.trailer_status(msgs)
+            if gs
+              j.field "grpc_status", gs
+              j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+              j.field "grpc_message", text(gm) if gm
             end
             j.field "truncated", true if msgs.size > GRPC_MSGS_MAX
             j.field "messages" do

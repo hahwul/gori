@@ -18,7 +18,7 @@ Select a token anywhere (a **History** detail pane, **Notes**, …) and `Space` 
 
 ## Two Lenses
 
-One session, two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border — ` ^T:→ENCODE ` on INPUT, ` ^T:→DECODE ` on HEADER — and clicking it does the same thing as the key:
+One session, two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border (` ^T:→ENCODE ` on INPUT, ` ^T:→DECODE ` on HEADER), and clicking it does the same thing as the key:
 
 - **Decode**: paste a token into INPUT and the header, payload, and signature decode live. Below them is a selectable list of generated **attack payloads**.
 - **Encode**: edit the HEADER and PAYLOAD as JSON, choose an algorithm (`Ctrl-A` cycles `HS256` / `HS384` / `HS512` / `none`), set a SECRET, and the re-signed token appears live in OUTPUT.
@@ -50,7 +50,7 @@ gori run jwt eyJhbGci... --attacks             # print the attack payloads
 cat token.txt | gori run jwt --attacks         # token from stdin
 ```
 
-The token comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--format` is `text` or `json`. On `--encode`, `--set KEY=VALUE` patches one claim (repeatable — the value is JSON when it parses, so `admin=true` is a boolean and `role=admin` a string) and `--payload JSON` replaces the whole claims object; the two are mutually exclusive. See the [CLI Reference](/reference/cli/#run-jwt).
+The token comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--format` is `text` or `json`. On `--encode`, `--set KEY=VALUE` patches one claim (repeatable; the value is JSON when it parses, so `admin=true` is a boolean and `role=admin` a string) and `--payload JSON` replaces the whole claims object; the two are mutually exclusive. See the [CLI Reference](/reference/cli/#run-jwt).
 
 Over MCP, `jwt_decode` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`, since they touch no network or state. `jwt_encode` takes the same `set` / `payload` claim edits.
 

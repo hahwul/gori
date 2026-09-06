@@ -9,6 +9,7 @@ module Gori
       # `decode` shape from Cookie.decode_json; verify/crack/forge drive the same engine
       # as `gori run cookie`. No network, no store — a target's secret is cracked offline.
 
+      @[Tool("cookie_decode", unbound: true)]
       private def cookie_decode_tool(h) : Result
         cookie = str(h, "cookie")
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
@@ -17,6 +18,7 @@ module Gori
         Result.new(ex.message || "not a decodable cookie", is_error: true)
       end
 
+      @[Tool("cookie_verify", unbound: true)]
       private def cookie_verify_tool(h) : Result
         cookie = str(h, "cookie")
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
@@ -28,6 +30,7 @@ module Gori
         Result.new(ex.message || "not a decodable cookie", is_error: true)
       end
 
+      @[Tool("cookie_crack", unbound: true)]
       private def cookie_crack_tool(h) : Result
         cookie = str(h, "cookie")
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
@@ -58,6 +61,7 @@ module Gori
         found
       end
 
+      @[Tool("cookie_forge", unbound: true)]
       private def cookie_forge_tool(h) : Result
         format = str(h, "format").try(&.downcase)
         return Result.new("missing required 'format' (flask/rack/django)", is_error: true) if format.nil? || format.empty?

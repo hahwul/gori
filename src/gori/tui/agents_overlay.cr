@@ -58,7 +58,7 @@ module Gori::Tui
 
     def self.safe_client(name : String?) : String?
       return nil unless name
-      cleaned = name.gsub(/\p{C}/, "").gsub(/\s+/, " ").strip
+      cleaned = name.scrub.gsub(/\p{C}/, "").gsub(/\s+/, " ").strip
       return nil if cleaned.empty?
       Screen.fit(cleaned, CLIENT_MAX_CELLS)
     end
@@ -109,6 +109,8 @@ module Gori::Tui
         move(-1)
       elsif k.down?
         move(1)
+      elsif page_key(ev)
+        # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
       elsif ev.ctrl? || ev.alt?
         # a chord is not a mnemonic
       elsif k.lower_k?
@@ -133,6 +135,10 @@ module Gori::Tui
       :stay
     end
 
+    def entry_count : Int32
+      @rows.size
+    end
+
     def move(d : Int32) : Nil
       @selected = (@selected + d).clamp(0, {@rows.size - 1, 0}.max)
     end
@@ -155,7 +161,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "agent list needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "agent list needs a larger window")
         return
       end
       Frame.card(screen, box, "AGENTS", border: Theme.border_focus)
@@ -163,6 +169,7 @@ module Gori::Tui
       Frame.border_meta(screen, box, "AGENTS", meta, bg: Theme.panel)
 
       cap = list_capacity(box)
+      @list_last_h = cap
       return if cap <= 0
       start = list_window(cap)
       if @rows.empty?

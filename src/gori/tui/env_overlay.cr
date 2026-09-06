@@ -85,6 +85,8 @@ module Gori::Tui
         select_move(-1)
       elsif key.down? || key.lower_j?
         select_move(1)
+      elsif page_key(ev)
+        # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
       elsif key.enter?
         edit_start
       else
@@ -215,6 +217,18 @@ module Gori::Tui
       :stay
     end
 
+    # A pair on a row opens its editor — what ↵ / `e` do, and the same method (see
+    # `HostsOverlay#handle_double_click`, its twin). On an open row's text the pair selects a
+    # word; off every row it passes.
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      return :stay if super == :stay
+      return :pass unless box = overlay_box(area)
+      return :pass unless idx = row_at(box, mx, my)
+      set_selected(idx)
+      edit_start
+      :stay
+    end
+
     def move(step : Int32) : Nil
       select_move(step)
     end
@@ -222,6 +236,10 @@ module Gori::Tui
     def select_move(d : Int32) : Nil
       return if @prefix_editing || @adding
       @selected = (@selected + d).clamp(0, {@items.size - 1, 0}.max)
+    end
+
+    def entry_count : Int32
+      @items.size
     end
 
     def set_selected(idx : Int32) : Nil
@@ -345,7 +363,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "env editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "env editor needs a larger window")
         return
       end
       Frame.card(screen, box, "ENVIRONMENT", border: Theme.border_focus)
@@ -360,6 +378,7 @@ module Gori::Tui
       screen.text(box.x + 3, box.y + 2, "KEY VALUE · e.g. HOST api.example.com", Theme.muted, Theme.panel, width: {box.w - 5, 1}.max)
 
       cap = list_capacity(box)
+      @list_last_h = cap
       y = box.y + 3
       rows = cap
       if @adding

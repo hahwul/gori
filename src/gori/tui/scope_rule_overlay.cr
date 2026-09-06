@@ -173,7 +173,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "scope form needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "scope form needs a larger window")
         return
       end
       title = editing? ? "EDIT SCOPE RULE" : "ADD SCOPE RULE"
@@ -206,21 +206,14 @@ module Gori::Tui
       when 2
         screen.text(x, py, "pattern:", Theme.muted, bg)
         vx = x + 9
-        vw = {box.right - 2 - vx, 3}.max
-        val = @pattern.value
-        pre = @pattern.preedit
-        shown = pre.empty? ? val : "#{val[0, @pattern.caret]}#{pre}#{val[@pattern.caret..]}"
-        screen.text(vx, py, shown, fg, bg, width: vw)
-        if sel
-          # block caret
-          cx = @pattern.caret.clamp(0, val.size)
-          px = vx + Screen.draw_width(val[0, cx])
-          if px < box.right - 2
-            ch = cx < val.size ? val[cx] : ' '
-            screen.cell(px, py, ch, Theme.bg, Theme.accent_bg)
-            screen.cursor(px, py)
-          end
-        end
+        # Through the FIELD's own `render`, not a hand-rolled paint of its value. Listing
+        # `@pattern` in `text_fields` is the opt-in for caret-on-press, drag-select and
+        # double-click-word (see `Overlay#text_fields`), and a `TextField` answers a pointer
+        # only against the x/y/width its own `render` recorded — so painting it here left this
+        # form advertising three gestures that were silent no-ops, `handle_click`'s
+        # `click_text_field` call included. It also buys the horizontal window `input_line`
+        # carries, which a long regex pattern needs and the clipped `text` call did not have.
+        @pattern.render(screen, vx, py, {box.right - 2 - vx, 3}.max, sel, fg, bg)
       else
         ok = !pattern.empty? && Scope.valid?(match_type, pattern)
         label = ok ? "[ Save rule ]" : "[ enter a valid pattern ]"

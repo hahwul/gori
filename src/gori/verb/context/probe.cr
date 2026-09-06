@@ -33,4 +33,7 @@ abstract class Gori::Verb::ExecContext
   abstract def probe_active_from_repeater : Nil # active-scan the current Repeater session's last send
   # A Probe issue's detail is open — the gate for the AFFECTED URLS list's read verbs.
   abstract def probe_detail_readable? : Bool
+
+  # The issue LIST is in front (no detail open) and an issue is under the cursor.
+  abstract def probe_issue_selected? : Bool
 end

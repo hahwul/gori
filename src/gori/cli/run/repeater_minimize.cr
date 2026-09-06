@@ -26,7 +26,11 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--apply", "Write the minimized request back into the repeater session") { apply = true }
           p.on("--verbatim", "Send the stored bytes as-is: no $VAR expansion, no Content-Length resync (same meaning as `repeater send --verbatim`; body params stop being candidates because their framing could not be kept honest)") { verbatim = true }
-          p.on("-k", "--insecure", "Do not verify the upstream TLS certificate") { insecure = true }
+          p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
+          # Back-compat alias: this command shipped as `--insecure` while every sibling
+          # (`repeater send`, the single-flow replay, `repeater h2`, fuzz/mine/…) spells it
+          # `--insecure-upstream`, so a script passing the family-wide flag aborted here alone.
+          p.on("--insecure", "Alias for --insecure-upstream") { insecure = true }
           p.on("--allow-unscoped", "Minimize even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -42,11 +46,13 @@ module Gori
         id = id_s.to_i64? || abort("gori run repeater minimize: invalid repeater id #{id_s.inspect}")
 
         # Resolved ONCE and reused by the `--apply` write below. `resolve_read_project` with no
-        # --project/--db falls through to `registry.list.first`, and that list is sorted by each
-        # project's DB-file MTIME (`Project#last_modified`) — so the "most-recently-active"
-        # project can change identity while this command runs, and a minimize is minutes long
-        # (up to SEND_CAP real sends). Re-resolving at apply time therefore let a peer's write
-        # steer the UPDATE into a DIFFERENT project's `repeaters` row #id.
+        # --project/--db falls through to `registry.list.first`, and that list is sorted by
+        # `Project#last_modified` — the newer of the db file's mtime and its write-ahead log's,
+        # so it moves WHILE a peer session is writing rather than only when one closes and
+        # checkpoints. The "most-recently-active" project can therefore change identity while
+        # this command runs, and a minimize is minutes long (up to SEND_CAP real sends).
+        # Re-resolving at apply time therefore let a peer's write steer the UPDATE into a
+        # DIFFERENT project's `repeaters` row #id.
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         # HostOverrides.load snapshots rows into memory, so it is safe to keep past the close.
@@ -184,6 +190,12 @@ module Gori
         # source form (that is what the session row holds, and re-resolving it on every send
         # is the point of storing it).
         report_repeater_minimize(id, report, format, applied, resolve, interrupted_run)
+        # LAST, after the report: `--slot NAME` whose overlay resolved to nothing means the
+        # calibration AND every candidate probe carried `$SESSION` itself instead of a session,
+        # so the whole search judged "same response" against an ANONYMOUS baseline — under which
+        # a header the session-bearing request needs looks removable, and `--apply` writes that
+        # trimmed request back over the operator's. Same drain, same sentence, as fuzz/discover.
+        report_unbound_slot_overlay("gori run repeater minimize")
         # Before the `report.aborted` check below, for the reason `Run.report_interrupted`
         # records: a run cut short has not demonstrated that calibration failed, so falling
         # through would print a diagnosis of the wrong cause. A refused `--apply` has already
@@ -272,8 +284,8 @@ module Gori
       private def self.minimize_target_or_abort(id : Int64, rec : Store::RepeaterRecord,
                                                 text : String,
                                                 outbound : Gori::Outbound) : {String, String, Int32}
-        if Repeater::WsEngine.upgrade_request?(text)
-          abort "gori run repeater minimize: session ##{id} is a WebSocket upgrade — minimize works on plain HTTP requests"
+        if Repeater::WsEngine.replayable?(text)
+          abort "gori run repeater minimize: session ##{id} is a WebSocket handshake — minimize works on plain HTTP requests"
         end
         # The TUI refuses this too (repeater_view.cr#minimizable?). A saved request holding
         # §fuzz§ markers is a TEMPLATE, not a request: minimizing it would send 250 requests

@@ -46,6 +46,9 @@ describe Gori::Tui::FuzzerResultWindow do
     kept.request.should be_nil
     kept.head.should be_nil
     kept.body.should be_nil
+    # The bytes are in the archive, not absent: the projection mark is what tells the detail
+    # panes so, and it used to be set only when the SECOND cap tripped as well.
+    window.projected?(9_i64).should be_true
     kept.wire.should be_nil
   end
 

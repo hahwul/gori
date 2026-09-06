@@ -331,6 +331,14 @@ module Gori
       ws_notes : Int64 = 0_i64,
       ws_note_reason : String? = nil
 
+    # The prefix `Engine#follow_redirects` puts on a row's `error` when a hop it CHOSE to follow
+    # failed — the gate refused the origin's `Location`, or the hop's socket died — while the
+    # payload's own answer (the 3xx) is kept as the row's response. One spelling, shared with
+    # `Matcher#eligible?`: that row still HAS a status, a head and a body, so it stays matchable
+    # on them (`--mc 302` is exactly how an open-redirect sweep names its finding), which a
+    # plain "error ⇒ nothing arrived" reading would have thrown away a second time.
+    REDIRECT_HOP_REFUSED = "redirect hop refused: "
+
     # One durable verdict across CLI and TUI. `max_requests` is a wire-attempt budget,
     # so exhausting it before every payload completes is a partial run rather than `done`.
     def self.terminal_status(progress : Progress, stopped : Bool, max_requests : Int64?,

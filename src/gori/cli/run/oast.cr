@@ -7,6 +7,10 @@ module Gori
       # `gori run oast` — headless out-of-band listener (interactsh & friends). `listen` is
       # store-free and ad-hoc: register a payload, print it, then stream decrypted callbacks.
       # `providers` and the session verbs (`list`/`resume`/`release`) read the project store.
+      @[Subcommand("oast", help: [
+        {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
+        {"oast providers", "Manage saved OAST providers (list, add, update, enable/disable, delete)"},
+      ])]
       private def self.cmd_oast(args : Array(String)) : Nil
         # `providers` is the one OAST subcommand that touches the project store, so it must be
         # dispatched BEFORE strip_project_flags eats the --project/--db it actually needs.
@@ -175,7 +179,7 @@ module Gori
         end
         configs.each do |c|
           tok = c.token.nil? ? "" : "  token=#{show_tokens ? c.token : "[REDACTED]"}"
-          puts "#{c.enabled ? "[on ]" : "[off]"} #{c.key.ljust(12)} #{c.kind.ljust(13)} #{c.name.ljust(24)} #{c.host}#{tok}"
+          puts "#{c.enabled ? "[on ]" : "[off]"} #{CLI::Output.pad(c.key, 12)} #{c.kind.ljust(13)} #{CLI::Output.pad(c.name, 24)} #{c.host}#{tok}"
         end
       end
 
@@ -423,8 +427,8 @@ module Gori
         end
         sessions.each do |s|
           last = s.last_poll_at.try(&.to_local.to_s("%Y-%m-%d %H:%M")) || "never"
-          puts "##{s.id.to_s.ljust(5)} #{s.provider.ljust(24)} #{s.kind.ljust(13)} " \
-               "#{s.payload_host.ljust(34)} #{s.hits.to_s.rjust(5)} hits  " \
+          puts "##{s.id.to_s.ljust(5)} #{CLI::Output.pad(s.provider, 24)} #{s.kind.ljust(13)} " \
+               "#{CLI::Output.pad(s.payload_host, 34)} #{s.hits.to_s.rjust(5)} hits  " \
                "started #{s.created_at.to_local.to_s("%Y-%m-%d %H:%M")}  last poll #{last}"
         end
       end

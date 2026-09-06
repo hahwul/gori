@@ -218,6 +218,24 @@ describe Gori::Proxy::H2::WsCapture do
     sink.frames.first.shape.fin.should be_false # ... and the row says the FIN never came
   end
 
+  # ... and when the thing that ends it is a CLOSE rather than the connection, that flush moves
+  # UP: §5.5.1 forbids a data frame after a CLOSE, so the FIN is never coming, and the
+  # fragment's bytes arrived FIRST. Leaving it to `finish` listed the pair backwards — the same
+  # defect the h1 `Relay.pump` carried, so a transcript's ORDER depended on which transport
+  # opened the socket. `WsEngine.drain` and `AssemblingPump` already flushed here.
+  it "records a half-assembled message BEFORE the CLOSE that ended it" do
+    sink = WsSink.new
+    a = open_socket(sink)
+    a.feed("in", data_frame(1_u32, 0_u8, cat(
+      ws_in(WS::OP_TEXT, "half a message", fin: false),
+      ws_in(WS::OP_CLOSE, "\u{03}\u{f3}giving up"))))
+
+    rows = sink.frames
+    rows.map(&.opcode).should eq([WS::OP_TEXT.to_i, WS::OP_CLOSE.to_i])
+    rows[0].text.should eq("half a message")
+    rows[0].shape.fin.should be_false
+  end
+
   # The flow has to exist WHILE the socket is live, or the rows have nothing to hang on. A
   # CONNECT stream's request half never half-closes until the socket ends, so the projection
   # cannot wait for END_STREAM the way every other h2 stream's does.

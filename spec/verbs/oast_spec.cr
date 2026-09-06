@@ -52,14 +52,14 @@ describe "Gori::Verbs.register_oast" do
   # by reflex, not only from the space menu. `r` is free in the Callbacks body (the controller
   # deliberately does not claim it) and ^R/^X stay the pair for start/stop.
   it "puts resume on a plain `r`, beside the ^R/^X pair" do
-    r["oast.sessions"].chords.should eq([Gori::Verb::Chord.new("r")])
+    r["oast.sessions"].chords.should eq([typed_chord("r")])
     r["oast.sessions"].menu_key.should eq('r')
   end
 
   # ⇧F is History's `issue.create` chord: "file what I'm looking at" is one gesture across the
   # app, and Keymap#lookup is per-scope so the two never resolve together.
   it "files a callback as an issue on ⇧F, gated on a selected callback" do
-    r["oast.issue"].chords.should eq([Gori::Verb::Chord.new("f", shift: true)])
+    r["oast.issue"].chords.should eq([typed_chord("f", shift: true)])
     r["oast.issue"].menu_key.should eq('a')
     r["issue.create"].chords.should eq(r["oast.issue"].chords)
 

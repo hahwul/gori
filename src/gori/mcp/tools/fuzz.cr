@@ -14,6 +14,7 @@ module Gori
     class Tools
       # --- fuzz tools (gated, async job model) --------------------------------
 
+      @[Tool("fuzz_start", gated: true, agent_action: true, env_refresh: true)]
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         save_results = bool_arg(h, "save_results", false)
@@ -34,11 +35,16 @@ module Gori
           effective_max_requests, Time.utc.to_unix_ms)
         fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit, @db_path)
         fjob.websocket = !ws_frames.nil?
+        # https only: a plaintext sweep sends no ClientHello, and naming a preset on one would
+        # tell an agent its A/B happened when nothing about the handshake changed. Settled
+        # BEFORE the saved-run row below reads it, so `get_fuzz_run` cannot report the preset
+        # `fuzz_start`/`fuzz_status` withhold for the same run.
+        fjob.tls_preset = tls_preset if origin.scheme == "https"
         if save_results
           fjob.persistence = Fuzz::Persistence.new(store,
             Fuzz::SavedRunMeta.new(nil, audit.target, mode_label, total,
               created_at: audit.started_at_ms * 1000_i64, http2: http2,
-              sni: effective_sni, tls_preset: tls_preset, websocket: fjob.websocket?,
+              sni: effective_sni, tls_preset: fjob.tls_preset, websocket: fjob.websocket?,
               surface: "mcp", source_ref: id))
         end
         # Re-read rather than plumbed back out of `build_fuzz_job`: it is a REPORTING input
@@ -46,9 +52,6 @@ module Gori
         # `fuzz_config` applies, so a second accessor on the plan would only be a second place
         # for the two to disagree.
         fjob.reframe_grpc = bool_arg(h, "reframe_grpc", false)
-        # https only: a plaintext sweep sends no ClientHello, and naming a preset on one would
-        # tell an agent its A/B happened when nothing about the handshake changed.
-        fjob.tls_preset = tls_preset if origin.scheme == "https"
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
         warn = budget_warning(total, optional_int_arg(h, "max_requests"))
@@ -281,6 +284,7 @@ module Gori
 
       private def apply_fuzz_progress(fjob : FuzzJob, p : Fuzz::Progress) : Nil
         fjob.sent = p.sent
+        fjob.requests = p.requests
         fjob.matched = p.matched
         fjob.errors = p.errors
         fjob.blocked = p.blocked
@@ -339,6 +343,7 @@ module Gori
         fjob.result_flow_ids << flow_id
       end
 
+      @[Tool("fuzz_status", gated: true)]
       private def fuzz_status(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)
@@ -348,6 +353,12 @@ module Gori
             j.field "status", fjob.status.to_s
             j.field "total", fjob.total
             j.field "sent", fjob.sent
+            # REQUESTS on the wire — retries and redirect hops each cost one here and none in
+            # `sent` — and the unit `max_requests` is enforced against. It is what turns a
+            # `budget_exhausted` verdict on `sent: 4` under `max_requests: 10` from a riddle
+            # into arithmetic; the CLI prints it and the TUI reads it, and this was the one
+            # surface that dropped it. See `Fuzz::Progress#requests`.
+            j.field "requests", fjob.requests
             j.field "candidates_remaining", (t = fjob.total) ? {0_i64, t - fjob.sent}.max : nil
             j.field "matched", fjob.matched
             j.field "errors", fjob.errors
@@ -413,6 +424,7 @@ module Gori
         end)
       end
 
+      @[Tool("fuzz_results", gated: true)]
       private def fuzz_results(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)
@@ -431,8 +443,10 @@ module Gori
         matched_only = bool_arg(h, "matched_only", false)
         picked = (0...rows.size).to_a
         picked.select! { |i| rows[i].matched? } if matched_only
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        limit = clamp(optional_int_arg(h, "limit"), 100, 1000)
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, 100, 1000)
         last = offset < picked.size ? Math.min(offset + limit, picked.size) : offset
         returned = last - offset
         Result.new(JSON.build do |j|
@@ -441,6 +455,8 @@ module Gori
             j.field "returned", returned
             j.field "offset", offset
             j.field "total_available", picked.size
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "matched_only", matched_only
             # What the filter is selecting FROM, so a caller that passed matched_only can see
             # how many non-matching rows the run kept rather than having to page twice to
@@ -459,11 +475,12 @@ module Gori
         end)
       end
 
+      @[Tool("fuzz_stop", gated: true, agent_action: true)]
       private def fuzz_stop(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)
         fjob.stop
-        Result.new(JSON.build { |j| j.object { j.field "job_id", fjob.id; j.field "status", "stopping" } })
+        stop_and_report(fjob)
       end
 
       # The job for `job_id`, or an error Result the caller returns as-is.
@@ -498,21 +515,37 @@ module Gori
                                    "entirely and has no framed-exchange form. Pass ws_http_only:true to " \
                                    "race the handshake itself")
           end
-          if bool_arg(h, "http2", false)
-            raise FuzzArgError.new("http2 and a WebSocket sweep cannot combine — gori re-establishes a " \
-                                   "WebSocket with an HTTP/1.1 upgrade and accepts nothing but a 101 " \
-                                   "(RFC 8441 extended CONNECT has no send path). Pass ws_http_only:true " \
-                                   "to sweep the handshake as an h2 request")
+          # Only against an RFC 6455 UPGRADE handshake. An RFC 8441 extended CONNECT IS the h2
+          # WebSocket (#733), so `http2` there is not a conflict — it is what the seed already
+          # says. `Fuzz::Plan.build_ws_script` is the backstop and draws the line in the same
+          # place; `gori run fuzz` says it in the same words.
+          if bool_arg(h, "http2", false) && !Gori::Proxy::WS.extended_connect_request?(text)
+            raise FuzzArgError.new("http2 and an `Upgrade: websocket` sweep cannot combine — HTTP/2 has " \
+                                   "no upgrade mechanism (RFC 9113 §8.1), so a WebSocket over h2 is opened " \
+                                   "by an RFC 8441 extended CONNECT instead, which this template is not. " \
+                                   "Pass ws_http_only:true to sweep the handshake as an h2 request")
           end
           if fuzz_record_policy(h) != :none
             raise FuzzArgError.new("#{Fuzz::HistoryRecord::WS_UNSUPPORTED}. Pass ws_http_only:true to " \
                                    "sweep the handshake as an ordinary request, which does record")
           end
-          use_h2 = false
+          # An RFC 8441 script IS h2, so `use_h2` follows the handshake rather than being
+          # forced off: the echo/plan must not report h1 for a socket opened over h2.
+          use_h2 = Gori::Proxy::WS.extended_connect_request?(text)
         end
-        effective_sni = str(h, "sni") || src_sni
+        # `.presence`: a schema-filling client sends `""` for every declared property (see
+        # `describes?`), and a bare `str` read it as an explicit override — winning over the
+        # seed session's stored SNI AND reaching the dial as an empty name, which OpenSSL
+        # treats as "send no SNI extension, check no hostname". `send_request`/`discover`
+        # already read theirs this way.
+        effective_sni = str(h, "sni").presence || src_sni
         config = fuzz_config(h, mode, src_tls_preset)
         matcher = fuzz_matcher(h)
+        # A `match`/`filter` term that can never fire (`size: "1O00"`, `status: "2OO"`) used to
+        # run the whole sweep and report `matched: 0` — the "nothing there" an agent acts on.
+        if spec_err = matcher.spec_error
+          raise FuzzArgError.new(spec_err)
+        end
         if save_results
           config.keep_bodies = :all
           matcher.keep_bodies = :all
@@ -712,8 +745,11 @@ module Gori
       # what they mean there. Re-deriving them would reintroduce the defect that comment records
       # (a PING sent as TEXT, a CLOSE as BINARY, with `isError:false`).
       private def fuzz_ws_messages(h, text : String) : Array(Fuzz::WsMessageSource)?
-        given = h["messages"]?
-        upgrade = Gori::Proxy::WS.upgrade_request?(text)
+        # A JSON `null` is ABSENT, as every scalar reader on this surface already holds
+        # (`str`, `present?`, `optional_int_arg`): a `JSON::Any` wrapping nil is truthy.
+        given = h["messages"]?.try { |v| v.raw.nil? ? nil : v }
+        # Either handshake (#733): an RFC 6455 `Upgrade:` head or an RFC 8441 extended CONNECT.
+        upgrade = Repeater::WsEngine.replayable?(text)
         http_only = bool_arg(h, "ws_http_only", false)
         # An explicit `messages` that cannot be sent is REFUSED, never dropped. Returning nil
         # here — which is what this did — ran the sweep as plain HTTP with the agent's whole
@@ -724,7 +760,8 @@ module Gori
         if given
           unless upgrade
             raise FuzzArgError.new("'messages' describes a WebSocket exchange, but this template " \
-                                   "declares no `Upgrade: websocket` handshake for the frames to ride. " \
+                                   "declares no WebSocket handshake for the frames to ride — neither an " \
+                                   "`Upgrade: websocket` request nor an RFC 8441 extended CONNECT. " \
                                    "Seed from a WebSocket flow_id/repeater_id, or drop 'messages' to " \
                                    "sweep it as HTTP")
           end
@@ -810,7 +847,7 @@ module Gori
 
       private def string_array_arg(h, key : String) : Array(String)
         raw = h[key]?
-        return [] of String unless raw
+        return [] of String unless raw && !raw.raw.nil?
         arr =
           if a = raw.as_a?
             a
@@ -828,7 +865,7 @@ module Gori
       # shared `processors` pipeline — pairing them here too would build the sets twice.
       private def fuzz_sources(h) : Array(Fuzz::PayloadSource)
         raw = h["payloads"]?
-        return [] of Fuzz::PayloadSource unless raw
+        return [] of Fuzz::PayloadSource unless raw && !raw.raw.nil?
         arr =
           if a = raw.as_a?
             a
@@ -852,7 +889,7 @@ module Gori
       # (LLM clients vary in whether they send a real array or a JSON string).
       private def fuzz_processors(h) : Array(Fuzz::Processor)
         raw = h["processors"]?
-        return [] of Fuzz::Processor unless raw
+        return [] of Fuzz::Processor unless raw && !raw.raw.nil?
         arr =
           if a = raw.as_a?
             a
@@ -1110,7 +1147,7 @@ module Gori
       private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, time: String?, header: String?, regex: String?)
 
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
-        return nil unless raw
+        return nil unless raw && !raw.raw.nil?
         obj =
           if h = raw.as_h?
             h
@@ -1215,6 +1252,12 @@ module Gori
         # itself both clamp at (`Fuzz::Engine::MAX_RACE_SIZE`).
         optional_int_arg(h, "race_count").try { |v| cfg.race_count = v.clamp(1_i64, Fuzz::Engine::MAX_RACE_SIZE.to_i64).to_i }
         cfg.race_warmup = fuzz_race_warmup(h)
+        # Read by `Engine#run_race` and by nothing else: without `race_count` the bytes were
+        # accepted, echoed nowhere and never sent. Refused, as `gori run fuzz` refuses the
+        # same pair, rather than left as a knob that silently did nothing.
+        if cfg.race_warmup && cfg.race_count.nil?
+          raise FuzzArgError.new("'race_warmup' applies to a race_count run — pass race_count, or drop the warm-up")
+        end
         cfg
       end
 
@@ -1260,7 +1303,7 @@ module Gori
           s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
           s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it's spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace) — e.g. [{"type":"encode","kind":"url"}]. Query-string and form-urlencoded body positions are ALREADY percent-encoded by default (see "no_encode"), so this is for the other positions — a path segment, a JSON body, a header or a cookie value — where a payload carrying a raw space, CRLF or quote would otherwise corrupt the request line/framing instead of reaching the app. An "encode" step here REPLACES the default encoding (it applies to every position, so it is not stacked on top); the other step types say what the PAYLOAD is rather than how the wire spells it, so the query/form default still applies to their output. Entries: {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}))
           s.field "no_encode", boolprop("send payloads into query-string / form-body positions RAW — turns off the default percent-encoding for those positions (path, JSON body, header and cookie positions are raw either way). For a payload that IS the raw byte: parameter pollution with a bare &, a request-line CRLF probe. Also for a payload that is ALREADY a percent-escape and aims at the origin's own decoder — %00, %c0%af, %2e%2e%2f — which the default encodes again (%00 -> %2500) so it arrives as text, testing something else. An explicit 'encode' step in 'processors' already replaces the default.")
-          s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "time" is the ROUND TRIP in milliseconds ({"time":">=5000"}), the dimension a time-based blind injection is the only evidence for: `' OR SLEEP(5)--` comes back with the same status, the same byte length and the same body as the payload that did nothing, and differs only in how long it took. A send that TIMED OUT counts as a match on "time" (it is the loudest form of the same signal) and on nothing else. "grpc" matches the grpc-status TRAILER (e.g. "7", ">0", "1-16"): for a gRPC target the HTTP status is 200 on every response, granted or denied, so "status" cannot separate them — every result row also carries grpc_status/grpc_status_name/grpc_message. "header" is a case-insensitive SUBSTRING of the response HEAD (e.g. "x-powered-by: php", "set-cookie") — "regex" only ever sees the BODY, so this is the only way to name a header the payload changed))
+          s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "time" is the ROUND TRIP in milliseconds ({"time":">=5000"}), the dimension a time-based blind injection is the only evidence for: `' OR SLEEP(5)--` comes back with the same status, the same byte length and the same body as the payload that did nothing, and differs only in how long it took. A send that TIMED OUT counts as a match on "time" (it is the loudest form of the same signal) and on nothing else. "grpc" matches the grpc-status TRAILER (e.g. "7", ">0", "1-16") — the HTTP/2 trailer for native gRPC, and the in-body TRAILER frame for grpc-web, which has no HTTP trailers to send: for a gRPC target the HTTP status is 200 on every response, granted or denied, so "status" cannot separate them — every result row also carries grpc_status/grpc_status_name/grpc_message. "header" is a case-insensitive SUBSTRING of the response HEAD (e.g. "x-powered-by: php", "set-cookie") — "regex" only ever sees the BODY, so this is the only way to name a header the payload changed))
           s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
           s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
           s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
@@ -1287,7 +1330,7 @@ module Gori
           s.field "messages", ws_out_messages_prop(%(WebSocket only: the outbound frame script, REPLACING the frames a flow_id/repeater_id seed carried. Each entry is a plain string (a TEXT frame), a WsFrameSpec string ("opcode=ping,text=hi"), or the object form — the same grammar send_websocket takes. Mark §…§ positions IN THESE PAYLOADS: that is what a WebSocket sweep fuzzes. One variation = one full RFC 6455 session (dial, handshake, send the script, drain, close), so concurrency N means N simultaneous sockets. A WebSocket seed with no frames and no 'messages' is swept as plain HTTP.))
           s.field "idle_ms", intprop("WebSocket only: per-session server-silence timeout after the first inbound frame (100-60000, default 3000). This is the WebSocket path's pacing knob — 'timeout' is NOT its synonym and is reported in 'ignored_args' on a WS run.")
           s.field "keep_sec_websocket_key", boolprop("WebSocket only: send the template's own Sec-WebSocket-Key on every session instead of a fresh one, so an absent / short / duplicate / non-base64 key can itself be the thing under test (default false).")
-          s.field "ws_http_only", boolprop("Sweep a WebSocket template as plain HTTP: the upgrade handshake goes out as an ordinary request and the 101 is read as a response, instead of performing the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite. Also the way to use race_count / http2 / record_history against a WebSocket seed, all three of which are refused on the framed path.")
+          s.field "ws_http_only", boolprop("Sweep a WebSocket template as plain HTTP: the handshake goes out as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) is read as the response, instead of performing the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite. Also the way to use race_count / record_history against a WebSocket seed, and http2 against an `Upgrade:` one; all are refused on the framed path.")
         end
 
         tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|stopped|error). " \

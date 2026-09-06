@@ -12,23 +12,25 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # terminal's alternate-scroll (which used to arrive as ↑/↓ key bursts), so wheel
   # MUST be handled here or list scrolling silently dies.
   private def handle_mouse(ev : Termisu::Event::Mouse) : Nil
+    @detail_pin = nil # see Runner#history_target_flow_id — the pin lives for one event only
     return unless ev.press? || ev.wheel? || ev.motion? || ev.button.release?
     w, h = @backend.size
     return unless Layout.usable?(w, h)
     layout = Layout.compute(w, h, statusline_active?)
     mx, my = ev.x - 1, ev.y - 1
+    # A notch scrolls a viewport; it is not "the next action", so it does not clear the
+    # toast the way a keypress or a press does — the message stays readable while the
+    # operator scrolls past what it names. (The quit arm still drops: any input disarms.)
     if ev.wheel?
       @quit_armed = false
-      @toast = nil
       return unless ev.button.wheel_up? || ev.button.wheel_down?
       handle_wheel(layout, mx, my, ev.button.wheel_up? ? -1 : 1)
     elsif ev.motion?
       dispatch_drag(layout, mx, my) # button held + pointer moved → extend a selection
     elsif ev.button.release?
-      @dragging = false
+      finish_drag
     elsif ev.button.right?
       @quit_armed = false
-      @toast = nil
       handle_right_click(layout, mx, my)
     else
       @quit_armed = false
@@ -54,6 +56,40 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The press just consumed was Miss Ring's. Reset at the top of every dispatch_click, so
   # it is true only for the press immediately after one she took.
   @companion_pressed = false
+
+  # Button up. Under `settings:mouse` Drag release = "select + copy" this also puts the band
+  # the drag just built on the clipboard — the primary-selection gesture a terminal gives you
+  # natively, and the one gori took away by claiming the mouse in the first place.
+  #
+  # Three guards, all load-bearing. A plain CLICK ends in a release too, and `read_copy` with
+  # nothing selected copies the WHOLE PANE (`read_selection_active? ? x_copy : x_copy_all`) —
+  # so without `@dragging` every click would dump the pane to the clipboard, and without
+  # `read_selection_active?` a press-and-jiggle that selected nothing would do the same.
+  #
+  # The third is `active_overlay`, and it is about WHOSE band this is. `dispatch_drag` resolves
+  # the migrated overlay FIRST, so a drag inside one extends that modal's own `TextField` /
+  # `TextArea` — while `read_selection_active?` / `read_copy` dispatch on `@active_tab` and
+  # cannot see it. A copy on that release would not be the band the operator just dragged: it
+  # would be whatever selection the tab UNDERNEATH still had (a Repeater REQUEST band left live
+  # before opening a modal, say), announced in a toast as though it were. Written as a guard
+  # rather than as a fix for something observed — driving the built TUI, no modal was found
+  # whose `supports_drag?` press actually armed `@dragging` — but the two dispatches disagree
+  # about who owns a drag, and only one of them is allowed to end in a clipboard write.
+  #
+  # The History detail is deliberately NOT excluded by this: it is the `@overlay.detail?` enum
+  # state, not an `active_overlay`, which is why `read_copy` has an arm for it and why a drag
+  # there copies (verified against the built binary).
+  #
+  # Otherwise routed through `read_copy`, the identical seam the `y` / `^Y` verbs use, so what
+  # "copy" means on each tab — and the wording of the toast that confirms it — cannot drift
+  # from the keyboard path.
+  private def finish_drag : Nil
+    if @dragging && Settings.mouse_drag_copy? && active_overlay.nil? && read_selection_active?
+      @quit_armed = false
+      read_copy
+    end
+    @dragging = false
+  end
 
   private def press_left(layout : Layout, mx : Int32, my : Int32) : Nil
     now = Time.instant
@@ -154,7 +190,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # The first press of the pair already placed the caret and focused the pane, so the
     # word selection lands where the operator is looking.
     if ov = active_overlay
-      return ov.handle_double_click(layout.body, mx, my)
+      # An OUTCOME, applied the way a click's is: a list card whose ↵ hands off to a form
+      # answers `:cancel` here and closes into it. `:pass` = not taken → the ordinary click.
+      outcome = ov.handle_double_click(layout.body, mx, my)
+      return false if outcome == :pass
+      apply_overlay_outcome(ov, outcome)
+      return true
     end
     @tabs[@active_tab]?.try(&.handle_double_click(layout.body, mx, my)) || false
   end
@@ -192,7 +233,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return if @space_menu_open && click_space_menu(layout, mx, my)
     return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
     return if send_to_shown? && click_send_to(layout.body, mx, my) # ditto
-    if @goto_open || @search_open || @rename_open || @tag_edit_open
+    # A confirm card over a prompt takes the click (its buttons, or click-away to cancel),
+    # the same precedence the key path gives it; the prompt is still there afterwards.
+    if (@goto_open || @search_open || @rename_open || @tag_edit_open) && !@overlay.confirm?
       close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
       close_search if @search_open
       close_rename if @rename_open
@@ -273,7 +316,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     seg = Chrome.menu_segments(rect, @active_tab, tabs: effective_tabs,
-      intercept_count: @session.interceptor.pending_count, hidden_count: hidden_tab_count).find { |(_, r)| r.contains?(mx, my) }
+      intercept_count: @session.interceptor.pending_count, hidden_count: hidden_tab_count,
+      numbered: Settings.tab_numbers?).find { |(_, r)| r.contains?(mx, my) }
     if seg
       seg[0] == @active_tab ? focus_pane(:menu) : focus_tab(seg[0], focus: :menu)
     else

@@ -41,19 +41,6 @@ module Gori::Probe
   end
 end
 
-private def with_store(&)
-  path = File.tempname("gori-probe-feed", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A complete flow that reliably yields passive detections (the missing-security-headers family),
 # tagged with the provenance under test.
 private def seed_flow(store : Gori::Store, host : String,

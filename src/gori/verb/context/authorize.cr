@@ -27,4 +27,5 @@ abstract class Gori::Verb::ExecContext
   abstract def authorize_has_target? : Bool
   # A run is in flight — gates Stop, and hides the run verbs while one is going.
   abstract def authorize_running? : Bool
+  abstract def authorize_filter : Nil # open the request-list `/` filter bar
 end

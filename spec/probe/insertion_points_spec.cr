@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/probe_harness"
 require "../../src/gori/probe/active/insertion_points"
 require "../../src/gori/probe/active/reflected_param"
 require "../../src/gori/probe/active/ssti"
@@ -9,38 +10,7 @@ require "../../src/gori/probe/active/lfi_param_traversal"
 private alias IP = Gori::Probe::Active::InsertionPoints
 private alias Loc = Gori::Miner::Location
 
-# ── store + flow helpers (copied from probe_spec.cr — this codebase duplicates these per file) ──
-
-private def with_store(&)
-  path = File.tempname("gori-probe", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
-private def capture_flow(store, resp_head : String, *, scheme = "https", host = "acme.test",
-                         target = "/", status = 200, content_type : String? = "text/html",
-                         body : String? = nil, method = "GET", req_headers = "",
-                         req_body : String? = nil) : Gori::Store::FlowDetail
-  head = String.build do |io|
-    io << method << " " << target << " HTTP/1.1\r\nHost: " << host << "\r\n" << req_headers << "\r\n"
-  end
-  req = Gori::Store::CapturedRequest.new(
-    created_at: 1_000_i64, scheme: scheme, host: host, port: scheme == "https" ? 443 : 80,
-    method: method, target: target, http_version: "HTTP/1.1",
-    head: head.to_slice, body: req_body.try(&.to_slice), source: Gori::FlowSource::Kind::Proxy)
-  id = store.insert_flow(req)
-  store.update_response(Gori::Store::CapturedResponse.new(
-    flow_id: id, status: status, head: resp_head.to_slice, body: body.try(&.to_slice),
-    reason: "OK", content_type: content_type, duration_us: 1_i64))
-  store.get_flow(id).not_nil!
-end
+# ── flow helpers (probe_capture_flow comes from spec/support/probe_harness.cr) ──
 
 private def resp(body : String, status : Int32 = 200) : Gori::Repeater::Result
   head = "HTTP/1.1 #{status} X\r\nContent-Type: text/html\r\n\r\n"
@@ -59,7 +29,7 @@ describe "Gori::Probe::Active::InsertionPoints" do
   describe ".enumerate" do
     it "enumerates query params in order" do
       with_store do |store|
-        d = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&flag&b=2")
+        d = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&flag&b=2")
         s = IP.enumerate(d, Gori::Probe::Active::Options::DEFAULT, [Loc::Query]).not_nil!
         s.method.should eq("GET")
         s.path.should eq("/s")
@@ -70,12 +40,12 @@ describe "Gori::Probe::Active::InsertionPoints" do
 
     it "enumerates form + JSON body params on a body-bearing request" do
       with_store do |store|
-        form = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p", method: "POST",
+        form = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p", method: "POST",
           req_headers: "Content-Type: application/x-www-form-urlencoded\r\n", req_body: "u=bob&pw=x")
         IP.enumerate(form, Gori::Probe::Active::Options::DEFAULT, [Loc::Query, Loc::Form, Loc::Json])
           .not_nil!.slots.map { |s| {s.loc.label, s.name} }.should eq([{"form", "u"}, {"form", "pw"}])
 
-        js = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p", method: "POST",
+        js = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p", method: "POST",
           req_headers: "Content-Type: application/json\r\n", req_body: %({"id":"42","n":7}))
         IP.enumerate(js, Gori::Probe::Active::Options::DEFAULT, [Loc::Query, Loc::Form, Loc::Json])
           .not_nil!.slots.map { |s| {s.loc.label, s.name} }.should eq([{"json", "id"}]) # only string field
@@ -84,7 +54,7 @@ describe "Gori::Probe::Active::InsertionPoints" do
 
     it "enumerates headers + cookies only under aggressive, skipping forbidden + request-critical" do
       with_store do |store|
-        d = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/", method: "POST",
+        d = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/", method: "POST",
           req_headers: "User-Agent: curl\r\nAuthorization: Bearer t\r\n" \
                        "Content-Type: application/json\r\nCookie: sid=abc; theme=dark\r\n",
           req_body: %({"x":"y"}))
@@ -106,7 +76,7 @@ describe "Gori::Probe::Active::InsertionPoints" do
         # A HEAD/no-param flow is NOT nil here (the method gate + cap live in the rule); enumerate
         # nils only on a malformed start line, which capture_flow can't produce, so assert the
         # non-nil, empty-slot shape instead.
-        d = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s")
+        d = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s")
         IP.enumerate(d, Gori::Probe::Active::Options::DEFAULT, [Loc::Query]).not_nil!.slots.should be_empty
       end
     end
@@ -115,7 +85,7 @@ describe "Gori::Probe::Active::InsertionPoints" do
   describe ".build" do
     it "REPLACE URL-encodes a query value; empty changes reproduce the request line" do
       with_store do |store|
-        d = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&b=2")
+        d = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&b=2")
         s = IP.enumerate(d, Gori::Probe::Active::Options::DEFAULT, [Loc::Query]).not_nil!
         base = String.new(IP.build(d, [] of {IP::Slot, IP::Change}))
         base.should contain("/s?a=1&b=2 ")
@@ -126,7 +96,7 @@ describe "Gori::Probe::Active::InsertionPoints" do
 
     it "RAW suffix is not re-encoded (single-encoded payload survives)" do
       with_store do |store|
-        d = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
+        d = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
         s = IP.enumerate(d, Gori::Probe::Active::Options::DEFAULT, [Loc::Query]).not_nil!
         String.new(IP.build(d, [{s.slots[0], IP::Change.new(suffix: "%27%22")}]))
           .should contain("id=42%27%22 ")
@@ -155,7 +125,7 @@ describe "Gori::Probe::Active::InsertionPoints" do
 
     it "rewrites cookie crumbs by name, preserving the `; ` separator" do
       with_store do |store|
-        d = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/",
+        d = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/",
           req_headers: "Cookie: sid=abc; theme=dark\r\n")
         s = IP.enumerate(d, aggressive, [Loc::Cookies]).not_nil!
         theme = s.slots.find { |x| x.name == "theme" }.not_nil!
@@ -166,7 +136,7 @@ describe "Gori::Probe::Active::InsertionPoints" do
 
     it "REPLACE re-serializes a JSON string field and resyncs an existing Content-Length" do
       with_store do |store|
-        d = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p", method: "POST",
+        d = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p", method: "POST",
           req_headers: "Content-Type: application/json\r\nContent-Length: 17\r\n",
           req_body: %({"id":"42","n":7}))
         s = IP.enumerate(d, Gori::Probe::Active::Options::DEFAULT, [Loc::Json]).not_nil!
@@ -184,7 +154,7 @@ end
 describe "insertion-point coverage (body params)" do
   it "error-based SQLi fires on a JSON body param (under allow_unsafe)" do
     with_store do |store|
-      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/api", method: "POST",
+      detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/api", method: "POST",
         req_headers: "Content-Type: application/json\r\n", req_body: %({"id":"42"}))
       rule = Gori::Probe::Active::ErrorBasedSqli.new
       plan = rule.plan(detail, unsafe).not_nil!
@@ -201,7 +171,7 @@ describe "insertion-point coverage (body params)" do
 
   it "error-based SQLi fires on a form body param (under allow_unsafe)" do
     with_store do |store|
-      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/login", method: "POST",
+      detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/login", method: "POST",
         req_headers: "Content-Type: application/x-www-form-urlencoded\r\n", req_body: "user=bob")
       rule = Gori::Probe::Active::ErrorBasedSqli.new
       plan = rule.plan(detail, unsafe).not_nil!
@@ -215,7 +185,7 @@ describe "insertion-point coverage (body params)" do
 
   it "SSTI reaches a JSON body param (under allow_unsafe)" do
     with_store do |store|
-      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/render", method: "POST",
+      detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/render", method: "POST",
         req_headers: "Content-Type: application/json\r\n", req_body: %({"tpl":"hi"}))
       rule = Gori::Probe::Active::Ssti.new
       plan = rule.plan(detail, unsafe).not_nil!
@@ -232,7 +202,7 @@ describe "insertion-point coverage (body params)" do
     # the one batched request would break every other param's reflection). Until that lands, the
     # value-injection rules stay on the body surfaces even under aggressive.
     with_store do |store|
-      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/?q=1",
+      detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/?q=1",
         req_headers: "User-Agent: curl\r\nCookie: sid=abc\r\n")
       rule = Gori::Probe::Active::ReflectedParam.new
       plan = rule.plan(detail, aggressive).not_nil!

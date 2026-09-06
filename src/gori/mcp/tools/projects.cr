@@ -26,6 +26,7 @@ module Gori
           @authorize_jobs.each_value.any? { |j| j.status == :running }
       end
 
+      @[Tool("list_projects", unbound: true)]
       private def list_projects : Result
         reg = registry
         projects = reg.list
@@ -92,6 +93,7 @@ module Gori
         err(ex.message || "could not create project", "INVALID_ARGUMENT", field: "name")
       end
 
+      @[Tool("switch_project", unbound: true)]
       private def switch_project(h) : Result
         name = str(h, "project")
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
@@ -167,6 +169,7 @@ module Gori
         end)
       end
 
+      @[Tool("delete_project", gated: true, unbound: true)]
       private def delete_project(h) : Result
         name = str(h, "project")
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?

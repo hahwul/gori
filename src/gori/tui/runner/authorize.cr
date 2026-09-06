@@ -91,6 +91,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     authorize_controller.remove_selected
   end
 
+  def authorize_filter : Nil
+    authorize_controller.authorize_filter
+  end
+
   def authorize_clear : Nil
     authorize_controller.clear
   end

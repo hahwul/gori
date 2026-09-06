@@ -8,19 +8,6 @@ require "compress/gzip"
 # put on the hot path at all: a proxy with no extract rule must buffer nothing (P6), and a
 # body-scoped rule must cost its own hosts an h2 downgrade and no others (#526/#531).
 
-private def with_store(&)
-  path = File.tempname("gori-bindings-proxy", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def gzip(text : String) : Bytes
   io = IO::Memory.new
   Compress::Gzip::Writer.open(io, &.write(text.to_slice))

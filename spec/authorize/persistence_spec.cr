@@ -3,19 +3,6 @@ require "../../src/gori/authorize/identity"
 
 private alias Identity = Gori::Authorize::Identity
 
-private def with_store(&)
-  path = File.tempname("gori-authorize", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # The identities are project state, and the project's `settings` table is where they live —
 # the same key/value table `env.vars` uses, so no schema migration is involved.
 describe "Authorize identity persistence" do

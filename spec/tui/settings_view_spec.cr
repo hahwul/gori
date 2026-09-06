@@ -64,7 +64,15 @@ describe SettingsView do
       v = SettingsView.new
       v.reload(:network)
       2.times { v.move_field(1) } # Proxy protocol: HTTP
-      v.toggle_or_move(1)         # SOCKS5, automatic 8080 → 1080
+      v.toggle_or_move(1)         # HTTP+TLS, automatic 8080 → 443
+      v.save
+      # The cycle reaches the TLS-to-proxy kind from HTTP, which is where an operator looking
+      # for it will land — and the port follows the KIND (443, not the plaintext 8080).
+      Gori::Settings.upstream_proxy.should eq("http+tls://proxy.local:443")
+
+      v.reload(:network)
+      2.times { v.move_field(1) }
+      v.toggle_or_move(1) # SOCKS5, automatic 443 → 1080
       v.save
       Gori::Settings.upstream_proxy.should eq("socks5://proxy.local:1080")
 
@@ -117,9 +125,12 @@ describe SettingsView do
       Gori::Settings.verify_upstream = true
       v = SettingsView.new
       v.reload(:network)
-      5.times { v.move_field(1) } # Bind IP → … → Verify upstream TLS (index 5)
-      v.toggle_or_move(-1)        # flip the bool off
-      v.save                      # persists the working copy back to the live Settings
+      # Located by LABEL, not a walk count: this row has already moved once (the proxy-leg TLS
+      # rows were inserted above it) and a number here re-breaks on the next insert.
+      SettingsView::NETWORK_FIELDS.index! { |f| f.label == "Verify upstream TLS" }
+        .times { v.move_field(1) }
+      v.toggle_or_move(-1) # flip the bool off
+      v.save               # persists the working copy back to the live Settings
       Gori::Settings.verify_upstream?.should be_false
 
       v.reset_to_defaults
@@ -142,8 +153,9 @@ describe SettingsView do
       Gori::Settings.serve_landing = true
       v = SettingsView.new
       v.reload(:network)
-      6.times { v.move_field(1) } # Bind IP → … → Info page (index 6)
-      v.toggle_or_move(-1)        # flip the Info-page bool off
+      SettingsView::NETWORK_FIELDS.index! { |f| f.label.starts_with?("Info page") }
+        .times { v.move_field(1) }
+      v.toggle_or_move(-1) # flip the Info-page bool off
       v.save
       Gori::Settings.serve_landing?.should be_false
 
@@ -214,13 +226,55 @@ describe SettingsView do
       v.save
       Gori::Settings.editor.should eq(Gori::Settings::DEFAULT_EDITOR)
       Gori::Settings.editor_markdown.should eq(Gori::Settings::DEFAULT_EDITOR_MARKDOWN)
-      Gori::Settings.mouse.should eq(Gori::Settings::DEFAULT_MOUSE)
       Gori::Settings.pretty_bodies_default.should eq(Gori::Settings::DEFAULT_PRETTY_BODIES)
-      # The modifier lives in the KEYS section — resetting EDITOR must not touch it.
+      # The modifier lives in the KEYS section and the pointer toggle in MOUSE — resetting
+      # EDITOR must not touch either. `mouse` is the sharper of the two: it was an EDITOR row
+      # until the MOUSE section took it, so a reset arm left behind would still clear it here.
       Gori::Settings.command_modifier.should eq("alt")
+      Gori::Settings.mouse.should be_false
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       Gori::Settings.editor, Gori::Settings.editor_markdown, Gori::Settings.mouse, Gori::Settings.pretty_bodies_default, Gori::Settings.command_modifier = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  # The MOUSE section: the pointer toggle plus the drag-release mode. Both halves are walked
+  # through the real view (reload → edit → save → reload) rather than poked at Settings, since
+  # the row INDEXES are what the save arm addresses and a silent shift is the failure mode.
+  it "saves and resets the MOUSE section (pointer toggle + drag release)" do
+    dir = File.tempname("gori-settings-mouse-view")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = {Gori::Settings.mouse, Gori::Settings.mouse_drag, Gori::Settings.editor}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.mouse = true
+      Gori::Settings.mouse_drag = "select"
+      Gori::Settings.editor = "code --wait"
+      v = SettingsView.new
+      v.reload(:mouse)
+
+      v.section.should eq(:mouse)
+      # Row 0 is the bool, row 1 the choice — the order the save arm reads them in.
+      v.toggle_or_move(1) # Mouse on → off
+      v.move_field(1)
+      v.toggle_or_move(1) # select only → select + copy
+      v.save
+      Gori::Settings.mouse.should be_false
+      Gori::Settings.mouse_drag.should eq("copy")
+      Gori::Settings.mouse_drag_copy?.should be_true
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.mouse.should eq(Gori::Settings::DEFAULT_MOUSE)
+      Gori::Settings.mouse_drag.should eq(Gori::Settings::DEFAULT_MOUSE_DRAG)
+      Gori::Settings.mouse_drag_copy?.should be_false
+      # The external editor lives in EDITOR — the section that used to hold the Mouse row.
+      Gori::Settings.editor.should eq("code --wait")
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.mouse, Gori::Settings.mouse_drag, Gori::Settings.editor = prev
       FileUtils.rm_rf(dir)
     end
   end
@@ -266,7 +320,7 @@ describe SettingsView do
     prev_home = ENV["GORI_HOME"]?
     prev = {
       Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview,
-      Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth,
+      Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.tab_numbers?,
     }
     begin
       ENV["GORI_HOME"] = dir
@@ -275,6 +329,7 @@ describe SettingsView do
       Gori::Settings.issues_preview = false
       Gori::Settings.history_list_order = "newest"
       Gori::Settings.sitemap_expand_depth = -1
+      Gori::Settings.tab_numbers = false
       v = SettingsView.new
       v.reload(:layout)
       v.section.should eq(:layout)
@@ -288,7 +343,10 @@ describe SettingsView do
       v.toggle_or_move(1) # newest first → oldest first
       v.move_field(1)
       v.toggle_or_move(1) # all → 0
+      v.move_field(1)
+      v.toggle_or_move(1) # tab numbers on
       v.save
+      Gori::Settings.tab_numbers?.should be_true
       Gori::Settings.history_preview.should be_true
       Gori::Settings.probe_preview.should be_true
       Gori::Settings.issues_preview.should be_true
@@ -302,9 +360,10 @@ describe SettingsView do
       Gori::Settings.issues_preview.should eq(Gori::Settings::DEFAULT_ISSUES_PREVIEW)
       Gori::Settings.history_list_order.should eq(Gori::Settings::DEFAULT_HISTORY_LIST_ORDER)
       Gori::Settings.sitemap_expand_depth.should eq(Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
+      Gori::Settings.tab_numbers?.should eq(Gori::Settings::DEFAULT_TAB_NUMBERS)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth = prev
+      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.tab_numbers = prev
       FileUtils.rm_rf(dir)
     end
   end
@@ -324,12 +383,14 @@ describe SettingsView do
       Gori::Settings.capture_max_mib = 2
       v = SettingsView.new
       v.reload(:network)
-      # Bind IP → … → Connect timeout (index 7, text)
-      7.times { v.move_field(1) }
+      # Bind IP → … → Connect timeout. By label: three text rows in a row, and the first of
+      # them has moved twice as fields were inserted above it.
+      SettingsView::NETWORK_FIELDS.index! { |f| f.label == "Connect timeout (s)" }
+        .times { v.move_field(1) }
       set_text(v, "5")
-      v.move_field(1) # → Idle timeout (index 8, text)
+      v.move_field(1) # → Idle timeout (text)
       set_text(v, "7")
-      v.move_field(1) # → Capture body limit (index 9, text)
+      v.move_field(1) # → Capture body limit (text)
       set_text(v, "9")
       v.save
       Gori::Settings.connect_timeout_secs.should eq(5)

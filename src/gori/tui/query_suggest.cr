@@ -159,7 +159,15 @@ module Gori::Tui
     # is the field `resp.body`. Mirrors what `FilterAst::Cursor#prefix` carries, so a candidate
     # produced under a negation or inside a group still finds its help entry.
     def self.field_of(candidate : String) : String
-      core = candidate.lstrip('(').lstrip('-')
+      core = candidate
+      # Peel in a loop, not one `lstrip` per mark: `-(host:` and `NOT(host:` are the fused
+      # negated-group prefixes `FilterAst.token_at` carries, and they interleave.
+      loop do
+        stripped = core.lstrip('(').lstrip('-')
+        stripped = stripped[3..] if stripped.starts_with?("NOT(")
+        break if stripped == core
+        core = stripped
+      end
       sep = core.index(':') || core.index('~')
       sep ? core[0...sep] : core
     end

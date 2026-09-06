@@ -72,9 +72,9 @@ describe "Gori::Verbs.register_history" do
       it "registers the mark gestures on keys that are free across Body" do
         r["history.mark-toggle"].chords.map(&.label).should eq(["t"])
         r["history.mark-toggle"].menu_key.should eq('t')
-        # Chord.new("t", shift: true), never Chord.new("T") — Keybind.from_event normalises a
+        # typed_chord("t", shift: true), never typed_chord("T") — Keybind.from_event normalises a
         # typed capital to shift+lowercase, so a "T" chord could never fire.
-        r["history.mark-all"].chords.should eq([Gori::Verb::Chord.new("t", shift: true)])
+        r["history.mark-all"].chords.should eq([typed_chord("t", shift: true)])
         r["history.mark-all"].menu_key.should eq('T')
         r["history.mark-clear"].chords.should be_empty
         r["history.mark-clear"].menu_key.should eq('N')
@@ -135,7 +135,7 @@ describe "Gori::Verbs.register_history" do
       #
       # `C` is not available for either half: this tab spends it on the column editor, and the
       # other `C` in the registry is Send to Comparer.
-      r["history.delete"].chords.should eq([Gori::Verb::Chord.new("d")])
+      r["history.delete"].chords.should eq([typed_chord("d")])
       r["history.delete"].menu_key.should eq('D')
       r["history.clear"].chords.should eq([shift_chord('X')])
       r["history.clear"].menu_key.should eq('X')
@@ -326,7 +326,7 @@ describe "Gori::Verbs.register_history" do
       r["fuzz.save-results"].available?(ctx).should be_false
       ctx.fuzzer_results_saveable = true
       r["fuzz.save-results"].available?(ctx).should be_true
-      r["fuzz.save-results"].chords.should eq([Gori::Verb::Chord.new("s", shift: true)])
+      r["fuzz.save-results"].chords.should eq([typed_chord("s", shift: true)])
       verb_intents(r, "fuzz.save-results").should eq([:fuzz_save_results])
     end
 

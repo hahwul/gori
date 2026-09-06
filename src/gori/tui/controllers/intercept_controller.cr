@@ -86,7 +86,8 @@ module Gori::Tui
       shell = BodyChrome.shell_focused(focus, multi_pane: !@intercept.empty?)
       BodyChrome.framed(screen, rect, shell) do |inner|
         @intercept.render(screen, inner, focused: body_focused,
-          listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
+          listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?,
+          holding: @host.session.capturing_lock_held?)
       end
     end
 
@@ -216,10 +217,24 @@ module Gori::Tui
     # payload (opcode 2) opens the HEX one, everything else the TextArea. It used to open
     # NOTHING on binary and say so; the status line now names the keys instead, because the
     # gestures in the byte editor are not the ones the operator just left.
+    # The caveat comes FIRST when there is one: "gori will not apply an edit to this message"
+    # outranks "here are the keys", and it is the sentence the operator has to read before
+    # typing rather than after forwarding (see `InterceptView#edit_caveat`). The border badge
+    # stays up for as long as the card does; this is the one keystroke that can say why.
     private def open_editor : Nil
       @intercept.toggle_edit
-      return unless @intercept.hex_editing?
-      @host.status("binary WebSocket message — hex edit: 0-9a-f overtype, Ins/Del/⌫ bytes")
+      announce_editor_mode if @intercept.editing?
+    end
+
+    # What the operator has to know the moment the buffer opens, whichever door they came
+    # through. The caveat outranks the key list: "gori will not apply an edit to this message"
+    # is the sentence that decides whether to type at all.
+    private def announce_editor_mode : Nil
+      if caveat = @intercept.selected_edit_caveat
+        @host.status(caveat.note)
+      elsif @intercept.hex_editing?
+        @host.status("binary WebSocket message — hex edit: 0-9a-f overtype, Ins/Del/⌫ bytes")
+      end
     end
 
     # esc over a mark set hands the marks back first — the reflex clear, mirroring History,
@@ -256,16 +271,23 @@ module Gori::Tui
     # gone rather than kept as a no-op. (⇧↑/⇧↓ had already left for the mark-range gesture;
     # vertical reading is PgUp/PgDn/Home/End — see `#body_scroll`.)
 
-    # PageUp/PageDown/Home/End page the read-only held-message preview (the Runner routes
-    # these here when handle_body_key declines them). The preview, not the queue: a hold
-    # queue is a handful of rows that j/k covers, while a held body runs to thousands of
-    # lines and this is now its only scroll path short of opening the editor. No editing?
-    # guard is needed — handle_body_key swallows every key while the editor is up, so these
-    # never reach here then (and vscroll_detail self-guards regardless).
+    # PageUp/PageDown/Home/End page the QUEUE (the Runner routes these here when
+    # handle_body_key declines them), the same list ↑/↓ walk — as every other list tab's page
+    # keys do. They used to page the read-only held-message PREVIEW instead, on the argument
+    # that a queue is short and a body is long; but the keys a hand learns on History/Issues
+    # then did something else on the one tab whose list can be the longest under a flood,
+    # and Home/End could not reach its ends at all. The preview keeps two scroll paths: the
+    # wheel over it (`handle_wheel_at`), and opening the editor (↵), where the same keys
+    # page the text. No editing? guard is needed — handle_body_key swallows every key while
+    # the editor is up, and `move` self-guards regardless.
     def body_scroll(delta : Int32) : Bool
       return false if @intercept.empty?
-      @intercept.vscroll_detail(delta)
+      @intercept.move(delta)
       true
+    end
+
+    def page_rows : Int32?
+      @intercept.editing? ? nil : @intercept.list_page_rows
     end
 
     # --- catch-condition filter bar (a text sub-mode; the shell claims it before the
@@ -281,8 +303,12 @@ module Gori::Tui
     # gate CI runs, and "move something" is a different question from "what does this key do".
     # `↓`/`↑` were dead in this bar before the dropdown — a one-line field has no second row to
     # move a caret to — which is why they could be claimed without displacing anything.
-    private def query_nav(key) : Bool
+    private def query_nav(ev : Termisu::Event::Key) : Bool
+      key = ev.key
       case
+      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
+        @intercept.query_edit(act)
+        @host.session.interceptor.set_filter(@intercept.query) if LineEdit.mutating?(act)
       when key.down?  then @intercept.popup_down
       when key.up?    then @intercept.popup_up
       when key.left?  then @intercept.query_move(-1)
@@ -313,7 +339,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       ic = @host.session.interceptor
-      return true if query_nav(key)
+      return true if query_nav(ev)
       case
       when key.enter?  then query_enter(ic)
       when key.escape? then query_escape(ic)
@@ -369,8 +395,19 @@ module Gori::Tui
       end
     end
 
+    # A pair on a QUEUE row opens the held message's editor — what ↵ / `e` do there, and the
+    # same method, so a binary frame gets the same hex-edit sentence. The pair's first press
+    # already selected the row (and collapsed any mark range) through `handle_click`. On the
+    # editor or the preview the pair selects a word, as before.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = hit_rect(rect)
+      if @intercept.pane_at(inner, mx, my) == :list
+        return false unless idx = @intercept.list_row_at(inner, mx, my)
+        @intercept.focus_list # `toggle_edit` is a toggle: land on the list first, so this OPENS
+        @intercept.select_index(idx)
+        open_editor
+        return true
+      end
       return false if @intercept.hex_editing? # a byte buffer has no words
       @intercept.editing? ? @intercept.editor_select_word(inner, mx, my) : @intercept.preview_select_word(inner, mx, my)
     end
@@ -509,8 +546,14 @@ module Gori::Tui
     end
 
     # --- focus ring (list ◂▸ detail editor) ---
+    # Tab into the detail pane opens the editor exactly as `↵`/`e` do, so it owes the same
+    # sentence: the caveat exists to be read BEFORE the operator types, and emitting it from
+    # `open_editor` alone skipped one of the two doors into the buffer.
     def pane_advance(dir : Int32) : Bool
-      @intercept.pane_advance(dir)
+      was = @intercept.editing?
+      moved = @intercept.pane_advance(dir)
+      announce_editor_mode if moved && !was && @intercept.editing?
+      moved
     end
 
     def focus_first : Nil
@@ -518,23 +561,40 @@ module Gori::Tui
     end
 
     def focus_last : Nil
+      was = @intercept.editing?
       @intercept.focus_last
+      announce_editor_mode if !was && @intercept.editing?
     end
 
     # --- verbs (delegated from the Runner's ExecContext; also called inline above) ---
+
+    # Only the capture-lock holder may change what gets caught. A view-only second instance on
+    # the same project holds no traffic of its own — the requests are blocked in the OTHER
+    # process's `Interceptor` — so a flip here mutates a local object that gates nothing,
+    # paints the bar as though it had, and leaves the operator waiting at an empty queue for
+    # held traffic that was never coming. Worse in the other direction: the tick republishes
+    # the bridge only from the lock holder (see `Runner#run`), so this window's state was a
+    # promise it could not keep — the real holder went on catching what it was already
+    # catching. Same tiebreak, and the same wording as the bind-error toast on entry, so
+    # "view-only" means one thing across the UI.
+    #
+    # ALL THREE catch controls, not just the master toggle. `i` grew this guard when the
+    # defect was found on it; `c` (direction) and `/` (condition) are the same object, the
+    # same bar, and the same lie — a window painting `c:REQ` beside a condition it typed,
+    # over a gate in another process that reads neither.
+    # "outside this tab", because `c` here is `intercept.direction`. `capture.toggle` is a
+    # GLOBAL `c` and `Runner#resolve_verb_id` gives a scoped binding precedence whenever the
+    # scoped verb is available — `intercept.direction` carries no `available:` predicate, so it
+    # always is. Naming a bare `c` therefore pointed the operator at the very key that had just
+    # refused them, and pressing it again printed the same sentence.
+    private def catch_control_allowed? : Bool
+      return true if @host.session.capturing_lock_held?
+      @host.status("view-only — this window is not holding traffic; take over capture with c outside this tab")
+      false
+    end
+
     def intercept_toggle : Nil
-      # Only the capture-lock holder may flip catch. A view-only second instance on the same
-      # project holds no traffic of its own — the requests are blocked in the OTHER process's
-      # `Interceptor` — so toggling here flipped a local flag that gates nothing, painted the
-      # bar ON, and left the operator waiting at an empty queue for held traffic that was never
-      # coming. Worse in the other direction: the tick republishes the bridge only from the
-      # lock holder (see `Runner#run`), so this window's "intercept off" was a promise it could
-      # not keep — the real holder went on catching. Same tiebreak, and the same wording as the
-      # bind-error toast on entry, so "view-only" means one thing across the UI.
-      unless @host.session.capturing_lock_held?
-        @host.status("view-only — this window is not holding traffic; press c to take over capture")
-        return
-      end
+      return unless catch_control_allowed?
       result = @host.session.interceptor.toggle
       @intercept.reload(@host.session.interceptor)
       @host.status(toggle_status(result))
@@ -652,17 +712,21 @@ module Gori::Tui
       # the operator's only record of how many irreversible decisions just went out.
       n = ic.forward_all(overrides)
       @intercept.reload(ic)
-      @host.status("forwarded all (#{n})")
+      # `forwarded all (0)` reads as a bulk release that found nothing to release, which on the
+      # one verb whose whole point is that it is irreversible is worth spelling out.
+      @host.status(n == 0 ? "nothing held — forward all released no messages" : "forwarded all (#{n})")
     end
 
     # Open the catch-condition filter bar (a query that narrows which messages hold).
     def intercept_query : Nil
+      return unless catch_control_allowed?
       @intercept.start_query(@host.session.store) # store backs `host:` Tab-completion
       @host.status("catch condition: host: method: path: status: scheme: · ↹ complete · ↵ apply · esc clear")
     end
 
     # Cycle which leg(s) to hold: all → requests → responses → all.
     def intercept_cycle_direction : Nil
+      return unless catch_control_allowed?
       dir = @host.session.interceptor.cycle_direction
       @intercept.reload(@host.session.interceptor)
       @host.status("intercept catch: #{direction_phrase(dir)}")
@@ -678,6 +742,13 @@ module Gori::Tui
 
     def selected_intercept_id : Int64?
       @intercept.selected_id
+    end
+
+    # The hold this window's editor has unsaved changes for — mirrored across the #123 bridge
+    # so an agent can see the human is mid-edit before forwarding it. See
+    # `InterceptView#held_edit_id`.
+    def held_edit_id : Int64?
+      @intercept.held_edit_id
     end
 
     # --- marks (multi-select over the hold queue) ---

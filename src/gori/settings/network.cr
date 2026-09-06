@@ -13,6 +13,20 @@ module Gori::Settings
   DEFAULT_PROJECT_UPSTREAM_DESTINATION = "*"
   DEFAULT_VERIFY_UPSTREAM              = true
   DEFAULT_SERVE_LANDING                = true
+  # PROXY-leg TLS policy (settings:network), for an `http+tls://` upstream proxy. Deliberately
+  # SEPARATE from DEFAULT_VERIFY_UPSTREAM above and from the `outbound_tls` table, which both
+  # describe the ORIGIN: the two legs have different peers, different trust anchors and
+  # different reasons to be relaxed. `--insecure-upstream` means "I am testing an origin with a
+  # broken certificate"; it must never also disable the check on the corporate proxy that is
+  # carrying the session, because that is the one hop an operator did not choose to inspect.
+  #
+  # `upstream_proxy_ca` is a PEM bundle trusted for the proxy leg ONLY (added to the system
+  # store, not replacing it) — a TLS proxy is normally issued by a private CA, which is the
+  # whole reason this knob exists. `upstream_proxy_insecure` skips proxy certificate
+  # verification entirely; it is the proxy-leg twin of `-k`, and it is off by default because
+  # an unverified proxy sees every CONNECT authority and every Proxy-Authorization credential.
+  DEFAULT_UPSTREAM_PROXY_CA       = ""
+  DEFAULT_UPSTREAM_PROXY_INSECURE = false
   # Outbound dial timeouts (settings:network). connect = how long a TCP/upstream connect
   # may take; io = the initial read/write timeout on the upstream socket (relaxed to nil
   # for long-lived streaming tunnels — that clearing is orthogonal). Seconds, min 1.
@@ -105,6 +119,11 @@ module Gori::Settings
   # settings:network editor toggles it live via Session#set_verify_upstream. Global-only
   # (no per-project override). CLI `run`/MCP paths keep their own --insecure-upstream flag.
   class_property? verify_upstream : Bool = DEFAULT_VERIFY_UPSTREAM
+  # The PROXY leg's trust anchor and verification switch (see DEFAULT_UPSTREAM_PROXY_CA).
+  # Global-only, read live by `Upstream.proxy_tls_context` — an edit applies to the next dial.
+  # Neither is touched by `--insecure-upstream`, and neither affects the origin handshake.
+  class_property upstream_proxy_ca : String = DEFAULT_UPSTREAM_PROXY_CA
+  class_property? upstream_proxy_insecure : Bool = DEFAULT_UPSTREAM_PROXY_INSECURE
   # Whether a browser gets the gori welcome + CA-download page instead of the 502
   # self-loop refusal. Covers both ways in: hitting the listen address itself (no proxy
   # configured yet), and the reserved host http://gori.proxy/ (already proxied, so the
@@ -638,6 +657,8 @@ module Gori::Settings
     self.bind_port = DEFAULT_BIND_PORT
     self.upstream_proxy = DEFAULT_UPSTREAM_PROXY
     self.verify_upstream = DEFAULT_VERIFY_UPSTREAM
+    self.upstream_proxy_ca = DEFAULT_UPSTREAM_PROXY_CA
+    self.upstream_proxy_insecure = DEFAULT_UPSTREAM_PROXY_INSECURE
     self.serve_landing = DEFAULT_SERVE_LANDING
     self.connect_timeout_secs = DEFAULT_CONNECT_TIMEOUT_SECS
     self.io_timeout_secs = DEFAULT_IO_TIMEOUT_SECS
@@ -654,6 +675,11 @@ module Gori::Settings
         j.field "bind_port", bind_port
         j.field "upstream_proxy", upstream_proxy
         j.field "verify_upstream", verify_upstream?
+        # Written even at their defaults, for the reason `tls_passthrough` is: the proxy leg's
+        # trust policy is invisible until someone already knows the keys exist, and the two of
+        # them are the only place `http+tls://` is qualified.
+        j.field "upstream_proxy_ca", upstream_proxy_ca
+        j.field "upstream_proxy_insecure", upstream_proxy_insecure?
         j.field "serve_landing", serve_landing?
         j.field "connect_timeout_secs", connect_timeout_secs
         j.field "io_timeout_secs", io_timeout_secs
@@ -669,9 +695,44 @@ module Gori::Settings
   end
 
   # Default proxy ports when a rule/scalar names no explicit port: the conventional HTTP-proxy
-  # and SOCKS ports.
-  DEFAULT_HTTP_PROXY_PORT = 8080
-  DEFAULT_SOCKS_PORT      = 1080
+  # and SOCKS ports, plus 443 for a TLS-wrapped HTTP proxy (`http+tls://`) — the same answer
+  # curl gives an `https://` proxy with no port, and the port such a proxy is normally reached
+  # on. It is NOT 8080: that number belongs to the plaintext form, and defaulting the TLS form
+  # to it would make a missing port silently dial the cleartext listener of the same proxy.
+  DEFAULT_HTTP_PROXY_PORT  = 8080
+  DEFAULT_SOCKS_PORT       = 1080
+  DEFAULT_HTTPS_PROXY_PORT =  443
+
+  # The default port for one transport kind. ONE home: the rule table, the scalar URI grammar,
+  # the save-time validator and the settings editor all have to agree about what a portless
+  # address means, and they are four separate call sites that were each spelling the ternary
+  # out for themselves before a third kind existed.
+  def self.upstream_default_port(kind : String) : Int32
+    case kind
+    when "socks5", "socks5h" then DEFAULT_SOCKS_PORT
+    when UPSTREAM_TLS_KIND   then DEFAULT_HTTPS_PROXY_PORT
+    else                          DEFAULT_HTTP_PROXY_PORT
+    end
+  end
+
+  # nil when the proxy-leg CA bundle is usable (or unset); the operator's mistake otherwise.
+  # Checked at SAVE time so a typo is caught on the settings screen rather than on every dial
+  # through the proxy, where it would arrive as an untrusted-certificate refusal pointing at
+  # the proxy's chain instead of at the path that was never read.
+  def self.upstream_proxy_ca_error(path : String) : String?
+    p = path.strip
+    return nil if p.empty?
+    return "settings: upstream proxy CA #{p.inspect} does not exist" unless File.exists?(p)
+    return "settings: upstream proxy CA #{p.inspect} is not a regular file" unless File.file?(p)
+    # Opened rather than stat-tested: `File::Info.readable?` answers for the CURRENT uid from
+    # the mode bits, which is not the same question OpenSSL asks (ACLs, a mount, a dangling
+    # symlink target). Reading one byte is the same operation SSL_CTX_load_verify_locations
+    # will perform, so a path that passes here is one the dial can actually use.
+    File.open(p) { |f| f.read_byte }
+    nil
+  rescue
+    "settings: upstream proxy CA #{path.strip.inspect} could not be read"
+  end
 
   # The shared strict authority parse behind legacy scalar addresses and the upstream RULE
   # table (which needs a different default port per kind). Accepts the historical HTTP scheme

@@ -61,22 +61,24 @@ module Gori
       # the live handler goes to `:subtabs`, which is where the tab's `esc tabs` hint came
       # from. Escape is the controller's, and the hint now says `esc sub-tabs`.
 
-      # --- Providers sub-tab (a/e/t/d handled in the controller body; menu-only here) ---
+      # --- Providers sub-tab: the four keys the hint names, as chords the editor can move ---
+      # They used to be raw `c == 'a'` arms in the controller, so the hotkey editor offered
+      # `a`/`e`/`x`/`d` as free in this scope and a binding there would have been shadowed.
       r.register Verb::Definition.new(
         "oast.add-provider", "Add provider", "Add an OAST provider (interactsh + friends; presets prefilled)",
-        Verb::Scope::OastProviders, [] of Verb::Chord, mnemonic: 'a') { |ctx| ctx.oast_add_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("a")], mnemonic: 'a') { |ctx| ctx.oast_add_provider; nil }
 
       r.register Verb::Definition.new(
         "oast.edit-provider", "Edit provider", "Edit the selected OAST provider",
-        Verb::Scope::OastProviders, [] of Verb::Chord, mnemonic: 'e') { |ctx| ctx.oast_edit_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("e")], mnemonic: 'e') { |ctx| ctx.oast_edit_provider; nil }
 
       r.register Verb::Definition.new(
         "oast.toggle-provider", "Enable / disable", "Toggle the selected provider on or off",
-        Verb::Scope::OastProviders, [] of Verb::Chord, mnemonic: 'x') { |ctx| ctx.oast_toggle_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("x")], mnemonic: 'x') { |ctx| ctx.oast_toggle_provider; nil }
 
       r.register Verb::Definition.new(
         "oast.delete-provider", "Delete provider", "Delete the selected provider (keeps its callback history)",
-        Verb::Scope::OastProviders, [] of Verb::Chord, mnemonic: 'd', group: :danger) { |ctx| ctx.oast_delete_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("d")], mnemonic: 'd', group: :danger) { |ctx| ctx.oast_delete_provider; nil }
 
       # --- cross-tab: insert / copy a fresh OAST payload (gated on an active listener) ---
       insert_avail = ->(tab : Symbol) {

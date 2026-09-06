@@ -37,7 +37,7 @@ private class RaceOrigin
     while conn = @server.accept?
       id = @conn_counter
       @conn_counter += 1
-      spawn { serve(conn, id) }
+      spawn serve(conn, id)
       if (m = @max_accepts) && @conn_counter >= m
         @server.close rescue nil
         break

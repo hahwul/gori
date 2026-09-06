@@ -1,4 +1,5 @@
 require "./screen"
+require "./line_edit"
 require "./theme"
 require "./frame"
 require "./query_suggest"
@@ -27,6 +28,7 @@ module Gori::Tui
   # Pure view: it reads the shared Interceptor snapshot; the Runner performs the
   # actual forward/drop. No diff (that's Repeater's job).
   class InterceptView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # Height of the top filter bar (catch direction + condition), reserved above the
     # queue|detail split — the Intercept tab's analogue of History's QL bar. While the
     # condition is being edited a second row carries Tab suggestions (see bar_h).
@@ -46,7 +48,7 @@ module Gori::Tui
     # The highlighter's field vocabulary. This backend's `FIELDS` really is the whole of what it
     # accepts (the comment there requires it to stay in lockstep with `field_symbol`), so unlike
     # History there is no wider accepted set to reach for.
-    GATE_KNOWN = ->(f : String) { InterceptFilter::FIELDS.includes?(f) }
+    GATE_KNOWN = ->(f : String, op : Char) { InterceptFilter.known_field?(f, regex: op == '~') }
     # The editing bar's label — a constant because `render_query_popup` lines the dropdown up
     # under the token, which means knowing how far the condition text is indented.
     QUERY_PREFIX = "catch › "
@@ -129,6 +131,10 @@ module Gori::Tui
       # same bytes): READ and EDIT must not disagree about what a row is in one pane.
       @preview = ReadPane.new(wrap: true)
       @reload_rev = -1 # Interceptor#revision the queue snapshot was last taken at (-1 ⇒ never)
+      # Interceptor#revision the COMMITTED condition was last mirrored at — see `reload`. Its
+      # own counter, not `@reload_rev`: the mirror is skipped while the bar is being typed in,
+      # and folding the two would mark the skipped revision as done and leave the bar stale.
+      @filter_rev = -1
       # Multi-select marks (#442's model, ported to the hold queue), keyed by ITEM ID rather
       # than row index: a forward/drop of an earlier entry shifts every index below it, so an
       # index-keyed set would silently retarget on the next revision tick. Unlike History there
@@ -152,6 +158,7 @@ module Gori::Tui
     # If the edited item vanished (forwarded/dropped/released), drop edit mode.
     def reload(interceptor : Interceptor) : Nil
       rev = interceptor.revision
+      mirror_condition(interceptor, rev)
       return if rev == @reload_rev
       @reload_rev = rev
       prev_id = @items[@selected]?.try(&.id)
@@ -165,11 +172,55 @@ module Gori::Tui
       @enabled = interceptor.enabled?
       @direction = interceptor.direction
       prune_marks
-      if @editing && (id = @loaded_id) && @items.none? { |it| it.id == id }
+      # The loaded buffer belongs to a hold that has left the queue (forwarded/dropped here, by
+      # a batch verb, released on toggle-off, reaped, or settled cross-process by an MCP peer).
+      # NOT gated on `@editing` any more: an operator who edits a hold and Escs back to the
+      # queue leaves `@loaded_id`/`@editor_dirty` set behind the closed editor, so a buffer for
+      # a message that no longer exists survived every release — and `held_edit_id`, which
+      # tells an agent a human is mid-edit on a hold, would have named one that was gone.
+      if (id = @loaded_id) && @items.none? { |it| it.id == id }
         @editing = false
         @loaded_id = nil
+        @editor_dirty = false
         @hex = nil # its bytes belonged to a hold that has left the queue
       end
+    end
+
+    # The held item this editor has UNSAVED changes for, or nil.
+    #
+    # Published across the #123 bridge (`Runner#publish_intercept_snapshot`) so an agent can
+    # see that a human is part-way through rewriting a hold before it forwards that hold out
+    # from under them. `HeldRow#edited` has existed since #123 and nothing ever set it, so
+    # `intercept_list` answered `edited: false` for every item forever — a field naming a fact
+    # that is real, knowable and exactly what the co-pilot loop needs.
+    #
+    # Deliberately NOT `pending_edit`: that one expands `$KEY`s and re-syncs Content-Length to
+    # BUILD the bytes, and this is asked on the publish cadence for as long as anything is held.
+    # The question here is only whether there ARE unsaved bytes.
+    def held_edit_id : Int64?
+      @editor_dirty ? @loaded_id : nil
+    end
+
+    # Mirror the Interceptor's COMMITTED condition into the bar's buffer.
+    #
+    # The bar used to be a write-only local buffer: `@enabled` and `@direction` were read back
+    # from the Interceptor every reload, the condition was not. So a condition set by the other
+    # two surfaces — MCP `intercept_set_filter`, `gori run intercept filter`, both of which
+    # reach the SAME `Interceptor` through the #123 command drain — narrowed the live gate while
+    # this bar kept painting its idle hint. The operator then watched an empty queue with
+    # nothing on screen saying why, and the next keystroke in `/` pushed the local (empty)
+    # buffer back over the agent's condition.
+    #
+    # Skipped while the bar is being typed in: there the local buffer IS the source (every
+    # keystroke pushes it down with `set_filter`), and mirroring would fight the caret. `rev`
+    # is tracked separately for exactly that reason — see `@filter_rev`.
+    private def mirror_condition(interceptor : Interceptor, rev : Int32) : Nil
+      return if @querying || @filter_rev == rev
+      @filter_rev = rev
+      source = interceptor.filter_source
+      return if source == @query
+      @query = source
+      @qcx = source.size
     end
 
     # Drop marks whose held item has left the queue — forwarded/dropped here, by a batch
@@ -535,6 +586,45 @@ module Gori::Tui
       {id, Fuzz::ContentLength.sync(raw, add_when_missing: true)}
     end
 
+    # What gori will do with an EDIT to a held message, said BEFORE one is written: the badge
+    # that rides the detail card's border for as long as the message is on screen, and the one
+    # sentence the status line carries when the editor opens.
+    record EditCaveat, badge : String, color : Color, note : String
+
+    # The caveat for one held message, or nil when an edit simply applies.
+    #
+    # The other two surfaces have said this since R3-F1 — `gori run intercept get` prints the
+    # reason ABOVE the head ("printed before the head so the operator reads it before writing
+    # one") and MCP's `intercept_get` emits `edit_refusal` / `head_only_note` — and the guide
+    # claims this one does too ("The intercept editor, `gori run intercept get` and the MCP
+    # `intercept_get` tool all say which kind of hold you have before you write an edit"). It
+    # did not: the TUI, the surface where an edit is most likely to be TYPED, opened a plain
+    # `e:EDIT` card and let the operator compose a whole edit, only answering at `f` with "edit
+    # NOT applied". That is the normal case for a CRLF-injection probe, which INDUCES exactly
+    # the head this refusal describes.
+    #
+    # Two states and not one, for the reason `Store::HeldRow#head_only_note` gives: a refusal
+    # means gori will apply NO edit to this message, while head-only means a head edit applies
+    # normally and only a body has nowhere to go. Reporting the caveat as a refusal would mark
+    # an editable message uneditable.
+    def edit_caveat(it : Interceptor::Item) : EditCaveat?
+      if reason = it.edit_refusal
+        return EditCaveat.new("NO-EDIT", Theme.red, "edits cannot be applied to this message — #{reason}")
+      end
+      return nil unless it.head_only?
+      # The one-line form of `Store::HeldRow#head_only_note`, which is the same fact written
+      # for a terminal that can spend a paragraph on it. Both stay a CAVEAT, never a refusal.
+      EditCaveat.new("HEAD-ONLY", Theme.yellow,
+        "this HTTP/2 hold covers the HEAD only — a head edit applies, but one that ADDS A BODY " \
+        "will be refused (its DATA frames stream past the gate untouched)")
+    end
+
+    # The caveat for the hold the detail pane is showing — what `↵`/`e` is about to open an
+    # editor on, so the controller can say it in the same keystroke.
+    def selected_edit_caveat : EditCaveat?
+      selected_item.try { |it| edit_caveat(it) }
+    end
+
     # Why gori would REFUSE the current pending edit, or nil when it would apply it.
     #
     # A QUERY beside `pending_edit`, not a change to it: the editor keeps showing what the
@@ -792,7 +882,7 @@ module Gori::Tui
     # for a file the editor left alone.
     def replace_editor(text : String) : Nil
       return unless text_editing?
-      @editor.set_text(text)
+      @editor.replace_from_outside(text)
       mark_editor_edit
     end
 
@@ -920,10 +1010,16 @@ module Gori::Tui
     # The queue/detail split, then the `↓` dropdown OVER it — drawn last unconditionally, since
     # the body below returns early on the empty-queue path and that is exactly when an operator
     # is most likely to be editing the condition. Mirrors HistoryView / SitemapView.
+    # `holding` is whether THIS window owns the project's capture lock. Everything this tab
+    # draws — the chips, the condition, the queue — comes from a local `Interceptor` that only
+    # the lock holder's proxy ever reaches, so in a second window the bar was painting a catch
+    # state nothing gates through while the real gate ran in another process. The controller
+    # already refuses to let those controls be changed here; the bar has to stop claiming them.
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
-               listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
+               listen : {String, Int32}? = nil, capturing : Bool = true,
+               holding : Bool = true) : Nil
       return if rect.empty?
-      render_panes(screen, rect, focused, listen: listen, capturing: capturing)
+      render_panes(screen, rect, focused, listen: listen, capturing: capturing, holding: holding)
       render_query_popup(screen, rect)
     end
 
@@ -940,8 +1036,9 @@ module Gori::Tui
     end
 
     private def render_panes(screen : Screen, rect : Rect, focused : Bool = true, *,
-                             listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
-      render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused)
+                             listen : {String, Int32}? = nil, capturing : Bool = true,
+                             holding : Bool = true) : Nil
+      render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused, holding)
       render_suggestions(screen, rect, rect.y + FILTER_BAR_H) if @querying
       body = body_rect(rect)
       return if body.empty?
@@ -960,14 +1057,15 @@ module Gori::Tui
     # The top filter bar: while editing the condition it's a single input line
     # (`catch › …`); otherwise a catch-direction chip, the committed condition (or a
     # field hint), and a right-aligned held count. Mirrors History's QL bar.
-    private def render_filter_bar(screen : Screen, rect : Rect, focused : Bool) : Nil
+    private def render_filter_bar(screen : Screen, rect : Rect, focused : Bool,
+                                  holding : Bool = true) : Nil
       return if rect.empty?
       if @querying
         screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
           width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD, GATE_KNOWN))
+          colors: Highlight.filter_query(@query, Theme.text_bright, known: GATE_KNOWN))
         return
       end
 
@@ -985,13 +1083,22 @@ module Gori::Tui
       rx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2, chips)
 
       left_w = {rx - x, 0}.max
+      # A window that does not hold the capture lock reads this tab off an `Interceptor` no
+      # proxy fiber ever reaches, so the chips left of here describe a local object and the
+      # condition slot has nothing true to put in it. Say which window this is instead of
+      # painting a gate state that belongs to another process.
+      unless holding
+        screen.text(x, rect.y, "view-only — the catch running on this project is another window's",
+          Theme.orange, width: left_w)
+        return
+      end
       if @query.blank?
         screen.text(x, rect.y, IDLE_HINT, Theme.muted, width: left_w)
       else
         # The committed condition stays highlighted — this readout is what you scan to
         # check WHY something is (or isn't) being held.
         x = screen.text(x, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, GATE_KNOWN),
+        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: GATE_KNOWN),
           Theme.text, width: {rect.right - 1 - x, 0}.max)
       end
     end
@@ -1104,12 +1211,20 @@ module Gori::Tui
       end
     end
 
+    @list_last_h = 0 # rows the QUEUE card drew last frame — the PgUp/PgDn step
+
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "QUEUE", bg: Theme.bg, border: Frame.pane_border(focused))
       Frame.border_meta(screen, rect, "QUEUE", @items.size.to_s)
       inner = rect.inset(1, 1)
+      @list_last_h = inner.h
       ensure_visible(inner.h)
+      now = Time.instant
       (0...inner.h).each do |i|
         idx = @scroll + i
         break if idx >= @items.size
@@ -1120,9 +1235,51 @@ module Gori::Tui
         bg = row_band(screen, inner, y, selected: selected, marked: marked, focused: focused)
         badge, bcolor = kind_badge(it.kind)
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
-        screen.text(inner.x + 5, y, row_label(it), selected || marked ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
+        label = row_label(it)
+        width = {inner.w - 6, 1}.max
+        # `selected || marked`, the SAME test the label uses one line down: a marked row paints
+        # its host+target bright, and keying the clock on `selected` alone left it muted beside
+        # a bright label, reading as a different row.
+        lit = selected || marked
+        render_held_age(screen, inner, y, it, now, bg, lit, Screen.draw_width(label), width)
+        screen.text(inner.x + 5, y, label, lit ? Theme.text_bright : Theme.text, bg, width: width)
       end
       Frame.scroll_gauge(screen, inner, @items.size, @scroll, focused)
+    end
+
+    # The row's right-aligned WAITING AGE — drawn in the row's own SLACK, never out of the
+    # label's cells.
+    #
+    # This column has been in the class header since the tab was written ("REQ/RES badge,
+    # method, host+target, waiting age") and was never drawn, while both other surfaces
+    # answer it: MCP's `intercept_item_row` emits `age_seconds` and the #123 reaper releases
+    # on a deadline. A hold is a real client blocked — a browser tab spinning, a script at
+    # its timeout — so how long it has been waiting is the queue's second fact after what it
+    # is.
+    #
+    # Second because it is: a fixed column would have taken four cells off EVERY label, and
+    # this pane is `body.w // 3`, so on an 80-column terminal that is `GET acme.test/` for a
+    # request whose path is the reason it is held. `Screen#text` clips and does not pad, so a
+    # label with room to spare leaves those cells free and the age can ride them; a label that
+    # needs them keeps them and the row simply carries no clock. The queue's own scroll gauge
+    # takes the same "only when it earns the column" line.
+    private def render_held_age(screen : Screen, inner : Rect, y : Int32, it : Interceptor::Item,
+                                now : Time::Instant, bg : Color, lit : Bool,
+                                label_w : Int32, width : Int32) : Nil
+      age = held_age(it, now)
+      w = Screen.draw_width(age)
+      return if label_w > width - w - 1 # no slack: the label needs every cell it has
+      # `right - 1 - w`: the label's own run stops one cell short of the card's inner right
+      # edge (`inner.w - 6` cells from `inner.x + 5`), so the age ends exactly where it could.
+      screen.text(inner.right - 1 - w, y, age, lit ? Theme.text_bright : Theme.muted, bg)
+    end
+
+    # How long a message has been held. MONOTONIC (`Item#held_at`), never the wall clock: a
+    # hold is measured against the client that is waiting on it, and a system clock step must
+    # not make one look older or newer than it is. The wording is `Interceptor.age_label`'s,
+    # shared with `gori run intercept list` so the two surfaces cannot drift.
+    private def held_age(it : Interceptor::Item, now : Time::Instant) : String
+      Interceptor.age_label((now - it.held_at).total_seconds.to_i)
     end
 
     # Paint a queue row's background band + gutter glyph, returning the bg every cell on that

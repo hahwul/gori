@@ -33,7 +33,7 @@ describe "Gori::Verbs.register_read_edit" do
       if prefix == "project"
         select_line.chords.should be_empty
       else
-        select_line.chords.should eq([Gori::Verb::Chord.new("x")])
+        select_line.chords.should eq([typed_chord("x")])
       end
       select_line.menu_key.should eq('x')
       select_line.section.should eq(section)

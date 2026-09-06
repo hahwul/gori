@@ -21,10 +21,55 @@ end
 
 # Overlay-only: no base draw, so untouched cells keep Color.default. Lets a
 # "nothing was painted" assertion distinguish a highlighted cell from a bare one.
-private def mark_only(text : String, query : String, max_x : Int32, x = 0, w = 40) : MemoryBackend
+private def mark_only(text : String, query : String, max_x : Int32, x = 0, w = 40,
+                      conceal : Array({Int32, Int32})? = nil, xoff = 0) : MemoryBackend
   backend = MemoryBackend.new(w, 1)
-  Wrap.mark_search(Screen.new(backend), x, 0, text, 0, text.size, query, max_x)
+  Wrap.mark_search(Screen.new(backend), x, 0, text, 0, text.size, query, max_x, conceal, xoff)
   backend
+end
+
+# The RETIRED mark loop, kept as the oracle for the rewrite (see the equivalence describe at
+# the bottom of the file): `String#index` on character offsets, `Wrap.row_col` re-measured
+# from the row start for every match, and a character-index slice for the segment. Every
+# line below is the body this file's subject replaced, reaching `row_col` / `slice_left_text`
+# from outside the module and carrying its own copy of the private `strip_hidden`.
+private def reference_mark(screen : Screen, x : Int32, y : Int32, line : String,
+                           a : Int32, b : Int32, query : String, max_x : Int32,
+                           conceal : Array({Int32, Int32})? = nil, xoff : Int32 = 0,
+                           lower : String? = nil) : Nil
+  return if query.empty? || line.empty? || a >= b
+  q = query.downcase
+  dl = lower || line.downcase
+  same = dl.size == line.size
+  src = same ? line : dl
+  lo, hi = a, b
+  unless same
+    return unless a <= 0 && b >= line.size
+    lo, hi = 0, dl.size
+  end
+  pos = 0
+  while i = dl.index(q, pos)
+    pos = i + q.size
+    ma = {i, lo}.max
+    mb = {pos, hi}.min
+    next if ma >= mb
+    col = x + Wrap.row_col(src, conceal, lo, ma) - xoff
+    seg = src[ma...mb]
+    seg = reference_strip_hidden(seg, conceal, ma) if conceal && !conceal.empty?
+    if col < x
+      seg = Highlight.slice_left_text(seg, x - col)
+      col = x
+    end
+    screen.text(col, y, seg, Theme.bg, Theme.yellow, width: {max_x - col, 0}.max) if col < max_x && !seg.empty?
+  end
+end
+
+private def reference_strip_hidden(seg : String, conceal : Array({Int32, Int32}), off : Int32) : String
+  String.build do |io|
+    seg.each_char_with_index do |c, k|
+      io << c unless conceal.any? { |(ra, rb)| off + k >= ra && off + k < rb }
+    end
+  end
 end
 
 # The columns [from, to) whose background is the search-match yellow.
@@ -208,14 +253,132 @@ describe "Gori::Tui::Wrap.mark_search (single unwrapped row)" do
       yellow_cols(backend, 10).should be_empty
     end
 
-    # SUSPECTED BUG (reported as a finding, not an executable test — a big-O claim can only
-    # be shown by timing, which is too flaky to assert in CI): the accumulator comment
-    # (search_hi.cr:20-23) documents the mark loop as "O(line) total instead of ... O(line²)
-    # on token-dense lines". But the loop's `dt.index(q, pos)` takes a CHARACTER offset, and
-    # String#index converts it to a byte offset by walking `pos` characters each call — so on
-    # a token-dense line the total is still O(line²) (measured: matches 1k→2k→4k→8k gave
-    # 0.8→4→14→39 ms, quadrupling per doubling). The draw_width re-walk was removed but an
-    # index re-walk remains, so the documented O(line) contract does not hold. Functionally
-    # correct (highlighting stays column-correct — covered by the cases above); perf only.
+    # The GROWTH RATE those two bound is asserted in `bench/mark_search_bench.cr`, not here:
+    # a big-O claim can only be shown by timing, and a wall-clock threshold in CI either
+    # flakes on a loaded box or is so generous it catches nothing. The bench charts µs per
+    # match at 1k → 16k matches, which must stay flat; it used to quadruple per doubling
+    # (`String#index` re-walked the prefix from byte 0 per match, `row_col` re-walked from
+    # the row start, and a char-index slice re-walked from byte 0 again). The ceilings above
+    # are the CI-safe half of that: they only catch a hang.
+    it "stays correct on a dense line marked for a row in the MIDDLE of it" do
+      # The wrapped shape of the same input: every match before the row is still scanned (it
+      # has to be — the non-overlapping match phase is set from char 0), but only the ones
+      # touching [a, b) may paint, and they must paint at their column WITHIN the row.
+      text = "ab" * 4_000
+      a = 1_000
+      backend = MemoryBackend.new(10, 1)
+      Wrap.mark_search(Screen.new(backend), 0, 0, text, a, a + 10, "ab", 8)
+      yellow_cols(backend, 10).should eq([0, 1, 2, 3, 4, 5, 6, 7])
+    end
+
+    it "survives a line of invalid UTF-8 bytes (P7: the operator's octets are the payload)" do
+      # A captured body is arbitrary octets. `downcase` folds an invalid byte to U+FFFD, so
+      # the scan's haystack and the drawn line disagree about bytes while agreeing about
+      # characters — exactly the case the byte cursors have to keep straight.
+      raw = String.new(Bytes[0x61, 0xFF, 0x62, 0x4E, 0x45, 0x45, 0x44, 0x4C, 0x45, 0x80])
+      backend = MemoryBackend.new(20, 1)
+      screen = Screen.new(backend)
+      screen.text(0, 0, raw, Theme.text)
+      Wrap.mark_search(screen, 0, 0, raw, 0, raw.size, "needle", 20)
+      yellow_cols(backend, 20).empty?.should be_false # it found the match and painted SOMETHING
+    end
+
+    it "does not paint past a conceal run that swallows the whole line" do
+      line = "needle"
+      b = mark_only(line, "needle", 40, conceal: [{0, line.size}])
+      yellow_cols(b).should be_empty
+    end
+
+    it "drops a match scrolled entirely off the left edge (xoff past its end)" do
+      b = mark_only("needle" + "." * 30, "needle", 40, xoff: 20)
+      yellow_cols(b).should be_empty
+    end
+  end
+
+  # --- equivalence with the retired algorithm -------------------------------
+  # The rewrite changed only HOW three things are computed — the match scan (`String#index`
+  # on CHARACTER offsets → `String#byte_index`), the column (`Wrap.row_col` re-measured from
+  # the row start per match → a forward-only cursor) and the segment slice (a char-index
+  # slice → a byte slice) — never WHAT they answer. `reference_mark` is the retired shape,
+  # kept here as the oracle for that claim, and the corpus is the shapes the three cursors
+  # can disagree on: a non-ASCII haystack, a downcase that changes bytesize without changing
+  # length, a match starting INSIDE a grapheme cluster, concealed runs, h-scroll, and the
+  # right clip the new early exit rests on.
+  describe "matches the retired per-match-rewalk algorithm cell for cell" do
+    zwj = "\u{1F468}\u{200D}\u{1F4BB}" # 👨‍💻 : 3 codepoints, 2 columns
+
+    # {name, line, query, a, b, x, max_x, conceal, xoff}
+    cases = [
+      {"plain ASCII", "a FOObar", "foo", nil, nil, 0, 40, nil, 0},
+      {"dense ASCII", "ab" * 12, "ab", nil, nil, 0, 40, nil, 0},
+      {"dense ASCII, tight clip", "ab" * 12, "ab", nil, nil, 0, 5, nil, 0},
+      {"dense ASCII, clip mid-match", "ab" * 12, "ab", nil, nil, 0, 7, nil, 0},
+      {"dense ASCII, clip at 0", "ab" * 12, "ab", nil, nil, 0, 0, nil, 0},
+      {"dense ASCII, x offset", "ab" * 12, "ab", nil, nil, 6, 40, nil, 0},
+      {"dense ASCII, h-scrolled", "ab" * 12, "ab", nil, nil, 0, 40, nil, 7},
+      {"dense ASCII, h-scroll + x", "ab" * 12, "ab", nil, nil, 4, 30, nil, 9},
+      {"wrapped row, whole match inside", "aaaaNEEDLEaaaa", "needle", 7, 14, 0, 40, nil, 0},
+      {"wrapped row, match straddles head", "aaaaNEEDLEaaaa", "needle", 0, 7, 0, 40, nil, 0},
+      {"wrapped row of a dense line", "ab" * 40, "ab", 20, 40, 0, 40, nil, 0},
+      {"wrapped row, odd start", "ab" * 40, "ab", 21, 41, 0, 40, nil, 0},
+      {"CJK prefix", "世界foo世界foo", "foo", nil, nil, 0, 40, nil, 0},
+      {"CJK haystack, dense", "世界" * 10, "世", nil, nil, 0, 40, nil, 0},
+      {"CJK, wrapped row", "世界" * 10, "界", 6, 14, 0, 40, nil, 0},
+      {"ZWJ cluster prefix", zwj + "needle" + zwj + "needle", "needle", nil, nil, 0, 40, nil, 0},
+      {"combining mark, match mid-cluster", "e\u0301x e\u0301x", "\u0301", nil, nil, 0, 40, nil, 0},
+      {"NFD Hangul", "\u1112\u1161\u11AB\u1100\u1173\u11AFneedle", "needle", nil, nil, 0, 40, nil, 0},
+      {"tab before the match", "a\tneedle\tneedle", "needle", nil, nil, 0, 40, nil, 0},
+      {"U+0130 (downcase grows)", "İ foo İ foo", "foo", nil, nil, 0, 40, nil, 0},
+      {"U+212A (downcase shrinks bytes only)", "aK bK", "k", nil, nil, 0, 40, nil, 0},
+      {"U+212A, wrapped row", "aK bK cK", "k", 3, 8, 0, 40, nil, 0},
+      {"ſ long s (folds into ASCII)", "aſb aſb", "ſ", nil, nil, 0, 40, nil, 0},
+      {"conceal before the match", "a¦hid§needle", "needle", nil, nil, 0, 40, [{1, 6}], 0},
+      {"conceal inside the match", "needle", "needle", nil, nil, 0, 40, [{2, 4}], 0},
+      {"conceal at the row start", "¦hid§needle", "needle", nil, nil, 0, 40, [{0, 5}], 0},
+      {"two conceal runs", "a¦h§b¦h§needle", "needle", nil, nil, 0, 40, [{1, 4}, {5, 8}], 0},
+      {"conceal + h-scroll", "a¦hid§needleneedle", "needle", nil, nil, 0, 40, [{1, 6}], 4},
+      {"conceal, ASCII line", "aXXXbneedle", "needle", nil, nil, 0, 40, [{1, 4}], 0},
+      {"no match", "hello world", "zzz", nil, nil, 0, 40, nil, 0},
+      {"query longer than the line", "hi", "hiya", nil, nil, 0, 40, nil, 0},
+      {"adjacent matches", "aaaa", "aa", nil, nil, 0, 40, nil, 0},
+      {"single-char query, whole run", "aaaa", "a", nil, nil, 0, 40, nil, 0},
+      # `x` at or past the clip: nothing can be drawn, and the new early exit takes it on
+      # the first match rather than after walking the line.
+      {"x at the clip", "ab" * 12, "ab", nil, nil, 4, 4, nil, 0},
+      {"x past the clip", "ab" * 12, "ab", nil, nil, 8, 4, nil, 0},
+      {"h-scroll past the whole line", "needle" + "." * 20, "needle", nil, nil, 0, 40, nil, 60},
+      # The TextArea shape: soft wrap AND a concealed ¦chain run on the same line.
+      {"conceal on a wrapped row", "a¦hid§needleneedleneedle", "needle", 0, 12, 0, 40, [{1, 6}], 0},
+      {"conceal on a later wrapped row", "a¦hid§needleneedleneedle", "needle", 12, 24, 0, 40, [{1, 6}], 0},
+      {"wide cluster at the row start", "世needle世needle", "needle", 1, 8, 0, 40, nil, 0},
+    ]
+
+    cases.each do |(name, line, query, a, b, x, max_x, conceal, xoff)|
+      it "agrees on #{name}" do
+        a0 = a || 0
+        b0 = b || line.size
+        got = MemoryBackend.new(48, 1)
+        want = MemoryBackend.new(48, 1)
+        [got, want].each { |bk| Screen.new(bk).text(x, 0, line[a0...b0], Theme.text) }
+        Wrap.mark_search(Screen.new(got), x, 0, line, a0, b0, query, max_x, conceal, xoff)
+        reference_mark(Screen.new(want), x, 0, line, a0, b0, query, max_x, conceal, xoff)
+        got.bg_grid.should eq(want.bg_grid)
+        got.fg_grid.should eq(want.fg_grid)
+        got.cluster_grid.should eq(want.cluster_grid)
+        got.cont_grid.should eq(want.cont_grid)
+      end
+    end
+
+    it "agrees when the caller hoists `lower` beside the line" do
+      # `read_pane` hands in `line.downcase` so a wrapped line is not downcased once per
+      # drawn row; the scan must be the same either way.
+      line = "AB" * 20
+      got = MemoryBackend.new(48, 1)
+      want = MemoryBackend.new(48, 1)
+      Wrap.mark_search(Screen.new(got), 0, 0, line, 0, line.size, "ab", 40, lower: line.downcase)
+      reference_mark(Screen.new(want), 0, 0, line, 0, line.size, "ab", 40)
+      got.bg_grid.should eq(want.bg_grid)
+      got.cluster_grid.should eq(want.cluster_grid)
+    end
   end
 end

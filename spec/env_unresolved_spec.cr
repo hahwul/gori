@@ -10,10 +10,6 @@ require "./spec_helper"
 # file asserts both halves: the query API and the five builders that use it, plus the
 # display behaviour that had to stay put.
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 private def with_vars(vars : Array({String, String}), &)
   Gori::Settings.env_prefix = "$"
   Gori::Settings.env_vars = vars
@@ -149,7 +145,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
         "GET /a?q=§x§ HTTP/1.1\r\nHost: t.test\r\nAuth: Bearer $SESSION\r\n\r\n",
         target: "http://t.test",
         sources: [Gori::Fuzz::InlineList.new(["p"])] of Gori::Fuzz::PayloadSource)
-      Gori::Fuzz::Plan.build(options, ungated).template.to_s.should contain("Bearer $SESSION")
+      Gori::Fuzz::Plan.build(options, ungated_outbound).template.to_s.should contain("Bearer $SESSION")
     end
   end
 
@@ -158,7 +154,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
       options = Gori::Miner::PlanOptions.new(
         "GET /a HTTP/1.1\r\nHost: t.test\r\nCookie: s=$SESSION\r\n\r\n",
         target: "http://t.test")
-      String.new(Gori::Miner::Plan.build(options, ungated).request).should contain("s=$SESSION")
+      String.new(Gori::Miner::Plan.build(options, ungated_outbound).request).should contain("s=$SESSION")
     end
   end
 
@@ -169,7 +165,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
       options = Gori::Sequencer::PlanOptions.new(
         "GET /a HTTP/1.1\r\nHost: t.test\r\nAuth: $SESSION\r\n\r\n".to_slice,
         target: "http://t.test", config: config)
-      String.new(Gori::Sequencer::Plan.build(options, ungated).request).should contain("Auth: $SESSION")
+      String.new(Gori::Sequencer::Plan.build(options, ungated_outbound).request).should contain("Auth: $SESSION")
     end
   end
 
@@ -180,7 +176,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
       options = Gori::Miner::PlanOptions.new(
         "GET /a HTTP/1.1\r\nHost: t.test\r\nCookie: s=$SESSION\r\n\r\n",
         target: "http://t.test")
-      wire = String.new(Gori::Miner::Plan.build(options, ungated).request)
+      wire = String.new(Gori::Miner::Plan.build(options, ungated_outbound).request)
       wire.should contain("s=s3cr3t")
       wire.should_not contain("$SESSION")
     end
@@ -197,7 +193,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
         "GET /a?$filter=§x§&$top=10 HTTP/1.1\r\nHost: t.test\r\nAuth: Bearer $SESSION\r\n\r\n",
         evidence: true, target: "http://t.test",
         sources: [Gori::Fuzz::InlineList.new(["p"])] of Gori::Fuzz::PayloadSource)
-      plan = Gori::Fuzz::Plan.build(options, ungated)
+      plan = Gori::Fuzz::Plan.build(options, ungated_outbound)
       wire = String.new(plan.generator.baseline_request)
       wire.should contain("$filter=")
       wire.should contain("$top=10")
@@ -210,7 +206,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
     with_vars([{"where", "XX"}]) do
       raw = "POST /a HTTP/1.1\nHost: t.test\nContent-Length: 9\n\n{\"$where\"}"
       options = Gori::Miner::PlanOptions.new(raw, evidence: true, target: "http://t.test")
-      String.new(Gori::Miner::Plan.build(options, ungated).request).should eq(raw)
+      String.new(Gori::Miner::Plan.build(options, ungated_outbound).request).should eq(raw)
     end
   end
 
@@ -221,14 +217,14 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
       config = Gori::Sequencer::Config.new(mode: Gori::Sequencer::Mode::LiveReplay, token_loc: loc, goal: 10)
       options = Gori::Sequencer::PlanOptions.new(raw.to_slice, evidence: true,
         target: "http://t.test", config: config)
-      String.new(Gori::Sequencer::Plan.build(options, ungated).request).should eq(raw)
+      String.new(Gori::Sequencer::Plan.build(options, ungated_outbound).request).should eq(raw)
     end
   end
 
   it "Discover::Plan.build refuses an unresolved SEED and names the token" do
     with_vars([] of {String, String}) do
       options = Gori::Discover::PlanOptions.new("$SEED/api")
-      ex = expect_raises(Gori::Discover::PlanError) { Gori::Discover::Plan.build(options, ungated) }
+      ex = expect_raises(Gori::Discover::PlanError) { Gori::Discover::Plan.build(options, ungated_outbound) }
       ex.reason.should eq(Gori::Discover::PlanError::Reason::UnresolvedEnv)
       ex.detail.should eq("$SEED")
     end
@@ -242,7 +238,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
       config = Gori::Discover::Config.new
       config.headers = [{"X-Mongo", "$ne"}, {"Authorization", "Bearer $SESSION"}]
       options = Gori::Discover::PlanOptions.new("https://t.test/", config: config)
-      Gori::Discover::Plan.build(options, ungated).config.headers
+      Gori::Discover::Plan.build(options, ungated_outbound).config.headers
         .should eq([{"X-Mongo", "$ne"}, {"Authorization", "Bearer $SESSION"}])
     end
   end
@@ -252,7 +248,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
       options = Gori::Repeater::PlanOptions.new(
         ["GET /a HTTP/1.1\r\nHost: t.test\r\nAuth: Bearer $SESSION\r\n\r\n".to_slice],
         target: "http://t.test")
-      String.new(Gori::Repeater::Plan.build(options, ungated).bytes).should contain("Bearer $SESSION")
+      String.new(Gori::Repeater::Plan.build(options, ungated_outbound).bytes).should contain("Bearer $SESSION")
     end
   end
 
@@ -265,7 +261,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
       options = Gori::Repeater::PlanOptions.new(
         ["GET /a HTTP/1.1\r\nHost: t.test\r\nAuth: Bearer $SESSION\r\n\r\n".to_slice],
         expand_request: false, target: "http://t.test")
-      String.new(Gori::Repeater::Plan.build(options, ungated).bytes).should contain("Bearer $SESSION")
+      String.new(Gori::Repeater::Plan.build(options, ungated_outbound).bytes).should contain("Bearer $SESSION")
     end
   end
 
@@ -273,11 +269,11 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
     with_vars([] of {String, String}) do
       wire = ["GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice]
       bad_target = Gori::Repeater::PlanOptions.new(wire, target: "http://$HOST")
-      expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::Plan.build(bad_target, ungated) }
+      expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::Plan.build(bad_target, ungated_outbound) }
         .detail.should eq("$HOST")
 
       bad_sni = Gori::Repeater::PlanOptions.new(wire, target: "https://t.test", sni: "$SNI_HOST")
-      expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::Plan.build(bad_sni, ungated) }
+      expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::Plan.build(bad_sni, ungated_outbound) }
         .detail.should eq("$SNI_HOST")
     end
   end
@@ -288,7 +284,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
     with_vars([{"SESSION", "s3cr3t"}, {"HOST", "t.test"}]) do
       plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
         ["GET /a HTTP/1.1\r\nHost: $HOST\r\nAuth: Bearer $SESSION\r\n\r\n".to_slice],
-        target: "http://$HOST"), ungated)
+        target: "http://$HOST"), ungated_outbound)
       plan.host.should eq("t.test")
       wire = String.new(plan.bytes)
       wire.should contain("Auth: Bearer s3cr3t")
@@ -302,7 +298,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
     with_vars([] of {String, String}) do
       plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
         ["POST /a HTTP/1.1\r\nHost: t.test\r\n\r\n{\"q\":\"$NOTATOKEN\"}".to_slice],
-        target: "http://t.test"), ungated)
+        target: "http://t.test"), ungated_outbound)
       String.new(plan.bytes).should contain("$NOTATOKEN")
     end
   end
@@ -314,7 +310,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
     with_vars([] of {String, String}) do
       plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
         ["GET /graphql?query=q($id)&f=$ne HTTP/1.1\r\nHost: t.test\r\nX-Ref: $ref\r\n\r\n".to_slice],
-        target: "http://t.test"), ungated)
+        target: "http://t.test"), ungated_outbound)
       wire = String.new(plan.bytes)
       wire.should contain("/graphql?query=q($id)&f=$ne")
       wire.should contain("X-Ref: $ref")
@@ -329,7 +325,7 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
       expect_raises(Gori::Repeater::PlanError) do
         Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(
           ["GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice],
-          target: "http://$NOHOST.test"), ungated)
+          target: "http://$NOHOST.test"), ungated_outbound)
       end
     end
   end

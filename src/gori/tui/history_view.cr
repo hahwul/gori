@@ -17,6 +17,7 @@ require "./wrap"
 require "./viewport"
 require "./copy_menu"
 require "./preview_split"
+require "./line_edit"
 require "../store"
 require "../display_columns"
 require "../repeater/flow_request"
@@ -33,6 +34,13 @@ module Gori::Tui
   # (no queue/ranking, P8). A QL bar (`/`) filters the list; analysis is by query
   # (pull), with field/value suggestions while typing. Also owns the detail view.
   class HistoryView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
+
+    # After a `LineEdit` edit: the dropdown follows the token now under the caret.
+    def query_edited : Nil
+      sync_popup
+    end
+
     # `list_split` only — the focus half (PreviewPane) is two-way and this preview is not.
     include PreviewSplit
 
@@ -84,12 +92,27 @@ module Gori::Tui
     # The highlighter's field vocabulary. `QL.known_field?`, not `QL_FIELDS.includes?`: the pool
     # is what Tab OFFERS and is a strict subset of what QL accepts, so testing against it would
     # paint `res.body:` — which compiles perfectly — as a typo.
-    QL_KNOWN = ->(f : String) { QL.known_field?(f) }
+    QL_KNOWN = ->(f : String, op : Char) { QL.known_field?(f, regex: op == '~') }
 
     getter rows : Array(Store::FlowRow)
     getter? follow : Bool
     getter? querying : Bool
     getter query : String
+    property reload_handler : Proc(Store, Nil)? = nil
+    property host_suggest_handler : Proc(String, Nil)? = nil
+    getter? searching : Bool = false
+    # `searching?` is the controller's truth (it guards the capture flush and the deferred
+    # click); `searching_shown?` is what the bar and the empty list PAINT. A search that
+    # finishes inside SEARCHING_GRACE — every coalesced capture reload on a small project —
+    # never reaches the screen, so the chips do not blink on each 250 ms refresh.
+    getter? searching_shown : Bool = false
+    @searching_since : Time::Instant? = nil
+    getter search_error : String? = nil
+    @host_suggest_dirty = false
+    @host_suggest_refresh_at = Time.instant
+    @host_suggest_pending = false
+    @suggestions_pending = false
+    @popup_requested = false
     # The detail body's read caret (mirrors RepeaterView#resp_cursor) — the pane's own
     # position, which the wrap walkers move in visual rows.
     getter detail_read : ReadCursor
@@ -98,6 +121,7 @@ module Gori::Tui
       # Display order follows Settings.history_list_order: newest-first (id DESC) or
       # oldest-first (id ASC). index_of binary-searches the matching direction.
       @rows = [] of Store::FlowRow
+      @rows_newest_first = Settings.history_newest_first?
       @selected = 0
       @scroll = 0
       @follow = true
@@ -180,6 +204,17 @@ module Gori::Tui
       # reloads, re-sorts and re-filters constantly, so an index-keyed memo would retarget.
       # Dropped wholesale whenever the engine's revision moves — see `color_for`.
       @color_memo = {} of Int64 => Store::ColorRule?
+      # The three per-row strings the list builds from a row's own fields, memoized on those
+      # fields: a timestamp is parsed, localised and strftime'd, a Content-Type is split,
+      # stripped and downcased twice, and an absolute-form target is sliced — per row, per
+      # frame, for values that do not change between frames. Keyed on the VALUE (created_at,
+      # the header, the flow id for a target that is immutable per flow), never on the row
+      # object, so a row whose response lands later (its Content-Type goes from nil to a
+      # value) reads the new answer. Cleared on size like `@color_memo`; `@mime_memo` is
+      # bounded by the number of distinct Content-Types and capped for a hostile origin.
+      @time_memo = {} of Int64 => String
+      @mime_memo = {} of String => String
+      @path_memo = {} of Int64 => String
       @color_rev = 0_u64
       @detail = nil.as(Store::FlowDetail?)
       @detail_ws = nil.as(Array(Store::WsMessage)?)
@@ -251,6 +286,7 @@ module Gori::Tui
       @detail_last_h = 0
       @detail_last_gw = 0
       @detail_last_cw = 0
+      @list_last_h = 0 # rows the last list frame drew — the PgUp/PgDn step (list_page_rows)
       # settings:layout History Req/Res preview (list page bottom pane) — separate from full detail.
       @preview_detail = nil.as(Store::FlowDetail?)
       @preview_id = nil.as(Int64?)
@@ -326,9 +362,15 @@ module Gori::Tui
     # four slices the preview projection is built from — NOT the row, whose mutable columns
     # (state, duration, size counters) settle after the bytes do and would keep invalidating a
     # projection that is already correct.
+    #
+    # The wire body sizes ride along because `preview_text_lines` bakes them into the binary
+    # placeholder, and the bodies here are the CAPPED preview slices: two captures of the same
+    # image that differ only past the cap would otherwise keep the first one's size line.
     private def preview_source_unchanged?(a : Store::FlowDetail, b : Store::FlowDetail) : Bool
       a.request_head == b.request_head && a.request_body == b.request_body &&
-        a.response_head == b.response_head && a.response_body == b.response_body
+        a.response_head == b.response_head && a.response_body == b.response_body &&
+        a.request_wire_body_size == b.request_wire_body_size &&
+        a.response_wire_body_size == b.response_wire_body_size
     end
 
     def clear_preview : Nil
@@ -375,15 +417,42 @@ module Gori::Tui
                        end
     end
 
+    # One step along list → req → res (dir > 0) or back; false off either end, so the
+    # Runner's focus ring can leave for the tab bar there.
+    def step_preview_focus(dir : Int32) : Bool
+      order = [:list, :req, :res]
+      i = order.index(@preview_focus) || 0
+      ni = i + dir
+      return false if ni < 0 || ni >= order.size
+      @preview_focus = order[ni]
+      true
+    end
+
     def set_preview_focus(f : Symbol) : Nil
       @preview_focus = f if {:list, :req, :res}.includes?(f)
     end
 
+    getter preview_scroll_req : Int32
+    getter preview_scroll_res : Int32
+
+    # Bounded at both ends by the projection the pane draws from: `render_preview_side` clamps
+    # a COPY of the offset to `lines.size - 1` and never wrote it back, so a PageDown past the
+    # end left a phantom offset that ↑ then had to walk back through before anything moved.
     def scroll_preview(delta : Int32) : Nil
-      case @preview_focus
-      when :req then @preview_scroll_req = {@preview_scroll_req + delta, 0}.max
-      when :res then @preview_scroll_res = {@preview_scroll_res + delta, 0}.max
+      wheel_preview(@preview_focus, delta)
+    end
+
+    # Scroll ONE preview pane by name — the wheel's entry, which reads the pane under the
+    # pointer without moving keyboard focus to it. `scroll_preview` is the focused-pane form.
+    def wheel_preview(pane : Symbol, delta : Int32) : Nil
+      case pane
+      when :req then @preview_scroll_req = preview_scroll_clamp(@preview_scroll_req + delta, @preview_req_lines)
+      when :res then @preview_scroll_res = preview_scroll_clamp(@preview_scroll_res + delta, @preview_res_lines)
       end
+    end
+
+    private def preview_scroll_clamp(at : Int32, lines : Array(String)?) : Int32
+      at.clamp(0, {(lines.try(&.size) || 1) - 1, 0}.max)
     end
 
     # `list_split` — the split geometry — comes from PreviewSplit, shared with Issues/Probe.
@@ -574,9 +643,29 @@ module Gori::Tui
     # Load flows applying the Scope lens AND the QL query. store.search returns
     # newest-first (ORDER BY id DESC); reverse when the layout pref is oldest-first.
     def reload(store : Store) : Nil
+      if handler = @reload_handler
+        handler.call(store)
+      elsif request = prepare_search(store)
+        apply_search(fetch_search(store, request))
+      end
+    end
+
+    record SearchRequest, filter : QL::Filter, view : SavedViews::View?, note : String?
+    record SearchResult, rows : Array(Store::FlowRow), note : String?, no_flows : Bool,
+      view_note : String?, error : String? = nil
+
+    alias SearchIdentity = Tuple(String, QL::Filter?, Bool, SavedViews::View?)
+
+    def search_identity : SearchIdentity
+      {@query, @scope.try(&.ql_lens.predicate), @scope.try(&.active?) == true, active_view}
+    end
+
+    # Compilation stays on the UI fiber. Workers receive a snapshot and never
+    # consult the mutable query, scope, selection, or saved-view state.
+    def prepare_search(store : Store) : SearchRequest?
       @suggest_store = store
-      invalidate_host_suggest_cache
-      prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
+      @search_error = nil
+      @filter_dirty = false
       # The `scope:` lens: this view already holds the Scope it applies for ⇧S, and a `scope:`
       # TERM is that same predicate asked as a question rather than switched on — `ql_lens` reads
       # the rules regardless of the flag (see there), so `scope:in` means the same thing with the
@@ -612,26 +701,43 @@ module Gori::Tui
         @filter_dirty = false
         @selected = 0
         @scroll = 0
-        return
+        self.searching = false
+        return nil
       end
       combined = QL.and(QL.and(@scope.try(&.filter) || QL::EMPTY, view_filter || QL::EMPTY),
         query_filter)
-      @rows =
-        begin
-          store.search(combined, PAGE, raise_on_error: true)
-        rescue
-          # A VALID QL parse that SQLite still can't run (a huge OR chain past the
-          # expression-tree-depth limit, a pathological FTS phrase). Degrade to empty like
-          # before, but SAY why via the note so it doesn't read as a genuine "no flows match"
-          # (#411). The store already logged it to gori.log; the live loop must never crash.
-          @query_note = "query too complex to run — narrow the filter"
-          [] of Store::FlowRow
-        end
+      SearchRequest.new(combined, view, @query_note)
+    end
+
+    def fetch_search(store : Store, request : SearchRequest,
+                     control : Store::QueryControl? = nil) : SearchResult
+      rows = store.search(request.filter, PAGE, raise_on_error: true, control: control)
+      SearchResult.new(rows, request.note, rows.empty? && store.recent_flows(1).empty?,
+        rows.empty? ? empty_view_note(request.view, store) : nil)
+    rescue ex : Store::QueryCancelled
+      raise ex
+    rescue ex
+      ::Log.warn { "history search failed: #{ex.message}" }
+      SearchResult.new([] of Store::FlowRow, request.note, false, nil,
+        "query too complex to run — narrow the filter")
+    end
+
+    def apply_search(result : SearchResult) : Nil
+      self.searching = false
+      @last_filter_flush = Time.instant
+      @search_error = result.error
+      if result.error
+        @query_note = result.error
+        return
+      end
+      prev_id = selected_id
+      @rows = result.rows
+      @rows_newest_first = Settings.history_newest_first?
+      @query_note = result.note
       @rows.reverse! unless newest_first?
-      # One indexed one-row read, and only when there is nothing to show anyway.
-      @no_flows = @rows.empty? && store.recent_flows(1).empty?
-      @view_note = @rows.empty? ? empty_view_note(view, store) : nil
-      @filter_dirty = false
+      @no_flows = result.no_flows
+      @view_note = result.view_note
+      prev_selected = @selected
       @selected =
         if @follow
           follow_index
@@ -640,6 +746,11 @@ module Gori::Tui
         else
           @selected.clamp(0, {@rows.size - 1, 0}.max)
         end
+      # The row moved by the rows that arrived above it; move the viewport by the same amount
+      # so the highlight stays ON SCREEN WHERE IT WAS, as the unfiltered insert path does
+      # (`on_event`: `@selected += 1; @scroll += 1`). Without this a filtered list under
+      # capture crept the highlight down one row per matching flow until it hit the edge.
+      @scroll = {@scroll + (@selected - prev_selected), 0}.max unless @follow
     end
 
     # A short note explaining a filter that matches nothing because it is INVALID (vs a
@@ -728,9 +839,11 @@ module Gori::Tui
       "body search is #{count} flow(s) behind — still indexing"
     end
 
-    # settings:layout History list order — newest first (default) or oldest first.
+    # The order of the rows actually on screen. A settings change only takes
+    # effect when its replacement rows arrive; binary searches and live inserts
+    # must keep using the previous order while that query is pending.
     private def newest_first? : Bool
-      Settings.history_newest_first?
+      @rows_newest_first
     end
 
     # Index of the live tail (newest flow) in the current display order.
@@ -748,12 +861,36 @@ module Gori::Tui
     # FIRST dirtying still reloads immediately (last-flush is nil), so the view stays live.
     FILTER_FLUSH_INTERVAL = 250.milliseconds
 
+    # How long a search runs before the bar says so. Longer than a tick (50 ms), shorter
+    # than the typing debounce plus a quick query, so a fast search never shows and a slow
+    # one is labelled well before an operator wonders whether the keystroke landed.
+    SEARCHING_GRACE = 150.milliseconds
+
+    def searching=(flag : Bool) : Nil
+      if flag
+        @searching_since ||= Time.instant
+      else
+        @searching_since = nil
+        @searching_shown = false
+      end
+      @searching = flag
+    end
+
+    # Called each tick with the loop's clock. Returns true the tick the label appears
+    # (the frame is dirty); false while nothing is pending or the label is already up.
+    def reveal_searching(now : Time::Instant) : Bool
+      return false if @searching_shown
+      since = @searching_since
+      return false unless since && now - since >= SEARCHING_GRACE
+      @searching_shown = true
+    end
+
     # Apply any filtered-view staleness accumulated during a drain cycle in ONE
     # reload (vs reloading per flow event — a search+reverse of up to PAGE rows),
     # debounced to FILTER_FLUSH_INTERVAL so a busy capture can't thrash the search.
     # Returns true if it actually reloaded (so the caller can mark the frame dirty).
     def flush_filter(store : Store) : Bool
-      return false unless @filter_dirty
+      return false unless @filter_dirty && !@searching
       now = Time.instant
       if (last = @last_filter_flush) && now - last < FILTER_FLUSH_INTERVAL
         return false
@@ -763,8 +900,14 @@ module Gori::Tui
       true
     end
 
+    def stale_filter : Nil
+      @filter_dirty = true
+      @host_suggest_dirty = true
+    end
+
     def on_event(event : Store::FlowEvent, store : Store) : Nil
-      if filtering?
+      @host_suggest_dirty = true if event.kind == :inserted
+      if filtering? || @searching
         @filter_dirty = true # coalesce: the Runner reloads once after draining
         return
       end
@@ -914,6 +1057,17 @@ module Gori::Tui
 
     def selected_id : Int64?
       @rows[@selected]?.try(&.id)
+    end
+
+    # The id at a list index, and the index an id currently sits at — the pair a caller uses
+    # to carry a row across a reload that may reorder or drop it (a click that also applies
+    # the QL query). nil when the index is off the window / the id is no longer in it.
+    def row_id_at(idx : Int32) : Int64?
+      @rows[idx]?.try(&.id)
+    end
+
+    def row_index(id : Int64) : Int32?
+      index_of(id)
     end
 
     def empty? : Bool
@@ -1100,8 +1254,20 @@ module Gori::Tui
       # that collision require a shared capture microsecond; dropping the memo here removes it
       # outright for every deletion gori itself performs.
       forget_column_values
+      remove_deleted_rows(ids)
       reload(store)
       true
+    end
+
+    # A replacement query is asynchronous in the TUI. Committed deletions must
+    # disappear immediately, especially since the Store can reuse their rowids.
+    private def remove_deleted_rows(ids : Array(Int64)) : Nil
+      anchor = selected_id
+      previous = @selected
+      deleted = ids.to_set
+      @rows.reject! { |row| deleted.includes?(row.id) }
+      @selected = (anchor.try { |id| index_of(id) } || @selected).clamp(0, {@rows.size - 1, 0}.max)
+      @scroll = (@scroll + @selected - previous).clamp(0, {@rows.size - 1, 0}.max)
     end
 
     # Wipe every History flow, close detail/preview, and reload the list.
@@ -1110,14 +1276,20 @@ module Gori::Tui
     # its caller branches on it; `clear` was the one History write that dropped it — and the
     # `reload` below made the contradiction visible, repopulating the list with the flows that
     # are still there while the status line said they were gone.
+    #
+    # On a rollback NOTHING local is touched, the same contract as `delete_ids`: the marks and
+    # the open detail stay, since every flow they point at is still there.
     def clear(store : Store) : Bool
-      ok = store.clear_flows
+      return false unless store.clear_flows
       close_detail
       clear_preview
       clear_marks
       forget_column_values # see delete_ids: a clear RESTARTS rowid numbering
+      @rows.clear
+      @selected = 0
+      @scroll = 0
       reload(store)
-      ok
+      true
     end
 
     # --- QL bar editing ------------------------------------------------------
@@ -1135,13 +1307,13 @@ module Gori::Tui
       @query = text
       @qcx = @query.size
       @preedit = ""
-      @popup.close
+      popup_close
       @filter_dirty = true
     end
 
     def stop_query : Nil # Enter: keep the filter, leave edit mode
       @querying = false
-      @popup.close
+      popup_close
     end
 
     def cancel_query : Nil # Esc: clear the filter, leave edit mode
@@ -1149,7 +1321,7 @@ module Gori::Tui
       @query = ""
       @qcx = 0
       @preedit = ""
-      @popup.close
+      popup_close
     end
 
     def query_insert(ch : Char) : Nil
@@ -1183,8 +1355,8 @@ module Gori::Tui
     # honoured, which is worse than not offering one.
     def popup_down : Nil
       return @popup.move(1) if @popup.open?
-      @popup.set(query_suggestions)
-      @popup.open!
+      @popup_requested = true
+      sync_popup
     end
 
     def popup_up : Nil
@@ -1192,6 +1364,7 @@ module Gori::Tui
     end
 
     def popup_close : Nil
+      @popup_requested = false
       @popup.close
     end
 
@@ -1199,7 +1372,13 @@ module Gori::Tui
     # selection onto the same candidate when it survived, and shuts itself when the edit left
     # nothing to show — an empty dropdown is a hole in the list for no content.
     private def sync_popup : Nil
-      @popup.set(query_suggestions) if @popup.open?
+      return unless @popup.open? || @popup_requested
+      suggestions = query_suggestions
+      @popup.set(suggestions)
+      # An empty asynchronous result is still loading, not "no candidates".
+      # Remember the opt-in gesture until it arrives, but never reopen after Esc.
+      @popup_requested = suggestions.empty? && @suggestions_pending
+      @popup.open!
     end
 
     # IME composing text, drawn (underlined) at the caret without touching the
@@ -1227,7 +1406,7 @@ module Gori::Tui
       # Completing consumes the choice: the token is now whole, so the old candidate set is
       # stale. Re-derive it (a field completion opens a value list) and let `set` close the
       # popup if that leaves nothing.
-      close ? @popup.close : (@popup.set(query_suggestions) if @popup.open?)
+      close ? popup_close : sync_popup
       true
     end
 
@@ -1235,6 +1414,7 @@ module Gori::Tui
     # FilterAst::Cursor carries the grammar's punctuation through, so `-ho` → `-host:`
     # and `(ho` → `(host:` — the same peeling every other filter bar uses.
     def query_suggestions : Array(String)
+      @suggestions_pending = false
       cur = FilterAst.token_at(@query, @qcx)
       return [] of String if cur.core.empty?
       fields =
@@ -1467,6 +1647,13 @@ module Gori::Tui
     # overlap" step `ReadPane#motion_key` uses, measured from this pane's own last drawn height.
     def detail_page_rows : Int32
       {@detail_last_h - 2, 1}.max
+    end
+
+    # One screenful of the LIST, for PgUp/PgDn: the rows the last frame actually drew (the
+    # bar, header and divider, the suggestion row while querying, and the preview split all
+    # come off the body height) minus the same two rows of overlap.
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
     end
 
     # True when the detail is at its very top: caret on the FIRST VISUAL ROW of line 0
@@ -1824,7 +2011,7 @@ module Gori::Tui
     # paths (move/scroll/paint) so BodyLines stay lazy; this full array is for
     # rare full-materialise callers (e.g. selection span rebuild when selecting).
     private def detail_plain_lines : Array(String)
-      if @reveal && (rl = reveal_lines)
+      if rl = shown_reveal_lines
         rl
       else
         dv = detail_view
@@ -1834,7 +2021,7 @@ module Gori::Tui
 
     # O(1) total + lazy line fetch for caret/scroll/copy on windowed req/resp bodies.
     private def detail_line_source
-      if @reveal && (rl = reveal_lines)
+      if rl = shown_reveal_lines
         {rl.size, ->(i : Int32) { rl[i] }}
       else
         dv = detail_view
@@ -1978,6 +2165,9 @@ module Gori::Tui
       if @detail_wrap_w != cw
         @detail_wrap.clear
         @detail_wrap_w = cw
+        # The sub-row was counted at the old width; a wider pane may give its line fewer rows,
+        # and `ensure_detail_visible` would compare the caret against the stale one for a frame.
+        @detail_scroll_sub = 0
       end
       if hit = @detail_wrap[li]?
         return hit
@@ -2077,7 +2267,7 @@ module Gori::Tui
       # scroll bounds (detail_scroll_max). Search must scan reveal_lines so the hit indices
       # match what goto_detail_line scrolls to — mirroring the hex exclusion above (the
       # decoded/pretty detail_view has a different line count, so its indices would scroll wrong).
-      if @reveal && (rl = reveal_lines)
+      if rl = shown_reveal_lines
         rl.each_with_index { |ln, i| hits << i if ln.downcase.includes?(q) }
         return hits
       end
@@ -2089,11 +2279,26 @@ module Gori::Tui
     private def detail_scroll_max : Int32
       if @detail_hex && (bytes = detail_pane_bytes)
         {HexView.rows(bytes.size) - 1, 0}.max
-      elsif @reveal && (rl = reveal_lines)
+      elsif rl = shown_reveal_lines
         {rl.size - 1, 0}.max
       else
         {detail_view.total - 1, 0}.max
       end
+    end
+
+    # The reveal line space, but only while the body is DRAWN from it — the answer
+    # `reveal_active?` gives the renderer, so the caret, scroll bounds, ^F and copy walk the
+    # lines on screen. `@reveal && reveal_lines` was not that: `@reveal` is a global pref and
+    # `reveal_lines` has raw bytes behind any request/response pane, so on a PNG response or
+    # a gRPC tree the screen showed the placeholder / the decoded tree while ↓ walked
+    # thousands of invisible raw lines, the gutter caret vanished, ^F scrolled the tree to
+    # reveal-space indices and `y` copied bytes the operator never saw.
+    private def shown_reveal_lines : Array(String)?
+      return nil unless @reveal
+      detail = @detail
+      return nil unless detail
+      return nil unless reveal_active?(detail_hex?(detail), detail_view)
+      reveal_lines
     end
 
     # Whether the current pane supports the hex view (raw request/response bytes;
@@ -2383,6 +2588,7 @@ module Gori::Tui
 
       list_top = hdr_y + 2
       list_h = {rect.bottom - list_top, 0}.max
+      @list_last_h = list_h
       ensure_visible(list_h)
 
       if @rows.empty?
@@ -2393,7 +2599,7 @@ module Gori::Tui
         # naming the filter that excluded nothing is useless when there was nothing to exclude.
         # A typed query is the one exception: the operator just wrote it and is owed the answer
         # that it matched nothing.
-        if @no_flows && @query.blank?
+        if @no_flows && @query.blank? && !@searching_shown && !@search_error
           list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
           TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
           return
@@ -2405,7 +2611,11 @@ module Gori::Tui
         # set is caused by the Scope lens or no traffic, where "esc clears the filter"
         # would mislead (⇧S clears the lens). Mirrors sitemap_view's ordering.
         msg, hint =
-          if @view_broken
+          if @searching_shown
+            {"searching", "esc clears the filter"}
+          elsif error = @search_error
+            {error, "/ to edit the filter"}
+          elsif @view_broken
             # FIRST, ahead of the bar: the list is empty because `reload` refused to apply the
             # view, so every other hint here would send the operator to a control that is not
             # the problem.
@@ -2427,8 +2637,24 @@ module Gori::Tui
             TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
             return
           end
-        screen.text(time_x, list_top, msg, Theme.muted)
-        screen.text(time_x, list_top + 2, hint, Theme.muted) if list_h > 2
+        # BOTH rows are gated on the room there actually is, on BOTH axes. The hint had the
+        # height half; neither had either the other.
+        #
+        # Vertically: `list_top` is `hdr_y + 2`, so on a pane with a one-row interior (a 40x9
+        # terminal — `Layout.usable?`'s floor plus a row) `list_h` is 0 and "no flows match the
+        # … view" was painted on the shell's status line, over the key hints.
+        #
+        # Horizontally: neither call passed a `width`, so `Screen#text` fell back to the whole
+        # SCREEN and the 41-character view-empty message ran two columns past the card's right
+        # border on a 40-column terminal — the ellipsis landed in the terminal's own margin.
+        #
+        # Same family as `short_pane_clamp_spec`: clamp one axis, forget the other. Contract:
+        # `spec/tui/contract_render_bounds_spec.cr`.
+        if list_h > 0
+          msg_w = {rect.right - time_x, 0}.max
+          screen.text(time_x, list_top, msg, Theme.muted, width: msg_w)
+          screen.text(time_x, list_top + 2, hint, Theme.muted, width: msg_w) if list_h > 2
+        end
         return
       end
 
@@ -2478,7 +2704,7 @@ module Gori::Tui
         if sw > 0 && (m = mark) && m.style.strip?
           screen.cell(strip_x, y, '█', Theme.mark_color(m.color), bg)
         end
-        screen.text(time_x, y, fmt_time(row.created_at), Theme.muted, bg)
+        screen.text(time_x, y, fmt_time_memo(row.created_at), Theme.muted, bg)
         # METHOD is a FIXED 8-column cell (method_x .. proto_x), so it needs its own clamp —
         # without a `width:` the limit is the whole SCREEN. RFC 9110 permits any token here and
         # the parser caps nothing, so a long method (`VERSION-CONTROL`, a smuggled
@@ -2508,7 +2734,7 @@ module Gori::Tui
         proto_color = stub ? Theme.yellow : (kind.http? ? Theme.muted : Theme.accent)
         screen.text(proto_x, y, proto_label, proto_color, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
-        screen.text(path_x, y, Url.origin_path(row.target), fg, bg, width: path_w) if path_w > 0
+        screen.text(path_x, y, origin_path_memo(row), fg, bg, width: path_w) if path_w > 0
         # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
         # a cryptic "0" indistinguishable from a still-pending "···".
         status, scolor = FlowStatus.cell(row)
@@ -2530,7 +2756,7 @@ module Gori::Tui
           screen.text(src_x, y, src.try(&.label) || "—",
             src.nil? || src.proxy? ? Theme.muted : Theme.accent, bg, width: 5)
         end
-        screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
+        screen.text(type_x, y, fmt_mime_memo(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
         screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
         render_columns_row(screen, cols_x, y, shown_cols, row, fg, bg)
@@ -2737,6 +2963,27 @@ module Gori::Tui
       t.to_local.to_s("%m-%d %H:%M:%S")
     end
 
+    # `fmt_time` through the memo — for the ABSOLUTE format only. A relative age is a
+    # function of now and has to be recomputed each frame (it is `Fmt.ago`, cheap).
+    private def fmt_time_memo(created_at : Int64) : String
+      return fmt_time(created_at) if Settings.history_time_format == "relative"
+      @time_memo.fetch(created_at) { @time_memo[created_at] = fmt_time(created_at) }
+    end
+
+    MIME_MEMO_CAP = 256
+
+    private def fmt_mime_memo(ct : String?) : String
+      return "—" unless ct
+      @mime_memo.fetch(ct) do
+        @mime_memo.clear if @mime_memo.size >= MIME_MEMO_CAP
+        @mime_memo[ct] = fmt_mime(ct)
+      end
+    end
+
+    private def origin_path_memo(row : Store::FlowRow) : String
+      @path_memo.fetch(row.id) { @path_memo[row.id] = Url.origin_path(row.target) }
+    end
+
     # Compact relative age from now: "3s" / "5m" / "2h" / "1d". This said it "mirrors
     # notifications_overlay#ago" — a copy that no longer exists as one: that overlay and its
     # two siblings were collapsed into `Fmt.ago` for exactly this reason, and the two methods
@@ -2888,8 +3135,12 @@ module Gori::Tui
       screen.text(x + 1, rect.y, "· #{nav} · space · esc", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
-      body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
+      # The text rect and the footer strip under it come from ONE derivation
+      # (`detail_text_rect`), shared with the controller's click/drag hit-test.
+      body = detail_text_rect(rect) || Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, 0)
+      render_detail_footer(screen, rect, body, focused)
       if hex && (bytes = detail_pane_bytes)
+        @detail_last_h = body.h # the page step (detail_page_rows) reads it in hex too
         HexView.render(screen, body, bytes, @detail_scroll)
         return
       end
@@ -2899,6 +3150,95 @@ module Gori::Tui
       end
 
       render_detail_body(screen, body, focused: focused)
+    end
+
+    # The fewest text rows the body keeps when the footer strip competes for height. Below
+    # this the footer is dropped whole rather than squeezing the pane to a sliver: the bytes
+    # are what the drill-in is FOR, the strip is what gori says about them.
+    DETAIL_FOOTER_MIN_BODY = 3
+
+    # The detail drill-in's TEXT rect inside the framed interior `inner`: under the pane
+    # strip + mode row, above the footer strip. nil when the terminal is too short to leave
+    # any text rows. ONE derivation for the render and for the controller's click/drag/
+    # double-click hit-test — a body drawn against one rect and hit-tested against another
+    # is a dead row, which is exactly what a footer added on the render side alone would
+    # have made of the last lines of the pane.
+    def detail_text_rect(inner : Rect) : Rect?
+      top = inner.y + 2 # pane strip + mode row
+      h = inner.bottom - top
+      return nil if h <= 0
+      Rect.new(inner.x + 1, top, {inner.w - 2, 0}.max, h - detail_footer_height(inner))
+    end
+
+    # Rows the footer strip takes out of `inner` (divider + lines), or 0 when it does not
+    # fit — the same 0 the render reads, so a footer that is not drawn also does not shrink
+    # the hit-test rect.
+    private def detail_footer_height(inner : Rect) : Int32
+      n = detail_footer_lines.size
+      return 0 if n == 0
+      avail = inner.bottom - (inner.y + 2)
+      avail - (n + 1) >= DETAIL_FOOTER_MIN_BODY ? n + 1 : 0
+    end
+
+    # The footer strip: a divider, the exchange's facts, then gori's own sentences about
+    # the flow (provenance, advisories) one per row. Drawn under the text of EVERY pane —
+    # request, response, hex, frames, messages — because none of it is a property of the
+    # pane: status, sizes and latency describe the exchange, and the provenance note says
+    # where the request came from. It used to ride the REQUEST pane's trailer, spliced
+    # after the wire bytes as if it were part of the message (P7: the panes are the wire's
+    # bytes, and a reader copying the pane got gori's sentence with them).
+    private def render_detail_footer(screen : Screen, inner : Rect, body : Rect, focused : Bool) : Nil
+      lines = detail_footer_lines
+      return if lines.empty? || detail_footer_height(inner) == 0
+      y = body.bottom
+      Frame.inner_divider(screen, inner, y, border: Frame.pane_border(focused))
+      lines.each_with_index do |line, i|
+        Highlight.draw(screen, body.x, y + 1 + i, line, width: body.w)
+      end
+    end
+
+    # The footer's rows, top to bottom. Built per call rather than memoised: a handful of
+    # short strings, and a live flow's facts change under the pane (pending → complete) via
+    # `refresh_detail`, which does not go through the view cache.
+    private def detail_footer_lines : Array(Highlight::Line)
+      detail = @detail
+      return EMPTY_LINES unless detail
+      lines = [detail_stats_line(detail)]
+      # Where this request came from, spelled out — the SRC column has five cells and has to
+      # abbreviate. Only when gori itself produced it: a proxy capture is the norm and needs
+      # no sentence, and a pre-provenance row has nothing true to say (the column's `—` is the
+      # whole answer). Muted, not yellow: this is a fact about the flow, not a warning.
+      if note = source_note(detail.row)
+        lines << [Highlight::Span.new(note, Theme.muted)]
+      end
+      # What gori has to say about this exchange that its bytes cannot (`FlowRow#advisory`).
+      detail.row.advisories.each do |a|
+        lines << [Highlight::Span.new("! #{a}", Theme.yellow)]
+      end
+      lines
+    end
+
+    # `200 · HTTP/1.1 · req 312B · res 1.4KB · 123ms · application/json · 09-05 14:02:11` —
+    # the row's cells, spelled out where the list had to abbreviate. Sizes are WIRE sizes
+    # (head + true body size, not the capture-capped blob), the same numbers the SIZE column
+    # shows; latency and size read `—` until the response lands, like the list. The status
+    # cell is `FlowStatus.cell` so ERR/ABT here can never disagree with the list.
+    private def detail_stats_line(detail : Store::FlowDetail) : Highlight::Line
+      row = detail.row
+      sep = Highlight::Span.new(" · ", Theme.muted)
+      status, scolor = FlowStatus.cell(row)
+      line = [Highlight::Span.new(status, scolor, Attribute::Bold)]
+      line << sep << Highlight::Span.new(row.short_circuited? ? "STUB" : detail.http_version,
+        row.short_circuited? ? Theme.yellow : Theme.text_bright)
+      req = detail.request_head.size.to_i64 + detail.request_wire_body_size
+      line << sep << Highlight::Span.new("req ", Theme.muted) << Highlight::Span.new(Fmt.size(req), Theme.text_bright)
+      line << sep << Highlight::Span.new("res ", Theme.muted) << Highlight::Span.new(Fmt.size(row.response_size), Theme.text_bright)
+      line << sep << Highlight::Span.new(Fmt.dur(row.duration_us), Theme.text_bright)
+      if (ct = row.content_type) && !(essence = ct.split(';', 2)[0].strip).empty?
+        line << sep << Highlight::Span.new(essence, Theme.muted)
+      end
+      line << sep << Highlight::Span.new(fmt_time(row.created_at), Theme.muted)
+      line
     end
 
     # "sent by gori — repeater (tui), session #42", or nil for a proxy capture and for a row
@@ -2957,6 +3297,11 @@ module Gori::Tui
       # describes both and the colours cannot land a column off the glyphs.
       rows = detail_rows(cw, body.h, total, ->(i : Int32) { detail_line_text(dv, i) })
       xs = detail_xscroll
+      # The search band scans a DOWNCASED copy of the whole logical line, and under wrap one
+      # minified body line can fill the viewport — so the copy is made once per logical line
+      # here, not once per drawn row (the `ReadPane` hoist; `mark_search`'s `lower:`).
+      searching = !@search_hl.empty?
+      lower = Wrap::LowerMemo.new
       rows.each_with_index do |vr, i|
         li = vr.li
         y = body.y + i
@@ -2964,13 +3309,13 @@ module Gori::Tui
         shown = Highlight.slice_chars(styled_detail_line(dv, li), vr.a, vr.b)
         shown = Highlight.slice_left(shown, xs) if xs > 0
         Highlight.draw(screen, body.x + gw, y, shown, width: cw)
-        need_plain = (focused && detail_navigable? && (li == @detail_read.cy || sel_spans)) || !@search_hl.empty?
+        need_plain = (focused && detail_navigable? && (li == @detail_read.cy || sel_spans)) || searching
         plain = need_plain ? detail_line_text(dv, li) : nil
         paint_detail_line_chrome(screen, body.x + gw, y, li, plain, focused, sel_spans, vr.a, vr.b) if plain
         # The plain-text line feeds ONLY the search overlay, so skip it when no query is
         # active (else every frame builds/scans discarded strings per row).
-        if (text = plain) && !@search_hl.empty?
-          Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs)
+        if (text = plain) && searching
+          Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, lower: lower.for(li, text))
         end
       end
       # The detail body scrolls (`@detail_scroll`) and had no gauge, while the Repeater's
@@ -2994,8 +3339,18 @@ module Gori::Tui
       # Reveal substitutes a 1-column marker for every control char (tab → '→', CR → '␍'),
       # which is exactly what `Screen.grapheme_cols` already scores them, so the wrap of the
       # RAW line and the wrap of the revealed line are the same break — no second layout.
+      # The ⇧-selection tint, exactly as render_detail_body computes it: `detail_line_source`
+      # answers these same reveal lines while they are shown, and Reveal keeps one column per
+      # control char, so the span columns line up with the glyphs. Passing nil here left the
+      # selection invisible in reveal mode while `y` still copied it.
+      sel_spans = if focused && detail_navigable? && @detail_read.selection?
+                    size, line_at = detail_line_source
+                    @detail_read.highlight_spans(size, line_at)
+                  end
       rows = detail_rows(cw, body.h, total, ->(i : Int32) { lines[i] })
       xs = detail_xscroll
+      searching = !@search_hl.empty?
+      lower = Wrap::LowerMemo.new
       rows.each_with_index do |vr, i|
         y = body.y + i
         line = lines[vr.li]
@@ -3006,8 +3361,9 @@ module Gori::Tui
         styled = Reveal.styled(line[vr.a...vr.b], eol, cw + xs)
         styled = Highlight.slice_left(styled, xs) if xs > 0
         Highlight.draw(screen, body.x + gw, y, styled, width: cw)
-        paint_detail_line_chrome(screen, body.x + gw, y, vr.li, line, focused, nil, vr.a, vr.b)
-        Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs) unless @search_hl.empty?
+        paint_detail_line_chrome(screen, body.x + gw, y, vr.li, line, focused, sel_spans, vr.a, vr.b)
+        next unless searching
+        Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, lower: lower.for(vr.li, line))
       end
     end
 
@@ -3095,17 +3451,20 @@ module Gori::Tui
     end
 
     private def render_ql_bar(screen : Screen, rect : Rect) : Nil
+      state = @searching_shown ? "searching — showing previous results" : @search_error
+      state_width = state ? {Screen.draw_width(state) + 2, rect.w // 2}.min : 0
       if @querying
+        screen.text(rect.right - state_width, rect.y, state, Theme.muted, width: state_width) if state
         screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
-          width: rect.w - QUERY_PREFIX.size - 2,
+          width: rect.w - QUERY_PREFIX.size - 2 - state_width,
           colors: Highlight.filter_query(@query, Theme.text_bright, known: QL_KNOWN))
         return
       end
 
-      lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2,
-        ql_bar_chips.map { |(_, text, color)| {text, color} })
+      chips = state ? [{screen.fit(state, {rect.w - 3, 0}.max), Theme.muted}] : ql_bar_chips.map { |(_, text, color)| {text, color} }
+      lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2, chips)
 
       left_w = {lx - (rect.x + 1) - 1, 0}.max
       if !@query.blank?
@@ -3145,7 +3504,7 @@ module Gori::Tui
         chips << {:count, @rows.size >= PAGE ? "#{PAGE}+" : @rows.size.to_s, Theme.muted}
       end
       scope_on = @scope.try(&.active?) == true
-      chips << (scope_on ? {:scope, "⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "⇧S scope:off", Theme.muted})
+      chips << (scope_on ? {:scope, "s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "s scope:off", Theme.muted})
       chips << {:follow, "f:follow", @follow ? Theme.accent : Theme.muted}
       # LEFT of `f:follow` — the chain draws rightmost-first, so it is pushed after it. Always
       # shown, like the scope chip and for the same reason: a mode nothing advertises is a mode
@@ -3164,7 +3523,7 @@ module Gori::Tui
     # those cells hold the query being typed and a click on them must not toggle a lens the
     # operator cannot see.
     def ql_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return nil if @querying
+      return nil if @querying || @searching_shown || @search_error
       list_rect, _ = list_split(rect)
       return nil if list_rect.empty?
       Frame.right_text_chain_hit(mx, my, list_rect.y, list_rect.right - 1, list_rect.x + 2,
@@ -3265,17 +3624,45 @@ module Gori::Tui
     private def host_values_for(prefix : String) : Array(String)
       key = prefix.downcase
       if @host_suggest_prefix == key
+        @suggestions_pending = @host_suggest_pending
         return @host_suggest_values
       end
       store = @suggest_store
       @host_suggest_prefix = key
+      if handler = @host_suggest_handler
+        @host_suggest_values = [] of String
+        @suggestions_pending = @host_suggest_pending = true
+        handler.call(prefix)
+        return @host_suggest_values
+      end
       @host_suggest_values = store ? store.distinct_hosts(prefix: prefix, limit: 16) : [] of String
       @host_suggest_values
     end
 
-    private def invalidate_host_suggest_cache : Nil
+    def invalidate_host_suggest_cache : Nil
       @host_suggest_prefix = nil
       @host_suggest_values = [] of String
+      @host_suggest_pending = false
+    end
+
+    def apply_host_suggestions(prefix : String, values : Array(String)) : Nil
+      return unless @host_suggest_prefix == prefix.downcase
+      @host_suggest_values = values
+      @host_suggest_pending = false
+      sync_popup
+    end
+
+    def fetch_host_suggestions(store : Store, prefix : String,
+                               control : Store::QueryControl? = nil) : Array(String)
+      store.distinct_hosts(prefix: prefix, control: control)
+    end
+
+    def refresh_host_suggestions(now : Time::Instant) : Bool
+      return false unless @host_suggest_dirty && now >= @host_suggest_refresh_at
+      @host_suggest_dirty = false
+      @host_suggest_refresh_at = now + FILTER_FLUSH_INTERVAL
+      invalidate_host_suggest_cache
+      true
     end
 
     # `@rows` is the windowed query result the draw loop walks, and it is what the tail
@@ -3330,6 +3717,8 @@ module Gori::Tui
       # otherwise accumulate an entry per flow ever seen. Cleared rather than pruned per dropped
       # id: it refills from a screenful of rows on the next frame.
       @color_memo.clear if @color_memo.size > @max_rows
+      @time_memo.clear if @time_memo.size > @max_rows
+      @path_memo.clear if @path_memo.size > @max_rows
     end
 
     # The detail content as a windowed view (request/response head + body with HTTP
@@ -3435,25 +3824,10 @@ module Gori::Tui
           "— body truncated at capture cap, #{stored_bytes} of #{wire_bytes} bytes — raise in Settings → Network / capture_max_mib —",
           Theme.yellow)]
       end
-      # What gori has to say about this exchange that its bytes cannot (`FlowRow#advisory`).
-      # In the TRAILER, beside the truncation notice, and not spliced into the head: this is
-      # gori's sentence, and the panes above it are the wire's bytes (P7). Only on the
-      # REQUEST pane — an advisory is a property of the exchange, so printing it under both
-      # would read as two different findings.
-      if request
-        detail.row.advisories.each do |a|
-          trailer << Highlight::Line.new
-          trailer << [Highlight::Span.new("! #{a}", Theme.yellow)]
-        end
-        # Where this request came from, spelled out — the SRC column has five cells and has to
-        # abbreviate. Only when gori itself produced it: a proxy capture is the norm and needs
-        # no sentence, and a pre-provenance row has nothing true to say (the column's `—` is the
-        # whole answer). Muted, not yellow: this is a fact about the flow, not a warning.
-        if note = source_note(detail.row)
-          trailer << Highlight::Line.new
-          trailer << [Highlight::Span.new(note, Theme.muted)]
-        end
-      end
+      # Advisories and the provenance note are NOT here: they are gori's sentences about
+      # the exchange, not about this pane's bytes, and they live in the footer strip under
+      # the text (`render_detail_footer`). The trailer keeps only what describes the body
+      # above it — the capture-cap truncation and the decode note.
 
       # gRPC: bounded framed view — style eagerly into `head`. Flagged binary so the
       # reveal-whitespace path is gated off (like any other binary body): the raw bytes
@@ -3623,7 +3997,13 @@ module Gori::Tui
       msgs.each_with_index do |m, i|
         if m.trailer
           lines << "▸ trailer  #{m.data.size}b"
-          Proxy::H2::Grpc.trailer_headers(m.data).each { |k, v| lines << "  #{k}: #{v}" }
+          # `status_label`, so this pane names the code the way the Repeater transcript does.
+          # For a grpc-web flow this row is the ONLY place the call's outcome appears (there
+          # are no HTTP trailers to merge into the head), and `grpc-status: 7` on its own asks
+          # the operator to go look the number up.
+          Proxy::H2::Grpc.trailer_headers(m.data).each do |k, v|
+            lines << "  #{k}: #{k == "grpc-status" ? Proxy::H2::Grpc.status_label(v) : v}"
+          end
         else
           lines << "▸ message ##{i + 1}  #{m.data.size}b#{m.compressed ? "  (compressed)" : ""}"
           lines.concat(grpc_payload_lines(m, tree, binding))

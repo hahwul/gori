@@ -39,6 +39,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     miner_controller.mine_stop
   end
 
+  def mine_filter : Nil
+    miner_controller.mine_filter
+  end
+
   def miner_duplicate_subtab : Nil
     miner_controller.miner_duplicate
   end
@@ -70,5 +74,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The FINDING pane holds focus — the gate for its read verbs.
   def miner_detail_readable? : Bool
     miner_controller.miner_detail_readable?
+  end
+
+  def miner_results_readable? : Bool
+    miner_controller.miner_results_readable?
   end
 end

@@ -3,19 +3,6 @@ require "../spec_helper"
 # Custom Probe match rules: the data-driven passive engine (Probe::CustomRule), its global/project
 # merge (Probe.custom_rules), and the per-project storage (probe_custom_rules + probe_disabled_rules).
 
-private def with_store(&)
-  path = File.tempname("gori-custom", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def flow(store, *, resp_head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
                  body : String? = nil, req_headers = "", req_body : String? = nil,
                  host = "acme.test", method = "GET") : Gori::Store::FlowDetail

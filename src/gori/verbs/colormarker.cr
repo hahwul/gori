@@ -27,6 +27,9 @@ module Gori
         "colormarker.edit", "Edit rule", "Edit the selected rule in the popup editor",
         Verb::Scope::Colormarker, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: on_rule, mnemonic: 'e', section: :rules) { |ctx| ctx.colormarker_edit; nil }
       r.register Verb::Definition.new(
+        "colormarker.copy", "Copy", "Copy the selected rule's match filter (the QL that paints the row)",
+        Verb::Scope::Colormarker, [Verb::Chord.new("y")], available: on_rule, mnemonic: 'y', section: :rules) { |ctx| ctx.read_copy; nil }
+      r.register Verb::Definition.new(
         "colormarker.toggle", "Enable/disable", "Toggle the selected rule on or off in THIS project",
         Verb::Scope::Colormarker, [Verb::Chord.new("x")], available: on_rule, mnemonic: 'x', section: :rules) { |ctx| ctx.colormarker_toggle; nil }
       r.register Verb::Definition.new(
@@ -67,7 +70,7 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.toggle-default", "Enable/disable everywhere",
         "Flip a GLOBAL rule's default — the state every project without an override follows",
-        Verb::Scope::Colormarker, [Verb::Chord.new("x", shift: true)],
+        Verb::Scope::Colormarker, [] of Verb::Chord, # menu-only: ⇧X is the wipe chord on five tabs, and this one asked no confirm
         available: on_global_rule, mnemonic: 'X', section: :rules) { |ctx| ctx.colormarker_toggle_default; nil }
 
       # --- CUSTOM COLORS pane (section :colors) — no chords, see the header note. ---

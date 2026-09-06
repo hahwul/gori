@@ -211,3 +211,22 @@ describe Gori::Tui::PaletteState do
     backend.contains?("▸ Toggle capture").should be_true # the Action sigil precedes the title
   end
 end
+
+# The palette's query has a caret now: `edit` takes the motions the `/` bars have.
+describe Gori::Tui::PaletteState, "caret" do
+  it "moves by word and inserts at the caret" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    "quit now".each_char { |c| palette.append(c, ctx) }
+    palette.edit(Termisu::Event::Key.new(Termisu::Input::Key::Left, Termisu::Input::Modifier::Ctrl), ctx).should be_true
+    palette.append('x', ctx)
+    palette.query.should eq("quit xnow")
+    palette.edit(Termisu::Event::Key.new(Termisu::Input::Key::Home), ctx).should be_true
+    palette.backspace(ctx) # at 0: nothing to delete, nothing raised
+    palette.query.should eq("quit xnow")
+    palette.edit(Termisu::Event::Key.new(Termisu::Input::Key::Delete), ctx).should be_true
+    palette.query.should eq("uit xnow")
+    palette.edit(Termisu::Event::Key.new(Termisu::Input::Key::LowerJ, Termisu::Input::Modifier::None, 'j'), ctx).should be_false
+  end
+end

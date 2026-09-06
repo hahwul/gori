@@ -123,37 +123,109 @@ module Gori
     # printing a smaller success. Whole-file atomicity was not protecting much: nothing
     # deduplicates on re-import, so a failed all-or-nothing import meant starting over anyway,
     # and 80% of a 200 MB HAR plus an honest message beats losing all of it.
-    def self.insert_all(store : Store, pairs : Array(Builder::FlowPair)) : {Int32, Int32}
+    #
+    # `cancelled` is polled between chunks (the TUI's import job sets it from the palette;
+    # what is committed stays) and `progress` is told the running count after each — both
+    # optional, and neither changes the count that comes back: a cancelled import is a
+    # short one, and the caller says so.
+    def self.insert_all(store : Store, pairs : Array(Builder::FlowPair), *,
+                        cancelled : (-> Bool)? = nil, progress : (Int32, Int32? ->)? = nil) : {Int32, Int32}
       committed = 0
       pairs.each_slice(IMPORT_CHUNK) do |slice|
-        # `_ids`, not the counting form: a flow's WebSocket transcript is stored against the
-        # flow id, which does not exist until this write commits.
-        ids = store.insert_import_batch_ids(slice.map { |pair| {pair.request, pair.response} })
-        committed += ids.size
-        # Ids come back in PAIR ORDER, which is what makes the index the pairing. A short
-        # answer is a rolled-back batch, and walking the ids we actually got is then exactly
-        # right: the pairs past the end have no flow to hang messages on.
-        ids.each_with_index do |id, i|
-          msgs = slice[i].ws_messages
-          store.insert_ws_messages(id, msgs) unless msgs.empty?
-        end
+        break if cancelled.try(&.call)
+        landed = insert_chunk(store, slice)
+        committed += landed
+        progress.try(&.call(committed, pairs.size))
         # A short answer means the batch rolled back or the store is closing; stop rather than
         # push more work at a store that just refused some.
-        break if ids.size < slice.size
+        break if landed < slice.size
       end
       {committed, pairs.size}
+    end
+
+    # One chunk, one transaction: the flows, then each flow's WebSocket transcript against the
+    # id it just got. Returns how many of `slice` committed.
+    def self.insert_chunk(store : Store, slice : Array(Builder::FlowPair)) : Int32
+      # `_ids`, not the counting form: a flow's WebSocket transcript is stored against the
+      # flow id, which does not exist until this write commits.
+      ids = store.insert_import_batch_ids(slice.map { |pair| {pair.request, pair.response} })
+      # Ids come back in PAIR ORDER, which is what makes the index the pairing. A short
+      # answer is a rolled-back batch, and walking the ids we actually got is then exactly
+      # right: the pairs past the end have no flow to hang messages on.
+      ids.each_with_index do |id, i|
+        msgs = slice[i].ws_messages
+        store.insert_ws_messages(id, msgs) unless msgs.empty?
+      end
+      ids.size
+    end
+
+    # A HAR is imported as it is READ: `Har.each_flow` walks the entries off the file one at a
+    # time and this writes them a chunk at a time, so neither the parsed tree nor the flow
+    # pairs of a 200 MB file are ever all in memory, and the fiber yields on the way (the
+    # walk paces itself; the store write does). The other formats are small by nature and
+    # keep the parse-then-insert shape.
+    #
+    # `progress` gets a nil total — a stream does not know its length. A file that turns out
+    # to be invalid JSON PAST some entries has already had those written; the error says so,
+    # because "not valid JSON" alone reads as "nothing happened".
+    private def self.import_har_stream(store : Store, path : String, prov : Provenance,
+                                       cancelled : (-> Bool)?, progress : (Int32, Int32? ->)?) : Result
+      committed = 0
+      attempted = 0
+      chunk = [] of Builder::FlowPair
+      refused = false
+      flush = -> {
+        return if chunk.empty? || refused
+        attempted += chunk.size
+        landed = insert_chunk(store, chunk)
+        committed += landed
+        refused = landed < chunk.size # the store rolled back / is closing: stop pushing
+        chunk.clear
+        progress.try(&.call(committed, nil))
+      }
+      skipped = begin
+        Har.each_flow(path, prov, cancelled: -> { refused || (cancelled.try(&.call) || false) }) do |pair|
+          chunk << pair
+          flush.call if chunk.size >= IMPORT_CHUNK
+        end
+      rescue ex : Gori::Error
+        raise ex if committed == 0
+        raise Gori::Error.new("#{ex.message} — #{committed} flows from the entries before it were written")
+      end
+      flush.call
+      raise_nothing_landed(path, skipped) if attempted == 0 && !cancelled.try(&.call)
+      Result.new(committed, skipped, attempted)
+    end
+
+    # Preserve WHY nothing landed: if every entry was skipped as malformed, say so (with the
+    # count) instead of the generic "no flows found", which hid the real reason and threw
+    # away the skipped tally.
+    private def self.raise_nothing_landed(path : String, skipped : Int32) : NoReturn
+      if skipped > 0
+        noun = skipped == 1 ? "entry was" : "entries were"
+        raise Gori::Error.new("no flows imported from #{path} — all #{skipped} #{noun} skipped as malformed")
+      end
+      raise Gori::Error.new("no flows found in #{path}")
     end
 
     # `surface` is which of gori's three faces asked for this import. Every imported flow is
     # stamped `source: import` and `source_ref: <basename>`, so a History row can say WHICH file
     # it came out of — the provenance question an operator actually asks of an imported row.
     def self.import_file(store : Store, kind : Symbol, path : String,
-                         surface : FlowSource::Surface? = nil) : Result
+                         surface : FlowSource::Surface? = nil, *,
+                         cancelled : (-> Bool)? = nil, progress : (Int32, Int32? ->)? = nil) : Result
       expanded = Path[path].expand(home: true).to_s
       raise Gori::Error.new("file not found: #{expanded}") unless File.exists?(expanded)
       raise Gori::Error.new("not a file: #{expanded}") unless File.file?(expanded)
       prov = Provenance.new(surface, File.basename(expanded))
 
+      if kind == :har
+        begin
+          return import_har_stream(store, expanded, prov, cancelled, progress)
+        rescue ex : File::Error
+          raise Gori::Error.new("cannot read #{expanded}: #{ex.message}")
+        end
+      end
       parsed = begin
         case kind
         when :har      then from_har(expanded, prov)
@@ -168,17 +240,8 @@ module Gori
       rescue ex : File::Error
         raise Gori::Error.new("cannot read #{expanded}: #{ex.message}")
       end
-      if parsed.flows.empty?
-        # Preserve WHY nothing landed: if every entry was skipped as malformed, say so
-        # (with the count) instead of the generic "no flows found", which hid the real
-        # reason and threw away the skipped tally.
-        if parsed.skipped > 0
-          noun = parsed.skipped == 1 ? "entry was" : "entries were"
-          raise Gori::Error.new("no flows imported from #{expanded} — all #{parsed.skipped} #{noun} skipped as malformed")
-        end
-        raise Gori::Error.new("no flows found in #{expanded}")
-      end
-      committed, attempted = insert_all(store, parsed.flows)
+      raise_nothing_landed(expanded, parsed.skipped) if parsed.flows.empty?
+      committed, attempted = insert_all(store, parsed.flows, cancelled: cancelled, progress: progress)
       Result.new(committed, parsed.skipped, attempted)
     end
   end

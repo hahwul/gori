@@ -12,6 +12,7 @@ module Gori
       # Manual mode — analyze a pasted token list inline (no network, no job). Available
       # even in --read-only mode (pure compute, no requests, no secrets returned but the
       # caller's own tokens).
+      @[Tool("sequence_analyze", unbound: true)]
       private def sequence_analyze(h) : Result
         tokens = sequence_token_list(h)
         return Result.new("provide a non-empty 'tokens' array", is_error: true) if tokens.empty?
@@ -26,6 +27,7 @@ module Gori
         str_list(h, "tokens").map(&.strip).reject(&.empty?)
       end
 
+      @[Tool("sequence_start", gated: true, agent_action: true, env_refresh: true)]
       private def sequence_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         plan = build_sequence_plan(h, ob)
@@ -95,6 +97,7 @@ module Gori
         sjob.error_msg ||= ex.message || "internal sequence drain error"
       end
 
+      @[Tool("sequence_status", gated: true)]
       private def sequence_status(h) : Result
         sjob = lookup_sequence_job(h)
         return sjob if sjob.is_a?(Result)
@@ -117,6 +120,7 @@ module Gori
 
       # Returns the randomness REPORT over the collected tokens — never the tokens
       # themselves (they are secrets).
+      @[Tool("sequence_results", gated: true)]
       private def sequence_results(h) : Result
         sjob = lookup_sequence_job(h)
         return sjob if sjob.is_a?(Result)
@@ -130,11 +134,12 @@ module Gori
         end)
       end
 
+      @[Tool("sequence_stop", gated: true, agent_action: true)]
       private def sequence_stop(h) : Result
         sjob = lookup_sequence_job(h)
         return sjob if sjob.is_a?(Result)
         sjob.stop
-        Result.new(JSON.build { |j| j.object { j.field "job_id", sjob.id; j.field "status", "stopping" } })
+        stop_and_report(sjob)
       end
 
       private def lookup_sequence_job(h) : SequenceJob | Result
@@ -156,7 +161,15 @@ module Gori
         config.timeout = fuzz_timeout(h)
         config.retries = (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i
         cap = optional_int_arg(h, "max_requests")
-        config.max_requests = cap ? {cap, SEQUENCE_MAX_REQUESTS}.min : SEQUENCE_MAX_REQUESTS
+        # The caller's budget on `max_requests`, this server's ceiling on `request_ceiling` —
+        # never both on the first. Filling `max_requests` in with the ceiling made every
+        # capless MCP collection look to `Config#max_sends` like one whose operator had
+        # budgeted 100,000 requests, which is exactly how that field is read, so the
+        # goal-derived runaway guard was gone: a `cookie` name that matches nothing sent
+        # 100,000 requests for a `count: 500` collection where `gori run sequence` sends
+        # 1,000. See `Sequencer::Config#request_ceiling`.
+        config.max_requests = cap.try { |c| {c, SEQUENCE_MAX_REQUESTS}.min }
+        config.request_ceiling = SEQUENCE_MAX_REQUESTS
         optional_int_arg(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         # The builder's sender carries the Outbound decision, so Sandbox / EXCLUDE hard-block
         # a collection run per send — sequence_start used to have only the job-start check.

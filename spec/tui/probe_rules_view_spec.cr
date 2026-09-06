@@ -39,7 +39,7 @@ describe Gori::Tui::ProbeRulesView do
     rules_store do |store|
       view = Gori::Tui::ProbeRulesView.new
       view.reload(store)
-      ["Blind SSRF (out-of-band)", "Blind OS command injection (out-of-band)"].each do |title|
+      ["Blind SSRF (out-of-band)", "Blind OS command injection (out-of-band)", "XML external entity (out-of-band)"].each do |title|
         row = find_row(view, title).not_nil!
         row.enabled?.should be_true # ships enabled — nothing to opt into
         row.note.should eq("needs OAST")
@@ -50,6 +50,7 @@ describe Gori::Tui::ProbeRulesView do
       view.reload(store)
       find_row(view, "Blind SSRF (out-of-band)").not_nil!.note.should eq("")
       find_row(view, "Blind OS command injection (out-of-band)").not_nil!.note.should eq("")
+      find_row(view, "XML external entity (out-of-band)").not_nil!.note.should eq("")
     end
   end
 

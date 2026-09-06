@@ -36,11 +36,12 @@ module Gori
     # paging into older matches (stable as new rows append, unlike OFFSET).
     # `raise_on_error` propagates a SQLite execution failure (a malformed FTS phrase,
     # or a pathological query hitting SQLite's expression-tree-depth limit) instead of
-    # degrading to no matches. The TUI keeps the default (never crash the live run
-    # loop); one-shot CLI callers pass true so a failed query is reported distinctly
-    # from a genuinely empty result rather than as a clean "no flows match".
+    # degrading to no matches. History and one-shot callers pass true so a failed
+    # query is reported distinctly from a genuinely empty result. `control` opts
+    # into cooperative execution; QueryCancelled always propagates, even when
+    # raise_on_error is false, because cancellation is never an empty result.
     def search(filter : QL::Filter, limit : Int32, before_id : Int64? = nil, since_id : Int64? = nil, *,
-               raise_on_error : Bool = false) : Array(FlowRow)
+               raise_on_error : Bool = false, control : QueryControl? = nil) : Array(FlowRow)
       rows = [] of FlowRow
       args = filter.args.dup
       if since_id
@@ -55,11 +56,12 @@ module Gori
         args << limit
         sql = "#{SELECT_ROW} WHERE #{filter.sql} ORDER BY id DESC LIMIT ?"
       end
-      @db.query(sql, args: args) do |rs|
+      controlled_query(sql, args, control) do |rs|
         rs.each { rows << read_row(rs) }
       end
       rows
     rescue ex
+      raise ex if ex.is_a?(QueryCancelled)
       raise ex if raise_on_error
       # Degrade to no matches (the live TUI must never crash the render loop). Route to gori.log
       # via Log, NOT STDERR: in TUI mode STDERR is the alternate screen, so a write there prints
@@ -455,13 +457,22 @@ module Gori
     end
 
     def count : Int64
-      @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
-    rescue
       # Degrade like `data_version` rather than raise: this is a POLL reader (the Project
       # tab's periodic refresh, MCP `get_context`/`list_projects`), so a transient
       # SQLITE_BUSY under a checkpoint would otherwise burn the TUI's tick-error budget and
       # void the MCP response instead of showing a stale number for one tick.
-      0_i64
+      count? || 0_i64
+    end
+
+    # The same count, nil when the read failed — for the callers that GATE a write on it.
+    # `clear_flows` on every surface prints and refuses on this number, and a 0 stood in for
+    # "busy" there: `gori run history clear` told the operator it refused to delete 0 flows
+    # (inviting the --yes that would empty the project) or reported "Deleted 0 flows" after
+    # doing exactly that, and the TUI's ⇧X read it as nothing to clear and said nothing.
+    def count? : Int64?
+      @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
+    rescue
+      nil
     end
 
     # Hard-delete one History flow and its captured dependents (WS messages, FTS row,
@@ -613,23 +624,25 @@ module Gori
     # (case-insensitive), hard-capped so a huge capture history never materialises
     # the full DISTINCT set on every keystroke. Uses idx_flows_sitemap's leading
     # host column; never raises into the TUI run loop.
-    def distinct_hosts(*, prefix : String = "", limit : Int32 = 16) : Array(String)
+    def distinct_hosts(*, prefix : String = "", limit : Int32 = 16,
+                       control : QueryControl? = nil) : Array(String)
       lim = limit.clamp(1, 64)
       hosts = [] of String
       if prefix.empty?
-        @db.query("SELECT DISTINCT host FROM flows ORDER BY host LIMIT ?", lim) do |rs|
+        controlled_query("SELECT DISTINCT host FROM flows ORDER BY host LIMIT ?", [lim] of DB::Any, control) do |rs|
           rs.each { hosts << rs.read(String) }
         end
       else
         # Prefix match only (trailing %); escape LIKE metacharacters in the typed prefix.
         pat = "#{QL.like_escape(prefix.downcase)}%"
-        @db.query("SELECT DISTINCT host FROM flows WHERE lower(host) LIKE ? ESCAPE '\\' ORDER BY host LIMIT ?",
-          pat, lim) do |rs|
+        controlled_query("SELECT DISTINCT host FROM flows WHERE lower(host) LIKE ? ESCAPE '\\' ORDER BY host LIMIT ?",
+          [pat, lim] of DB::Any, control) do |rs|
           rs.each { hosts << rs.read(String) }
         end
       end
       hosts
-    rescue
+    rescue ex
+      raise ex if ex.is_a?(QueryCancelled)
       [] of String
     end
 
@@ -668,6 +681,13 @@ module Gori
       @db.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?)
     end
 
+    # Latest flow timestamp, the other end of the capture window. `earliest_created_at`
+    # alone answers "when did this project start" and is read as if it answered "how old is
+    # this data" — the opposite end. Same unit and same nil-when-empty contract.
+    def latest_created_at : Int64?
+      @db.query_one?("SELECT MAX(created_at) FROM flows", as: Int64?)
+    end
+
     # Sum of all captured wire sizes (request + response) across flows. Used for
     # Project tab overview of total data volume (distinct from on-disk DB size).
     def total_size : Int64
@@ -703,11 +723,17 @@ module Gori
     # (see ql.cr), so every WebSocket endpoint reported "N attempts, 0 successes, 0 errors".
     # A NULL status stays in neither bucket on purpose — a Pending flow has no outcome yet —
     # so ok + errors can legitimately be less than count.
+    #
+    # `offset` is what makes the cut above a PAGE rather than a ceiling: the ordering is
+    # total, so `offset` walks the whole set deterministically instead of leaving everything
+    # past `limit` permanently out of reach.
     def sitemap_entries_detailed(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
+                                 offset : Int32 = 0,
                                  raise_on_error : Bool = false) : Array(SitemapEntry)
       rows = [] of SitemapEntry
       args = filter.args.dup
       args << limit
+      args << offset
       sql = "SELECT scheme, host, port, http_version, method, target, " \
             "GROUP_CONCAT(DISTINCT status), COUNT(*), " \
             "SUM(CASE WHEN status BETWEEN 100 AND 399 THEN 1 ELSE 0 END), " \
@@ -715,7 +741,7 @@ module Gori
             "MIN(created_at), MAX(created_at) " \
             "FROM flows WHERE #{filter.sql} " \
             "GROUP BY scheme, host, port, http_version, method, target " \
-            "ORDER BY host, target, method, scheme, port, http_version LIMIT ?"
+            "ORDER BY host, target, method, scheme, port, http_version LIMIT ? OFFSET ?"
       @db.query(sql, args: args) do |rs|
         rs.each do
           rows << SitemapEntry.new(
@@ -732,19 +758,28 @@ module Gori
       [] of SitemapEntry
     end
 
+    #
+    # `control` makes the read cooperative (`controlled_query`): the Sitemap's `/` bar runs
+    # this on a worker fiber, and the DISTINCT scan over the flow table is the two thirds of
+    # a reload that scales with retention rather than with the capped tree. A cancelled read
+    # raises `QueryCancelled` past the rescue below — cancellation is never an empty tree.
     def sitemap_entries(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
-                        raise_on_error : Bool = false) : Array({String, String, String})
+                        offset : Int32 = 0,
+                        raise_on_error : Bool = false, control : QueryControl? = nil) : Array({String, String, String})
       rows = [] of {String, String, String}
       args = filter.args.dup
       args << limit
+      args << offset
       # `method` is SELECTed, so it must ORDER too, or the LIMIT cut between two rows that
       # differ only by method is arbitrary — and with no cursor here the loser is unreachable.
-      @db.query("SELECT DISTINCT host, method, target FROM flows WHERE #{filter.sql} " \
-                "ORDER BY host, target, method LIMIT ?",
-        args: args) do |rs|
+      # `offset` is that cursor: with a total ordering it pages the whole set.
+      controlled_query("SELECT DISTINCT host, method, target FROM flows WHERE #{filter.sql} " \
+                       "ORDER BY host, target, method LIMIT ? OFFSET ?", args, control) do |rs|
         rs.each { rows << {rs.read(String), rs.read(String), rs.read(String)} }
       end
       rows
+    rescue ex : QueryCancelled
+      raise ex
     rescue ex
       # The Sitemap's `/` filter feeds user QL here; a malformed FTS phrase or a query
       # too complex for SQLite raises. The live TUI must never crash (degrade to no

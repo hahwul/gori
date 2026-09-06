@@ -6,23 +6,6 @@ require "http/server"
 # RESUME LISTENER picker shows — so an agent can pick up a payload planted yesterday.
 #
 # Helpers are file-local (Crystal's top-level `private def` is file-scoped).
-private def with_store(&)
-  path = File.tempname("gori-mcp-oast-sessions", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
-private def tools_for(store, allow_actions = true, verify_upstream = false) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: allow_actions, verify_upstream: verify_upstream)
-end
-
 private def ok_json(tools, name, args : String) : JSON::Any
   r = tools.call(name, JSON.parse(args))
   fail "tool #{name} errored: #{r.text}" if r.is_error
@@ -263,6 +246,25 @@ describe "MCP OAST sessions" do
       names = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a.map(&.["name"].as_s)
       names.should contain("oast_resume")
       names.should contain("oast_release")
+    end
+  end
+end
+
+# A remote call that failed is not an argument that was wrong. Every uncoded error Result is
+# filed by `Tools#classify` under INVALID_ARGUMENT with `retryable:false`, so a refused
+# connection to the OAST provider told the caller's error policy to fix its arguments and stop —
+# for the one failure class that is transient by construction. `send_request` has always answered
+# a transport failure with NETWORK_ERROR + retryable (`Tools.send_error_code`).
+describe "MCP OAST transport failures" do
+  it "codes a provider that cannot be reached as a retryable NETWORK_ERROR" do
+    with_store do |store|
+      tools = tools_for(store)
+      # Port 1 on loopback: refused immediately, so this needs no DNS and no fixture server.
+      r = tools.call("oast_start", JSON.parse(%({"provider":"interactsh","server":"127.0.0.1:1"})))
+      r.is_error.should be_true
+      r.error_code.should eq("NETWORK_ERROR")
+      r.retryable.should be_true
+      r.text.should contain("OAST register failed")
     end
   end
 end

@@ -4,12 +4,8 @@ require "socket"
 private alias Q = Gori::Sequencer
 
 # The builder takes the Outbound as an argument (Layer-1 strictness differs per surface on
-# purpose), so the equivalence check uses one ungated decision for all three — the gate is
+# purpose), so the equivalence check uses one ungated_outbound decision for all three — the gate is
 # not what is under test here, `spec/outbound_spec.cr` owns that.
-private def ungated : Gori::Outbound
-  ungated_outbound
-end
-
 private def with_ov_store(&)
   path = File.tempname("gori-seqplan", ".db")
   store = Gori::Store.open(path)
@@ -70,7 +66,7 @@ private record Shape,
   max_requests : Int64?
 
 private def shape_of(options : Q::PlanOptions) : Shape
-  plan = Q::Plan.build(options, ungated)
+  plan = Q::Plan.build(options, ungated_outbound)
   origin = plan.origin!
   Shape.new(scheme: origin.scheme, host: origin.host, port: origin.port, http2: plan.http2?,
     request: String.new(plan.request), request_target: plan.request_target, goal: plan.goal,
@@ -166,7 +162,7 @@ describe Gori::Sequencer::Plan do
     # that copied it would run yesterday's goal/descriptor. Identity, not equality.
     cfg = live_config(Q::TokenLoc.cookie("SID"), 7)
     plan = Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "http://t.test",
-      config: cfg, verify: false), ungated)
+      config: cfg, verify: false), ungated_outbound)
     plan.config.should be(cfg)
     cfg.goal = 9
     plan.goal.should eq(9)
@@ -184,7 +180,7 @@ describe Gori::Sequencer::Plan do
       plan = Q::Plan.build(Q::PlanOptions.new(
         "GET /t?v=$A HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice,
         default_target: "http://$A.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
-        verify: false), ungated)
+        verify: false), ungated_outbound)
       plan.origin!.host.should eq("$B.test")
       String.new(plan.request).should eq("GET /t?v=$B HTTP/1.1\r\nHost: t.test\r\n\r\n")
       plan.request_target.should eq("/t?v=$B")
@@ -197,7 +193,7 @@ describe Gori::Sequencer::Plan do
     it "normalizes a bare-LF head to CRLF (the TUI used to skip expand_wire entirely)" do
       plan = Q::Plan.build(Q::PlanOptions.new(
         "GET /p HTTP/1.1\nHost: t.test\n\nbody\nkeeps\nLF".to_slice, target: "http://t.test",
-        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated)
+        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated_outbound)
       # Head normalized, BODY left byte-for-byte (a body's LFs are payload, not framing).
       String.new(plan.request).should eq("GET /p HTTP/1.1\r\nHost: t.test\r\n\r\nbody\nkeeps\nLF")
     end
@@ -212,7 +208,7 @@ describe Gori::Sequencer::Plan do
       raw = "GET /p HTTP/1.1\nHost: t.test\n\nbody\nkeeps\nLF"
       plan = Q::Plan.build(Q::PlanOptions.new(raw.to_slice, evidence: true,
         target: "http://t.test",
-        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated)
+        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated_outbound)
       String.new(plan.request).should eq(raw)
     end
 
@@ -235,7 +231,7 @@ describe Gori::Sequencer::Plan do
         ("POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
          "Content-Length: #{body.bytesize}\r\n\r\n#{body}").to_slice,
         target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
-        verify: false), ungated)
+        verify: false), ungated_outbound)
       wire = String.new(plan.request)
       sent_body = wire.split("\r\n\r\n", 2)[1]
       sent_body.should eq(%({"a":"99999-EVIL-ENV","b":"x"}))
@@ -261,7 +257,7 @@ describe Gori::Sequencer::Plan do
         ("POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
          "Content-Length: #{body.bytesize}\r\n\r\n#{body}").to_slice,
         target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
-        verify: false), ungated)
+        verify: false), ungated_outbound)
       wire = String.new(plan.request)
       sent_body = wire.split("\r\n\r\n", 2)[1]
       sent_body.should eq(%({"a":"z"}))
@@ -285,7 +281,7 @@ describe Gori::Sequencer::Plan do
       raw = "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
             "Content-Length: 99\r\n\r\n{\"a\":\"x\"}"
       plan = Q::Plan.build(Q::PlanOptions.new(raw.to_slice, target: "http://t.test",
-        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated)
+        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated_outbound)
       String.new(plan.request).should eq(raw)
     ensure
       Gori::Settings.env_prefix = prefix || "$"
@@ -303,7 +299,7 @@ describe Gori::Sequencer::Plan do
       plan = Q::Plan.build(Q::PlanOptions.new(
         "GET /login HTTP/1.1\r\nHost: t.test\r\nUser-Agent: $UA\r\n\r\n".to_slice,
         target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
-        verify: false), ungated)
+        verify: false), ungated_outbound)
       wire = String.new(plan.request)
       wire.should eq("GET /login HTTP/1.1\r\nHost: t.test\r\nUser-Agent: gori-sequencer-agent\r\n\r\n")
       wire.downcase.should_not contain("content-length")
@@ -324,7 +320,7 @@ describe Gori::Sequencer::Plan do
             "Content-Length: 4\r\n\r\n{\"a\":\"$id\"}"
       plan = Q::Plan.build(Q::PlanOptions.new(raw.to_slice, evidence: true,
         target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
-        verify: false), ungated)
+        verify: false), ungated_outbound)
       String.new(plan.request).should eq(raw)
     ensure
       Gori::Settings.env_prefix = prefix || "$"
@@ -347,7 +343,7 @@ describe Gori::Sequencer::Plan do
         ("POST /api HTTP/1.1\nHost: t.test\nContent-Type: application/json\n" \
          "Content-Length: #{body.bytesize}\n\n#{body}").to_slice,
         target: "http://t.test", config: live_config(Q::TokenLoc.cookie("SID"), 5),
-        verify: false), ungated)
+        verify: false), ungated_outbound)
       wire = String.new(plan.request)
       sent_body = wire.split("\r\n\r\n", 2)[1]
       sent_body.should eq(%({"a":"99999-EVIL-ENV"}))
@@ -372,7 +368,7 @@ describe Gori::Sequencer::Plan do
       head.copy_to(raw)
       body.copy_to(raw + head.size)
       plan = Q::Plan.build(Q::PlanOptions.new(raw, target: "http://t.test",
-        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated)
+        config: live_config(Q::TokenLoc.cookie("SID"), 5), verify: false), ungated_outbound)
       sent = plan.request
       boundary = Gori::Env.head_body_boundary(sent)
       sent[boundary..].should eq(Bytes[0xFF, 0xFE, 0x41, 0x41, 0x41, 0x41, 0x00, 0x80])
@@ -387,7 +383,7 @@ describe Gori::Sequencer::Plan do
   describe "analyse-only (manual) plans" do
     it "carries no origin and no sender, and replays the pasted tokens" do
       cfg = Q::Config.new(mode: Q::Mode::Manual, manual_tokens: ["aa", "bb", "", "cc"])
-      plan = Q::Plan.build(Q::PlanOptions.new(config: cfg), ungated)
+      plan = Q::Plan.build(Q::PlanOptions.new(config: cfg), ungated_outbound)
       plan.analyse_only?.should be_true
       plan.origin.should be_nil
       plan.request.size.should eq(0)
@@ -398,7 +394,7 @@ describe Gori::Sequencer::Plan do
 
     it "raises from origin! rather than handing a live surface a fake origin" do
       cfg = Q::Config.new(mode: Q::Mode::Manual, manual_tokens: ["aa"])
-      plan = Q::Plan.build(Q::PlanOptions.new(config: cfg), ungated)
+      plan = Q::Plan.build(Q::PlanOptions.new(config: cfg), ungated_outbound)
       expect_raises(Gori::Error) { plan.origin! }
     end
 
@@ -410,7 +406,7 @@ describe Gori::Sequencer::Plan do
       # have dialled a real socket here.
       cfg = Q::Config.new(mode: Q::Mode::Manual, token_loc: Q::TokenLoc.cookie("SID"),
         goal: 3, manual_tokens: ["aa"])
-      plan = Q::Plan.build(Q::PlanOptions.new(config: cfg), ungated)
+      plan = Q::Plan.build(Q::PlanOptions.new(config: cfg), ungated_outbound)
       cfg.mode = Q::Mode::LiveReplay
       errors = [] of String
       samples = [] of Q::Sample
@@ -429,7 +425,7 @@ describe Gori::Sequencer::Plan do
       cfg = Q::Config.new(mode: Q::Mode::Manual, token_loc: Q::TokenLoc.cookie(""),
         manual_tokens: ["aa"])
       plan = Q::Plan.build(Q::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice,
-        target: "::::", config: cfg), ungated)
+        target: "::::", config: cfg), ungated_outbound)
       plan.analyse_only?.should be_true
     end
   end
@@ -439,7 +435,7 @@ describe Gori::Sequencer::Plan do
 
     it "reports NoTarget when neither an explicit nor a flow target is given" do
       ex = expect_raises(Q::PlanError) do
-        Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, config: live_config(cookie, 5)), ungated)
+        Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, config: live_config(cookie, 5)), ungated_outbound)
       end
       ex.reason.should eq(Q::PlanError::Reason::NoTarget)
     end
@@ -447,7 +443,7 @@ describe Gori::Sequencer::Plan do
     it "reports BadTarget with the expanded string a surface quotes back" do
       ex = expect_raises(Q::PlanError) do
         Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "::::",
-          config: live_config(cookie, 5)), ungated)
+          config: live_config(cookie, 5)), ungated_outbound)
       end
       ex.reason.should eq(Q::PlanError::Reason::BadTarget)
       ex.detail.should eq("::::")
@@ -458,7 +454,7 @@ describe Gori::Sequencer::Plan do
        Q::ExtractKind::JsonPath].each do |kind|
         ex = expect_raises(Q::PlanError) do
           Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "http://t.test",
-            config: live_config(Q::TokenLoc.new(kind, " "), 5)), ungated)
+            config: live_config(Q::TokenLoc.new(kind, " "), 5)), ungated_outbound)
         end
         ex.reason.should eq(Q::PlanError::Reason::NoTokenLoc)
       end
@@ -466,7 +462,7 @@ describe Gori::Sequencer::Plan do
 
     it "accepts a Position descriptor with no selector (its offsets ARE the selector)" do
       plan = Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "http://t.test",
-        config: live_config(Q::TokenLoc.new(Q::ExtractKind::Position, "", 4, 20), 5)), ungated)
+        config: live_config(Q::TokenLoc.new(Q::ExtractKind::Position, "", 4, 20), 5)), ungated_outbound)
       plan.origin!.host.should eq("t.test")
     end
 
@@ -477,7 +473,7 @@ describe Gori::Sequencer::Plan do
       [[] of String, ["", ""]].each do |tokens|
         ex = expect_raises(Q::PlanError) do
           Q::Plan.build(Q::PlanOptions.new(
-            config: Q::Config.new(mode: Q::Mode::Manual, manual_tokens: tokens)), ungated)
+            config: Q::Config.new(mode: Q::Mode::Manual, manual_tokens: tokens)), ungated_outbound)
         end
         ex.reason.should eq(Q::PlanError::Reason::NoTokens)
       end
@@ -487,7 +483,7 @@ describe Gori::Sequencer::Plan do
       # The order every surface's error text inherits: with both wrong, the target is what
       # gets reported (what the TUI and `gori run sequence` already did).
       ex = expect_raises(Q::PlanError) do
-        Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, config: live_config(Q::TokenLoc.cookie(""), 5)), ungated)
+        Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, config: live_config(Q::TokenLoc.cookie(""), 5)), ungated_outbound)
       end
       ex.reason.should eq(Q::PlanError::Reason::NoTarget)
     end
@@ -512,12 +508,12 @@ describe Gori::Sequencer::Plan do
           # B first, so the one-shot responder is still unclaimed for A: no overrides is
           # exactly what every TUI workbench tool passed before #367, and it is why the gap
           # was invisible — nothing else about the run changes.
-          unpinned = drain(Q::Plan.build(options.call(nil), ungated).engine)
+          unpinned = drain(Q::Plan.build(options.call(nil), ungated_outbound).engine)
           unpinned.should_not be_empty # a vacuous none?/all? over zero samples proves nothing
           unpinned.none?(&.token).should be_true
           unpinned.compact_map(&.error).size.should eq(unpinned.size)
 
-          pinned = drain(Q::Plan.build(options.call(ov), ungated).engine)
+          pinned = drain(Q::Plan.build(options.call(ov), ungated_outbound).engine)
           pinned.size.should eq(1)
           pinned[0].token.should eq("abc123")
           # The bytes reached the loopback responder unchanged, Host header included: an

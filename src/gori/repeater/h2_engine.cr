@@ -95,7 +95,11 @@ module Gori
       # body-size probes are the ordinary work of this tool, so the old note that "repeater
       # bodies are typically small" was never true: no gori surface could send a >64 KiB h2
       # request body against any conformant origin.
-      private class SendFlow
+      # PUBLIC, like `exchange` below and for the same reason: `H2WsStream` runs the SAME
+      # send-side accounting over an RFC 8441 extended CONNECT stream (#733), and a second copy
+      # of a flow-control window is how the two halves of one connection start disagreeing.
+      # Nothing outside this file's own siblings constructs one.
+      class SendFlow
         # The stream this exchange owns. 1 for a one-shot connection, and 3, 5, 7 … for the
         # later requests of a POOLED one (`Conn#take_stream`): RFC 9113 §5.1.1 makes a client
         # stream id odd, strictly increasing, and — this is the part that made every `1_u32`
@@ -175,6 +179,10 @@ module Gori
       # response — an RFC 9110 §15.2 violation the operator has to be told about, because it is
       # what an h2 response-splitting / header-injection probe produces and what a buggy
       # gateway emits. It rides alongside the final response rather than replacing it.
+      # `trailer_pseudo` is its non-interim sibling: the pseudo-header names a TRAILING block
+      # carried, which RFC 9113 §8.1 forbids outright. Same reason it is reported rather than
+      # obeyed — a `:status` in a trailer section is a second answer to a question the response
+      # head has already answered.
       private record Reply,
         status : Int32,
         headers : Array({String, String}),
@@ -185,7 +193,8 @@ module Gori
         trailers : Array(String)?,
         timed_out : Bool,
         final_seen : Bool,
-        late_interim : Int32? = nil
+        late_interim : Int32? = nil,
+        trailer_pseudo : Array(String)? = nil
 
       # One h2 CONNECTION and the state that outlives a single request on it.
       #
@@ -482,6 +491,14 @@ module Gori
                    "1xx and its fields were discarded; the status, headers and body reported " \
                    "here are the final response's"
         end
+        # …and its non-interim sibling, standing alone for the same reason: the response is
+        # intact, and a pseudo-header in a trailer section is itself the finding.
+        if pseudo = reply.trailer_pseudo
+          parts << "the origin's trailing header block carried the pseudo-header" \
+                   "#{pseudo.size == 1 ? "" : "s"} #{pseudo.join(", ")}, which RFC 9113 §8.1 " \
+                   "forbids in a trailer section. gori did not act on #{pseudo.size == 1 ? "it" : "them"} " \
+                   "— the status reported here is the response head's own"
+        end
         parts.empty? ? nil : parts.join(" — ")
       end
 
@@ -660,7 +677,7 @@ module Gori
           Frame.read(io)
         rescue IO::TimeoutError
           return false # idle, not dead — the caller decides whether that is fatal
-        rescue IO::Error | Gori::Error
+        rescue IO::Error | Gori::Error | OpenSSL::Error
           # `Gori::Error` here is `read_exact`'s "unexpected EOF mid-frame" — a FIN that
           # landed inside a frame rather than on its boundary. That is end-of-data, not a
           # reason to raise: `Gori::Error < Exception`, not `IO::Error`, so it used to
@@ -668,6 +685,10 @@ module Gori
           # unwind out of `write_request` before `read_response` could drain the complete
           # response already sitting in `flow.pending` — the exact lie `write_data`'s
           # comment below swore off. Treated like the reset socket it is.
+          # `OpenSSL::Error` is the same end-of-data one transport down: on `https` this `io`
+          # is an `OpenSSL::SSL::Socket`, and a peer that resets or garbles a record answers
+          # `SSL_read` with `OpenSSL::SSL::Error` — also not an `IO::Error`. `WsEngine` and
+          # `H2WsStream` already name it here; this pair did not.
           flow.eof = true
           return false
         end
@@ -682,10 +703,10 @@ module Gori
           unless frame.ack?
             apply_settings(frame, flow)
             flow.settings_seen = true
-            ack(io, Frame::Type::Settings, Bytes.empty)
+            ack_soft(io, Frame::Type::Settings, Bytes.empty)
           end
         when Frame::Type::Ping
-          ack(io, Frame::Type::Ping, frame.payload) unless frame.ack?
+          ack_soft(io, Frame::Type::Ping, frame.payload) unless frame.ack?
         when Frame::Type::WindowUpdate
           credit(frame, flow)
         when Frame::Type::Goaway
@@ -721,7 +742,8 @@ module Gori
       # stream window. §6.9.2: the new value is a DELTA against the previous initial size
       # applied to every open stream, not an assignment — space already consumed stays
       # consumed, and the window may end up negative.
-      private def self.apply_settings(frame : Frame::Header, flow : SendFlow) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` applies the peer's SETTINGS on the same stream).
+      def self.apply_settings(frame : Frame::Header, flow : SendFlow) : Nil
         payload = frame.payload
         i = 0
         while i + 6 <= payload.size
@@ -744,7 +766,8 @@ module Gori
       # stall loop reporting a flat timeout for a violation gori had watched the origin commit
       # 1200 times. Neither half REJECTS the frame — gori is the tester here, and a window that
       # overflows into an Int64 is harmless — but the operator gets told what was on the wire.
-      private def self.credit(frame : Frame::Header, flow : SendFlow) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` credits the same windows).
+      def self.credit(frame : Frame::Header, flow : SendFlow) : Nil
         return if frame.payload.size < 4
         inc = (IO::ByteFormat::BigEndian.decode(UInt32, frame.payload[0, 4]) & 0x7fffffff_u32).to_i64
         if inc == 0
@@ -786,8 +809,9 @@ module Gori
       # the initial value at 2^14 and forbids a smaller one, so 16384 is legal against every
       # peer, and gori writes the block before the peer's SETTINGS has even arrived. END_STREAM
       # belongs on the HEADERS frame, END_HEADERS on the last CONTINUATION (§6.10).
-      private def self.write_header_block(io : IO, block : Bytes, end_stream : Bool,
-                                          stream_id : UInt32) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` writes the extended CONNECT block with it).
+      def self.write_header_block(io : IO, block : Bytes, end_stream : Bool,
+                                  stream_id : UInt32) : Nil
         head = Math.min(MAX_FRAME, block.size)
         flags = (head >= block.size ? Frame::END_HEADERS : 0_u8) | (end_stream ? Frame::END_STREAM : 0_u8)
         io.write(Frame::Header.new(Frame::Type::Headers.value, flags, stream_id, block[0, head]).to_bytes)
@@ -927,10 +951,11 @@ module Gori
         goaway = flow.goaway # the origin's stated reason for hanging up
         rst = flow.rst       # the origin's stated reason for killing the stream
         trailers = nil.as(Array(String)?)
-        late_interim = nil.as(Int32?) # a 1xx block that arrived AFTER the final response
-        final_seen = false            # the final (non-interim) response header block is absorbed
-        end_stream_pending = false    # END_STREAM seen on a HEADERS frame whose block isn't closed yet
-        timed_out = false             # the read ended on an idle timeout, not on a closed socket
+        late_interim = nil.as(Int32?)           # a 1xx block that arrived AFTER the final response
+        trailer_pseudo = nil.as(Array(String)?) # pseudo-headers a TRAILING block carried (§8.1)
+        final_seen = false                      # the final (non-interim) response header block is absorbed
+        end_stream_pending = false              # END_STREAM seen on a HEADERS frame whose block isn't closed yet
+        timed_out = false                       # the read ended on an idle timeout, not on a closed socket
         pending = flow.pending
         at = 0
         progress = Time.instant # last time this exchange's stream actually moved
@@ -985,12 +1010,20 @@ module Gori
             # keeps its head and body regardless". If a discriminable protocol violation is
             # ever wanted here, give `Frame.read` a distinct subtype for it rather than
             # resting on a guard that cannot trip.
+            #
+            # `OpenSSL::Error` is a FOURTH way for the same wire event to arrive, and it used
+            # to be the destructive one. On `https` this `io` is an `OpenSSL::SSL::Socket`, so
+            # a peer that resets the TCP connection or garbles a record mid-response answers
+            # `SSL_read` with `OpenSSL::SSL::Error` — which is not an `IO::Error` either, and
+            # so unwound past both arms, past `exchange`, into `send`'s blanket rescue. The
+            # identical h2c event (`start_h2_origin_truncated`) has always kept its status and
+            # body, so the transport alone decided whether a decoded response survived.
             frame = begin
               Frame.read(io)
             rescue IO::TimeoutError
               timed_out = true
               nil
-            rescue IO::Error | Gori::Error
+            rescue IO::Error | Gori::Error | OpenSSL::Error
               nil
             end
             break if frame.nil?
@@ -1016,10 +1049,10 @@ module Gori
               # have blamed the ORIGIN for the GOAWAY that followed.
               apply_settings(frame, flow)
               flow.settings_seen = true
-              ack(io, Frame::Type::Settings, Bytes.empty)
+              ack_soft(io, Frame::Type::Settings, Bytes.empty)
             end
           when Frame::Type::Ping
-            ack(io, Frame::Type::Ping, frame.payload) unless frame.ack?
+            ack_soft(io, Frame::Type::Ping, frame.payload) unless frame.ack?
           when Frame::Type::Goaway
             goaway = goaway_reason(frame)
             done = true
@@ -1043,9 +1076,9 @@ module Gori
             # status). Defer completion until END_HEADERS.
             end_stream_pending = frame.end_stream?
             if frame.end_headers?
-              status, final_seen, trailers, late_interim =
+              status, final_seen, trailers, late_interim, trailer_pseudo =
                 merge_block(header_buf, decoder, headers, status, final_seen, trailers,
-                  late_interim, end_stream_pending)
+                  late_interim, trailer_pseudo, end_stream_pending)
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Continuation
@@ -1054,9 +1087,9 @@ module Gori
             break if header_buf.bytesize + frame.payload.size > MAX_HEADER_BLOCK # flood — abort
             header_buf.write(frame.payload)
             if frame.end_headers?
-              status, final_seen, trailers, late_interim =
+              status, final_seen, trailers, late_interim, trailer_pseudo =
                 merge_block(header_buf, decoder, headers, status, final_seen, trailers,
-                  late_interim, end_stream_pending)
+                  late_interim, trailer_pseudo, end_stream_pending)
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Data
@@ -1105,14 +1138,14 @@ module Gori
         end
 
         Reply.new(status, headers, body.size == 0 ? nil : body.to_slice, clean_eos,
-          goaway, rst, trailers, timed_out, final_seen, late_interim)
+          goaway, rst, trailers, timed_out, final_seen, late_interim, trailer_pseudo)
       end
 
       # Fold one COMPLETED header block into the response being assembled, and decide what the
-      # block IS. Returns the updated `(status, final_seen, trailers, late_interim)`; `headers`
-      # is written through, as `absorb` already did.
+      # block IS. Returns the updated `(status, final_seen, trailers, late_interim,
+      # trailer_pseudo)`; `headers` is written through, as `absorb` already did.
       #
-      # Four shapes reach here and only two of them used to be told apart:
+      # Five shapes reach here and only two of them used to be told apart:
       #
       #   1. the final response head            → keep everything
       #   2. an interim 1xx BEFORE it           → drop its fields (§15.2: they precede the final
@@ -1122,6 +1155,10 @@ module Gori
       #   3. a real trailers block after it     → keep the fields, record their NAMES as trailers
       #   4. an interim 1xx AFTER it            → the origin violated §15.2; drop the block and
       #                                           report it, do not let it become the response
+      #   5. a trailers block carrying a        → RFC 9113 §8.1 forbids a pseudo-header in a
+      #      pseudo-header                        trailer section; keep the real response's
+      #                                           status, keep the regular fields as trailers,
+      #                                           and report the violation
       #
       # 4 was being handled as 2-and-3 at once: `absorb` overwrote the status with the 1xx's,
       # `note_trailers` filed its field under trailers, and `headers.clear` — guarded on
@@ -1131,32 +1168,53 @@ module Gori
       # `status: 103` with no headers and the real 200 gone. That is precisely what an h2
       # response-splitting probe produces, so gori was reporting a successful injection as a
       # benign informational response.
+      #
+      # 5 is the same hole one status range over, and it survived that fix because the guard
+      # asked `interim?` rather than "did a trailer carry a status at all". A
+      # `HEADERS(:status 200, set-cookie)` + DATA + `HEADERS(:status 500)` came back as
+      # **HTTP/2 500** wearing the 200's own headers — the capture path reads the FIRST
+      # `:status` off the merged list (`Assembler#emit_response`) and reported 200 for the very
+      # same wire, so the two surfaces answered differently about one response. `absorb` now
+      # hands back THIS BLOCK's status instead of folding it into the running one, which is
+      # what makes "a trailing block may not restate the status" expressible at all.
       private def self.merge_block(header_buf : IO::Memory, decoder : HPACK::Decoder,
                                    headers : Array({String, String}), status : Int32,
                                    final_seen : Bool, trailers : Array(String)?,
-                                   late_interim : Int32?,
-                                   end_stream_pending : Bool) : {Int32, Bool, Array(String)?, Int32?}
+                                   late_interim : Int32?, trailer_pseudo : Array(String)?,
+                                   end_stream_pending : Bool) : {Int32, Bool, Array(String)?, Int32?, Array(String)?}
         count_before = headers.size
-        status_before = status
-        status, names = absorb(header_buf, decoder, headers, status)
+        block_status, names, pseudo = absorb(header_buf, decoder, headers)
         if final_seen
-          if interim?(status)
-            # Shape 4. Drop exactly what THIS block added — not the whole array — and give the
-            # final response its status back. The event itself is not swallowed: `exchange`
-            # turns `late_interim` into a named clause on the Result.
-            late_interim = status
+          if block_status && interim?(block_status)
+            # Shape 4. Drop exactly what THIS block added — not the whole array. `status` is
+            # left alone by construction now, so the final response keeps its own. The event
+            # is not swallowed: `exchange` turns `late_interim` into a named clause.
+            late_interim = block_status
             headers.pop(headers.size - count_before)
-            status = status_before
           else
-            trailers = note_trailers(trailers, names, true) # shape 3
+            trailers = note_trailers(trailers, names, true)      # shape 3
+            trailer_pseudo = note_pseudo(trailer_pseudo, pseudo) # …and shape 5 on top of it
           end
         else
+          # Only a block that CARRIES a status sets one; a head with no `:status` leaves the
+          # running value where it was, exactly as the old `value.to_i? || status` did.
+          status = block_status || status
           final_seen = !interim?(status)
           # Shape 2. Not when END_STREAM rode on the interim block itself: the stream is over,
           # no final response is coming, and `no_response` reports that instead.
           headers.clear if !end_stream_pending && !final_seen
         end
-        {status, final_seen, trailers, late_interim}
+        {status, final_seen, trailers, late_interim, trailer_pseudo}
+      end
+
+      # The pseudo-header names a TRAILING block carried, accumulated in arrival order and
+      # deduplicated — one hostile stream can send the same name in block after block, and the
+      # clause names what was wrong, not how many times.
+      private def self.note_pseudo(seen : Array(String)?, names : Array(String)) : Array(String)?
+        return seen if names.empty?
+        seen ||= [] of String
+        names.each { |n| seen << n unless seen.includes?(n) }
+        seen
       end
 
       # Names decoded from a header block that arrived AFTER the final response block are
@@ -1186,7 +1244,8 @@ module Gori
       # The code was previously read only as "stop looping", so an origin that told gori
       # exactly what it disliked about gori's own frames — FRAME_SIZE_ERROR, COMPRESSION_ERROR,
       # ENHANCE_YOUR_CALM — was reported as "no h2 response", pointing at the network.
-      private def self.goaway_reason(frame : Frame::Header) : String
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` reports the peer's own reason with it).
+      def self.goaway_reason(frame : Frame::Header) : String
         payload = frame.payload
         return "h2 GOAWAY (no error code)" if payload.size < 8
         code = IO::ByteFormat::BigEndian.decode(UInt32, payload[4, 4]).to_i
@@ -1199,7 +1258,8 @@ module Gori
       # of `goaway_reason`, one `case` arm away and written for the same reason: the code
       # names WHY the stream died, and REFUSED_STREAM (§8.7) is not a failure at all but an
       # instruction to retry on a new connection.
-      private def self.rst_reason(frame : Frame::Header) : String
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` reports the peer's own reason with it).
+      def self.rst_reason(frame : Frame::Header) : String
         payload = frame.payload
         return "h2 RST_STREAM on stream #{frame.stream_id} (no error code)" if payload.size < 4
         code = IO::ByteFormat::BigEndian.decode(UInt32, payload[0, 4]).to_i
@@ -1207,22 +1267,41 @@ module Gori
         "h2 RST_STREAM #{name} on stream #{frame.stream_id}"
       end
 
-      # Decode a completed header block, splitting :status from regular headers. Returns the
-      # status and the REGULAR field names this block contributed, so the caller can tell a
-      # trailing block's fields from the response head's (see `note_trailers`).
+      # Decode a completed header block, splitting the pseudo-headers off the regular fields.
+      # Returns THIS BLOCK's own `:status` (nil when it carried none), the REGULAR field names
+      # it contributed — so the caller can tell a trailing block's fields from the response
+      # head's (see `note_trailers`) — and the names of every pseudo-header in it, which
+      # RFC 9113 §8.1 forbids in a trailer section.
+      #
+      # Both halves of "the block's own, first one only" are load-bearing, and each used to be
+      # a way for a header block to report a status the response never had:
+      #
+      #   * folding the value into the RUNNING status let a trailing block replace the final
+      #     response's — see `merge_block` shape 5;
+      #   * taking the LAST `:status` within one block disagreed with the capture projection,
+      #     which reads the first (`HeadCodec.pseudo` is a `find`). §8.3 makes a duplicated
+      #     pseudo-header malformed either way, so neither reading is "right" — but gori
+      #     answering 200 in History and 500 in the Repeater for one wire is a bug on its own.
       private def self.absorb(buf : IO::Memory, decoder : HPACK::Decoder,
-                              headers : Array({String, String}), status : Int32) : {Int32, Array(String)}
+                              headers : Array({String, String})) : {Int32?, Array(String), Array(String)}
         names = [] of String
+        pseudo = [] of String
+        status = nil.as(Int32?)
+        seen_status = false
         decoder.decode(buf.to_slice).each do |(name, value)|
-          if name == ":status"
-            status = value.to_i? || status
-          elsif !name.starts_with?(':')
+          if name.starts_with?(':')
+            pseudo << name
+            if name == ":status" && !seen_status
+              seen_status = true
+              status = value.to_i?
+            end
+          else
             headers << {name, value}
             names << name
           end
         end
         buf.clear
-        {status, names}
+        {status, names, pseudo}
       end
 
       # An interim (informational) response: its header fields precede — and are not part
@@ -1231,14 +1310,35 @@ module Gori
         100 <= status < 200
       end
 
-      private def self.ack(io : IO, type : Frame::Type, payload : Bytes) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` answers SETTINGS/PING with it).
+      def self.ack(io : IO, type : Frame::Type, payload : Bytes) : Nil
         io.write(Frame::Header.new(type.value, Frame::ACK, 0_u32, payload).to_bytes)
         io.flush
       end
 
+      # The same ACK, for the two loops that may already be holding a decoded response.
+      #
+      # `pump_once` and `read_response` both WRITE while they read — a SETTINGS or PING from
+      # the peer is answered on the spot — and that write meets exactly the wire events the
+      # frame reads above rescue: a reset socket answers it with `IO::Error`, and on `https`
+      # (where `io` is an `OpenSSL::SSL::Socket`) with `OpenSSL::SSL::Error`, which is not an
+      # `IO::Error`. Raising there unwinds `read_response` — or `pump_once` → `write_data` →
+      # `write_request`, before `read_response` can drain `flow.pending` — into `send`'s
+      # blanket rescue, which throws away a status + headers + body that plainly arrived. So a
+      # failed ACK is swallowed for the same reason `window_update` swallows one: the peer is
+      # gone, acknowledging a frame changes nothing, and the next `Frame.read` sees the dead
+      # socket and ends the loop with the response intact (and `carry_over` retires the
+      # connection on `!clean_eos`). `H2WsStream` keeps the raising `ack`: it has no decoded
+      # response to lose, and its handshake wants the failure.
+      private def self.ack_soft(io : IO, type : Frame::Type, payload : Bytes) : Nil
+        ack(io, type, payload)
+      rescue
+      end
+
       # WINDOW_UPDATE crediting `increment` bytes back to `stream_id` (0 = connection-
       # level). The reserved high bit stays clear (increment is a small frame size).
-      private def self.window_update(io : IO, stream_id : UInt32, increment : Int32) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` replenishes the receive window with it).
+      def self.window_update(io : IO, stream_id : UInt32, increment : Int32) : Nil
         return if increment <= 0
         payload = Bytes.new(4)
         IO::ByteFormat::BigEndian.encode(increment.to_u32, payload)
@@ -1310,12 +1410,28 @@ module Gori
         # (it is the very shape `HeadCodec.resolve_authority` preserves in the other
         # direction) — and it is what a host-confusion probe wants on the wire.
         authority_override = nil
+        protocol = nil
         regular = [] of {String, String}
         lines[1..]?.try &.each do |field_line|
           next if field_line.empty?
           pair = HeadCodec.header_field(field_line)
           raise Gori::Error.new(unencodable_line(field_line)) unless pair
           raw_name, value = pair
+          # `X-Gori-Protocol` back to `:protocol` — the inverse of `HeadCodec.synth_request`,
+          # which writes that marker because the pseudo-header has nowhere else to go in an h1
+          # head. Without the fold a captured RFC 8441 extended CONNECT replayed as an ordinary
+          # h2 request carrying gori's own diagnostic line as a REGULAR field, while the one
+          # pseudo-header that makes the stream a WebSocket never reached the wire — so the
+          # socket could not be re-opened and the marker leaked into the target's logs.
+          #
+          # ONE occurrence, like `Host:`/`:authority` beside it: the synthesizer writes at most
+          # one, so a second is an operator's own field and stays a regular one, where they can
+          # see it. `reserved_marker?` renames a PEER field of this name on the way in, so the
+          # line being folded here is gori's own by construction.
+          if raw_name.compare(HeadCodec::PROTOCOL_MARKER, case_insensitive: true) == 0 && protocol.nil?
+            protocol = value
+            next
+          end
           if raw_name.compare("host", case_insensitive: true) == 0 && authority_override.nil?
             # An EMPTY `Host:` maps to an empty `:authority`, not to the dial target: the
             # operator asked for a request with no authority (the missing-authority probe),
@@ -1324,11 +1440,14 @@ module Gori
             authority_override = value
             next
           end
-          regular << {preserve_field_case ? raw_name : raw_name.downcase, value}
+          regular << {preserve_field_case ? raw_name : ascii_downcase(raw_name), value}
         end
 
         headers = [{":method", method}, {":path", path}, {":scheme", scheme},
                    {":authority", authority_override || authority(host, port, scheme)}]
+        # RFC 8441 §4: `:protocol` is a pseudo-header, so it belongs in this block and never
+        # among the regular fields (§8.3 requires every pseudo to precede them).
+        protocol.try { |p| headers << {":protocol", p} }
         headers.concat(regular)
         headers.each { |(n, v)| reject_uncarriable(n, v) }
         body = reframed_grpc(regular, body) if reframe_grpc && body
@@ -1391,7 +1510,11 @@ module Gori
                                preserve_field_case : Bool = false,
                                reframe_grpc : Bool = false) : Bytes
         fields, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
-        head = HeadCodec.synth_request(fields, HeadCodec.pseudo(fields, ":authority") || "")
+        # `protocol:` so the RFC 8441 marker line the parse just consumed comes back — this is
+        # the projection of the fields that WILL be encoded, and a `:protocol` dropped here
+        # would report an ordinary CONNECT tunnel for a request opening a WebSocket.
+        head = HeadCodec.synth_request(fields, HeadCodec.pseudo(fields, ":authority") || "",
+          protocol: HeadCodec.pseudo(fields, ":protocol"))
         return head unless body && !body.empty?
         joined = Bytes.new(head.size + body.size)
         head.copy_to(joined)
@@ -1450,6 +1573,19 @@ module Gori
       # treat as malformed, with no notice to the operator and the Fuzzer still labelling the
       # row with the payload it believed it sent. Refusing here keeps the h1/h2 divergence
       # visible instead of silent; the h1 engine is unchanged and still sends them byte-exact.
+      # Lower-case ONLY ASCII A–Z, leaving every other byte (a non-UTF-8 byte included)
+      # byte-exact. `String#downcase` on a field name carrying an invalid UTF-8 byte emits
+      # U+FFFD for it, silently altering the operator's bytes on the h2 path (P7) — while an
+      # h2 field name is an RFC 9113 §8.2.1 token h2 requires lower-cased, and only ASCII
+      # letters have a case, so a byte scan folds exactly what must fold and nothing else.
+      # `preserve_field_case` skips even this; the non-UTF-8 hazard was in the DEFAULT fold.
+      private def self.ascii_downcase(s : String) : String
+        bytes = s.to_slice
+        return s unless bytes.any? { |b| 0x41_u8 <= b <= 0x5A_u8 }
+        folded = Bytes.new(bytes.size) { |i| (0x41_u8 <= (b = bytes[i]) <= 0x5A_u8) ? b + 0x20_u8 : b }
+        String.new(folded)
+      end
+
       private def self.reject_uncarriable(name : String, value : String) : Nil
         {name, value}.each do |s|
           next unless s.each_char.any? { |c| c == '\r' || c == '\n' || c == '\0' }
@@ -1486,7 +1622,10 @@ module Gori
         {bytes, nil}
       end
 
-      private def self.header_block(frame : Frame::Header) : Bytes
+      # PUBLIC for `H2WsStream` — see `SendFlow` (the same frame carries the same
+      # padding/priority prefix whichever loop reads it, and two strippers is one
+      # off-by-one away from a desynced HPACK table).
+      def self.header_block(frame : Frame::Header) : Bytes
         payload = frame.payload
         offset = 0
         pad = 0
@@ -1500,7 +1639,10 @@ module Gori
         finish <= offset ? Bytes.empty : payload[offset...finish]
       end
 
-      private def self.data_block(frame : Frame::Header) : Bytes
+      # PUBLIC for `H2WsStream` — see `SendFlow` (the same frame carries the same
+      # padding/priority prefix whichever loop reads it, and two strippers is one
+      # off-by-one away from a desynced HPACK table).
+      def self.data_block(frame : Frame::Header) : Bytes
         return frame.payload unless frame.padded?
         return Bytes.empty if frame.payload.empty?
         pad = frame.payload[0].to_i

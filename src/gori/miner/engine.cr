@@ -575,7 +575,7 @@ module Gori::Miner
           # above is 200 for every gRPC call, so for a gRPC target this — not `last_status` —
           # is the isolated candidate's real outcome. nil/nil for a non-gRPC response, at the
           # cost of one allocation-free byte scan.
-          last_grpc_status, last_grpc_message = Fuzz::GrpcVerdict.response(raw.head)
+          last_grpc_status, last_grpc_message = Fuzz::GrpcVerdict.response(raw.head, raw.body)
           break if hits >= majority
         end
       end
@@ -871,8 +871,18 @@ module Gori::Miner
         # between the two calls, and each attempt is charged to the cap a second time
         # (`CappedBackend#send` increments AFTER the cap check but BEFORE the gate's).
         return raw if permanent_refusal?(raw.error) || attempts >= @config.retries
+        # A STOP ends the retry chain. It was honoured everywhere else in the run — the
+        # dispatcher breaks, a worker skips the bucket it just took — and invisible only here,
+        # where a retry is a NEW request: measured, a `stop` on the first errored bucket put
+        # `retries` more requests on the wire per in-flight worker after `mine_stop` returned,
+        # and MCP's ceilings (`retries` up to 1000, `retry_pause` 500 ms by default) scale that
+        # to 1000 requests and ~8 minutes EACH. Checked on BOTH sides of the pause, so neither a
+        # stop that arrived during the send nor one during the pause costs another. Same shape,
+        # same reason, as `Sequencer::Engine#send_with_retries` and `Fuzz::Engine#run_one`.
+        return raw if @state.stopped?
         attempts += 1
         sleep @config.retry_pause
+        return raw if @state.stopped?
       end
     end
 

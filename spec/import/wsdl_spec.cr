@@ -3,19 +3,6 @@ require "../spec_helper"
 # src/gori/import/wsdl.cr — WSDL 1.1 (SOAP 1.1 + 1.2) → response-less SOAP request templates.
 # Inline temp files rather than fixtures, matching spec/import/postman_spec.cr.
 
-private def with_store(&)
-  path = File.tempname("gori-wsdl", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_wsdl(xml : String, &)
   path = File.tempname("gori", ".wsdl")
   File.write(path, xml)

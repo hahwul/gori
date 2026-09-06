@@ -14,7 +14,29 @@ module Gori::Tui
   # brute="charset:min-max"). Shared by FuzzerView (@sets, persistence, engine
   # assembly) and FuzzSetOverlay (the editor that produces one). Hoisted to module
   # scope so the overlay can build one without depending on FuzzerView.
-  record SetSpec, kind : Symbol, value : String
+  record SetSpec, kind : Symbol, value : String do
+    # A `:list` value is NEWLINE-separated with a trailing newline — the overlay's own grammar
+    # ("one value per line") — because a comma is ordinary payload text: `{"id":1,"role":"x"}`
+    # or `' OR 1=1,--` stored comma-joined came back as two payloads, and the run count said
+    # so while the operator read it as one. The trailing newline is the format marker: a value
+    # with no newline at all is a session saved under the old comma grammar and is still
+    # split on `,`, so nothing already on disk changes meaning.
+    LIST_SEP = '\n'
+
+    def self.list(values : Array(String)) : SetSpec
+      new(:list, values.join(LIST_SEP) + LIST_SEP)
+    end
+
+    def self.list_values(value : String) : Array(String)
+      return value.split(',') unless value.includes?(LIST_SEP)
+      value.chomp(LIST_SEP).split(LIST_SEP)
+    end
+
+    # ONE line, for a set row and a signature. The stored form of a list carries newlines.
+    def display : String
+      kind == :list ? SetSpec.list_values(value).join(',') : value
+    end
+  end
 
   # The full-area popup for adding or editing ONE payload set. Replaces the cramped
   # in-pane draft fields: every payload type gets its own vertically-stacked, labeled
@@ -71,7 +93,7 @@ module Gori::Tui
       case spec.kind
       when :list
         @ptype = :list
-        @values.set_text(spec.value.split(',').map(&.strip).reject(&.empty?).join('\n'))
+        @values.set_text(SetSpec.list_values(spec.value).map(&.strip).reject(&.empty?).join('\n'))
       when :numbers
         @ptype = :numbers
         range, _, step = spec.value.partition(':')
@@ -120,6 +142,11 @@ module Gori::Tui
 
     private def rows : Array(Symbol)
       [:type] + field_rows
+    end
+
+    # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the VALUES editor takes a line break as a newline; the other rows keep the default.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      focused == :values || !ev.key.enter?
     end
 
     private def focused : Symbol
@@ -249,8 +276,9 @@ module Gori::Tui
     private def edit_values(ev : Termisu::Event::Key) : Nil
       key = ev.key
       case
-      when key.enter? then @values.insert_newline
-        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when key.enter?               then @values.insert_newline
+      when ev.ctrl? && key.lower_z? then @values.undo # the undo chord every body editor binds
+      # Before plain ⌫, which would swallow the modified form as a one-character delete.
       when @values.word_delete_key?(ev)  then @values.handle_motion_key(ev)
       when key.backspace?                then @values.backspace
       when key.delete?                   then @values.delete
@@ -328,7 +356,7 @@ module Gori::Tui
       case @ptype
       when :list
         vals = list_values
-        vals.empty? ? nil : SetSpec.new(:list, vals.join(","))
+        vals.empty? ? nil : SetSpec.list(vals)
       when :numbers
         SetSpec.new(:numbers, "#{num64(:from)}-#{num64(:to)}:#{num64(:step, 1_i64)}")
       when :wordlist
@@ -398,7 +426,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "payload set editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "payload set editor needs a larger window")
         return
       end
       # Not `title` — that is now the Overlay chrome method, and a local of the same name
@@ -577,10 +605,10 @@ module Gori::Tui
       @values.click_to_cursor(values_rect(box), mx, my, selecting: true)
     end
 
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
       return super unless @ptype == :list
-      return false unless box = overlay_box(area)
-      @values.select_word_at(values_rect(box), mx, my)
+      return :pass unless box = overlay_box(area)
+      @values.select_word_at(values_rect(box), mx, my) ? :stay : :pass
     end
 
     def move(d : Int32) : Nil

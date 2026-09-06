@@ -3,6 +3,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("sequence", "seq", help: [
+        {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
+      ])]
       private def self.cmd_sequence(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -302,6 +305,12 @@ module Gori
           end
         end
         emit_sequence_report(Sequencer::Stats.analyze(tokens), format, subject)
+        # LAST, after the report: `--slot NAME` whose overlay resolved to nothing means every
+        # replay carried `$SESSION` itself instead of a session, so the tokens analyzed are the
+        # ones the origin issues to an ANONYMOUS client — a different generator than the one the
+        # slot names, and the rating is about that one. Same drain, same sentence, as
+        # fuzz/discover. `--tokens FILE` never reaches here: it sends nothing.
+        report_unbound_slot_overlay("gori run sequence")
         # Before the all-refused check below — see `Run.report_interrupted`.
         Run.report_interrupted(tokens.size, "token", "collected") if interrupted.call
         exit 1 if had_error

@@ -2,19 +2,6 @@ require "../../spec_helper"
 
 # --- file-local harness (mirrors spec/probe_spec.cr's private with_store/capture_flow) ---
 
-private def with_store(&)
-  path = File.tempname("gori-sharedcache", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture_flow(store, *, host = "api.acme.test", origin : String? = nil,
                          resp_headers : String = "", status = 200,
                          content_type : String? = "text/html") : Gori::Store::FlowDetail
@@ -72,6 +59,30 @@ describe Gori::Probe::Passive::SharedCache do
         dets(store, "cacheable_set_cookie", resp_headers: "Set-Cookie: sessionid=abc\r\n").should be_empty
         # Publicly cacheable but nothing to leak.
         dets(store, "cacheable_set_cookie", resp_headers: "Cache-Control: public, max-age=600\r\n").should be_empty
+      end
+    end
+
+    it "combines repeated fields and lets a veto win regardless of field order" do
+      with_store do |store|
+        dets(store, "cacheable_set_cookie",
+          resp_headers: "Cache-Control: private\r\nCache-Control: public\r\n" \
+                        "Set-Cookie: sessionid=abc\r\n").should be_empty
+        dets(store, "cacheable_set_cookie",
+          resp_headers: "Cache-Control: public\r\nCache-Control: no-store\r\n" \
+                        "Set-Cookie: sessionid=abc\r\n").should be_empty
+      end
+    end
+
+    it "does not read directive names out of quoted extension values" do
+      with_store do |store|
+        # The quoted `private` is only extension data; the real public directive still applies.
+        dets(store, "cacheable_set_cookie",
+          resp_headers: "Cache-Control: note=\"safe, private\", public\r\n" \
+                        "Set-Cookie: sessionid=abc\r\n").size.should eq(1)
+        # Conversely, a quoted `public` does not invite a shared cache.
+        dets(store, "cacheable_set_cookie",
+          resp_headers: "Cache-Control: note=\"safe, public\"\r\n" \
+                        "Set-Cookie: sessionid=abc\r\n").should be_empty
       end
     end
   end

@@ -164,6 +164,51 @@ describe Gori::Store do
     end
   end
 
+  # `edited` is the operator's UNSAVED edit on a hold — the one column a republish has to be
+  # able to change, because it flips long after the row was first mirrored. Under the old
+  # `INSERT OR IGNORE` it was frozen at whatever the first publish said, which for every hold
+  # was `false`; the publish side hardcoded it false as well, so `intercept_list` answered
+  # `edited: false` for every item that has ever been held.
+  it "updates the operator-edit flag on a republish without rewriting the held bytes" do
+    with_store do |store|
+      tok = "sess-edit"
+      raw = "POST /a HTTP/1.1\r\nHost: x.test\r\n\r\n".to_slice
+      row = ->(edited : Bool) {
+        Gori::Store::HeldRow.new(tok, 1_i64, "request", "POST", "x.test", 80, "http", "/a",
+          raw, 1_000_i64, nil, edited)
+      }
+      store.publish_intercept_held(tok, [row.call(false)])
+      store.intercept_held(tok)[0].edited.should be_false
+
+      store.publish_intercept_held(tok, [row.call(true)]) # the human started typing
+      held = store.intercept_held(tok)
+      held.size.should eq(1)
+      held[0].edited.should be_true
+      held[0].raw.should eq(raw) # the immutable bytes are untouched by the flag's update
+
+      store.publish_intercept_held(tok, [row.call(false)]) # …and closed the editor again
+      store.intercept_held(tok)[0].edited.should be_false
+    end
+  end
+
+  # The upsert's `WHERE` is what keeps "the raw BLOB is written exactly once" true: without it
+  # SQLite takes the DO UPDATE branch for every already-present row on every republish —
+  # reading the record, blob included, and rewriting it — and typing a catch condition
+  # republishes on every keystroke.
+  it "leaves an unchanged held row alone across republishes" do
+    with_store do |store|
+      tok = "sess-noop"
+      raw = "POST /a HTTP/1.1\r\nHost: x.test\r\n\r\n".to_slice
+      rows = [Gori::Store::HeldRow.new(tok, 1_i64, "request", "POST", "x.test", 80, "http",
+        "/a", raw, 1_000_i64, nil, false)]
+      store.publish_intercept_held(tok, rows)
+      before = store.data_version
+      3.times { store.publish_intercept_held(tok, rows) }
+      store.data_version.should eq(before) # no row rewritten, so nothing committed
+      store.intercept_held(tok)[0].raw.should eq(raw)
+    end
+  end
+
   # R4. The two producers that had nowhere to put a flow-level statement (a Match&Replace rule
   # that could not run, a server-pushed request) write here. `error` is the neighbouring shape;
   # this one does not mean the flow failed.

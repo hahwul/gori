@@ -1,18 +1,5 @@
 require "../spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-extra", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe "Gori::Store scope rules + settings (v3)" do
   it "persists scope rules" do
     with_store do |store|

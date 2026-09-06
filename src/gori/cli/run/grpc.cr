@@ -13,6 +13,11 @@ require "../../discover/url"
 module Gori
   module CLI
     module Run
+      @[Subcommand("grpc", help: [
+        {"grpc reflect <url>", "Fetch a gRPC target's .proto descriptors by server reflection (ACTIVE) and cache them"},
+        {"grpc schema", "What .proto schema this project loaded, and where each piece came from"},
+        {"grpc forget", "Drop a cached reflection result (by target, or --all)"},
+      ])]
       private def self.cmd_grpc(args : Array(String)) : Nil
         case sub = args.first?
         when "reflect"      then cmd_grpc_reflect(args[1..])

@@ -18,10 +18,11 @@ module Gori
   #   reqsize:>1000 respsize:<500       # request-only / response-only byte size
   #   header:set-cookie                 # substring over request/response head bytes
   #   scope:in  scope:out               # the project's scope rules, ⇧S lens off or on
-  #   body~secret\d+  host~^api\.       # `~` = regex (host path url header body)
+  #   body~secret\d+  host~^api\.       # `~` = regex (host path url method scheme header body)
   module QL
     # `:` fields:  see FIELDS below (the list every surface reads).
-    # `~` regex on: host path url header body   (+ bare words = free text).
+    # `~` regex on: REGEX_FIELDS below (host path url method scheme header body, and the
+    #               req./resp. sides of header and body)   (+ bare words = free text).
     # Comparison ops (<= >= < > =) apply to status/size/reqsize/respsize/dur.
     #
     # QL is not only History's: a Colormarker rule's condition is a QL string too, matched
@@ -130,6 +131,7 @@ module Gori
         host:api OR status:5xx                      # OR
         (host:a OR host:b) -method:GET              # parentheses group
         NOT (host:cdn OR host:static)               # NOT negates a term or a group
+        -(host:cdn OR host:static)                  # so do `-(` and `NOT(` fused to the paren
         host:"my host"  "two words"                 # quotes keep spaces in one term
         -host:cdn login                             # negation + free-text search
 
@@ -175,7 +177,11 @@ module Gori
       a surface with no project scope at all the term is DROPPED like a bad numeric, and
       ql_explain / strict:true name it.
 
-      Regex (~): host~^api\\.  body~secret\\d+  path~/admin
+      Regex (~): host~^api\\.  body~secret\\d+  path~/admin  method~^P(OST|UT)$ — on host path url
+      method scheme header body (and req./resp. header/body). Case-sensitive; prefix (?i) to fold.
+      A `~` on any OTHER field QL has (status size dur proto stub src scope …) is DROPPED and
+      reported like a bad numeric, not searched as text; a `~` on a name QL does not have at all
+      is free text, the whole token.
 
       body: SEARCHES AN INDEX, AND THE INDEX IS BOUNDED. `body:` reads a trigram index that
       covers only the FIRST 8 KiB of each side (request and response), and a body is not
@@ -329,7 +335,14 @@ module Gori
     FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub src scope
       req.header resp.header req.body resp.body]
 
-    REGEX_FIELDS = %w[host path url header body req.header resp.header req.body resp.body]
+    # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
+    # them costs nothing to offer — and `method~^P(OST|UT)$` is the one-term spelling of "every
+    # write verb" that `method:` (exact) could only say as a three-way OR. Every OTHER known field
+    # is a number, an enum or a predicate, and a `~` on one is dropped and reported (see
+    # `regex_cond`) rather than free-texted: `status~5..` used to compile to a literal search for
+    # the text `status~5..`, match nothing, and be reported CLEAN — with the bar painting it as a
+    # field, because the name is one. Same trap as `resp.status:`, same answer.
+    REGEX_FIELDS = %w[host path url method scheme header body req.header resp.header req.body resp.body]
 
     # A `req.`/`resp.` prefix picks ONE SIDE of a field that has two. `header:`/`body:` search the
     # request AND the response, which is right for "find this string anywhere" and useless for the
@@ -374,8 +387,11 @@ module Gori
     }
 
     # Does QL implement this field name? THE membership test — `FIELDS` alone is the pool a
-    # surface OFFERS, which is a strict subset of what it accepts.
-    def self.known_field?(name : String) : Bool
+    # surface OFFERS, which is a strict subset of what it accepts. With `regex: true` the question
+    # is the narrower "…under the `~` operator?" (`REGEX_FIELDS`), which is what a highlighter has
+    # to ask to paint `status~5..` truthfully: the name is known, the term is still dropped.
+    def self.known_field?(name : String, regex : Bool = false) : Bool
+      return canonical(name).in?(REGEX_FIELDS) if regex
       FIELDS.includes?(name) || FIELD_ALIASES.has_key?(name)
     end
 
@@ -399,6 +415,13 @@ module Gori
     #     timestamp, a port, an IPv6 run — is free text) and hold only letters, digits and `_`,
     #     plus `.` ONLY behind a `SIDES` prefix, since every dotted field QL has is a
     #     `req.`/`resp.`/`res.` one. `acme.test:8443` is an authority; `resp.bdy` is still a typo.
+    #   * an UNDOTTED name no field is close to, over a value that is nothing but a PORT (one to
+    #     five digits): the token is `host:port` for a host with no dot in it — `localhost:8080`,
+    #     `api:3000`, the address of every dev server a proxy ever fronts — and the dot rule above
+    #     cannot see it. "Close to" is `suggest_field`'s own tolerance, so a numeric-field typo with
+    #     a numeric value (`stauts:500`, `sizee:100`) stays a refused typo with its suggestion
+    #     attached. Dotted names never take this road: `resp.status:200` is a namespace guess, and
+    #     the SIDES rule already says so.
     #
     # Every typo of a real field passes all of this — `methd`, `hsot`, `resp.bdy`, `xyzzy` are
     # field-shaped, unknown, and still refused, which is the whole point of the refusal.
@@ -407,8 +430,14 @@ module Gori
       return false if value.starts_with?("//")
       return false unless name[0]?.try(&.ascii_letter?)
       return false unless name.each_char.all? { |c| c.ascii_alphanumeric? || c == '_' || c == '.' }
-      return true unless name.includes?('.')
-      SIDES.each_key.any? { |prefix| name.starts_with?(prefix) }
+      return SIDES.each_key.any? { |prefix| name.starts_with?(prefix) } if name.includes?('.')
+      !(port_like?(value) && suggest_field(name).nil?)
+    end
+
+    # One to five ASCII digits — the shape of a TCP port, and of nothing a QL field value has to
+    # be that a known field would not already have claimed.
+    private def self.port_like?(value : String) : Bool
+      value.size.in?(1..5) && value.each_char.all?(&.ascii_number?)
     end
 
     # The spelling a name QL does NOT implement most likely meant, or nil when nothing is close
@@ -450,8 +479,8 @@ module Gori
       "host"        => "server host — substring; host~ for regex",
       "path"        => "path AND query string — substring",
       "url"         => "scheme://host + path — substring",
-      "method"      => "exact method — GET POST PUT …",
-      "scheme"      => "exact — http or https",
+      "method"      => "exact — GET POST …; method~ for regex",
+      "scheme"      => "exact — http or https; scheme~ for regex",
       "proto"       => "ws grpc sse http (+s = over TLS)",
       "status"      => "code; classes (5xx) and >= <= compare",
       "size"        => "request + response bytes — >10k <1M",
@@ -539,7 +568,7 @@ module Gori
       {"host:acme status:5xx", "space = AND (both must hold)"},
       {"host:a OR host:b", "OR; NOT > AND > OR, ( ) to group"},
       {"-path:/static", "leading - excludes — so does NOT path:/static"},
-      {"NOT (host:cdn OR host:img)", "NOT negates a whole group"},
+      {"NOT (host:cdn OR host:img)", "NOT or -( negates a whole group"},
       {"body~secret\\d+", "~ is regex; : is plain substring"},
       {"status:>=500 dur:>1.5s", ">= <= > < = on status size dur"},
       {"resp.body:token", "req. / resp. picks one side of body: header:"},
@@ -747,12 +776,12 @@ module Gori
     # `ql_explain`'s warning, the `history delete` refusal, `Colormarker`'s decision to re-read
     # the lens and its author note, HistoryView's empty-list note.
     #
-    # `!u.regex` is load-bearing. `scope` is not in `REGEX_FIELDS`, so `scope~in` takes
-    # `regex_cond`'s free-text fallback (the same road `size~1` takes) and names no scope
-    # predicate at all — counting it would make every one of those surfaces speak about a term
-    # that is not there: a note claiming a dead rule follows the scope rules, a warning about a
-    # project's missing scope on a query that never asked, a refused delete, and a poll tick
-    # re-reading `scope_rules` for a rule that never consults the lens.
+    # `!u.regex` is load-bearing. `scope` is not in `REGEX_FIELDS`, so `scope~in` is DROPPED by
+    # `regex_cond` (the same road `size~1` takes — reported under `analyze`'s `ignored`) and
+    # names no scope predicate at all — counting it would make every one of those surfaces speak
+    # about a term that is not there: a note claiming a dead rule follows the scope rules, a
+    # warning about a project's missing scope on a query that never asked, a refused delete, and
+    # a poll tick re-reading `scope_rules` for a rule that never consults the lens.
     #
     # `InterceptFilter.unsupported_fields` deliberately does NOT filter that way: that backend
     # refuses the NAME, before the operator split, so `scope~in` is a refused term there.
@@ -948,6 +977,10 @@ module Gori
 
       # status class: 2xx / 4xx / 5xx — honour any comparison operator against the
       # class bounds (e.g. status:>=5xx → status >= 500; bare status:4xx → 400-499).
+      # Case-insensitive, because `InterceptFilter` (the same predicate over a live message) folds
+      # the value before its class test, so `status:5XX` painted a colour rule's row while the
+      # History query for the same string was silently dropped — one string, two answers.
+      rest = rest.downcase
       if rest.size == 3 && rest[1] == 'x' && rest[2] == 'x' && rest[0].ascii_number?
         base = rest[0].to_i * 100
         case op
@@ -1065,10 +1098,10 @@ module Gori
 
     # The `~` operator: case-sensitive regex (SQLite REGEXP, the same shard-provided
     # function Scope's regex rules use, backed by Crystal Regex) over a text field —
-    # host/path/url/header/body. Any other field falls back to a literal free-text
-    # search of the whole token. An invalid pattern would raise inside the SQLite
-    # REGEXP callback, so we validate up front and emit a never-matches clause instead.
-    # For case-insensitive matching use an inline (?i) flag.
+    # `REGEX_FIELDS`. A known field outside that list drops the term (reported); a name QL
+    # does not have falls back to a literal free-text search of the whole token. An invalid
+    # pattern would raise inside the SQLite REGEXP callback, so we validate up front and emit
+    # a never-matches clause instead. For case-insensitive matching use an inline (?i) flag.
     private def self.regex_cond(field : String, value : String, term : String,
                                 body_max : Int32? = nil) : {String, Array(DB::Any)}?
       # A non-regex field name means `~` wasn't a regex operator here (e.g. `foo~bar`):
@@ -1080,9 +1113,20 @@ module Gori
       # the diagnosis cannot disagree with the compilation about which terms are regex terms.
       field = canonical(field)
       return regex_field_cond(field, value, body_max) if field.in?(REGEX_FIELDS)
-      # A side prefix we own on a field that has none — dropped, not free-texted; see `field_cond`.
-      return nil if side_prefixed?(field)
+      # A name this module ADVERTISES with no `~` behind it — a field QL has (`status~5..`,
+      # `size~1`, `scope~in`) or a side prefix it owns on a field that has none
+      # (`resp.status~2..`) — is dropped and reported, for `field_cond`'s `resp.status:` reason:
+      # free-texting it searched method/host/target for the literal token, matched nothing, and
+      # reported the query clean. See `REGEX_FIELDS`. Anything else is not a field at all.
+      return nil if advertised_name?(field)
       free_text(term)
+    end
+
+    # Is `field` a name QL puts in front of an operator — one it implements, or one wearing a
+    # side prefix it owns? The names for which "this term did nothing" has to be SAID rather than
+    # left to a free-text search that finds nothing.
+    private def self.advertised_name?(field : String) : Bool
+      known_field?(field) || side_prefixed?(field)
     end
 
     # The clause for a `~` term on a field that HAS one. Split out of `regex_cond` so that method
@@ -1096,15 +1140,14 @@ module Gori
       # front and emit a never-matches clause instead.
       return {"0", [] of DB::Any} unless valid_regex?(value)
       case field
-      when "host"        then {"host REGEXP ?", [value] of DB::Any}
-      when "path"        then {"target REGEXP ?", [value] of DB::Any}
-      when "url"         then {"#{URL_EXPR} REGEXP ?", [value] of DB::Any}
-      when "header"      then header_regex_cond(value)
-      when "req.header"  then header_regex_cond(value, :req)
-      when "resp.header" then header_regex_cond(value, :resp)
-      when "req.body"    then body_regex_cond(value, body_max, :req)
-      when "resp.body"   then body_regex_cond(value, body_max, :resp)
-      else                    body_regex_cond(value, body_max)
+      when "host"                                then {"host REGEXP ?", [value] of DB::Any}
+      when "path"                                then {"target REGEXP ?", [value] of DB::Any}
+      when "url"                                 then {"#{URL_EXPR} REGEXP ?", [value] of DB::Any}
+      when "method"                              then {"method REGEXP ?", [value] of DB::Any}
+      when "scheme"                              then {"scheme REGEXP ?", [value] of DB::Any}
+      when "header", "req.header", "resp.header" then header_regex_cond(value, side_of(field))
+      else # body, req.body, resp.body — the only names left in REGEX_FIELDS
+        body_regex_cond(value, body_max, side_of(field))
       end
     end
 

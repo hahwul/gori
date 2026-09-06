@@ -4,19 +4,6 @@ require "../support/overlay_harness"
 
 include Gori::Tui
 
-private def tmp_store(&)
-  path = File.tempname("gori-pao", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def flow(store, method, target) : Gori::Store::FlowDetail
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
@@ -34,7 +21,7 @@ end
 
 describe Gori::Tui::ProbeActiveOverlay do
   it "hides the unsafe row when safe and unsafe estimates match (GET flow)" do
-    tmp_store do |store|
+    with_store do |store|
       d = flow(store, "GET", "/s?q=1")
       same = [est("reflected_param")]
       ov = ProbeActiveOverlay.new(d, same, same)
@@ -50,7 +37,7 @@ describe Gori::Tui::ProbeActiveOverlay do
   end
 
   it "offers an off-by-default unsafe opt-in for an unsafe-method flow (POST)" do
-    tmp_store do |store|
+    with_store do |store|
       d = flow(store, "POST", "/submit?q=1")
       safe = [] of Gori::Probe::Analyzer::ActiveEstimate # nothing runs safe-only on a POST
       unsafe = [est("reflected_param")]                  # the opt-in surfaces the reflected-param check
@@ -79,7 +66,7 @@ describe Gori::Tui::ProbeActiveOverlay do
   # "enable unsafe methods" hint, so the POST was silently never probed with no control left to
   # include it. The gate compares CONTENT.
   it "offers the unsafe opt-in when a merged estimate differs only in request count" do
-    tmp_store do |store|
+    with_store do |store|
       details = [flow(store, "GET", "/s?q=1"), flow(store, "POST", "/submit")]
       info = Gori::Probe::RuleInfo.new("reflected_param", "Reflected param", "d", Gori::Probe::Category::ACTIVE)
       safe = [Gori::Probe::Analyzer::ActiveEstimate.new(info, 1..1)]   # applies to the GET only
@@ -106,7 +93,7 @@ describe Gori::Tui::ProbeActiveOverlay do
   end
 
   it "renders without crashing and hit-tests all three rows for a POST flow" do
-    tmp_store do |store|
+    with_store do |store|
       d = flow(store, "POST", "/submit?q=1")
       ov = ProbeActiveOverlay.new(d, [] of Gori::Probe::Analyzer::ActiveEstimate, [est("reflected_param")])
       screen = Screen.new(MemoryBackend.new(80, 24))
@@ -122,14 +109,14 @@ describe Gori::Tui::ProbeActiveOverlay do
   # --- Overlay seam (see overlay.cr): the routing the Runner's generic dispatch replaced.
   # OverlayHarness replays Runner#dispatch_overlay_key / #dispatch_overlay_click.
   it "exposes the chrome the collapsed ladders used to hard-code" do
-    tmp_store do |store|
+    with_store do |store|
       ov = ProbeActiveOverlay.new(flow(store, "GET", "/s?q=1"), [est("x")], [est("x")])
       OverlayHarness.new(ov).assert_chrome(OverlayKind::ProbeActive, "ACTIVE SCAN")
     end
   end
 
   it "↵ on Run commits; esc cancels without running the scan" do
-    tmp_store do |store|
+    with_store do |store|
       same = [est("reflected_param")]
       ov = ProbeActiveOverlay.new(flow(store, "GET", "/s?q=1"), same, same)
       h = OverlayHarness.new(ov)
@@ -144,7 +131,7 @@ describe Gori::Tui::ProbeActiveOverlay do
   end
 
   it "keeps the popup up when the closure refuses (nothing to send)" do
-    tmp_store do |store|
+    with_store do |store|
       # A POST with the unsafe opt-in still off: start_probe_active toasts and reports false.
       ov = ProbeActiveOverlay.new(flow(store, "POST", "/submit?q=1"),
         [] of Gori::Probe::Analyzer::ActiveEstimate, [est("reflected_param")])
@@ -155,7 +142,7 @@ describe Gori::Tui::ProbeActiveOverlay do
   end
 
   it "␣ on a non-Run row toggles instead of committing" do
-    tmp_store do |store|
+    with_store do |store|
       ov = ProbeActiveOverlay.new(flow(store, "POST", "/submit?q=1"),
         [] of Gori::Probe::Analyzer::ActiveEstimate, [est("reflected_param")])
       h = OverlayHarness.new(ov)
@@ -167,7 +154,7 @@ describe Gori::Tui::ProbeActiveOverlay do
   end
 
   it "a click on Run commits, a click on another row toggles, a click outside dismisses" do
-    tmp_store do |store|
+    with_store do |store|
       ov = ProbeActiveOverlay.new(flow(store, "POST", "/submit?q=1"),
         [] of Gori::Probe::Analyzer::ActiveEstimate, [est("reflected_param")])
       h = OverlayHarness.new(ov)
@@ -190,7 +177,7 @@ describe Gori::Tui::ProbeActiveOverlay do
   end
 
   it "the wheel moves the selected row (base handle_wheel delegates to move)" do
-    tmp_store do |store|
+    with_store do |store|
       ov = ProbeActiveOverlay.new(flow(store, "GET", "/s?q=1"), [est("x")], [est("x")])
       ov.on_run_row?.should be_true
       OverlayHarness.new(ov).wheel(-1) # up one notch: Run → notify
@@ -203,7 +190,7 @@ describe Gori::Tui::ProbeActiveOverlay do
     # path is unreachable through the default — pass an area that actually forces it. This
     # popup sends real requests on commit, so an unrenderable card MUST cancel, matching the
     # pre-seam `return close_probe_active if box.nil?`.
-    tmp_store do |store|
+    with_store do |store|
       tiny = Gori::Tui::Rect.new(0, 0, 29, 6)
       ov = ProbeActiveOverlay.new(flow(store, "GET", "/s?q=1"), [est("x")], [est("x")])
       ov.overlay_box(tiny).should be_nil
@@ -219,7 +206,7 @@ describe Gori::Tui::ProbeActiveOverlay do
     # Production hands an overlay `layout.body` — 6 rows shorter and offset from the screen.
     # Asserting row_at over that box would just restate the 80x24 example above, since the
     # card fits either way; drive a real click so the smaller rect is actually load-bearing.
-    tmp_store do |store|
+    with_store do |store|
       body = Gori::Tui::Rect.new(2, 4, 76, 18)
       ov = ProbeActiveOverlay.new(flow(store, "POST", "/submit?q=1"),
         [] of Gori::Probe::Analyzer::ActiveEstimate, [est("reflected_param")])

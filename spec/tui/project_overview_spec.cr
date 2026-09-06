@@ -154,7 +154,7 @@ describe "ProjectView OVERVIEW row budget" do
       # under-reports, the band is short and the break silently drops rows again — so assert the
       # whole set, not a sample. (Sabotage check: make `ov_group_sizes` under-count a group.)
       ["Name:", "Path:", "ID:", "Workspace:", "Proxy:", "Flows:", "Captured:",
-       "Issues:", "DB Size:", "Created:", "Activity:", "Technologies:"].each do |label|
+       "Issues:", "DB Size:", "Created:", "Technologies:"].each do |label|
         b.contains?(label).should be_true
       end
     end

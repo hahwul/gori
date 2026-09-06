@@ -667,11 +667,14 @@ module Gori::Proxy::H2
     private def warn_overflow(slot : Slot, ahead : Int32) : Nil
       return if @warned_overflow
       @warned_overflow = true
-      ::Log.warn do
-        also = ahead > 0 ? " (releasing #{ahead} stream(s) deferred ahead of it too)" : ""
-        "h2 #{@direction}: held stream #{slot.stream_id} buffered over " \
-        "#{MAX_DEFERRED_BYTES + slot.body_budget} bytes — forwarding it unedited#{also}"
-      end
+      also = ahead > 0 ? " (releasing #{ahead} stream(s) deferred ahead of it too)" : ""
+      msg = "h2 #{@direction}: held stream #{slot.stream_id} buffered over " \
+            "#{MAX_DEFERRED_BYTES + slot.body_budget} bytes — forwarded UNEDITED#{also}"
+      ::Log.warn { msg }
+      # And on screen: the queue row this operator was deciding about simply vanishes, and a
+      # `::Log.warn` under `gori tui` goes to `~/.gori/gori.log` and nowhere else. See
+      # `Interceptor#note_unheld`.
+      @interceptor.note_unheld(msg)
     end
 
     # --- hold side -----------------------------------------------------------
@@ -1106,17 +1109,20 @@ module Gori::Proxy::H2
     private def warn_unscopable(stream_id : UInt32) : Nil
       return if @warned_scope
       @warned_scope = true
-      ::Log.warn do
-        # Do NOT assert the cause. This message named the live-stream ceiling unconditionally,
-        # and it fired on connections carrying a SINGLE stream — where the real reason was an
-        # undecodable request head, so the assembler never tracked the stream in the first
-        # place. An operator asking "why did my hold not fire / why did $SESSION not bind" was
-        # sent to look at a limit they were nowhere near. Same shape as the #536 note about
-        # this message.
-        "h2 in: stream #{stream_id} has no projected request, so its response has no request " \
-        "target to scope an intercept hold against — not held. Either the request head could " \
-        "not be decoded, or the connection is past #{Assembler::MAX_LIVE_STREAMS} live streams"
-      end
+      # Do NOT assert the cause. This message named the live-stream ceiling unconditionally,
+      # and it fired on connections carrying a SINGLE stream — where the real reason was an
+      # undecodable request head, so the assembler never tracked the stream in the first
+      # place. An operator asking "why did my hold not fire / why did $SESSION not bind" was
+      # sent to look at a limit they were nowhere near. Same shape as the #536 note about
+      # this message.
+      msg = "h2 in: stream #{stream_id} has no projected request, so its response has no request " \
+            "target to scope an intercept hold against — NOT HELD. Either the request head could " \
+            "not be decoded, or the connection is past #{Assembler::MAX_LIVE_STREAMS} live streams"
+      ::Log.warn { msg }
+      # The third site where a gate declines to hold something catch was armed for (the caller
+      # already gates this on `@interceptor.enabled?`), and it belongs on screen for the reason
+      # the other two do — see `Interceptor#note_unheld`.
+      @interceptor.note_unheld(msg)
     end
   end
 end

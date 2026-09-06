@@ -15,6 +15,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("session", help: [
+        {"session", "Manage session slots — named identities a send goes out as (list, show, add, from-flow, edit, rm, baseline)"},
+      ])]
       private def self.cmd_session(args : Array(String)) : Nil
         case sub = args.first?
         when "add"          then cmd_session_add(args[1..])
@@ -461,7 +464,7 @@ module Gori
         mark = slot.baseline? ? "◆" : " "
         body = show_values ? session_slot_verbose(slot) : slot.summary
         rules = slot.rules.empty? ? "" : " · rules #{Env.token_list(slot.rules)}"
-        "#{mark} #{slot.name.ljust(18)} #{body}#{rules}"
+        "#{mark} #{CLI::Output.pad(slot.name, 18)} #{body}#{rules}"
       end
 
       # The same one-liner with the VALUES in it (`--show-values`), so the row a script greps

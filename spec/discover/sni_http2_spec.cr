@@ -9,10 +9,6 @@ require "socket"
 
 private alias D = Gori::Discover
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 # A TCP listener that reads the ClientHello, reports its SNI, and hangs up. The handshake never
 # completes, which is all this needs: the question is what gori put on the wire, not what came
 # back. Same technique as spec/proxy/tls/client_hello_spec.cr, in the other direction.
@@ -54,13 +50,13 @@ end
 describe "Discover — --sni / --http2 parity with the other three engines" do
   it "threads sni and http2 from PlanOptions all the way to the Sender" do
     options = D::PlanOptions.new("https://127.0.0.1:1/", sni: "vhost.local", http2: true)
-    plan = D::Plan.build(options, ungated)
+    plan = D::Plan.build(options, ungated_outbound)
     plan.sender.sni.should eq("vhost.local")
     plan.sender.http2?.should be_true
   end
 
   it "defaults to no override, which is what every existing caller gets" do
-    plan = D::Plan.build(D::PlanOptions.new("https://127.0.0.1:1/"), ungated)
+    plan = D::Plan.build(D::PlanOptions.new("https://127.0.0.1:1/"), ungated_outbound)
     plan.sender.sni.should be_nil
     plan.sender.http2?.should be_false
   end
@@ -68,7 +64,7 @@ describe "Discover — --sni / --http2 parity with the other three engines" do
   it "puts the override on the ClientHello of a real dial" do
     with_hello_watcher do |port, seen|
       options = D::PlanOptions.new("https://127.0.0.1:#{port}/", verify: false, sni: "vhost.local")
-      plan = D::Plan.build(options, ungated)
+      plan = D::Plan.build(options, ungated_outbound)
       # `fetch` is the wire seam every crawl send goes through; driving it directly keeps the
       # example to one dial instead of a whole sweep.
       plan.sender.fetch("https", "127.0.0.1", port, "/")
@@ -79,7 +75,7 @@ describe "Discover — --sni / --http2 parity with the other three engines" do
 
   it "presents the dialed host, not the override, when --sni is absent" do
     with_hello_watcher do |port, seen|
-      plan = D::Plan.build(D::PlanOptions.new("https://127.0.0.1:#{port}/", verify: false), ungated)
+      plan = D::Plan.build(D::PlanOptions.new("https://127.0.0.1:#{port}/", verify: false), ungated_outbound)
       plan.sender.fetch("https", "127.0.0.1", port, "/")
       take_sni(seen).should_not eq("vhost.local")
       plan.sender.close
@@ -94,7 +90,7 @@ describe "Discover — --sni / --http2 parity with the other three engines" do
       config = D::Config.new(keep_alive: true, concurrency: 1)
       options = D::PlanOptions.new("https://127.0.0.1:#{port}/", config: config,
         verify: false, sni: "pooled.local")
-      plan = D::Plan.build(options, ungated)
+      plan = D::Plan.build(options, ungated_outbound)
       plan.sender.fetch("https", "127.0.0.1", port, "/")
       take_sni(seen).should eq("pooled.local")
       plan.sender.close

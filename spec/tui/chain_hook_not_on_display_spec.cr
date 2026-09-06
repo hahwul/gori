@@ -154,8 +154,11 @@ describe "an exec: chain on a display path" do
     # `make_session` rebuilds every persisted sub-tab when a project opens.
     src.any?(&.includes?("Decoder.run(registry, input.text.to_slice, chain, run_hooks: false)"))
       .should be_true
-    # `library_changed` re-derives EVERY open conversation on one ^S/^X.
-    src.any?(&.includes?("Decoder.run(registry, s.input.text.to_slice, s.chain, run_hooks: false)"))
+    # `library_changed` re-derives EVERY open conversation on one ^S/^X — hooks off for all
+    # but the ACTIVE one, which the operator is looking at and whose command a keystroke would
+    # run anyway (withholding it there replaced the decode on screen with "chain held").
+    src.any?(&.includes?("run_hooks = run_active_hooks && i == @idx && !s.result.held?")).should be_true
+    src.any?(&.includes?("Decoder.run(registry, s.input.text.to_slice, s.chain, run_hooks: run_hooks)"))
       .should be_true
   end
 end

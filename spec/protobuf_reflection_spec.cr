@@ -425,7 +425,34 @@ describe Gori::Protobuf::Reflection do
           outcome.ok?.should be_false
           outcome.refused?.should be_false
           outcome.error.not_nil!.should contain("UNIMPLEMENTED")
+          # The sentence and `outcome.service` must name the SAME service. Reporting the
+          # FIRST failure (v1's) beside a `service` field holding the LAST one tried put two
+          # different names on one failure — and MCP hands that field to an agent in
+          # `details.service`.
+          outcome.error.not_nil!.should contain(Reflection::SERVICE_V1ALPHA)
+          outcome.error.not_nil!.should contain("neither")
+          outcome.service.should eq(Reflection::SERVICE_V1ALPHA)
           outcome.schema.should be_nil
+        end
+      ensure
+        origin.close
+      end
+    end
+
+    # A dependency the server never returns leaves a HOLE in the lens: types declared only
+    # there resolve to nil and render schema-less, which reads exactly like "the API does not
+    # declare that". The walk ends four ways and only the ROUND budget used to say anything —
+    # the common ending is "a round produced nothing new", which is precisely this case.
+    it "names an import the server never returned instead of ending quietly" do
+      root = file_descriptor("root.proto", "root", ["gone.proto"], message: "Root")
+      origin = ReflectOrigin.new(services: ["root.Svc"], files: {"root.Svc" => root})
+      begin
+        with_scope do |scope, _store|
+          outcome = Reflection::Client.new(Gori::Outbound.interactive(scope),
+            scheme: "http", host: "127.0.0.1", port: origin.port, verify: false, timeout: 5.seconds).fetch
+          outcome.ok?.should be_true # the files that DID arrive still resolve
+          outcome.notes.any?(&.includes?("gone.proto")).should be_true
+          outcome.notes.any?(&.includes?("render schema-less")).should be_true
         end
       ensure
         origin.close

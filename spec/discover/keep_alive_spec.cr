@@ -26,7 +26,7 @@ private class KeepAliveOrigin
   private def accept_loop : Nil
     while conn = @server.accept?
       @connections += 1
-      spawn { serve(conn) }
+      spawn serve(conn)
     end
   rescue
     # server closed

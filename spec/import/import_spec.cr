@@ -9,19 +9,6 @@ private def har_pair(headers)
     nil, "HTTP/1.1", 200, "OK", Gori::Import::Builder::Headers.new, nil, nil, nil)
 end
 
-private def with_store(&)
-  path = File.tempname("gori-import", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe Gori::Import do
   it "imports flows from a HAR file into History" do
     har = File.tempname("gori", ".har")

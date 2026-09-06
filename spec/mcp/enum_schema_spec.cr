@@ -83,10 +83,6 @@ private def with_globals(&)
   end
 end
 
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-end
-
 private record EnumArg, tool : String, arg : String, values : Array(String),
   required : Hash(String, JSON::Any)
 

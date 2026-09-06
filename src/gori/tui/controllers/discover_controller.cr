@@ -47,16 +47,36 @@ module Gori::Tui
     end
 
     def body_badge : Symbol
-      :body
+      querying? ? :editor : :body
     end
 
     def body_hint(focus : Symbol) : String
       return "start from Sitemap/History (space → \"Discover here\")" if @view.empty?
+      return @view.filter_hint if querying?
       if @view.focus == :runs
-        keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · p pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
+        keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
       else
-        keys("↑/↓ nav · ↵/o request+response · tab runs · {discover.run} run · {discover.stop} stop · p pause · space cmds · esc sub-tabs")
+        keys("↑/↓ nav · ↵/o request+response · {discover.filter} filter · {discover.copy} copy · tab runs · {discover.run} run · {discover.stop} stop · {discover.pause} pause · space cmds · esc sub-tabs")
       end
+    end
+
+    # --- the FINDINGS `/` filter (a text sub-mode the shell claims ahead of the focus ring) ---
+    def querying? : Bool
+      @view.filter_editing?
+    end
+
+    def handle_query_key(ev : Termisu::Event::Key) : Bool
+      @view.handle_filter_key(ev)
+    end
+
+    def set_preedit(text : String) : Bool
+      @view.set_filter_preedit(text)
+    end
+
+    # `/` — narrow the FINDINGS table by status / source / URL. Refused with nothing to filter.
+    def discover_filter : Nil
+      return @host.status("no run selected — start from Sitemap/History (space → \"Discover here\")") unless @view.current
+      @view.filter_start
     end
 
     # --- rendering (frameless seam for TargetController) ---
@@ -85,6 +105,23 @@ module Gori::Tui
       handle_click_content(rect.inset(1, 1), mx, my)
     end
 
+    # A pair on a FINDINGS row opens its flow — what ↵ / `o` (`discover.open-flow`) do, through
+    # the same Host seam, because the hop into the History detail is the Runner's. A RUNS row
+    # declines: ↵ there drills into the findings, which the pair's first press has done by
+    # focusing the card, and there is no request of its own to open. Same `content` rect as
+    # `handle_click_content`, so a pair hit-tests once.
+    def handle_double_click_content(content : Rect, mx : Int32, my : Int32) : Bool
+      return false unless idx = @view.findings_index_at(content, mx, my)
+      @view.focus_pane(:findings)
+      @view.select_finding(idx)
+      @host.discover_open_flow
+      true
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      handle_double_click_content(rect.inset(1, 1), mx, my)
+    end
+
     # --- input ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return handle_empty_key(ev) if @view.empty?
@@ -99,20 +136,18 @@ module Gori::Tui
 
     private def handle_empty_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      return false unless key.escape? || key.up? || key.lower_k?
-      @host.request_focus(:subtabs) # pop to Target's Sitemap|Discover strip (self-downgrades to :menu with no strip)
+      return false unless key.escape? || nav_up?(ev) # `k` only BARE — see TabController#nav_up?
+      @host.request_focus(:subtabs)                  # pop to Target's Sitemap|Discover strip (self-downgrades to :menu with no strip)
       true
     end
 
     # Keys that mean the same thing in either pane.
     private def handle_pane_chord(ev : Termisu::Event::Key) : Bool
-      c = ev.char || ev.key.to_char
       case
       when ev.key.escape? then @host.request_focus(:subtabs)
-      when c == '['       then @view.move_run(-1) # cycling still works from either pane
-      when c == ']'       then @view.move_run(1)
-      when c == 'p'       then discover_toggle_pause
-      else                     return false
+        # `[` / `]` used to cycle runs from either pane; they are the Global tab chords, and the
+        # RUNS list's ↑/↓ (or `space → k/j`) is the way between runs now.
+      else return false # `p` pause is a chord — the keymap's
       end
       true
     end
@@ -148,9 +183,30 @@ module Gori::Tui
       handle_wheel(delta)
     end
 
+    def page_rows : Int32?
+      @view.page_rows
+    end
+
+    # `y`: the selected finding's URL.
+    def copy_row : Nil
+      copy_text(@view.selected_finding.try(&.url) || "")
+    end
+
     def handle_wheel(step : Int32) : Bool
-      @view.focus == :runs ? @view.move_run(step) : @view.move(step)
+      wheel_pane(@view.focus, step)
       true
+    end
+
+    # Pointer-aware: the card under the cursor scrolls, keyboard focus stays put. Same
+    # content inset `handle_click` hit-tests with.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      pane = @view.pane_at(rect.inset(1, 1), mx, my)
+      wheel_pane(pane || @view.focus, step)
+      true
+    end
+
+    private def wheel_pane(pane : Symbol, step : Int32) : Nil
+      pane == :runs ? @view.move_run(step) : @view.move(step)
     end
 
     # --- focus ring ---
@@ -506,8 +562,14 @@ module Gori::Tui
         @persist_owners.each_with_index { |(run, idx), i| run.set_flow_id(idx, ids[i]) }
       end
       clear_persist
-    rescue
-      clear_persist # a store write failure must not wedge the drain
+    rescue ex
+      # A store write failure must not wedge the drain — but the operator has no other signal
+      # that these captures were lost, and the rows keep no bytes, so they can never be opened
+      # later. Say so, on the toast AND in the notification centre (the toast is one keypress
+      # from gone).
+      lost = @persist_buf.size
+      clear_persist
+      @host.status("discover: #{lost} captured exchange#{lost == 1 ? "" : "s"} not saved (store busy: #{ex.message}) — their rows can't be opened", :error)
     end
 
     private def clear_persist : Nil

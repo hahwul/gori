@@ -6,6 +6,7 @@ module Gori
   module MCP
     class Tools
       # Add a scope rule (validates + dedupes, like `gori run project scope add`).
+      @[Tool("add_scope_rule", gated: true, agent_action: true)]
       private def add_scope_rule(h) : Result
         kind = str(h, "kind").try(&.strip.downcase) || "include"
         return err("invalid 'kind' (expected #{Scope::KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
@@ -50,6 +51,7 @@ module Gori
       # Edit an existing rule in place (the TUI's `e` on the scope list). Without this, the only
       # way to fix a typo'd pattern was delete + re-add, which changes the rule's id and — for a
       # moment — leaves the scope gate without it.
+      @[Tool("update_scope_rule", gated: true, agent_action: true)]
       private def update_scope_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -111,6 +113,7 @@ module Gori
         end)
       end
 
+      @[Tool("delete_scope_rule", gated: true, agent_action: true)]
       private def delete_scope_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -132,6 +135,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true; j.field "blocks_all", blocks_all } })
       end
 
+      @[Tool("set_scope_enabled", gated: true, agent_action: true)]
       private def set_scope_enabled(h) : Result
         enabled = optional_bool_arg(h, "enabled")
         return err("missing required 'enabled' (true or false)", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
@@ -146,6 +150,7 @@ module Gori
       # from set_scope_enabled (the display lens): the sandbox BLOCKS every request the
       # scope does not allow — with no include rule it blocks ALL captured traffic
       # (reported as blocks_all).
+      @[Tool("set_sandbox", gated: true, agent_action: true)]
       private def set_sandbox(h) : Result
         enabled = optional_bool_arg(h, "enabled")
         return err("missing required 'enabled' (true or false)", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
@@ -184,8 +189,13 @@ module Gori
         end
 
         tool j, "set_scope_enabled",
-          "Turn the scope lens/gate on or off (the rules themselves are untouched)." do |s|
-          s.field "enabled", boolprop("true = filter to in-scope; false = show/allow everything"), required: true
+          "Turn the CAPTURE-side scope lens on or off (the rules themselves are untouched) — " \
+          "the Target/Sitemap \u21e7S filter. It does NOT govern whether this server may send: " \
+          "active tools (send_request, send_websocket, fuzz_*, mine_*, probe active) are gated " \
+          "on the RULES being present, whatever this flag says, so turning it off does not " \
+          "lift a SCOPE_BLOCKED refusal and turning it on does not cause one. To send at a " \
+          "target the rules do not cover, add_scope_rule or pass allow_unscoped:true." do |s|
+          s.field "enabled", boolprop("true = filter captured views to in-scope; false = show everything. Does not change what may be SENT"), required: true
         end
 
         tool j, "set_sandbox",

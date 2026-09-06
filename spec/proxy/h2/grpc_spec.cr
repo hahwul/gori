@@ -78,6 +78,15 @@ describe Gori::Proxy::H2::Grpc do
     h["grpc-message"].should eq("not found")
   end
 
+  # The doc has always promised "CR, LF, or CRLF terminated"; `each_line` split on LF alone,
+  # so a bare-CR producer folded the whole frame into ONE header whose value carried every
+  # line after the first — `grpc-status` then read as `0\rgrpc-message: …`.
+  it "parses a trailer payload terminated with bare CRs" do
+    h = Grpc.trailer_headers("grpc-status: 5\rgrpc-message: not found\r".to_slice)
+    h["grpc-status"].should eq("5")
+    h["grpc-message"].should eq("not found")
+  end
+
   it "parses a trailer payload with an invalid UTF-8 byte instead of raising" do
     payload = Bytes[0x67, 0x72, 0x70, 0x63, 0x2d, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67,
       0x65, 0x3a, 0x20, 0xff, 0x0d, 0x0a] # "grpc-message: \xFF\r\n"
@@ -239,6 +248,40 @@ describe Gori::Proxy::H2::Grpc do
       body = framed("hello")
       Grpc.framed_bytes("application/grpc+proto", body).should eq(body)
       Grpc.scan_body("application/grpc+proto", body)[0].size.should eq(1)
+    end
+  end
+
+  # grpc-web has no HTTP trailers: the call's outcome is a FRAME inside the body, and every
+  # surface that only read the response head reported nothing for it — while the HTTP status
+  # is 200 for a denial as much as for a grant.
+  describe ".trailer_status" do
+    it "reads grpc-status / grpc-message out of a binary grpc-web body" do
+      body = framed("hi") + trailer_frame("grpc-status: 7\r\ngrpc-message: denied\r\n")
+      Grpc.trailer_status("application/grpc-web+proto", body).should eq({7, "denied"})
+    end
+
+    it "reads it through grpc-web-text's base64" do
+      wire = (Base64.strict_encode(framed("hi")) +
+              Base64.strict_encode(trailer_frame("grpc-status: 5\r\n"))).to_slice
+      Grpc.trailer_status("application/grpc-web-text", wire).should eq({5, nil})
+    end
+
+    it "takes the LAST trailer frame, so a promoted 0 cannot hide the code the call ended on" do
+      body = trailer_frame("grpc-status: 0\r\n") + trailer_frame("grpc-status: 7\r\n")
+      Grpc.trailer_status("application/grpc-web+proto", body).should eq({7, nil})
+    end
+
+    it "answers nil for a body with no trailer frame, and for one that is not gRPC" do
+      Grpc.trailer_status("application/grpc-web+proto", framed("hi")).should eq({nil, nil})
+      Grpc.trailer_status("application/octet-stream",
+        framed("hi") + trailer_frame("grpc-status: 7\r\n")).should eq({nil, nil})
+      Grpc.trailer_status("application/grpc-web+proto", nil).should eq({nil, nil})
+    end
+
+    # A frame carrying only a message is not an outcome — the pair travels together.
+    it "ignores a trailer frame with no grpc-status" do
+      Grpc.trailer_status("application/grpc-web+proto",
+        trailer_frame("grpc-message: something\r\n")).should eq({nil, nil})
     end
   end
 

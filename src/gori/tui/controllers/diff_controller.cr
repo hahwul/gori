@@ -69,9 +69,36 @@ module Gori::Tui
       true
     end
 
+    # A pair on a row sends its pair of captures to the Comparer — what ↵ / `o`
+    # (`diff.to-comparer`) do, through the Host because the tab switch is the Runner's. False
+    # off every row, so the shell delivers the second press as an ordinary click.
+    def handle_double_click_content(content : Rect, mx : Int32, my : Int32) : Bool
+      return false unless idx = @diff.row_at(content, mx, my)
+      @diff.select_index(idx)
+      @host.diff_to_comparer
+      true
+    end
+
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      handle_double_click_content(BodyChrome.frame_inner(rect), mx, my)
+    end
+
     def body_scroll(delta : Int32) : Bool
       @diff.move(delta)
       true
+    end
+
+    def page_rows : Int32?
+      @diff.list_page_rows
+    end
+
+    # `y`: the selected row as one line — endpoint, verdict, and what moved.
+    def copy_row : Nil
+      row = @diff.selected_row
+      return copy_text("") unless row
+      parts = ["#{row.key}", row.verdict.label]
+      parts << row.changes.join(", ") unless row.changes.empty?
+      copy_text(parts.join(" · "))
     end
 
     def handle_wheel(step : Int32) : Bool
@@ -90,7 +117,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       return "" unless focus == :body
       return keys("{diff.pick-a} pick the baseline project") unless @diff.ready?
-      base = keys("{diff.pick-a}/{diff.pick-b} pick · {diff.swap} swap · {diff.run} run · {diff.lens} lens")
+      base = keys("{diff.pick-a}/{diff.pick-b} pick · {diff.swap} swap · {diff.run} run · {diff.lens} lens · {diff.copy} copy")
       # The three ROW verbs are gated on a row under the cursor (`diff_rows_shown?`), and a
       # lens can empty the list. Naming a key that would do nothing is the hint lying about
       # what the tab can do — which it already did for `↵` before these two joined it.

@@ -8,6 +8,7 @@ module Gori
     class Tools
       # --- discover (spider + directory brute-force) --------------------------
 
+      @[Tool("discover_start", gated: true, agent_action: true, env_refresh: true)]
       private def discover_start(h) : Result
         # ONE Outbound for the whole call: the builder derives the crawl-time ScopePolicy
         # from it (see Discover::Plan.resolve_policy) and the Layer-1 check below reads the
@@ -282,6 +283,7 @@ module Gori
         djob.persist_buf.clear # a store failure must not wedge the crawl or grow forever
       end
 
+      @[Tool("discover_status", gated: true)]
       private def discover_status(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)
@@ -316,11 +318,14 @@ module Gori
         end)
       end
 
+      @[Tool("discover_results", gated: true)]
       private def discover_results(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        limit = clamp(optional_int_arg(h, "limit"), 100, 1000)
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, 100, 1000)
         page = djob.results[offset, limit]? || [] of Discover::Finding
         Result.new(JSON.build do |j|
           j.object do
@@ -328,6 +333,8 @@ module Gori
             j.field "returned", page.size
             j.field "offset", offset
             j.field "total_available", djob.results.size
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "job_complete", djob.status != :running
             # `has_more` is about this PAGE. A budget-capped run has no more stored findings
             # and still is not an exhaustive answer — that is what incomplete_reason says.
@@ -352,11 +359,12 @@ module Gori
         end
       end
 
+      @[Tool("discover_stop", gated: true, agent_action: true)]
       private def discover_stop(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)
         djob.stop
-        Result.new(JSON.build { |j| j.object { j.field "job_id", djob.id; j.field "status", "stopping" } })
+        stop_and_report(djob)
       end
 
       private def lookup_discover_job(h) : DiscoverJob | Result

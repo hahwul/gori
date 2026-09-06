@@ -206,12 +206,11 @@ module Gori::Tui
     # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
     # (`target_subtab_indices` — the one target rule).
     def jwt_duplicate : Nil
-      targets = target_subtab_indices
       msg = nil.as(String?)
-      if targets.size > 1
-        msg = duplicate_marked_subtabs(targets, "session") { |i| duplicate_at(i) }
+      if refs = batch_subtab_refs
+        msg = duplicate_marked_subtabs(refs, "session") { |i| duplicate_at(i) }
         unless msg
-          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
           return
         end
       else
@@ -239,18 +238,17 @@ module Gori::Tui
     # it has always been; a plural one asks, because it discards more than the operator can
     # see at the moment they press the key.
     def jwt_close : Nil
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE JWT SESSIONS", "Close #{marked_subtab_phrase(targets.size)}?\nEach token and its edits are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE JWT SESSIONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach token and its edits are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
       close_at(@idx)
       @host.status(@sessions.size == 1 ? "session closed" : "session closed (#{@sessions.size} open)")
     end
 
-    private def close_marked_sessions(idxs : Array(Int32)) : Nil
-      msg = close_marked_subtabs(idxs)
+    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
+      msg = close_marked_subtabs(refs)
       @host.status(msg)
       @host.resolve_subtab_focus
     end
@@ -425,9 +423,9 @@ module Gori::Tui
       selecting = ev.shift?
       case
       when key.enter?, c == 'i' then s.input_mode = InputMode::Insert
-      when key.up?
+      when nav_up?(ev)
         s.input.at_top? ? cross_pane(s, -1) : s.input_read.move(s.input, -1, 0, selecting: selecting)
-      when key.down?
+      when nav_down?(ev)
         s.input.at_bottom? ? cross_pane(s, 1) : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
       when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
@@ -578,6 +576,11 @@ module Gori::Tui
       true
     end
 
+    def insert_key_refusal : String?
+      return nil unless {:decoded, :attacks, :output}.includes?(cur.pane)
+      "this pane is read-only — i edits the INPUT (↹ up); intercept toggles from the tab bar"
+    end
+
     def focus_first : Nil
       enter_pane(cur, panes(cur).first)
     end
@@ -711,13 +714,46 @@ module Gori::Tui
     # scrolling in both modes, and the wheel is a reading gesture in either.
     def handle_wheel(step : Int32) : Bool
       s = cur
-      case s.pane
+      wheel_pane(s, s.pane, step)
+      true
+    end
+
+    # Pointer-aware: the card under the cursor scrolls, keyboard focus stays put. The same
+    # lens layouts `handle_click` hit-tests with.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      s = cur
+      body = body_rect_below_filter(rect)
+      pane =
+        if s.mode == :decode
+          input_c, dec_c, atk_c = s.view.decode_layout(body)
+          case
+          when input_c.contains?(mx, my) then :input
+          when dec_c.contains?(mx, my)   then :decoded
+          when atk_c.contains?(mx, my)   then :attacks
+          else                                s.pane
+          end
+        else
+          hdr_c, pay_c, _, out_c = s.view.encode_layout(body)
+          case
+          when hdr_c.contains?(mx, my) then :header
+          when pay_c.contains?(mx, my) then :payload
+          when out_c.contains?(mx, my) then :output
+          else                              s.pane
+          end
+        end
+      wheel_pane(s, pane, step)
+      true
+    end
+
+    private def wheel_pane(s : JwtSession, pane : Symbol, step : Int32) : Nil
+      case pane
       when :decoded then s.view.scroll_decoded(step)
       when :output  then s.view.scroll_output(step)
       when :attacks then s.view.attacks_move(step)
       when :input   then s.input.scroll_view(step)
+      when :header  then s.header.scroll_view(step)
+      when :payload then s.payload.scroll_view(step)
       end
-      true
     end
 
     def set_preedit(text : String) : Bool
@@ -727,7 +763,6 @@ module Gori::Tui
       when :header  then s.header.set_preedit(text)
       when :payload then s.payload.set_preedit(text)
       when :secret  then s.secret_pre = text
-      else               nil
       end
       true
     end
@@ -888,10 +923,20 @@ module Gori::Tui
 
     # The INPUT pane's two selection models, one per mode — see RepeaterView#pane_selection?.
     # This pair changes together with `jwt_selection_text`'s :input arm.
+    #
+    # HEADER and PAYLOAD too: they are always-typing `TextArea`s whose band `jwt_copy_text`
+    # already copies, and a drag over them paints one (`editor_at` hands the drag to
+    # `s.header`/`s.payload`). Answering false for them made Drag release = `select + copy`
+    # silently do nothing on the two panes where `^Y` is the ONLY copy — no clipboard write,
+    # no toast — while the keyboard path copied the same band fine.
     def jwt_selection_active? : Bool
       s = cur
-      return false unless s.pane == :input
-      s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
+      case s.pane
+      when :input   then s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
+      when :header  then s.header.selection?
+      when :payload then s.payload.selection?
+      else               false
+      end
     end
 
     def jwt_selection_text : String

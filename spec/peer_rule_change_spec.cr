@@ -13,19 +13,6 @@ require "file_utils"
 # `spec/tui/rewriter_peer_reload_anchor_spec.cr` uses: it lands in the row without going through
 # the object under test, which is exactly what another process does.
 
-private def with_store(&)
-  path = File.tempname("gori-peer-change", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # The global rule library is process-wide (Settings) and a file as much as it is memory — see the
 # long note in `spec/rules_spec.cr`. Same isolation here.
 private def with_globals(&)

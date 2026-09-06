@@ -127,6 +127,18 @@ module Gori
       property retries : Int32
       property retry_pause : Time::Span
       property max_requests : Int64? # hard cap on real sends (Fuzz::CappedBackend)
+      # A hard ceiling a SURFACE imposes on wire requests, on top of (never instead of) the
+      # operator's own `max_requests` budget. MCP is the only surface with one: an agent that
+      # names no budget still must not be able to aim an unbounded collection at a target.
+      #
+      # It is deliberately NOT `max_requests`, and that distinction is the whole point.
+      # `max_sends` below reads an explicit `max_requests` as the run's DISPATCH budget — so
+      # that an operator who raises the budget also lets a lossy extractor keep trying — and
+      # MCP was handing the engine its 100,000-request ceiling THROUGH that field, which
+      # replaced the goal-derived runaway guard with it: a `cookie` name matching nothing
+      # aimed 100,000 requests at the target for a `count: 500` collection, where the same
+      # descriptor under `gori run sequence` stops at 1,000.
+      property request_ceiling : Int64? = nil
       property manual_tokens : Array(String)
       property notify : NotifyMode
       # Reuse ONE connection across the run's samples (see `Plan.build`). On by default, and
@@ -153,12 +165,32 @@ module Gori
 
       # A safety ceiling on real sends: an explicit cap, else twice the goal so a
       # broken extractor terminates instead of spinning forever counting only hits.
+      #
+      # NEVER BELOW THE GOAL, and `clamp(goal, GOAL_CEILING)` was not that. `clamp` answers its
+      # MAX first, so a goal past the ceiling — reachable from `gori run sequence --count`,
+      # whose only rule is "a positive integer" — silently dropped the floor and handed the
+      # dispatcher a budget it could not reach the goal with: `--count 60000` stopped at 50,000
+      # dispatches and reported `done · 49xxx collected · 50000 sent`, a shortfall with nothing
+      # anywhere naming a ceiling. A budget under the goal is not a ceiling, it is a truncation
+      # nobody asked for. The runaway guard the ceiling exists for still holds either way — the
+      # run terminates at `goal` dispatches rather than spinning on a descriptor that never
+      # matches — and the other two surfaces cap the goal itself (MCP at SEQUENCE_MAX_GOAL, the
+      # TUI at its cycler's largest choice) well below this.
       def max_sends : Int64
         if (c = @max_requests) && c > 0
           c
         else
-          (@goal.to_i64 * 2).clamp(@goal.to_i64, GOAL_CEILING.to_i64)
+          { {@goal.to_i64 * 2, GOAL_CEILING.to_i64}.min, @goal.to_i64 }.max
         end
+      end
+
+      # The cap `Fuzz::CappedBackend` enforces: the operator's own budget and any
+      # surface-imposed ceiling, whichever binds first. nil when neither is set.
+      def wire_cap : Int64?
+        budget = @max_requests.try { |c| c if c > 0 }
+        ceiling = @request_ceiling.try { |c| c if c > 0 }
+        return {budget, ceiling}.min if budget && ceiling
+        budget || ceiling
       end
     end
   end

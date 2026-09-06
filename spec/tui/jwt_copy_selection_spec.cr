@@ -272,6 +272,22 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
 
         s.header.selection_text.should eq(%(  "alg": "HS256"))
         ctl.jwt_copy_text.should eq(%(  "alg": "HS256"))
+        # …and SAYS so: `read_selection_active?` is what a drag's release consults before it
+        # copies, and this pane answered false for a band `jwt_copy_text` was about to take.
+        ctl.jwt_selection_active?.should be_true
+      end
+    end
+
+    it "reports no band on HEADER / PAYLOAD until one is grown" do
+      with_jwt_copy_controller do |ctl|
+        ctl.jwt_from_text(TOKEN)
+        ctl.load_decoded
+        s = ctl.@sessions[ctl.@idx]
+        ctl.jwt_selection_active?.should be_false
+        s.pane = :payload
+        ctl.jwt_selection_active?.should be_false
+        3.times { ctl.handle_body_key(key(Termisu::Input::Key::Right, :shift)) }
+        ctl.jwt_selection_active?.should be_true
       end
     end
 

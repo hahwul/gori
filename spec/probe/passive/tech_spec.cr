@@ -2,19 +2,6 @@ require "../../spec_helper"
 
 # --- file-local harness (mirrors spec/probe_spec.cr's private with_store/capture_flow) ---
 
-private def with_store(&)
-  path = File.tempname("gori-tech-test", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture_flow(store, *, status = 200, content_type : String? = "text/html",
                          resp_headers = "", body : String = "OK") : Gori::Store::FlowDetail
   head = "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n"

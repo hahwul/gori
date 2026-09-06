@@ -98,6 +98,8 @@ module Gori::Tui
         move(-1)
       elsif k.down?
         move(1)
+      elsif page_key(ev)
+        # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
       elsif ev.ctrl? || ev.alt?
         # A chord is not a mnemonic. Claimed and dropped rather than fallen through: this
         # overlay returns :stay for everything, so the chord was consumed either way — the
@@ -127,6 +129,10 @@ module Gori::Tui
       :stay
     end
 
+    def entry_count : Int32
+      @rows.size
+    end
+
     def move(d : Int32) : Nil
       @selected = (@selected + d).clamp(0, {@rows.size - 1, 0}.max)
     end
@@ -150,7 +156,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "listener list needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "listener list needs a larger window")
         return
       end
       Frame.card(screen, box, "LISTENERS", border: Theme.border_focus)
@@ -158,6 +164,7 @@ module Gori::Tui
       Frame.border_meta(screen, box, "LISTENERS", meta, bg: Theme.panel)
 
       cap = list_capacity(box)
+      @list_last_h = cap
       return if cap <= 0
       start = list_window(cap)
       if @rows.empty?

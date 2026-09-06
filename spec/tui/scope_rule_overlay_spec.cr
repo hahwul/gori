@@ -69,6 +69,55 @@ describe Gori::Tui::ScopeRuleOverlay do
     ov.row_at(box, box.x + 3, box.y + 2).should eq(0) # kind row
     ov.row_at(box, box.x + 3, box.y + 5).should eq(3) # save row
   end
+
+  # Listing a field in `text_fields` is the whole opt-in for caret-on-press, drag-select and
+  # double-click-word (`Overlay#text_fields`), and a `TextField` can only answer a pointer
+  # against the geometry its OWN `render` recorded. This form listed the field and then painted
+  # it by hand, so every one of those gestures was a silent no-op: `handle_click` called
+  # `click_text_field` per press and it could never hit, and `supports_drag?` reported true for
+  # a field no drag could reach.
+  it "places the caret where the pointer landed inside the pattern field" do
+    ov = ScopeRuleOverlay.editing(1_i64, "include", "host", "acme.test")
+    screen = Screen.new(MemoryBackend.new(80, 24))
+    area = Rect.new(0, 0, 80, 24)
+    box = ov.overlay_box(area).not_nil!
+    ov.set_selected(2) # the pattern row
+    ov.render(screen, area)
+
+    field = ov.text_fields.first
+    field.caret.should eq("acme.test".size) # seeded at the end
+    # The value starts after "pattern:" plus one space — the same geometry `render` drew.
+    vx = box.x + 3 + 9
+    py = box.y + 2 + 2
+    ov.handle_click(area, vx + 4, py).should eq(:stay)
+    field.caret.should eq(4)
+
+    # …and the drag/double-click halves of the same opt-in reach it too.
+    ov.handle_drag(area, vx + 1, py)
+    field.selection?.should be_true
+    ov.handle_double_click(area, vx + 2, py).should eq(:stay)
+  end
+
+  # The press that FOCUSES the row lands on the frame drawn while the row was NOT selected,
+  # and `TextField#render` draws an unfocused value from character 0 with no horizontal
+  # window. Rebasing that click by `window_start` moved the caret by the whole scroll offset:
+  # a 109-character pattern in a 58-column field, clicked on its third visible column, put the
+  # caret at 54. `TextField` records WHICH of its two drawings the geometry came from.
+  it "maps a click on the UNFOCUSED (unscrolled) pattern field to the column drawn there" do
+    pattern = "^https://acme\\.test/(admin|internal|staging|preview)/.*[?&]debug=1&trace=on$"
+    ov = ScopeRuleOverlay.editing(1_i64, "include", "regex", pattern)
+    screen = Screen.new(MemoryBackend.new(80, 24))
+    area = Rect.new(0, 0, 80, 24)
+    box = ov.overlay_box(area).not_nil!
+    ov.render(screen, area) # kind row is selected, so the pattern row draws unfocused
+
+    field = ov.text_fields.first
+    field.caret.should eq(pattern.size) # parked at the end, so a window WOULD scroll
+    vx = box.x + 3 + 9
+    py = box.y + 2 + 2
+    ov.handle_click(area, vx + 2, py).should eq(:stay)
+    field.caret.should eq(2) # the third drawn column, which is character 2 — not 2 + offset
+  end
 end
 
 describe "ProjectView#commit_scope_rule" do

@@ -9,19 +9,6 @@ require "./spec_helper"
 
 private alias Slot = Gori::SessionSlot
 
-private def with_store(&)
-  path = File.tempname("gori-binding-slots", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_layer(bindings : Gori::Bindings?, &)
   previous = Gori::Env.layer
   Gori::Env.layer = bindings

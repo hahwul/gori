@@ -25,6 +25,8 @@ require "../notes"
 require "../probe"
 require "./serialize"
 require "./request_builder"
+require "./tool"
+require "./tool_filter"
 require "./tools/authorize"
 require "./tools/compare"
 require "./tools/diff"
@@ -100,78 +102,61 @@ module Gori
 
       EMPTY_HASH = {} of String => JSON::Any
 
-      # #124 — MCP tools whose SUCCESSFUL (or failed) execution is a real mutation or
-      # outbound send worth recording in the event feed as a visible "agent action", so the
-      # human can see (via list_events, and later the notification ring) what the AI did.
-      # Deliberately EXCLUDES gated READ tools (fuzz_status/results, mine_status/results,
-      # list_jobs, get_job, preview_rule) and project-management tools (switch_project reopens
-      # @store, so a post-hoc append would land in the wrong DB) — only in-project side effects.
-      AGENT_ACTION_TOOLS = Set{
-        "send_request", "send_websocket",
-        # The intercept write verbs act on LIVE traffic the human is holding — forwarding,
-        # dropping, or rewriting bytes mid-flight is the single most consequential thing an
-        # agent can do here, so it belongs in the feed more than any store mutation does.
-        # toggle/set_filter/set_direction change what the proxy HOLDS next, which silently
-        # reshapes the human's queue; they are recorded for the same reason.
-        "intercept_forward", "intercept_drop", "intercept_forward_edit",
-        "intercept_toggle", "intercept_set_filter", "intercept_set_direction",
-        "fuzz_start", "fuzz_stop", "delete_fuzz_run", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop",
-        "authorize_start", "authorize_stop", "stop_job",
-        # An outbound request to a target, and a project mutation (the descriptor cache) —
-        # both halves of what AGENT_ACTION_TOOLS records. `grpc_forget` mutates the same row.
-        "grpc_reflect", "grpc_forget",
-        "create_issue", "update_issue",
-        "probe_dismiss", "probe_promote", "probe_delete",
-        "set_probe_rule_enabled", "create_probe_rule", "update_probe_rule", "delete_probe_rule", "set_probe_mode",
-        "delete_issue", "update_scope_rule", "set_sitemap_tag",
-        "delete_flow", "clear_history",
-        "add_link", "remove_link",
-        "create_oast_provider", "update_oast_provider", "set_oast_provider_enabled", "delete_oast_provider",
-        "minimize_repeater",
-        "create_rule", "create_rule_from_preset", "update_rule", "delete_rule", "set_rule_enabled",
-        "create_color_rule", "update_color_rule", "delete_color_rule", "set_color_rule_enabled", "move_color_rule",
-        "create_view", "update_view", "delete_view",
-        "create_custom_color", "update_custom_color", "delete_custom_color",
-        "create_extract_rule", "update_extract_rule", "delete_extract_rule", "set_extract_rule_enabled",
-        "create_note", "update_note", "delete_note",
-        "create_repeater", "update_repeater", "delete_repeater",
-        # The bulk siblings and the reorder. `move_repeater` is here for the same reason
-        # `move_color_rule` is: order is what the operator navigates by, so an agent that
-        # rearranges the strip has changed something the human will notice and should be able
-        # to trace.
-        "move_repeater", "create_repeaters", "delete_repeaters", "update_repeaters",
-        "oast_start", "oast_stop", "oast_resume", "oast_release",
-        "add_scope_rule", "delete_scope_rule", "set_scope_enabled", "set_sandbox",
-        "set_env_var", "delete_env_var",
-        "create_session_slot", "update_session_slot", "delete_session_slot", "set_active_session_slot",
-        "add_host_override", "update_host_override", "delete_host_override",
-        "import_flows",
-      }
-
-      # R2-3 — tools that READ or WRITE the per-project `$KEY` env vars. Env vars live in a
-      # process-global (Settings.project_env_vars) loaded once at bind time (initialize /
-      # switch_project's Env.load_project), so a mid-session CLI change (`gori run project
-      # env set KEY val`) is otherwise invisible to an already-running MCP server. `call`
-      # reloads from the store before dispatching any of these.
+      # --- Tool registry --------------------------------------------------------
       #
-      # Three populations, all of which need the fresh value:
-      #   - active/outbound tools that EXPAND or MASK `$KEY` at call time;
-      #   - `list_env`, which would otherwise REPORT a stale set as fact;
-      #   - `set_env_var`/`delete_env_var`, which read-modify-WRITE the whole array
-      #     (Env.save_project persists it wholesale) — on a stale copy that silently
-      #     DELETES every var another process added since we bound.
-      # Deliberately EXCLUDES other read tools and the async *_status / *_results /
-      # *_stop pollers (a running job already captured its fully expanded template at
-      # build time) — and `authorize_start`, which is the one active *_start that never
-      # expands a `$KEY` at all: an authorize run sends the CAPTURED bytes under an
-      # operator-authored header overlay, so its backend marks every buffer verbatim
-      # (`Fuzz::Backend.all_verbatim`, see `Authorize::Engine#send_one`). A refresh there
-      # would re-read the store for a value nothing on that path reads.
-      ENV_REFRESH_TOOLS = Set{
-        "send_request", "send_websocket",
-        "fuzz_start", "mine_start", "sequence_start", "discover_start",
-        "list_env", "set_env_var", "delete_env_var",
-      }
+      # Generated from the `@[Tool]` annotations (mcp/tool.cr) on the handlers themselves,
+      # once every `tools/*.cr` reopen has been parsed. Name → handler dispatch and the three
+      # flag sets all derive from the same declarations, so a tool is declared once, next to
+      # its body, and adding one touches only its own domain file. The action/write split
+      # that used to be two hand-kept `case` ladders here is the `gated:` flag.
+      macro finished
+        {% tools = @type.methods.select(&.annotation(Tool)) %}
+        {% for m in tools %}
+          {% anns = m.annotations(Tool) %}
+          {% if anns.size != 1 %}
+            {% raise "#{m.name}: a handler carries exactly one @[Tool] (found #{anns.size}); a tool has one name" %}
+          {% end %}
+          {% ann = anns[0] %}
+          {% if ann.args.size != 1 || !ann.args[0].is_a?(StringLiteral) %}
+            {% raise "#{m.name}: @[Tool] takes the tool name as its one positional argument" %}
+          {% end %}
+          {% for key in ann.named_args.keys %}
+            {% unless %w[gated agent_action env_refresh unbound].includes?(key.stringify) %}
+              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound" %}
+            {% end %}
+          {% end %}
+        {% end %}
+
+        # Dispatch by tool name; nil when `name` is not a tool at all. A handler taking an
+        # argument receives the call's argument hash, a zero-argument one is called bare.
+        # `gated:` wraps the call in `gated { }` (refused under --read-only).
+        private def dispatch_tool(name : String, h) : Result?
+          case name
+          {% for m in tools %}
+            {% ann = m.annotation(Tool) %}
+            {% invoke = m.args.empty? ? m.name : "#{m.name}(h)".id %}
+            when {{ ann[0] }} then {% if ann[:gated] %}gated { {{ invoke }} }{% else %}{{ invoke }}{% end %}
+          {% end %}
+          end
+        end
+
+        # Every tool name the dispatcher answers to, in declaration (require) order.
+        TOOL_NAMES = {{ tools.map { |m| m.annotation(Tool)[0] } }}
+
+        # Tools refused under `gori mcp --read-only` (`gated: true`).
+        GATED_TOOLS = Set(String){ {{ tools.select { |m| m.annotation(Tool)[:gated] }.map { |m| m.annotation(Tool)[0] }.splat }} }
+
+        # Tools whose call is recorded in the event feed as an agent action (#124);
+        # `agent_action: true`, reasoning in mcp/tool.cr.
+        AGENT_ACTION_TOOLS = Set(String){ {{ tools.select { |m| m.annotation(Tool)[:agent_action] }.map { |m| m.annotation(Tool)[0] }.splat }} }
+
+        # Tools that re-read the project env vars before running (R2-3); `env_refresh: true`,
+        # reasoning in mcp/tool.cr.
+        ENV_REFRESH_TOOLS = Set(String){ {{ tools.select { |m| m.annotation(Tool)[:env_refresh] }.map { |m| m.annotation(Tool)[0] }.splat }} }
+
+        # Tools that work with no project store open; `unbound: true`.
+        UNBOUND_SAFE = Set(String){ {{ tools.select { |m| m.annotation(Tool)[:unbound] }.map { |m| m.annotation(Tool)[0] }.splat }} }
+      end
 
       # A live OAST listening session held server-side across tool calls (oast_start →
       # oast_poll/oast_payload → oast_stop). Ephemeral to this MCP process.
@@ -280,7 +265,7 @@ module Gori
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil,
-                     @bind_error : String? = nil)
+                     @bind_error : String? = nil, @tool_filter : ToolFilter? = nil)
         # The binding table (#501) is built ONCE per bound project and kept, not rebuilt per
         # call: an MCP server is long-lived and IS an extraction source — `send_request` goes
         # through `Repeater::Sender`, so a `$SESSION` bound by a login here has to still be
@@ -464,21 +449,6 @@ module Gori
       # `Oast::ProviderKind.parse?`.
       OAST_KINDS = Oast::ProviderKind.values.map(&.label)
 
-      # Tools that work with no project store open.
-      UNBOUND_SAFE = Set{
-        "list_projects", "create_project", "switch_project", "delete_project",
-        "project_info",
-        "decode", "jwt_decode", "jwt_encode", "jwt_attacks",
-        "cookie_decode", "cookie_verify", "cookie_crack", "cookie_forge",
-        "sequence_analyze", "ql_reference", "ql_explain",
-        # Both sides can be NAMED, and then the diff needs no binding at all — an agent
-        # comparing two past engagements should not have to bind one of them first. With
-        # `to` omitted it still refuses here, from `resolve_diff_target`, with the same
-        # NO_PROJECT sentence: the default side IS the bound project.
-        "diff_projects",
-        "oast_presets", "oast_start", "oast_poll", "oast_payload", "oast_stop",
-      }
-
       # Unbound because the START-UP bind FAILED reads differently from unbound by design:
       # naming the failure here is the only place an agent (which never sees our stderr)
       # can learn that its configured project is broken rather than merely unselected —
@@ -525,6 +495,8 @@ module Gori
         # before checking every candidate is not read as an exhaustive "0 matches".
         property status : Symbol = :running
         property sent = 0_i64
+        # Requests on the wire (`Fuzz::Progress#requests`): the `max_requests` unit.
+        property requests = 0_i64
         property matched = 0_i64
         property errors = 0_i64
         # Refused before the socket — see `Fuzz::Backend#blocked`. Tracked separately from
@@ -818,6 +790,17 @@ module Gori
         h.keys.reject { |k| allowed.includes?(k) || k.starts_with?('_') }
       end
 
+      # The refusal for a real tool this server was started without, or nil when `name` is
+      # either advertised or not a tool at all (`dispatch_tool` answers the latter).
+      private def filtered_out(name : String) : Result?
+        f = @tool_filter
+        return nil unless f
+        return nil if f.allows?(name) || !TOOL_NAMES.includes?(name)
+        err("tool '#{name}' is not served by this gori MCP server: it was started with " \
+            "--tools=#{f.spec.inspect}, which advertises #{f.size} of #{TOOL_NAMES.size} tools. " \
+            "Everything available is in tools/list.", "UNKNOWN_TOOL")
+      end
+
       # tool name → declared property names, harvested from `list` itself so the validator
       # cannot drift from the advertised schema (a hand-maintained second list would).
       # Built once per process, on the first call that needs it.
@@ -891,13 +874,19 @@ module Gori
         # dispatch; runs inside this method's rescue, so a store read error becomes an
         # INTERNAL result rather than crashing the loop.
         refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
+        # A tool the filter hid must be REFUSED, not quietly answered: `declared_args` is
+        # harvested from `list`, so a hidden tool has no declared arg set, `unknown_args`
+        # returns nil, and dispatch would run it with every argument unchecked — a tool
+        # absent from tools/list but fully live underneath.
+        if hidden = filtered_out(name)
+          return hidden
+        end
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
                      "Accepted: #{declared_args[name].to_a.sort.join(", ")}",
             "INVALID_ARGUMENT", field: bad.first)
         end
-        result = read_tool(name, h) || action_tool(name, h) ||
-                 err("unknown tool: #{name}", "UNKNOWN_TOOL")
+        result = dispatch_tool(name, h) || err("unknown tool: #{name}", "UNKNOWN_TOOL")
         result = classify(result)
         log_agent_action(name, result) if @allow_actions && agent_action?(name, h)
         result
@@ -954,23 +943,75 @@ module Gori
 
       # Read-only tools (always exposed). nil when `name` isn't one of them.
       # --- OAST (out-of-band) tools ------------------------------------------
+      @[Tool("oast_presets", unbound: true)]
       private def oast_presets_tool : Result
         presets = Oast::Presets.all.map { |p| {type: p.kind.label, name: p.name, host: p.host} }
         Result.new(presets.to_json)
       end
 
+      # The saved provider `provider_id` names, nil when the caller did not name one, or the
+      # refusal. A DISABLED provider is refused rather than used: the operator turned it off,
+      # and an agent quietly registering against it would put callbacks on a server they
+      # believed was out of the engagement.
+      private def saved_oast_provider(h) : (Oast::ProviderConfig | Result)?
+        key = str(h, "provider_id").try(&.strip).presence
+        return nil unless key
+        if str(h, "server").try(&.strip).presence || str(h, "token").try(&.strip).presence
+          return err("pass either 'provider_id' (a saved provider supplies host and token) " \
+                     "or an ad-hoc 'server'/'token' — not both",
+            "INVALID_ARGUMENT", field: "provider_id")
+        end
+        if unbound?
+          return err("'provider_id' names a SAVED provider, which needs a bound project — " \
+                     "switch_project first, or pass provider/server/token inline",
+            "NO_PROJECT", field: "provider_id")
+        end
+        configs = Oast.provider_configs(store)
+        found = configs.find { |c| c.key == key }
+        unless found
+          known = configs.map { |c| "#{c.key} (#{c.name})" }
+          return not_found("no saved OAST provider #{key.inspect} — " \
+                           "#{known.empty? ? "none are configured; see create_oast_provider" : "known: #{known.join(", ")}"}")
+        end
+        unless found.enabled
+          return err("saved OAST provider #{key.inspect} (#{found.name}) is DISABLED — " \
+                     "enable it with set_oast_provider_enabled, or pass server/token inline",
+            "INVALID_ARGUMENT", field: "provider_id")
+        end
+        found
+      end
+
+      @[Tool("oast_start", gated: true, agent_action: true, unbound: true)]
       private def oast_start(h) : Result
-        provider = str(h, "provider") || "interactsh"
-        kind = Oast::ProviderKind.parse?(provider)
-        return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
-        host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
-        return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
+        # A SAVED provider, by the id list_oast_providers prints. The provider CRUD tools next
+        # door exist so an operator can configure a private collaborator once — and until this
+        # branch, `oast_start` could not consume one: the agent had to copy the host and token
+        # back inline on every call, and the token comes back [REDACTED], so a token-bearing
+        # provider was unreachable from MCP at all. `list_oast_providers`' own comment already
+        # claimed this was solved ("without them the only way ... was to re-supply its host and
+        # token inline every time").
+        saved = saved_oast_provider(h)
+        return saved if saved.is_a?(Result)
+        if saved
+          kind = Oast::ProviderKind.parse?(saved.kind)
+          return err("saved provider #{saved.key.inspect} has an unknown kind #{saved.kind.inspect}",
+            "INVALID_ARGUMENT", field: "provider_id") unless kind
+          host = saved.host
+          token = saved.token
+        else
+          provider = str(h, "provider") || "interactsh"
+          kind = Oast::ProviderKind.parse?(provider)
+          return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
+          host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
+          return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
+          token = str(h, "token")
+        end
         # Bound the number of live sessions: each holds an Oast::Http (socket) for the
         # process life until oast_stop, so an agent that never stops them would leak.
         if @oast_mcp.size >= MAX_OAST_SESSIONS
           return Result.new("too many active OAST sessions (#{@oast_mcp.size}/#{MAX_OAST_SESSIONS}); call oast_stop on one before starting another", is_error: true)
         end
-        prov = Oast::Provider.build(kind, host, str(h, "token"))
+        prov = Oast::Provider.build(kind, host, token)
         http = Oast::HttpClient.new(@verify_upstream)
         session = prov.register(http)
         # Unpredictable session id: a sequential "oast-N" is trivially guessable, so
@@ -980,22 +1021,50 @@ module Gori
         sid = "oast_#{Random::Secure.hex(8)}"
         @oast_mcp[sid] = OastMcpSession.new(prov, session, http, kind.label)
         payload = prov.generate_payload(session)
-        Result.new({session_id: sid, provider: kind.label, payload_url: payload}.to_json)
+        Result.new({session_id: sid, provider: kind.label, provider_id: saved.try(&.key),
+                    server: host, payload_url: payload}.to_json)
       rescue ex
-        Result.new("OAST register failed: #{ex.message}", is_error: true)
+        # A remote call that failed, not an argument that was wrong. Uncoded, `classify` files
+        # every plain-message error under INVALID_ARGUMENT with `retryable:false` — so a DNS
+        # blip on the interactsh host told the caller's error policy "your arguments are wrong,
+        # do not retry". `send_request` has always answered a transport failure with
+        # NETWORK_ERROR + retryable (see `Tools.send_error_code`); this is the same fact.
+        err("OAST register failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
       end
 
+      # An OAST handle read: the session, or the refusal that says WHICH mistake was made.
+      # A missing `session_id` and a stale one used to answer identically ("unknown or
+      # expired session_id"), which told an agent that had simply omitted the argument that
+      # its listener had died — the one reading under which the correct move is to abandon a
+      # session that is in fact still registered and still collecting callbacks.
+      private def oast_session(h, delete : Bool = false) : OastMcpSession | Result
+        sid = str(h, "session_id").try(&.strip).presence
+        unless sid
+          return err("missing required 'session_id' (the id oast_start returned)",
+            "INVALID_ARGUMENT", field: "session_id")
+        end
+        s = delete ? @oast_mcp.delete(sid) : @oast_mcp[sid]?
+        return s if s
+        live = @oast_mcp.keys
+        err("unknown or expired session_id #{sid.inspect} — this server holds " \
+            "#{live.empty? ? "no live sessions" : "#{live.size} (#{live.join(", ")})"}; " \
+            "an ad-hoc oast_start handle dies with the server process, and a persisted one " \
+            "is re-opened with oast_resume (see list_oast_sessions)",
+          "NOT_FOUND", field: "session_id")
+      end
+
+      @[Tool("oast_payload", unbound: true)]
       private def oast_payload(h) : Result
-        sid = str(h, "session_id")
-        s = sid ? @oast_mcp[sid]? : nil
-        return Result.new("unknown or expired session_id", is_error: true) unless s
-        Result.new({session_id: sid, payload_url: s.provider.generate_payload(s.session)}.to_json)
+        s = oast_session(h)
+        return s if s.is_a?(Result)
+        Result.new({session_id: str(h, "session_id"), payload_url: s.provider.generate_payload(s.session)}.to_json)
       end
 
+      @[Tool("oast_poll", unbound: true)]
       private def oast_poll(h) : Result
+        s = oast_session(h)
+        return s if s.is_a?(Result)
         sid = str(h, "session_id")
-        s = sid ? @oast_mcp[sid]? : nil
-        return Result.new("unknown or expired session_id", is_error: true) unless s
         fresh = s.provider.poll(s.http, s.session).reject { |i| s.seen.includes?(i.unique_id) }
         fresh.each { |i| s.seen << i.unique_id }
         # A RESUMED handle is a project listener, so its hits are project evidence: persist
@@ -1008,13 +1077,16 @@ module Gori
         callbacks = fresh.map { |i| Oast::Present.interaction(i, s.kind_label) }
         Result.new({session_id: sid, count: fresh.size, callbacks: callbacks}.to_json)
       rescue ex
-        Result.new("OAST poll failed: #{ex.message}", is_error: true)
+        # Transient by construction: a poll is a read the caller is expected to repeat, and the
+        # session it names is still live here. See `oast_start`'s rescue for the contract.
+        err("OAST poll failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
       end
 
+      @[Tool("oast_stop", gated: true, agent_action: true, unbound: true)]
       private def oast_stop(h) : Result
+        s = oast_session(h, delete: true)
+        return s if s.is_a?(Result)
         sid = str(h, "session_id")
-        s = sid ? @oast_mcp.delete(sid) : nil
-        return Result.new("unknown or expired session_id", is_error: true) unless s
         # A RESUMED session is only stopped, never deregistered — the same split the TUI makes
         # between `^X` (stop polling, keep it resumable) and RELEASE. Its payloads are planted
         # out in the world right now, and dropping the server state here would kill them
@@ -1026,181 +1098,7 @@ module Gori
         Result.new({stopped: sid}.to_json)
       end
 
-      private def read_tool(name : String, h) : Result?
-        case name
-        when "list_history"            then list_history(h)
-        when "list_events"             then list_events(h)
-        when "intercept_list"          then intercept_list(h)
-        when "intercept_get"           then intercept_get(h)
-        when "get_flow"                then get_flow(h)
-        when "get_response_body_chunk" then get_response_body_chunk(h)
-        when "compare_flows"           then compare_flows(h)
-        when "diff_projects"           then diff_projects(h)
-        when "list_sitemap"            then list_sitemap(h)
-        when "list_issues"             then list_issues(h)
-        when "get_issue"               then get_issue(h)
-        when "probe_scan"              then probe_scan(h)
-        when "probe_issues"            then probe_issues(h)
-        when "list_probe_rules"        then list_probe_rules(h)
-        when "list_sitemap_tags"       then list_sitemap_tags(h)
-        when "list_links"              then list_links(h)
-        when "list_oast_providers"     then list_oast_providers(h)
-        when "list_oast_sessions"      then list_oast_sessions(h)
-        when "list_scope"              then list_scope
-        when "list_env"                then list_env(h)
-        when "list_host_overrides"     then list_host_overrides
-        when "list_session_slots"      then list_session_slots(h)
-        when "project_info"            then project_info
-        when "get_current_context"     then get_current_context
-        when "get_repeater_context"    then get_repeater_context(h)
-        when "list_fuzz_runs"          then list_fuzz_runs(h)
-        when "get_fuzz_run"            then get_fuzz_run(h)
-        when "ql_reference"            then ql_reference
-        when "list_notes"              then list_notes
-        when "get_note"                then get_note(h)
-        when "decode"                  then decoder(h)
-        when "oast_presets"            then oast_presets_tool
-        when "oast_poll"               then oast_poll(h)
-        when "oast_payload"            then oast_payload(h)
-        when "jwt_decode"              then jwt_decode_tool(h)
-        when "jwt_encode"              then jwt_encode_tool(h)
-        when "jwt_attacks"             then jwt_attacks_tool(h)
-        when "cookie_decode"           then cookie_decode_tool(h)
-        when "cookie_verify"           then cookie_verify_tool(h)
-        when "cookie_crack"            then cookie_crack_tool(h)
-        when "cookie_forge"            then cookie_forge_tool(h)
-        when "sequence_analyze"        then sequence_analyze(h)
-        when "list_rules"              then list_rules(h)
-        when "list_rule_presets"       then list_rule_presets
-        when "list_color_rules"        then list_color_rules(h)
-        when "list_views"              then list_views(h)
-        when "preview_color_rule"      then preview_color_rule(h)
-        when "list_custom_colors"      then list_custom_colors
-        when "list_extract_rules"      then list_extract_rules
-        when "list_projects"           then list_projects
-        when "ql_explain"              then ql_explain(h)
-        end
-      end
-
-      # Action + write tools. Project selection (switch always; create when unbound
-      # or when actions allowed) is not fully blocked by --read-only so install-and-use
-      # works on a fresh machine. nil when `name` isn't one of them.
-      private def action_tool(name : String, h) : Result?
-        case name
-        when "send_request"              then gated { send_request(h) }
-        when "send_websocket"            then gated { send_websocket(h) }
-        when "oast_start"                then gated { oast_start(h) }
-        when "oast_stop"                 then gated { oast_stop(h) }
-        when "oast_resume"               then gated { oast_resume(h) }
-        when "oast_release"              then gated { oast_release(h) }
-        when "intercept_forward"         then gated { intercept_forward(h) }
-        when "intercept_drop"            then gated { intercept_drop(h) }
-        when "intercept_forward_edit"    then gated { intercept_forward_edit(h) }
-        when "intercept_toggle"          then gated { intercept_toggle(h) }
-        when "intercept_set_filter"      then gated { intercept_set_filter(h) }
-        when "intercept_set_direction"   then gated { intercept_set_direction(h) }
-        when "add_scope_rule"            then gated { add_scope_rule(h) }
-        when "delete_scope_rule"         then gated { delete_scope_rule(h) }
-        when "set_scope_enabled"         then gated { set_scope_enabled(h) }
-        when "set_sandbox"               then gated { set_sandbox(h) }
-        when "set_env_var"               then gated { set_env_var(h) }
-        when "delete_env_var"            then gated { delete_env_var(h) }
-        when "create_session_slot"       then gated { create_session_slot(h) }
-        when "update_session_slot"       then gated { update_session_slot(h) }
-        when "delete_session_slot"       then gated { delete_session_slot(h) }
-        when "set_active_session_slot"   then gated { set_active_session_slot(h) }
-        when "add_host_override"         then gated { add_host_override(h) }
-        when "update_host_override"      then gated { update_host_override(h) }
-        when "delete_host_override"      then gated { delete_host_override(h) }
-        when "import_flows"              then gated { import_flows(h) }
-        when "create_repeater"           then gated { create_repeater(h) }
-        when "update_repeater"           then gated { update_repeater(h) }
-        when "delete_repeater"           then gated { delete_repeater(h) }
-        when "move_repeater"             then gated { move_repeater(h) }
-        when "create_repeaters"          then gated { create_repeaters(h) }
-        when "delete_repeaters"          then gated { delete_repeaters(h) }
-        when "update_repeaters"          then gated { update_repeaters(h) }
-        when "create_issue"              then gated { create_issue(h) }
-        when "update_issue"              then gated { update_issue(h) }
-        when "probe_dismiss"             then gated { probe_dismiss(h) }
-        when "probe_promote"             then gated { probe_promote(h) }
-        when "probe_delete"              then gated { probe_delete(h) }
-        when "set_probe_rule_enabled"    then gated { set_probe_rule_enabled(h) }
-        when "create_probe_rule"         then gated { create_probe_rule(h) }
-        when "update_probe_rule"         then gated { update_probe_rule(h) }
-        when "delete_probe_rule"         then gated { delete_probe_rule(h) }
-        when "set_probe_mode"            then gated { set_probe_mode(h) }
-        when "delete_issue"              then gated { delete_issue(h) }
-        when "update_scope_rule"         then gated { update_scope_rule(h) }
-        when "set_sitemap_tag"           then gated { set_sitemap_tag(h) }
-        when "delete_flow"               then gated { delete_flow(h) }
-        when "clear_history"             then gated { clear_history(h) }
-        when "add_link"                  then gated { add_entity_link(h) }
-        when "remove_link"               then gated { remove_entity_link(h) }
-        when "create_oast_provider"      then gated { create_oast_provider(h) }
-        when "update_oast_provider"      then gated { update_oast_provider(h) }
-        when "set_oast_provider_enabled" then gated { set_oast_provider_enabled(h) }
-        when "delete_oast_provider"      then gated { delete_oast_provider(h) }
-        when "minimize_repeater"         then gated { minimize_repeater(h) }
-        when "fuzz_start"                then gated { fuzz_start(h) }
-        when "fuzz_status"               then gated { fuzz_status(h) }
-        when "fuzz_results"              then gated { fuzz_results(h) }
-        when "fuzz_stop"                 then gated { fuzz_stop(h) }
-        when "delete_fuzz_run"           then gated { delete_fuzz_run(h) }
-        when "mine_start"                then gated { mine_start(h) }
-        when "mine_status"               then gated { mine_status(h) }
-        when "mine_results"              then gated { mine_results(h) }
-        when "mine_stop"                 then gated { mine_stop(h) }
-        when "sequence_start"            then gated { sequence_start(h) }
-        when "sequence_status"           then gated { sequence_status(h) }
-        when "sequence_results"          then gated { sequence_results(h) }
-        when "sequence_stop"             then gated { sequence_stop(h) }
-        when "discover_start"            then gated { discover_start(h) }
-        when "discover_status"           then gated { discover_status(h) }
-        when "discover_results"          then gated { discover_results(h) }
-        when "discover_stop"             then gated { discover_stop(h) }
-        when "grpc_schema"               then grpc_schema(h)
-        when "grpc_reflect"              then gated { grpc_reflect(h) }
-        when "grpc_forget"               then gated { grpc_forget(h) }
-        when "authorize_start"           then gated { authorize_start(h) }
-        when "authorize_status"          then gated { authorize_status(h) }
-        when "authorize_results"         then gated { authorize_results(h) }
-        when "authorize_stop"            then gated { authorize_stop(h) }
-        when "list_jobs"                 then gated { list_jobs }
-        when "get_job"                   then gated { get_job(h) }
-        when "stop_job"                  then gated { stop_job(h) }
-        when "create_note"               then gated { create_note(h) }
-        when "update_note"               then gated { update_note(h) }
-        when "delete_note"               then gated { delete_note(h) }
-        when "create_rule"               then gated { create_rule(h) }
-        when "create_rule_from_preset"   then gated { create_rule_from_preset(h) }
-        when "update_rule"               then gated { update_rule(h) }
-        when "preview_rule"              then gated { preview_rule(h) }
-        when "set_rule_enabled"          then gated { set_rule_enabled(h) }
-        when "create_extract_rule"       then gated { create_extract_rule(h) }
-        when "update_extract_rule"       then gated { update_extract_rule(h) }
-        when "delete_extract_rule"       then gated { delete_extract_rule(h) }
-        when "set_extract_rule_enabled"  then gated { set_extract_rule_enabled(h) }
-        when "delete_rule"               then gated { delete_rule(h) }
-        when "create_color_rule"         then gated { create_color_rule(h) }
-        when "update_color_rule"         then gated { update_color_rule(h) }
-        when "set_color_rule_enabled"    then gated { set_color_rule_enabled(h) }
-        when "move_color_rule"           then gated { move_color_rule(h) }
-        when "delete_color_rule"         then gated { delete_color_rule(h) }
-        when "create_view"               then gated { create_view(h) }
-        when "update_view"               then gated { update_view(h) }
-        when "delete_view"               then gated { delete_view(h) }
-        when "create_custom_color"       then gated { create_custom_color(h) }
-        when "update_custom_color"       then gated { update_custom_color(h) }
-        when "delete_custom_color"       then gated { delete_custom_color(h) }
-          # switch is always available (selecting a DB is not a data mutation).
-        when "switch_project" then switch_project(h)
-          # create when unbound even under --read-only; once bound, actions-gated.
-        when "create_project" then create_project_entry(h)
-        when "delete_project" then gated { delete_project(h) }
-        end
-      end
-
+      @[Tool("create_project", unbound: true)]
       private def create_project_entry(h) : Result
         return create_project(h) if unbound? || @allow_actions
         err("tool disabled (gori mcp --read-only)", "TOOL_DISABLED")
@@ -1372,8 +1270,12 @@ module Gori
         end
       end
 
+      # `0` (and below) is "no override" — the engine default — as `rate: 0` is "unlimited" on
+      # this same tool and `--timeout 0` is refused on the CLI. It used to clamp UP to 1 ms, so
+      # a caller writing the conventional zero got every send timed out and a `done` verdict
+      # about a test they never asked for.
       private def fuzz_timeout(h) : Time::Span?
-        optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
+        optional_int_arg(h, "timeout_ms").try { |ms| ms <= 0 ? nil : ms.clamp(1_i64, 600_000_i64).milliseconds }
       end
 
       private def clamp_nonneg(n : Int64?) : Int32
@@ -1867,6 +1769,12 @@ module Gori
       # Emits one {name, description, inputSchema} object. The block declares
       # properties on a builder; `required` names are tracked and emitted.
       private def tool(j : JSON::Builder, name : String, description : String, & : SchemaBuilder ->) : Nil
+        # The ONE place every schema is emitted, which is why `--tools` filters here rather
+        # than in the 30 `list_*_tools` methods: a tool added tomorrow is covered by
+        # construction. `declared_args` is harvested from this same output, so a filtered-out
+        # tool also leaves the argument validator — `call` refuses it by name before that
+        # matters (see `filtered_out`).
+        return if (f = @tool_filter) && !f.allows?(name)
         sb = SchemaBuilder.new
         yield sb
         j.object do

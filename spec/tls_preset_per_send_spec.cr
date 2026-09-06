@@ -13,43 +13,26 @@ private alias R = Gori::Repeater
 # the question "does an operator's choice actually reach a send, and come back when the tab
 # is reopened".
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 private RAW = "GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n"
-
-private def with_store(&)
-  path = File.tempname("gori-tls-preset", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
 
 describe "per-send TLS fingerprint — Repeater plan" do
   it "carries a valid preset onto the plan and its sender" do
     plan = R::Plan.build(R::PlanOptions.new([RAW.to_slice],
-      target: "https://t.test", tls_preset: "chrome"), ungated)
+      target: "https://t.test", tls_preset: "chrome"), ungated_outbound)
     plan.tls_preset.should eq("chrome")
     plan.sender.tls_preset.should eq("chrome")
   end
 
   it "normalises the name so one intent is one policy" do
     plan = R::Plan.build(R::PlanOptions.new([RAW.to_slice],
-      target: "https://t.test", tls_preset: "  CHROME "), ungated)
+      target: "https://t.test", tls_preset: "  CHROME "), ungated_outbound)
     plan.tls_preset.should eq("chrome")
   end
 
   it "means no override when absent or blank" do
     [nil, "", "  "].each do |none|
       plan = R::Plan.build(R::PlanOptions.new([RAW.to_slice],
-        target: "https://t.test", tls_preset: none), ungated)
+        target: "https://t.test", tls_preset: none), ungated_outbound)
       plan.tls_preset.should be_nil
       plan.sender.tls_preset.should be_nil
     end
@@ -62,7 +45,7 @@ describe "per-send TLS fingerprint — Repeater plan" do
   it "refuses an unknown preset before anything dials" do
     ex = expect_raises(R::PlanError) do
       R::Plan.build(R::PlanOptions.new([RAW.to_slice],
-        target: "https://t.test", tls_preset: "chromee"), ungated)
+        target: "https://t.test", tls_preset: "chromee"), ungated_outbound)
     end
     ex.reason.should eq(R::PlanError::Reason::TlsPreset)
     ex.detail.should eq("chromee")
@@ -74,7 +57,7 @@ describe "per-send TLS fingerprint — Repeater plan" do
   it "carries the preset on the field-native h2 path too" do
     plan = R::Plan.build(R::PlanOptions.new(
       h2_fields: [{":method", "GET"}, {":path", "/fn"}],
-      target: "https://t.test", http2: true, tls_preset: "safari"), ungated)
+      target: "https://t.test", http2: true, tls_preset: "safari"), ungated_outbound)
     plan.tls_preset.should eq("safari")
     plan.sender.tls_preset.should eq("safari")
   end
@@ -90,20 +73,20 @@ end
 
 describe "per-send TLS fingerprint — fuzz plan" do
   it "carries the run's preset onto the plan and its sender" do
-    plan = Gori::Fuzz::Plan.build(fuzz_options("firefox"), ungated)
+    plan = Gori::Fuzz::Plan.build(fuzz_options("firefox"), ungated_outbound)
     plan.tls_preset.should eq("firefox")
   end
 
   it "refuses an unknown preset before the first request" do
     ex = expect_raises(Gori::Fuzz::PlanError) do
-      Gori::Fuzz::Plan.build(fuzz_options("safarii"), ungated)
+      Gori::Fuzz::Plan.build(fuzz_options("safarii"), ungated_outbound)
     end
     ex.reason.should eq(Gori::Fuzz::PlanError::Reason::TlsPreset)
     ex.detail.should eq("safarii")
   end
 
   it "means no override when absent" do
-    Gori::Fuzz::Plan.build(fuzz_options(nil), ungated).tls_preset.should be_nil
+    Gori::Fuzz::Plan.build(fuzz_options(nil), ungated_outbound).tls_preset.should be_nil
   end
 end
 
@@ -113,11 +96,11 @@ end
 describe "per-send TLS fingerprint — minimize backend" do
   it "presents the session's fingerprint on its probe sends" do
     origin = Gori::Fuzz::Origin.new("https", "t.test", 443)
-    sender = Gori::Fuzz::Sender.new(origin, ungated, false, true, tls_preset: "chrome")
+    sender = Gori::Fuzz::Sender.new(origin, ungated_outbound, false, true, tls_preset: "chrome")
     sender.tls_preset.should eq("chrome")
     # …and the pool it dials through carries it too, or a parked socket would serve the
     # sweep over a handshake nobody asked for.
-    pooled = Gori::Fuzz::Sender.new(origin, ungated, false, true,
+    pooled = Gori::Fuzz::Sender.new(origin, ungated_outbound, false, true,
       keep_alive: true, idle_conns: 1, tls_preset: "curl")
     pooled.tls_preset.should eq("curl")
     pooled.pool.should_not be_nil

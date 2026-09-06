@@ -54,6 +54,9 @@ module Gori
       # pair rather than an editable binding.
       rows_shown = ->(ctx : Verb::ExecContext) { ctx.diff_rows_shown? }
       r.register Verb::Definition.new(
+        "diff.copy", "Copy", "Copy the selected row — endpoint, verdict, and what moved — as one line",
+        Verb::Scope::Diff, [Verb::Chord.new("y")], available: rows_shown, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+      r.register Verb::Definition.new(
         "diff.to-comparer", "Compare the two captures",
         "Send this endpoint's capture from each side to the Comparer for the byte-level diff",
         Verb::Scope::Diff, [Verb::Chord.new("o"), Verb::Chord.new("enter")],

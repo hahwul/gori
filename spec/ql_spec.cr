@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-private def tmp_store(&)
-  path = File.tempname("gori-ql", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture(store, host, method, target, status = nil)
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
@@ -57,6 +44,10 @@ describe Gori::QL do
     f = Gori::QL.parse("status:4xx")
     f.sql.should eq("((status >= ? AND status < ?))") # clause-wrap around the range term
     f.args.should eq([400, 500])
+    # Case-insensitively: `InterceptFilter` folds the value before its class test, so a colour
+    # rule's `status:5XX` painted rows while the History query for the same string was DROPPED.
+    Gori::QL.parse("status:5XX").should eq(Gori::QL.parse("status:5xx"))
+    Gori::QL.parse("status:>=5XX").should eq(Gori::QL.parse("status:>=5xx"))
   end
 
   it "honours a comparison operator against a status class" do
@@ -154,7 +145,7 @@ describe Gori::QL do
   # tokenizer's, which varies by SQLite build, so it is deliberately not pinned here — this
   # test targets the blob fallback that the fix actually changed.)
   it "finds a short (<3-char) body: needle that sits AFTER a NUL byte" do
-    tmp_store do |store|
+    with_store do |store|
       buried = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/bin", http_version: "HTTP/1.1",
@@ -246,7 +237,7 @@ describe Gori::QL do
 
   it "matches header: past an embedded NUL in the stored head bytes" do
     # CAST AS TEXT LIKE stopped at the first NUL; the REGEXP/instr path must not.
-    tmp_store do |store|
+    with_store do |store|
       head = "HTTP/1.1 200 OK\r\nX-Trace: a\u0000b\r\nSet-Cookie: sid=1\r\n\r\n".to_slice
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
@@ -266,7 +257,7 @@ describe Gori::QL do
   # for both. The same expression backs Scope's string/regex rules, where the miss was a
   # fail-OPEN: an exclude naming a port did not hold over TLS.
   it "url: matches a non-default port on BOTH wire shapes" do
-    tmp_store do |store|
+    with_store do |store|
       capture_on_port(store, "http", "127.0.0.1", 19316, "http://127.0.0.1:19316/x") # plaintext, absolute-form
       capture_on_port(store, "https", "127.0.0.1", 19316, "/x")                      # tunnelled, origin-form
       capture_on_port(store, "https", "127.0.0.1", 443, "/x")                        # same host, default port
@@ -282,7 +273,7 @@ describe Gori::QL do
   # (RFC 3986 §3.2.3), so building the authority must not hand every ordinary flow a `:443`
   # for `url:443` to match.
   it "url: does not invent a default port" do
-    tmp_store do |store|
+    with_store do |store|
       capture_on_port(store, "https", "acme.test", 443, "/x")
       capture_on_port(store, "http", "acme.test", 80, "/y")
 
@@ -296,7 +287,7 @@ describe Gori::QL do
   # authority has to put them back or `url:` reads `https://::1:8443/x` — a string no operator
   # can type and no URL parser accepts.
   it "url: brackets an IPv6 literal the way FlowRow#url does" do
-    tmp_store do |store|
+    with_store do |store|
       capture_on_port(store, "https", "::1", 8443, "/x")
       rows = store.search(Gori::QL.parse("url:[::1]:8443"), 50)
       rows.map(&.url).should eq(["https://[::1]:8443/x"])
@@ -308,7 +299,7 @@ describe Gori::QL do
   # `Scope.request_url` builds without it. They are written twice — once in SQL, once in
   # Crystal — so nothing but a test can hold them together.
   it "URL_EXPR and URL_EXPR_NO_PORT are the two Crystal builders, row for row" do
-    tmp_store do |store|
+    with_store do |store|
       rows = [
         {"https", "127.0.0.1", 19316, "/x"},
         {"https", "acme.test", 443, "/a?b=c"},
@@ -352,6 +343,16 @@ describe Gori::QL do
                        "(response_body IS NOT NULL AND CAST(response_body AS TEXT) REGEXP ?)))")
     body.args.should eq(["secret\\d+", "secret\\d+"])
 
+    # `method` and `scheme` are text columns too: `method~^P(OST|UT)$` is the one-term spelling
+    # of "every write verb", which `method:` (exact) could only say as a three-way OR.
+    Gori::QL.parse("method~^P(OST|UT)$").sql.should eq("(method REGEXP ?)")
+    Gori::QL.parse("method~^P(OST|UT)$").args.should eq(["^P(OST|UT)$"])
+    Gori::QL.parse("scheme~^https?$").sql.should eq("(scheme REGEXP ?)")
+    Gori::QL::REGEX_FIELDS.should contain("method")
+    Gori::QL::REGEX_FIELDS.should contain("scheme")
+    Gori::QL.known_field?("method", regex: true).should be_true
+    Gori::QL.known_field?("res.body", regex: true).should be_true # aliases resolve here too
+
     hdr = Gori::QL.parse("header~^Set-Cookie:") # `~` wins over a later ':' in the value
     hdr.sql.should eq("((CAST(request_head AS TEXT) REGEXP ? OR " \
                       "(response_head IS NOT NULL AND CAST(response_head AS TEXT) REGEXP ?)))")
@@ -368,13 +369,31 @@ describe Gori::QL do
     f.args.should be_empty
   end
 
-  it "free-texts a ~ token on a non-regex field instead of never-matching" do
-    # `foo` is not a regex field, so `~` is not a regex operator here: the whole token
+  it "free-texts a ~ token on an UNKNOWN field instead of never-matching" do
+    # `foo` is not a field at all, so `~` is not a regex operator here: the whole token
     # must fall back to a free-text LIKE search, NOT compile to the never-match clause
     # (the validity guard only applies to real regex fields).
     f = Gori::QL.parse("foo~[")
     f.sql.should eq("((lower(method) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\' OR lower(target) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["%foo~[%", "%foo~[%", "%foo~[%"])
+  end
+
+  it "DROPS and reports a ~ on a field QL has but offers no regex on" do
+    # `status~5..` names a real field under an advertised operator, and the field has no `~`
+    # form. It used to free-text — a literal search for the text `status~5..` over
+    # method/host/target, which matches nothing and was reported CLEAN — while the bar painted
+    # `status~` as a field. Now it is dropped like `resp.status:` is: `analyze` names it,
+    # `strict:`/`ql_explain`/the CLI warning see it, and a query that was ONLY this is refused.
+    %w[status~5.. size~1 dur~\d+ proto~ws stub~true src~proxy scope~in resp.size~1].each do |q|
+      Gori::QL.parse(q, scope: Gori::QL::SCOPE_SHAPE_ONLY).should eq(Gori::QL::EMPTY), q
+      Gori::QL.analyze(q, scope: Gori::QL::SCOPE_SHAPE_ONLY).ignored.should eq([q]), q
+      Gori::QL.invalid_regex_terms(q).should be_empty, q # dropped, not "never-match"
+      Gori::QL.known_field?(q.split('~').first, regex: true).should be_false, q
+    end
+    # The drop is a leaf: the rest of an AND-chain still applies (and reports the broaden).
+    mixed = Gori::QL.parse("host:a status~5..")
+    mixed.should eq(Gori::QL.parse("host:a"))
+    Gori::QL.analyze("host:a status~5..").ignored.should eq(["status~5.."])
   end
 
   # gRPC reads BOTH sides' Content-Type: it is a type the request sends too, and a call
@@ -442,7 +461,7 @@ end
 
 describe "Gori::Store#search (QL)" do
   it "filters flows by a compiled query" do
-    tmp_store do |store|
+    with_store do |store|
       capture(store, "acme.test", "GET", "/", 200)
       capture(store, "acme.test", "POST", "/login", 500)
       capture(store, "other.test", "GET", "/", 200)
@@ -465,7 +484,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "url~ recognizes an ABSOLUTE-FORM target of any scheme case without doubling scheme://host" do
-    tmp_store do |store|
+    with_store do |store|
       # Origin-form (the common case: HTTPS/CONNECT) and absolute-form (plain-HTTP
       # forward-proxy wire shape) captures of the same logical endpoint, plus an
       # upper-cased-scheme absolute-form capture (RFC 3986 §3.1: schemes are
@@ -490,7 +509,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "filters by proto: over real captured flows (ws/grpc/sse/http, NULL-safe)" do
-    tmp_store do |store|
+    with_store do |store|
       # WebSocket handshake (101, no content type).
       ws = capture(store, "acme.test", "GET", "/socket", 101)
       # gRPC + SSE distinguished only by Content-Type on a 200.
@@ -521,7 +540,7 @@ describe "Gori::Store#search (QL)" do
   # together the way an operator triages them. `proto:ws` still means "a WebSocket"; the
   # spelling the PROTO column shows for each row selects that row and only that row.
   it "separates ws:// from wss:// on proto:, the way the PROTO column now spells them" do
-    tmp_store do |store|
+    with_store do |store|
       cleartext = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/chat", http_version: "HTTP/1.1",
@@ -545,7 +564,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "searches request and response bodies (body:)" do
-    tmp_store do |store|
+    with_store do |store|
       req_match = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
@@ -589,7 +608,7 @@ describe "Gori::Store#search (QL)" do
   # so these pin that the filter really scopes rather than being ignored by the MATCH parser,
   # which would silently return the two-sided answer and look like it worked.
   it "scopes header:/body: to one side with a req./resp. prefix" do
-    tmp_store do |store|
+    with_store do |store|
       req_side = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
@@ -719,12 +738,12 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.uses_scope?("host:a scope:out").should be_true
       Gori::QL.uses_scope?("-scope:in").should be_true
       Gori::QL.uses_scope?("host:acme").should be_false
-      # `scope` is not a REGEX field, so `scope~in` free-texts the whole token (the road
-      # `size~1` takes) and names no scope predicate — every surface that WARNS about a scope
-      # term must not speak about this one, or it warns about a term that is not there.
+      # `scope` is not a REGEX field, so `scope~in` is DROPPED (the road `size~1` takes,
+      # reported under `ignored`) and names no scope predicate — every surface that WARNS about
+      # a scope term must not speak about this one, or it warns about a term that is not there.
       Gori::QL.uses_scope?("scope~in").should be_false
-      Gori::QL.parse("scope~in", scope: Gori::QL::ScopeLens.new(nil)).sql
-        .should eq(Gori::QL.parse("zzz~in", scope: Gori::QL::ScopeLens.new(nil)).sql)
+      Gori::QL.parse("scope~in", scope: Gori::QL::ScopeLens.new(nil)).should eq(Gori::QL::EMPTY)
+      Gori::QL.analyze("scope~in", scope: Gori::QL::ScopeLens.new(nil)).ignored.should eq(["scope~in"])
       # Quoting is NOT an escape: the grammar strips quotes before the field/value split, so
       # `"scope:in"` is still a scope term — the same reading `host:"x"` gets, and the reason
       # `field_shaped?` says a KNOWN field is a field use whatever its value holds.
@@ -734,7 +753,7 @@ describe "Gori::Store#search (QL)" do
     # The claim the whole design rests on: `scope:in` IS the `--in-scope` predicate, not a
     # respelling of it. Run against a real store, both ways, and compared row for row.
     it "selects exactly what Scope#filter(force: true) selects" do
-      tmp_store do |store|
+      with_store do |store|
         scope = Gori::Scope.load(store)
         scope.add("include", "host", "acme.test")
         scope.add("exclude", "host", "cdn.acme.test")
@@ -802,12 +821,41 @@ describe "Gori::Store#search (QL)" do
     Gori::QL.analyze("respond").applied.should eq(["respond"])
   end
 
+  # `field_shaped?` decides which unknown `name:value` tokens the CLI and MCP REFUSE as a typo'd
+  # field and which they search as text; the free-text compilation is the same either way.
+  describe ".field_shaped?" do
+    it "reads host:port for a dotless host as an authority, not a field" do
+      # The commonest paste after a URL: a dev server's address. `localhost:8080` was refused as
+      # ``unknown query field `localhost:` `` — the dot rule that lets `acme.test:8443` through
+      # cannot see a host with no dot in it.
+      Gori::QL.field_shaped?("localhost", "8080").should be_false
+      Gori::QL.field_shaped?("api", "3000").should be_false
+      Gori::QL.field_shaped?("acme.test", "8443").should be_false
+      Gori::QL.fields_used("localhost:8080").should be_empty
+    end
+
+    it "still refuses a numeric field typed short of its name, with the suggestion attached" do
+      # A port-shaped value is not an escape for a typo a real field is CLOSE to.
+      Gori::QL.field_shaped?("stauts", "500").should be_true
+      Gori::QL.field_shaped?("sizee", "100").should be_true
+      Gori::QL.suggest_field("stauts").should eq("status")
+      # ...and a non-numeric value under an unknown name stays field-shaped whatever the name.
+      Gori::QL.field_shaped?("localhost", "x").should be_true
+      Gori::QL.field_shaped?("hsot", "acme").should be_true
+    end
+
+    it "treats a KNOWN field as a field use whatever its value holds" do
+      Gori::QL.field_shaped?("status", "500").should be_true
+      Gori::QL.field_shaped?("dur", "5").should be_true
+    end
+  end
+
   # A substring field folds BOTH sides — needle and haystack — and folding is only a fold if it
   # covers the whole alphabet. SQLite's built-in `lower()` is ASCII-only, so `lower(target) LIKE
   # '%überweisung%'` left the haystack's `Ü` uppercase and answered nothing; a non-ASCII needle
   # takes `gori_ci_contains` (Crystal's `downcase.includes?` as a UDF) instead.
   it "folds a non-ASCII needle on both sides for path:, url: and free text" do
-    tmp_store do |store|
+    with_store do |store|
       id = capture(store, "acme.test", "GET", "/Überweisung")
       other = capture(store, "acme.test", "GET", "/other")
 
@@ -823,7 +871,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "folds a non-ASCII needle for host: and free text too" do
-    tmp_store do |store|
+    with_store do |store|
       id = capture(store, "Über.test", "GET", "/x")
       capture(store, "acme.test", "GET", "/x")
 
@@ -836,7 +884,7 @@ describe "Gori::Store#search (QL)" do
   # The ASCII needle keeps the native `lower(col) LIKE ?` path, so the LIKE-metacharacter
   # escaping that path depends on must still hold over real rows, not just in the compiled SQL.
   it "still treats a literal % / _ in the needle literally" do
-    tmp_store do |store|
+    with_store do |store|
       pct = capture(store, "acme.test", "GET", "/a%b")
       capture(store, "acme.test", "GET", "/axb")
 
@@ -852,7 +900,7 @@ describe "Gori::Store#search (QL)" do
       method: "GET", host: "acme.test", target: "/Überweisung", scheme: "http")
     Gori::InterceptFilter.new("path:Überweisung").matches?(subject).should be_true
 
-    tmp_store do |store|
+    with_store do |store|
       id = capture(store, "acme.test", "GET", "/Überweisung")
       store.search(Gori::QL.parse("path:Überweisung"), 50).map(&.id).should eq([id])
     end
@@ -891,7 +939,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "matches bodies, hosts and headers by regex (~), case-sensitively" do
-    tmp_store do |store|
+    with_store do |store|
       secret = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "api.acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
@@ -926,7 +974,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "scans a binary / invalid-UTF-8 body with body~ past a NUL without crashing" do
-    tmp_store do |store|
+    with_store do |store|
       # leading invalid-UTF-8 bytes + an embedded NUL with "ABC" AFTER it. The scan
       # must (1) not crash on the invalid UTF-8 (scrubbed) and (2) still see content
       # past the NUL — the haystack is read by its true byte length (value_bytes),
@@ -948,7 +996,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   it "filters by total size and duration; respsize:/dur: exclude pending rows" do
-    tmp_store do |store|
+    with_store do |store|
       big = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/big", http_version: "HTTP/1.1",

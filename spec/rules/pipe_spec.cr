@@ -8,19 +8,6 @@ require "../spec_helper"
 # so in the event feed. A green "it transformed the body" example proves almost nothing next to
 # those; the whole risk of this feature is what happens when the operator's script misbehaves.
 
-private def with_store(&)
-  path = File.tempname("gori-pipe", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_hook(body : String, &)
   dir = File.tempname("gori-pipe-hook")
   Dir.mkdir_p(dir)

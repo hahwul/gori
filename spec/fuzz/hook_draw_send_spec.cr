@@ -20,10 +20,6 @@ private def with_counting_hook(&)
   end
 end
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 describe "the draw-vs-send hook contract (#852)" do
   # Item 1: a refusal decidable WITHOUT a side effect is decided before any side effect. Two
   # markers — one an `exec:` hook, one a pure chain that fails on its value — and the hook must
@@ -90,7 +86,7 @@ describe "the draw-vs-send hook contract (#852)" do
         "GET /q?a=§P¦exec:#{hook}§ HTTP/1.1\r\nHost: t.test\r\n\r\n",
         target: "http://t.test",
         sources: [F::InlineList.new(["x"])] of F::PayloadSource,
-        config: F::Config.new(mode: F::Mode::BatteringRam)), ungated)
+        config: F::Config.new(mode: F::Mode::BatteringRam)), ungated_outbound)
       runs.call.should eq 1
     end
   end

@@ -12,21 +12,8 @@ require "socket"
 # ran a passive scan and reported a clean active one, and `create_repeater{auto_content_length:1}`
 # stored the OPPOSITE of the absent-default. See `Tools#bool_value`.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-bools", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def bool_tools(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools_for(store)
 end
 
 private def bool_json(tools : Gori::MCP::Tools, name : String, args : String) : JSON::Any
@@ -421,8 +408,8 @@ private def start_bool_always200_origin : Int32
   port = origin.local_address.port
   spawn do
     loop do
-      break unless conn = origin.accept?
-      spawn do
+      break unless accepted = origin.accept?
+      spawn_with(accepted) do |conn|
         conn.read_timeout = 2.seconds
         loop do
           break unless Gori::Proxy::Codec::Http1.read_head(conn)

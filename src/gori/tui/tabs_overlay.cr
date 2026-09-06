@@ -22,6 +22,8 @@ module Gori::Tui
     property on_reset : Proc(Nil)?
     property on_toast : Proc(String, Nil)?
 
+    getter selected : Int32
+
     def initialize
       @items = [] of {Symbol, String, Bool}
       @selected = 0
@@ -51,10 +53,8 @@ module Gori::Tui
         return :cancel # discard the working copy
       elsif key.enter?
         return :commit
-      elsif key.up?
-        ev.shift? ? move_selected(-1) : select_move(-1)
-      elsif key.down?
-        ev.shift? ? move_selected(1) : select_move(1)
+      elsif nav_key(ev)
+        # ↑/↓ (⇧ reorders), PgUp/PgDn/Home/End
       elsif (c = ev.char) && !ev.ctrl? && !ev.alt?
         # Guarded, and not for tidiness: `Event::Key#char` is `@char || key.to_char`, so ^R
         # reports 'r' and lands on the reset arm below — the shell's pre-filter claims only
@@ -93,6 +93,20 @@ module Gori::Tui
     end
 
     # ↑/↓ and the scroll wheel share the selection move (Overlay#handle_wheel calls this).
+    # ↑/↓ move the selection (⇧ moves the ROW), and the four page keys ride the list
+    # contract (`Overlay#page_key`). One arm of `handle_key`, so that ladder stays readable.
+    private def nav_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.up?
+        ev.shift? ? move_selected(-1) : select_move(-1)
+      elsif key.down?
+        ev.shift? ? move_selected(1) : select_move(1)
+      else
+        return page_key(ev)
+      end
+      true
+    end
+
     def move(step : Int32) : Nil
       select_move(step)
     end
@@ -116,6 +130,10 @@ module Gori::Tui
       @selected = (@selected + d).clamp(0, {@items.size - 1, 0}.max)
     end
 
+    def entry_count : Int32
+      @items.size
+    end
+
     def set_selected(idx : Int32) : Nil
       @selected = idx.clamp(0, {@items.size - 1, 0}.max)
     end
@@ -127,7 +145,8 @@ module Gori::Tui
     # Flip show/hide of the selected tab. Refuses (false) to hide the last visible one
     # so the bar can never go empty; the caller toasts the refusal.
     def toggle_selected : Bool
-      sym, label, vis = @items[@selected]
+      return false unless item = @items[@selected]?
+      sym, label, vis = item
       return false if vis && visible_count <= 1
       @items[@selected] = {sym, label, !vis}
       true
@@ -177,7 +196,7 @@ module Gori::Tui
       unless box
         # Too small to draw the editor — show a one-line hint so the (still input-capturing)
         # :tabs modal is never fully invisible; esc closes it.
-        screen.text(area.x + 1, area.y, "tab editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "tab editor needs a larger window")
         return
       end
       Frame.card(screen, box, "TAB BAR", border: Theme.border_focus)
@@ -186,6 +205,7 @@ module Gori::Tui
 
       list_top = box.y + 2
       cap = list_capacity(box)
+      @list_last_h = cap
       start = list_window(cap)
       cap.times do |row|
         i = start + row

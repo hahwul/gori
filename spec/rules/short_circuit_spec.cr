@@ -7,19 +7,6 @@ require "../spec_helper"
 
 private SC = Gori::Store::RuleOp::ShortCircuit
 
-private def with_store(&)
-  path = File.tempname("gori-short-circuit", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def get(target = "/admin")
   "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice
 end

@@ -7,19 +7,6 @@ include Gori::Tui
 # ⇧S scope lens does. What is pinned here is the behaviour that has no visible symptom until it
 # has already shown the operator the wrong flows.
 
-private def tmp_store(&)
-  path = File.tempname("gori-hv-view", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def add_flow(store, source : Gori::FlowSource::Kind, host = "h.test", status = 200)
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
@@ -46,7 +33,7 @@ end
 
 describe "HistoryView — view mode" do
   it "ANDs the view over the filter bar instead of replacing it" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, Gori::FlowSource::Kind::Proxy, "keep.test", 500)
       add_flow(store, Gori::FlowSource::Kind::Proxy, "keep.test", 200)
       add_flow(store, Gori::FlowSource::Kind::Repeater, "resent.test", 500)
@@ -69,7 +56,7 @@ describe "HistoryView — view mode" do
     # not filtered — and an unfiltered list may never reload at all. If `filtering?` did not
     # know about views, a `src:proxy` view would fill, permanently, with the repeater sends it
     # exists to exclude, under a chip claiming otherwise.
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.set_view(history_view)
       view.filtering?.should be_true
@@ -84,7 +71,7 @@ describe "HistoryView — view mode" do
   end
 
   it "is not filtering under the All view, so the incremental path still applies" do
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.set_view(Gori::SavedViews.all_view)
       view.filtering?.should be_false
@@ -100,7 +87,7 @@ describe "HistoryView — view mode" do
     # A view can reach the list from a peer's settings.json or a hand edit, where nothing
     # validated it. `QL.and` folds an EMPTY side away, so applying it would show EVERY flow
     # under a `v:` chip asserting a filter — the direction that matters on a security proxy.
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, Gori::FlowSource::Kind::Proxy, "would-leak.test")
       view = HistoryView.new
       view.set_view(Gori::SavedViews::View.new("1", "broken", "src:nope", "project"))
@@ -111,7 +98,7 @@ describe "HistoryView — view mode" do
   end
 
   it "draws v:all muted at rest and v:name left of f:follow when one is on" do
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.reload(store)
       text = screen_text(view)
@@ -131,7 +118,7 @@ describe "HistoryView — view mode" do
     # `History + Repeater` is 18 columns against VIEW_CHIP_NAME_MAX's 14, so the chip a fresh
     # project opens on read `v:History + Re…`. `CHIP_LABELS` is what stops the most-seen chip
     # on the bar from being the one wearing an ellipsis.
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.set_view(Gori::SavedViews.default_view(store))
       view.reload(store)
@@ -157,7 +144,7 @@ describe "HistoryView — view mode" do
     # The chip is a mode indicator beside `f:follow` and `⇧S scope:off`, not a place a name is
     # quoted — so a saved view's casing goes the same way a builtin's does. The picker, the CLI
     # and MCP keep the name the operator typed.
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.set_view(Gori::SavedViews::View.new("1", "API Auth", "src:proxy", "project"))
       view.reload(store)
@@ -170,7 +157,7 @@ describe "HistoryView — view mode" do
   end
 
   it "names the view on the empty state instead of sending the operator to the scope lens" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, Gori::FlowSource::Kind::Repeater, "resent.test")
       view = HistoryView.new
       view.set_view(history_view)
@@ -183,7 +170,7 @@ describe "HistoryView — view mode" do
   end
 
   it "says why a src: view is empty on a project captured before provenance was recorded" do
-    tmp_store do |store|
+    with_store do |store|
       # A pre-V17 row: inserted with a source, then blanked, which is what those rows look like.
       id = add_flow(store, Gori::FlowSource::Kind::Proxy, "old.test")
       store.@db.exec("UPDATE flows SET source = NULL WHERE id = ?", id)
@@ -201,7 +188,7 @@ describe "HistoryView — view mode" do
     # new user saw was "no flows match the History + Repeater view" instead of the card telling
     # them where to point their client — and naming a filter that excluded nothing is useless
     # when there was nothing to exclude.
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.set_view(Gori::SavedViews.default_view(store))
       view.reload(store)
@@ -214,7 +201,7 @@ describe "HistoryView — view mode" do
 
   it "answers a typed query that matched nothing, even on an empty project" do
     # The one exception to the card: the operator just wrote the query and is owed the answer.
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.set_view(Gori::SavedViews.default_view(store))
       view.set_query("status:404")
@@ -228,7 +215,7 @@ describe "HistoryView — view mode" do
   end
 
   it "names the view in the note when the BAR is what the operator can see" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, Gori::FlowSource::Kind::Proxy, "keep.test", 200)
       view = HistoryView.new
       view.set_view(history_view)

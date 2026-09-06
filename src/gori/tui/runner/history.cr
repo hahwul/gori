@@ -23,7 +23,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.open_detail
   end
 
+  # Pins the flow on screen for the rest of this event (`@detail_pin`, runner.cr): the verbs
+  # that close the detail and then jump resolve their target AFTER this returns, when the
+  # overlay is gone and the resolvers would answer with the marks instead.
   def close_detail : Nil
+    @detail_pin = history_controller.view.detail_flow_id if @overlay.detail?
     history_controller.close_detail
   end
 

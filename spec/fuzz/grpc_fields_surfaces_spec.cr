@@ -142,7 +142,7 @@ describe "gRPC field positions reach every fuzz surface" do
   describe "MCP fuzz_start{fields}" do
     it "declares `fields`, so the unknown-argument gate lets it through" do
       with_surf_store do |store|
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         text, err = call_raw(tools, "fuzz_start", %({"template":"x","fields":["role"]}))
         err.should be_true                          # no template/target — refused for THAT
         text.should_not contain("unknown argument") # …not for the argument's name
@@ -154,7 +154,7 @@ describe "gRPC field positions reach every fuzz surface" do
       begin
         Protobuf::Schemas.clear
         with_surf_store do |store|
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           args = {
             "template"       => grpc_template("127.0.0.1"),
             "url"            => "http://127.0.0.1:#{origin.port}",
@@ -178,7 +178,7 @@ describe "gRPC field positions reach every fuzz surface" do
       origin = RecordingOrigin.new
       begin
         with_surf_store do |store|
-          tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+          tools = tools_for(store)
           # AFTER the bind: `Tools.new` publishes the project's own (empty) schema registry,
           # so a descriptor set applied before it would be replaced by the bind.
           with_demo_schema do
@@ -232,7 +232,7 @@ describe "gRPC field positions reach every fuzz surface" do
 
     it "leaves the echo alone for a sweep that named no field" do
       with_surf_store do |store|
-        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        tools = tools_for(store)
         text, err = call_raw(tools, "fuzz_start", %({"template":"x"}))
         err.should be_true # no payloads/target — but the point is the key, not the refusal
         text.should_not contain(%("grpc"))

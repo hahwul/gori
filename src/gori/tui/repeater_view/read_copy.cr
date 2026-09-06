@@ -146,7 +146,7 @@ class Gori::Tui::RepeaterView
     # offer "Copy selection" and then copy the caret line.
     when :request  then pane_insert?(:request) ? req_editor.selection? : @req_read.selection?
     when :response then @resp_cursor.selection?
-    when :target   then !pane_insert?(:target) && @target_read.selection?
+    when :target   then !pane_insert?(:target) && @target_read.selection?(target_active_cx)
     else                false
     end
   end

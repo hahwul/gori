@@ -76,11 +76,30 @@ describe Gori::InterceptFilter do
       Gori::InterceptFilter.new("body~unsubscr\\w+").matches?(ws).should be_false
     end
 
-    # A `~` on a field QL does not offer it on free-texts the whole token, exactly as
-    # `QL.regex_cond` does — so the two backends never disagree about what is a regex.
-    it "free-texts a ~ on a field that has no regex form" do
-      Gori::InterceptFilter.new("method~POST").matches?(req(method: "POST")).should be_false
-      Gori::InterceptFilter.new("method~POST").matches?(req(target: "/method~post")).should be_true
+    # `method` and `scheme` take `~` too, as they do in QL — `method~^P(OST|UT)$` is the one-term
+    # spelling of "every write verb" that the exact `method:` could only say as a three-way OR.
+    it "applies to method and scheme as well" do
+      writes = Gori::InterceptFilter.new("method~^P(OST|UT)$")
+      writes.matches?(req(method: "POST")).should be_true
+      writes.matches?(req(method: "PUT")).should be_true
+      writes.matches?(req(method: "GET")).should be_false
+      Gori::InterceptFilter.new("scheme~^https$").matches?(req(scheme: "https")).should be_true
+      Gori::InterceptFilter.new("scheme~^https$").matches?(req(scheme: "http")).should be_false
+    end
+
+    # A `~` on a field this backend HAS but offers no regex on is DROPPED, exactly as
+    # `QL.regex_cond` drops it — so the two backends never disagree about what is a regex. It
+    # used to free-text the whole token, so `status~5..` searched the target for that literal
+    # text: it matched nothing real and looked like a regex that found nothing.
+    it "drops a ~ on a field that has no regex form, rather than free-texting it" do
+      f = Gori::InterceptFilter.new("status~5..")
+      f.blank?.should be_true                               # dropped → no constraint, like a half-typed `host:`
+      f.matches?(req(target: "/status~5..")).should be_true # NOT a literal search for the token
+      Gori::InterceptFilter.known_field?("status", regex: true).should be_false
+      Gori::InterceptFilter.known_field?("method", regex: true).should be_true
+      Gori::InterceptFilter.known_field?("status").should be_true
+      # An unknown field under `~` is still free text, as before.
+      Gori::InterceptFilter.new("foo~bar").matches?(req(target: "/foo~bar")).should be_true
     end
 
     # An invalid pattern must not raise onto the proxy path. It becomes a never-match term,
@@ -348,6 +367,50 @@ describe Gori::InterceptFilter do
       Gori::InterceptFilter.new("-proto:ws").mentions_ws?.should be_false
       Gori::InterceptFilter.new("NOT proto:ws").mentions_ws?.should be_false
       Gori::InterceptFilter.new("host:acme AND NOT (proto:ws)").mentions_ws?.should be_false
+    end
+  end
+
+  # `UNSUPPORTED_FIELDS` said "and the whole of that list" while holding `scope` alone, so the
+  # other eleven QL fields a live message cannot answer — the ones `FIELDS`' own comment already
+  # names — fell through `field_symbol`'s else to FREE TEXT: `dur:>500` searched method/host/target
+  # for the literal string, held nothing, and read as intercept being broken. Deriving the list
+  # from `QL::FIELDS - FIELDS` is what keeps the two from disagreeing again.
+  describe "every QL field a live message cannot answer" do
+    it "is refused by name rather than degraded to free text" do
+      %w[size reqsize respsize dur stub src scope req.header resp.header req.body resp.body].each do |f|
+        Gori::InterceptFilter::UNSUPPORTED_FIELDS.should contain(f)
+      end
+      # An alias resolves before the check, so `res.body:` cannot free-text past it.
+      %w[res.body res.header req.size resp.size res.size source].each do |f|
+        Gori::InterceptFilter::UNSUPPORTED_FIELDS.should contain(f)
+      end
+    end
+
+    it "refuses nothing this backend actually implements" do
+      Gori::InterceptFilter::FIELDS.each do |f|
+        Gori::InterceptFilter::UNSUPPORTED_FIELDS.should_not contain(f)
+      end
+    end
+
+    it "holds nothing rather than everything the token happens to appear in" do
+      Gori::InterceptFilter.new("dur:>500").matches?(req(target: "/x?q=dur:>500")).should be_false
+      # Same caveat the `scope:` case carries: negated, a never-match holds EVERYTHING, which is
+      # why the doors that submit a complete condition refuse the term instead of compiling it.
+      Gori::InterceptFilter.new("-dur:>500").matches?(req).should be_true
+    end
+
+    it "says WHY, per field, in the one sentence the five refusing surfaces share" do
+      Gori::InterceptFilter.unsupported_field_reason("dur:>500")
+        .not_nil!.should contain("has no size or duration yet")
+      Gori::InterceptFilter.unsupported_field_reason("stub:yes")
+        .not_nil!.should contain("CAPTURE decision")
+      Gori::InterceptFilter.unsupported_field_reason("src:proxy")
+        .not_nil!.should contain("recorded when it is captured")
+      Gori::InterceptFilter.unsupported_field_reason("resp.body:x")
+        .not_nil!.should contain("`body:` already means the message in hand")
+      Gori::InterceptFilter.unsupported_field_reason("scope:in")
+        .not_nil!.should contain("scope rules are not part of a message")
+      Gori::InterceptFilter.unsupported_field_reason("host:acme method:POST").should be_nil
     end
   end
 

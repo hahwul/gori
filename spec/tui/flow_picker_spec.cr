@@ -81,7 +81,7 @@ describe Gori::Tui::FlowPicker do
     # vs press ⇧S). The link picker keeps the unlensed default and the older sentence.
     lensed = OverlayHarness.new(FlowPicker.new([] of Gori::Store::FlowRow, :a, scoped: true))
     lensed.rendered?("no flows in scope").should be_true
-    lensed.rendered?("⇧S toggles the lens").should be_true
+    lensed.rendered?("s toggles the lens").should be_true
     lensed.rendered?("no flows captured yet").should be_false
 
     OverlayHarness.new(FlowPicker.new([] of Gori::Store::FlowRow, :link))

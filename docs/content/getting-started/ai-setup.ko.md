@@ -47,7 +47,7 @@ gori mcp --install-hermes        # Hermes
 | 클라이언트가 MCP를 띄우는 방식 | 동작 |
 |-------------------------------|------|
 | Git 리포지토리 안 | 그 워크스페이스를 자체 gori 프로젝트에 path-bind |
-| Git 밖 (Desktop / 전역 에이전트에서 흔함) | **unbound**로 시작 — 핸드셰이크 성공; 에이전트가 트래픽 도구 전에 `list_projects` / `create_project` / `switch_project` 호출 |
+| Git 밖 (Desktop / 전역 에이전트에서 흔함) | **unbound**로 시작. 핸드셰이크 성공; 에이전트가 트래픽 도구 전에 `list_projects` / `create_project` / `switch_project` 호출 |
 | `--project` / `--db`로 설치 | 첫 도구 호출부터 그 프로젝트 제공 |
 
 에이전트가 먼저 `project_info`를 호출하게 하세요. `bound`가 false이면 프로젝트를 나열·생성(unbound일 때 create는 자동 바인딩)하거나 switch 한 뒤, bound일 때 이름·DB 경로·선택 출처를 확인한 다음 데이터를 건드리게 합니다.

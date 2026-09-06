@@ -11,10 +11,25 @@ require "../host_pattern"
 # internal proxy, everything else direct", cannot carry credentials (so gori was unusable
 # behind an authenticating proxy at all), and can choose different proxies per destination.
 module Gori::Settings
+  # The one spelling of "an HTTP CONNECT proxy reached over TLS". It is a rule `kind` AND a
+  # scalar/project URI scheme, because those two grammars name the same transport and a second
+  # word for it is how they drift (the same argument `Proxy::Socks5` makes for the SOCKS
+  # vocabulary gori speaks at both ends).
+  #
+  # WHY NOT `https://`: that scheme is already taken. It has meant a PLAINTEXT HTTP CONNECT
+  # proxy since before gori could speak TLS to a proxy at all, and every settings.json that
+  # carries one means exactly that. Redefining it would silently move an existing operator's
+  # egress onto a handshake their proxy may not even offer, on upgrade, with no edit — so
+  # `https://` keeps its meaning, `http+tls://` is the new, explicit spelling, and
+  # `upstream_proxy_warnings` says so out loud at startup for anyone who wrote the ambiguous
+  # one. `+` is legal in a scheme (RFC 3986 §3.1) and reads as what it is: the HTTP proxy
+  # protocol, carried over TLS.
+  UPSTREAM_TLS_KIND = "http+tls"
+
   # The transports a rule can route through. "direct" is a real, useful rule: it is how an
   # exception is carved out of a broader proxy rule below it in the table.
-  UPSTREAM_KINDS     = ["direct", "http", "socks5", "socks5h"]
-  UPSTREAM_PROTOCOLS = ["none", "http", "socks5", "socks5h"]
+  UPSTREAM_KINDS     = ["direct", "http", UPSTREAM_TLS_KIND, "socks5", "socks5h"]
+  UPSTREAM_PROTOCOLS = ["none", "http", UPSTREAM_TLS_KIND, "socks5", "socks5h"]
 
   # One routing rule. `host` is a HostPattern (see Gori::HostPattern) — the same dialect as
   # scope host rules, with "*" as the catch-all. Rules are ORDERED and the FIRST match wins,
@@ -38,6 +53,13 @@ module Gori::Settings
 
     def socks5? : Bool
       kind == "socks5" || kind == "socks5h"
+    end
+
+    # True when the hop to the PROXY itself is TLS. Named `tls?` on both the rule and the
+    # route (below) so a caller never has to compare the kind string, and never has to ask
+    # this question about the origin leg by accident.
+    def tls? : Bool
+      kind == UPSTREAM_TLS_KIND
     end
 
     def remote_dns? : Bool
@@ -88,6 +110,12 @@ module Gori::Settings
 
     def socks5? : Bool
       kind == "socks5" || kind == "socks5h"
+    end
+
+    # See UpstreamRule#tls?. This is the PROXY leg only; the origin's own TLS is decided by
+    # `Settings.verify_upstream?` + `outbound_tls_for`, which this deliberately never consults.
+    def tls? : Bool
+      kind == UPSTREAM_TLS_KIND
     end
 
     def remote_dns? : Bool
@@ -191,7 +219,7 @@ module Gori::Settings
       return invalid_upstream_route(err)
     end
     return UpstreamRoute::DIRECT if rule.direct?
-    addr = proxy_addr(rule.addr, default_port: rule.socks5? ? DEFAULT_SOCKS_PORT : DEFAULT_HTTP_PROXY_PORT)
+    addr = proxy_addr(rule.addr, default_port: upstream_default_port(rule.kind))
     return invalid_upstream_route("settings: invalid #{rule.kind} upstream proxy #{rule.addr.inspect}") unless addr
     UpstreamRoute.new(rule.kind, addr[0], addr[1], rule.username, rule.password, rule.credential_error)
   end
@@ -199,8 +227,9 @@ module Gori::Settings
   # The scalar/project upstream grammar follows the conventional SOCKS URI distinction:
   # `socks5` resolves destination names locally; `socks5h` sends them to the proxy as
   # ATYP DOMAIN. Keeping the kind here lets the dialer make that decision once.
-  # `https://` keeps its historical meaning (a plaintext HTTP CONNECT proxy) for compatibility;
-  # TLS-to-proxy is not implemented.
+  # `https://` keeps its historical meaning (a plaintext HTTP CONNECT proxy) for
+  # compatibility — see UPSTREAM_TLS_KIND for why it was not reclaimed, and
+  # `upstream_proxy_advisory` for what an operator who wrote it is told.
   def self.parse_upstream_proxy(value : String) : UpstreamRoute
     raw = value.strip
     return UpstreamRoute::DIRECT if raw.empty?
@@ -235,13 +264,63 @@ module Gori::Settings
 
   private def self.upstream_route_kind(scheme : String) : {String, Int32} | UpstreamRoute
     case scheme
-    when "http", "https" then {"http", DEFAULT_HTTP_PROXY_PORT}
-    when "socks5"        then {"socks5", DEFAULT_SOCKS_PORT}
-    when "socks5h"       then {"socks5h", DEFAULT_SOCKS_PORT}
+    when "http", "https"   then {"http", DEFAULT_HTTP_PROXY_PORT}
+    when UPSTREAM_TLS_KIND then {UPSTREAM_TLS_KIND, DEFAULT_HTTPS_PROXY_PORT}
+    when "socks5"          then {"socks5", DEFAULT_SOCKS_PORT}
+    when "socks5h"         then {"socks5h", DEFAULT_SOCKS_PORT}
     else
       invalid_upstream_route(
-        "settings: unsupported upstream proxy scheme #{scheme.inspect}; use http, socks5, or socks5h"
+        "settings: unsupported upstream proxy scheme #{scheme.inspect}; use " \
+        "http, #{UPSTREAM_TLS_KIND}, socks5, or socks5h"
       )
+    end
+  end
+
+  # What to tell an operator about a value that is ACCEPTED but probably not what they meant.
+  # Separate from `upstream_proxy_error` on purpose: an error refuses the route and fails every
+  # dial closed, and `https://` must not do that — it has a defined, long-standing meaning and
+  # a settings.json full of them has to keep working byte-for-byte. So the ambiguity is
+  # reported, not enforced. nil when there is nothing to say.
+  def self.upstream_proxy_advisory(value : String) : String?
+    return nil unless value.strip.downcase.starts_with?("https://")
+    "settings: upstream proxy #{value.strip.inspect} uses the legacy `https://` spelling, which " \
+    "means a PLAINTEXT HTTP CONNECT proxy here and always has — gori does not speak TLS to it. " \
+    "Write `http://` for that (same behaviour, no ambiguity), or `#{UPSTREAM_TLS_KIND}://` to " \
+    "actually wrap the hop to the proxy in TLS"
+  end
+
+  # Everything about upstream routing that an operator should see at startup but that must not
+  # refuse a dial. Modelled on `outbound_tls_warnings` and emitted at the same two sites
+  # (`App#print_banner`, `App#open_and_run`), because the failures are the same shape: config
+  # that is only wrong at dial time, far from the file that caused it.
+  #
+  # Guarded end to end for the reason that sibling is: this runs before the proxy binds, and a
+  # warning that can take the app down is worse than the problem it reports.
+  def self.upstream_proxy_warnings : Array(String)
+    out = [] of String
+    [effective_upstream_proxy, upstream_proxy].uniq.each do |value|
+      upstream_proxy_advisory(value).try { |w| out << w }
+    end
+    if err = upstream_proxy_ca_error(upstream_proxy_ca)
+      out << "#{err} — the proxy leg falls back to the system trust store"
+    end
+    if upstream_proxy_insecure? && tls_proxy_configured?
+      out << "settings: network.upstream_proxy_insecure is on — the upstream proxy's certificate " \
+             "is NOT verified, so the hop carrying every CONNECT authority and Proxy-Authorization " \
+             "header is unauthenticated"
+    end
+    out
+  rescue
+    [] of String
+  end
+
+  # Whether ANY configured route reaches its proxy over TLS. Asked only to decide whether the
+  # `insecure` warning is relevant: shouting about an unverified proxy on an install that has
+  # no TLS proxy would be noise on every start.
+  private def self.tls_proxy_configured? : Bool
+    return true if upstream_rules.any?(&.tls?)
+    [effective_upstream_proxy, upstream_proxy].any? do |value|
+      parse_upstream_proxy(value).tls?
     end
   end
 
@@ -451,8 +530,7 @@ module Gori::Settings
     if err = upstream_proxy_port_error(rule.addr)
       return err
     end
-    default_port = rule.socks5? ? DEFAULT_SOCKS_PORT : DEFAULT_HTTP_PROXY_PORT
-    unless proxy_addr(rule.addr, default_port: default_port)
+    unless proxy_addr(rule.addr, default_port: upstream_default_port(rule.kind))
       return "settings: invalid #{rule.kind} upstream proxy #{rule.addr.inspect}"
     end
     return "settings: upstream rule password_env is an environment variable NAME, not a value" if rule.password_env.includes?('$')

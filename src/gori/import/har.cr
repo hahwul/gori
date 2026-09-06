@@ -8,45 +8,122 @@ require "../proxy/h2/head_codec" # PROTOCOL_MARKER — the `:protocol` line Expo
 module Gori
   module Import
     module Har
+      # The whole file as one `ParseResult` — the CLI, MCP and the specs read it this way.
+      # Built on `each_flow`, so there is one parser; what this adds is the array.
+      #
+      # No raise on an empty result, deliberately. `Import.import_file` owns that message and
+      # says WHY nothing landed — "all N entries were skipped as malformed" — which is the
+      # whole reason `ParseResult` carries a tally. Raising here first made that branch dead
+      # for HAR, the format it matters most for: an operator with a 4000-entry file got "no
+      # valid HAR entries in <path>" and no count, while the same all-malformed OpenAPI spec
+      # got the tally. Every other parser already returns and lets `import_file` speak.
       def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
-        raw = File.read(path)
-        doc = begin
-          JSON.parse(raw)
-        rescue ex : JSON::ParseException
-          raise Gori::Error.new("HAR file is not valid JSON: #{ex.message}")
-        end
-        # A valid-JSON-but-wrong-shape file (a top-level array, a scalar, a `log` that
-        # isn't an object) must yield a clean Gori::Error, not the raw Exception that
-        # JSON::Any#[](String) throws on a non-Hash — cmd_import only rescues Gori::Error.
-        doc_h = doc.as_h? || raise Gori::Error.new("HAR file is not a JSON object")
-        log = doc_h["log"]?.try(&.as_h?)
-        raise Gori::Error.new("HAR file missing log object") unless log
-        entries = log["entries"]?.try(&.as_a?)
-        raise Gori::Error.new("HAR file has no entries") unless entries
         flows = [] of Builder::FlowPair
+        skipped = each_flow(path, prov) { |flow| flows << flow }
+        ParseResult.new(flows, skipped)
+      end
+
+      # How long the walk runs before it hands the fiber back. A HAR is the one import that
+      # gets big (a browser session is hundreds of MB), and `File.read` + `JSON.parse` of the
+      # whole thing was one synchronous call: the TUI froze for as long as it took. Same slice
+      # `Store::QueryControl` uses for a cooperative read.
+      PACE_SLICE = 4.milliseconds
+
+      # Walk the file's entries ONE AT A TIME — `JSON::PullParser` over the open file, each
+      # entry materialised as its own `JSON::Any` and handed to the same `entry_to_flow` the
+      # whole-file parse always used — so a 200 MB HAR is never in memory as one tree, and the
+      # fiber yields every `PACE_SLICE` so a render loop keeps drawing while it runs. Yields
+      # each flow; returns the number of entries SKIPPED as malformed (a bad body encoding, a
+      # bad date, an unexpected shape — one entry must never abort the file).
+      #
+      # `cancelled` is polled per entry: true stops the walk where it is (the rest of the file
+      # is not read), which is the palette cancel of a running TUI import.
+      #
+      # The shape errors (`not a JSON object`, `missing log object`, `has no entries`) are the
+      # same `Gori::Error`s the whole-file parse raised, found where the pull parser meets
+      # them. INVALID JSON is found where it lies, too — which for a file that breaks after
+      # its 3000th entry is AFTER those entries were yielded; `Import.import_file` says so.
+      # The walk's way out on a cancel. It leaves the parser mid-array by design (nothing past
+      # the stop is read), so the loops above it must not resume — they unwind on this.
+      private class Stopped < Exception
+        getter skipped : Int32
+
+        def initialize(@skipped : Int32)
+          super("HAR walk stopped")
+        end
+      end
+
+      def self.each_flow(path : String, prov : Provenance = Provenance.none,
+                         cancelled : (-> Bool)? = nil, &block : Builder::FlowPair ->) : Int32
+        File.open(path) do |file|
+          pull = JSON::PullParser.new(file)
+          raise Gori::Error.new("HAR file is not a JSON object") unless pull.kind.begin_object?
+          pull.read_begin_object
+          skipped = nil.as(Int32?)
+          while !pull.kind.end_object?
+            if pull.read_object_key == "log"
+              skipped = walk_log(pull, prov, cancelled, block)
+            else
+              pull.skip
+            end
+          end
+          pull.read_end_object
+          skipped || raise Gori::Error.new("HAR file missing log object")
+        end
+      rescue ex : Stopped
+        ex.skipped
+      rescue ex : JSON::ParseException
+        raise Gori::Error.new("HAR file is not valid JSON: #{ex.message}")
+      end
+
+      # The `log` object: its `entries` array is walked, everything else (version, creator,
+      # pages, comment) skipped without being built. Returns the skipped-entry count.
+      private def self.walk_log(pull : JSON::PullParser, prov : Provenance,
+                                cancelled : (-> Bool)?, block : Builder::FlowPair ->) : Int32
+        raise Gori::Error.new("HAR file missing log object") unless pull.kind.begin_object?
+        pull.read_begin_object
+        skipped = nil.as(Int32?)
+        while !pull.kind.end_object?
+          if pull.read_object_key == "entries"
+            skipped = walk_entries(pull, prov, cancelled, block)
+          else
+            pull.skip
+          end
+        end
+        pull.read_end_object
+        skipped || raise Gori::Error.new("HAR file has no entries")
+      end
+
+      # The `entries` array, one entry at a time. A cancel unwinds through `Stopped` with the
+      # parser still inside the array: the caller is stopping, and nothing past it is read.
+      private def self.walk_entries(pull : JSON::PullParser, prov : Provenance,
+                                    cancelled : (-> Bool)?, block : Builder::FlowPair ->) : Int32
+        raise Gori::Error.new("HAR file has no entries") unless pull.kind.begin_array?
+        pull.read_begin_array
         skipped = 0
-        entries.each do |e|
-          # A single malformed entry (invalid base64 body, bad date, unexpected JSON
-          # shape) must SKIP, not abort the whole import — entry_to_flow can raise
-          # (Base64::Error, type casts), which previously discarded every valid entry.
+        last_pause = Time.instant
+        while !pull.kind.end_array?
+          raise Stopped.new(skipped) if cancelled.try(&.call)
+          # The entry as its own tree, straight off the parser. OUTSIDE the rescue below on
+          # purpose: a JSON error here is the FILE being malformed, and swallowing it as one
+          # skipped entry would leave the parser where it stopped and this loop spinning on it.
+          entry = JSON::Any.new(pull)
+          # A single malformed entry (invalid base64 body, bad date, unexpected JSON shape)
+          # must SKIP, not abort the whole import — entry_to_flow can raise (Base64::Error,
+          # type casts), which previously discarded every valid entry.
           flow = begin
-            entry_to_flow(e, prov)
+            entry_to_flow(entry, prov)
           rescue
             nil
           end
-          if flow
-            flows << flow
-          else
-            skipped += 1
+          flow ? block.call(flow) : (skipped += 1)
+          if Time.instant - last_pause >= PACE_SLICE
+            Fiber.yield
+            last_pause = Time.instant
           end
         end
-        # No raise on an empty result, deliberately. `Import.import_file` owns that message and
-        # says WHY nothing landed — "all N entries were skipped as malformed" — which is the
-        # whole reason `ParseResult` carries a tally. Raising here first made that branch dead
-        # for HAR, the format it matters most for: an operator with a 4000-entry file got "no
-        # valid HAR entries in <path>" and no count, while the same all-malformed OpenAPI spec
-        # got the tally. Every other parser already returns and lets `import_file` speak.
-        ParseResult.new(flows, skipped)
+        pull.read_end_array
+        skipped
       end
 
       private def self.entry_to_flow(entry : JSON::Any, prov : Provenance) : Builder::FlowPair?
@@ -60,7 +137,7 @@ module Gori
         duration_us = parse_time(entry["time"]?)
 
         req_headers = headers_list(req["headers"]?)
-        req_body = post_body(req["postData"]?)
+        req_body, req_frame = post_body(req["postData"]?)
         # HAR's `bodySize` is the size the body had ON THE WIRE, which is not necessarily the
         # size of the text the file carries: `Export::Har` writes the true size beside a body
         # that was capped at capture time. Passing it through keeps that flow truncated
@@ -71,7 +148,7 @@ module Gori
         resp = nil if resp.try(&.raw).nil? # an explicit JSON `null` response is truthy as JSON::Any — treat it as absent
         unless resp
           return Builder.pending_request(created_at, url, method, req_headers, req_body,
-            http_version, req_declared,
+            http_version, req_declared, frame_body: req_frame,
             source_surface: prov.surface, source_ref: prov.ref)
         end
 
@@ -115,7 +192,7 @@ module Gori
           created_at, url, method, req_headers, req_body, http_version,
           status, reason, resp_headers, resp_body, content_type, duration_us,
           req_declared, resp_declared, connect_protocol(req_headers),
-          resp_http_version: resp_version,
+          resp_http_version: resp_version, frame_body: req_frame,
           source_surface: prov.surface, source_ref: prov.ref)
         msgs = ws_messages(entry, created_at)
         msgs.empty? ? pair : Builder::FlowPair.new(pair.request, pair.response, msgs)
@@ -286,10 +363,18 @@ module Gori
       # postData.params {name,value} — Firefox/Safari record x-www-form-urlencoded
       # POSTs as params with no text. Fall back to reconstructing the urlencoded body
       # from params so the body (and its Content-Length) aren't silently dropped.
-      private def self.post_body(node : JSON::Any?) : Bytes?
-        return nil unless node
+      #
+      # Returns {body, reconstructed}: `reconstructed` is true only when the body was REBUILT
+      # from `params`. A `text` body is the operator's bytes verbatim, so `request_head` must
+      # not frame it with a fabricated `Content-Length` the source never stated — an HTTP/2 POST
+      # exported without one (h2 frames its body with DATA/END_STREAM) has to import back with
+      # the same head it left, or the export→import fixed point breaks and a replay carries a
+      # header the capture did not (see `Builder.synthesized_length`). A `params` body IS ours to
+      # frame, since we composed it.
+      private def self.post_body(node : JSON::Any?) : {Bytes?, Bool}
+        return {nil, false} unless node
         if body = encoded_body(node["text"]?.to_s, node["encoding"]?.to_s)
-          return body
+          return {body, false}
         end
         if params = node["params"]?.try(&.as_a?)
           pairs = params.compact_map do |p|
@@ -297,9 +382,9 @@ module Gori
             next if name.empty?
             "#{URI.encode_www_form(name)}=#{URI.encode_www_form(p["value"]?.to_s)}"
           end
-          return pairs.join('&').to_slice unless pairs.empty?
+          return {pairs.join('&').to_slice, true} unless pairs.empty?
         end
-        nil
+        {nil, false}
       end
 
       private def self.response_body(resp : JSON::Any) : {Bytes?, String?, Int64?}

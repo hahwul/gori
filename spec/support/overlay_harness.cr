@@ -12,9 +12,12 @@ require "./memory_backend"
 #   * `press` / `click` mirror `Runner#dispatch_overlay_key` / `#dispatch_overlay_click`
 #     LINE FOR LINE — :cancel closes, :commit runs `commit` and closes iff it returns
 #     true, anything else stays open.
-#   * `drag` / `double_click` mirror `Runner#dispatch_drag` / `#dispatch_double_click`'s
-#     OVERLAY tier, including its `supports_drag?` gate: a modal that never opted in must
-#     see the gesture do nothing, which is what the shell does.
+#   * `drag` mirrors `Runner#dispatch_drag`'s OVERLAY tier, including its `supports_drag?`
+#     gate: a modal that never opted in must see the gesture do nothing, which is what the
+#     shell does. `double_click` mirrors `#dispatch_double_click`'s, which has NO such gate
+#     (`double_click_target?` asks an overlay nothing — a list card with no text to drag over
+#     still answers a pair on a row): the outcome is applied like a click's, `:pass` falls
+#     back to the ordinary click.
 #   * `open?` mirrors whether the shell still holds the modal in `@active_overlay`.
 #   * `commits` counts runs of the injected `on_commit` closure — the open-site behaviour
 #     a migrated modal no longer carries itself.
@@ -160,18 +163,23 @@ class OverlayHarness
   end
 
   # Two presses in the same cell inside the shell's double-click window. Mirrors
-  # `Runner#press_left`: the pair is dispatched to `handle_double_click` FIRST, and only a
-  # false answer falls back to the ordinary click (which, for a modal, includes the
-  # click-away dismiss). Returns whether the overlay took a word.
+  # `Runner#press_left` + `#dispatch_double_click`: the pair is dispatched to
+  # `handle_double_click` FIRST; its outcome is applied exactly as a click's would be
+  # (`:cancel` closes, `:commit` closes iff `commit`), and only `:pass` falls back to the
+  # ordinary click (which, for a modal, includes the click-away dismiss). Returns whether
+  # the overlay took the pair.
   #
   # The first press of the pair is the caller's job — the shell's real sequence is
   # press → press, and `handle_double_click` spreads from the caret that first press left.
   def double_click(mx : Int32, my : Int32) : Bool
     live!
-    return false unless @overlay.supports_drag?
-    took = @overlay.handle_double_click(@area, mx, my)
-    dispatch(@overlay.handle_click(@area, mx, my)) unless took
-    took
+    outcome = @overlay.handle_double_click(@area, mx, my)
+    if outcome == :pass
+      dispatch(@overlay.handle_click(@area, mx, my))
+      return false
+    end
+    dispatch(outcome)
+    true
   end
 
   def double_click_in_box(dx : Int32, dy : Int32) : Bool

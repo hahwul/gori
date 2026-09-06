@@ -17,22 +17,6 @@ require "../spec_helper"
 # because a live binding value exists only in the process that observed it and the MCP server
 # rebinds `Env.layer` from the store at bind time (`Tools#bind_binding_layer`).
 
-private def with_store(&)
-  path = File.tempname("gori-draftprov", ".db")
-  store = Gori::Store.open(path)
-  prev_env = Gori::Settings.project_env_vars
-  begin
-    yield store
-  ensure
-    Gori::Settings.project_env_vars = prev_env
-    Gori::Env.bump_highlight_rev
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def drive(store, *lines) : Array(JSON::Any)
   input = IO::Memory.new(lines.join('\n') + "\n")
   output = IO::Memory.new
@@ -72,7 +56,7 @@ end
 
 describe "MCP repeater drafts keep the author's bytes" do
   it "stores create_repeater's request verbatim when it carries a recognisable secret" do
-    with_store do |store|
+    with_store_env do |store|
       req = "GET /a HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer #{SECRET}\r\n\r\n"
       res = drive(store, set_secret_call, create_call(req))
       payload = tool_payload(res[1])
@@ -86,7 +70,7 @@ describe "MCP repeater drafts keep the author's bytes" do
   end
 
   it "stores update_repeater's replacement verbatim, and says the flow link no longer means byte identity" do
-    with_store do |store|
+    with_store_env do |store|
       flow = seed_flow(store)
       seed = "GET /seed HTTP/1.1\r\nHost: h\r\n\r\n"
       req = "GET /afterupdate HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer #{SECRET}\r\n\r\n"
@@ -106,7 +90,7 @@ describe "MCP repeater drafts keep the author's bytes" do
   # must not grow a `secrets_masked` field — an "only when it FIRED" report that fires on
   # every call is noise an agent learns to ignore.
   it "leaves a request with no secret in it alone and reports nothing" do
-    with_store do |store|
+    with_store_env do |store|
       req = "GET /clean HTTP/1.1\r\nHost: h\r\n\r\n"
       payload = tool_payload(drive(store, set_secret_call, create_call(req))[1])
       String.new(store.get_repeater(payload["id"].as_i64).not_nil!.request).should eq(req)
@@ -119,7 +103,7 @@ describe "MCP repeater drafts keep the author's bytes" do
   # it says, so the note must not fire. It keys on "the bytes were replaced", not on
   # "update_repeater was called".
   it "does not claim a flow link is stale when the request was not replaced" do
-    with_store do |store|
+    with_store_env do |store|
       flow = seed_flow(store)
       req = "GET /seed HTTP/1.1\r\nHost: h\r\n\r\n"
       rid = tool_payload(drive(store, create_call(req, flow))[0])["id"].as_i64
@@ -134,7 +118,7 @@ describe "MCP repeater drafts keep the author's bytes" do
   # COMPLEMENT 3: with NO env var and no binding at all the two paths are identical, so this
   # cannot be a behaviour difference for the overwhelmingly common call.
   it "is a no-op when nothing is set" do
-    with_store do |store|
+    with_store_env do |store|
       req = "GET /x HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer #{SECRET}\r\n\r\n"
       payload = tool_payload(drive(store, create_call(req))[0])
       String.new(store.get_repeater(payload["id"].as_i64).not_nil!.request).should eq(req)
@@ -148,7 +132,7 @@ describe "MCP repeater drafts keep the author's bytes" do
   # produce the SAME request. Round 3's headline regression existed because nobody compared
   # the three surfaces against each other.
   it "gives the TUI evidence path and the CLI/MCP path the same wire bytes" do
-    with_store do |store|
+    with_store_env do |store|
       req = "GET /a HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer #{SECRET}\r\n\r\n"
       res = drive(store, set_secret_call, create_call(req))
       rid = tool_payload(res[1])["id"].as_i64

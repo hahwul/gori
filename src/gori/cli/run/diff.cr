@@ -10,6 +10,9 @@ module Gori
       # Verdict names `--verdict` accepts, in the order a report reads them.
       DIFF_VERDICTS = Gori::Diff::Render::ORDER
 
+      @[Subcommand("diff", help: [
+        {"diff", "Retest report: diff two projects at endpoint scale (--from/--to, text/json/md)"},
+      ])]
       private def self.cmd_diff(args : Array(String)) : Nil
         from_name : String? = nil
         to_name : String? = nil

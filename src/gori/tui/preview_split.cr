@@ -38,6 +38,7 @@ module Gori::Tui
     # :list or :preview. A Symbol rather than an enum because the shell's focus plumbing
     # speaks symbols; `set_preview_focus` is what keeps a bad one from ever landing here.
     getter preview_focus : Symbol
+    getter preview_scroll : Int32
 
     # Ignores anything outside the vocabulary, so a caller cannot park focus on a value
     # neither pane answers to — which renders as "nothing focused" rather than as an error.
@@ -52,8 +53,25 @@ module Gori::Tui
       @preview_focus = @preview_focus == :list ? :preview : :list
     end
 
+    # One step list → preview (dir > 0) or back; false off either end, so the Runner's focus
+    # ring can leave for the tab bar there.
+    def step_preview_focus(dir : Int32) : Bool
+      return false unless preview_enabled?
+      target = dir > 0 ? :preview : :list
+      return false if @preview_focus == target
+      @preview_focus = target
+      true
+    end
+
     def scroll_preview(delta : Int32) : Nil
       return unless @preview_focus == :preview
+      wheel_preview(delta)
+    end
+
+    # The same scroll without the focus guard — for the wheel, which reads whatever pane is
+    # under the pointer and must not move keyboard focus to do it. The ceiling is written at
+    # render, where the line count is known (both includers clamp there).
+    def wheel_preview(delta : Int32) : Nil
       @preview_scroll = {@preview_scroll + delta, 0}.max
     end
   end

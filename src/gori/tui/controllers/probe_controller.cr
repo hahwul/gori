@@ -33,6 +33,12 @@ module Gori::Tui
       @sub_idx = 0 # 0 = Findings · 1 = Rules
     end
 
+    # The RULES sub-tab's list — read by specs that drive the row gestures through the view's
+    # own hit-tests, the way `view` exposes the findings.
+    def rules : ProbeRulesView
+      @rules
+    end
+
     def view : ProbeView
       @probe
     end
@@ -87,6 +93,20 @@ module Gori::Tui
         @probe.detail_open? ? @probe.scroll_detail(delta) : @probe.move(delta)
       end
       true
+    end
+
+    # ⇥ / ⇧⇥ between the findings list and its preview; off either end the ring returns to
+    # the tab bar. The focus-ring hook — a `key.tab?` arm in `handle_body_key` never ran (the
+    # Runner claims ⇥ for the ring first), so the `↹ preview` the hint promised was mouse-only.
+    def pane_advance(dir : Int32) : Bool
+      return false if rules_tab? || @probe.detail_open? || !@probe.preview_enabled?
+      @probe.step_preview_focus(dir)
+    end
+
+    def page_rows : Int32?
+      return @rules.list_page_rows if rules_tab?
+      return nil if @probe.detail_open? || (@probe.preview_enabled? && @probe.preview_focus == :preview)
+      @probe.list_page_rows
     end
 
     def body_badge : Symbol
@@ -204,6 +224,19 @@ module Gori::Tui
       true
     end
 
+    # Pointer-aware: the preview under the cursor scrolls without taking focus from the list.
+    # Same `content` rect `handle_click` hit-tests with.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return handle_wheel(step) if rules_tab? || @probe.detail_open?
+      content = BodyChrome.content_rect(rect, strip: true)
+      if @probe.preview_enabled? && @probe.preview_at?(content, mx, my)
+        @probe.wheel_preview(step)
+      else
+        @probe.move(step)
+      end
+      true
+    end
+
     def handle_wheel(step : Int32) : Bool
       if rules_tab?
         @rules.move(step)
@@ -241,10 +274,6 @@ module Gori::Tui
         end
         return true
       end
-      if @probe.preview_enabled? && key.tab?
-        @probe.cycle_preview_focus
-        return true
-      end
       false
     end
 
@@ -254,12 +283,13 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-      when key.enter?     then @probe.stop_query
-      when key.escape?    then @probe.cancel_query
-      when key.tab?       then @probe.query_complete
-      when key.backspace? then @probe.query_backspace
-      when key.left?      then @probe.query_move(-1)
-      when key.right?     then @probe.query_move(1)
+      when key.enter?                  then @probe.stop_query
+      when key.escape?                 then @probe.cancel_query
+      when key.tab?                    then @probe.query_complete
+      when (act = LineEdit.action(ev)) then @probe.query_edit(act) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before plain ⌫, which would swallow ⌥⌫
+      when key.backspace?              then @probe.query_backspace
+      when key.left?                   then @probe.query_move(-1)
+      when key.right?                  then @probe.query_move(1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @probe.query_insert(c)
@@ -521,16 +551,16 @@ module Gori::Tui
       when :custom
         c = row.custom.not_nil!
         on = !c.enabled
-        ok = if c.global?
-               # settings.json, not the project DB — there is no transaction and so no commit
-               # flag to read. Only the PROJECT writer can report a rolled-back batch.
-               Settings.set_scan_rule_enabled(c.id, on)
-               true
-             else
-               store.set_probe_custom_rule_enabled(c.id.to_i64, on)
-             end
+        # BOTH writers answer. `Settings.set_scan_rule_enabled` returns whether the section
+        # reached disk — `Settings.save` refuses outright after a half-read load, and it puts
+        # the array back when the write did not commit — and this branch used to throw that
+        # answer away behind a comment claiming settings.json had no commit flag to read. It
+        # does, `apply_custom_rule` below already acts on it, and a global scan rule the strip
+        # says is off while it is still matching (or still on while it is not) is the same
+        # false negative that refusal exists to prevent.
+        ok = c.global? ? Settings.set_scan_rule_enabled(c.id, on) : store.set_probe_custom_rule_enabled(c.id.to_i64, on)
         unless ok
-          @host.status("rule \"#{c.title}\" NOT changed (project busy)")
+          @host.status("rule \"#{c.title}\" NOT changed (#{write_cause(c.scope)})")
           return
         end
         @host.status(on ? "enabled rule \"#{c.title}\"" : "disabled rule \"#{c.title}\"")
@@ -572,9 +602,13 @@ module Gori::Tui
       @host.confirm("DELETE PROBE RULE",
         "Delete custom rule “#{c.title}”? Existing findings from it are kept until cleared.",
         confirm_label: "delete", danger: true) do
-        c.global? ? Settings.delete_scan_rule(c.id) : @host.session.store.delete_probe_custom_rule(c.id.to_i64)
+        ok = remove_custom_rule(c.id, c.scope, @host.session.store)
         reload_rules
-        @host.status("probe rule deleted: #{c.title}")
+        # The delete answers, and dropping that answer said "deleted" over a rule that is
+        # still installed and still matching — the row `reload_rules` redraws one line later
+        # then contradicts the strip. `Settings.delete_scan_rule`'s own comment names the
+        # stake: "an operator removing a noisy rule has to be able to trust that sentence".
+        @host.status(ok ? "probe rule deleted: #{c.title}" : "rule \"#{c.title}\" NOT deleted (#{write_cause(c.scope)}) — it is still scanning")
       end
     end
 
@@ -586,7 +620,11 @@ module Gori::Tui
       return false unless ov.valid?
       store = @host.session.store
       if id = ov.edit_id
-        if ov.scope == ov.edit_scope
+        # `CustomRuleOverlay.editing` sets the pair together, so a non-nil `edit_id` always
+        # carries one; the fallback only keeps this branch off the "moved between libraries"
+        # path for a form that somehow has an id and no origin.
+        from = ov.edit_scope || ov.scope
+        if ov.scope == from
           if ov.scope == "global"
             # settings.json answers the same "did it COMMIT" question as the project writer
             # below: `Settings.save` refuses outright after a half-read load, and a rolled-back
@@ -608,24 +646,76 @@ module Gori::Tui
             end
           end
         else
-          ov.edit_scope == "global" ? Settings.delete_scan_rule(id) : store.delete_probe_custom_rule(id.to_i64)
-          insert_custom_rule(ov, store)
+          # A scope change is a MOVE between the two libraries, and both halves answer. INSERT
+          # FIRST: a refused insert after a committed delete loses the rule outright, while a
+          # refused delete after a committed insert only leaves a duplicate — which the strip
+          # can name and the operator can remove. Neither answer was read at all, so the pair
+          # could do either and still report "updated custom rule".
+          # The rule's on/off bit rides along. Both writers default a NEW rule to enabled and
+          # the form carries no `enabled` field, so a rule the operator had turned off started
+          # scanning again the moment its scope was cycled — a muted rule un-muting itself with
+          # nothing on the strip to say so.
+          unless insert_custom_rule(ov, store, enabled: custom_rule_enabled?(id, from, store))
+            @host.status("rule \"#{ov.rule_title}\" NOT moved (#{write_cause(ov.scope)}) — " \
+                         "it is still #{from}")
+            return false
+          end
+          unless remove_custom_rule(id, from, store)
+            # Saved, so the form closes; the leftover is named because only the operator can
+            # clear it, and until they do the same rule files findings twice.
+            reload_rules
+            @host.status("rule \"#{ov.rule_title}\" added to the #{ov.scope} library but the " \
+                         "#{from} copy could NOT be removed (#{write_cause(from)}) — delete it there")
+            return true
+          end
         end
         @host.status("updated custom rule")
       else
-        insert_custom_rule(ov, store)
+        unless insert_custom_rule(ov, store)
+          @host.status("rule \"#{ov.rule_title}\" NOT added (#{write_cause(ov.scope)}) — " \
+                       "nothing is scanning for it")
+          return false
+        end
         @host.status("added custom rule")
       end
       reload_rules
       true
     end
 
-    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store) : Nil
+    # Whether the new rule reached its library. Both writers report a refusal in their own
+    # dialect: `add_scan_rule` answers "" (the `0_i64` of this family's id type) and
+    # `insert_probe_custom_rule` answers 0 — NOT nil — for a batch that never committed, and
+    # 0 is TRUTHY in Crystal, which is the trap `Probe::Triage.promote` names.
+    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store, enabled : Bool = true) : Bool
       if ov.scope == "global"
-        Settings.add_scan_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
+        !Settings.add_scan_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind,
+          ov.pattern, ov.severity.label, enabled).empty?
       else
-        store.insert_probe_custom_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
+        store.insert_probe_custom_rule(ov.rule_title, ov.description, ov.side, ov.region,
+          ov.kind, ov.pattern, ov.severity, enabled) != 0
       end
+    end
+
+    # Whether the rule `id` in `scope`'s library is currently ON — read so a MOVE between the
+    # two libraries carries the bit instead of re-minting the rule enabled. A rule the lookup
+    # cannot find keeps the insert's own default.
+    private def custom_rule_enabled?(id : String, scope : String, store : Store) : Bool
+      if scope == "global"
+        Settings.scan_rules.find { |r| r.id == id }.try(&.enabled) != false
+      else
+        store.probe_custom_rules.find { |r| r.id.to_s == id }.try(&.enabled?) != false
+      end
+    end
+
+    # Drop a custom rule from the library its `scope` names; whether the write committed.
+    private def remove_custom_rule(id : String, scope : String, store : Store) : Bool
+      scope == "global" ? Settings.delete_scan_rule(id) : store.delete_probe_custom_rule(id.to_i64)
+    end
+
+    # The cause clause for a refused write, by the library it was aimed at — the two strings
+    # the edit branch above already uses, spelled once.
+    private def write_cause(scope : String) : String
+      scope == "global" ? "settings not writable" : "project busy"
     end
 
     private def reload_rules : Nil
@@ -645,9 +735,23 @@ module Gori::Tui
       @probe.detail_click(BodyChrome.content_rect(rect, strip: true), mx, my, selecting: true)
     end
 
+    # RULES: a pair on a row opens its editor — what ↵ / `e` (`probe-rules.edit`) do, and the
+    # same method, so a built-in row gets the same sentence the key gives it ("built-in rules
+    # can't be edited") rather than two silent selects. Elsewhere the pair selects a word in
+    # the detail's AFFECTED URLS, as before. Same `content` rect as `handle_click`.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      content = BodyChrome.content_rect(rect, strip: true)
+      if rules_tab?
+        return false unless idx = @rules.row_at(content, mx, my)
+        @rules.select_index(idx)
+        # A section header or the empty placeholder is not a rule: `select_index` refused it,
+        # so acting now would edit whichever row was selected before. Decline instead.
+        return false unless @rules.selected_index == idx
+        rules_edit
+        return true
+      end
       return false unless supports_drag?
-      @probe.detail_select_word(BodyChrome.content_rect(rect, strip: true), mx, my)
+      @probe.detail_select_word(content, mx, my)
     end
 
     # --- READ-pane delegators (the detail's read verbs + the Runner's read_* ladders) ---
@@ -675,6 +779,19 @@ module Gori::Tui
 
     def probe_detail_clear_selection : Nil
       @probe.detail_clear_selection
+    end
+
+    def probe_issue_selected? : Bool
+      !rules_tab? && !@probe.detail_open? && !@probe.selected_issue.nil?
+    end
+
+    # `y` wherever the tab is: the detail's URLs when the detail is open, else the issue row
+    # under the cursor as a report line with its affected URLs beneath (#964's shape).
+    def probe_copy : Nil
+      return probe_detail_copy if probe_detail_readable?
+      return unless (issue = @probe.selected_issue) && probe_issue_selected?
+      head = "[#{issue.severity}] #{issue.title} · #{issue.host}"
+      copy_text(issue.affected.empty? ? head : "#{head}\n#{issue.affected.join('\n')}", "issue")
     end
 
     # `y`: the selected URLs, or every affected URL when nothing is selected. This list IS the

@@ -3,19 +3,6 @@ require "../spec_helper"
 # Configured OAST providers: the global/project merge (Oast.provider_configs) mirrors
 # Probe.custom_rules — see spec/probe/custom_rule_spec.cr for the analogous test.
 
-private def with_store(&)
-  path = File.tempname("gori-oast-config", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe Gori::Oast::ProviderConfig do
   it "builds a scope-qualified key that can't collide across scopes" do
     g = Gori::Oast::ProviderConfig.new("7", "g", "interactsh", "https://a", nil, true, "global")

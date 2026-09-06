@@ -68,9 +68,14 @@ module Gori::Tui
       @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
     end
 
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Bool
-      return false unless box = overlay_box(area)
-      @editor.select_word_at(editor_rect(box), mx, my)
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      return :pass unless box = overlay_box(area)
+      @editor.select_word_at(editor_rect(box), mx, my) ? :stay : :pass
+    end
+
+    # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the whole card is the editor, so a line break is a newline.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      true
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -90,8 +95,9 @@ module Gori::Tui
     private def edit(ev : Termisu::Event::Key) : Nil
       key = ev.key
       case
-      when key.enter? then @editor.insert_newline
-        # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when key.enter?               then @editor.insert_newline
+      when ev.ctrl? && key.lower_z? then @editor.undo # the undo chord every body editor binds
+      # Before plain ⌫, which would swallow the modified form as a one-character delete.
       when @editor.word_delete_key?(ev)  then @editor.handle_motion_key(ev)
       when key.backspace?                then @editor.backspace
       when key.delete?                   then @editor.delete
@@ -129,7 +135,7 @@ module Gori::Tui
         # says: esc here returns :commit (see handle_key), and this line is the only thing on
         # screen when the card cannot be drawn. Telling an operator "close" about a key that
         # keeps their unsaved response is the one place the wording has to be exact.
-        screen.text(area.x + 1, area.y, "stub editor needs a larger window · esc saves & closes", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "stub editor needs a larger window", closing: "esc saves & closes")
         return
       end
       # bg: Theme.bg (not the card default panel) so the embedded editor, which paints on

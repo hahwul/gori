@@ -16,6 +16,10 @@ include Gori::Tui
 describe "RepeaterView transport chip" do
   ws_head = "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n" \
             "Connection: Upgrade\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\n\r\n"
+  # The RFC 8441 shape a capture stores (#733): a `CONNECT` line plus the `X-Gori-Protocol`
+  # marker standing in for the `:protocol` pseudo-header.
+  h2_ws_head = "CONNECT /ws HTTP/2\r\nHost: ws.test\r\n" \
+               "Sec-WebSocket-Version: 13\r\nX-Gori-Protocol: websocket\r\n\r\n"
 
   render = ->(view : RepeaterView, rect : Rect) {
     b = MemoryBackend.new(rect.w, rect.h)
@@ -100,6 +104,45 @@ describe "RepeaterView transport chip" do
       view.cycle_ws_transport
       render.call(view, rect).row(rect.y).should contain("^V:WS")
       view.transport_badge_lit?.should be_false
+    end
+
+    # An RFC 8441 tab has TWO stops, not three. `^V` moves a tab between the WebSocket engine
+    # and a plain send of THE SAME bytes, and `CONNECT /ws HTTP/2` + `:protocol` has no HTTP/1.1
+    # form at all: down an h1 socket `CONNECT /ws` names a host, not a path.
+    it "cycles WS → h2 → WS on an RFC 8441 handshake" do
+      view = RepeaterView.new
+      view.restore("https://ws.test", h2_ws_head, true, true,
+        ws_messages: [Gori::Store::WsOutMessage.text("hello")])
+      rect = Rect.new(0, 0, 100, 30)
+
+      render.call(view, rect).row(rect.y).should contain("^V:WS")
+      view.ws_mode?.should be_true
+      view.transport_badge_lit?.should be_false
+
+      view.cycle_ws_transport
+      render.call(view, rect).row(rect.y).should contain("^V:WS→h2")
+      view.ws_mode?.should be_false
+      view.transport_badge_lit?.should be_true
+
+      view.cycle_ws_transport
+      render.call(view, rect).row(rect.y).should contain("^V:WS")
+      view.ws_mode?.should be_true
+      view.http2?.should be_true # the handshake is an h2 request whichever engine sends it
+    end
+
+    # A stored row that says `http2: false` about an RFC 8441 handshake (an older gori, or a
+    # hand-authored `--request-raw`) still reaches the h2 stop: the CYCLE reads the bytes in
+    # the editor, not the row's flag.
+    it "reads the handshake shape off the editor, not the stored flag" do
+      view = RepeaterView.new
+      view.restore("https://ws.test", h2_ws_head, false, true,
+        ws_messages: [Gori::Store::WsOutMessage.text("hello")])
+      rect = Rect.new(0, 0, 100, 30)
+
+      view.cycle_ws_transport
+      render.call(view, rect).row(rect.y).should contain("^V:WS→h2")
+      view.cycle_ws_transport
+      render.call(view, rect).row(rect.y).should contain("^V:WS")
     end
 
     it "fills with accent while the handshake is going out as plain HTTP" do

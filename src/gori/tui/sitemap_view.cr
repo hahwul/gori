@@ -1,4 +1,5 @@
 require "./screen"
+require "./line_edit"
 require "./theme"
 require "./frame"
 require "./query_suggest"
@@ -18,6 +19,7 @@ module Gori::Tui
   # WRAPPING their children rather than rewriting any path. Helps answer "what does this
   # app do". Navigate with ↑/↓, expand/collapse with →/←/Enter.
   class SitemapView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # The tree node + pure builder live in `Gori::Sitemap` (shared with the headless
     # `gori run sitemap`); this view layers scope markers, path-tag editing, and
     # rendering on top. The alias keeps the rest of this file reading as `Node`.
@@ -54,7 +56,7 @@ module Gori::Tui
     # The highlighter's field vocabulary: everything QL ACCEPTS (a superset of `QL_FIELDS`, which
     # is only what Tab offers here) plus this surface's own `tag:`, which QL knows nothing about
     # because `partition` pulls it out before the query ever reaches the parser.
-    QL_KNOWN = ->(f : String) { f == "tag" || QL.known_field?(f) }
+    QL_KNOWN = ->(f : String, op : Char) { (f == "tag" && op == ':') || QL.known_field?(f, regex: op == '~') }
     # The editing bar's label — a constant because `render_query_popup` lines the dropdown up
     # under the token, which means knowing how far the query text is indented.
     QUERY_PREFIX = "filter › "
@@ -144,10 +146,24 @@ module Gori::Tui
     # rather than the capped tree, so the number to watch is retention: at the 100k default it
     # is what is quoted here. Re-measure before assuming it still holds if that default moves.
     def reload(store : Store) : Nil
-      prev_sel = selection_anchor
-      prev_scroll = @scroll
-      prev_expand = collect_expand_state
+      plan = prepare_reload || return
+      entries, tags = fetch_reload(store, plan)
+      apply_reload(entries, tags, plan)
+    end
 
+    # The store half of a reload, as three steps, so the `/` bar can run the middle one on a
+    # worker fiber (`SitemapController#request_reload`, the History #967 shape): `prepare`
+    # compiles the query on the main fiber and answers nil when it already settled the tree
+    # (an invalid residual); `fetch` is the two reads and touches no view state; `apply`
+    # builds the tree from what came back. `reload` is the three in a row, for every caller
+    # that is not typing.
+    record ReloadPlan, positives : Array(String), negatives : Array(String), combined : QL::Filter
+
+    # Whether a worker fetch is in flight — the empty-tree note says so instead of "no
+    # endpoints match" while the previous tree stays up.
+    property? searching : Bool = false
+
+    def prepare_reload : ReloadPlan?
       # `tag:`/`-tag:` are Sitemap-local (the shared QL has no tag column): split them
       # out, hand the residual to QL.parse, and apply the tag filter to the built tree.
       positives, negatives, residual = split_tag_terms(@query)
@@ -173,10 +189,22 @@ module Gori::Tui
         @loaded = true
         return
       end
-      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter)
-      @hosts = Sitemap.build(store.sitemap_entries(combined))
-      Sitemap.stamp_tags!(@hosts, store.sitemap_tags)
-      filter_by_tags(positives, negatives)
+      ReloadPlan.new(positives, negatives, QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter))
+    end
+
+    # Reads only — safe off the main fiber. `control` lets the caller cancel a superseded read.
+    def fetch_reload(store : Store, plan : ReloadPlan,
+                     control : Store::QueryControl? = nil) : {Array({String, String, String}), Hash({String, String}, String)}
+      {store.sitemap_entries(plan.combined, control: control), store.sitemap_tags}
+    end
+
+    def apply_reload(entries : Array({String, String, String}), tags : Hash({String, String}, String), plan : ReloadPlan) : Nil
+      prev_sel = selection_anchor
+      prev_scroll = @scroll
+      prev_expand = collect_expand_state
+      @hosts = Sitemap.build(entries)
+      Sitemap.stamp_tags!(@hosts, tags)
+      filter_by_tags(plan.positives, plan.negatives)
       if @grouping
         # Opaque ids first, then numeric runs — the two passes partition the children.
         @hosts.each { |h| Sitemap.fold_templates!(h) }
@@ -630,16 +658,22 @@ module Gori::Tui
       @tag_targets = [] of {String, String}
     end
 
-    # Apply the committed memo to every pinned target in place (blank clears it) and exit the
-    # editor. No re-derive — the tree structure is unchanged, so the selection stays put and
-    # draw_row reads the fresh tags live. Each target is looked up by its (host, path) key
-    # rather than off the cursor, so a mid-edit reload that moved the selection (or a set of
-    # marks the cursor was never on) still stamps the right nodes; a key the tree no longer
-    # holds is skipped and picked up by the next reload from the store.
-    def apply_tag(text : String) : Nil
+    # Apply the committed memo in place (blank clears it) and exit the editor. No re-derive —
+    # the tree structure is unchanged, so the selection stays put and draw_row reads the fresh
+    # tags live. Each target is looked up by its (host, path) key rather than off the cursor,
+    # so a mid-edit reload that moved the selection (or a set of marks the cursor was never
+    # on) still stamps the right nodes; a key the tree no longer holds is skipped and picked
+    # up by the next reload from the store.
+    #
+    # `committed` is which of the pinned targets the STORE actually took, and it is an
+    # argument rather than an assumption: `Store#set_sitemap_tag` answers whether the write
+    # landed, and stamping a refused one paints a memo that is on nobody's disk and that the
+    # next reload silently takes back. Nil means "all of them", for a caller with nothing to
+    # report.
+    def apply_tag(text : String, committed : Array({String, String})? = nil) : Nil
       value = text.blank? ? nil : text
       index = node_index
-      @tag_targets.each { |key| index[key]?.try(&.tag=(value)) }
+      (committed || @tag_targets).each { |key| index[key]?.try(&.tag=(value)) }
       cancel_tag
     end
 
@@ -922,6 +956,13 @@ module Gori::Tui
     # the body below returns early on several paths (no endpoints, the empty-state card), and a
     # dropdown that vanished exactly when the filter matched nothing would be missing from the
     # one moment an operator is most likely to be fixing a query. Mirrors HistoryView.
+    @list_last_h = 0 # rows the last tree frame drew — the PgUp/PgDn step (list_page_rows)
+
+    # One screenful of the tree, for PgUp/PgDn: last drawn rows minus two of overlap.
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
                listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
@@ -961,7 +1002,9 @@ module Gori::Tui
         # A recovery hint mirrors Issues/Probe. The QL-clear cue only applies to a
         # real `/` query — a Scope-lens-only empty set isn't cleared with esc//.
         msg, hint =
-          if !@query.blank?
+          if @searching
+            {"searching…", nil}
+          elsif !@query.blank?
             # An INVALID QL residual (all terms bad, or a broken regex) reads as "no
             # endpoints match" unless we say why — @query_note distinguishes it.
             {@query_note || "no endpoints match", querying? ? "esc clears the filter" : "/ to edit the filter"}
@@ -980,6 +1023,7 @@ module Gori::Tui
       rows = visible_rows
       # Reserve the bottom row for the tag prompt while editing (the tree scrolls above it).
       list_h = @tagging ? {rect.h - 1, 0}.max : rect.h
+      @list_last_h = list_h
       ensure_visible(rows.size, list_h)
       (0...list_h).each do |i|
         ri = @scroll + i
@@ -1270,7 +1314,7 @@ module Gori::Tui
       chips = [] of {Symbol, String, Color}
       chips << {:count, "#{@hosts.size}h", Theme.muted} if filtering?
       scope_on = @scope.try(&.active?) == true
-      chips << (scope_on ? {:scope, "⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "⇧S scope:off", Theme.muted})
+      chips << (scope_on ? {:scope, "s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "s scope:off", Theme.muted})
       chips << {:fold, "g:fold", @grouping ? Theme.accent : Theme.muted}
       chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
       chips
@@ -1359,6 +1403,14 @@ module Gori::Tui
     end
 
     # Inverts render's marker column `rect.x + 1 + depth*2` for visible_rows[ri].
+    # Whether row `idx` is an endpoint (nothing to expand) rather than a folder. A grouped
+    # fold reads as a folder: it has children to show, even when its own path is synthetic.
+    def leaf_at?(idx : Int32) : Bool
+      row = visible_rows[idx]?
+      return false unless row
+      row.node.leaf?
+    end
+
     def marker_hit?(rect : Rect, mx : Int32, ri : Int32) : Bool
       row = visible_rows[ri]?
       return false unless row

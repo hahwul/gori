@@ -27,13 +27,16 @@ module Gori::Tui
       charge = self.class.result_bytes(result)
       projected = false
       if charge > @byte_cap
+        # Projected from HERE on, not only past the second cap: `metrics_only` already dropped
+        # the request/head/body this row holds in the archive, and a row it sufficed for was
+        # left unmarked — so the detail panes said "not retained" about bytes the spool has.
+        projected = true
         result = self.class.metrics_only(result)
         charge = self.class.result_bytes(result)
         if charge > @byte_cap
           result = self.class.bounded_metrics(result,
             {@byte_cap - Fuzz::Persistence::ROW_METADATA_BYTES, SCALAR_PREVIEW_BYTES}.min)
           charge = self.class.result_bytes(result)
-          projected = true
         end
       end
       @rows << result

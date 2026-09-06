@@ -113,19 +113,6 @@ private class RecordingBackend < F::Backend
   end
 end
 
-private def with_store(&)
-  path = File.tempname("gori-smuggle", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe Gori::Probe::Active::RequestSmuggling do
   rule = P::Active::RequestSmuggling.new
 

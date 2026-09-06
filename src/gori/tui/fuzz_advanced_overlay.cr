@@ -277,7 +277,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "advanced editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "advanced editor needs a larger window")
         return
       end
       Frame.card(screen, box, "ADVANCED", bg: Theme.bg, border: Theme.border_focus)

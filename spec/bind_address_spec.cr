@@ -54,6 +54,20 @@ describe Gori::BindAddress do
 
     it "keeps a non-canonical loopback alias literal (localhost would not reach it)" do
       Gori::BindAddress.display("127.0.0.2", 8070).should eq("127.0.0.2:8070")
+      # …and every other 127/8 address, which is why this is an equality against the two
+      # canonical loopbacks rather than `IPAddress#loopback?`.
+      Gori::BindAddress.display("127.1.2.3", 8070).should eq("127.1.2.3:8070")
+      Gori::BindAddress.display("::ffff:127.0.0.1", 8070).should eq("[::ffff:127.0.0.1]:8070")
+    end
+
+    # The same "one address, many spellings" rule `wildcard?` follows: `bind_host_error`
+    # accepts every RFC 4291 form, so a string list would collapse one spelling of ::1 to
+    # `localhost` and print the raw literal for another — the same bind, two readouts.
+    it "collapses ::1 in any spelling, not just the two that were listed" do
+      {"::1", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "::0:1",
+       "[::1]"}.each do |h|
+        Gori::BindAddress.display(h, 9000).should eq("localhost:9000")
+      end
     end
   end
 
@@ -98,6 +112,28 @@ describe Gori::BindAddress do
       end
       {"127.0.0.1", "::1", "192.168.1.5", "localhost", "0.0.0.1"}.each do |h|
         Gori::BindAddress.wildcard?(h).should be_false
+      end
+    end
+
+    # RFC 4291 §2.2 gives one address many spellings, and `Settings.bind_host_error` accepts
+    # every one of them (`Socket::IPAddress.valid_v6?`). A hand-kept list of strings is
+    # therefore a list a new spelling escapes — the same reason `Upstream.unspecified?` parses
+    # the address instead of matching text. What escapes is not cosmetic: `dial_host` hands the
+    # unresolved literal to the browser launcher (`--proxy-server=`) and to the setup page, so
+    # the operator is told to point their client at an address nothing can connect to.
+    it "recognises an all-zero address in any RFC 4291 spelling" do
+      {"0000:0000:0000:0000:0000:0000:0000:0000", "0::0", "0:0:0::0", "::0.0.0.0",
+       "[0000::0000]", " ::0 "}.each do |h|
+        Gori::BindAddress.wildcard?(h).should be_true, "expected #{h.inspect} to be a wildcard"
+        Gori::BindAddress.dial_host(h).should eq("::1")
+        Gori::BindAddress.display(h, 8070).should eq("localhost:8070 (all interfaces)")
+      end
+    end
+
+    it "still refuses an address that merely LOOKS all-zero" do
+      {"0.0.0.1", "::2", "0000:0000:0000:0000:0000:0000:0000:0001", "0.0.0.0.0",
+       "0-0-0-0"}.each do |h|
+        Gori::BindAddress.wildcard?(h).should be_false, "expected #{h.inspect} not to be a wildcard"
       end
     end
   end

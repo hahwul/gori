@@ -8,21 +8,8 @@ require "../spec_helper"
 # `authorization: [REDACTED]` and the chunk tool handing back the whole Bearer token were two
 # readings of one stored flow.
 
-private def with_store(&)
-  path = File.tempname("gori-chunkgate", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def call_json(store, name, args : String) : JSON::Any
-  tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+  tools = tools_for(store)
   r = tools.call(name, JSON.parse(args))
   fail "#{name} errored: #{r.text}" if r.is_error
   JSON.parse(r.text)

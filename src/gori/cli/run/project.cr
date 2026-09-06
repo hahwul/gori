@@ -3,6 +3,15 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("project", help: [
+        {"project [list]", "List projects holding captured traffic (--all for every one)"},
+        {"project create", "Create (or reopen) a project by name"},
+        {"project delete", "Delete a project and everything captured in it"},
+        {"project scope", "Manage scope rules (list, add, update, delete, enable/disable)"},
+        {"project sandbox", "Get/set the hard-containment sandbox gate (status, on, off)"},
+        {"project env", "Manage project env vars ($KEY substitution)"},
+        {"project host-override", "Manage host overrides (list, add, update, delete)"},
+      ])]
       private def self.cmd_project(args : Array(String)) : Nil
         sub = args.first?
         case sub
@@ -159,7 +168,7 @@ module Gori
             ts = pr.last_modified.try(&.to_local.to_s("%Y-%m-%d %H:%M")) || "—"
             id = registry.id_of(pr) || "—"
             flows = row.flows.try(&.to_s) || "?"
-            puts "#{project_row_marker(row)} #{pr.name.ljust(24)}  #{id.ljust(8)}  #{ts}  " \
+            puts "#{project_row_marker(row)} #{CLI::Output.pad(pr.name, 24)}  #{id.ljust(8)}  #{ts}  " \
                  "#{CLI::Output.human_size(pr.db_size).rjust(8)}  #{flows.rjust(6)} flows"
           end
         end

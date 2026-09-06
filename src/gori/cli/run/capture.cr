@@ -2,6 +2,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("capture", help: [
+        {"capture", "Start the proxy and stream captured flows to STDOUT"},
+      ])]
       private def self.cmd_capture(args : Array(String)) : Nil
         Settings.load # persisted bind is the default; flags override
         listen = Settings.bind_host

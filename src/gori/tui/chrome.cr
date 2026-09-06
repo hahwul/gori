@@ -139,13 +139,26 @@ module Gori::Tui
     # both every frame (the menu strip + the ⋯ hidden count); calling visible_tabs and
     # hidden_tabs separately rebuilt reconcile's catalog hashes twice per frame for the same
     # output. Pure function of prefs, so folding the two into one pass is byte-identical.
+    #
+    # Memoized on its two inputs: this runs once per FRAME (`Runner#render`), and `reconcile`
+    # is three catalog Hashes, a quadratic insert walk and four array passes for an answer
+    # that changes only when the operator edits the tab layout or switches tab. A tuple
+    # equality over ≤25 small entries is what the hit costs; the prefs are copied into the
+    # memo so a later in-place edit of the live array cannot make a stale hit look fresh.
     def self.split_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : {Array({Symbol, String}), Array({Symbol, String})}
+      if (memo = @@split_memo) && memo[1] == force && memo[0] == prefs
+        return memo[2]
+      end
       ann = reconcile(prefs)
       vis = ann.select { |(_, _, v)| v }.map { |(s, l, _)| {s, l} }
       append_forced(ann, vis, force)
       hidden = ann.reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
-      {vis, hidden}
+      out = {vis, hidden}
+      @@split_memo = {prefs.dup, force, out}
+      out
     end
+
+    @@split_memo : {Array({String, Bool}), Symbol?, {Array({Symbol, String}), Array({Symbol, String})}}? = nil
 
     # The "more" affordance label — a ⋯ ellipsis plus the hidden-tab count, so the bar
     # reads "there are N tabs tucked away here" at a glance.
@@ -413,14 +426,14 @@ module Gori::Tui
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
                          tabs : Array({Symbol, String}) = TABS,
                          intercept_count : Int32 = 0, hidden_count : Int32 = 0,
-                         more_focused : Bool = false) : Nil
+                         more_focused : Bool = false, numbered : Bool = false) : Nil
       return if rect.empty?
 
       # Carve the rightmost cells out for the "more" dropdown button (when tabs are
       # hidden) so the segment layout never packs a tab over it. A one-col gutter sits
       # between the last tab and the button.
       more = more_button_rect(rect, hidden_count)
-      segs, start = menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count)
+      segs, start = menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count, numbered)
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0 # earlier tabs hidden
       segs.each do |(sym, label, seg)|
         if sym == active_tab
@@ -429,7 +442,12 @@ module Gori::Tui
           screen.fill(seg, bg)
           screen.text(seg.x + 1, seg.y, label, fg, bg, Attribute::Bold)
         else
-          screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg)
+          # A numbered label wears its `N:` dimmer than the name, as the sub-tab strip's chips do
+          # (`chip_zones` is the one definition of that run). Widths are untouched: the number is
+          # part of the label, so the click hit-test sees the same cells the paint does.
+          num_end = numbered ? chip_zones(label)[0] : 0
+          screen.text(seg.x + 1, seg.y, label[0, num_end], menu_number_ink, Theme.bg) if num_end > 0
+          screen.text(seg.x + 1 + num_end, seg.y, label[num_end..], Theme.muted, Theme.bg)
         end
       end
 
@@ -455,9 +473,10 @@ module Gori::Tui
     # can never drift from what was drawn. Coords are 0-based cells.
     def self.menu_segments(rect : Rect, active_tab : Symbol, *,
                            tabs : Array({Symbol, String}) = TABS,
-                           intercept_count : Int32 = 0, hidden_count : Int32 = 0) : Array({Symbol, Rect})
+                           intercept_count : Int32 = 0, hidden_count : Int32 = 0,
+                           numbered : Bool = false) : Array({Symbol, Rect})
       return [] of {Symbol, Rect} if rect.empty?
-      menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count)[0]
+      menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count, numbered)[0]
         .map { |(sym, _, seg)| {sym, seg} }
     end
 
@@ -474,10 +493,25 @@ module Gori::Tui
     # rect} plus the window `start` (so render can flag the `‹` overflow marker).
     # Mirrors the old inline render_menu loop exactly — windowing via scroll_start,
     # segments laid " label " with a 1-col gap, the same `> rect.right + 1` break.
+    # The `N:` run's ink on an inactive tab: a step below the name's `Theme.muted`, since the
+    # bar's names are already muted and the number must read as the lesser half.
+    MENU_NUMBER_DIM = 0.55
+
+    def self.menu_number_ink : Color
+      Theme.blend(Theme.muted, Theme.bg, MENU_NUMBER_DIM)
+    end
+
+    # `numbered` prefixes the first nine labels with `N:` — the sub-tab strip's convention,
+    # and the number `nav.posN` answers to: the Nth VISIBLE tab, an absolute position, so a
+    # scrolled bar showing `5:History` first still sends `5` there. Off by default
+    # (`Settings.tab_numbers?`); Chrome reads no Settings itself, the caller passes it.
     private def self.menu_layout(rect : Rect, active_tab : Symbol, tabs : Array({Symbol, String}),
-                                 intercept_count : Int32) : {Array({Symbol, String, Rect}), Int32}
+                                 intercept_count : Int32, numbered : Bool = false) : {Array({Symbol, String, Rect}), Int32}
       segs = [] of {Symbol, String, Rect}
-      labels = tabs.map { |(sym, label)| "#{label}#{menu_badge(sym, intercept_count)}" }
+      labels = tabs.map_with_index do |(sym, label), i|
+        num = numbered && i < 9 ? "#{i + 1}:" : ""
+        "#{num}#{label}#{menu_badge(sym, intercept_count)}"
+      end
       # Columns, like strip_layout's sibling line. The catalog TABS are fixed ASCII, where
       # display_width takes its bytesize fast path and this is a no-op — but `tabs` comes from
       # the caller, and the two layout helpers share scroll_start, so they must not measure a

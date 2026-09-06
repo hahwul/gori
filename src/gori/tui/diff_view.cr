@@ -240,8 +240,15 @@ module Gori::Tui
       Gori::Diff::Render::ORDER.map { |v| "#{v.label} #{counts[v]}" }.join(" · ")
     end
 
+    @list_last_h = 0 # rows the last list frame drew — the PgUp/PgDn step (list_page_rows)
+
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h <= 0
+      @list_last_h = rect.h
       if @rows.empty?
         screen.text(rect.x, rect.y, empty_lens_note, Theme.muted, Theme.bg, width: rect.w)
         return

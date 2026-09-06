@@ -69,6 +69,12 @@ module Gori::Tui
       @dirty = false
       @link_preview = ""            # resolved first-link line for the bottom strip (set by controller)
       @deleted_ids = Set(Int64).new # notes closed this session — so a merge-on-save doesn't resurrect them
+      # Ids this session MINTED that no committed document has carried yet. A note in here
+      # exists only in memory, so closing it can drop its `entity_links` on the spot: there is
+      # no write for the store to refuse and nothing on disk to bring the note back. Every
+      # OTHER note's links wait for `Notes.save`'s post-commit cleanup, which is what keeps a
+      # refused save from destroying the evidence of a note that is still there.
+      @unpersisted = Set(Int64).new
       @mode = InputMode::Read
       @read = TextReadState.new
     end
@@ -81,7 +87,16 @@ module Gori::Tui
     private def alloc_note_id : Int64
       id = Random::Secure.rand(1_i64..0x7fff_ffff_ffff_ffff_i64)
       @next_id = {@next_id, id + 1}.max
+      @unpersisted << id
       id
+    end
+
+    # Was this id minted here and never carried by a committed document? Only such a note may
+    # have its links dropped at close — see `@unpersisted`. The ctor's own first note is NOT in
+    # the set: its id is the literal 1, which a project written by `Notes.create` really can
+    # hold, so it must never authorise a delete against somebody else's note.
+    def unpersisted?(id : Int64) : Bool
+      @unpersisted.includes?(id)
     end
 
     getter link_preview : String
@@ -145,6 +160,7 @@ module Gori::Tui
           doc.cur.clamp(0, @notes.size - 1)
         end
       @next_id = {@next_id, doc.next_id}.max
+      doc.notes.each { |e| @unpersisted.delete(e.id) }
       @dirty = false
       # Leave @mode / @read alone — soft merge must not force READ or drop selection.
     end
@@ -189,7 +205,7 @@ module Gori::Tui
     # Replace the current note's text (e.g. from the external editor); marks dirty
     # so it persists + the cross-session reconcile won't clobber it.
     def replace_current(text : String) : Nil
-      current.area.set_text(text)
+      current.area.replace_from_outside(text)
       @dirty = true
     end
 
@@ -263,14 +279,26 @@ module Gori::Tui
       @dirty = true
     end
 
+    # ⌫, ⌦ and ⌃Z dirty the note only on a REAL buffer change. Each is a no-op somewhere — ⌫
+    # at the buffer start, ⌦ at its end, ⌃Z on an empty undo stack — and marking the note
+    # dirty there was not harmless: `dirty?` is the lock that keeps a peer's commit from
+    # reloading this note (`locked?`), and it is what makes the next esc / sub-tab switch
+    # rewrite the whole document. An idle ⌃Z in a clean note held off every peer refresh until
+    # something else saved. The Repeater's request pane and the Fuzzer's template already gate
+    # the same three keys on `TextArea#edits`.
     def backspace : Nil
-      current.area.backspace
-      @dirty = true
+      edit_if_changed(&.backspace)
     end
 
     def undo : Nil
-      current.area.undo
-      @dirty = true
+      edit_if_changed(&.undo)
+    end
+
+    private def edit_if_changed(& : TextArea -> Nil) : Nil
+      ed = current.area
+      before = ed.edits
+      yield ed
+      @dirty = true if ed.edits != before
     end
 
     def move(dr : Int32, dc : Int32) : Nil
@@ -327,10 +355,23 @@ module Gori::Tui
       current.area.end_of_line
     end
 
-    # Forward-delete the char under the caret — a content edit.
+    # Forward-delete the char under the caret — a content edit (see `backspace` for the gate).
     def delete : Nil
-      current.area.delete
+      edit_if_changed(&.delete)
+    end
+
+    # Splice a whole bracketed paste in as ONE edit — one undo step, one `edits` bump — instead
+    # of the N keystrokes it used to arrive as (see `TextArea#insert_text`, and the Repeater's
+    # `edit_paste`, whose measurements this shares: per-keystroke delivery is quadratic in the
+    # paste). A note is where a captured response, a tool's output or a whole writeup gets
+    # pasted, so this was the tab most often paying that cost. INSERT only: READ has no caret
+    # to paste at, and the Runner already refuses a paste there rather than running it as
+    # commands. Returns false when refused, so the Runner replays it keystroke by keystroke.
+    def paste(text : String) : Bool
+      return false unless insert_mode?
+      current.area.insert_text(text)
       @dirty = true
+      true
     end
 
     # Mouse: place the cursor at a click. `rect` is the framed interior the runner
@@ -477,8 +518,10 @@ module Gori::Tui
       merged = Notes.save(store, mine, @deleted_ids, @notes[@current]?.try(&.id), @next_id)
       return false unless merged
       # `next_id` advances on a COMMIT only: the ids the merge handed out are the ones now on
-      # disk, and a rolled-back transaction handed out none.
+      # disk, and a rolled-back transaction handed out none. That same commit is what makes a
+      # newly-minted note persisted, so its id leaves `@unpersisted` here and nowhere else.
       @next_id = merged.next_id
+      merged.notes.each { |n| @unpersisted.delete(n.id) }
       # …and `@dirty` only comes down on a write that COMMITTED. Clearing it regardless meant
       # a rolled-back write (project busy) silently dropped the operator's notes: the flag was
       # the only thing that would have made a later exit path try again. Same correction as

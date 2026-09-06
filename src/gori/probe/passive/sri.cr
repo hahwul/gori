@@ -14,7 +14,7 @@ module Gori
       # FP control, deliberately strict:
       #   * only ABSOLUTE (`https://host/…`) and protocol-relative (`//host/…`) references are
       #     considered — a relative path is same-origin by definition and needs no SRI;
-      #   * only a reference whose host:port differs from the page's is flagged;
+      #   * only a reference whose scheme/host/port differs from the page's is flagged;
       #   * only `<script src>` and `<link rel=stylesheet>`, the two subresource types browsers
       #     actually enforce `integrity` on today.
       # Evidence is the external HOST, not the URL, so one issue per host names its third
@@ -22,20 +22,18 @@ module Gori
       class Sri < Rule
         def info : RuleInfo
           RuleInfo.new("sri", "Missing Subresource Integrity",
-            "Flags cross-origin scripts and stylesheets loaded without an integrity attribute (supply-chain exposure).",
+            "Flags cross-origin scripts and stylesheets without supported integrity metadata (supply-chain exposure).",
             Category::HEADERS)
         end
 
         # Both tag types in ONE pattern: scanning for them separately walked the same (up to
         # 256 KiB) document twice.
-        TAG = /<(?:script|link)\b[^>]*>/i
-        # Attribute readers. The (?<![-\w]) guard requires a real attribute boundary, so
-        # `data-src=` / `data-href=` (lazy-loading placeholders, never fetched as subresources)
-        # can't masquerade as the real attribute — cf. the same guard in body_leaks.
-        SRC_ATTR       = /(?<![-\w])src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
-        HREF_ATTR      = /(?<![-\w])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
-        INTEGRITY_ATTR = /(?<![-\w])integrity\s*=\s*["']?\S/i
-        REL_STYLESHEET = /(?<![-\w])rel\s*=\s*["']?stylesheet\b/i
+        TAG              = /<(?:script|link)(?=[\t\n\f\r \/>])(?:[^"'<>]++|"[^"]*"|'[^']*')*>/i
+        STYLESHEET_TOKEN = /(?:\A|[\t\n\f\r ])stylesheet(?:[\t\n\f\r ]|\z)/i
+        # Empty or unsupported-only metadata is ignored by SRI. Do not require the digest
+        # to have a correct length: recognized but mismatching hashes BLOCK the resource.
+        # https://www.w3.org/TR/sri/#parse-metadata
+        SUPPORTED_INTEGRITY = /(?:\A|[\t\n\f\r ])sha(?:256|384|512)(?:[-?\t\n\f\r ]|\z)/
 
         MAX_HOSTS = 5 # distinct third-party hosts reported per flow
 
@@ -113,17 +111,95 @@ module Gori
         # when the tag isn't SRI-eligible, already carries `integrity`, or stays same-origin.
         private def external_ref(tag : String, ctx : Context) : String?
           link = tag.size >= 5 && tag[0, 5].compare("<link", case_insensitive: true) == 0
-          return nil if link && !REL_STYLESHEET.matches?(tag)
-          return nil if INTEGRITY_ATTR.matches?(tag)
-          return nil unless url = attr_value(tag, link ? HREF_ATTR : SRC_ATTR)
+          url, rel, guarded = attributes(tag, link)
+          return nil if guarded
+          return nil if link && !STYLESHEET_TOKEN.matches?(rel || "")
+          return nil unless url
           external_host(url, ctx)
         end
 
-        # The attribute value from whichever quoting form matched (double, single, bare).
-        private def attr_value(tag : String, re : Regex) : String?
-          m = re.match(tag)
-          return nil unless m
-          m[1]? || m[2]? || m[3]?
+        private def attributes(tag : String, link : Bool) : {String?, String?, Bool}
+          url_span = nil.as({Int32, Int32}?)
+          rel = integrity = nil.as(String?)
+          each_attribute(tag, link ? 5 : 7) do |name, start, size|
+            if name_is?(name, link ? "href" : "src")
+              url_span ||= {start, size}
+            elsif name_is?(name, "rel")
+              rel ||= tag.byte_slice(start, size)
+            elsif name_is?(name, "integrity")
+              integrity ||= tag.byte_slice(start, size)
+              return {nil, nil, true} if SUPPORTED_INTEGRITY.matches?(integrity)
+            end
+          end
+          {url_span.try { |span| tag.byte_slice(span[0], span[1]) }, rel, false}
+        end
+
+        # Consume complete attributes, including unknown ones: src=/integrity= inside a quoted
+        # title is text. The caller keeps the first duplicate, including boolean/empty values.
+        # Byte offsets keep Unicode labels linear. Only the three relevant values are copied;
+        # regex MatchData per attribute plus a per-tag Hash tripled protected-tag scan cost.
+        private def each_attribute(tag : String, pos : Int32, & : Bytes, Int32, Int32 ->) : Nil
+          bytes = tag.to_slice
+          while pos < bytes.size
+            if space?(bytes[pos]) || bytes[pos] == '/'.ord || bytes[pos] == '>'.ord
+              pos += 1
+              next
+            end
+            start = pos
+            while pos < bytes.size && !name_end?(bytes[pos])
+              pos += 1
+            end
+            name = bytes[start, pos - start]
+            pos += 1 if pos == start # malformed '=': consume it to guarantee progress (P7)
+            pos = skip_space(bytes, pos)
+            pos, value_start, size = attribute_value(bytes, pos)
+            yield name, value_start, size
+          end
+        end
+
+        private def name_is?(name : Bytes, expected : String) : Bool
+          return false unless name.size == expected.bytesize
+          name.each_with_index do |byte, i|
+            return false unless (byte | 32) == expected.to_unsafe[i]
+          end
+          true
+        end
+
+        private def name_end?(byte : UInt8) : Bool
+          space?(byte) || byte == '='.ord || byte == '/'.ord || byte == '>'.ord
+        end
+
+        private def space?(byte : UInt8) : Bool
+          byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13
+        end
+
+        private def skip_space(bytes : Bytes, pos : Int32) : Int32
+          while pos < bytes.size && space?(bytes[pos])
+            pos += 1
+          end
+          pos
+        end
+
+        private def attribute_value(bytes : Bytes, pos : Int32) : {Int32, Int32, Int32}
+          return {pos, pos, 0} unless pos < bytes.size && bytes[pos] == '='.ord
+          pos += 1
+          pos = skip_space(bytes, pos)
+          return {pos, pos, 0} if pos >= bytes.size
+          quote = bytes[pos]
+          if quote == '"'.ord || quote == '\''.ord
+            start = pos + 1
+            pos = start
+            while pos < bytes.size && bytes[pos] != quote
+              pos += 1
+            end
+            {pos + 1, start, pos - start}
+          else
+            start = pos
+            while pos < bytes.size && !space?(bytes[pos]) && bytes[pos] != '>'.ord
+              pos += 1
+            end
+            {pos, start, pos - start}
+          end
         end
 
         # The reference's host when it is absolute/protocol-relative AND its origin differs
@@ -155,14 +231,14 @@ module Gori
           # `acme.test:8443` on a page from `acme.test:443` is another origin's code and needs
           # a hash exactly as a CDN does — dropping it trades that false positive for a false
           # negative, the worse half of the trade in a scanner. An omitted port defaults from
-          # the reference's OWN scheme, which keeps `https://acme.test/x.js` on a plaintext
-          # page a different origin (:443 vs :80) without the compare carrying the scheme
-          # dimension as well (cf. `Cors#cross_origin?`, which compares all three).
+          # the reference's OWN scheme. Scheme itself also matters when both origins explicitly
+          # name the same port (cf. `Cors#cross_origin?`, which compares all three).
           # `split_host_port` is the same helper that produced `row.host`, so it strips IPv6
           # brackets and refuses to split an unbracketed v6 literal on its address colons. The
-          # port stays in the evidence string; only the comparison parses it out.
+          # port stays in the evidence string; only the comparison parses it out. Scheme is
+          # also part of the tuple even when BOTH schemes explicitly name the same port.
           bare, port = Proxy::Upstream.split_host_port(host, scheme == "https" ? 443 : 80)
-          return nil if bare == ctx.host.downcase && port == ctx.row.port
+          return nil if scheme == ctx.scheme.downcase && bare == ctx.host.downcase && port == ctx.row.port
           safe_host(host)
         end
 

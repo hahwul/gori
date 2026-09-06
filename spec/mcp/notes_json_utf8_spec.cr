@@ -14,7 +14,7 @@ private def with_notes_store(text : String, &)
   begin
     store.set_setting(Gori::Notes::DOCS_KEY,
       Gori::Notes.serialize(0, [Gori::Notes::NoteEntry.new(7_i64, text)], 8_i64))
-    yield Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+    yield tools_for(store)
   ensure
     store.close
     File.delete?(path)
@@ -76,7 +76,7 @@ describe "MCP issue tools — JSON-RPC UTF-8" do
       iid = store.insert_issue("t", Gori::Store::Severity::Low, "h.test", primary)
       store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, linked)
 
-      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      tools = tools_for(store)
       %w[list_issues get_issue].each do |name|
         args = name == "get_issue" ? JSON.parse(%({"id":#{iid}})) : JSON.parse("{}")
         res = tools.call(name, args).text

@@ -9,6 +9,7 @@ require "../scope"
 require "../probe"
 require "../probe_query"
 require "./preview_split"
+require "./line_edit"
 require "./issue_presentation"
 require "./viewport"
 
@@ -19,6 +20,7 @@ module Gori::Tui
   # IssuesView structurally; the issues ARE the groups (the DB upserts one row per
   # (code, host)), so there's no in-view folding.
   class ProbeView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # The list-over-preview layout and the severity/status vocabulary, both shared with
     # the sibling tab that lists the same records through the other lens.
     include PreviewSplit
@@ -26,6 +28,10 @@ module Gori::Tui
     include IssuePresentation
 
     QUERY_FIELDS = Probe::Filter::FIELDS
+
+    # The bar's field vocabulary — see `IssuesView::QUERY_KNOWN`, the sibling bar over the
+    # sibling backend.
+    QUERY_KNOWN = ->(f : String, op : Char) { Probe::Filter.known_field?(f, regex: op == '~') }
 
     getter query : String
     getter mode : Probe::Mode
@@ -187,6 +193,11 @@ module Gori::Tui
       @selected = idx.clamp(0, @issues.size - 1)
       @preview_scroll = 0
       @preview_focus = :list
+    end
+
+    # The issue under the cursor, or nil on an empty (or fully filtered) list.
+    def selected_issue : Store::ProbeIssue?
+      @issues[@selected]?
     end
 
     def selected_index : Int32
@@ -479,6 +490,12 @@ module Gori::Tui
 
     # --- rendering ------------------------------------------------------------
 
+    @list_last_h = 0 # rows the last list frame drew — the PgUp/PgDn step (list_page_rows)
+
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
                listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
@@ -499,12 +516,20 @@ module Gori::Tui
                             listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       render_mode_band(screen, rect)
       render_filter_bar(screen, rect, rect.y + 1)
-      screen.text(rect.x + 1, rect.y + 2, "SEV", Theme.muted)
-      screen.text(rect.x + 7, rect.y + 2, "CAT", Theme.muted)
-      screen.text(rect.x + 14, rect.y + 2, "TITLE", Theme.muted)
+      # The column header owns row 2 of the pane, so it exists only once the pane HAS one.
+      # Unguarded, a 40x9 terminal (Layout.usable?'s floor plus a row) gives this list a
+      # one-row interior and `SEV CAT TITLE` was painted on the shell's status line, over the
+      # key hints. The divider below clamps itself (see Frame.inner_divider); this row did not.
+      # Contract: `spec/tui/contract_render_bounds_spec.cr`.
+      if rect.h > 2
+        screen.text(rect.x + 1, rect.y + 2, "SEV", Theme.muted)
+        screen.text(rect.x + 7, rect.y + 2, "CAT", Theme.muted)
+        screen.text(rect.x + 14, rect.y + 2, "TITLE", Theme.muted)
+      end
       Frame.inner_divider(screen, rect, rect.y + 3, border: Frame.pane_border(focused))
       top = rect.y + 4
       list_h = {rect.bottom - top, 0}.max
+      @list_last_h = list_h
       return render_empty(screen, rect, top, listen: listen, capturing: capturing) if @issues.empty?
 
       ensure_visible(list_h)
@@ -708,7 +733,8 @@ module Gori::Tui
         screen.text(rect.x + 1, y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD))
+          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
+            known: QUERY_KNOWN))
         return
       end
       # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable,
@@ -717,7 +743,7 @@ module Gori::Tui
       chips = [] of {String, Color}
       chips << {@issues.size.to_s, Theme.muted} if filtering?
       scope_on = scope_active?
-      chips << (scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted})
+      chips << (scope_on ? {"s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"s scope:off", Theme.muted})
       scope_x = Frame.right_text_chain(screen, rect.right - 1, y, rect.x + 2, chips)
       left_w = {scope_x - (rect.x + 1) - 1, 0}.max
       if filtering?

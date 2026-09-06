@@ -27,24 +27,6 @@ require "../spec_helper"
 # time. So these drive a real `send_request` at a local origin first — which is exactly how
 # an agent reaches this state.
 
-private def with_store(&)
-  path = File.tempname("gori-wirefield", ".db")
-  store = Gori::Store.open(path)
-  prev_env = Gori::Settings.project_env_vars
-  prev_layer = Gori::Env.layer
-  begin
-    yield store
-  ensure
-    Gori::Env.layer = prev_layer
-    Gori::Settings.project_env_vars = prev_env
-    Gori::Env.bump_highlight_rev
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # An origin that names the backend node that answered — the header the extract rule reads.
 private def with_edge_origin(&)
   server = TCPServer.new("127.0.0.1", 0)
@@ -96,7 +78,7 @@ private REQ             = "GET /vhost HTTP/1.1\r\nHost: front.example.com\r\n\r\
 
 describe "MCP repeater rows keep the author's wire fields" do
   it "stores an SNI that collides with a live session binding verbatim" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         res = drive(store, bind_call(port),
@@ -115,7 +97,7 @@ describe "MCP repeater rows keep the author's wire fields" do
   end
 
   it "stores a target that collides with a live session binding verbatim" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         res = drive(store, bind_call(port),
@@ -132,7 +114,7 @@ describe "MCP repeater rows keep the author's wire fields" do
   # did not mention, so RENAMING a tab re-masked an SNI nobody touched — an agent tidying up
   # after itself permanently destroyed the operator's TLS ServerName.
   it "keeps the SNI and the target through a rename that mentions neither" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         rid = store.insert_repeater(target: AUTHORED_TARGET, request: REQ.to_slice,
@@ -151,7 +133,7 @@ describe "MCP repeater rows keep the author's wire fields" do
   # verbatim. The store holds bytes; resolving them is the send path's job, and this is the
   # documented way to reach a per-project SNI.
   it "stores a deliberately-typed literal $KEY SNI unchanged, and it still resolves" do
-    with_store do |store|
+    with_store_env do |store|
       Gori::Env.save_project(store, [{"HOSTPART", "corpnet"}])
       res = drive(store, call("create_repeater",
         %({"target":"https://127.0.0.1:1/vhost","request":#{REQ.to_json},) +
@@ -165,7 +147,7 @@ describe "MCP repeater rows keep the author's wire fields" do
   # COMPLEMENT: a session with no SNI is untouched — `nil` in, `nil` out, never an empty
   # string, which `Repeater::Plan` would read as "an SNI was requested".
   it "leaves a session with no SNI alone" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         res = drive(store, bind_call(port),
@@ -180,7 +162,7 @@ describe "MCP repeater rows keep the author's wire fields" do
   # way in. The rule is "does this become bytes the origin sees", not "did the author type
   # it" — this pins the other side of it so the fix is not read as "stop masking everything".
   it "still masks the tab NAME, which never reaches a socket" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         res = drive(store, bind_call(port),
@@ -195,7 +177,7 @@ describe "MCP repeater rows keep the author's wire fields" do
   # COMPLEMENT: masking on the way OUT is a display transform and is deliberate. The reply the
   # agent reads must still spell the binding, even though the row does not.
   it "still masks the target in the reply it hands the agent" do
-    with_store do |store|
+    with_store_env do |store|
       edge_rule(store)
       with_edge_origin do |port|
         res = drive(store, bind_call(port),

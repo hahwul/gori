@@ -9,23 +9,6 @@ require "socket"
 # Helpers are file-local — Crystal's top-level `private def` is file-scoped, so this file
 # does not depend on spec/mcp/fuzz_spec.cr's.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpwire", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-end
-
 private def call_raw(tools, name, args : String) : {String, Bool}
   r = tools.call(name, JSON.parse(args))
   {r.text, r.is_error}
@@ -45,8 +28,8 @@ private def recording_origin(conns = 1) : {Int32, Channel(Bytes)}
   seen = Channel(Bytes).new(conns)
   spawn do
     conns.times do
-      break unless conn = server.accept?
-      spawn do
+      break unless accepted = server.accept?
+      spawn_with(accepted) do |conn|
         buf = IO::Memory.new
         begin
           conn.read_timeout = 400.milliseconds
@@ -94,8 +77,8 @@ private def html_origin : Int32
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
   spawn do
-    while conn = server.accept?
-      spawn do
+    while accepted = server.accept?
+      spawn_with(accepted) do |conn|
         begin
           conn.read_timeout = 2.seconds
           body = "<html><body>no links here</body></html>"
@@ -300,5 +283,48 @@ describe "MCP mine_status{skipped}" do
         File.delete?(wl)
       end
     end
+  end
+end
+
+# ── sequence_start's runaway guard ────────────────────────────────────────────────────────
+#
+# `Sequencer::Config#max_sends` reads an EXPLICIT `max_requests` as the run's dispatch
+# budget — on purpose, so an operator who raises the budget also lets a lossy extractor keep
+# trying — and falls back to twice the goal otherwise, "so a broken extractor terminates
+# instead of spinning forever counting only hits". `sequence_start` filled `max_requests` in
+# with its own 100,000-request server CEILING whenever the caller named no budget, so every
+# capless agent collection looked like one budgeted for 100,000 dispatches and that fallback
+# never applied: the #1 failure mode of this tool (a cookie name that matches nothing) aimed
+# 100,000 requests at the target for a `count: 500` collection, where the same descriptor
+# under `gori run sequence` stops at 1,000. The ceiling now rides on `request_ceiling`.
+describe "sequence_start bounds a descriptor that never matches" do
+  it "stops at twice the goal when the caller named no max_requests" do
+    port = HTML_ORIGIN_PORT
+    with_store do |store|
+      tools = tools_for(store)
+      start = call_json(tools, "sequence_start",
+        {"template" => "GET /page HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+         "url" => "http://127.0.0.1:#{port}", "cookie" => "no-such-cookie",
+         "count" => 5, "concurrency" => 1, "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+      begin
+        st = poll_sequence_done(tools, job_id)
+        st["collected"].as_i.should eq(0)
+        # goal 5 → max_sends 10. Pre-fix this was 100_000 and the poll above timed out.
+        st["sent"].as_i.should eq(10)
+      ensure
+        call_json(tools, "sequence_stop", %({"job_id":#{job_id.to_json}}))
+      end
+    end
+  end
+end
+
+private def poll_sequence_done(tools, job_id : String, seconds = 20) : JSON::Any
+  deadline = Time.instant + seconds.seconds
+  loop do
+    st = call_json(tools, "sequence_status", %({"job_id":#{job_id.to_json}}))
+    return st unless st["status"].as_s == "running"
+    fail "sequence job #{job_id} never left :running within #{seconds}s (sent #{st["sent"]})" if Time.instant > deadline
+    sleep 0.02.seconds
   end
 end

@@ -45,6 +45,10 @@ module Gori::Tui
       @active_sub == 0
     end
 
+    def discover_active? : Bool
+      @active_sub == 1
+    end
+
     # Indexed rather than a ternary chain: a third sub-tab is exactly where an
     # `@active_sub == 0 ? … : …` starts answering "Discover" for Diff.
     private def active_child : TabController
@@ -123,6 +127,27 @@ module Gori::Tui
       end
     end
 
+    # Same rect derivation as `handle_click`, so a pair of clicks hit-tests once. Each sub-tab
+    # answers for its own rows: the Sitemap folds/unfolds a folder or opens a leaf, Discover
+    # opens a finding's flow, Diff sends a row's pair to the Comparer.
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      content = BodyChrome.content_rect(rect, strip: true)
+      case @active_sub
+      when 0 then @sitemap.handle_double_click_content(content, mx, my)
+      when 1 then @discover.handle_double_click_content(content, mx, my)
+      else        @diff.handle_double_click_content(content, mx, my)
+      end
+    end
+
+    # `y` — the cursor row (or the marks) of whichever sub-tab is up, as text.
+    def copy_row : Nil
+      case @active_sub
+      when 0 then @sitemap.copy_row
+      when 1 then @discover.copy_row
+      else        @diff.copy_row
+      end
+    end
+
     # --- forwarded input / focus / lifecycle ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       active_child.handle_body_key(ev)
@@ -138,6 +163,10 @@ module Gori::Tui
 
     def body_scroll(delta : Int32) : Bool
       active_child.body_scroll(delta)
+    end
+
+    def page_rows : Int32?
+      active_child.page_rows
     end
 
     def set_preedit(text : String) : Bool
@@ -166,6 +195,10 @@ module Gori::Tui
 
     def focus_last : Nil
       active_child.focus_last
+    end
+
+    def focus_resume : Nil
+      active_child.focus_resume
     end
 
     def on_enter : Nil

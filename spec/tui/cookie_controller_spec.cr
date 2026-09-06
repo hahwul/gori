@@ -307,6 +307,26 @@ describe "Gori::Tui::CookieController" do
       end
     end
 
+    # The FORGE payload is an always-typing `TextArea` whose band `cookie_copy_text` takes,
+    # and the predicate a drag's release consults answered false for it — so Drag release =
+    # `select + copy` did nothing there, silently. Same defect and same fix as the JWT tab's
+    # HEADER / PAYLOAD (jwt_copy_selection_spec).
+    it "reports the FORGE payload's band, which is what its copy reads" do
+      with_cookie_controller do |ctl|
+        ctl.cookie_from_text(FLASK)
+        ctl.toggle_mode # → FORGE, pane :payload
+        s = ctl.@sessions[ctl.@idx]
+        s.pane.should eq(:payload)
+        type(ctl, %({"admin":true}))
+        ctl.cookie_selection_active?.should be_false
+        3.times { ctl.handle_body_key(key(Termisu::Input::Key::Left, :shift)) }
+        band = s.payload.selection_text
+        band.should_not be_nil
+        ctl.cookie_selection_active?.should be_true
+        ctl.cookie_copy_text.should eq(band)
+      end
+    end
+
     it "re-signs an edited payload into a cookie that verifies under the same secret" do
       with_cookie_controller do |ctl|
         ctl.cookie_from_text(FLASK)
