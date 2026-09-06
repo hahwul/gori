@@ -677,7 +677,7 @@ module Gori
           Frame.read(io)
         rescue IO::TimeoutError
           return false # idle, not dead — the caller decides whether that is fatal
-        rescue IO::Error | Gori::Error
+        rescue IO::Error | Gori::Error | OpenSSL::Error
           # `Gori::Error` here is `read_exact`'s "unexpected EOF mid-frame" — a FIN that
           # landed inside a frame rather than on its boundary. That is end-of-data, not a
           # reason to raise: `Gori::Error < Exception`, not `IO::Error`, so it used to
@@ -685,6 +685,10 @@ module Gori
           # unwind out of `write_request` before `read_response` could drain the complete
           # response already sitting in `flow.pending` — the exact lie `write_data`'s
           # comment below swore off. Treated like the reset socket it is.
+          # `OpenSSL::Error` is the same end-of-data one transport down: on `https` this `io`
+          # is an `OpenSSL::SSL::Socket`, and a peer that resets or garbles a record answers
+          # `SSL_read` with `OpenSSL::SSL::Error` — also not an `IO::Error`. `WsEngine` and
+          # `H2WsStream` already name it here; this pair did not.
           flow.eof = true
           return false
         end
@@ -1006,12 +1010,20 @@ module Gori
             # keeps its head and body regardless". If a discriminable protocol violation is
             # ever wanted here, give `Frame.read` a distinct subtype for it rather than
             # resting on a guard that cannot trip.
+            #
+            # `OpenSSL::Error` is a FOURTH way for the same wire event to arrive, and it used
+            # to be the destructive one. On `https` this `io` is an `OpenSSL::SSL::Socket`, so
+            # a peer that resets the TCP connection or garbles a record mid-response answers
+            # `SSL_read` with `OpenSSL::SSL::Error` — which is not an `IO::Error` either, and
+            # so unwound past both arms, past `exchange`, into `send`'s blanket rescue. The
+            # identical h2c event (`start_h2_origin_truncated`) has always kept its status and
+            # body, so the transport alone decided whether a decoded response survived.
             frame = begin
               Frame.read(io)
             rescue IO::TimeoutError
               timed_out = true
               nil
-            rescue IO::Error | Gori::Error
+            rescue IO::Error | Gori::Error | OpenSSL::Error
               nil
             end
             break if frame.nil?
