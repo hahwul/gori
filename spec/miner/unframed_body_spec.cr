@@ -109,6 +109,16 @@ describe "Miner::Plan framing a body the seed declared no length for" do
     String.new(form_plan(chunked).request).should eq(chunked)
   end
 
+  # A bare-LF head is what the TUI editor holds and what an evidence seed skips `expand_wire`'s
+  # CRLF promotion for, so the added line has to carry the message's OWN terminator.
+  it "frames an LF-separated head with an LF-terminated line" do
+    lf = "POST /s HTTP/1.1\nHost: t.test\n" \
+         "Content-Type: application/x-www-form-urlencoded\n\nn=jay"
+    String.new(form_plan(lf, evidence: true).request)
+      .should eq("POST /s HTTP/1.1\nHost: t.test\n" \
+                 "Content-Type: application/x-www-form-urlencoded\nContent-Length: 5\n\nn=jay")
+  end
+
   it "leaves a bodyless request byte-exact" do
     get = "GET /s?q=hi HTTP/1.1\r\nHost: t.test\r\n\r\n"
     cfg = M::Config.new(locations: [M::Location::Query], concurrency: 2)
