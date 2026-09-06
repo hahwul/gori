@@ -92,15 +92,26 @@ module Gori
       end
     end
 
-    # Only the CANONICAL loopback spellings become "localhost". A non-canonical 127.x
+    # Only the CANONICAL loopback ADDRESSES become "localhost". A non-canonical 127.x
     # (127.0.0.2, a second loopback alias someone bound on purpose) stays literal: dialing
-    # "localhost" would not reach it, so collapsing it would print an address that lies.
+    # "localhost" would not reach it, so collapsing it would print an address that lies —
+    # which is why this is an equality against 127.0.0.1 / ::1 and NOT `IPAddress#loopback?`,
+    # whose 127/8 (and `::ffff:127.0.0.1`) reading is exactly the wider set that would lie.
+    #
+    # Compared as ADDRESSES for the reason `wildcard?` states one predicate up: the hand-kept
+    # list this replaced knew `0:0:0:0:0:0:0:1` and not `0000:0000:…:0001` or `::0:1`, all of
+    # which `bind_host_error` accepts, so the same bind read as "localhost:8070" or as a raw
+    # literal depending on how the operator spelled it. `localhost` itself is a NAME and never
+    # parses, so it stays a string test.
     private def self.localhost_alias?(host : String) : Bool
-      case normalize(host)
-      when "localhost", "127.0.0.1", "::1", "0:0:0:0:0:0:0:1" then true
-      else                                                         false
-      end
+      h = normalize(host)
+      return true if h == "localhost"
+      return false unless ip = parse_ip(h)
+      ip == CANONICAL_V4_LOOPBACK || ip == CANONICAL_V6_LOOPBACK
     end
+
+    private CANONICAL_V4_LOOPBACK = Socket::IPAddress.new("127.0.0.1", 0)
+    private CANONICAL_V6_LOOPBACK = Socket::IPAddress.new("::1", 0)
 
     private def self.normalize(host : String) : String
       strip_brackets(host.strip).downcase

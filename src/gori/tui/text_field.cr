@@ -30,6 +30,11 @@ module Gori::Tui
       @last_x = 0
       @last_y = -1 # -1 = never rendered: `hit?` must answer false, and row 0 is real
       @last_w = 0
+      # …and WHICH of `render`'s two drawings it was. An UNFOCUSED field is drawn from
+      # character 0 (`screen.text`), a focused one through `window_start` — so the offset a
+      # click has to be rebased by is not a property of the value, it is a property of the
+      # last paint. See `click_to_cursor`.
+      @last_focused = false
     end
 
     # Replace the whole value and park the caret at its END.
@@ -275,9 +280,17 @@ module Gori::Tui
     # Inverts `render`'s own window + `Screen.draw_width` measure, so the caret cannot land
     # on a character other than the one the operator pointed at — the same pairing
     # `window_start` already had to hold with the block caret.
+    #
+    # The window is `render`'s ONLY when render actually applied one. The press that FOCUSES
+    # a field lands on the frame drawn while it was unfocused, and that frame drew the value
+    # from character 0 with no window at all — so rebasing by `window_start` there moves the
+    # caret by the whole scroll offset. Measured on the SCOPE form: a 109-character pattern in
+    # a 58-column field, clicked on its third visible column, put the caret at 54 instead of 2.
+    # Every overlay reaches this the same way (click a field row that is not the selected one),
+    # so the fix is here rather than in each form.
     def click_to_cursor(mx : Int32, my : Int32, selecting : Bool = false) : Bool
       return false unless hit?(mx, my)
-      start = window_start(@last_w)
+      start = @last_focused ? window_start(@last_w) : 0
       to = start + Screen.column_for_click(@value[start..], mx - @last_x)
       @caret = @sel.move_cx(@caret, to.clamp(0, @value.size) - @caret, @value.size, selecting: selecting)
       true
@@ -313,6 +326,7 @@ module Gori::Tui
       # Remembered BEFORE the early return, so an unfocused field is still clickable — that
       # click is how the operator focuses it (see `hit?`).
       @last_x, @last_y, @last_w = x, y, width
+      @last_focused = focused
       unless focused
         screen.text(x, y, @value, fg, bg, width: width)
         return

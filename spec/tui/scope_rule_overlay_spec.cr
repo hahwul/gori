@@ -97,6 +97,27 @@ describe Gori::Tui::ScopeRuleOverlay do
     field.selection?.should be_true
     ov.handle_double_click(area, vx + 2, py).should eq(:stay)
   end
+
+  # The press that FOCUSES the row lands on the frame drawn while the row was NOT selected,
+  # and `TextField#render` draws an unfocused value from character 0 with no horizontal
+  # window. Rebasing that click by `window_start` moved the caret by the whole scroll offset:
+  # a 109-character pattern in a 58-column field, clicked on its third visible column, put the
+  # caret at 54. `TextField` records WHICH of its two drawings the geometry came from.
+  it "maps a click on the UNFOCUSED (unscrolled) pattern field to the column drawn there" do
+    pattern = "^https://acme\\.test/(admin|internal|staging|preview)/.*[?&]debug=1&trace=on$"
+    ov = ScopeRuleOverlay.editing(1_i64, "include", "regex", pattern)
+    screen = Screen.new(MemoryBackend.new(80, 24))
+    area = Rect.new(0, 0, 80, 24)
+    box = ov.overlay_box(area).not_nil!
+    ov.render(screen, area) # kind row is selected, so the pattern row draws unfocused
+
+    field = ov.text_fields.first
+    field.caret.should eq(pattern.size) # parked at the end, so a window WOULD scroll
+    vx = box.x + 3 + 9
+    py = box.y + 2 + 2
+    ov.handle_click(area, vx + 2, py).should eq(:stay)
+    field.caret.should eq(2) # the third drawn column, which is character 2 — not 2 + offset
+  end
 end
 
 describe "ProjectView#commit_scope_rule" do

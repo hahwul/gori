@@ -158,14 +158,21 @@ private def start_keepalive_origin(body : String, seen : Channel(String)) : Int3
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
-    while conn = origin.accept?
-      spawn do
+    # `spawn_with`, never `spawn do … conn … end`: the block would close over the LOOP
+    # VARIABLE, which the next `accept?` reassigns before the fiber runs (see spec_helper).
+    # This helper is the KEEP-ALIVE origin, so a second leg to it is the normal case and the
+    # trap is live — both fibers would then serve the second socket while the first is never
+    # read, and the client on it blocks until the GC finalises the orphan.
+    while accepted = origin.accept?
+      spawn_with(accepted) do |conn|
         while head = Gori::Proxy::Codec::Http1.read_head(conn)
           seen.send(String.new(head).lines.first)
           conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n" << body
           conn.flush
         end
       rescue
+      ensure
+        conn.close rescue nil
       end
     end
   end

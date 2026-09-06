@@ -126,6 +126,7 @@
 - Proxy: a wildcard bind is recognised by its ADDRESS, so every RFC 4291 spelling of the all-zero address (`0000:…:0000`, `0::0`, `::0.0.0.0`) resolves to loopback for display and for the browser launcher instead of handing out a literal nothing can connect to.
 - Scope, TLS passthrough and upstream routing: a trailing root dot names the same host, so `acme.test.` now matches a rule written for `acme.test` (and a rule typed with the dot is no longer a rule nothing can match). It was a string compare before, which let the dotted spelling walk past a scope EXCLUDE, a passthrough entry and a route rule alike.
 - TUI: the SCOPE rule form's `pattern:` row answers the pointer — click to place the caret, drag to select, double-click for a word — and scrolls horizontally instead of clipping a long pattern at the card edge.
+- TUI: clicking a text field that is not the focused row puts the caret where the pointer landed. The click was rebased by a horizontal scroll offset the unfocused paint had not applied, so on a long value it landed dozens of characters away.
 
 ## v0.4.0
 

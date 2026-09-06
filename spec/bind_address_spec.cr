@@ -54,6 +54,20 @@ describe Gori::BindAddress do
 
     it "keeps a non-canonical loopback alias literal (localhost would not reach it)" do
       Gori::BindAddress.display("127.0.0.2", 8070).should eq("127.0.0.2:8070")
+      # …and every other 127/8 address, which is why this is an equality against the two
+      # canonical loopbacks rather than `IPAddress#loopback?`.
+      Gori::BindAddress.display("127.1.2.3", 8070).should eq("127.1.2.3:8070")
+      Gori::BindAddress.display("::ffff:127.0.0.1", 8070).should eq("[::ffff:127.0.0.1]:8070")
+    end
+
+    # The same "one address, many spellings" rule `wildcard?` follows: `bind_host_error`
+    # accepts every RFC 4291 form, so a string list would collapse one spelling of ::1 to
+    # `localhost` and print the raw literal for another — the same bind, two readouts.
+    it "collapses ::1 in any spelling, not just the two that were listed" do
+      {"::1", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "::0:1",
+       "[::1]"}.each do |h|
+        Gori::BindAddress.display(h, 9000).should eq("localhost:9000")
+      end
     end
   end
 

@@ -2450,9 +2450,9 @@ module Gori::Proxy
     #     History lens read was a completely different authority from the one gori dialled —
     #     `http://evil.example.com/` for a connection pinned to `127.0.0.1:19090`.
     #
-    # `Url.absolute_form?` rather than the branch below's `starts_with?("http://")`: RFC 3986
-    # §3.1 makes the scheme case-insensitive, and a `HTTP://` target is the same instruction to
-    # a lenient recipient.
+    # `Url.absolute_form?` here and in `resolve_forward` above, one predicate on both paths:
+    # RFC 3986 §3.1 makes the scheme case-insensitive, and a `HTTP://` target is the same
+    # instruction to a lenient recipient.
     private def pinned_origin_head(req : Codec::RawRequest) : Bytes
       return req.raw_head unless Gori::Url.absolute_form?(req.target)
       # `URI::Error`/`OverflowError` here is the malformed-target case `handle_request` already

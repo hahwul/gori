@@ -64,8 +64,11 @@ module Gori::Proxy::Codec
     # caller. RFC 9110 §5.3 makes repeated field lines of a list-valued field exactly equivalent
     # to one comma-joined line, so `Connection: close` + `Connection: keep-alive` carries BOTH —
     # while `get?` returns the LAST line only, and the token an answer turns on can sit in an
-    # earlier one. Two callers ask this question (`Connection`, and the WebSocket handshake's
-    # `Upgrade`), and both read a token whose presence decides what gori does with the socket.
+    # earlier one. Two callers ask this question — `Connection` on both keep-alive decisions,
+    # and the WebSocket handshake's `Upgrade` — and each reads a token whose presence decides
+    # what gori does with the socket. (`Repeater::ConnPool#connection_token?` and
+    # `Probe::Passive::Tech#websocket?` still carry copies of it; they belong to other
+    # subsystems and are named here so the next reader finds them.)
     #
     # Allocation-free on the miss, which is the common case for both: the whole point of asking
     # `Connection` per message is that most messages carry no such token.
