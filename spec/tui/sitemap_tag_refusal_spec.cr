@@ -94,4 +94,28 @@ describe "Gori::Tui::SitemapController tag editor" do
       rendered(controller.view).contains?("checked").should be_false
     end
   end
+
+  # `Store#set_sitemap_tag` DELETEs on `tag.blank?` and `SitemapView#apply_tag` stamps nil on
+  # the same test, so a memo of nothing but spaces is a CLEAR everywhere the write lands. The
+  # strip tested `empty?` and so called it a tag.
+  it "calls a whitespace-only memo a CLEAR, the way both write paths read it" do
+    with_sitemap_controller do |controller, host, session|
+      seed_endpoint(session.store)
+      controller.reload
+      select_admin(controller.view)
+
+      controller.sitemap_tag
+      "checked".each_char { |c| controller.view.tag_insert(c) }
+      controller.handle_tag_key(enter)
+      session.store.sitemap_tags[{"acme.test", "/admin"}]?.should eq("checked")
+
+      controller.sitemap_tag
+      controller.view.tag_buffer.size.times { controller.view.tag_backspace }
+      controller.view.tag_insert(' ')
+      controller.handle_tag_key(enter)
+
+      host.statuses.last.should eq("tag cleared")
+      session.store.sitemap_tags[{"acme.test", "/admin"}]?.should be_nil
+    end
+  end
 end

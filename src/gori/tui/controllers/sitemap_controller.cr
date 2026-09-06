@@ -415,14 +415,19 @@ module Gori::Tui
       # A `tag:` filter must re-evaluate against the changed tags (the in-place stamp
       # doesn't re-filter), else the just-tagged node stays hidden / a cleared tag shown.
       reload if @sitemap.filtering?
+      # `blank?`, not `empty?`: a memo of nothing but spaces is a CLEAR everywhere the write
+      # lands — `Store#set_sitemap_tag` DELETEs on `tag.blank?` and `apply_tag` stamps nil on
+      # the same test — so an `empty?` here said `tagged: "  "` over a tag that had just been
+      # removed, and named a refused clear "NOT tagged". Same predicate, same sentence.
+      cleared = text.blank?
       refused = targets.size - committed.size
       if refused > 0
         return @host.status(
-          "#{paths(refused)} NOT #{text.empty? ? "cleared" : "tagged"} (project busy) — try again", :error)
+          "#{paths(refused)} NOT #{cleared ? "cleared" : "tagged"} (project busy) — try again", :error)
       end
       n = targets.size
       @host.status(
-        if text.empty?
+        if cleared
           n == 1 ? "tag cleared" : "cleared #{n} tags"
         else
           n == 1 ? "tagged: #{text}" : "tagged #{paths(n)}: #{text}"

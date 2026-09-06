@@ -651,7 +651,11 @@ module Gori::Tui
           # refused delete after a committed insert only leaves a duplicate — which the strip
           # can name and the operator can remove. Neither answer was read at all, so the pair
           # could do either and still report "updated custom rule".
-          unless insert_custom_rule(ov, store)
+          # The rule's on/off bit rides along. Both writers default a NEW rule to enabled and
+          # the form carries no `enabled` field, so a rule the operator had turned off started
+          # scanning again the moment its scope was cycled — a muted rule un-muting itself with
+          # nothing on the strip to say so.
+          unless insert_custom_rule(ov, store, enabled: custom_rule_enabled?(id, from, store))
             @host.status("rule \"#{ov.rule_title}\" NOT moved (#{write_cause(ov.scope)}) — " \
                          "it is still #{from}")
             return false
@@ -682,13 +686,24 @@ module Gori::Tui
     # dialect: `add_scan_rule` answers "" (the `0_i64` of this family's id type) and
     # `insert_probe_custom_rule` answers 0 — NOT nil — for a batch that never committed, and
     # 0 is TRUTHY in Crystal, which is the trap `Probe::Triage.promote` names.
-    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store) : Bool
+    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store, enabled : Bool = true) : Bool
       if ov.scope == "global"
         !Settings.add_scan_rule(ov.rule_title, ov.description, ov.side, ov.region, ov.kind,
-          ov.pattern, ov.severity.label).empty?
+          ov.pattern, ov.severity.label, enabled).empty?
       else
         store.insert_probe_custom_rule(ov.rule_title, ov.description, ov.side, ov.region,
-          ov.kind, ov.pattern, ov.severity) != 0
+          ov.kind, ov.pattern, ov.severity, enabled) != 0
+      end
+    end
+
+    # Whether the rule `id` in `scope`'s library is currently ON — read so a MOVE between the
+    # two libraries carries the bit instead of re-minting the rule enabled. A rule the lookup
+    # cannot find keeps the insert's own default.
+    private def custom_rule_enabled?(id : String, scope : String, store : Store) : Bool
+      if scope == "global"
+        Settings.scan_rules.find { |r| r.id == id }.try(&.enabled) != false
+      else
+        store.probe_custom_rules.find { |r| r.id.to_s == id }.try(&.enabled?) != false
       end
     end
 

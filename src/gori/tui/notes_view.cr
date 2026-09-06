@@ -69,6 +69,12 @@ module Gori::Tui
       @dirty = false
       @link_preview = ""            # resolved first-link line for the bottom strip (set by controller)
       @deleted_ids = Set(Int64).new # notes closed this session — so a merge-on-save doesn't resurrect them
+      # Ids this session MINTED that no committed document has carried yet. A note in here
+      # exists only in memory, so closing it can drop its `entity_links` on the spot: there is
+      # no write for the store to refuse and nothing on disk to bring the note back. Every
+      # OTHER note's links wait for `Notes.save`'s post-commit cleanup, which is what keeps a
+      # refused save from destroying the evidence of a note that is still there.
+      @unpersisted = Set(Int64).new
       @mode = InputMode::Read
       @read = TextReadState.new
     end
@@ -81,7 +87,16 @@ module Gori::Tui
     private def alloc_note_id : Int64
       id = Random::Secure.rand(1_i64..0x7fff_ffff_ffff_ffff_i64)
       @next_id = {@next_id, id + 1}.max
+      @unpersisted << id
       id
+    end
+
+    # Was this id minted here and never carried by a committed document? Only such a note may
+    # have its links dropped at close — see `@unpersisted`. The ctor's own first note is NOT in
+    # the set: its id is the literal 1, which a project written by `Notes.create` really can
+    # hold, so it must never authorise a delete against somebody else's note.
+    def unpersisted?(id : Int64) : Bool
+      @unpersisted.includes?(id)
     end
 
     getter link_preview : String
@@ -145,6 +160,7 @@ module Gori::Tui
           doc.cur.clamp(0, @notes.size - 1)
         end
       @next_id = {@next_id, doc.next_id}.max
+      doc.notes.each { |e| @unpersisted.delete(e.id) }
       @dirty = false
       # Leave @mode / @read alone — soft merge must not force READ or drop selection.
     end
@@ -502,8 +518,10 @@ module Gori::Tui
       merged = Notes.save(store, mine, @deleted_ids, @notes[@current]?.try(&.id), @next_id)
       return false unless merged
       # `next_id` advances on a COMMIT only: the ids the merge handed out are the ones now on
-      # disk, and a rolled-back transaction handed out none.
+      # disk, and a rolled-back transaction handed out none. That same commit is what makes a
+      # newly-minted note persisted, so its id leaves `@unpersisted` here and nowhere else.
       @next_id = merged.next_id
+      merged.notes.each { |n| @unpersisted.delete(n.id) }
       # …and `@dirty` only comes down on a write that COMMITTED. Clearing it regardless meant
       # a rolled-back write (project busy) silently dropped the operator's notes: the flag was
       # the only thing that would have made a later exit path try again. Same correction as

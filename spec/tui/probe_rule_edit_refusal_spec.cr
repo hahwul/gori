@@ -361,6 +361,27 @@ describe "Gori::Tui::ProbeController#apply_custom_rule" do
       session.store.probe_custom_rules.map(&.title).should eq(["leaky"])
     end
   end
+
+  # A move is an INSERT into the other library, and both writers default a NEW rule to
+  # enabled while the form carries no `enabled` field — so a rule the operator had turned off
+  # started scanning again the moment its scope was cycled, with the strip saying only
+  # "updated custom rule". The bit rides along now.
+  it "carries a disabled rule's OFF state across a scope change" do
+    with_probe_controller do |controller, host, session|
+      row_id = session.store.insert_probe_custom_rule("leaky", "finds a debug header", "response",
+        "header", "string", "X-Debug", Gori::Store::Severity::Info, enabled: false)
+
+      with_global_scan_rule(refused: false) do |_id|
+        controller.apply_custom_rule(moved_form(row_id.to_s, from: "project", to: "global"))
+          .should be_true
+        host.statuses.last.should eq("updated custom rule")
+        # NOT by title/pattern: the harness seeds an unrelated `s1` that shares both.
+        moved = Gori::Settings.scan_rules.find { |r| r.id != "s1" }
+        moved.not_nil!.enabled.should be_false
+      end
+      session.store.probe_custom_rules.should be_empty
+    end
+  end
 end
 
 describe "Gori::Tui::ProbeController#rules_toggle_selected" do

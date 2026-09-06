@@ -489,13 +489,19 @@ module Gori::Tui
     # Close note `idx`. Notes keeps ≥1 — closing the last one leaves a fresh blank note behind
     # (NotesView#close_note_at).
     #
-    # The note's `entity_links` go with it, but at SAVE time (`Notes.save`, once the write has
-    # committed) rather than here: dropping them on the keypress destroyed the operator's
-    # evidence links against a document that had not been written yet, so a save the project's
-    # writer then refused left the note on disk with its links already gone. The close is only
-    # a buffer edit until `@dirty` is spent.
+    # A note that IS on disk keeps its `entity_links` until `Notes.save` drops them, once the
+    # write has committed. Dropping them on the keypress destroyed the operator's evidence
+    # against a document that had not been written yet, so a save the project's writer then
+    # refused left the note on disk with its links already gone.
+    #
+    # A note this session minted and never saved is the other half: nothing on disk can bring
+    # it back, so no later commit will ever reach its links and they would sit in
+    # `entity_links` for the life of the project. That one is dropped here, where the only
+    # copy of it is being discarded (`NotesView#unpersisted?`).
     private def close_note_at(idx : Int32) : Nil
-      @notes.close_note_at(idx)
+      return unless closed_id = @notes.close_note_at(idx)
+      return unless @notes.unpersisted?(closed_id)
+      @host.session.store.delete_links_for_owner(Store::LinkOwnerKind::Note, closed_id)
     end
 
     # Copy selection (or current line) in READ mode.
