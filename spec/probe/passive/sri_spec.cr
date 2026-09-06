@@ -27,6 +27,83 @@ private def sri(store, body : String, host = "acme.test", port : Int32? = nil,
 end
 
 describe Gori::Probe::Passive::Sri do
+  it "reports empty and unsupported integrity metadata" do
+    with_store do |store|
+      ["", "   ", "md5-abc", "SHA384-abc", "sha999-abc sha1-def"].each do |metadata|
+        sri(store, %(<script src="https://cdn.example/a.js" integrity="#{metadata}"></script>))
+          .map(&.evidence).should eq(["cdn.example"])
+      end
+      sri(store, %(<script src="https://cdn.example/a.js" integrity></script>)).size.should eq(1)
+    end
+  end
+
+  it "recognizes supported metadata among unknown algorithms without asserting a digest match" do
+    with_store do |store|
+      ["sha256-abc", "sha512-abc?option", "unknown-abc\tsha384-abc"].each do |metadata|
+        sri(store, %(<script src="https://cdn.example/a.js" integrity="#{metadata}"></script>)).should be_empty
+      end
+    end
+  end
+
+  it "does not read attributes inside another attribute's quoted value" do
+    with_store do |store|
+      sri(store, %(<script title="src='https://fake.example/a.js'"></script>)).should be_empty
+      sri(store, %(<script title="integrity='sha384-abc'" src="https://cdn.example/a.js"></script>))
+        .map(&.evidence).should eq(["cdn.example"])
+      sri(store, %(<link title="rel='stylesheet'" href="https://fake.example/a.css">)).should be_empty
+    end
+  end
+
+  it "keeps quoted greater-than signs inside a tag" do
+    with_store do |store|
+      sri(store, %(<script title="a > b" src="https://cdn.example/a.js"></script>)).size.should eq(1)
+      sri(store, %(<script src="https://cdn.example/a.js" title="a > b" integrity="sha384-abc"></script>))
+        .should be_empty
+    end
+  end
+
+  it "uses the first duplicate attribute, including boolean and empty integrity" do
+    with_store do |store|
+      sri(store, %(<script src="/local.js" src="https://fake.example/a.js"></script>)).should be_empty
+      sri(store, %(<script src="https://cdn.example/a.js" integrity="" integrity="sha384-abc"></script>)).size.should eq(1)
+      sri(store, %(<script src="https://cdn.example/a.js" integrity integrity="sha384-abc"></script>)).size.should eq(1)
+      sri(store, %(<script src="https://cdn.example/a.js" integrity="sha384-abc" integrity=""></script>)).should be_empty
+    end
+  end
+
+  it "reads stylesheet as an exact token anywhere in rel" do
+    with_store do |store|
+      ["alternate stylesheet", "STYLESHEET alternate", "alternate\tstylesheet"].each do |rel|
+        sri(store, %(<link rel="#{rel}" href="https://cdn.example/a.css">)).size.should eq(1)
+      end
+      sri(store, %(<link rel="stylesheet-disabled" href="https://fake.example/a.css">)).should be_empty
+      sri(store, %(<link rel="stylesheet,preload" href="https://fake.example/a.css">)).should be_empty
+    end
+  end
+
+  it "distinguishes schemes even on an identical explicit port" do
+    with_store do |store|
+      sri(store, %(<script src="https://acme.test:8080/a.js"></script>), "acme.test", 8080, "http")
+        .size.should eq(1)
+    end
+  end
+
+  it "does not interpret custom elements as script or link tags" do
+    with_store do |store|
+      sri(store, %(<script-loader src="https://fake.example/a.js"></script-loader>)).should be_empty
+      sri(store, %(<link-widget rel="stylesheet" href="https://fake.example/a.css">)).should be_empty
+    end
+  end
+
+  it "handles Unicode labels, bare attributes and malformed equals without losing later tags" do
+    with_store do |store|
+      sri(store, %(<SCRIPT title='한글 > 🙂' SRC = https://cdn.example/a.js defer></SCRIPT>))
+        .map(&.evidence).should eq(["cdn.example"])
+      sri(store, %(<script = src='https://cdn.example/a.js'></script>)).size.should eq(1)
+      sri(store, %(<script SRC=https://cdn.example/a.js INTEGRITY=sha384-abc></script>)).should be_empty
+    end
+  end
+
   it "flags a cross-origin script with no integrity, naming the host" do
     with_store do |store|
       dets = sri(store, %(<script src="https://cdn.example.com/lib/v1.js"></script>))

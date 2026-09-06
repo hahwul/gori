@@ -11,16 +11,23 @@ module Gori
       #     clear (High: a live secret went over the wire).
       #   * response `WWW-Authenticate: Basic` — the server challenges for Basic over cleartext, so
       #     the browser will send credentials in the clear on the next request (Medium).
-      # Digest/Bearer/Negotiate are out of scope: they don't ship the raw password like Basic does.
+      # Bearer tokens are reusable credentials too (RFC 6750 §5.3), even when opaque rather
+      # than JWT-shaped. Report the observed cleartext submission without recording the token.
       class Auth < Rule
         def info : RuleInfo
           RuleInfo.new("auth", "Insecure authentication",
-            "Flags HTTP Basic authentication served over cleartext http://.",
+            "Flags Basic authentication and Bearer token submission over cleartext http://.",
             Category::HEADERS)
         end
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.scheme == "http" # over TLS the credentials are transport-protected
+
+          if ctx.req.headers.get_all("Authorization").any? { |v| bearer?(v) }
+            acc << Detection.new("insecure_bearer_auth", Category::HEADERS, ctx.host, ctx.url,
+              "Bearer token sent over cleartext HTTP", Store::Severity::High,
+              "request Authorization: Bearer (token redacted)", ctx.fid)
+          end
 
           if ctx.req.headers.get_all("Authorization").any? { |v| basic?(v) }
             # get_all, not get? (last-only): a duplicated Authorization header could hide the
@@ -35,6 +42,11 @@ module Gori
             acc << det(ctx, "HTTP Basic authentication challenged over cleartext HTTP",
               Store::Severity::Medium, "WWW-Authenticate: Basic")
           end
+        end
+
+        private def bearer?(value : String) : Bool
+          scheme, separator, token = value.strip.partition(' ')
+          scheme.compare("Bearer", case_insensitive: true) == 0 && !separator.empty? && !token.strip.empty?
         end
 
         # A WWW-Authenticate header may list several comma-separated challenges
