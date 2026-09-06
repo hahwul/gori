@@ -5,7 +5,7 @@ private alias O = Gori::Oast
 # A provider whose poll answers or raises on demand — the two states an out-of-band listener
 # must never conflate, and the two `Poller#answering?` exists to keep apart.
 private class ScriptedProvider < O::Provider
-  property fail_next : Bool = false
+  property? fail_next : Bool = false
 
   def initialize
     super(O::ProviderKind::CustomHttp, "https://oast.test")
@@ -20,7 +20,7 @@ private class ScriptedProvider < O::Provider
   end
 
   def poll(http : O::Http, session : O::Session) : Array(O::Interaction)
-    raise Gori::Error.new("custom-http poll: HTTP 401 unauthorized") if @fail_next
+    raise Gori::Error.new("custom-http poll: HTTP 401 unauthorized") if fail_next?
     [] of O::Interaction
   end
 end

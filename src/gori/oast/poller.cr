@@ -62,20 +62,30 @@ module Gori::Oast
     end
 
     private def poll_once : Nil
-      answered = false
-      interactions = @provider.poll(@http, @session)
-      # The provider ANSWERED — an empty batch included. Flipped before the fan-out below so a
-      # send that raises on a closed channel (teardown) cannot be read as a provider failure.
-      answered = true
-      @answering = true
+      interactions = poll_answering
+      return unless interactions
       interactions.each do |interaction|
         break if @state.stopped?
         @events.send(CallbackEvent.new(@session.id, interaction))
       end
+    rescue
+      # The FAN-OUT's own failure — a channel closed under a teardown — is not the provider's.
+      # It must not flip `answering?`, and it must not take this fiber down with a backtrace
+      # onto the TUI's alternate screen.
+    end
+
+    # One poll, and the record of whether it was ANSWERED. Split from the fan-out above so
+    # `answering?` reports the PROVIDER's verdict and nothing else — see its comment. nil means
+    # the poll failed and the error is already on the event stream.
+    private def poll_answering : Array(Interaction)?
+      out = @provider.poll(@http, @session)
+      @answering = true # an EMPTY batch is an answer
+      out
     rescue ex
-      @answering = false unless answered
-      return if @state.stopped?
+      @answering = false
+      return nil if @state.stopped?
       @events.send(OastErrorEvent.new(@session.id, ex.message || "poll error"))
+      nil
     end
 
     private def poke : Nil
