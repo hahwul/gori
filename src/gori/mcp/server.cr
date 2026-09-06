@@ -45,13 +45,13 @@ module Gori
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil,
-                     @bind_error : String? = nil,
+                     @bind_error : String? = nil, tool_filter : ToolFilter? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
         @tools = Tools.new(@store, allow_actions, verify_upstream,
           project_name: @project_name, project_slug: @project_slug, db_path: @db_path,
           selection_source: @selection_source, workspace_root: @workspace_root,
-          project_id: @project_id, bind_error: @bind_error)
+          project_id: @project_id, bind_error: @bind_error, tool_filter: tool_filter)
         @initialized = false
         # Set when the output pipe breaks (client vanished mid-write): the loop then
         # stops rather than thrashing on a dead stream or raising an unhandled error.

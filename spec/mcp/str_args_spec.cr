@@ -213,8 +213,8 @@ describe "MCP string arguments — the shared str() reader" do
       seed_str_flow(store)
       tools = str_tools(store)
       # `query: null` is "no filter", the same as omitting it — not the string "null".
-      both = str_json(tools, "list_history", %({"query":null})).as_a.size
-      both.should eq(str_json(tools, "list_history", "{}").as_a.size)
+      both = str_json(tools, "list_history", %({"query":null}))["flows"].as_a.size
+      both.should eq(str_json(tools, "list_history", "{}")["flows"].as_a.size)
       both.should be > 0
     end
   end

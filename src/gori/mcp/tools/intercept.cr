@@ -235,9 +235,13 @@ module Gori
 
       @[Tool("intercept_set_direction", gated: true, agent_action: true)]
       private def intercept_set_direction(h) : Result
-        dir = str(h, "direction").try(&.downcase)
-        unless dir && INTERCEPT_DIRECTIONS.includes?(dir)
-          return err("invalid 'direction' (expected #{INTERCEPT_DIRECTIONS.join(" | ")})", "INVALID_ARGUMENT", field: "direction")
+        raw = str(h, "direction").try(&.strip).presence
+        unless raw
+          return err("missing required 'direction' (#{INTERCEPT_DIRECTIONS.join(" | ")})", "INVALID_ARGUMENT", field: "direction")
+        end
+        dir = raw.downcase
+        unless INTERCEPT_DIRECTIONS.includes?(dir)
+          return err("invalid 'direction' #{raw.inspect} (expected #{INTERCEPT_DIRECTIONS.join(" | ")})", "INVALID_ARGUMENT", field: "direction")
         end
         enqueue_intercept("set_direction", arg: dir)
       end

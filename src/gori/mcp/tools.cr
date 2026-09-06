@@ -26,6 +26,7 @@ require "../probe"
 require "./serialize"
 require "./request_builder"
 require "./tool"
+require "./tool_filter"
 require "./tools/authorize"
 require "./tools/compare"
 require "./tools/diff"
@@ -264,7 +265,7 @@ module Gori
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil,
-                     @bind_error : String? = nil)
+                     @bind_error : String? = nil, @tool_filter : ToolFilter? = nil)
         # The binding table (#501) is built ONCE per bound project and kept, not rebuilt per
         # call: an MCP server is long-lived and IS an extraction source — `send_request` goes
         # through `Repeater::Sender`, so a `$SESSION` bound by a login here has to still be
@@ -789,6 +790,17 @@ module Gori
         h.keys.reject { |k| allowed.includes?(k) || k.starts_with?('_') }
       end
 
+      # The refusal for a real tool this server was started without, or nil when `name` is
+      # either advertised or not a tool at all (`dispatch_tool` answers the latter).
+      private def filtered_out(name : String) : Result?
+        f = @tool_filter
+        return nil unless f
+        return nil if f.allows?(name) || !TOOL_NAMES.includes?(name)
+        err("tool '#{name}' is not served by this gori MCP server: it was started with " \
+            "--tools=#{f.spec.inspect}, which advertises #{f.size} of #{TOOL_NAMES.size} tools. " \
+            "Everything available is in tools/list.", "UNKNOWN_TOOL")
+      end
+
       # tool name → declared property names, harvested from `list` itself so the validator
       # cannot drift from the advertised schema (a hand-maintained second list would).
       # Built once per process, on the first call that needs it.
@@ -862,6 +874,13 @@ module Gori
         # dispatch; runs inside this method's rescue, so a store read error becomes an
         # INTERNAL result rather than crashing the loop.
         refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
+        # A tool the filter hid must be REFUSED, not quietly answered: `declared_args` is
+        # harvested from `list`, so a hidden tool has no declared arg set, `unknown_args`
+        # returns nil, and dispatch would run it with every argument unchecked — a tool
+        # absent from tools/list but fully live underneath.
+        if hidden = filtered_out(name)
+          return hidden
+        end
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
                      "Accepted: #{declared_args[name].to_a.sort.join(", ")}",
@@ -930,19 +949,69 @@ module Gori
         Result.new(presets.to_json)
       end
 
+      # The saved provider `provider_id` names, nil when the caller did not name one, or the
+      # refusal. A DISABLED provider is refused rather than used: the operator turned it off,
+      # and an agent quietly registering against it would put callbacks on a server they
+      # believed was out of the engagement.
+      private def saved_oast_provider(h) : (Oast::ProviderConfig | Result)?
+        key = str(h, "provider_id").try(&.strip).presence
+        return nil unless key
+        if str(h, "server").try(&.strip).presence || str(h, "token").try(&.strip).presence
+          return err("pass either 'provider_id' (a saved provider supplies host and token) " \
+                     "or an ad-hoc 'server'/'token' — not both",
+            "INVALID_ARGUMENT", field: "provider_id")
+        end
+        if unbound?
+          return err("'provider_id' names a SAVED provider, which needs a bound project — " \
+                     "switch_project first, or pass provider/server/token inline",
+            "NO_PROJECT", field: "provider_id")
+        end
+        configs = Oast.provider_configs(store)
+        found = configs.find { |c| c.key == key }
+        unless found
+          known = configs.map { |c| "#{c.key} (#{c.name})" }
+          return not_found("no saved OAST provider #{key.inspect} — " \
+                           "#{known.empty? ? "none are configured; see create_oast_provider" : "known: #{known.join(", ")}"}")
+        end
+        unless found.enabled
+          return err("saved OAST provider #{key.inspect} (#{found.name}) is DISABLED — " \
+                     "enable it with set_oast_provider_enabled, or pass server/token inline",
+            "INVALID_ARGUMENT", field: "provider_id")
+        end
+        found
+      end
+
       @[Tool("oast_start", gated: true, agent_action: true, unbound: true)]
       private def oast_start(h) : Result
-        provider = str(h, "provider") || "interactsh"
-        kind = Oast::ProviderKind.parse?(provider)
-        return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
-        host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
-        return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
+        # A SAVED provider, by the id list_oast_providers prints. The provider CRUD tools next
+        # door exist so an operator can configure a private collaborator once — and until this
+        # branch, `oast_start` could not consume one: the agent had to copy the host and token
+        # back inline on every call, and the token comes back [REDACTED], so a token-bearing
+        # provider was unreachable from MCP at all. `list_oast_providers`' own comment already
+        # claimed this was solved ("without them the only way ... was to re-supply its host and
+        # token inline every time").
+        saved = saved_oast_provider(h)
+        return saved if saved.is_a?(Result)
+        if saved
+          kind = Oast::ProviderKind.parse?(saved.kind)
+          return err("saved provider #{saved.key.inspect} has an unknown kind #{saved.kind.inspect}",
+            "INVALID_ARGUMENT", field: "provider_id") unless kind
+          host = saved.host
+          token = saved.token
+        else
+          provider = str(h, "provider") || "interactsh"
+          kind = Oast::ProviderKind.parse?(provider)
+          return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
+          host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
+          return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
+          token = str(h, "token")
+        end
         # Bound the number of live sessions: each holds an Oast::Http (socket) for the
         # process life until oast_stop, so an agent that never stops them would leak.
         if @oast_mcp.size >= MAX_OAST_SESSIONS
           return Result.new("too many active OAST sessions (#{@oast_mcp.size}/#{MAX_OAST_SESSIONS}); call oast_stop on one before starting another", is_error: true)
         end
-        prov = Oast::Provider.build(kind, host, str(h, "token"))
+        prov = Oast::Provider.build(kind, host, token)
         http = Oast::HttpClient.new(@verify_upstream)
         session = prov.register(http)
         # Unpredictable session id: a sequential "oast-N" is trivially guessable, so
@@ -952,7 +1021,8 @@ module Gori
         sid = "oast_#{Random::Secure.hex(8)}"
         @oast_mcp[sid] = OastMcpSession.new(prov, session, http, kind.label)
         payload = prov.generate_payload(session)
-        Result.new({session_id: sid, provider: kind.label, payload_url: payload}.to_json)
+        Result.new({session_id: sid, provider: kind.label, provider_id: saved.try(&.key),
+                    server: host, payload_url: payload}.to_json)
       rescue ex
         # A remote call that failed, not an argument that was wrong. Uncoded, `classify` files
         # every plain-message error under INVALID_ARGUMENT with `retryable:false` — so a DNS
@@ -962,19 +1032,39 @@ module Gori
         err("OAST register failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
       end
 
+      # An OAST handle read: the session, or the refusal that says WHICH mistake was made.
+      # A missing `session_id` and a stale one used to answer identically ("unknown or
+      # expired session_id"), which told an agent that had simply omitted the argument that
+      # its listener had died — the one reading under which the correct move is to abandon a
+      # session that is in fact still registered and still collecting callbacks.
+      private def oast_session(h, delete : Bool = false) : OastMcpSession | Result
+        sid = str(h, "session_id").try(&.strip).presence
+        unless sid
+          return err("missing required 'session_id' (the id oast_start returned)",
+            "INVALID_ARGUMENT", field: "session_id")
+        end
+        s = delete ? @oast_mcp.delete(sid) : @oast_mcp[sid]?
+        return s if s
+        live = @oast_mcp.keys
+        err("unknown or expired session_id #{sid.inspect} — this server holds " \
+            "#{live.empty? ? "no live sessions" : "#{live.size} (#{live.join(", ")})"}; " \
+            "an ad-hoc oast_start handle dies with the server process, and a persisted one " \
+            "is re-opened with oast_resume (see list_oast_sessions)",
+          "NOT_FOUND", field: "session_id")
+      end
+
       @[Tool("oast_payload", unbound: true)]
       private def oast_payload(h) : Result
-        sid = str(h, "session_id")
-        s = sid ? @oast_mcp[sid]? : nil
-        return Result.new("unknown or expired session_id", is_error: true) unless s
-        Result.new({session_id: sid, payload_url: s.provider.generate_payload(s.session)}.to_json)
+        s = oast_session(h)
+        return s if s.is_a?(Result)
+        Result.new({session_id: str(h, "session_id"), payload_url: s.provider.generate_payload(s.session)}.to_json)
       end
 
       @[Tool("oast_poll", unbound: true)]
       private def oast_poll(h) : Result
+        s = oast_session(h)
+        return s if s.is_a?(Result)
         sid = str(h, "session_id")
-        s = sid ? @oast_mcp[sid]? : nil
-        return Result.new("unknown or expired session_id", is_error: true) unless s
         fresh = s.provider.poll(s.http, s.session).reject { |i| s.seen.includes?(i.unique_id) }
         fresh.each { |i| s.seen << i.unique_id }
         # A RESUMED handle is a project listener, so its hits are project evidence: persist
@@ -994,9 +1084,9 @@ module Gori
 
       @[Tool("oast_stop", gated: true, agent_action: true, unbound: true)]
       private def oast_stop(h) : Result
+        s = oast_session(h, delete: true)
+        return s if s.is_a?(Result)
         sid = str(h, "session_id")
-        s = sid ? @oast_mcp.delete(sid) : nil
-        return Result.new("unknown or expired session_id", is_error: true) unless s
         # A RESUMED session is only stopped, never deregistered — the same split the TUI makes
         # between `^X` (stop polling, keep it resumable) and RELEASE. Its payloads are planted
         # out in the world right now, and dropping the server state here would kill them
@@ -1679,6 +1769,12 @@ module Gori
       # Emits one {name, description, inputSchema} object. The block declares
       # properties on a builder; `required` names are tracked and emitted.
       private def tool(j : JSON::Builder, name : String, description : String, & : SchemaBuilder ->) : Nil
+        # The ONE place every schema is emitted, which is why `--tools` filters here rather
+        # than in the 30 `list_*_tools` methods: a tool added tomorrow is covered by
+        # construction. `declared_args` is harvested from this same output, so a filtered-out
+        # tool also leaves the argument validator — `call` refuses it by name before that
+        # matters (see `filtered_out`).
+        return if (f = @tool_filter) && !f.allows?(name)
         sb = SchemaBuilder.new
         yield sb
         j.object do

@@ -169,9 +169,16 @@ module Gori
         return unless @allow_actions
 
         tool j, "oast_start",
-          "Register an OAST listener and return {session_id, payload_url}. Default provider is " \
-          "interactsh on a public server. Put payload_url in a target, then oast_poll for hits." do |s|
-          s.field "provider", enumprop("out-of-band provider to register with (default interactsh)", OAST_KINDS)
+          "Register an OAST listener and return {session_id, provider, provider_id, server, " \
+          "payload_url}. Put payload_url in a target, then oast_poll for hits. Two ways to " \
+          "pick where it registers: pass `provider_id` to use one of the operator's SAVED " \
+          "providers (list_oast_providers — it supplies the host AND the auth token, which " \
+          "you cannot read back yourself since tokens come back [REDACTED]), or pass an " \
+          "ad-hoc `provider`/`server`/`token`. With NEITHER it defaults to interactsh on a " \
+          "PUBLIC server, which means the callbacks — and the hostnames you are testing — " \
+          "land on third-party infrastructure." do |s|
+          s.field "provider_id", strprop("id of a saved provider from list_oast_providers (p_<n> project, g_<hex> global); supplies host + token, and cannot be combined with server/token")
+          s.field "provider", enumprop("ad-hoc provider kind to register with (default interactsh)", OAST_KINDS)
           s.field "server", strprop("provider server/base URL (default: the provider's public preset)")
           s.field "token", strprop("optional provider auth token")
         end

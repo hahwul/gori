@@ -74,7 +74,7 @@ describe "MCP query tools: an unknown QL field" do
     with_store do |store|
       r = call_tools(store, "list_history", q("methd:GET", lenient: true))
       r.is_error.should be_false
-      r.text.should eq("[]")
+      JSON.parse(r.text)["flows"].as_a.should be_empty
     end
   end
 

@@ -11,6 +11,7 @@ module Gori::CLI
     project = nil.as(String?)
     insecure_upstream = false
     read_only = false
+    tools_spec = nil.as(String?)
     use_active_project = false
     no_project = false
     # A LIST, not a single slot: `gori mcp --install-claude-code --install-codex` is what
@@ -33,6 +34,9 @@ module Gori::CLI
       p.on("--no-project", "Start unbound even inside a Git workspace (agent picks via list/create/switch)") { no_project = true }
       p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
       p.on("--read-only", "Disable action tools (send_request, create/update_issue); serve the project without a writer") { read_only = true }
+      p.on("--tools=SPEC", "Advertise only these tools — comma-separated names/globs, '-' subtracts " \
+                           "(e.g. 'list_*,get_*,send_request' or '-fuzz_*,-mine_*'). The full catalogue is " \
+                           "~43k tokens of client context; this trims it") { |v| tools_spec = v }
       p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_targets << "agy" }
       p.on("--install-codex", "Install gori as an MCP server in Codex (~/.codex/config.toml)") { install_targets << "codex" }
       p.on("--install-claude", "Install gori as an MCP server in Claude Desktop config") { install_targets << "claude" }
@@ -52,11 +56,24 @@ module Gori::CLI
       abort "gori mcp: --no-project cannot be combined with --db/--project/--use-active-project"
     end
 
+    # Parsed BEFORE anything opens a store or writes a config: a misspelled pattern must
+    # abort while the operator is still looking at the terminal. Left silent it produces a
+    # server advertising a handful of tools, which an agent cannot tell from a gori that
+    # simply does not have the feature.
+    tool_filter = nil.as(MCP::ToolFilter?)
+    if spec = tools_spec.try(&.strip).presence
+      known = MCP::Tools::TOOL_NAMES.reject { |n| read_only && MCP::Tools::GATED_TOOLS.includes?(n) }
+      case parsed = MCP::ToolFilter.parse(spec, known)
+      in String          then abort parsed
+      in MCP::ToolFilter then tool_filter = parsed
+      end
+    end
+
     unless install_targets.empty?
       # Settings.path_override is `--config`, already stripped from argv by CLI.run before
       # dispatch — so run_mcp never sees the flag and can only read it back from here.
       ok = install_mcp_config(install_targets, db_path, project, read_only, insecure_upstream,
-        use_active_project, no_project, Settings.path_override)
+        use_active_project, no_project, Settings.path_override, tools_spec)
       exit(ok ? 0 : 1)
     end
 
@@ -80,12 +97,15 @@ module Gori::CLI
       server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: nil, project_slug: nil, db_path: nil,
         selection_source: selection.source, workspace_root: nil, project_id: nil,
-        bind_error: bind_error)
+        bind_error: bind_error, tool_filter: tool_filter)
       server.run
       return
     end
 
     resolved = selection.db_path.not_nil!
+    if f = tool_filter
+      Log.info { "mcp: --tools=#{f.spec} advertises #{f.size} of #{MCP::Tools::TOOL_NAMES.size} tools: #{f.names.join(", ")}" }
+    end
     Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name}#{" [#{project_slug}]" if project_slug} source=#{selection.source} (actions=#{!read_only})" }
     if selection.auto_created
       Log.warn { "mcp: created an isolated project for workspace #{selection.workspace_root}; use --project/--db to override" }
@@ -120,7 +140,7 @@ module Gori::CLI
         server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
           project_name: nil, project_slug: nil, db_path: nil,
           selection_source: "unbound", workspace_root: nil, project_id: nil,
-          bind_error: reason)
+          bind_error: reason, tool_filter: tool_filter)
         server.run
         return
       end
@@ -129,7 +149,7 @@ module Gori::CLI
       server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: project_name, project_slug: project_slug, db_path: resolved,
         selection_source: selection.source, workspace_root: selection.workspace_root,
-        project_id: project_id)
+        project_id: project_id, tool_filter: tool_filter)
       server.run # blocks until STDIN EOF (client closed)
     ensure
       store.close
@@ -142,12 +162,12 @@ module Gori::CLI
   private def self.install_mcp_config(targets : Array(String), db_path : String?, project : String?,
                                       read_only : Bool, insecure_upstream : Bool,
                                       use_active_project : Bool, no_project : Bool,
-                                      settings_path : String?) : Bool
+                                      settings_path : String?, tools_spec : String? = nil) : Bool
     exe = MCP::Install.executable_path
     outcomes = MCP::Install.install_all(targets, exe_path: exe, db_path: db_path, project: project,
       read_only: read_only, insecure_upstream: insecure_upstream,
       use_active_project: use_active_project, no_project: no_project,
-      settings_path: settings_path)
+      settings_path: settings_path, tools_spec: tools_spec)
     outcomes.each do |outcome|
       if path = outcome.path
         puts "Successfully installed gori MCP server configuration to #{path}"

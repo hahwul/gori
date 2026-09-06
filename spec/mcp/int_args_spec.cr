@@ -141,7 +141,7 @@ describe "MCP integer arguments — refused by name, never silently defaulted" d
       tools = int_tools(store)
       {"list_history" => {"limit", "before_id", "since"},
        "list_events"  => {"limit", "since"},
-       "list_sitemap" => {"limit"},
+       "list_sitemap" => {"limit", "offset"},
        "list_issues"  => {"limit", "offset"},
        "probe_issues" => {"limit", "offset"}}.each do |tool, fields|
         fields.each do |field|
@@ -188,7 +188,7 @@ describe "MCP integer arguments — refused by name, never silently defaulted" d
       # than anything the caller could have meant, and once nil became an argument error it
       # would have refused a perfectly legal number.
       {"1e19", %("99999999999999999999")}.each do |huge|
-        int_json(tools, "list_history", %({"limit":#{huge}})).as_a.size.should eq(3)
+        int_json(tools, "list_history", %({"limit":#{huge}}))["flows"].as_a.size.should eq(3)
       end
       # A fractional float still has no integer reading, so it stays a refusal — the same rule
       # `get_flow{id:1.9}` has always applied, now stated for a non-id argument too.

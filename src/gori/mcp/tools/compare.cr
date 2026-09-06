@@ -40,7 +40,16 @@ module Gori
 
         lines_a = compare_lines(detail_a, pane, include_sensitive)
         lines_b = compare_lines(detail_b, pane, include_sensitive)
-        truncated = Repeater::Diff.truncated?(lines_a, lines_b)
+        # The same argument `identical` already makes about a diff cut at MAX_LINES, applied to
+        # the cut that happened BEFORE this tool saw the bytes: the proxy stops storing a body
+        # at the capture ceiling, so two flows cut at 2 KiB with matching prefixes diff to zero
+        # changes. Reporting `identical:true` there is a claim about megabytes gori never held.
+        # Named per side, because "which one was cut" is what decides whether the comparison is
+        # salvageable by re-sending one of them.
+        cut_sides = [] of String
+        cut_sides << "a" if body_cut?(detail_a, pane)
+        cut_sides << "b" if body_cut?(detail_b, pane)
+        truncated = Repeater::Diff.truncated?(lines_a, lines_b) || !cut_sides.empty?
         full_diff = Repeater::Diff.lines(lines_a, lines_b)
         change_count = Repeater::Diff.change_count(full_diff)
         # `context` folds the unchanged runs to counted markers; `changes_only` drops them
@@ -77,6 +86,13 @@ module Gori
             # two responses match when only their first MAX_LINES lines were compared.
             j.field "identical", change_count == 0 && !truncated
             j.field "truncated", truncated
+            unless cut_sides.empty?
+              j.field "source_truncated" { j.array { cut_sides.each { |side| j.string side } } }
+              j.field "source_truncated_note",
+                "the capture cap cut the #{pane} body on #{cut_sides.size == 2 ? "both flows" : "flow #{cut_sides.first}"} " \
+                "before this diff saw it, so only the stored prefix was compared and `identical` cannot be true here — " \
+                "re-send with send_request to compare whole bodies"
+            end
             j.field "meta" do
               j.object do
                 meta_a = Repeater::ExchangeMeta.of(detail_a.row)
@@ -152,6 +168,12 @@ module Gori
         {kept, trimmed}
       end
 
+      # Whether the capture cap cut the side of this flow the diff is about. `compare_lines`
+      # builds head+body text from the stored blob and has no way to know the blob is a prefix.
+      private def body_cut?(detail : Store::FlowDetail, pane : Symbol) : Bool
+        pane == :request ? detail.request_body_truncated? : detail.response_body_truncated?
+      end
+
       private def compare_lines(d : Store::FlowDetail, pane : Symbol, include_sensitive : Bool) : Array(String)
         if pane == :request
           Repeater::MessageLines.of(redacted_head(d.request_head, include_sensitive), d.request_body, decode: false)
@@ -178,11 +200,15 @@ module Gori
           "Line-diff two flows' request or response — the MCP equivalent of the TUI's Comparer " \
           "tab. Response bodies are decoded (de-chunked/decompressed) before diffing; request " \
           "bodies are compared byte-faithful. Returns {changed_lines, identical, truncated, " \
+          "source_truncated, " \
           "meta:{a,b:{status,size,duration_us}, delta}, " \
           "diff:[{kind: same|add|del, text} | {kind: fold, hidden}]} (add = only in flow B, " \
           "del = only in flow A; fold = a run of `hidden` identical lines collapsed by `context`). " \
           "`meta.delta` answers the usual question — a status flip, a size or timing shift — " \
-          "before any diff line is read. " \
+          "before any diff line is read. `identical` is only ever true over a COMPLETE " \
+          "comparison: a diff cut at the line/byte cap, or a body the capture cap already cut " \
+          "(`source_truncated` names which side), sets `truncated` and leaves `identical` " \
+          "false, because matching prefixes are not matching bodies. " \
           "Authorization/Cookie/Set-Cookie/API-key header values are [REDACTED] in the diff " \
           "text unless include_sensitive=true. Pure read: no network, nothing written." do |s|
           s.field "flow_id_a", intprop("first flow id (the 'original' side)"), required: true

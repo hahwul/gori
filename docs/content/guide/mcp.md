@@ -63,6 +63,20 @@ A default (actions-on) server still has a writer (`send_request` and `create_iss
 
 One consequence is worth knowing: free-text search (`body:`) reads an index that is built off the capture commit, and a read-only server cannot build it. If flows are still waiting to be indexed, such a query is refused with `FTS_BACKLOG` rather than answered from a partial index; open the project in gori, or drop `--read-only`, to drain it.
 
+## Choosing Which Tools Are Exposed
+
+gori exposes about 160 MCP tools. A client loads that whole catalogue into the model's context before you ask the first question and keeps it there for the session — roughly 43,000 tokens. `--read-only` cuts it to 53 tools (~12,000 tokens), but only along one axis. `--tools` lets you pick directly:
+
+```bash
+gori mcp --tools='list_*,get_*,ql_*,project_info,send_request'   # recon + replay, ~11k tokens
+gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # everything but the async workbench
+gori mcp --tools='*,-intercept_*'                                # same idea, spelled out
+```
+
+The spec is a comma-separated list of tool names and `*` globs, applied left to right; a term prefixed with `-` subtracts. Because the tools are already named in prefix families (`list_*`, `intercept_*`, `fuzz_*`, `oast_*`), globbing gives you groups without a separate catalogue to keep in step. A spec that starts with a subtraction begins from every tool, so it keeps working when a later gori adds one.
+
+A pattern that matches nothing aborts at startup with a suggestion (`--tools: "list_hisotry" matches no tool — did you mean list_history?`) rather than quietly serving a smaller set — a server missing a tool looks exactly like a gori that never had the feature. Tools left out are absent from `tools/list` **and** refused if called anyway, naming the flag that hid them. `--tools` composes with `--read-only`, and like every other flag it is written into the command when you pass it alongside `--install-*`.
+
 ## Seeing an Agent From the TUI
 
 While an MCP server is bound to a project, gori shows it. In the project picker the project's row carries an `mcp` mark (`mcp×2` for more than one), and once the project is open a clickable `mcp:<client>` chip appears on the top bar. Click it, or run `app.agents` from the command palette, to open a card listing every attached agent: its name, version, pid, when it connected, and whether it is read-only. The name comes from the client's own `clientInfo` handshake; a server started with `--read-only` shows as read-only there. A row disappears on its own the moment its process exits, so the chip and card always reflect what is attached right now.
@@ -96,7 +110,7 @@ Codex and Grok use TOML with an `[mcp_servers.gori]` table, and Hermes YAML with
 
 If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example `gori mcp --project my-engagement --install-codex`.
 
-Every flag you pass alongside `--install-*` is written into the installed command, so what the client spawns matches what you typed: selectors (`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--insecure-upstream`, and `--config`. Paths are made absolute, because the client spawns the server from a working directory you did not choose.
+Every flag you pass alongside `--install-*` is written into the installed command, so what the client spawns matches what you typed: selectors (`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--insecure-upstream`, and `--config`. Paths are made absolute, because the client spawns the server from a working directory you did not choose.
 
 ## Tools
 

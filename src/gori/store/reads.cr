@@ -681,6 +681,13 @@ module Gori
       @db.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?)
     end
 
+    # Latest flow timestamp, the other end of the capture window. `earliest_created_at`
+    # alone answers "when did this project start" and is read as if it answered "how old is
+    # this data" — the opposite end. Same unit and same nil-when-empty contract.
+    def latest_created_at : Int64?
+      @db.query_one?("SELECT MAX(created_at) FROM flows", as: Int64?)
+    end
+
     # Sum of all captured wire sizes (request + response) across flows. Used for
     # Project tab overview of total data volume (distinct from on-disk DB size).
     def total_size : Int64
@@ -716,11 +723,17 @@ module Gori
     # (see ql.cr), so every WebSocket endpoint reported "N attempts, 0 successes, 0 errors".
     # A NULL status stays in neither bucket on purpose — a Pending flow has no outcome yet —
     # so ok + errors can legitimately be less than count.
+    #
+    # `offset` is what makes the cut above a PAGE rather than a ceiling: the ordering is
+    # total, so `offset` walks the whole set deterministically instead of leaving everything
+    # past `limit` permanently out of reach.
     def sitemap_entries_detailed(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
+                                 offset : Int32 = 0,
                                  raise_on_error : Bool = false) : Array(SitemapEntry)
       rows = [] of SitemapEntry
       args = filter.args.dup
       args << limit
+      args << offset
       sql = "SELECT scheme, host, port, http_version, method, target, " \
             "GROUP_CONCAT(DISTINCT status), COUNT(*), " \
             "SUM(CASE WHEN status BETWEEN 100 AND 399 THEN 1 ELSE 0 END), " \
@@ -728,7 +741,7 @@ module Gori
             "MIN(created_at), MAX(created_at) " \
             "FROM flows WHERE #{filter.sql} " \
             "GROUP BY scheme, host, port, http_version, method, target " \
-            "ORDER BY host, target, method, scheme, port, http_version LIMIT ?"
+            "ORDER BY host, target, method, scheme, port, http_version LIMIT ? OFFSET ?"
       @db.query(sql, args: args) do |rs|
         rs.each do
           rows << SitemapEntry.new(
@@ -751,14 +764,17 @@ module Gori
     # a reload that scales with retention rather than with the capped tree. A cancelled read
     # raises `QueryCancelled` past the rescue below — cancellation is never an empty tree.
     def sitemap_entries(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
+                        offset : Int32 = 0,
                         raise_on_error : Bool = false, control : QueryControl? = nil) : Array({String, String, String})
       rows = [] of {String, String, String}
       args = filter.args.dup
       args << limit
+      args << offset
       # `method` is SELECTed, so it must ORDER too, or the LIMIT cut between two rows that
       # differ only by method is arbitrary — and with no cursor here the loser is unreachable.
+      # `offset` is that cursor: with a total ordering it pages the whole set.
       controlled_query("SELECT DISTINCT host, method, target FROM flows WHERE #{filter.sql} " \
-                       "ORDER BY host, target, method LIMIT ?", args, control) do |rs|
+                       "ORDER BY host, target, method LIMIT ? OFFSET ?", args, control) do |rs|
         rs.each { rows << {rs.read(String), rs.read(String), rs.read(String)} }
       end
       rows
