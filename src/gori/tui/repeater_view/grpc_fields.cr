@@ -50,6 +50,22 @@ class Gori::Tui::RepeaterView
   GRPC_FIELD_NAME_COL = 20
   GRPC_FIELD_TYPE_COL = 18
 
+  # Characters a value field is willing to be seeded with.
+  #
+  # `Encoder.seed` answers the ROUND-TRIP question — "does this text re-encode to exactly
+  # these bytes?" — and for a `bytes` field its hex always does, however long. But a gRPC
+  # `bytes` field routinely carries an image, a nested serialized message or a signed blob,
+  # and hex is three characters per octet: a 256 KiB payload seeds 786,431 characters into a
+  # ONE-LINE editor that re-slices the whole string on every keystroke and repaints it every
+  # frame. The same is true of a `string` field holding a document.
+  #
+  # So this is the third reading with no one-line form, beside a packed run past
+  # `Lens::PACKED_MAX` and a string carrying control bytes: read-only, with the reason on the
+  # row and `^X` beside it. The cap lives HERE and not in `Encoder.seed`, because the
+  # Fuzzer's `--field` positions seed from the same call and a payload REPLACES the seed
+  # there — a large field is a perfectly good position, it is this editor that cannot hold it.
+  GRPC_FIELD_MAX_SEED = 4096
+
   getter? grpc_fields : Bool
 
   # Whether a value is being TYPED (as opposed to the list being navigated). The two take
@@ -343,6 +359,13 @@ class Gori::Tui::RepeaterView
       packed = f.wire.length_delimited? && d.repeated && d.type.packable?
       seed = Protobuf::Encoder.seed(d, f, r)
       note = r.note
+      # See GRPC_FIELD_MAX_SEED: a faithful value that no one can type on one line.
+      if (text = seed) && text.size > GRPC_FIELD_MAX_SEED
+        cut = "#{text.size} characters — longer than the #{GRPC_FIELD_MAX_SEED} this one-line " \
+              "field takes; ^X edits its bytes"
+        note = note ? "#{note}; #{cut}" : cut
+        seed = nil
+      end
       # A reading with no single-line form: a packed run longer than the lens lists (seeding
       # it would silently DROP the rest on apply), or a type with no text spelling. Read-only
       # with the reason on the row rather than an editor that loses bytes.

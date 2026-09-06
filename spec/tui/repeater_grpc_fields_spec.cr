@@ -387,6 +387,24 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
       by_name["delta"].seed.should eq("-3")
       by_name["serial"].seed.should eq("244837814094590")
     end
+
+    # A gRPC `bytes` field routinely carries an image or a serialized blob, and hex is three
+    # characters per octet — a 256 KiB payload used to seed 786,431 characters into a
+    # ONE-LINE editor that re-slices the whole string on every keystroke.
+    it "keeps a field too large to type on one line read-only, and says why" do
+      s = demo_schema
+      blob = Bytes.new(64 * 1024) { |i| (i % 251).to_u8 }
+      payload = PB::Encoder.length_delimited(5_u32, blob) # demo.User.token, a `bytes` field
+      row = RepeaterView.grpc_form_rows(payload, s, s.message?("demo.User").not_nil!).first
+      row.editable?.should be_false
+      row.seed.should be_nil
+      row.note.not_nil!.should contain("longer than the #{RepeaterView::GRPC_FIELD_MAX_SEED}")
+      row.note.not_nil!.should contain("^X")
+      # …and one that fits is untouched.
+      small = PB::Encoder.length_delimited(5_u32, Bytes[0xde, 0xad])
+      RepeaterView.grpc_form_rows(small, s, s.message?("demo.User").not_nil!).first
+        .seed.should eq("de ad")
+    end
   end
 end
 

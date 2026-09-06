@@ -764,19 +764,32 @@ module Gori::Tui
     private def apply_reflection(done : ReflectDone) : Nil
       outcome = done.outcome
       if err = outcome.error
-        @host.status("gRPC reflection #{done.target}: #{err}")
+        @host.status("gRPC reflection #{done.target}: #{err}#{reflect_notes(outcome)}")
         return
       end
       set = outcome.descriptor_set
       unless set
-        @host.status("gRPC reflection #{done.target}: no descriptors returned")
+        @host.status("gRPC reflection #{done.target}: no descriptors returned#{reflect_notes(outcome)}")
         return
       end
       committed = Gori::Protobuf::Schemas.adopt(@host.session.store, done.target,
         outcome.service, outcome.services.size, outcome.files, set)
       line = "gRPC reflection #{done.target} (#{outcome.version}): #{Gori::Protobuf::Schemas.status}"
       line += " — but NOT saved (project busy); it reverts when you reopen this project" unless committed
-      @host.status(line)
+      @host.status(line + reflect_notes(outcome))
+    end
+
+    # What the fetch could NOT get, on the one line this verb has. `gori run grpc reflect`
+    # prints every note and MCP returns them all; the TUI dropped them, so a walk that
+    # answered NOT_FOUND for three of four symbols, or stopped at a cap, read as a clean
+    # fetch — and the operator's next question ("why is this rpc still schema-less?") had no
+    # answer on screen. The first note in full, the rest counted, because a status line is
+    # one line; `gori run grpc schema` and MCP `grpc_schema` carry the whole list.
+    private def reflect_notes(outcome : Gori::Protobuf::Reflection::Outcome) : String
+      notes = outcome.notes
+      return "" if notes.empty?
+      rest = notes.size - 1
+      " — #{notes[0]}#{rest > 0 ? " (+#{rest} more)" : ""}"
     end
 
     # The effective target set for a batch verb: the marks if any, else the cursor row

@@ -323,7 +323,7 @@ module Gori::Protobuf
           missing = held.missing
           break if missing.empty?
           if held.size >= MAX_FILES
-            notes << "stopped at the #{MAX_FILES}-file limit with #{missing.size} import#{missing.size == 1 ? "" : "s"} unresolved"
+            notes << "stopped at the #{MAX_FILES}-file limit"
             break
           end
           # Past MAX_PER_ROUND the remainder is not dropped — it is still missing next round,
@@ -331,8 +331,20 @@ module Gori::Protobuf
           asked = missing.first(MAX_PER_ROUND)
           wanted = asked.map { |n| Request.filename(n) }
         end
-        if round >= MAX_ROUNDS && !held.missing.empty?
-          notes << "stopped after #{MAX_ROUNDS} rounds with imports still unresolved"
+        notes << "stopped after #{MAX_ROUNDS} import rounds" if round >= MAX_ROUNDS && !held.missing.empty?
+        # An import no file in hand satisfies is a HOLE in the lens: a message declared only
+        # there resolves to nil, and the pane then renders those bytes schema-less — which
+        # reads exactly like "the API does not declare that field". The walk ends four ways
+        # and only the round budget used to say so, while the COMMON ending is "a round
+        # produced nothing new" — which is precisely the case where a file was asked for and
+        # not returned. Named, not counted alone: `file_by_filename` is the request that
+        # failed, so the filename is the whole diagnosis.
+        unresolved = held.missing
+        unless unresolved.empty?
+          shown = unresolved.first(3).join(", ")
+          shown += ", …" if unresolved.size > 3
+          notes << "#{unresolved.size} import#{unresolved.size == 1 ? "" : "s"} the server did " \
+                   "not return (#{shown}) — types declared only there render schema-less"
         end
 
         if held.empty?
@@ -355,14 +367,16 @@ module Gori::Protobuf
       # service that answered, and the reason neither did.
       private def list_services(notes : Array(String)) : {Array(String), String, Failure?}
         none = [] of String
-        first_failure = nil.as(Failure?)
+        unimplemented = [] of String
+        last_failure = nil.as(Failure?)
         {SERVICE_V1, SERVICE_V1ALPHA}.each do |service|
           replies, failure = Reflection.exchange(self, service, [Request.list_services])
           if failure
             # Only "this server does not implement THIS version" falls through to the next
             # name. A connect failure, a timeout or a PERMISSION_DENIED is the answer.
             return {none, service, failure} unless failure.unimplemented?
-            first_failure ||= failure
+            unimplemented << service
+            last_failure = failure
             notes << "#{service} is not implemented here — trying #{SERVICE_V1ALPHA}" if service == SERVICE_V1
             next
           end
@@ -386,9 +400,20 @@ module Gori::Protobuf
           end
           return {names.uniq, service, nil}
         end
-        reason = first_failure ||
-                 Failure.new("neither #{SERVICE_V1} nor #{SERVICE_V1ALPHA} answered on this target",
-                   FailureKind::Answered)
+        # Both names answered UNIMPLEMENTED. The sentence has to say BOTH, because the Outcome
+        # this becomes reports `service` as the last one tried — and reporting the FIRST
+        # failure's message beside that field put two different service names on one failure,
+        # which is what MCP hands an agent in `details.service`. The message an operator needs
+        # here is not "v1 is missing" (it is in `notes`, and v1alpha was tried because of it)
+        # but "this target does not do reflection at all".
+        reason = if unimplemented.size == 2 && (f = last_failure)
+                   Failure.new("neither #{SERVICE_V1} nor #{SERVICE_V1ALPHA} is implemented on " \
+                               "this target (#{f.message})", FailureKind::Unimplemented)
+                 else
+                   last_failure ||
+                     Failure.new("neither #{SERVICE_V1} nor #{SERVICE_V1ALPHA} answered on this target",
+                       FailureKind::Answered)
+                 end
         return {none, SERVICE_V1ALPHA, reason}
       end
 
@@ -397,6 +422,7 @@ module Gori::Protobuf
       private def absorb(replies : Array(Protobuf::Message), asked : Array(String),
                          held : Collected, notes : Array(String)) : Bool
         added = 0
+        dropped = 0
         replies.each_with_index do |m, i|
           if e = Reflection.error_response(m)
             # Named against the symbol/filename this reply answers, which is its position in
@@ -406,7 +432,14 @@ module Gori::Protobuf
           end
           Schema.submessages(m, FILE_DESCRIPTOR_RESPONSE).each do |fdr|
             Schema.blobs(fdr, FILE_DESCRIPTOR_PROTO).each do |blob|
-              break if held.size >= MAX_FILES
+              # The cap DROPS this file, and a dropped file is indistinguishable from one the
+              # server never had: the rpc it declares resolves to nil and renders schema-less.
+              # Counted so the caller can name it, for the reason `Schemas` counts its own
+              # directory cap rather than truncating in silence.
+              if held.size >= MAX_FILES
+                dropped += 1
+                next
+              end
               if held.over_bytes?(blob)
                 notes << "stopped at the #{MAX_BYTES // (1024 * 1024)} MiB descriptor limit"
                 return added > 0
@@ -414,6 +447,10 @@ module Gori::Protobuf
               added += 1 if held.add(blob)
             end
           end
+        end
+        if dropped > 0
+          notes << "#{dropped} descriptor file#{dropped == 1 ? "" : "s"} past the " \
+                   "#{MAX_FILES}-file limit were dropped"
         end
         added > 0
       end

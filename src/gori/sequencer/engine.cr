@@ -294,7 +294,7 @@ module Gori::Sequencer
       # without this a live-replay collection against a target rejecting every call (an
       # expired session cookie, say) read as healthy on every sample. nil/nil (and free, past
       # the allocation-free needle scan) for a non-gRPC response.
-      grpc_status, grpc_message = Fuzz::GrpcVerdict.response(raw.head)
+      grpc_status, grpc_message = Fuzz::GrpcVerdict.response(raw.head, raw.body)
       @events.send(SampleEvent.new(Sample.new(idx, token, status, len, raw.duration_us, err,
         grpc_status, grpc_message)))
       emit_progress
