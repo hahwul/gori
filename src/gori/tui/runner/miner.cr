@@ -75,4 +75,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def miner_detail_readable? : Bool
     miner_controller.miner_detail_readable?
   end
+
+  def miner_results_readable? : Bool
+    miner_controller.miner_results_readable?
+  end
 end

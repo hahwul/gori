@@ -317,6 +317,21 @@ module Gori::Tui
       true
     end
 
+    # RULES and COLOURS sit side by side, so the notch goes to the pane under the pointer,
+    # not the focused one (#956); off both panes it falls back to the focused pane.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      inner = BodyChrome.frame_inner(rect)
+      rules_r, colors_r = @view.pane_rects(inner)
+      if !colors_r.empty? && colors_r.contains?(mx, my)
+        move_color_sel(step)
+      elsif !rules_r.empty? && rules_r.contains?(mx, my)
+        move_sel(step)
+      else
+        return handle_wheel(step)
+      end
+      true
+    end
+
     # --- policy actions (also the ExecContext verbs) ---
 
     def colormarker_add : Nil

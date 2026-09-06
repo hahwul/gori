@@ -745,19 +745,25 @@ module Gori
       [] of SitemapEntry
     end
 
+    #
+    # `control` makes the read cooperative (`controlled_query`): the Sitemap's `/` bar runs
+    # this on a worker fiber, and the DISTINCT scan over the flow table is the two thirds of
+    # a reload that scales with retention rather than with the capped tree. A cancelled read
+    # raises `QueryCancelled` past the rescue below — cancellation is never an empty tree.
     def sitemap_entries(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
-                        raise_on_error : Bool = false) : Array({String, String, String})
+                        raise_on_error : Bool = false, control : QueryControl? = nil) : Array({String, String, String})
       rows = [] of {String, String, String}
       args = filter.args.dup
       args << limit
       # `method` is SELECTed, so it must ORDER too, or the LIMIT cut between two rows that
       # differ only by method is arbitrary — and with no cursor here the loser is unreachable.
-      @db.query("SELECT DISTINCT host, method, target FROM flows WHERE #{filter.sql} " \
-                "ORDER BY host, target, method LIMIT ?",
-        args: args) do |rs|
+      controlled_query("SELECT DISTINCT host, method, target FROM flows WHERE #{filter.sql} " \
+                       "ORDER BY host, target, method LIMIT ?", args, control) do |rs|
         rs.each { rows << {rs.read(String), rs.read(String), rs.read(String)} }
       end
       rows
+    rescue ex : QueryCancelled
+      raise ex
     rescue ex
       # The Sitemap's `/` filter feeds user QL here; a malformed FTS phrase or a query
       # too complex for SQLite raises. The live TUI must never crash (degrade to no

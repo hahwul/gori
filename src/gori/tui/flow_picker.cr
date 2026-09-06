@@ -57,7 +57,7 @@ module Gori::Tui
     # Recompute the visible rows from the precomputed haystacks: every whitespace-
     # separated term must appear (case-insensitive). Resets the cursor to the top.
     protected def refilter : Nil
-      terms = @query.downcase.split
+      terms = query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
       @selected = 0
       @scroll = 0
@@ -91,7 +91,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "flow picker needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "flow picker needs a larger window")
         return
       end
       Frame.card(screen, box, "PICK FLOW #{@target.to_s.upcase}", border: Theme.border_focus)

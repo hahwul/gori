@@ -84,6 +84,7 @@ module Gori::Tui
     def initialize(@title : String, @all : Array(HelpView::Row), @key_w : Int32, @scroll : Int32)
       @rows = @all
       @query = ""
+      @qcx = 0
       @preedit = "" # live IME composition on the filter (e.g. Hangul jamo)
       @searching = false
       @search_origin_scroll = @scroll
@@ -124,6 +125,7 @@ module Gori::Tui
         return :cancel unless @searching
         cancel_search
       when handle_navigation_key(k)
+      when search_edit(ev)
       when k.backspace?
         backspace if @searching
       else
@@ -161,6 +163,7 @@ module Gori::Tui
       @search_origin_scroll = @scroll
       @searching = true
       @query = ""
+      @qcx = 0
       @preedit = ""
       @rows = @all
     end
@@ -168,6 +171,7 @@ module Gori::Tui
     private def cancel_search : Nil
       @searching = false
       @query = ""
+      @qcx = 0
       @preedit = ""
       @rows = @all
       @scroll = @search_origin_scroll
@@ -184,16 +188,37 @@ module Gori::Tui
       return unless @searching
       return if ch.control?
       @preedit = "" # a committed char ends any in-progress composition
-      @query += ch
+      @query = @query[0, @qcx] + ch + @query[@qcx..]
+      @qcx += 1
       refilter
     end
 
     def backspace : Nil
       return unless @searching
-      return if @query.empty?
+      return if @qcx == 0
       @preedit = ""
-      @query = @query[0, @query.size - 1]
+      @query = @query[0, @qcx - 1] + @query[@qcx..]
+      @qcx -= 1
       refilter
+    end
+
+    # The caret's other moves while searching — ⌃/⌥←→ by word, Delete, ⌥⌫ (`LineEdit`; Home
+    # and End stay the list's, taken by `handle_navigation_key` first) and the bare ←/→.
+    private def search_edit(ev : Termisu::Event::Key) : Bool
+      return false unless @searching
+      key = ev.key
+      if act = LineEdit.action(ev)
+        @query, @qcx = LineEdit.apply(act, @query, @qcx)
+        @preedit = ""
+        refilter if LineEdit.mutating?(act)
+      elsif key.left?
+        @qcx = {@qcx - 1, 0}.max
+      elsif key.right?
+        @qcx = {@qcx + 1, @query.size}.min
+      else
+        return false
+      end
+      true
     end
 
     # Substring, case-insensitive, over both columns — NOT the fuzzy subsequence the palette
@@ -274,7 +299,7 @@ module Gori::Tui
         # drew (the QL card opens with `?` straight off a filter bar), or it blinks on through
         # the "larger window" message.
         screen.desired_cursor = nil
-        screen.text(area.x + 1, area.y, "#{@title.downcase} needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "#{@title.downcase} needs a larger window")
         return
       end
       Frame.card(screen, box, @title, border: Theme.border_focus)
@@ -314,7 +339,7 @@ module Gori::Tui
     private def render_filter(screen : Screen, box : Rect) : Nil
       if @searching
         px = screen.text(box.x + 2, box.y + 1, "search: ", Theme.muted, Theme.panel)
-        screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
+        screen.input_line(px, box.y + 1, @query, @qcx, @preedit, Theme.text_bright,
           Theme.panel, width: {box.right - 2 - px, 1}.max)
       else
         screen.text(box.x + 2, box.y + 1, "/ search", Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)

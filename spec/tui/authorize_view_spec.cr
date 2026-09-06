@@ -595,3 +595,36 @@ describe AuthorizeView do
     render(v)
   end
 end
+
+# The request list up top and the detail below are two mouse targets, hit-tested against
+# the geometry the LAST frame drew (the `OastController#callback_row_at` rule: invert the
+# window, never move it). The only list-bearing tab that took no click at all until now.
+describe AuthorizeView, "mouse geometry" do
+  it "maps a click to the visible row under it, and the pane below to the detail" do
+    v = AuthorizeView.new
+    v.add(flow("GET", "/one"))
+    v.add(flow("GET", "/two"))
+    v.add(flow("GET", "/three"))
+    v.list_row_at(5, 2).should be_nil # nothing drawn yet — no frame, no rows
+    render(v, 120, 30)
+    # row 0 is the header line, row 1 the column header, rows from 2
+    v.list_row_at(5, 2).should eq(0)
+    v.list_row_at(5, 4).should eq(2)
+    v.list_row_at(5, 5).should be_nil # past the three rows
+    v.list_contains?(5, 3).should be_true
+    v.detail_contains?(5, 20).should be_true
+    v.detail_contains?(5, 3).should be_false
+    v.select_row(2)
+    v.selected_entry.not_nil!.host_path.should contain("/three")
+  end
+
+  it "forgets last frame's rows when a frame draws no list" do
+    v = AuthorizeView.new
+    v.add(flow("GET", "/one"))
+    render(v, 120, 30)
+    v.list_row_at(5, 2).should eq(0)
+    v.clear
+    render(v, 120, 30)
+    v.list_row_at(5, 2).should be_nil
+  end
+end

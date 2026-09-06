@@ -794,6 +794,25 @@ module Gori::Tui
       true
     end
 
+    # On the RULES sub-tab the list and the two previews share the body, so the notch goes to
+    # the pane under the pointer (#956); the other sub-tabs are one list and take the plain
+    # wheel.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return handle_wheel(step) unless @sub == :rules
+      inner = BodyChrome.frame_inner(rect)
+      pin = @view.preview_input_body(inner)
+      pout = @view.preview_output_body(inner)
+      if !pin.empty? && pin.contains?(mx, my)
+        @preview_input.scroll_view(step)
+      elsif !pout.empty? && pout.contains?(mx, my)
+        sync_preview_out
+        @out.scroll_view(step)
+      else
+        move_sel(step)
+      end
+      true
+    end
+
     def set_preedit(text : String) : Bool
       return false unless @focus == :preview_in
       @preview_input.set_preedit(text)

@@ -19,6 +19,7 @@ module Gori::Tui
 
     def initialize(@registry : Verb::Registry)
       @query = ""
+      @qcx = 0 # caret into @query
       @results = [] of Verb::Definition
       @selected = 0
       @preedit = ""
@@ -27,23 +28,53 @@ module Gori::Tui
 
     def reset(ctx : Verb::ExecContext) : Nil
       @query = ""
+      @qcx = 0
       @selected = 0
       @preedit = ""
       refresh(ctx)
     end
 
     def append(ch : Char, ctx : Verb::ExecContext) : Nil
-      @query += ch
+      @query = @query[0, @qcx] + ch + @query[@qcx..]
+      @qcx += 1
       @selected = 0
       @preedit = ""
       refresh(ctx)
     end
 
     def backspace(ctx : Verb::ExecContext) : Nil
-      return if @query.empty?
-      @query = @query[0, @query.size - 1]
+      return if @qcx == 0
+      @query = @query[0, @qcx - 1] + @query[@qcx..]
+      @qcx -= 1
       @selected = 0
       refresh(ctx)
+    end
+
+    # ↑/↓ over the results, and the caret edits beyond a character at a time — ⌃/⌥←→ by
+    # word, Home/End, Delete, ⌥⌫ (`LineEdit`, the `/` bars' keymap) and the bare ←/→. True
+    # when `ev` was one of them; the list is re-scored only when the text changed, so a
+    # motion keeps the cursor row.
+    def edit(ev : Termisu::Event::Key, ctx : Verb::ExecContext) : Bool
+      key = ev.key
+      if key.up?
+        move(-1)
+      elsif key.down?
+        move(1)
+      elsif act = LineEdit.action(ev)
+        @query, @qcx = LineEdit.apply(act, @query, @qcx)
+        @preedit = ""
+        if LineEdit.mutating?(act)
+          @selected = 0
+          refresh(ctx)
+        end
+      elsif key.left?
+        @qcx = {@qcx - 1, 0}.max
+      elsif key.right?
+        @qcx = {@qcx + 1, @query.size}.min
+      else
+        return false
+      end
+      true
     end
 
     # IME composing text, drawn (underlined) at the caret without touching the
@@ -81,7 +112,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       if box.empty?
-        screen.text(area.x + 1, area.y, "command palette needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "command palette needs a larger window")
         return
       end
       w = box.w
@@ -89,7 +120,7 @@ module Gori::Tui
 
       # query line (caret always at end; preedit shown underlined there)
       screen.text(box.x + 2, box.y + 1, "›", Theme.accent, Theme.panel)
-      screen.input_line(box.x + 4, box.y + 1, @query, @query.size, @preedit, Theme.text_bright, Theme.panel, width: w - 6)
+      screen.input_line(box.x + 4, box.y + 1, @query, @qcx, @preedit, Theme.text_bright, Theme.panel, width: w - 6)
 
       Frame.tee_divider(screen, box, box.y + 2)
 

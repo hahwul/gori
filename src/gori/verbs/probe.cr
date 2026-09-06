@@ -27,6 +27,13 @@ module Gori
         "probe.filter", "Filter issues", "Filter the list (severity:/status:/category:/host:/code:/free text)",
         Verb::Scope::Probe, [Verb::Chord.new("/")], group: :view) { |ctx| ctx.probe_query; nil }
 
+      # `y` on the LIST (#964's shape): the issue as a report line with its affected URLs
+      # under it. The detail scope's own `y` copies the selected affected URLs.
+      r.register Verb::Definition.new(
+        "probe.copy-issue", "Copy issue", "Copy the selected issue (severity, title, host) and its affected URLs",
+        Verb::Scope::Probe, [Verb::Chord.new("y")],
+        available: ->(ctx : Verb::ExecContext) { ctx.probe_issue_selected? }, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
       # Probe-local `m` (mode cycle). Global Match & Replace is palette-only by default,
       # so this no longer needs to shadow a Global bare letter.
       r.register Verb::Definition.new(

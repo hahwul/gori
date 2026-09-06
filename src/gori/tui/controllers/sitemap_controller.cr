@@ -14,6 +14,13 @@ module Gori::Tui
       @sitemap = SitemapView.new
       @sitemap.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
       @query_reload_at = nil.as(Time::Instant?)
+      # The `/` bar's reload off the main fiber (the History #967 shape): one running read
+      # and one replaceable request. A superseded read is cancelled and its answer dropped
+      # by generation, so a fast typist never sees an older query's tree land last.
+      @search_generation = 0_i64
+      @search_control = nil.as(Store::QueryControl?)
+      @search_pending = nil.as({Store, SitemapView::ReloadPlan, Int64}?)
+      @search_results = Channel({Int64, SitemapView::ReloadPlan, {Array({String, String, String}), Hash({String, String}, String)}?}).new(1)
     end
 
     def view : SitemapView
@@ -193,8 +200,72 @@ module Gori::Tui
     # Re-derive the tree from the store under the current scope filter + `/` query
     # (both held by the view). Public so the scope-lens toggle (a cross-tab action
     # mediated by the shell) can refresh it.
+    # A synchronous reload (tab entry, an external change, an import) supersedes any read the
+    # bar has in flight — its answer would otherwise land AFTER this one, showing an older
+    # query's tree.
     def reload : Nil
+      invalidate_search
+      @sitemap.searching = false
       @sitemap.reload(@host.session.store)
+    end
+
+    private def invalidate_search : Nil
+      @search_generation += 1
+      @search_control.try(&.cancel)
+      @search_pending = nil
+    end
+
+    # The debounced flush: compile the query here, read on a worker, build on return.
+    private def request_reload(store : Store) : Nil
+      invalidate_search
+      unless plan = @sitemap.prepare_reload
+        @sitemap.searching = false # an invalid residual settled the tree by itself
+        return
+      end
+      @sitemap.searching = true
+      @search_pending = {store, plan, @search_generation}
+      start_search
+    end
+
+    private def start_search : Nil
+      return if @search_control
+      return unless pending = @search_pending
+      @search_pending = nil
+      store, plan, generation = pending
+      control = Store::QueryControl.new
+      @search_control = control
+      results = @search_results
+      view = @sitemap
+      spawn(name: "gori-sitemap-search") do
+        result = nil.as({Array({String, String, String}), Hash({String, String}, String)}?)
+        begin
+          control.check!
+          result = view.fetch_reload(store, plan, control)
+        rescue Store::QueryCancelled
+          # Superseded/closed is not a failed query and never means an empty tree.
+        rescue ex
+          ::Log.warn { "sitemap worker failed: #{ex.message}" }
+        ensure
+          results.send({generation, plan, result})
+        end
+      end
+    end
+
+    # Called each run-loop tick: land a finished read. True when it did (→ a frame).
+    def drain_search : Bool
+      select
+      when done = @search_results.receive
+        @search_control = nil
+        generation, plan, result = done
+        if generation == @search_generation
+          @sitemap.searching = false
+          @sitemap.apply_reload(result[0], result[1], plan) if result
+        end
+        start_search
+        true
+      else
+        false
+      end
     end
 
     # --- QL filter bar (a text sub-mode; the shell claims it before the focus ring) ---
@@ -258,6 +329,8 @@ module Gori::Tui
       return @sitemap.popup_close if @sitemap.popup_open?
       @query_reload_at = nil
       @sitemap.cancel_query
+      invalidate_search
+      @sitemap.searching = false
       @sitemap.reload(store)
     end
 
@@ -279,7 +352,7 @@ module Gori::Tui
     private def flush_query_reload : Nil
       return unless @query_reload_at
       @query_reload_at = nil
-      @sitemap.reload(@host.session.store)
+      request_reload(@host.session.store)
     end
 
     # `/` — focus the QL filter bar (verb-dispatched).

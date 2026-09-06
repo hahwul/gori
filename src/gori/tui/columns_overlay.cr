@@ -71,6 +71,7 @@ module Gori::Tui
       case
       when k.up?, k.lower_k?   then move(-1)
       when k.down?, k.lower_j? then move(1)
+      when page_key(ev)        then nil # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
       when k.lower_a?
         # Refused HERE and not only at the store: the ceiling is about the ROW being readable,
         # which is a fact about this card's own list, and a form the operator fills in only to
@@ -90,6 +91,14 @@ module Gori::Tui
       when k.lower_d? then delete_selected
       end
       :stay
+    end
+
+    def entry_count : Int32
+      @columns.size
+    end
+
+    def set_selected(idx : Int32) : Nil
+      @selected = idx.clamp(0, {@columns.size - 1, 0}.max)
     end
 
     def move(d : Int32) : Nil
@@ -177,7 +186,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "columns need a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "columns need a larger window")
         return
       end
       Frame.card(screen, box, title, border: Theme.border_focus)

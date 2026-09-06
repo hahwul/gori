@@ -1317,16 +1317,11 @@ module Gori::Tui
       # payload bar (2 rows) — no row action; body is the filter + table card below
       body = Rect.new(content.x, content.y + 2, content.w, content.h - 2)
       return if body.h < 1
-      table = if body.h >= 2
-                if my == body.y
-                  start_cb_filter unless @filter_editing
-                  return
-                end
-                Rect.new(body.x, body.y + 1, body.w, body.h - 1)
-              else
-                body
-              end
-      return unless idx = callback_row_at(table, mx, my)
+      if body.h >= 2 && my == body.y
+        start_cb_filter unless @filter_editing
+        return
+      end
+      return unless (table = callbacks_table(content)) && (idx = callback_row_at(table, mx, my))
       @filter_editing = false # a row click commits the filter, like History's list click
       if idx == @cb_sel
         @cb_detail = true
@@ -1335,6 +1330,31 @@ module Gori::Tui
         @cb_sel = idx
         sync_scroll
       end
+    end
+
+    # The CALLBACKS table card's rect inside `content` — under the two-row payload bar and
+    # the filter row — or nil when the pane is too short for one. The single derivation the
+    # click, the double-click and the filter-row test share.
+    private def callbacks_table(content : Rect) : Rect?
+      return nil if content.h < 2
+      body = Rect.new(content.x, content.y + 2, content.w, content.h - 2)
+      return nil if body.h < 1
+      body.h >= 2 ? Rect.new(body.x, body.y + 1, body.w, body.h - 1) : body
+    end
+
+    # A double-click on a callback row runs ↵ on it (#969's contract): select and open the
+    # detail in one gesture, where the click's select-then-open needs two.
+    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless callbacks_sub? && !@cb_detail
+      content = BodyChrome.content_rect(rect, strip: true)
+      return false unless (table = callbacks_table(content)) && (idx = callback_row_at(table, mx, my))
+      @host.focus_body
+      @filter_editing = false
+      @cb_sel = idx
+      sync_scroll
+      @cb_detail = true
+      @cb_pane.reset
+      true
     end
 
     # Hit-test a click against the CALLBACKS table card (mirrors render_callback_table).

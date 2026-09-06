@@ -74,4 +74,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def sequencer_analysis_readable? : Bool
     sequencer_controller.sequencer_analysis_readable?
   end
+
+  def sequencer_samples_readable? : Bool
+    sequencer_controller.sequencer_samples_readable?
+  end
 end

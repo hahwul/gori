@@ -426,7 +426,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "payload set editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "payload set editor needs a larger window")
         return
       end
       # Not `title` — that is now the Overlay chrome method, and a local of the same name

@@ -87,7 +87,7 @@ module Gori::Tui
     end
 
     # Remember the last confirmed overlay for the next Sitemap/History discovery.
-    def save_prefs : Nil
+    def save_prefs : Bool
       Settings.save_discover_prefs(CONTAINMENTS[@contain_idx].label, DEPTHS[@depth_idx],
         CONCS[@conc_idx], @spider, @bruteforce, @ext, @keep_alive)
     end
@@ -212,7 +212,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "config needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "config needs a larger window")
         return
       end
       Frame.card(screen, box, "DISCOVER", border: Theme.border_focus)

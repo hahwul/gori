@@ -123,9 +123,16 @@ module Gori
     # printing a smaller success. Whole-file atomicity was not protecting much: nothing
     # deduplicates on re-import, so a failed all-or-nothing import meant starting over anyway,
     # and 80% of a 200 MB HAR plus an honest message beats losing all of it.
-    def self.insert_all(store : Store, pairs : Array(Builder::FlowPair)) : {Int32, Int32}
+    #
+    # `cancelled` is polled between chunks (the TUI's import job sets it from the palette;
+    # what is committed stays) and `progress` is told the running count after each — both
+    # optional, and neither changes the count that comes back: a cancelled import is a
+    # short one, and the caller says so.
+    def self.insert_all(store : Store, pairs : Array(Builder::FlowPair), *,
+                        cancelled : (-> Bool)? = nil, progress : (Int32, Int32 ->)? = nil) : {Int32, Int32}
       committed = 0
       pairs.each_slice(IMPORT_CHUNK) do |slice|
+        break if cancelled.try(&.call)
         # `_ids`, not the counting form: a flow's WebSocket transcript is stored against the
         # flow id, which does not exist until this write commits.
         ids = store.insert_import_batch_ids(slice.map { |pair| {pair.request, pair.response} })
@@ -137,6 +144,7 @@ module Gori
           msgs = slice[i].ws_messages
           store.insert_ws_messages(id, msgs) unless msgs.empty?
         end
+        progress.try(&.call(committed, pairs.size))
         # A short answer means the batch rolled back or the store is closing; stop rather than
         # push more work at a store that just refused some.
         break if ids.size < slice.size
@@ -148,7 +156,8 @@ module Gori
     # stamped `source: import` and `source_ref: <basename>`, so a History row can say WHICH file
     # it came out of — the provenance question an operator actually asks of an imported row.
     def self.import_file(store : Store, kind : Symbol, path : String,
-                         surface : FlowSource::Surface? = nil) : Result
+                         surface : FlowSource::Surface? = nil, *,
+                         cancelled : (-> Bool)? = nil, progress : (Int32, Int32 ->)? = nil) : Result
       expanded = Path[path].expand(home: true).to_s
       raise Gori::Error.new("file not found: #{expanded}") unless File.exists?(expanded)
       raise Gori::Error.new("not a file: #{expanded}") unless File.file?(expanded)
@@ -178,7 +187,7 @@ module Gori
         end
         raise Gori::Error.new("no flows found in #{expanded}")
       end
-      committed, attempted = insert_all(store, parsed.flows)
+      committed, attempted = insert_all(store, parsed.flows, cancelled: cancelled, progress: progress)
       Result.new(committed, parsed.skipped, attempted)
     end
   end

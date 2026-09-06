@@ -43,7 +43,7 @@ module Gori::Settings
 
   # Persist the overlay's last confirmed choices (called when mining starts).
   def self.save_mine_prefs(locations : Array(String), concurrency : Int32, notify : String,
-                           keep_alive : Bool = true) : Nil
+                           keep_alive : Bool = true) : Bool
     self.mine_locations = locations.map(&.downcase.strip).reject(&.empty?)
     self.mine_concurrency = concurrency
     self.mine_notify = notify

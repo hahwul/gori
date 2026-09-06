@@ -188,16 +188,19 @@ module Gori::Tui
       # ↑/↓ keep stepping in BOTH modes — that's why Tab, not an arrow, is the toggle.
       @search_open = false
       @search_buffer = ""
+      @search_cx = 0 # caret into @search_buffer (the prompts edit through `prompt_edit`)
       @search_preedit = ""
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
       @search_replace = false
       @search_replace_buffer = ""
+      @search_replace_cx = 0
       # The sub-tab rename prompt (Repeater + Fuzzer + Decoder + Miner) — orthogonal to
       # @overlay (floats over the bottom status row, like ^G/^F).
       @rename_open = false
       @rename_buffer = ""
+      @rename_cx = 0
       @rename_preedit = ""
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove repeater tabs while the prompt is open, so the
@@ -207,6 +210,12 @@ module Gori::Tui
       # space-separated tags. Held by VIEW identity for the same reconcile-race reason.
       @tag_edit_open = false
       @tag_buffer = ""
+      @tag_cx = 0
+      # A running import: its job id, the worker's events (drained on the tick), and the
+      # cancel flag the worker polls between chunks. See `apply_import`.
+      @import_job = nil.as(Int32?)
+      @import_cancel = false
+      @import_events = Channel(ImportEvent).new(16)
       @tag_preedit = ""
       @tag_views = [] of RepeaterView # the sub-tabs the prompt will tag (marks, else the active one)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
@@ -672,6 +681,8 @@ module Gori::Tui
             # Debounced QL filter: fire the deferred search once typing has paused.
             dirty = true if history_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
+            dirty = true if sitemap_controller.drain_search
+            dirty = true if drain_import_events
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
             # idle loop wakes once a minute to repaint rather than every second.
             if (clock = clock_minute) != last_clock
@@ -736,6 +747,7 @@ module Gori::Tui
         #
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
+        @import_cancel = true
         history_controller.cancel_searches
         # Drop the per-tab window title back to a neutral "𝓰𝓸𝓻𝓲" on leave — the shared term
         # outlives this Runner (project picker + the next session reuse it), so a stale
@@ -2189,10 +2201,7 @@ module Gori::Tui
           close_overlay
           @toast = verb.call(self) || @toast
         end
-      elsif key.up?
-        @palette.move(-1)
-      elsif key.down?
-        @palette.move(1)
+      elsif @palette.edit(ev, self) # ↑/↓, ⌃/⌥←→, Home/End, Delete, ⌥⌫, ←/→ — before ⌫ and the printables
       elsif key.backspace?
         @palette.backspace(self)
       elsif c && !ev.ctrl? && !ev.alt?
@@ -2902,6 +2911,7 @@ module Gori::Tui
     # listed: the ones that call `@host.jobs.start` are discover / fuzzer / miner /
     # sequencer / repeater(minimize) / oast / authorize.
     private def stop_all_jobs : Nil
+      @import_cancel = true # the worker stops after its chunk; the store outlives this tick
       discover_controller.stop_all
       fuzzer_controller.stop_all
       miner_controller.stop_all
@@ -3519,16 +3529,13 @@ module Gori::Tui
 
     private def handle_rename_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
         close_rename
       elsif key.enter?
         apply_rename(@rename_buffer)
         close_rename
-      elsif key.backspace?
-        @rename_buffer = @rename_buffer[0, {@rename_buffer.size - 1, 0}.max]
-      elsif c && !ev.ctrl? && !ev.alt?
-        @rename_buffer += c
+      elsif edited = prompt_edit(ev, @rename_buffer, @rename_cx)
+        @rename_buffer, @rename_cx = edited
         @rename_preedit = "" # commit any IME preedit
       end
     end
@@ -3565,6 +3572,7 @@ module Gori::Tui
       return unless view
       @rename_view = view
       @rename_buffer = view.name || ""
+      @rename_cx = @rename_buffer.size
       @rename_preedit = ""
       @rename_open = true
     end
@@ -3600,7 +3608,7 @@ module Gori::Tui
       hint = "↵ save · esc cancel · empty: auto"
       x = rect.x + prefix.size
       iw = {rect.right - x - hint.size - 2, 4}.max
-      screen.input_line(x, rect.y, @rename_buffer, @rename_buffer.size, @rename_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.input_line(x, rect.y, @rename_buffer, @rename_cx, @rename_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
@@ -3622,6 +3630,7 @@ module Gori::Tui
       targets = repeater_controller.target_views
       @tag_views = targets.empty? ? [view] : targets
       @tag_buffer = view.tags.join(" ")
+      @tag_cx = @tag_buffer.size
       @tag_preedit = ""
       @tag_edit_open = true
     end
@@ -3634,16 +3643,13 @@ module Gori::Tui
 
     private def handle_tag_edit_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
         close_tag_edit
       elsif key.enter?
         apply_tag_edit(@tag_buffer)
         close_tag_edit
-      elsif key.backspace?
-        @tag_buffer = @tag_buffer[0, {@tag_buffer.size - 1, 0}.max]
-      elsif c && !ev.ctrl? && !ev.alt?
-        @tag_buffer += c
+      elsif edited = prompt_edit(ev, @tag_buffer, @tag_cx)
+        @tag_buffer, @tag_cx = edited
         @tag_preedit = "" # commit any IME preedit
       end
     end
@@ -3668,7 +3674,7 @@ module Gori::Tui
       hint = "↵ save · esc cancel · #tags space-separated"
       x = rect.x + prefix.size
       iw = {rect.right - x - hint.size - 2, 4}.max
-      screen.input_line(x, rect.y, @tag_buffer, @tag_buffer.size, @tag_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.input_line(x, rect.y, @tag_buffer, @tag_cx, @tag_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
@@ -3693,17 +3699,84 @@ module Gori::Tui
       true
     end
 
+    # What the import worker reports back, drained on the tick (`drain_import_events`).
+    private record ImportProgress, job : Int32, done : Int32, total : Int32
+    private record ImportDone, job : Int32, label : String, path : String, result : Import::Result?, error : String?
+    private alias ImportEvent = ImportProgress | ImportDone
+
+    # The import runs as a background JOB — on the activity chip, with progress, and with a
+    # palette cancel — instead of on the tick, where a large file froze every key and every
+    # frame until it was done. The shape is `FuzzerController#fuzz_save_results`: the worker
+    # fiber writes to the store and sends events; the shell applies them on its own fiber.
+    #
+    # HONEST LIMIT: only the INSERT phase yields (per 2000-row chunk, and the store write
+    # itself does) and cancels. The PARSE — `File.read` + `JSON.parse` of the whole file for a
+    # HAR — is one synchronous call on a single-threaded scheduler, so a very large file still
+    # holds the frame while it is parsed; a streaming reader is the follow-up that removes it.
     private def apply_import(kind : Symbol, label : String, path : String) : Nil
-      result = Import.import_file(@session.store, kind, path, Gori::FlowSource::Surface::Tui)
+      if @import_job
+        @toast = "an import is already running — cancel it from the palette (Import: cancel) or wait"
+        return
+      end
+      job = @jobs.start(:import, "import #{label} · #{File.basename(path)}")
+      @import_job = job
+      @import_cancel = false
+      store = @session.store
+      events = @import_events
+      status("importing #{label} — parsing #{File.basename(path)}…", :busy)
+      spawn(name: "gori-import") do
+        begin
+          result = Import.import_file(store, kind, path, Gori::FlowSource::Surface::Tui,
+            cancelled: -> { @import_cancel },
+            progress: ->(done : Int32, total : Int32) { events.send(ImportProgress.new(job, done, total)) })
+          events.send(ImportDone.new(job, label, path, result, nil))
+        rescue ex
+          events.send(ImportDone.new(job, label, path, nil, ex.message || ex.class.name))
+        end
+      end
+    end
+
+    # Land the import worker's events. True when anything arrived (→ a frame).
+    private def drain_import_events : Bool
+      any = false
+      loop do
+        select
+        when ev = @import_events.receive
+          any = true
+          case ev
+          in ImportProgress
+            @jobs.progress(ev.job, ev.done, ev.total, "#{ev.done}/#{ev.total} flows")
+          in ImportDone
+            finish_import(ev)
+          end
+        else
+          break
+        end
+      end
+      any
+    end
+
+    private def finish_import(ev : ImportDone) : Nil
+      @import_job = nil
+      if error = ev.error
+        @jobs.finish(ev.job, :error, error)
+        status("import failed: #{error}", :error)
+        return
+      end
+      result = ev.result || return
       sitemap_controller.reload
-      msg = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{label} · #{path}"
+      count = result.count
+      msg = if @import_cancel
+              "import cancelled — #{count} flow#{count == 1 ? "" : "s"} from #{ev.label} were written before the stop"
+            else
+              "imported #{count} flow#{count == 1 ? "" : "s"} from #{ev.label} · #{ev.path}"
+            end
       msg += " (#{result.skipped} entries skipped)" if result.skipped > 0
       # The import is chunked, so a partial write is possible — say so rather than letting a
       # short count read as a successful import of a smaller file (see Import::Result).
-      result.shortfall_note.try { |note| msg += " — #{note}" }
-      @toast = msg
-    rescue ex
-      @toast = "import failed: #{ex.message}"
+      result.shortfall_note.try { |note| msg += " — #{note}" } unless @import_cancel
+      @jobs.finish(ev.job, @import_cancel ? :stopped : :done, "#{count} flows")
+      status(msg, :done)
     end
 
     # --- Export path popup (Notes → Export note, Issues → Export issues) -----
@@ -3738,7 +3811,7 @@ module Gori::Tui
       suffix = hint_with_count(replace_target? ? "↵/↑↓ step · tab replace · esc done" : "↵/↑↓ step · esc done")
       sx = {rect.right - suffix.size, x}.max
       iw = {sx - x - 1, 0}.max
-      screen.input_line(x, rect.y, @search_buffer, @search_buffer.size, @search_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.input_line(x, rect.y, @search_buffer, @search_cx, @search_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text(sx, rect.y, suffix, no_matches? ? Theme.yellow : Theme.muted, Theme.panel)
     end
 
@@ -3761,7 +3834,7 @@ module Gori::Tui
       # Bottom row: the focused field — input_line syncs the hardware cursor here.
       rsuffix = "↵ replace all · esc done"
       rsx = {rect.right - rsuffix.size, x}.max
-      screen.input_line(x, rect.y, @search_replace_buffer, @search_replace_buffer.size, @search_preedit, Theme.text_bright, Theme.panel, width: {rsx - x - 1, 0}.max)
+      screen.input_line(x, rect.y, @search_replace_buffer, @search_replace_cx, @search_preedit, Theme.text_bright, Theme.panel, width: {rsx - x - 1, 0}.max)
       screen.text(rsx, rect.y, rsuffix, Theme.muted, Theme.panel)
     end
 
@@ -4242,7 +4315,7 @@ module Gori::Tui
         return false
       end
       notify = ov.notify_mode
-      Settings.save_probe_active_notify(notify.token)
+      status("notify choice applied — could not save to #{Settings.path}", :error) unless Settings.save_probe_active_notify(notify.token)
       # One run per flow (already background), so each target keeps its own scope decision at
       # the Outbound chokepoint — the batch changed the count, not the gate.
       ov.details.each do |d|
@@ -4414,7 +4487,7 @@ module Gori::Tui
       # its header names the flow count, so N sessions are never a surprise (P4).
       ov.on_commit = -> {
         if ov.any_checked?
-          ov.save_prefs
+          status("mine prefs applied — could not save to #{Settings.path}", :error) unless ov.save_prefs
           miner_controller.start_session(ov.seed, ov.build_config)
           started = 1
           ov.extra_seeds.each do |s|
@@ -4494,7 +4567,7 @@ module Gori::Tui
         @toast = "enable spider or bruteforce"
         return false
       end
-      ov.save_prefs
+      status("discover prefs applied — could not save to #{Settings.path}", :error) unless ov.save_prefs
       discover_controller.start_session(ov.selected_target, ov.build_config)
       switch_tab(:target)
       target_controller.select_discover
@@ -5131,7 +5204,7 @@ module Gori::Tui
       when :comparer  then comparer_controller.comparer_copy
       when :intercept then intercept_controller.intercept_preview_copy
       when :oast      then oast_controller.oast_detail_copy
-      when :probe     then probe_controller.probe_detail_copy
+      when :probe     then probe_controller.probe_copy
       when :sequencer then sequencer_controller.sequencer_copy
       when :miner     then miner_controller.miner_copy
         # List-row copies (#C12): the row under the cursor — or every marked row — as text.
@@ -5313,6 +5386,16 @@ module Gori::Tui
 
     def import_burp : Nil
       open_import(:burp)
+    end
+
+    def import_running? : Bool
+      !@import_job.nil?
+    end
+
+    def import_cancel : Nil
+      return @toast = "no import is running" unless @import_job
+      @import_cancel = true
+      status("cancelling the import after its current chunk…", :busy)
     end
 
     def import_wsdl : Nil

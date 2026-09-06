@@ -82,12 +82,6 @@ module Gori::Tui
       @filtered[i]?
     end
 
-    # What has been typed into the filter. The Runner seeds a new issue's title with it
-    # (type the title, ↵ on `+ New issue…`, and the form is already filled in).
-    def query : String
-      @query
-    end
-
     # --- Overlay contract (see overlay.cr) ---
     def key : OverlayKind
       OverlayKind::LinkPick
@@ -102,7 +96,7 @@ module Gori::Tui
     end
 
     protected def refilter : Nil
-      terms = @query.downcase.split
+      terms = query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
       # Keep the create rows at the top; land on the first match when any, else on
       # `+ New issue…` — a query with no hits is the create case.
@@ -134,7 +128,7 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return unless box
+      return render_too_small(screen, area, "the link picker needs a larger window") unless box
       Frame.card(screen, box, title, border: Theme.border_focus)
       list_top = render_filter(screen, box, CARD_HINT)
       list_h = list_height(box)

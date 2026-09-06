@@ -18,4 +18,7 @@ abstract class Gori::Verb::ExecContext
   # The ANALYSIS report holds focus — the gate for its row select / copy verbs. The report IS the
   # randomness finding, so being unable to paste it was half a tool.
   abstract def sequencer_analysis_readable? : Bool
+
+  # The SAMPLES list holds focus and a sample is under the cursor — the row-copy gate.
+  abstract def sequencer_samples_readable? : Bool
 end
