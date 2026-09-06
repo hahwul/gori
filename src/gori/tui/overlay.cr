@@ -353,6 +353,53 @@ module Gori::Tui
     def move(step : Int32) : Nil
     end
 
+    # --- the list-card contract: PgUp/PgDn/Home/End over whatever rows a card draws --------
+    #
+    # `PickerOverlay` had this for the five pickers (#958); the nine list CARDS — notifications,
+    # agents, listeners, passthrough, tabs, columns, hosts, env, hotkeys — each hand-rolled
+    # ↑/↓ and walked a 100-entry ring one row at a time. A card takes part by answering
+    # `entry_count`, keeping `set_selected`, recording the rows its last frame drew in
+    # `@list_last_h`, and taking `page_key(ev)` as one arm of its key ladder.
+
+    @list_last_h = 0 # rows the last frame drew — the PgUp/PgDn step
+
+    # Navigable rows. Zero (the default) leaves `page_key` inert.
+    def entry_count : Int32
+      0
+    end
+
+    # Put the cursor on row `idx` (clamped). Default no-op; list cards override it.
+    def set_selected(idx : Int32) : Nil
+    end
+
+    # PgUp/PgDn/Home/End over the list, one page being the rows the last frame drew. True
+    # when `ev` was one of the four, so a key ladder can take it as one arm.
+    def page_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when key.page_up?   then move(-{@list_last_h, 1}.max)
+      when key.page_down? then move({@list_last_h, 1}.max)
+      when key.home?      then set_selected(0)
+      when key.end?       then set_selected(entry_count - 1)
+      else                     return false
+      end
+      true
+    end
+
+    # The one line a card draws when `area` cannot hold it: "<what> · esc to close" (or the
+    # `closing` a card with unsaved edits prefers, e.g. "esc saves & closes"). Forty-odd cards
+    # each spelled this out; the wording stays theirs, the paint and the empty-area guard are
+    # here. Class-level so a card that is not an `Overlay` (the confirm dialog, the settings
+    # view) draws the same line.
+    def self.too_small(screen : Screen, area : Rect, what : String, closing : String = "esc to close") : Nil
+      return if area.empty?
+      screen.text(area.x + 1, area.y, "#{what} · #{closing}", Theme.muted, Theme.bg, width: {area.w - 1, 0}.max)
+    end
+
+    def render_too_small(screen : Screen, area : Rect, what : String, closing : String = "esc to close") : Nil
+      Overlay.too_small(screen, area, what, closing)
+    end
+
     # A scroll-wheel notch over the modal (already ±3-scaled). Defaults to a field move, so
     # form overlays get wheel scrolling for free by overriding `move`.
     def handle_wheel(step : Int32) : Nil

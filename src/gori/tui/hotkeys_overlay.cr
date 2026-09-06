@@ -51,6 +51,7 @@ module Gori::Tui
       @mode = :browse
       @visible = [] of Int32
       @search_query = ""
+      @search_qcx = 0
       @search_preedit = ""
       @search_origin = 0
       @feedback = nil.as(String?)
@@ -68,6 +69,7 @@ module Gori::Tui
       @mode = :browse
       @visible = (0...@rows.size).to_a
       @search_query = ""
+      @search_qcx = 0
       @search_preedit = ""
       @search_origin = @selected
       @feedback = nil
@@ -160,6 +162,8 @@ module Gori::Tui
         select_move(-1)
       elsif key.down?
         select_move(1)
+      elsif page_key(ev)
+        # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
       elsif key.left?
         cycle_profile(-1)
       elsif key.right?
@@ -187,6 +191,7 @@ module Gori::Tui
         select_move(-1)
       elsif key.down?
         select_move(1)
+      elsif search_edit(ev)
       elsif key.backspace?
         search_backspace
       elsif c = bare_char(ev)
@@ -229,6 +234,7 @@ module Gori::Tui
       @search_origin = @selected
       @mode = :search
       @search_query = ""
+      @search_qcx = 0
       @search_preedit = ""
       @visible = (0...@rows.size).to_a
       @feedback = nil
@@ -247,6 +253,7 @@ module Gori::Tui
     private def finish_search : Nil
       @mode = :browse
       @search_query = ""
+      @search_qcx = 0
       @search_preedit = ""
       @visible = (0...@rows.size).to_a
     end
@@ -254,15 +261,36 @@ module Gori::Tui
     private def search_insert(ch : Char) : Nil
       return if ch.control?
       @search_preedit = ""
-      @search_query += ch
+      @search_query = @search_query[0, @search_qcx] + ch + @search_query[@search_qcx..]
+      @search_qcx += 1
       refilter
     end
 
     private def search_backspace : Nil
-      return if @search_query.empty?
+      return if @search_qcx == 0
       @search_preedit = ""
-      @search_query = @search_query[0, @search_query.size - 1]
+      @search_query = @search_query[0, @search_qcx - 1] + @search_query[@search_qcx..]
+      @search_qcx -= 1
       refilter
+    end
+
+    # The caret's other moves — ⌃/⌥←→ by word, Home/End, Delete, ⌥⌫ (`LineEdit`) and the
+    # bare ←/→, which the search row has no other use for (browse mode's ←/→ cycle the
+    # profile, and that is a different ladder).
+    private def search_edit(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if act = LineEdit.action(ev)
+        @search_query, @search_qcx = LineEdit.apply(act, @search_query, @search_qcx)
+        @search_preedit = ""
+        refilter if LineEdit.mutating?(act)
+      elsif key.left?
+        @search_qcx = {@search_qcx - 1, 0}.max
+      elsif key.right?
+        @search_qcx = {@search_qcx + 1, @search_query.size}.min
+      else
+        return false
+      end
+      true
     end
 
     # Match only text the row visibly presents: its scope heading, action title and current
@@ -360,6 +388,10 @@ module Gori::Tui
     end
 
     # Click target: snap to the row, or the nearest binding when a header is hit.
+    def entry_count : Int32
+      @visible.size
+    end
+
     def set_selected(idx : Int32) : Nil
       idx = idx.clamp(0, {@rows.size - 1, 0}.max)
       return if @rows.empty?
@@ -473,7 +505,7 @@ module Gori::Tui
         # No card, but the overlay still owns the screen: clear the caret the pane underneath
         # drew, or it blinks on through the "larger window" message.
         screen.desired_cursor = nil
-        screen.text(area.x + 1, area.y, "hotkeys editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "hotkeys editor needs a larger window")
         return
       end
       Frame.card(screen, box, "HOTKEYS", border: Theme.border_focus)
@@ -484,6 +516,7 @@ module Gori::Tui
 
       top = box.y + 3
       cap = list_capacity(box)
+      @list_last_h = cap
       start = list_window(cap)
       if @visible.empty?
         screen.text(box.x + 3, top, "no hotkeys match", Theme.muted, Theme.panel)
@@ -516,7 +549,7 @@ module Gori::Tui
         return
       end
       px = screen.text(box.x + 2, box.y + 1, "search: ", Theme.muted, Theme.panel)
-      screen.input_line(px, box.y + 1, @search_query, @search_query.size, @search_preedit,
+      screen.input_line(px, box.y + 1, @search_query, @search_qcx, @search_preedit,
         Theme.text_bright, Theme.panel, width: {box.right - 2 - px, 1}.max)
     end
 

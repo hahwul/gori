@@ -86,6 +86,8 @@ module Gori::Tui
         select_move(-1)
       elsif key.down? || key.lower_j?
         select_move(1)
+      elsif page_key(ev)
+        # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
       elsif key.enter?
         edit_start
       else
@@ -210,6 +212,10 @@ module Gori::Tui
       @selected = (@selected + d).clamp(0, {@items.size - 1, 0}.max)
     end
 
+    def entry_count : Int32
+      @items.size
+    end
+
     def set_selected(idx : Int32) : Nil
       @selected = idx.clamp(0, {@items.size - 1, 0}.max)
     end
@@ -323,7 +329,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "hostname editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "hostname editor needs a larger window")
         return
       end
       Frame.card(screen, box, "HOSTNAME OVERRIDES", border: Theme.border_focus)
@@ -336,6 +342,7 @@ module Gori::Tui
       screen.text(box.x + 3, box.y + 1, "IP HOSTNAME · e.g. 10.0.0.1 example.com", Theme.muted, Theme.panel, width: {box.w - 5, 1}.max)
 
       cap = list_capacity(box)
+      @list_last_h = cap
       y = box.y + 2
       rows = cap
       if @adding

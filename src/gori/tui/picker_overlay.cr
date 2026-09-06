@@ -1,4 +1,5 @@
 require "./screen"
+require "./text_field"
 require "./theme"
 require "./frame"
 require "./overlay"
@@ -30,22 +31,9 @@ module Gori::Tui
       @selected = (@selected + step).clamp(0, n - 1)
     end
 
-    @list_last_h = 0 # rows the last frame drew — the PgUp/PgDn step
-
-    # PgUp/PgDn/Home/End over the list, one page being the rows the last frame drew. Every
-    # picker walked its rows one at a time — a 500-flow FlowPicker had no other gait. True
-    # when `ev` was one of the four, so a subclass's key ladder can take it as one arm.
-    def page_key(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      case
-      when key.page_up?   then move(-{@list_last_h, 1}.max)
-      when key.page_down? then move({@list_last_h, 1}.max)
-      when key.home?      then set_selected(0)
-      when key.end?       then set_selected(entry_count - 1)
-      else                     return false
-      end
-      true
-    end
+    # PgUp/PgDn/Home/End ride `Overlay#page_key` (it was born here for the pickers — a
+    # 500-flow FlowPicker had no other gait than one row at a time — and moved up to the
+    # base once the list cards needed the same four keys).
 
     def set_selected(idx : Int32) : Nil
       n = entry_count
@@ -82,24 +70,30 @@ module Gori::Tui
     # row +1 and the divider row +2.
     LIST_OFFSET = 3
 
-    @query = ""
-    @preedit = "" # live IME composition (e.g. Hangul jamo) shown under the filter caret
+    # The filter is a `TextField` (the `RowFilter` shape), so the bar answers every key a
+    # card's field does — ⌃/⌥←→ by word, Home/End, Delete, ⌥⌫, ^Z — where it used to be
+    # append-and-trailing-backspace with no caret at all. Live IME composition rides the
+    # field's own preedit.
+    @field = TextField.new
+
+    # What has been typed into the filter.
+    def query : String
+      @field.value
+    end
 
     def set_preedit(text : String) : Nil
-      @preedit = text
+      @field.set_preedit(text)
     end
 
     def query_char(ch : Char) : Nil
       return if ch.control?
-      @preedit = "" # a committed char ends any in-progress composition
-      @query += ch
+      @field.insert(ch) # a committed char ends any in-progress composition
       refilter
     end
 
     def backspace : Nil
-      return if @query.empty?
-      @preedit = ""
-      @query = @query[0, @query.size - 1]
+      return if @field.value.empty?
+      @field.backspace
       refilter
     end
 
@@ -108,21 +102,19 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
-      when key.escape?    then return :cancel
-      when key.up?        then move(-1)
-      when key.down?      then move(1)
-      when page_key(ev)   then nil
-      when key.enter?     then return :commit
-      when key.backspace? then backspace
+      when key.escape?  then return :cancel
+      when key.up?      then move(-1)
+      when key.down?    then move(1)
+      when page_key(ev) then nil
+      when key.enter?   then return :commit
       else
-        # `Event::Key#char` falls back to `key.to_char`, so a Ctrl/Alt chord still carries
-        # its plain letter ('p' for ^P) — query_char's `ch.control?` guard never sees a C0
-        # byte to drop. Without the modifier check every chord an operator presses over an
-        # open picker (^P for the palette, ^C/^D to leave — quit_chord_claimed? yields both
-        # to a modal) would silently type into the filter instead. Same guard every other
-        # ev.char consumer in the TUI carries.
-        if (c = ev.char) && !ev.ctrl? && !ev.alt?
-          query_char(c)
+        # The field refuses a Ctrl/Alt chord itself (`TextField#handle_edit_key` — the
+        # `Event::Key#char` fallback would otherwise type 'p' for ^P into the filter), and
+        # ⇥, which a picker has no use for. Refilter only when the TEXT changed: a caret
+        # motion must not reset the cursor to the top of the list.
+        before = @field.value
+        if @field.handle_edit_key(ev) && @field.value != before
+          refilter
         end
       end
       :stay
@@ -131,13 +123,13 @@ module Gori::Tui
     # Draw the filter bar + divider and return the list's first row. `idle_hint` shows
     # while nothing has been typed, so the card explains itself before it filters.
     private def render_filter(screen : Screen, box : Rect, idle_hint : String) : Int32
-      if @query.empty? && @preedit.empty?
+      if @field.value.empty? && @field.preedit.empty?
         screen.text(box.x + 2, box.y + 1, idle_hint, Theme.muted, Theme.panel, width: box.w - 4)
       else
         # input_line shows committed text + IME preedit (underline) + a caret, and syncs
         # the terminal cursor so Hangul/CJK composition renders where the user is typing.
         px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
-        screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
+        screen.input_line(px, box.y + 1, @field.value, @field.caret, @field.preedit, Theme.text_bright,
           Theme.panel, width: {box.right - 1 - px, 1}.max)
       end
       Frame.tee_divider(screen, box, box.y + 2)

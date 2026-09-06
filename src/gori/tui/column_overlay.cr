@@ -269,7 +269,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        screen.text(area.x + 1, area.y, "column form needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "column form needs a larger window")
         return
       end
       Frame.card(screen, box, editing? ? "EDIT COLUMN" : "ADD COLUMN", border: Theme.border_focus)

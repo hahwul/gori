@@ -135,7 +135,7 @@ module Gori::Tui
         # says: esc here returns :commit (see handle_key), and this line is the only thing on
         # screen when the card cannot be drawn. Telling an operator "close" about a key that
         # keeps their unsaved response is the one place the wording has to be exact.
-        screen.text(area.x + 1, area.y, "stub editor needs a larger window · esc saves & closes", Theme.muted, Theme.bg) unless area.empty?
+        Overlay.too_small(screen, area, "stub editor needs a larger window", closing: "esc saves & closes")
         return
       end
       # bg: Theme.bg (not the card default panel) so the embedded editor, which paints on
