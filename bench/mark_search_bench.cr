@@ -94,3 +94,24 @@ puts "no-match scan (one byte_index pass, no cursor built — should be flat per
   ms = timed(REPS) { Wrap.mark_search(screen, 0, 0, text, 0, text.size, "zzz", W) }
   printf("  %-9d %8.3f ms  %8.4f ms/100k\n", n, ms, ms / (n / 100_000.0))
 end
+
+# A VIEWPORT of wrapped rows over one long line, the shape every read pane draws when a
+# minified body is on screen with a live ^F. `mark_search` needs the downcased line to match
+# in; without `lower:` each drawn row downcases the whole logical line again, so the pane paid
+# for one `downcase` of an 800k line PER ROW per frame. `ReadPane` hoists it beside the line
+# it caches per logical line; the History detail and the Repeater response panes do the same
+# now, and this is the difference that hoist buys.
+ROWS_PER_FRAME = 40
+
+puts
+puts "one wrapped 800k-char line, #{ROWS_PER_FRAME} drawn rows per frame, query 'ab'"
+big = "ab" * 400_000
+lower = big.downcase
+Benchmark.ips do |x|
+  x.report("downcase per row (no lower:)") do
+    ROWS_PER_FRAME.times { |i| Wrap.mark_search(screen, 0, 0, big, i * W, (i + 1) * W, "ab", W) }
+  end
+  x.report("downcase once per line (lower:)") do
+    ROWS_PER_FRAME.times { |i| Wrap.mark_search(screen, 0, 0, big, i * W, (i + 1) * W, "ab", W, lower: lower) }
+  end
+end
