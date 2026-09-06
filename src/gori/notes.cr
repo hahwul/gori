@@ -242,7 +242,8 @@ module Gori
     #   - a persisted note THIS session deleted   → dropped
     #   - a note only THIS session has (new)      → appended
     # (`mine` carry cross-session-unique ids, so a peer's new note can't be mistaken
-    # for an edit of ours.) next_id advances past every surviving id.
+    # for an edit of ours.) next_id advances past every surviving id AND never below the
+    # persisted allocator — see the comment at the return.
     #
     # The active note arrives as `cur_id`, a STABLE ID, not as an index. The merged order is
     # the persisted one (minus this session's deletes) with this session's new notes appended,
@@ -269,7 +270,16 @@ module Gori
       end
       max_id = result.max_of?(&.id) || 0_i64
       cur = cur_id.try { |id| result.index { |n| n.id == id } } || 0
-      Doc.new(cur.clamp(0, {result.size - 1, 0}.max), result, {next_id, max_id + 1}.max)
+      # `persisted.next_id` is part of the max, and leaving it out let a save hand the
+      # allocator BACK. It is a high-water mark, not a function of the surviving notes: a peer
+      # that created notes 2..4 and closed them again leaves 5 on disk with only note 1 alive,
+      # so a session that opened before any of that (and still counts from 2) rebuilt the mark
+      # from `mine` + the survivors and wrote 2. The next `create` then re-minted id 2 — an id
+      # an earlier note already used — which breaks this merge's own premise that `mine` carry
+      # cross-session-unique ids: the two notes fold into one and the later text wins. It also
+      # adopts the deleted note's `entity_links`, since those are keyed by (Note, id).
+      Doc.new(cur.clamp(0, {result.size - 1, 0}.max), result,
+        {next_id, persisted.next_id, max_id + 1}.max)
     end
 
     # The note's title: its first non-blank line, trimmed; nil when the note is
