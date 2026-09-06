@@ -60,7 +60,7 @@ module Gori
     # unauthenticated (`Env.take_unbound_overlay` is what a run summary drains).
     def self.resolve(id : Identity) : Identity
       Env.report_unbound_overlay(id)
-      resolved(id)
+      resolve_without_report(id)
     end
 
     # The RESOLUTION with NO report — for a caller that is not putting these bytes on a wire.
@@ -78,7 +78,7 @@ module Gori
     #
     # The record is also throttled per {slot, name} until a surface drains it, so a predicate
     # that got there first would have SILENCED the log line at the seam that really sends.
-    def self.resolved(id : Identity) : Identity
+    def self.resolve_without_report(id : Identity) : Identity
       id.resolve_values { |v| Env.expand_bindings_as(v, id.name, guard_boundary: true) }
     end
 

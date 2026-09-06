@@ -790,8 +790,15 @@ module Gori
     # path writes the row that names it. `run_hooks` already answers "is this a real send"
     # (its own doc says so), and the two questions it now drives — may this fork a process, may
     # this write a row — have the same answer for both callers; a third caller that wants one
-    # without the other still says so. The throttle is per {rule, binding revision}, so a send
-    # loop writes one row, not one per send.
+    # without the other still says so.
+    #
+    # `report_refused`'s throttle is per {rule, binding revision} on THIS `Rules` INSTANCE, so
+    # what it bounds depends on who holds the instance. The proxy holds one for the life of the
+    # project and writes one row per refused rule per rebind; `mcp/tools/send.cr` builds a fresh
+    # `Rules.load(store)` per call (it wants the current rule set), so an agent looping
+    # `send_request{apply_rules: true}` against a rule that stays refused writes one row per
+    # send. That is the honest reading of an explicitly requested send — each one really did go
+    # out without the header — but it is NOT deduplicated the way the proxy path's is.
     def transform_message(text : String, target : Store::RuleTarget, host : String = "",
                           run_hooks : Bool = true, report : Bool? = nil) : String
       say = report.nil? ? run_hooks : report

@@ -106,18 +106,18 @@ module Gori
       # and holding its own token — is character-for-character identical UNRESOLVED, so asking
       # before expansion answered `:no_effect` and declined the one shape this tool exists for.
       #
-      # `Authorize.resolved` and NOT `Authorize.resolve`: this is a PREDICATE and the report
-      # belongs to the seam that sends. See `Authorize.resolved` for what reporting from here
+      # `Authorize.resolve_without_report` and NOT `Authorize.resolve`: this is a PREDICATE, and
+      # the report belongs to the seam that sends. See that method for what reporting from here
       # put in a run summary.
       def self.any_identity_changes?(detail : Store::FlowDetail,
                                      identities : Array(Identity)) : Bool
         return false if identities.size < 2
         head = detail.request_head
         base_id = identities.find(&.baseline?) || identities.first
-        base = Authorize.overlay_head(head, Authorize.resolved(base_id))
+        base = Authorize.overlay_head(head, Authorize.resolve_without_report(base_id))
         identities.any? do |id|
           next false if id.same?(base_id)
-          Authorize.overlay_head(head, Authorize.resolved(id)) != base
+          Authorize.overlay_head(head, Authorize.resolve_without_report(id)) != base
         end
       end
 

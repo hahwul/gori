@@ -52,6 +52,50 @@ private def start_garbling_tls_h2_origin : Int32
   port
 end
 
+# A connection whose frames are scripted and whose WRITES fail once the script is spent.
+#
+# `read_response` (and `pump_once` on the write side) do not only read: a peer SETTINGS or
+# PING is ACKed on the spot, from inside the same loop. That write meets exactly the wire
+# events the frame reads rescue — a reset socket answers it with `IO::Error`, and on `https`
+# with `OpenSSL::SSL::Error` — and an ACK that raised unwound past a status, headers and body
+# that had already been decoded. No socket here, because the point is the ORDER of the frames
+# and not the transport: SETTINGS, HEADERS(:status 200), DATA, then a PING whose ACK cannot
+# be written.
+private class ScriptedH2Conn < IO
+  getter writes_refused = 0
+
+  def initialize(@script : Bytes)
+    @pos = 0
+  end
+
+  def read(slice : Bytes) : Int32
+    n = Math.min(slice.size, @script.size - @pos)
+    return 0 if n <= 0
+    @script[@pos, n].copy_to(slice[0, n])
+    @pos += n
+    n
+  end
+
+  # Refused once every scripted byte has been handed over — i.e. from the moment the PING is
+  # in the reader's hands, which is when the ACK is written.
+  def write(slice : Bytes) : Nil
+    if @pos >= @script.size
+      @writes_refused += 1
+      raise IO::Error.new("connection reset by peer")
+    end
+  end
+end
+
+private def h2_ping_script : Bytes
+  block = HPACK::Encoder.new.encode([{":status", "200"}])
+  io = IO::Memory.new
+  io.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, Bytes.empty).to_bytes)
+  io.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, block).to_bytes)
+  io.write(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, "partial".to_slice).to_bytes)
+  io.write(Frame::Header.new(Frame::Type::Ping.value, 0_u8, 0_u32, Bytes.new(8)).to_bytes)
+  io.to_slice
+end
+
 describe Gori::Repeater::H2Engine do
   describe "a TLS-layer read failure mid-response" do
     it "keeps the decoded status and body it already has" do
@@ -65,6 +109,21 @@ describe Gori::Repeater::H2Engine do
       result.response.not_nil!.status.should eq(200)
       String.new(result.body.not_nil!).should eq("partial")
       result.incomplete?.should be_true # no END_STREAM ever arrived
+    end
+  end
+  describe "an ACK that cannot be written mid-response" do
+    it "keeps the decoded status and body it already has" do
+      sock = ScriptedH2Conn.new(h2_ping_script)
+      conn = Gori::Repeater::H2Engine::Conn.new(sock)
+      result = Gori::Repeater::H2Engine.exchange_request(conn, "GET /ping HTTP/2\r\n\r\n".to_slice,
+        scheme: "http", host: "127.0.0.1", port: 80, started: Time.instant, timeout: 2.seconds)
+
+      sock.writes_refused.should eq(1) # the PING ACK, and only it
+      result.ok?.should be_true
+      result.response.not_nil!.status.should eq(200)
+      String.new(result.body.not_nil!).should eq("partial")
+      result.incomplete?.should be_true # no END_STREAM ever arrived
+      conn.poisoned?.should be_true     # …and the socket is still retired
     end
   end
 end
