@@ -24,6 +24,12 @@ module Gori
       r.register Verb::Definition.new(
         "import.wsdl", "Import: WSDL", "Import SOAP request templates from a WSDL 1.1 service description",
         Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_wsdl; nil }
+      # Listed only while an import runs (`available:`), which is also the only time it means
+      # anything. Stops after the chunk being written; what is committed stays.
+      r.register Verb::Definition.new(
+        "import.cancel", "Import: cancel", "Stop the running import after its current chunk (the flows already written stay)",
+        Verb::Scope::Global, available: ->(ctx : Verb::ExecContext) { ctx.import_running? },
+        category: Verb::Category::Action) { |ctx| ctx.import_cancel; nil }
     end
   end
 end

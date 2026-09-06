@@ -211,6 +211,11 @@ module Gori::Tui
       @tag_edit_open = false
       @tag_buffer = ""
       @tag_cx = 0
+      # A running import: its job id, the worker's events (drained on the tick), and the
+      # cancel flag the worker polls between chunks. See `apply_import`.
+      @import_job = nil.as(Int32?)
+      @import_cancel = false
+      @import_events = Channel(ImportEvent).new(16)
       @tag_preedit = ""
       @tag_views = [] of RepeaterView # the sub-tabs the prompt will tag (marks, else the active one)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
@@ -677,6 +682,7 @@ module Gori::Tui
             dirty = true if history_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.drain_search
+            dirty = true if drain_import_events
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
             # idle loop wakes once a minute to repaint rather than every second.
             if (clock = clock_minute) != last_clock
@@ -741,6 +747,7 @@ module Gori::Tui
         #
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
+        @import_cancel = true
         history_controller.cancel_searches
         # Drop the per-tab window title back to a neutral "𝓰𝓸𝓻𝓲" on leave — the shared term
         # outlives this Runner (project picker + the next session reuse it), so a stale
@@ -2904,6 +2911,7 @@ module Gori::Tui
     # listed: the ones that call `@host.jobs.start` are discover / fuzzer / miner /
     # sequencer / repeater(minimize) / oast / authorize.
     private def stop_all_jobs : Nil
+      @import_cancel = true # the worker stops after its chunk; the store outlives this tick
       discover_controller.stop_all
       fuzzer_controller.stop_all
       miner_controller.stop_all
@@ -3691,17 +3699,84 @@ module Gori::Tui
       true
     end
 
+    # What the import worker reports back, drained on the tick (`drain_import_events`).
+    private record ImportProgress, job : Int32, done : Int32, total : Int32
+    private record ImportDone, job : Int32, label : String, path : String, result : Import::Result?, error : String?
+    private alias ImportEvent = ImportProgress | ImportDone
+
+    # The import runs as a background JOB — on the activity chip, with progress, and with a
+    # palette cancel — instead of on the tick, where a large file froze every key and every
+    # frame until it was done. The shape is `FuzzerController#fuzz_save_results`: the worker
+    # fiber writes to the store and sends events; the shell applies them on its own fiber.
+    #
+    # HONEST LIMIT: only the INSERT phase yields (per 2000-row chunk, and the store write
+    # itself does) and cancels. The PARSE — `File.read` + `JSON.parse` of the whole file for a
+    # HAR — is one synchronous call on a single-threaded scheduler, so a very large file still
+    # holds the frame while it is parsed; a streaming reader is the follow-up that removes it.
     private def apply_import(kind : Symbol, label : String, path : String) : Nil
-      result = Import.import_file(@session.store, kind, path, Gori::FlowSource::Surface::Tui)
+      if @import_job
+        @toast = "an import is already running — cancel it from the palette (Import: cancel) or wait"
+        return
+      end
+      job = @jobs.start(:import, "import #{label} · #{File.basename(path)}")
+      @import_job = job
+      @import_cancel = false
+      store = @session.store
+      events = @import_events
+      status("importing #{label} — parsing #{File.basename(path)}…", :busy)
+      spawn(name: "gori-import") do
+        begin
+          result = Import.import_file(store, kind, path, Gori::FlowSource::Surface::Tui,
+            cancelled: -> { @import_cancel },
+            progress: ->(done : Int32, total : Int32) { events.send(ImportProgress.new(job, done, total)) })
+          events.send(ImportDone.new(job, label, path, result, nil))
+        rescue ex
+          events.send(ImportDone.new(job, label, path, nil, ex.message || ex.class.name))
+        end
+      end
+    end
+
+    # Land the import worker's events. True when anything arrived (→ a frame).
+    private def drain_import_events : Bool
+      any = false
+      loop do
+        select
+        when ev = @import_events.receive
+          any = true
+          case ev
+          in ImportProgress
+            @jobs.progress(ev.job, ev.done, ev.total, "#{ev.done}/#{ev.total} flows")
+          in ImportDone
+            finish_import(ev)
+          end
+        else
+          break
+        end
+      end
+      any
+    end
+
+    private def finish_import(ev : ImportDone) : Nil
+      @import_job = nil
+      if error = ev.error
+        @jobs.finish(ev.job, :error, error)
+        status("import failed: #{error}", :error)
+        return
+      end
+      result = ev.result || return
       sitemap_controller.reload
-      msg = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{label} · #{path}"
+      count = result.count
+      msg = if @import_cancel
+              "import cancelled — #{count} flow#{count == 1 ? "" : "s"} from #{ev.label} were written before the stop"
+            else
+              "imported #{count} flow#{count == 1 ? "" : "s"} from #{ev.label} · #{ev.path}"
+            end
       msg += " (#{result.skipped} entries skipped)" if result.skipped > 0
       # The import is chunked, so a partial write is possible — say so rather than letting a
       # short count read as a successful import of a smaller file (see Import::Result).
-      result.shortfall_note.try { |note| msg += " — #{note}" }
-      @toast = msg
-    rescue ex
-      @toast = "import failed: #{ex.message}"
+      result.shortfall_note.try { |note| msg += " — #{note}" } unless @import_cancel
+      @jobs.finish(ev.job, @import_cancel ? :stopped : :done, "#{count} flows")
+      status(msg, :done)
     end
 
     # --- Export path popup (Notes → Export note, Issues → Export issues) -----
@@ -5311,6 +5386,16 @@ module Gori::Tui
 
     def import_burp : Nil
       open_import(:burp)
+    end
+
+    def import_running? : Bool
+      !@import_job.nil?
+    end
+
+    def import_cancel : Nil
+      return @toast = "no import is running" unless @import_job
+      @import_cancel = true
+      status("cancelling the import after its current chunk…", :busy)
     end
 
     def import_wsdl : Nil

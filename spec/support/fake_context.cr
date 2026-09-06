@@ -251,9 +251,9 @@ class FakeExecContext < Gori::Verb::ExecContext
   property miner_detail_read : Bool = false      # settable so the Miner FINDING read-pane gate can be exercised
   property sequencer_analysis : Bool = false     # settable so the Sequencer ANALYSIS read-pane gate can be exercised
   property probe_detail_read : Bool = false      # settable so the Probe AFFECTED-URLS read-pane gate can be exercised
-  property sequencer_samples : Bool = false      # the Sequencer SAMPLES row-copy gate
-  property miner_results : Bool = false          # the Miner FINDINGS row-copy gate
-  property probe_issue : Bool = false            # the Probe issue-list row-copy gate
+  property? sequencer_samples : Bool = false     # the Sequencer SAMPLES row-copy gate
+  property? miner_results : Bool = false         # the Miner FINDINGS row-copy gate
+  property? probe_issue : Bool = false           # the Probe issue-list row-copy gate
   property oast_detail : Bool = false            # settable so the OAST callback-detail read-pane gate can be exercised
 
   def rewriter_rule_selected? : Bool
@@ -348,6 +348,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def probe_issue_selected? : Bool
     @probe_issue
+  end
+
+  def import_running? : Bool
+    false
   end
 
   def rewriter_global_rule_selected? : Bool

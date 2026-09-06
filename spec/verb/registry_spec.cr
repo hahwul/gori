@@ -1744,6 +1744,14 @@ private class FakeContext < ExecContext
   def import_wsdl : Nil
     @calls << :import_wsdl
   end
+
+  def import_running? : Bool
+    false
+  end
+
+  def import_cancel : Nil
+    @calls << :import_cancel
+  end
 end
 
 describe Gori::Verb do
