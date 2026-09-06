@@ -155,7 +155,19 @@ module Gori
         end
       end
       return Write::Busy unless committed
-      found ? Write::Committed : Write::Missing
+      return Write::Missing unless found
+      drop_links(store, [id])
+      Write::Committed
+    end
+
+    # The `entity_links` a note owned, dropped once the note itself is GONE FROM DISK. Owner
+    # rows are keyed by (Note, id) and nothing else ever reclaims them, so a note deleted
+    # anywhere but the TUI used to leave its evidence links behind for the life of the
+    # project. AFTER the commit, never before: `Tui::NotesController` dropped them the moment
+    # a tab was closed, so a save the writer then refused left the note alive on disk with its
+    # links already destroyed — the operator's evidence gone to a write that did not happen.
+    private def self.drop_links(store : Store, ids : Enumerable(Int64)) : Nil
+      ids.each { |id| store.delete_links_for_owner(Store::LinkOwnerKind::Note, id) }
     end
 
     # `merge` applied to the persisted set INSIDE the write transaction, for the two surfaces
@@ -170,12 +182,21 @@ module Gori
                   cur_id : Int64?, next_id : Int64) : Doc?
       legacy = store.setting(LEGACY_KEY)
       merged = nil.as(Doc?)
+      # Which notes this save actually REMOVED from the persisted set — computed against the
+      # document the transaction read, not against `deleted`, which also names ids a peer had
+      # already dropped. See `drop_links`.
+      removed = [] of Int64
       committed = store.mutate_setting(DOCS_KEY) do |raw|
-        doc = merge(doc_from(raw, legacy), mine, deleted, cur_id, next_id)
+        before = doc_from(raw, legacy)
+        doc = merge(before, mine, deleted, cur_id, next_id)
+        live = doc.notes.map(&.id).to_set
+        removed = before.notes.map(&.id).reject { |id| live.includes?(id) }
         merged = doc
         serialize(doc.cur, doc.notes, doc.next_id)
       end
-      committed ? merged : nil
+      return nil unless committed
+      drop_links(store, removed)
+      merged
     end
 
     # Parse the JSON document set; nil on malformed data so callers can fall back.
