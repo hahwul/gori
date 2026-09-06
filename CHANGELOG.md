@@ -125,6 +125,7 @@
 - Miner: stopping a mine (`^X`, `gori run mine` Ctrl-C, MCP `mine_stop`) now ends the retry chain too. Every in-flight worker used to send `--retries` more requests after the stop, and MCP's ceilings scale that to 1000 requests and minutes of wall clock each.
 - OAST: a listener whose provider refuses every poll no longer keeps its session marked as the freshly-polled one. The probe out-of-band minter plants payloads against that session, so a rotated api key or an expired webhook token used to send every blind SSRF/XXE callback to a listener nobody was reading, and the scan reported clean.
 - Workbench senders read a BLANK TLS SNI override as no override. An empty `sni` reached OpenSSL as the hostname, which sends no SNI extension and skips the certificate hostname check — with verification still on — and MCP `sequence_start` / `mine_start` pass one straight through when a schema-filling client fills every property.
+- Sequencer: `gori run sequence --count N` past 50,000 no longer runs against a send budget smaller than the goal it is collecting — the run stopped short with nothing naming a ceiling.
 
 ## v0.4.0
 
