@@ -100,5 +100,27 @@ describe Gori::BindAddress do
         Gori::BindAddress.wildcard?(h).should be_false
       end
     end
+
+    # RFC 4291 §2.2 gives one address many spellings, and `Settings.bind_host_error` accepts
+    # every one of them (`Socket::IPAddress.valid_v6?`). A hand-kept list of strings is
+    # therefore a list a new spelling escapes — the same reason `Upstream.unspecified?` parses
+    # the address instead of matching text. What escapes is not cosmetic: `dial_host` hands the
+    # unresolved literal to the browser launcher (`--proxy-server=`) and to the setup page, so
+    # the operator is told to point their client at an address nothing can connect to.
+    it "recognises an all-zero address in any RFC 4291 spelling" do
+      {"0000:0000:0000:0000:0000:0000:0000:0000", "0::0", "0:0:0::0", "::0.0.0.0",
+       "[0000::0000]", " ::0 "}.each do |h|
+        Gori::BindAddress.wildcard?(h).should be_true, "expected #{h.inspect} to be a wildcard"
+        Gori::BindAddress.dial_host(h).should eq("::1")
+        Gori::BindAddress.display(h, 8070).should eq("localhost:8070 (all interfaces)")
+      end
+    end
+
+    it "still refuses an address that merely LOOKS all-zero" do
+      {"0.0.0.1", "::2", "0000:0000:0000:0000:0000:0000:0000:0001", "0.0.0.0.0",
+       "0-0-0-0"}.each do |h|
+        Gori::BindAddress.wildcard?(h).should be_false, "expected #{h.inspect} not to be a wildcard"
+      end
+    end
   end
 end
