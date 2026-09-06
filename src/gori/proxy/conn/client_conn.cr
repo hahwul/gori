@@ -3162,9 +3162,9 @@ module Gori::Proxy
     private def keep_alive?(req : Codec::RawRequest, resp : Codec::RawResponse,
                             resp_framing : Codec::BodyFraming) : Bool
       return false if resp_framing.close_delimited? # body ends at close
-      return false if connection_lists?(req.headers.get?("Connection"), "close")
-      return false if connection_lists?(resp.headers.get?("Connection"), "close")
-      req.version == "HTTP/1.1" || connection_lists?(req.headers.get?("Connection"), "keep-alive")
+      return false if req.headers.lists?("Connection", "close")
+      return false if resp.headers.lists?("Connection", "close")
+      req.version == "HTTP/1.1" || req.headers.lists?("Connection", "keep-alive")
     end
 
     # Whether the ORIGIN will keep its connection open after this response, so its
@@ -3181,9 +3181,9 @@ module Gori::Proxy
     private def origin_keep_alive?(sent_req : Codec::RawRequest, resp : Codec::RawResponse,
                                    resp_framing : Codec::BodyFraming) : Bool
       return false if resp_framing.close_delimited?
-      return false if connection_lists?(sent_req.headers.get?("Connection"), "close")
-      return false if connection_lists?(resp.headers.get?("Connection"), "close")
-      resp.version == "HTTP/1.1" || connection_lists?(resp.headers.get?("Connection"), "keep-alive")
+      return false if sent_req.headers.lists?("Connection", "close")
+      return false if resp.headers.lists?("Connection", "close")
+      resp.version == "HTTP/1.1" || resp.headers.lists?("Connection", "keep-alive")
     end
 
     # Whether a request may be transparently REPLAYED on a fresh connection after a
@@ -3207,15 +3207,6 @@ module Gori::Proxy
     # a bodyless framing keeps the capture unallocated.
     private def capture_hint(framing : Codec::BodyFraming, length : Int64) : Int64
       framing.length? ? length : 0_i64
-    end
-
-    # True when a Connection header field lists `token` (case-insensitive) as one of its
-    # comma-separated connection-options — e.g. `Connection: keep-alive, close` carries BOTH
-    # `keep-alive` and `close`. Comparing the whole value (the old header_token) missed a
-    # token embedded in such a list, so a peer signalling close would be parked as persistent.
-    private def connection_lists?(value : String?, token : String) : Bool
-      return false unless value
-      value.downcase.split(',').any? { |t| t.strip == token }
     end
 
     private def now_us : Int64
