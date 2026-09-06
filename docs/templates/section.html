@@ -1,18 +1,24 @@
 {% include "header.html" %}
 {% include "partials/nav.html" %}
 {% include "partials/search.html" %}
-<div class="docs-container">
-{% include "partials/sidebar.html" %}
+{% if page.section == "playbooks" %}
+{% include "partials/book-cover.html" %}
+{% else %}
+<div class="docs-container docs-index">
+  {% include "partials/sidebar.html" %}
   <main id="main" class="docs-main">
-    {% if page.title is present %}<h1>{{ page.title | e }}</h1>{% endif %}
-    {{ content }}
-
-    <h2>{{ "section.in_this_section" | t }}</h2>
-    <ul class="section-list">
-      {{ section.list }}
-    </ul>
+    <nav class="document-path" aria-label="{{ "docs.path" | t }}"><a href="{{ base_url }}{{ lang_prefix }}/">{{ site.title | e }}</a><span aria-hidden="true">/</span><span>{{ page.title | e }}</span></nav>
+    <header class="document-heading section-heading">
+      <p class="doc-kicker">{% if page.section == "guide" %}{{ "docs.catalog" | t }}{% elif page.section == "reference" %}{{ "docs.reference_kicker" | t }}{% else %}{{ "nav.start" | t }}{% endif %}</p>
+      <h1>{{ page.title | e }}<span class="title-cursor" aria-hidden="true">_</span></h1>
+      <p class="section-description">{{ page.description | e }}</p>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    {% include "partials/catalog.html" %}
+    <article class="document-body section-body">{{ content }}</article>
     {{ pagination }}
   </main>
-  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="{{ "docs.on_this_page" | t }}" data-title="{{ "docs.on_this_page" | t }}"></aside>
 </div>
+{% endif %}
 {% include "footer.html" %}

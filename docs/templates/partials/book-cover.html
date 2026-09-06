@@ -1,0 +1,36 @@
+<main id="main" class="book-main">
+  <section class="book-opening" aria-labelledby="book-title">
+    <div class="book-intro">
+      <p class="doc-kicker">{{ "docs.book_kicker" | t }}</p>
+      <h1 id="book-title">{{ "docs.book_title" | t }}</h1>
+      <p class="book-subtitle">{{ "docs.book_subtitle" | t }}</p>
+      <p class="book-description">{{ "docs.book_description" | t }}</p>
+      <div class="book-actions">{% for sec in site.sections %}{% if sec.name == "playbooks" and sec.language == page_language %}{% set chapters = sec.pages | rejectattr("is_index") | sort(attribute="weight") %}<a class="button button-primary" href="{{ base_url }}{{ chapters[0].url }}">{{ "docs.start_reading" | t }} <span aria-hidden="true">→</span></a>{% endif %}{% endfor %}<a href="#chapters">{{ "docs.all_chapters" | t }} <span aria-hidden="true">↓</span></a></div>
+    </div>
+    {# First chapter = lowest weight in front matter (docs/DESIGN.md), not a hard-coded slug. #}
+    {% for sec in site.sections %}{% if sec.name == "playbooks" and sec.language == page_language %}{% set chapters = sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
+    <a class="book-object" href="{{ base_url }}{{ chapters[0].url }}">
+      <div class="book-spine" aria-hidden="true">GORI / PLAYBOOKS</div>
+      <div class="book-front">
+        <span class="cover-edition">{{ "nav.playbooks" | t }}</span>
+        <strong class="cover-title" lang="en">The gori<br>field guide.</strong>
+        <span class="cover-mark" aria-hidden="true" style="--logo-src: url('{{ base_url }}/images/gori.png')"></span>
+        <span class="cover-foot">{{ "docs.book_workflows" | t }}<span aria-hidden="true">↗</span></span>
+      </div>
+    </a>
+    {% endif %}{% endfor %}
+  </section>
+  <section class="book-contents" id="chapters" aria-labelledby="contents-title">
+    <div class="book-contents-intro"><p class="doc-kicker">{{ "docs.book_parts" | t }} / {{ "docs.book_chapters" | t }}</p><h2 id="contents-title">{{ "docs.contents" | t }}</h2><p>{{ "docs.book_note" | t }}</p><a href="{{ base_url }}{{ lang_prefix }}/getting-started/quick-start/">{{ "nav.start" | t }} →</a></div>
+    <div class="book-parts">
+    {% for sec in site.sections %}{% if sec.name == "playbooks" and sec.language == page_language %}
+    {% set ordered = sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
+    {% for p in ordered %}
+    {% if loop.first or p.extra.group != ordered[loop.index0 - 1].extra.group %}<section class="book-part"><h3>{{ p.extra.group | e }}</h3><ol>{% endif %}
+      <li value="{{ loop.index }}"><a href="{{ base_url }}{{ p.url }}"><span class="chapter-number" aria-hidden="true">{% if loop.index < 10 %}0{% endif %}{{ loop.index }}</span><span><strong>{{ p.title | e }}</strong><span class="chapter-description">{{ p.description | e }}</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    {% if loop.last or p.extra.group != ordered[loop.index0 + 1].extra.group %}</ol></section>{% endif %}
+    {% endfor %}{% endif %}{% endfor %}
+    </div>
+  </section>
+  <div class="book-afterword docs-main"><article class="document-body">{{ content }}</article></div>
+</main>

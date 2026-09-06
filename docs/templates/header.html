@@ -4,6 +4,7 @@
   <script>
     /* Set the color theme before first paint to avoid a flash. Default: dark. */
     (function () {
+      document.documentElement.classList.add("has-js");
       try {
         var t = localStorage.getItem("gori-theme");
         document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
@@ -28,12 +29,14 @@
   {{ hreflang_tags }}
   {{ pagination_seo_links }}
   <link rel="stylesheet" href="{{ base_url }}/css/style.css">
+  {% if page.section != "" %}<link rel="stylesheet" href="{{ base_url }}/css/docs.css">{% endif %}
   {# The syntax theme is inlined in css/style.css, so no highlight theme
      stylesheet link is emitted here (sub-path safe). Highlight.js itself
      still loads from the footer. #}
+  {% if page.section == "playbooks" %}<link rel="preload" href="{{ base_url }}/fonts/charis-sil-400.woff2" as="font" type="font/woff2" crossorigin>{% endif %}
   {{ math_tags }}
   {{ mermaid_tags }}
   {{ auto_includes_css }}
 </head>
-<body class="{% if page.section == "" %}is-home{% else %}is-doc{% endif %}" data-section="{{ page.section }}">
+<body class="{% if page.section == "" %}is-home{% else %}is-doc{% if page.section == "playbooks" %} is-book{% endif %}{% endif %}" data-section="{{ page.section }}">
   <a class="skip-link" href="#main">{{ "a11y.skip_to_content" | t }}</a>

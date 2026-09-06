@@ -1,0 +1,14 @@
+<div class="tool-catalog">
+{% for sec in site.sections %}{% if sec.name == page.section and sec.language == page_language %}
+{% set ordered = sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
+{% for p in ordered %}
+{% if loop.first or p.extra.group != ordered[loop.index0 - 1].extra.group %}
+<section class="catalog-group">
+  {% if p.extra.group %}<h2>{{ p.extra.group | e }}</h2>{% else %}<h2>{{ "section.in_this_section" | t }}</h2>{% endif %}
+  <div class="catalog-links">
+{% endif %}
+    <a href="{{ base_url }}{{ p.url }}"><span class="catalog-title">{{ p.title | e }}<span aria-hidden="true">↗</span></span><span class="catalog-description">{{ p.description | e }}</span></a>
+{% if loop.last or p.extra.group != ordered[loop.index0 + 1].extra.group %}</div></section>{% endif %}
+{% endfor %}{% endif %}{% endfor %}
+</div>
+<a class="learning-link" href="{{ base_url }}{{ lang_prefix }}/playbooks/"><span>{{ "docs.learn_by_doing" | t }}</span><strong>{{ "docs.read_playbooks" | t }} <span aria-hidden="true">↗</span></strong></a>

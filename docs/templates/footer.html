@@ -3,7 +3,7 @@
    handwriting stack under "Built with Love" carries no Hangul anyway. #}
 <footer class="docs-footer">
   <p class="footer-meta">
-    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
       <span class="hahwul-img" aria-hidden="true"></span>
       <span class="footer-love">Built with Love</span>
     </a>
@@ -99,11 +99,12 @@
     });
   })();
 </script>
-{{ highlight_js }}
-<script src="{{ base_url }}/js/search.js"></script>
-<script src="{{ base_url }}/js/toc.js"></script>
-<script src="{{ base_url }}/js/codecopy.js"></script>
-<script src="{{ base_url }}/js/logo-menu.js"></script>
+{% if not page.is_index and page.section != "" %}{{ highlight_js }}{% endif %}
+<script src="{{ base_url }}/js/search.js" defer></script>
+<script src="{{ base_url }}/js/toc.js" defer></script>
+{% if page.section != "" %}<script src="{{ base_url }}/js/docs.js" defer></script>{% endif %}
+<script src="{{ base_url }}/js/codecopy.js" defer></script>
+<script src="{{ base_url }}/js/logo-menu.js" defer></script>
 {{ auto_includes_js }}
 </body>
 </html>
