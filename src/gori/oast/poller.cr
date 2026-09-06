@@ -16,6 +16,20 @@ module Gori::Oast
 
     getter session : Session
 
+    # Did the LAST poll reach the provider? "Nothing came back" and "the server refused us" are
+    # the two states an out-of-band listener must never conflate (`Provider#poll` raises rather
+    # than answering an empty batch for exactly that reason), and a CONSUMER needs the same
+    # distinction: `last_poll_at` is a LIVENESS signal, not a "we tried" counter. The probe
+    # out-of-band minter picks the most-recently-polled session to plant payloads against
+    # (`Probe::OutOfBand::StoreMinter.pick_session`), so a listener whose endpoint 401s or 500s
+    # on every tick used to keep winning that pick — and win it harder the longer it stayed
+    # broken — while the callbacks arrived nowhere and the scan read clean. `gori run oast`
+    # already stamps only for a poll that answered; this is what lets the tab do the same.
+    #
+    # TRUE until a poll actually fails: the session was registered (or resumed) a moment ago,
+    # and that round trip succeeded.
+    getter? answering : Bool = true
+
     def initialize(@provider : Provider, @session : Session, @http : Http,
                    @interval : Time::Span, @events : Channel(Event))
       @state = State::Running
@@ -48,11 +62,18 @@ module Gori::Oast
     end
 
     private def poll_once : Nil
-      @provider.poll(@http, @session).each do |interaction|
+      answered = false
+      interactions = @provider.poll(@http, @session)
+      # The provider ANSWERED — an empty batch included. Flipped before the fan-out below so a
+      # send that raises on a closed channel (teardown) cannot be read as a provider failure.
+      answered = true
+      @answering = true
+      interactions.each do |interaction|
         break if @state.stopped?
         @events.send(CallbackEvent.new(@session.id, interaction))
       end
     rescue ex
+      @answering = false unless answered
       return if @state.stopped?
       @events.send(OastErrorEvent.new(@session.id, ex.message || "poll error"))
     end

@@ -70,6 +70,13 @@ module Gori::Tui
       def active? : Bool
         (p = @poller) ? p.running? : false
       end
+
+      # Running AND its last poll reached the provider. `active?` alone is "a fiber is looping",
+      # which a listener whose endpoint refuses every poll satisfies forever — see
+      # `Oast::Poller#answering?` for what reads this apart.
+      def answering? : Bool
+        (p = @poller) ? (p.running? && p.answering?) : false
+      end
     end
 
     # A displayed callback row (decoupled from the DB id; dedup is by (session, uid)).
@@ -1445,13 +1452,21 @@ module Gori::Tui
     # a listener here, switch tabs, and a probe scan still mints against it. Throttled to
     # SESSION_HEARTBEAT and skipped entirely when nothing is listening, so an idle project writes
     # nothing. Does not mark the tick `applied`: it changes no on-screen state.
+    #
+    # `answering?`, not `active?`. The stamp is a LIVENESS signal, not a "we tried" counter: the
+    # minter plants payloads against the most-recently-polled session, so a listener whose
+    # endpoint 401s (a rotated api key) or 404s (an expired webhook token) on every tick used to
+    # keep winning that pick — and win it harder the longer it stayed broken — while every blind
+    # SSRF/XXE payload it minted called home to nobody and the scan reported clean. A failing
+    # poll must leave the row looking exactly as stale as the listener behind it is, which is the
+    # rule `gori run oast resume` already follows (it stamps only for a poll that answered).
     private def heartbeat_active_sessions : Nil
       return if @listeners.empty?
       now = Time.instant
       return if now - @last_session_heartbeat < SESSION_HEARTBEAT
       @last_session_heartbeat = now
       store = @host.session.store
-      @listeners.each { |l| store.touch_oast_session(l.session.id) if l.active? }
+      @listeners.each { |l| store.touch_oast_session(l.session.id) if l.answering? }
     end
 
     # Move @cb_sel back onto the callback identified by `key` after live inserts shifted the
