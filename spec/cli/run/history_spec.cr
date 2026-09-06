@@ -351,11 +351,13 @@ describe "gori run history — CLI::Output rows" do
 
   it "rolls human_us over to seconds" do
     Gori::CLI::Output.human_us(1_000_000_i64).should eq("1.0s")
-    # Both formatters share ONE rounding edge, and it is deliberate: the tier check runs
-    # before round1, so a value just under a boundary prints as the rounded boundary.
-    # Pinned here so it reads as a known edge rather than a formatter bug.
-    Gori::CLI::Output.human_us(999_999_i64).should eq("1000.0ms")
-    Gori::CLI::Output.human_size(1_048_575_i64).should eq("1024.0kB")
+    # The boundary edge these two used to be pinned at — `1000.0ms` and `1024.0kB` — was
+    # pinned as deliberate ("the tier check runs before round1"), and the example above it
+    # is titled "no '1024.0MB'". Both cannot be true, and `Tui::Fmt` settles it: the unit
+    # comes from the value that will be PRINTED, so a size or a latency never names a
+    # quantity outside its own scale. See spec/cli/output_spec.cr for the whole rule.
+    Gori::CLI::Output.human_us(999_999_i64).should eq("1.0s")
+    Gori::CLI::Output.human_size(1_048_575_i64).should eq("1.0MB")
   end
 end
 

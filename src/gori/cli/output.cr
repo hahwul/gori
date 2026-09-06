@@ -1209,22 +1209,36 @@ module Gori
         end
       end
 
+      # The unit is picked from the value this method WILL PRINT — one decimal — and not from
+      # the raw quotient, so a size just under a boundary rolls up instead of naming a quantity
+      # outside its own scale: 1,048,570 bytes is 1023.99 KiB, and the raw test printed it as
+      # `1024.0kB`. That is the rule `Tui::Fmt.size` states for the History column, and this is
+      # the same fact rendered on the other surface — the two must not disagree about it.
       def self.human_size(bytes : Int64) : String
         return "#{bytes}B" if bytes < 1024
-        kb = bytes / 1024.0
-        return "#{round1(kb)}kB" if kb < 1024
-        mb = kb / 1024.0
-        return "#{round1(mb)}MB" if mb < 1024
-        gb = mb / 1024.0
-        return "#{round1(gb)}GB" if gb < 1024
-        "#{round1(gb / 1024.0)}TB"
+        v = bytes / 1024.0
+        return "#{round1(v)}kB" if rounded1(v) < 1024
+        v /= 1024.0
+        return "#{round1(v)}MB" if rounded1(v) < 1024
+        v /= 1024.0
+        return "#{round1(v)}GB" if rounded1(v) < 1024
+        "#{round1(v / 1024.0)}TB"
       end
 
+      # Same rounding rule as `human_size`, plus the minute and hour tiers `Tui::Fmt.dur`
+      # carries: a 3.5-hour long poll (a real captured shape — a hanging GET on a
+      # notifications endpoint) read `12600.0s` here and `3.5h` in the History column beside
+      # it. The CLI keeps its own one-decimal spelling — it has no six-column cell to defend —
+      # so only which unit is chosen changes, never how the number is written.
       def self.human_us(micros : Int64) : String
         return "#{micros}µs" if micros < 1000
-        ms = micros / 1000.0
-        return "#{round1(ms)}ms" if ms < 1000
-        "#{round1(ms / 1000.0)}s"
+        v = micros / 1000.0
+        return "#{round1(v)}ms" if rounded1(v) < 1000
+        v /= 1000.0
+        return "#{round1(v)}s" if rounded1(v) < 60
+        v /= 60.0
+        return "#{round1(v)}m" if rounded1(v) < 60
+        "#{round1(v / 60.0)}h"
       end
 
       # Local ISO-8601 from unix micros (the store's created_at unit). Lossy on purpose: this
@@ -1255,7 +1269,13 @@ module Gori
       end
 
       private def self.round1(n : Float64) : String
-        ((n * 10).round / 10.0).to_s
+        rounded1(n).to_s
+      end
+
+      # What `round1` will print, as a number — so the unit tests above compare against the
+      # rendered value rather than the raw one they are about to round.
+      private def self.rounded1(n : Float64) : Float64
+        (n * 10).round / 10.0
       end
     end
   end

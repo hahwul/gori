@@ -86,3 +86,46 @@ end
 private def color_rule(color : String, filter : String = "host:x") : Gori::Store::ColorRule
   Gori::Store::ColorRule.new(1_i64, true, filter, color)
 end
+
+# The compact size / latency cells, against the ONE rounding convention this repo states.
+#
+# `Tui::Fmt` documents it for the History column — "the unit is picked from the ROUNDED
+# magnitude so a value just under a boundary rolls up to the next unit instead of the
+# misleading '1024KB'" — and the CLI's copies picked theirs from the RAW quotient, so the
+# headless listing of the same flow printed a quantity outside its own unit: 1,048,570 bytes
+# as `1024.0kB` where the TUI says `1.0MB`, and 999,960 µs as `1000.0ms` against `1.0s`.
+# `human_us` also stopped at seconds, so a 3.5-hour long poll read `12600.0s` in
+# `gori run history` and `3.5h` one surface over.
+describe "CLI::Output.human_size" do
+  it "rolls up rather than naming a quantity outside its own unit" do
+    Gori::CLI::Output.human_size(1_048_570_i64).should eq("1.0MB")
+    Gori::CLI::Output.human_size(1_073_741_300_i64).should eq("1.0GB")
+    Gori::CLI::Output.human_size(1_048_570_i64).should eq(Gori::Tui::Fmt.size(1_048_570_i64))
+  end
+
+  it "leaves everything below the boundary exactly as it was" do
+    Gori::CLI::Output.human_size(0_i64).should eq("0B")
+    Gori::CLI::Output.human_size(1023_i64).should eq("1023B")
+    Gori::CLI::Output.human_size(1536_i64).should eq("1.5kB")
+    Gori::CLI::Output.human_size(1_048_576_i64).should eq("1.0MB")
+  end
+end
+
+describe "CLI::Output.human_us" do
+  it "rolls up rather than naming a quantity outside its own unit" do
+    Gori::CLI::Output.human_us(999_960_i64).should eq("1.0s")
+  end
+
+  it "carries the minute and hour tiers the History column has" do
+    # A 3.5-hour long poll is a real captured row (scripts/seed_demo.cr's Act five).
+    Gori::CLI::Output.human_us(12_600_000_000_i64).should eq("3.5h")
+    Gori::CLI::Output.human_us(214_000_000_i64).should eq("3.6m")
+    Gori::CLI::Output.human_us(90_000_000_i64).should eq("1.5m")
+  end
+
+  it "leaves everything below the boundary exactly as it was" do
+    Gori::CLI::Output.human_us(999_i64).should eq("999µs")
+    Gori::CLI::Output.human_us(43_000_i64).should eq("43.0ms")
+    Gori::CLI::Output.human_us(1_200_000_i64).should eq("1.2s")
+  end
+end
