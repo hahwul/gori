@@ -76,9 +76,9 @@ describe "Import.insert_all cancel + progress" do
   it "reports the running count after every chunk" do
     chunk_store do |store|
       n = Gori::Import::IMPORT_CHUNK + 3
-      seen = [] of {Int32, Int32}
+      seen = [] of {Int32, Int32?}
       Gori::Import.insert_all(store, (0...n).map { |i| pair(i) },
-        progress: ->(done : Int32, total : Int32) { seen << {done, total} })
+        progress: ->(done : Int32, total : Int32?) { seen << {done, total} })
       seen.should eq([{Gori::Import::IMPORT_CHUNK, n}, {n, n}])
     end
   end
@@ -90,7 +90,7 @@ describe "Import.insert_all cancel + progress" do
       cancelled = false
       committed, attempted = Gori::Import.insert_all(store, (0...n).map { |i| pair(i) },
         cancelled: -> { cancelled },
-        progress: ->(_done : Int32, _total : Int32) { chunks += 1; cancelled = chunks >= 1 })
+        progress: ->(_done : Int32, _total : Int32?) { chunks += 1; cancelled = chunks >= 1 })
       committed.should eq(Gori::Import::IMPORT_CHUNK) # one chunk landed, the flag stopped the second
       attempted.should eq(n)
       store.count.should eq(Gori::Import::IMPORT_CHUNK.to_i64)
