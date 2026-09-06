@@ -28,7 +28,14 @@ module Gori
         return conflict if conflict
         save = bool_arg(h, "save_as_repeater", false)
         record_history = bool_arg(h, "record_history", true)
-        include_sensitive_headers = bool_arg(h, "include_sensitive_headers", false)
+        # `include_sensitive` is the spelling every OTHER tool that redacts uses (get_flow,
+        # compare_flows, intercept_get, get_repeater_context, list_env, … — ten of them).
+        # This tool alone said `include_sensitive_headers`, so an agent that learned the name
+        # from the tool it read the flow with got INVALID_ARGUMENT from the tool it replays
+        # with — on the one call whose whole point is reading back the Set-Cookie it just
+        # earned. Both spellings are accepted; either one alone turns redaction off.
+        include_sensitive_headers = bool_arg(h, "include_sensitive_headers", false) ||
+                                    bool_arg(h, "include_sensitive", false)
         # Read BEFORE the send, not on the way out with the reply it shapes. These two only
         # affect how much of the RESPONSE is inlined, so reading them late looked free — and
         # was, right up until an unreadable value became a refusal instead of a silent
@@ -1537,7 +1544,8 @@ module Gori
           s.field "apply_rules", boolprop("apply the project's enabled Match & Replace rules (REQUEST side only) to the outgoing request before sending, matching the live proxy; default false — direct sends are byte-exact")
           s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
           s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
-          s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")
+          s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false). `include_sensitive` — the name the other redacting tools use — is accepted as an alias")
+          s.field "include_sensitive", boolprop("alias for include_sensitive_headers, spelled the way get_flow/compare_flows/get_repeater_context spell it")
           s.field "body_mode", enumprop("how much response body to inline (default full)", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined response-body bytes (clamped to 65536)")
           s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")

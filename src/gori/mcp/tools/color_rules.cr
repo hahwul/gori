@@ -251,7 +251,9 @@ module Gori
           case dir_s.try(&.downcase)
           when "up"   then -1
           when "down" then 1
-          else             return err("invalid 'direction' (expected #{MOVE_DIRS.join("|")})", "INVALID_ARGUMENT", field: "direction")
+          else
+            return err("#{dir_s ? "invalid 'direction' #{dir_s.inspect}" : "missing required 'direction'"} " \
+                       "(expected #{MOVE_DIRS.join("|")})", "INVALID_ARGUMENT", field: "direction")
           end
         return not_found("no #{scope.label} colour rule with id #{id}") unless color_rule_exists?(id, scope)
         scoped = Gori::Colormarker.merged(store).select { |r| r.scope == scope }
