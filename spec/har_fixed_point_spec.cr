@@ -203,6 +203,24 @@ describe "HAR request Content-Length synthesis" do
                         "params"   => [{"name" => "a", "value" => "1"}]})
     head.should contain("Content-Length: 3\r\n") # a=1
   end
+
+  # A CAPPED h2 POST carries `bodySize` (the true wire size) beside a shorter `text` prefix and
+  # no `content-length`. The declared size must not resurrect a length on a head that framed its
+  # body implicitly — that would over-frame a prefix as if it were the whole entity.
+  it "does not resurrect a Content-Length from a capped h2 body's declared size" do
+    head = req_head_of({"mimeType" => "application/octet-stream", "text" => "abcde"},
+      http_version: "HTTP/2", body_size: 9999)
+    head.should_not contain("Content-Length")
+  end
+
+  # The suppression is scoped to a version that frames its body without one. An HTTP/1.1 verbatim
+  # body that stated no framing at all still gets a synthesized length — an unframed h1 request
+  # is not a fidelity case, it is one the origin cannot read.
+  it "still frames a verbatim HTTP/1.1 body the source left unframed" do
+    head = req_head_of({"mimeType" => "application/json", "text" => %({"a":1})},
+      http_version: "HTTP/1.1")
+    head.should contain("Content-Length: 7\r\n")
+  end
 end
 
 # One 101 entry carrying Chrome's `_webSocketMessages`, parsed through the real seam.

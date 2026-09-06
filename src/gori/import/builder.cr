@@ -280,11 +280,28 @@ module Gori
             next if !both && !wire_chunked && transfer_encoding?(k)
             b << k << ": " << v << "\r\n"
           end
-          if !both && !wire_chunked && (length = synthesized_length(headers, body, content_length, frame_body))
+          # The verbatim-body suppression is scoped to a version that FRAMES its own body
+          # without a `content-length` — HTTP/2 (and HTTP/3) carry the body in DATA frames
+          # ended by END_STREAM, so a captured POST legitimately has neither header. HTTP/1.x
+          # frames a body only by `Content-Length` or `Transfer-Encoding`, so a verbatim h1
+          # body that stated NEITHER is not a fidelity case worth preserving — it is an
+          # unframed request the origin cannot read, and one this builder still has to make
+          # sendable. So `frame_body: false` only reaches `synthesized_length` under implicit
+          # framing; otherwise a length is synthesized as it always was.
+          frame = frame_body || !implicit_body_framing?(http_version)
+          if !both && !wire_chunked && (length = synthesized_length(headers, body, content_length, frame))
             b << "Content-Length: " << length << "\r\n"
           end
           b << "\r\n"
         end.to_slice
+      end
+
+      # Does this HTTP version frame a request body WITHOUT a `content-length` on the wire?
+      # HTTP/2 and HTTP/3 do (DATA frames ended by END_STREAM); HTTP/1.x and HTTP/0.9 do not.
+      # `Import::Har.normalize_http_version` folds every h2 spelling to `HTTP/2`, and h3 arrives
+      # as `HTTP/3`, so a prefix test covers both.
+      private def self.implicit_body_framing?(http_version : String) : Bool
+        http_version.starts_with?("HTTP/2") || http_version.starts_with?("HTTP/3")
       end
 
       private def self.transfer_encoding?(name : String) : Bool
@@ -317,16 +334,22 @@ module Gori
       #   * the source stated a `Transfer-Encoding` that this call is STRIPPING (a lying `chunked`
       #     over a body that is not chunked octets — `request_head` only reaches here when
       #     `!wire_chunked`), which is the same condition `response_head` frames a body under.
-      # A source that stated NEITHER keeps no length — the pure h2 DATA-framed case.
+      # A source that stated NEITHER keeps no length — the pure h2 DATA-framed case. That case
+      # holds even when the body was capped: a truncated HTTP/2 POST still carries `bodySize`
+      # (`declared`) yet no `content-length`, so `declared` must not resurrect one on a head that
+      # stated none — emitting it (worse, the full pre-cap size beside a prefix body) is the very
+      # misframe `frame_body: false` exists to prevent. `declared` re-frames only a body the
+      # source already framed (`stated`/`frame_body`/a stripped `Transfer-Encoding`).
       private def self.synthesized_length(headers : Headers, body : Bytes?, declared : Int64?,
                                           frame_body : Bool = true) : Int64?
-        return declared if declared
         stated = headers.any? { |(k, _)| k.compare("content-length", case_insensitive: true) == 0 }
         if body
-          return body.size.to_i64 if stated || frame_body
+          return declared || body.size.to_i64 if stated || frame_body
           stripped_te = headers.any? { |(k, _)| transfer_encoding?(k) }
-          return stripped_te ? body.size.to_i64 : nil
+          return declared || body.size.to_i64 if stripped_te
+          return nil
         end
+        return declared if declared
         stated ? 0_i64 : nil
       end
 

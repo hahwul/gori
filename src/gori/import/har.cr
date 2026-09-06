@@ -372,7 +372,7 @@ module Gori
       # header the capture did not (see `Builder.synthesized_length`). A `params` body IS ours to
       # frame, since we composed it.
       private def self.post_body(node : JSON::Any?) : {Bytes?, Bool}
-        return {nil, true} unless node
+        return {nil, false} unless node
         if body = encoded_body(node["text"]?.to_s, node["encoding"]?.to_s)
           return {body, false}
         end
@@ -384,7 +384,7 @@ module Gori
           end
           return {pairs.join('&').to_slice, true} unless pairs.empty?
         end
-        {nil, true}
+        {nil, false}
       end
 
       private def self.response_body(resp : JSON::Any) : {Bytes?, String?, Int64?}
