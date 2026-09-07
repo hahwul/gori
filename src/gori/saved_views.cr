@@ -4,7 +4,7 @@ require "./settings"
 
 module Gori
   # A **view** is a named History query applied as a LENS: it ANDs over whatever is in the
-  # filter bar rather than replacing it, exactly the way the ⇧S scope lens does. That is the
+  # filter bar rather than replacing it, exactly the way the `s` scope lens does. That is the
   # whole point of the feature (#776) — `src:proxy` stops being a query the operator retypes
   # every session and becomes a mode that survives the next `/`.
   #
@@ -89,7 +89,7 @@ module Gori
 
       # What the History filter row's `v:` chip spells. A LABEL, not the name, for two reasons
       # that both belong to that row and to nowhere else: every chip beside it reads
-      # `f:follow` / `⇧S scope:off` / `3 marked`, so a Title-Case one is the only word on the
+      # `f:follow` / `s scope:off` / `3 marked`, so a Title-Case one is the only word on the
       # bar shouting; and the chip is the narrowest place a view is ever printed, which is why
       # `CHIP_LABELS` exists at all.
       #

@@ -178,7 +178,7 @@ module Gori::Tui
       # beside `refresh_preview` — the list itself never opens one.
       @col_store = nil.as(Store?)
       @scope = nil.as(Scope?)
-      # The active VIEW (#776) — a named QL query ANDed over the bar, the way the ⇧S scope lens
+      # The active VIEW (#776) — a named QL query ANDed over the bar, the way the `s` scope lens
       # is. Nil until `set_view`, exactly like @scope: every construction site outside
       # HistoryController leaves it nil, which keeps the whole feature a no-op for the existing
       # History specs. `SavedViews.all_view` is "no view" spelled as a view, so nil and All mean
@@ -666,7 +666,7 @@ module Gori::Tui
       @suggest_store = store
       @search_error = nil
       @filter_dirty = false
-      # The `scope:` lens: this view already holds the Scope it applies for ⇧S, and a `scope:`
+      # The `scope:` lens: this view already holds the Scope it applies for `s`, and a `scope:`
       # TERM is that same predicate asked as a question rather than switched on — `ql_lens` reads
       # the rules regardless of the flag (see there), so `scope:in` means the same thing with the
       # lens off. nil only before `set_scope` has run.
@@ -780,14 +780,14 @@ module Gori::Tui
       # A `scope:` term that runs cleanly and returns NOTHING is indistinguishable on this list
       # from "no traffic matched", and there are two states where that happens for a reason the
       # operator can act on — so name the state rather than leave an empty list to explain it.
-      # The second is not a claim about this query: the ⇧S lens ANDs the in-scope predicate over
+      # The second is not a claim about this query: the `s` lens ANDs the in-scope predicate over
       # whatever is typed, so it makes `scope:in` redundant and `scope:out` (un-negated) empty,
       # and saying that costs no analysis of where the term sits in the tree.
       if QL.uses_scope?(@query)
         return "no scope rules — nothing is in scope" unless lens.try(&.configured?)
-        return "⇧S lens also narrows to in-scope" if @scope.try(&.active?)
+        return "the s lens also narrows to in-scope" if @scope.try(&.active?)
       end
-      # Same reasoning as the ⇧S line above, one lens over: a view ANDs its own query over
+      # Same reasoning as the `s` line above, one lens over: a view ANDs its own query over
       # whatever is typed, so a bar the operator can read in full still does not explain the
       # empty list. Named LAST because a broken regex or a dropped term is a defect in what they
       # just typed, while this one is a standing mode they may have set days ago.
@@ -2606,10 +2606,10 @@ module Gori::Tui
         end
         # Mirror Issues/Probe: a recovery hint under the message. The QL-clear
         # cue only applies to a real query (not a Scope-lens-only empty set, which
-        # ⇧S toggles off), so branch on @querying / @query before filtering?.
+        # `s` toggles off), so branch on @querying / @query before filtering?.
         # Branch on a real `/` query FIRST (querying-aware hint): a blank-query empty
         # set is caused by the Scope lens or no traffic, where "esc clears the filter"
-        # would mislead (⇧S clears the lens). Mirrors sitemap_view's ordering.
+        # would mislead (`s` clears the lens). Mirrors sitemap_view's ordering.
         msg, hint =
           if @searching_shown
             {"searching", "esc clears the filter"}
@@ -2627,11 +2627,11 @@ module Gori::Tui
             {@query_note || "no flows match", @querying ? "esc clears the filter" : "/ to edit the filter"}
           elsif v = active_view
             # A view with a blank bar. Named before the Scope lens for the same reason the bar
-            # is: it is the more specific of the two, and "⇧S clears the scope lens" on a
+            # is: it is the more specific of the two, and "s clears the scope lens" on a
             # view-emptied list points at the wrong control.
             {@view_note || "no flows match the #{v.name} view", "v selects a view — All shows everything"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
-            {"no flows in scope", "⇧S clears the scope lens"}
+            {"no flows in scope", "s clears the scope lens"}
           else
             list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
             TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
@@ -3476,7 +3476,7 @@ module Gori::Tui
       else
         # No QL query typed — whether or not a Scope lens is active. Surface the filter
         # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
-        # already signalled by the ⇧S chip on the right, so this row isn't wasted
+        # already signalled by the `s` chip on the right, so this row isn't wasted
         # repeating it, and the user's next move here is to ADD a query atop the lens.
         screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
       end
@@ -3485,7 +3485,7 @@ module Gori::Tui
     # The filter bar's right cluster as `{tag, text, colour}`, RIGHT-TO-LEFT — the order
     # `Frame.right_text_chain` draws in.
     #
-    # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable) and,
+    # Right cluster: a scope-lens chip (always shown so the `s` toggle is discoverable) and,
     # when filtering, the row count. The scope lens is a filter too, so it lives on the filter
     # bar next to the QL query. The `f:follow` toggle shares the scope chip's accent/muted dress
     # so the two read as one cluster, and the mark chip joins them rather than being placed by

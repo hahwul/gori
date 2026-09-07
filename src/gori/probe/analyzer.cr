@@ -599,7 +599,7 @@ module Gori
         # Active probes only on hosts/paths covered by Project scope INCLUDE rules
         # (the Outbound ALLOWLIST gate — lens-independent; requires ≥1 include so
         # excludes-only never means "probe everything"). in_scope_url? is wrong here: it is
-        # permissive when the ⇧S display lens is off. AGGRESSIVE never widens this.
+        # permissive when the `s` display lens is off. AGGRESSIVE never widens this.
         # Gate on the port-less scope URL (check_request), not FlowRow#url — a non-default
         # port in the latter made string/regex includes miss every active probe on that origin.
         return if @outbound.check_request(row.scheme, row.host, row.target, row.port).blocked?

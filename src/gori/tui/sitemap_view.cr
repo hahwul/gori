@@ -219,7 +219,7 @@ module Gori::Tui
       reapply_expand_state(prev_expand)
       # Stamp host-level scope state + endpoint counts on the FINAL tree, so the render
       # loop is a pure read (no per-frame Scope mutex hits). host_in_scope?/configured?
-      # evaluate the rules regardless of the ⇧S enabled flag, so targets are marked even
+      # evaluate the rules regardless of the `s` enabled flag, so targets are marked even
       # with the lens off (all traffic shown).
       @scope_configured = @scope.try(&.configured?) == true
       @hosts.each do |h|
@@ -1293,7 +1293,7 @@ module Gori::Tui
       else
         # No QL query typed — whether or not a Scope lens is active. Surface the filter
         # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
-        # already signalled by the ⇧S chip on the right, so this row isn't wasted
+        # already signalled by the `s` chip on the right, so this row isn't wasted
         # repeating it, and the user's next move here is to ADD a query atop the lens.
         screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
       end
@@ -1302,7 +1302,7 @@ module Gori::Tui
     # The filter bar's right cluster as `{tag, text, colour}`, RIGHT-TO-LEFT — the order
     # `Frame.right_text_chain` draws in.
     #
-    # Right cluster: the scope-lens chip (always shown so the ⇧S toggle is discoverable — the
+    # Right cluster: the scope-lens chip (always shown so the `s` toggle is discoverable — the
     # Scope lens filters the tree too) and, when filtering, the matching host count. The
     # `g:fold` toggle keeps the scope chip's accent/muted dress so the two lenses read as one
     # cluster, and its `g` chord stays in view (folding on vs off renders identically when a

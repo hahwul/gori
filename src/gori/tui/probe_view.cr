@@ -72,7 +72,7 @@ module Gori::Tui
       Settings.probe_preview
     end
 
-    # Wires the shared session Scope in (mirrors HistoryView/SitemapView) so the ⇧S
+    # Wires the shared session Scope in (mirrors HistoryView/SitemapView) so the `s`
     # lens filters this tab too, and its chip is discoverable on the filter bar.
     def set_scope(scope : Scope) : Nil
       @scope = scope
@@ -445,7 +445,7 @@ module Gori::Tui
       next_status
     end
 
-    # Bulk-mute every OPEN issue sharing the targeted issue's code. Respects the ⇧S scope lens:
+    # Bulk-mute every OPEN issue sharing the targeted issue's code. Respects the `s` scope lens:
     # dismissing "all with this code" from a scoped view must not silently mute issues on
     # out-of-scope hosts the user can't see, and the returned count must equal what was muted.
     # With the lens off this is every open issue carrying the code.
@@ -645,7 +645,7 @@ module Gori::Tui
       elsif @pre_scope_empty && !@all.empty? && !@show_closed
         screen.text(rect.x + 1, top, "no open issues · all #{@all.size} triaged · press a to show closed", Theme.muted)
       elsif scope_active?
-        screen.text(rect.x + 1, top, "no issues in scope · ⇧S clears the scope lens", Theme.muted)
+        screen.text(rect.x + 1, top, "no issues in scope · s clears the scope lens", Theme.muted)
       else
         TrafficEmptyState.render(screen, list_rect, variant: :probe, listen: listen,
           capturing: capturing, scan_on: !@mode.off?,
@@ -737,7 +737,7 @@ module Gori::Tui
             known: QUERY_KNOWN))
         return
       end
-      # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable,
+      # Right cluster: a scope-lens chip (always shown so the `s` toggle is discoverable,
       # mirroring HistoryView/SitemapView) and, when filtering, the row count.
       # One right-anchored chain — see HistoryView#render_ql_bar.
       chips = [] of {String, Color}

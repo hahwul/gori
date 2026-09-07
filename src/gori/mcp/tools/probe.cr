@@ -503,7 +503,7 @@ module Gori
           s.field "active", boolprop("also run active checks that SEND probe requests (default false = passive, request-free); requires write access + a configured scope")
           s.field "severity", enumprop("only return issues at/above this level", SEVERITIES)
           s.field "category", enumprop("only return issues in this category", Probe::FILTER_CATEGORIES)
-          s.field "in_scope", boolprop("only return issues on hosts in the project's configured scope (the TUI ⇧S lens; ALL flows are still scanned). Empty result when no scope rules exist. Independent of active/allow_unscoped. Default false")
+          s.field "in_scope", boolprop("only return issues on hosts in the project's configured scope (the TUI `s` lens; ALL flows are still scanned). Empty result when no scope rules exist. Independent of active/allow_unscoped. Default false")
           s.field "allow_unscoped", boolprop("with active:true, run even when a target host is outside — or without — a configured scope (default false)")
           s.field "unsafe", boolprop("with active:true, ALSO probe unsafe methods (POST/PUT/PATCH/DELETE) — re-sends may mutate server data (default false)")
           s.field "aggressive", boolprop("with active:true, raise per-rule caps + use wider bypass sets (implies unsafe) — authorized targets only (default false)")

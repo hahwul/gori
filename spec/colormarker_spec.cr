@@ -521,7 +521,7 @@ describe Gori::Colormarker do
         .should contain("not a value that field takes")
       # …and the note an author needs, because both surprising halves are invisible otherwise.
       note = Gori::Colormarker.advise("scope:in").find { |n| n.includes?("scope:") }.not_nil!
-      note.should contain("⇧S")
+      note.should contain("`s` lens")
       note.should contain("nothing is in scope")
       Gori::Colormarker.advise("host:acme").any?(&.includes?("`scope:`")).should be_false
     end

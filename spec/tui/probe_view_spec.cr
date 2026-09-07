@@ -174,7 +174,7 @@ describe Gori::Tui::ProbeView do
       view.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 80, 20))
       rows = (0...20).map { |y| b.row(y) }.join("\n")
       rows.should contain("no issues in scope")
-      rows.should contain("⇧S clears the scope lens")
+      rows.should contain("s clears the scope lens")
     end
   end
 

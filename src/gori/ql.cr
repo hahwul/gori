@@ -17,7 +17,7 @@ module Gori
   #   size:>10000 dur:>=500 dur:<2s     # total bytes (req+resp) / latency (ms; ms|s)
   #   reqsize:>1000 respsize:<500       # request-only / response-only byte size
   #   header:set-cookie                 # substring over request/response head bytes
-  #   scope:in  scope:out               # the project's scope rules, ⇧S lens off or on
+  #   scope:in  scope:out               # the project's scope rules, `s` lens off or on
   #   body~secret\d+  host~^api\.       # `~` = regex (host path url method scheme header body)
   module QL
     # `:` fields:  see FIELDS below (the list every surface reads).
@@ -54,7 +54,7 @@ module Gori
 
     # The project's in-scope predicate, as a `scope:` term sees it. `predicate` is the
     # include/exclude fragment `Scope#filter(force: true)` builds — the SAME fragment
-    # `gori run history --in-scope` and the TUI's ⇧S lens apply, threaded in rather than
+    # `gori run history --in-scope` and the TUI's `s` lens apply, threaded in rather than
     # respelled, so `scope:in` IS that predicate and inherits its SQL⇄in-memory parity
     # (PR #688) instead of re-earning it.
     #
@@ -168,7 +168,7 @@ module Gori
       the caveat list.
 
       Scope: scope:in  scope:out  — the project's scope rules (the include/exclude boundary the
-      TUI's ⇧S lens and `--in-scope` apply), as an ordinary term: it negates and it groups.
+      TUI's `s` lens and `--in-scope` apply), as an ordinary term: it negates and it groups.
       INDEPENDENT of whether that lens is switched on, because a filter term is a question, not
       a mode. With NO scope rules configured nothing is in scope, so `scope:in` AND `scope:out`
       both match nothing — the question is not asked rather than answered "everything". Note
@@ -740,8 +740,8 @@ module Gori
     SOURCE_VALUES = FlowSource::Kind.tokens + ["gori"]
 
     # scope: selects flows by the project's SCOPE rules — `scope:in` for the include/exclude
-    # boundary, `scope:out` for everything outside it. The same predicate the ⇧S History lens
-    # and `--in-scope` apply, and DELIBERATELY independent of the persisted ⇧S flag: a filter
+    # boundary, `scope:out` for everything outside it. The same predicate the `s` History lens
+    # and `--in-scope` apply, and DELIBERATELY independent of the persisted `s` flag: a filter
     # term is the operator asking a question, not a mode, so `scope:in` must mean the same
     # thing whether the lens happens to be on (see `ScopeLens`, which is built with
     # `Scope#filter(force: true)`).

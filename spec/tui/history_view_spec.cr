@@ -110,10 +110,10 @@ describe Gori::Tui::HistoryView do
     end
   end
 
-  # `scope:` in the filter bar (#754). The view already holds the Scope it applies for ⇧S, so a
+  # `scope:` in the filter bar (#754). The view already holds the Scope it applies for `s`, so a
   # scope TERM is that same predicate asked as a question — including with the lens OFF, which is
   # the state that makes the term worth having at all.
-  it "filters by scope: with the ⇧S lens off, and says when there is no scope to ask about" do
+  it "filters by scope: with the `s` lens off, and says when there is no scope to ask about" do
     with_store do |store|
       add_flow(store, "GET", "/a", 200, host: "acme.test")
       add_flow(store, "GET", "/b", 200, host: "evil.test")
@@ -131,7 +131,7 @@ describe Gori::Tui::HistoryView do
       view.@query_note.not_nil!.should contain("no scope rules")
 
       scope.add("include", "host", "acme.test")
-      scope.active?.should be_false # ⇧S still OFF — the term does not need the lens
+      scope.active?.should be_false # `s` still OFF — the term does not need the lens
       view.reload(store)
       view.@rows.map(&.host).should eq(["evil.test"])
       view.@query_note.should be_nil
@@ -141,7 +141,7 @@ describe Gori::Tui::HistoryView do
       scope.enable
       view.reload(store)
       view.@rows.should be_empty
-      view.@query_note.not_nil!.should contain("⇧S lens")
+      view.@query_note.not_nil!.should contain("s lens")
     end
   end
 
@@ -2168,7 +2168,7 @@ describe Gori::Tui::HistoryView do
       view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 12))
       rows = (0...12).map { |y| backend.row(y) }.join("\n")
       rows.should contain("no flows in scope")
-      rows.should contain("⇧S clears the scope lens")
+      rows.should contain("s clears the scope lens")
       rows.should_not contain("esc clears the filter") # would be misleading — esc won't unfilter
     end
   end

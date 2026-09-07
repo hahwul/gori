@@ -278,7 +278,7 @@ describe "the last hand-rolled chrome" do
   root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
 
   it "leaves the filter bar's right cluster to Frame.right_text_chain" do
-    # Four views wrote this out — History (`count · ⇧S scope · f:follow · N marked`), Sitemap
+    # Four views wrote this out — History (`count · s scope · f:follow · N marked`), Sitemap
     # (`… g:fold …`), and the bare pair in Issues and Probe. The tell is the hand-rolled
     # right-to-left cursor: `rx = rect.right - 1` followed by `rx -= …`. They had already
     # drifted on the gap, stepping TWO columns after the count and ONE between the chips in

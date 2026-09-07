@@ -373,7 +373,7 @@ module Gori
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit") }
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
-          p.on("--in-scope", "Only flows in the project's configured scope (the TUI's ⇧S lens; capture still records everything)") { in_scope = true }
+          p.on("--in-scope", "Only flows in the project's configured scope (the TUI's `s` lens; capture still records everything)") { in_scope = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
           p.on("--column=SPEC", "Show an extracted value per row: [LABEL=][req|res:]kind:selector — e.g. header:x-request-id, RID=jsonpath:data.id, position:0:32 (repeatable; replaces this project's configured History columns)") { |v| column_specs << v }
           p.on("--no-columns", "Don't draw this project's configured History columns (see the TUI's Columns… on the History tab)") { no_columns = true }
@@ -426,7 +426,7 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path),
           read_only: !query_uses_fts?(query) && view_name.nil?)
         begin
-          # The scope lens, opt-in and independent of the persisted ⇧S flag — the same per-flow
+          # The scope lens, opt-in and independent of the persisted `s` flag — the same per-flow
           # include/exclude filter the TUI History lens applies, so `--in-scope` here shows the
           # same set. Capture is untouched; this narrows only the VIEW. Empty (nothing in scope)
           # when no scope rules are configured, matching `sitemap --in-scope`.

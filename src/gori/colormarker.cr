@@ -634,9 +634,9 @@ module Gori
       end
       # Said unconditionally rather than only when the project has no scope rules: this runs
       # where a rule is WRITTEN, the rule outlives that state, and the surprising half — that
-      # `scope:` ignores the ⇧S lens on purpose — is true either way.
+      # `scope:` ignores the `s` lens on purpose — is true either way.
       if QL.uses_scope?(match_filter)
-        notes << "`scope:` applies the project's include/exclude rules whether or not the ⇧S " \
+        notes << "`scope:` applies the project's include/exclude rules whether or not the `s` " \
                  "lens is on, and follows them as they change. With NO scope rules configured " \
                  "nothing is in scope, so `scope:in` and `scope:out` both paint nothing — while a " \
                  "NEGATED one (`-scope:in`) paints EVERY row in that state, so prefer `scope:out`."

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Docs: an accuracy pass over the English and Korean guides — corrected keys (deleting marked flows, Sitemap tagging), the rule host-scope and colour-rule condition semantics, per-field `Alt-Svc` stripping, undocumented `gori run` flags and MCP tool gating, and restored dropped Korean paragraphs.
+- TUI/CLI/MCP: every place gori names the scope-lens key now says `s` — the two `--in-scope` help lines, the History and Probe empty-state hints, the colour-rule advice note and the MCP scope arguments still named `⇧S`, the twin key removed when the lens became the Global `s` (#959)
 
 ## v0.5.0
 

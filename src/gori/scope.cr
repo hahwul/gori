@@ -200,14 +200,14 @@ module Gori
     end
 
     # Has any scope rule at all, REGARDLESS of the enabled flag — drives whether the
-    # Sitemap shows scope markers (targets are marked even with the ⇧S lens off). Kept
+    # Sitemap shows scope markers (targets are marked even with the `s` lens off). Kept
     # mutex-guarded so it shares the same discipline as the other rule readers.
     def configured? : Bool
       @mutex.synchronize { !@rules.empty? }
     end
 
     # Host-level scope membership evaluated against the rules REGARDLESS of the enabled
-    # flag, so the Sitemap can mark its targets even when the ⇧S lens is off. False when
+    # flag, so the Sitemap can mark its targets even when the `s` lens is off. False when
     # no rules exist (nothing to mark). Conservative on url-level (string/regex) includes
     # — a host can't be ruled out by a rule whose path we don't know here — same as
     # may_match_host?; host-type scoping (the common case) is precise.
@@ -244,7 +244,7 @@ module Gori
       end
     end
 
-    # Evaluate include/exclude rules against a URL REGARDLESS of the ⇧S display lens.
+    # Evaluate include/exclude rules against a URL REGARDLESS of the `s` display lens.
     # Used by Probe Active probes. Differs from the Burp display filter in one safety
     # way: at least one INCLUDE rule is required (excludes-only would otherwise mean
     # "probe the whole internet minus a few hosts" — too aggressive for an automatic
@@ -392,7 +392,7 @@ module Gori
     # string/regex rules see is `scheme || '://' || host || target` — the same value
     # `in_scope_url?` builds in memory. Combined Burp-style:
     #   ( <includes OR'd, or 1 when none>  [AND NOT (<excludes OR'd>)] )
-    # `force: true` builds the include/exclude SQL even when the ⇧S display lens is OFF — the
+    # `force: true` builds the include/exclude SQL even when the `s` display lens is OFF — the
     # opt-in `gori run history --in-scope` uses it to apply the rules regardless of the persisted
     # flag, exactly as the TUI History lens applies `filter` when the flag is on. Still EMPTY
     # (match-all) when no rules exist, so a caller that wants "nothing when unconfigured" must
@@ -434,7 +434,7 @@ module Gori
     end
 
     # This project's scope as a QL `scope:in` / `scope:out` term sees it (see `QL::ScopeLens`):
-    # the include/exclude predicate REGARDLESS of the persisted ⇧S flag — same `force: true`
+    # the include/exclude predicate REGARDLESS of the persisted `s` flag — same `force: true`
     # reading `gori run history --in-scope` takes, because a filter term is the operator asking
     # a question and not a mode — or the UNCONFIGURED lens when there are no rules, which makes
     # both spellings match nothing rather than one of them matching every flow.

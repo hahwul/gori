@@ -25,7 +25,7 @@ module Gori::Tui
     # `scoped` — the caller drew these rows THROUGH the active Scope lens, so an empty list
     # means "nothing in scope", not "nothing captured". The picker holds rows and cannot ask
     # the Scope itself, and the two readings send the operator opposite ways: one hunts for
-    # traffic gori supposedly lost, the other presses ⇧S.
+    # traffic gori supposedly lost, the other presses `s`.
     def initialize(@rows : Array(Store::FlowRow), @target : Symbol, @scoped : Bool = false)
       # Precompute each row's filter haystack ONCE (not per keystroke) so typing into
       # a 2000-row snapshot doesn't rebuild 2000 strings on every character.
