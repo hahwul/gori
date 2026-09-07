@@ -2234,6 +2234,94 @@ kbd {
   }
 }
 
+/* Brand Kit / Miss Ring: artwork plates and colour swatches. Both are grids of
+   small squares, so auto-fit does the reflow and no breakpoint is needed. The
+   art carries its own near-black plate the way the TUI captures do, which is
+   why the plate colour is a literal and not a theme token. */
+.art-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1.1rem;
+  margin: 2rem 0 2.4rem;
+}
+.art-gallery figure {
+  margin: 0;
+}
+.art-gallery img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  /* Each plate defaults to the terminal's own near-black. A variant meant for
+     a light background sets `--plate` inline, so the black mono mark is not
+     shown as a black square on a black square. */
+  background: var(--plate, #0a0a0b);
+}
+.art-gallery figcaption {
+  margin-top: 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  text-align: center;
+}
+/* Each swatch reads its colour from an inline `--c`, so a new row on the page
+   costs no CSS. The chip sits on the plate colour it is meant to be judged
+   against, hence the hairline rather than a shadow. */
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.8rem;
+  margin: 1.8rem 0 2.2rem;
+}
+.swatch {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.swatch b {
+  display: block;
+  height: 56px;
+  background: var(--c, var(--bg-panel));
+}
+.swatch span {
+  display: block;
+  padding: 0.5rem 0.6rem 0.6rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font: 500 0.72rem/1.5 var(--font-mono);
+}
+.swatch span em {
+  display: block;
+  color: var(--heading);
+  font-style: normal;
+  font-size: 0.78rem;
+}
+
+/* Miss Ring's sprite is a portrait, not source. At body-code size the face is
+   five glyphs nobody can read, so it gets its own scale and the brand gold she
+   is actually painted in. The blocks around it stay at code size, but every one
+   of them carries `nohighlight`: hljs.highlightAll() guesses a language for any
+   unlabelled block, and it colours half-block art as if it were syntax. */
+.sprite code {
+  font-size: 1.75rem;
+  /* Half blocks only join into a ring when the rows touch and the cells do
+     not: any line-height above 1 opens a seam between the crown and the face,
+     and any letter-spacing breaks the walls off the arc. */
+  line-height: 1;
+  letter-spacing: 0;
+  color: var(--accent-strong);
+}
+/* A stack of independent one-line chips rather than one figure: these rows are
+   separate examples, so they need the air the ring must not have. */
+.sprite--stack code {
+  line-height: 1.6;
+}
+@media (max-width: 620px) {
+  .sprite code {
+    font-size: 1.25rem;
+  }
+}
+
 hr {
   height: 1px;
   margin: var(--space-7) 0;
