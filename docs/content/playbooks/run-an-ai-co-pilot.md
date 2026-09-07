@@ -19,7 +19,7 @@ gori has no chat window, and that is deliberate: the intelligence lives outside 
 gori mcp --install-claude-code   # Claude Code
 ```
 
-Other hosts install the same way: `--install-claude` (Claude Desktop), `--install-codex` (OpenAI Codex), `--install-agy` (Antigravity), `--install-grok` (Grok), `--install-hermes` (Hermes). Each command prints the file it wrote and the exact launch command it recorded; Codex and Grok write a TOML `[mcp_servers.gori]` table and Hermes a YAML `mcp_servers:` entry, rather than JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
+Other hosts install the same way: `--install-claude` (Claude Desktop), `--install-codex` (OpenAI Codex), `--install-agy` (Antigravity), `--install-grok` (Grok), `--install-hermes` (Hermes), `--install-pi` (Pi, which reads its MCP servers through an adapter package). Each command prints the file it wrote and the exact launch command it recorded; Codex and Grok write a TOML `[mcp_servers.gori]` table and Hermes a YAML `mcp_servers:` entry, rather than JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
 
 Two choices ride along into that recorded command. **Read-only vs. full access**: by default the agent also gets the action tools (`send_request`, issue writes, the intercept mutators); add `--read-only` to expose only the read tools. **Which project**: run the install from inside your engagement's Git repository and gori path-binds that workspace to its own project; from anywhere else the server starts unbound and the agent picks a project over tools. Pin one explicitly with `--project` or `--db`, and it is written into the recorded command with an absolute path:
 

@@ -30,6 +30,11 @@ describe Gori::MCP::Install do
         Gori::MCP::Install.config_path("pi").should eq("/opt/pi-eng/mcp.json")
         ENV["PI_CODING_AGENT_DIR"] = "~/pi-eng"
         Gori::MCP::Install.config_path("pi").should eq(File.join(ENV["HOME"], "pi-eng", "mcp.json"))
+        # A BARE tilde is its own arm in both implementations (the adapter's getAgentDir
+        # returns homedir() for it, Crystal's expand matches "~" before "~/"); a path
+        # built by concatenation instead would answer "$HOME/~/mcp.json" here.
+        ENV["PI_CODING_AGENT_DIR"] = "~"
+        Gori::MCP::Install.config_path("pi").should eq(File.join(ENV["HOME"], "mcp.json"))
         ENV["PI_CODING_AGENT_DIR"] = "pi-eng"
         Gori::MCP::Install.config_path("pi").should eq(File.join(Dir.current, "pi-eng", "mcp.json"))
       ensure
