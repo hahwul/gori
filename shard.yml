@@ -33,7 +33,7 @@ dependencies:
     version: ~> 0.2
   cvss:
     github: hahwul/cvss.cr
-    version: ~> 0.2
+    version: ~> 0.3
 
 development_dependencies:
   ameba:

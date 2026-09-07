@@ -6,8 +6,8 @@
   };
   "cvss" = {
     url = "https://github.com/hahwul/cvss.cr.git";
-    rev = "v0.2.0";
-    sha256 = "16fm9c7l0g3jgk9r8kjcaw5c197w36d0irl6iixmqpaavnqjsgvk";
+    rev = "v0.3.0";
+    sha256 = "016aky70cspqavviq38haxjkfy4p4yxa68m8k3070ml42p57s561";
   };
   "db" = {
     url = "https://github.com/crystal-lang/crystal-db.git";
