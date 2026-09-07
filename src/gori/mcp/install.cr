@@ -5,7 +5,7 @@ require "../durable_file"
 module Gori
   module MCP
     # Writes client-specific MCP configuration so agents can spawn `gori mcp`.
-    # JSON clients (Claude Desktop, Claude Code, Antigravity) get an `mcpServers`
+    # JSON clients (Claude Desktop, Claude Code, Antigravity, Pi) get an `mcpServers`
     # entry; TOML clients (OpenAI Codex, Grok) get an `[mcp_servers.gori]` table;
     # YAML clients (Hermes) get an `mcp_servers:` entry. Three file formats, one shape:
     # a server named `gori` with a `command` and an `args` array.
@@ -46,7 +46,7 @@ module Gori
         {% end %}
 
       # Returns the absolute config path for *target* (`agy`, `codex`, `claude`,
-      # `claude-code`, `grok`, `hermes`). Raises on unknown targets.
+      # `claude-code`, `grok`, `hermes`, `pi`). Raises on unknown targets.
       def self.config_path(target : String) : String
         home = ENV["HOME"]? || ENV["USERPROFILE"]? || abort "HOME is not set"
         case target
@@ -64,6 +64,26 @@ module Gori
         when "grok"
           # Grok Build TUI: GROK_HOME is not standard; config lives under ~/.grok.
           File.join(home, ".grok", "config.toml")
+        when "pi"
+          # Pi speaks MCP through an adapter package rather than natively, and
+          # `<agent dir>/mcp.json` is the "pi global override" in that adapter's
+          # precedence chain — above the tool-agnostic `~/.config/mcp` and
+          # `~/.agents` files, below a repo's own `.pi/mcp.json` (pi-mcp-adapter
+          # `config.ts`). Same `mcpServers` shape as the other JSON clients.
+          #
+          # The resolution mirrors the adapter's `getAgentDir` (`agent-dir.ts`)
+          # exactly: strip the override, treat an all-whitespace one as unset,
+          # resolve `~` and `~/…` against $HOME and anything else against the
+          # working directory. Not the fidelity concession `hermes_home` makes
+          # below — this client DOES expand the tilde, so gori must too.
+          #
+          # A REBRANDED distribution built on pi (the adapter reads `piConfig.name`
+          # out of `$PI_PACKAGE_DIR`'s manifest) renames both halves — its var is
+          # `<NAME>_CODING_AGENT_DIR` and its default `~/.<name>/agent`. gori answers
+          # for vanilla pi; because it prints the file it wrote, that case shows up
+          # as a path the user can see is wrong rather than as missing tools.
+          agent_dir = ENV["PI_CODING_AGENT_DIR"]?.try(&.strip).presence || File.join(home, ".pi", "agent")
+          File.join(File.expand_path(agent_dir, home: true), "mcp.json")
         when "hermes"
           # Hermes agent: `<HERMES_HOME>/config.yaml` (`hermes_constants.py` get_config_path),
           # servers under a snake_case `mcp_servers` key (`tools/mcp_tool.py`'s module docs).
@@ -249,7 +269,7 @@ module Gori
         end
       end
 
-      # --- JSON clients (Claude Desktop, Claude Code, Antigravity) -------------
+      # --- JSON clients (Claude Desktop, Claude Code, Antigravity, Pi) ---------
 
       def self.install_json(config_path : String, exe_path : String, args : Array(String)) : Nil
         # Load existing config or initialize. If the file exists but doesn't parse as a

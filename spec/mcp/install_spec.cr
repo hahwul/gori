@@ -19,6 +19,29 @@ end
 
 describe Gori::MCP::Install do
   describe ".config_path" do
+    it "maps pi to ~/.pi/agent/mcp.json and honors PI_CODING_AGENT_DIR" do
+      old_pi = ENV["PI_CODING_AGENT_DIR"]?
+      ENV.delete("PI_CODING_AGENT_DIR")
+      begin
+        Gori::MCP::Install.config_path("pi").should eq(File.join(ENV["HOME"], ".pi", "agent", "mcp.json"))
+        ENV["PI_CODING_AGENT_DIR"] = "   "
+        Gori::MCP::Install.config_path("pi").should eq(File.join(ENV["HOME"], ".pi", "agent", "mcp.json"))
+        ENV["PI_CODING_AGENT_DIR"] = " /opt/pi-eng "
+        Gori::MCP::Install.config_path("pi").should eq("/opt/pi-eng/mcp.json")
+        ENV["PI_CODING_AGENT_DIR"] = "~/pi-eng"
+        Gori::MCP::Install.config_path("pi").should eq(File.join(ENV["HOME"], "pi-eng", "mcp.json"))
+        # A BARE tilde is its own arm in both implementations (the adapter's getAgentDir
+        # returns homedir() for it, Crystal's expand matches "~" before "~/"); a path
+        # built by concatenation instead would answer "$HOME/~/mcp.json" here.
+        ENV["PI_CODING_AGENT_DIR"] = "~"
+        Gori::MCP::Install.config_path("pi").should eq(File.join(ENV["HOME"], "mcp.json"))
+        ENV["PI_CODING_AGENT_DIR"] = "pi-eng"
+        Gori::MCP::Install.config_path("pi").should eq(File.join(Dir.current, "pi-eng", "mcp.json"))
+      ensure
+        old_pi ? (ENV["PI_CODING_AGENT_DIR"] = old_pi) : ENV.delete("PI_CODING_AGENT_DIR")
+      end
+    end
+
     it "maps codex to ~/.codex/config.toml (or CODEX_HOME)" do
       Gori::MCP::Install.config_path("codex").should eq(
         File.join(ENV["CODEX_HOME"]?.presence || File.join(ENV["HOME"], ".codex"), "config.toml"))
@@ -646,6 +669,42 @@ describe Gori::MCP::Install do
   end
 
   describe ".install" do
+    it "creates Pi's config and updates gori while preserving other servers and settings" do
+      dir = File.join(Dir.tempdir, "pi-install-#{Random::Secure.hex(4)}")
+      old_pi = ENV["PI_CODING_AGENT_DIR"]?
+      ENV["PI_CODING_AGENT_DIR"] = dir
+      begin
+        path = Gori::MCP::Install.install("pi", exe_path: "/opt/gori")
+        path.should eq(File.join(dir, "mcp.json"))
+        JSON.parse(File.read(path))["mcpServers"]["gori"]["args"].as_a.map(&.as_s).should eq(["mcp"])
+
+        File.write(path, %({"settings":{"toolPrefix":"custom"},"mcpServers":{"other":{"command":"other"},"gori":{"command":"old"}}}))
+        2.times do
+          outcomes = Gori::MCP::Install.install_all(["pi", "pi"], exe_path: "/opt/gori new",
+            project: "engagement", read_only: true, tools_spec: "list_*")
+          outcomes.size.should eq(1)
+          outcomes.first.ok?.should be_true
+          outcomes.first.path.should eq(path)
+        end
+        parsed = JSON.parse(File.read(path))
+        parsed["settings"]["toolPrefix"].as_s.should eq("custom")
+        servers = parsed["mcpServers"].as_h
+        servers.keys.sort!.should eq(["gori", "other"])
+        servers["other"]["command"].as_s.should eq("other")
+        servers["gori"]["command"].as_s.should eq("/opt/gori new")
+        servers["gori"]["args"].as_a.map(&.as_s).should eq(["mcp", "--project=engagement", "--read-only", "--tools=list_*"])
+
+        File.write(path, "not-json{")
+        expect_raises(Exception, /Refusing to overwrite/) do
+          Gori::MCP::Install.install("pi", exe_path: "/opt/gori")
+        end
+        File.read(path).should eq("not-json{")
+      ensure
+        old_pi ? (ENV["PI_CODING_AGENT_DIR"] = old_pi) : ENV.delete("PI_CODING_AGENT_DIR")
+        FileUtils.rm_rf(dir)
+      end
+    end
+
     it "writes a JSON mcpServers entry for claude-style targets" do
       Dir.tempdir.try do |base|
         # Point HOME at a temp tree so we don't touch the real Claude config.

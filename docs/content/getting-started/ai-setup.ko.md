@@ -21,6 +21,7 @@ gori mcp --install-codex         # OpenAI Codex
 gori mcp --install-agy           # Antigravity CLI
 gori mcp --install-grok          # Grok
 gori mcp --install-hermes        # Hermes
+gori mcp --install-pi            # Pi
 ```
 
 | 플래그 | 클라이언트 | 작성되는 설정 |
@@ -31,6 +32,9 @@ gori mcp --install-hermes        # Hermes
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), 또는 `$HERMES_HOME` |
+| `--install-pi` | Pi | `~/.pi/agent/mcp.json` (`mcpServers.gori`), 또는 `$PI_CODING_AGENT_DIR` |
+
+Pi는 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 같은 MCP 어댑터가 필요합니다. `pi install npm:pi-mcp-adapter`로 어댑터를 설치한 다음 Pi를 다시 시작하세요. `--install-pi`는 MCP 서버 설정을 기록합니다.
 
 각 명령은 작성한 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 TOML `[mcp_servers.gori]` 테이블을, Hermes는 YAML `mcp_servers:` 항목을 사용합니다(JSON이 아닙니다). 설치 후에는 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.
 

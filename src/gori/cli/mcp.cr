@@ -43,6 +43,7 @@ module Gori::CLI
       p.on("--install-claude-code", "Install gori as an MCP server in Claude Code (~/.claude.json)") { install_targets << "claude-code" }
       p.on("--install-grok", "Install gori as an MCP server in Grok (~/.grok/config.toml)") { install_targets << "grok" }
       p.on("--install-hermes", "Install gori as an MCP server in Hermes ($HERMES_HOME, default ~/.hermes/config.yaml)") { install_targets << "hermes" }
+      p.on("--install-pi", "Install gori as an MCP server in Pi ($PI_CODING_AGENT_DIR, default ~/.pi/agent/mcp.json; requires an MCP adapter)") { install_targets << "pi" }
       p.on("-h", "--help", "Show this help") { puts p; exit 0 }
       p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
       p.missing_option { |flag| abort "missing value for #{flag}" }
@@ -171,6 +172,9 @@ module Gori::CLI
     outcomes.each do |outcome|
       if path = outcome.path
         puts "Successfully installed gori MCP server configuration to #{path}"
+        if outcome.target == "pi"
+          puts "Pi requires an MCP adapter (e.g. pi install npm:pi-mcp-adapter). Restart Pi to load the configuration."
+        end
       else
         STDERR.puts "Failed to install MCP config for #{outcome.target}: #{outcome.error}"
       end
