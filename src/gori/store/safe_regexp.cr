@@ -66,52 +66,65 @@ module Gori
     # --- literal fast path ------------------------------------------------------
     #
     # Most patterns reaching this callback are not regexes at all. QL compiles EVERY
-    # `header:` and every index-free `body:` to `(?i)<Regex.escape(needle)>` (see
-    # ql.cr's `header_cond` / `body_literal_cond`), and a hand-written `body~admin` is
-    # a bare literal too. Handing those to PCRE2 pays for three passes over the body
-    # that a byte search does not need — the `String` copy, `scrub`'s UTF-8 validation,
-    # and PCRE2's own UTF-8 validation — before the match even starts. Over 100k flows
-    # with 1KB bodies (bench/history_filter_bench), `body~absentneedle` spent 876ms in
-    # this callback: 81ms copying, 370ms scrubbing, the rest matching. The byte search
-    # answers the same query in 108ms.
+    # `header:` and every index-free `body:` to `(?i)<Regex.escape(needle)>` (see ql.cr's
+    # `header_cond` / `body_literal_cond`), and a hand-written `body~admin` is a bare literal
+    # too. Handing those to PCRE2 pays for a `String` copy of the whole body and a UTF-8
+    # validation pass before the match even starts; a byte search off the SQLite pointer pays
+    # for neither. Over 100k flows with 1KB bodies (bench/history_filter_bench),
+    # `body~absentneedle` went from 798ms to 40ms and from 137MB of garbage to none.
     #
     # `nil` from `extract_literal` means "not a literal" — the pattern goes to PCRE2
-    # unchanged. This is an OPTIMISATION, never a second definition of what matches:
-    # every case it declines falls through, and the cases it takes are argued below to
-    # give the identical answer.
+    # unchanged. This is an OPTIMISATION, never a second definition of what matches: every
+    # case it declines falls through, and the cases it takes are argued below to give the
+    # identical answer.
     record Literal,
-      # The literal bytes, ASCII-only (a non-ASCII byte makes `(?i)` Unicode's business,
-      # not ours, so `extract_literal` refuses those patterns outright).
+      # The literal bytes, ASCII-only (a non-ASCII byte makes `(?i)` Unicode's business, not
+      # ours, so `extract_literal` refuses those patterns outright). EMPTY marks the sentinel
+      # below; a real literal always has at least one byte.
       needle : Bytes,
       # `(?i)` was on the front: compare ASCII letters case-insensitively.
       fold : Bool,
-      # UTF-8 LEAD bytes of the non-ASCII codepoints PCRE2 would also fold onto a letter
-      # this needle carries — see `literal_match?`. Empty unless `fold`.
-      fold_leads : Bytes
+      # The needle carries a letter PCRE2 would ALSO fold a non-ASCII codepoint onto, so a
+      # miss is not final until that codepoint is ruled out of the haystack — see
+      # `literal_match?`. Both false unless `fold`.
+      long_s : Bool,
+      kelvin : Bool,
+      # Boyer-Moore-Horspool bad-character table: with the needle laid over the haystack, how
+      # far the scan may jump when the byte under the needle's LAST position is `b`. A byte
+      # the needle does not carry jumps the whole needle. Empty for a one-byte needle, which
+      # never consults it. Built once per pattern.
+      skip : Array(Int32)
+
+    # A pattern PCRE2 must own is CACHED as this rather than as `nil`, so the per-row lookup
+    # is one hash instead of `has_key?` + `[]`.
+    NOT_LITERAL = Literal.new(Bytes.empty, false, false, false, [] of Int32)
 
     # The two non-ASCII codepoints PCRE2's `(?i)` folds onto an ASCII letter, under the
-    # UTF|UCP options Crystal compiles every Regex with. NOT assumed — enumerated by
-    # matching `(?i)<letter>` against every codepoint in the space; these two are the
-    # entire set, so an ASCII-only fold is exact for any needle without `s`/`k`.
-    FOLD_ESCAPES = {'s' => 0xC5_u8, 'k' => 0xE2_u8} # U+017F 'ſ' = C5 BF, U+212A 'K' = E2 84 AA
+    # UTF|UCP options Crystal compiles every Regex with. NOT assumed — enumerated by matching
+    # `(?i)<letter>` against every codepoint in the space, and `spec/store/safe_regexp_spec.cr`
+    # re-runs that enumeration so a PCRE2 upgrade that widened the set could not pass silently.
+    LONG_S = Bytes[0xC5, 0xBF]       # U+017F ſ, which `(?i)s` matches
+    KELVIN = Bytes[0xE2, 0x84, 0xAA] # U+212A K, which `(?i)k` matches
 
     # Unescaped, these end the literal — the pattern is a real regex and PCRE2 owns it.
     # `-`, `=`, `!`, `<`, `>`, `:`, `#` and space are NOT here on purpose: `Regex.escape`
-    # backslashes them, but none is a metacharacter outside a character class (and `#`/
-    # space would need EXTENDED, which Crystal does not set), so they stay literal
-    # whether or not the escape survived.
+    # backslashes them, but none is a metacharacter outside a character class (and `#`/space
+    # would need EXTENDED, which Crystal does not set), so they stay literal whether or not
+    # the escape survived.
     META = ".*+?()[]{}|^$"
 
-    @@literals = {} of String => Literal?
+    @@literals = {} of String => Literal
 
     # :nodoc: — internal (called from FN, which needs an explicit receiver)
     def self.literal(pattern : String) : Literal?
-      return @@literals[pattern] if @@literals.has_key?(pattern)
+      if hit = @@literals[pattern]?
+        return hit.needle.empty? ? nil : hit
+      end
       lit = extract_literal(pattern)
       # Bounded for the reason `@@cache` is, and cleared with it in mind: a scan uses a
       # handful of patterns, so this can never evict one mid-scan.
       @@literals.clear if @@literals.size >= CACHE_MAX
-      @@literals[pattern] = lit
+      @@literals[pattern] = lit || NOT_LITERAL
       lit
     end
 
@@ -148,92 +161,194 @@ module Gori
       # NOT named `out`: `out` is a Crystal keyword and `out[0, n]` fails to parse.
       buf = Bytes.new(src.size - i)
       n = 0
-      leads = Set(UInt8).new
+      long_s = false
+      kelvin = false
       while i < src.size
         b, i = literal_byte_at(src, i) || return nil
-        if fold && (lead = FOLD_ESCAPES[b.unsafe_chr.downcase]?)
-          leads << lead
-        end
+        long_s = true if fold && (b === 's' || b === 'S')
+        kelvin = true if fold && (b === 'k' || b === 'K')
         buf[n] = b
         n += 1
       end
       return nil if n == 0 # `` or `(?i)`: a match-all, which PCRE2 should answer
-      ordered = leads.to_a
-      Literal.new(buf[0, n], fold, Bytes.new(ordered.size) { |k| ordered[k] })
+      Literal.new(buf[0, n], fold, long_s, kelvin, skip_table(buf, n, fold))
     end
 
-    # `true` / `false`, or `nil` when an ASCII fold cannot answer and PCRE2 must.
+    private def self.skip_table(buf : Bytes, n : Int32, fold : Bool) : Array(Int32)
+      return [] of Int32 if n == 1 # `contains_byte?` handles those and never reads the table
+      skip = Array(Int32).new(256, n)
+      (0...n - 1).each do |j|
+        b = buf[j]
+        skip[b] = n - 1 - j
+        # A folded needle has to be skippable by EITHER spelling of its letters, or the table
+        # would jump past a match the comparison would have found.
+        skip[b ^ 0x20_u8] = n - 1 - j if fold && b.unsafe_chr.ascii_letter?
+      end
+      skip
+    end
+
+    # `true` / `false`, or `nil` when this cannot answer and PCRE2 must.
     #
-    # A HIT is always final: ASCII case folding is a strict subset of PCRE2's, so
-    # anything this finds, `(?i)` finds too. A MISS is final unless the needle carries an
-    # `s` or a `k` AND the haystack could hold the one non-ASCII codepoint PCRE2 folds
-    # onto it (`ſ` / `K`) — which the presence of that codepoint's UTF-8 lead byte
-    # settles, since neither can occur without it. Case-SENSITIVE needles skip all of
-    # this: byte equality is exactly what PCRE2 would do.
+    # A HIT is always final: ASCII case folding is a strict subset of PCRE2's, so anything
+    # this finds, `(?i)` finds too. A MISS is final unless the needle carries an `s` or a `k`
+    # AND the haystack actually holds `ſ` / `K` — the two codepoints PCRE2 folds onto those
+    # letters. That is tested as the full UTF-8 SEQUENCE, not the lead byte: 0xE2 leads every
+    # codepoint from U+2000 to U+2FFF, so an em dash or a curly quote — never mind a
+    # compressed body, where it appears with probability ~0.98 per KB — would have deferred
+    # every `(?i)` needle containing a `k`, which is most of them. Case-SENSITIVE needles skip
+    # all of this: byte equality is exactly what PCRE2 would do.
     #
-    # Reads the haystack by pointer + true length, never through a `String`: that is the
-    # whole point (no copy, no `scrub`), and it keeps the NUL-transparency the callback
-    # has promised since it started reading `value_bytes` instead of `value_text`.
+    # Reads the haystack by pointer + true length, never through a `String`: that is the whole
+    # point (no copy, no `scrub`), and it keeps the NUL-transparency the callback has promised
+    # since it started reading `value_bytes` instead of `value_text`.
     def self.literal_match?(hay : Pointer(UInt8), len : Int32, lit : Literal) : Bool?
-      needle = lit.needle
-      n = needle.size
+      m = lit.needle.size
       # A needle longer than the haystack cannot match even under folding, so this needs no
       # deferral either: `ſ`/`K` make a MATCHED REGION longer than the needle, never shorter.
-      return false if n > len
+      return false if m > len
+      hit = m == 1 ? contains_byte?(hay, len, lit.needle[0], lit.fold) : horspool?(hay, len, lit)
+      return hit unless hit == false
+      return false unless lit.long_s || lit.kelvin
+      # Only now, and only for the miss, is the haystack worth a second look — and one pass
+      # answers for both codepoints.
+      contains_fold_escape?(hay, len, lit) ? nil : false
+    end
+
+    # Horspool, and comparing from the END of the needle is the load-bearing half of it. The
+    # obvious forward scan is fast on real traffic but quadratic on a body of one repeated
+    # byte — a needle whose PREFIX is that byte measured 1.1ms per 64KB body against PCRE2's
+    # 0.22ms, and a captured body is the ATTACKER's to shape. Testing the last position first
+    # is the same "required last code unit" trick that keeps PCRE2 fast there, and it costs
+    # nothing on the ordinary path: 64KB of JSON, absent needle, 6us here against PCRE2's
+    # 234us.
+    #
+    # The skip table narrows the quadratic case rather than removing it (a needle whose SUFFIX
+    # is the repeated byte still walks one position at a time, comparing the whole needle at
+    # each), so the scan carries a work budget and returns `nil` — hand the row to PCRE2 —
+    # rather than grinding. Four passes over the haystack is far more than any realistic
+    # needle spends, and it bounds the worst case at roughly 1.5x what PCRE2 alone would have
+    # cost instead of 8x.
+    private def self.horspool?(hay : Pointer(UInt8), len : Int32, lit : Literal) : Bool?
+      needle = lit.needle
+      m = needle.size
+      skip = lit.skip.to_unsafe # bounds-checked `Array#[]` in this loop is per haystack byte
+      budget = 4_i64 * len + 16
       i = 0
-      limit = len - n
+      limit = len - m
       while i <= limit
-        return true if matches_at?(hay + i, needle, lit.fold)
-        i += 1
-      end
-      return false if lit.fold_leads.empty?
-      # Only now, and only for the miss, is the haystack worth a second look.
-      lit.fold_leads.each do |lead|
-        return nil if find_byte(hay, len, lead)
+        j = m - 1
+        while j >= 0 && byte_eq?(hay[i + j], needle[j], lit.fold)
+          j -= 1
+        end
+        return true if j < 0
+        budget -= m - j
+        return nil if budget < 0
+        i += skip[hay[i + m - 1]]
       end
       false
     end
 
-    private def self.matches_at?(at : Pointer(UInt8), needle : Bytes, fold : Bool) : Bool
-      j = 0
-      while j < needle.size
-        b = at[j]
-        want = needle[j]
-        unless b == want || (fold && (b | 0x20_u8) == (want | 0x20_u8) && want.unsafe_chr.ascii_letter?)
-          return false
-        end
-        j += 1
-      end
-      true
-    end
-
-    private def self.find_byte(hay : Pointer(UInt8), len : Int32, byte : UInt8) : Bool
+    # One byte, which is linear by construction — no table to consult and no budget to keep.
+    # Kept off the general loop because the bookkeeping for both dominated it there: `body:z`
+    # over 100k 1KB bodies went 39ms -> 117ms when a one-byte needle walked the same path.
+    private def self.contains_byte?(hay : Pointer(UInt8), len : Int32, want : UInt8,
+                                    fold : Bool) : Bool
       i = 0
       while i < len
-        return true if hay[i] == byte
+        return true if byte_eq?(hay[i], want, fold)
         i += 1
       end
       false
+    end
+
+    # Does the haystack hold a codepoint PCRE2 would fold onto a letter this needle carries?
+    # ONE pass for both — a needle with an `s` AND a `k` used to walk the body twice more
+    # after the search that missed.
+    private def self.contains_fold_escape?(hay : Pointer(UInt8), len : Int32,
+                                           lit : Literal) : Bool
+      i = 0
+      while i < len
+        b = hay[i]
+        if lit.long_s && b == LONG_S[0]
+          return true if i + 1 < len && hay[i + 1] == LONG_S[1]
+        elsif lit.kelvin && b == KELVIN[0]
+          return true if i + 2 < len && hay[i + 1] == KELVIN[1] && hay[i + 2] == KELVIN[2]
+        end
+        i += 1
+      end
+      false
+    end
+
+    # `want` is a needle byte, so the letter test is on IT: for a letter, `| 0x20` maps both
+    # spellings onto the lowercase one, and the only bytes that land in `a`-`z` that way are
+    # themselves letters — no non-letter can alias into a match.
+    private def self.byte_eq?(got : UInt8, want : UInt8, fold : Bool) : Bool
+      got == want || (fold && (got | 0x20_u8) == (want | 0x20_u8) && want.unsafe_chr.ascii_letter?)
+    end
+
+    # --- the PCRE2 path, for everything the literal search declined --------------
+    #
+    # Whether to `scrub` before matching, rather than letting PCRE2 reject an invalid subject.
+    # Both routes give the IDENTICAL answer; this only picks the cheaper one for the corpus in
+    # hand, and they are far apart in both directions. Per 1KB body, measured: PCRE2 validates
+    # the subject itself at 0.26us, so scrubbing up front pays for that pass twice and costs
+    # 4.7us on a VALID body against 0.29us — but a body PCRE2 REJECTS unwinds a Crystal
+    # exception at 11.3us against the 6.5us scrubbing it would have cost. Break-even is around
+    # two invalid bodies in five, and a capture holds whatever the target served: mostly text
+    # from an API, mostly compressed bytes from a site. So sample the recent rows rather than
+    # assume either shape. `scrub` returns the string ITSELF when it was already valid, which
+    # is how the scrub-first route keeps feeding the sample that may switch it back off.
+    SAMPLE_ROWS = 512
+    @@rows_seen = 0
+    @@rows_invalid = 0
+    @@scrub_first = false
+
+    # :nodoc: — internal (called from FN, which needs an explicit receiver)
+    def self.match_text(pattern : String, text : String) : Bool
+      rx = compile(pattern)
+      if @@scrub_first
+        scrubbed = text.scrub
+        note_subject(!scrubbed.same?(text))
+        # Scrubbed => valid by construction, so PCRE2's own check is pure overhead now.
+        rx.matches_at_byte_index?(scrubbed, 0, Regex::MatchOptions::NO_UTF_CHECK)
+      else
+        begin
+          matched = rx.matches?(text)
+          note_subject(false)
+          matched
+        rescue
+          note_subject(true)
+          rx.matches_at_byte_index?(text.scrub, 0, Regex::MatchOptions::NO_UTF_CHECK)
+        end
+      end
+    rescue
+      # A pattern that will not compile, or a residual engine error: never a raise out of a C
+      # callback, which would abort the whole query (see the module comment).
+      false
+    end
+
+    private def self.note_subject(invalid : Bool) : Nil
+      @@rows_seen += 1
+      @@rows_invalid += 1 if invalid
+      return if @@rows_seen < SAMPLE_ROWS
+      @@scrub_first = @@rows_invalid * 5 > @@rows_seen * 2 # more than two in five
+      @@rows_seen = 0
+      @@rows_invalid = 0
     end
 
     # The pattern arrives as raw SQLite bytes on EVERY row, so `String.new` on it is an
-    # allocation per row — 6.4MB of garbage for one 100k-row `header:` scan, every byte of
-    # it another copy of the same eleven. A scan's patterns are a small fixed set (the
-    # reason `@@cache` exists at all), so keep the ones already interned and hand back the
-    # SAME String when the bytes match; only a pattern this scan has not seen allocates.
-    # Bounded and cleared like the caches it feeds, and a byte compare against a handful of
-    # short patterns costs far less than the allocation it replaces.
-    @@known = [] of String
+    # allocation per row — 64MB of garbage for one 500k-row `header:` scan, every byte of it
+    # another copy of the same eleven. Both clauses of a `body:`/`header:` term bind the same
+    # value, so a single remembered pattern covers the whole scan; a query with two `~` terms
+    # alternates and simply allocates, exactly as it did before this existed.
+    @@last_pattern : String? = nil
 
     # :nodoc: — internal (called from FN, which needs an explicit receiver)
     def self.intern(ptr : Pointer(UInt8), len : Int32) : String
-      @@known.each do |known|
-        return known if known.bytesize == len && known.to_unsafe.memcmp(ptr, len) == 0
+      if last = @@last_pattern
+        return last if last.bytesize == len && last.to_unsafe.memcmp(ptr, len) == 0
       end
-      @@known.clear if @@known.size >= CACHE_MAX
-      pattern = String.new(ptr, len)
-      @@known << pattern
-      pattern
+      @@last_pattern = String.new(ptr, len)
     end
 
     # Closure-free proc (no captured locals) so it is valid as a C callback, matching
@@ -251,24 +366,7 @@ module Gori
            !(answer = SafeRegexp.literal_match?(hay_ptr, hay_len, lit)).nil?
           answer
         else
-          text = empty ? "" : String.new(hay_ptr, hay_len)
-          begin
-            # NOT `.scrub` first. PCRE2 validates the subject itself under the UTF option
-            # Crystal compiles with, so scrubbing up front paid for that pass TWICE — and
-            # the second one is the expensive one here (370ms of the 876ms above). Let the
-            # engine reject the invalid haystack instead, and scrub only that row: a
-            # capture holds far more valid-UTF-8 bodies than binary ones, and the ones it
-            # does hold still get the identical answer, one rescue later.
-            SafeRegexp.compile(pattern).matches?(text)
-          rescue
-            begin
-              # Scrubbed => valid by construction, so PCRE2's check is pure overhead now.
-              SafeRegexp.compile(pattern).matches_at_byte_index?(
-                text.scrub, 0, Regex::MatchOptions::NO_UTF_CHECK)
-            rescue
-              false
-            end
-          end
+          SafeRegexp.match_text(pattern, empty ? "" : String.new(hay_ptr, hay_len))
         end
       LibSQLite3.result_int(context, matched ? 1 : 0)
       nil

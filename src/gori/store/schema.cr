@@ -71,7 +71,8 @@ module Gori
         # are bounded by retention.
         #
         # trigram tokenizer => case-insensitive SUBSTRING matching (like a body: LIKE), just
-        # indexed. Query terms must be >=3 chars (QL falls back to a BLOB LIKE scan below that).
+        # indexed. Query terms must be >=3 chars; below that QL scans the stored bytes with
+        # the same literal REGEXP its index-free `body:` uses (see ql.cr's `body_cond`).
         #
         # CONTENTLESS (content='') because we already store the raw bodies in
         # flows.{request,response}_body — the default FTS5 shadow %_content copy would be pure

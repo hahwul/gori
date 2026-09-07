@@ -859,7 +859,9 @@ module Gori
     # quotes doubled) so arbitrary characters can't form FTS operator syntax. A
     # bodyless flow has an empty FTS row, so it never matches and `-body:x`
     # correctly KEEPS it. The trigram index needs >=3 characters, so shorter
-    # values fall back to the NULL-safe BLOB LIKE scan.
+    # values take the index-free spelling below instead — the same NUL-transparent,
+    # NULL-guarded literal REGEXP `fts:`-off `body:` takes, so the needle's LENGTH never
+    # changes what `body:` means.
     # The body columns a `side` selects — both, or one. Named because `body_cond`,
     # `body_literal_cond` and `body_regex_cond` each build their own clause and must not be able
     # to disagree about what `resp.` means.

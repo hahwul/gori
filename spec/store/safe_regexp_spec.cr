@@ -26,6 +26,26 @@ private def agree(pattern : String, hay : String | Bytes) : Nil
 end
 
 describe Gori::SafeRegexp do
+  describe "the assumption the whole fast path rests on" do
+    it "finds exactly two non-ASCII codepoints that (?i) folds onto an ASCII letter" do
+      # FOLD_ESCAPES is a property of the LINKED PCRE2's caseless tables, not of gori, and
+      # Unicode has added caseless sets before. If a future PCRE2 folds a third codepoint onto
+      # an ASCII letter, `literal_match?` would answer a confident `false` for a row PCRE2
+      # matches — the silent narrow this module exists to prevent — with nothing to catch it.
+      # So re-run the enumeration the constant's comment describes, rather than trusting it.
+      any_letter = Regex.new("^(?i)[a-z]$")
+      folded = [] of Int32
+      (0x80..0x10FFFF).each do |cp|
+        next if 0xD800 <= cp <= 0xDFFF # lone surrogates are not scalar values
+        folded << cp if any_letter.matches?(cp.unsafe_chr.to_s)
+      end
+      folded.should eq([0x017F, 0x212A])
+      # …and that they are spelled the way the search looks for them.
+      0x017F.unsafe_chr.to_s.to_slice.should eq(Gori::SafeRegexp::LONG_S)
+      0x212A.unsafe_chr.to_s.to_slice.should eq(Gori::SafeRegexp::KELVIN)
+    end
+  end
+
   describe "literal extraction" do
     it "takes the shapes QL compiles `:` and a literal `~` into" do
       # `header:`/`body:` (>=3 chars) => `(?i)<Regex.escape(needle)>`; `body~admin` is bare.
@@ -88,6 +108,74 @@ describe Gori::SafeRegexp do
       fast_answer("(?i)admin", "a \u{017F}ql injection".to_slice).should be_false
       # Case-SENSITIVE needles never fold at all, so `ſ` is irrelevant to them.
       fast_answer("sql", "a \u{017F}ql injection".to_slice).should be_false
+    end
+
+    it "hands a haystack that outruns the work budget back to PCRE2" do
+      # The skip table narrows the quadratic case but does not remove it: a needle whose
+      # SUFFIX is the haystack's one repeated byte walks a position at a time and compares
+      # the whole needle at each. The budget catches that and defers rather than grinding —
+      # a captured body is the attacker's to shape, so this is a bound, not a nicety.
+      repeated = Bytes.new(70_000, 'a'.ord.to_u8)
+      fast_answer("b" + "a" * 64, repeated).should be_nil
+      # The mirror shape (the repeated byte is the needle's PREFIX) is exactly what testing
+      # the LAST position first fixes, so it stays inside the budget and answers.
+      fast_answer("a" * 64 + "b", repeated).should be_false
+      # And an ordinary needle over the same body never comes close to the budget.
+      fast_answer("absentneedle", repeated).should be_false
+      fast_answer("a" * 64, repeated).should be_true
+    end
+  end
+
+  describe "the PCRE2 path the literal search hands back to" do
+    # Everything above is about patterns the byte search ANSWERS. These drive the other
+    # branch — a real regex over a haystack PCRE2 rejects — through the actual SQLite
+    # callback, which nothing else in the suite does: the literal specs never reach the
+    # rescue chain, and every failure mode of that chain is a silent `false`.
+    it "matches a non-literal pattern over an invalid-UTF-8 body, past a NUL" do
+      with_store do |store|
+        binary = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "bin.test", port: 80,
+          method: "POST", target: "/", http_version: "HTTP/1.1",
+          head: "POST / HTTP/1.1\r\nHost: bin.test\r\n\r\n".to_slice,
+          # invalid UTF-8, then a NUL, then the text a regex has to still reach
+          body: Bytes[0xFF, 0xFE, 0x00, 0x41, 0x42, 0x43, 0x31, 0x32],
+          source: Gori::FlowSource::Kind::Proxy))
+        text = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 2_i64, scheme: "http", host: "txt.test", port: 80,
+          method: "POST", target: "/", http_version: "HTTP/1.1",
+          head: "POST / HTTP/1.1\r\nHost: txt.test\r\n\r\n".to_slice,
+          body: "plain ABC99 body".to_slice, source: Gori::FlowSource::Kind::Proxy))
+        ids = ->(q : String) { store.search(Gori::QL.parse(q), 50, raise_on_error: true).map(&.id).sort! }
+        # `\\d` makes these regexes, so `extract_literal` declines and PCRE2 answers.
+        ids.call("body~ABC\\d+").should eq([binary, text].sort)
+        ids.call("body~ABC9\\d").should eq([text])
+        ids.call("body~ZZZ\\d").should be_empty
+        # A pattern that cannot compile is a never-match, not a raise out of the callback.
+        ids.call("body~[").should be_empty
+      end
+    end
+
+    it "gives the same answer whichever validation route the sampler picked" do
+      # The two routes (let PCRE2 reject an invalid subject, or scrub before matching) are a
+      # cost choice, never a meaning choice. Drive enough rows to flip the sampler and assert
+      # the query still answers identically.
+      with_store do |store|
+        wanted = [] of Int64
+        600.times do |i|
+          body = i % 3 == 0 ? "plain ABC#{i} text".to_slice : Bytes[0xFF, 0xFE, 0x00, 0x41, 0x42, 0x43, 0x37]
+          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: i.to_i64 + 1, scheme: "http", host: "h.test", port: 80,
+            method: "POST", target: "/#{i}", http_version: "HTTP/1.1",
+            head: "POST /#{i} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+            body: body, source: Gori::FlowSource::Kind::Proxy))
+          wanted << id
+        end
+        query = -> { store.search(Gori::QL.parse("body~ABC\\d+"), 1000, raise_on_error: true).map(&.id).sort! }
+        first = query.call
+        first.should eq(wanted.sort)
+        # The second run is the one that reads whatever the first run's sample decided.
+        query.call.should eq(first)
+      end
     end
   end
 
