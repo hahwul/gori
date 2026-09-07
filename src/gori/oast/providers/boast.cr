@@ -51,7 +51,10 @@ module Gori::Oast
 
     private def to_interaction(ev : JSON::Any) : Interaction?
       return nil unless ev.as_h?
-      uid = field(ev, "id") || Crypto.random_id(16)
+      # A CONTENT hash, not a random id, when the event carries no id — see
+      # `Provider#content_uid`. BOAST re-serves its buffer on every poll, so a random fallback
+      # made one id-less event a new callback on every cycle.
+      uid = field(ev, "id") || content_uid(ev.to_json)
       Interaction.new(uid,
         (field(ev, "receiver") || "unknown").downcase,
         field(ev, "QueryType", "queryType"),

@@ -634,12 +634,13 @@ gori run sitemap tag --list
 
 ### run oast
 
-Out-of-band listener. `listen` is ad-hoc and store-free (register a payload, print it, stream callbacks); `list` / `resume` / `release` act on the sessions the project persists, the same rows the TUI's RESUME LISTENER picker shows.
+Out-of-band listener. `listen` is ad-hoc and store-free by default (register a payload, print it, stream callbacks); `--save` makes it a project session instead. `list` / `resume` / `release` act on those saved sessions, the same rows the TUI's RESUME LISTENER picker shows.
 
 ```bash
 gori run oast presets                          # list built-in public providers
 gori run oast listen                           # interactsh, poll until Ctrl-C
 gori run oast listen --provider webhook.site --once --json
+gori run oast listen --save                    # …and keep it as a project session
 ```
 
 `presets` lists the public providers. `listen` options:
@@ -651,7 +652,10 @@ gori run oast listen --provider webhook.site --once --json
 | `--token=TOK` | Optional provider auth token |
 | `--interval=SEC` | Poll interval (default 5) |
 | `--once` | Poll once and exit |
+| `--save` | Save the registration as a project OAST session (see `oast list`) |
 | `--json` | Emit each callback as a JSON line (same shape as MCP) |
+
+`--save` is what turns an ad-hoc listener into a project one, and it changes three things: every callback is written into the project (so the TUI OAST tab shows the same hits), the registration is **kept** on exit so `oast resume ID` can pick it up later, and the out-of-band probe rules (`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`) have a session to mint payloads against — without one they plan nothing and `gori run probe --active` says so. It takes `--project` / `--db` like the session verbs; `oast release ID` is the teardown.
 
 **`oast list` / `resume` / `release`**: the project's saved listening SESSIONS, as opposed to the providers below (a provider is where you listen; a session is one live registration on it). A registration outlives the process that minted it, which is what makes a payload planted yesterday still worth watching.
 

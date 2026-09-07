@@ -215,8 +215,8 @@ module Gori
         return nil if on.empty? || Probe::OutOfBand.available?(store)
         "#{on.join(", ")} #{on.size == 1 ? "is" : "are"} enabled but this project has no OAST " \
         "session — out-of-band probes were NOT sent, so an empty result is not evidence that no " \
-        "blind (out-of-band) vulnerability exists (register a listener in the TUI's OAST tab, " \
-        "then `gori run oast resume ID`)"
+        "blind (out-of-band) vulnerability exists (`gori run oast listen --save`, or register a " \
+        "listener in the TUI's OAST tab, then scan again)"
       end
 
       private def self.report_probe(groups : Array(Probe::Group), flow_n : Int32, repeater_n : Int32,

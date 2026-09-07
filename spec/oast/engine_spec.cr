@@ -683,3 +683,79 @@ describe Gori::Oast do
     end
   end
 end
+
+# --- dedup keys must be a function of the CONTENT, never of a PRNG -----------------------
+#
+# `unique_id` is the ONLY thing that folds a re-poll: the Poller, `oast_poll` and `gori run
+# oast` each keep a seen-set of it, `oast_callbacks` enforces UNIQUE(session_id, provider_uid),
+# and a resumed listener seeds its set from those rows (`Sessions.seen_uids`). Three providers
+# fell back to `Crypto.random_id(16)` when the server's item carried no id of its own, which
+# cannot dedup by construction — and webhook.site and BOAST both re-serve their whole buffer on
+# every poll, so ONE such interaction became a fresh notification, a fresh pane row and a fresh
+# `oast_callbacks` insert every POLL_INTERVAL for as long as the listener lived.
+private class ConstHttp < O::Http
+  def initialize(@body : String)
+  end
+
+  def request(method : String, url : String,
+              headers : Hash(String, String) = {} of String => String,
+              body : String? = nil) : O::Http::Response
+    O::Http::Response.new(200, @body)
+  end
+end
+
+describe "Oast providers — dedup key stability" do
+  it "gives an id-less interaction the SAME unique_id on a re-poll, for every provider" do
+    cases = {
+      "webhook.site" => {
+        O::Provider.build(O::ProviderKind::WebhookSite, "https://webhook.site"),
+        O::Session.new(1_i64, O::ProviderKind::WebhookSite, "https://webhook.site", "u", ""),
+        %({"data":[{"url":"https://webhook.site/u/tok","method":"GET","ip":"1.1.1.1","content":""}]}),
+      },
+      "BOAST" => {
+        O::Provider.build(O::ProviderKind::Boast, "https://boast.example/events", "s"),
+        O::Session.new(1_i64, O::ProviderKind::Boast, "https://boast.example/events", "b", "s", token: "s"),
+        %({"events":[{"receiver":"DNS","remoteAddress":"2.2.2.2","dump":"tok.b.boast.example"}]}),
+      },
+      "postbin" => {
+        O::Provider.build(O::ProviderKind::Postbin, "https://postb.example"),
+        O::Session.new(1_i64, O::ProviderKind::Postbin, "https://postb.example", "b1", ""),
+        %({"method":"GET","path":"/b1/tok"}),
+      },
+      "custom-http" => {
+        O::Provider.build(O::ProviderKind::CustomHttp, "https://my.box/log"),
+        O::Session.new(1_i64, O::ProviderKind::CustomHttp, "https://my.box/log", "c", ""),
+        %([{"method":"GET","path":"/hit?oid=tok","ip":"3.3.3.3"}]),
+      },
+    }
+    cases.each do |label, (prov, session, body)|
+      http = ConstHttp.new(body)
+      first = prov.poll(http, session).first
+      second = prov.poll(http, session).first
+      first.unique_id.should eq(second.unique_id), "#{label} re-announced an id-less interaction"
+      first.unique_id.should_not be_empty
+    end
+  end
+
+  # `full_id` is documented as "the destination sub-id shown in the table (the hostname/path
+  # that was actually hit)". postbin repeated the reqId there, so the OAST tab's destination
+  # column carried an opaque server-side id — the same shape for every callback, telling two
+  # planted payloads apart not at all. The PATH is what carries the per-payload nonce.
+  it "shows postbin's hit PATH as the destination, not its request id" do
+    prov = O::Provider.build(O::ProviderKind::Postbin, "https://postb.example")
+    session = O::Session.new(1_i64, O::ProviderKind::Postbin, "https://postb.example", "b1", "")
+    i = prov.poll(ConstHttp.new(%({"reqId":"r1","method":"GET","path":"/b1/nonce123"})), session).first
+    i.full_id.should eq("/b1/nonce123")
+    i.unique_id.should eq("r1") # the reqId stays the DEDUP key; it was never a destination
+  end
+
+  # `Provider#payload_token` cuts the fragment because a `#` never reaches the wire (RFC 3986
+  # §3.5), so a token carrying one can match no callback. CustomHttp's override reads from the
+  # END of the URL — the one place a fragment can sit — and skipped that cut.
+  it "strips a fragment from a custom-http payload token" do
+    prov = O::Provider.build(O::ProviderKind::CustomHttp, "https://my.box/log")
+    prov.payload_token("https://my.box/log?oid=ABCDEF#tail").should eq("abcdef")
+    prov.payload_token("https://my.box/log?oid=abcdef").should eq("abcdef")
+    prov.payload_token("https://my.box/log?a=1&oid=abcdef&z=2").should eq("abcdef")
+  end
+end

@@ -62,8 +62,13 @@ module Gori
         # self-signed certificate is the ordinary case for a scan, and without this the active
         # checks simply failed there with a TLS error that named nothing actionable.
         verify_upstream = !bool_arg(h, "insecure", false) && @verify_upstream
+        # Loaded HERE and handed to the scan, rather than letting `scan_all` load its own: the
+        # out-of-band notice below has to describe the run that actually happened, and a config
+        # read a second time could disagree with it (a rule toggled between the two reads, or a
+        # busy store making only one of them `degraded`).
+        rules = Probe::Scan::RuleConfig.load(store)
         dets, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: verify_upstream,
-          scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_budget: budget,
+          scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_budget: budget, rules: rules,
           on_error: ->(_where : String, _ex : Exception) { scan_errors += 1; nil })
         capped = budget.exhausted?
 
@@ -77,7 +82,32 @@ module Gori
           groups = groups.select { |g| lens.host_in_scope?(g.host) }
         end
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,
-          scope_configured, capped, unsafe, aggressive, limit, scan_errors))
+          scope_configured, capped, unsafe, aggressive, limit, scan_errors,
+          oob_inert: oob_inert_rules(store, rules, active)))
+      end
+
+      # The enabled out-of-band rule ids this scan could NOT plant a payload for, or an empty
+      # list. An OOB rule closes its loop through a third-party interaction server rather than
+      # on the sending socket, so it needs an `oast_sessions` row to mint against
+      # (`Probe::OutOfBand::StoreMinter`); with none it plans nothing, sends nothing and finds
+      # nothing — and an agent reading an empty `issues` array records "no blind SSRF" for a
+      # check that never ran.
+      #
+      # `gori run probe` prints this as a notice and the TUI's Rules sub-tab badges it as
+      # "needs OAST". MCP was the one surface that stayed silent, and it is the surface where a
+      # clean-looking result is believed without a human reading the run. It joins
+      # `scan_errors` and `active_flows_capped` for the same reason: all three say the coverage
+      # was narrower than the empty result suggests.
+      #
+      # `available?` rather than `oast_sessions.empty?` — the same call `Scan.with_oob` makes,
+      # so this cannot claim a plant the scan could not perform (a row whose kind no longer
+      # parses is not a session either). Silent on a passive run (nothing plants), on a rule the
+      # operator switched OFF, and under a degraded config (which skips ACTIVE wholesale and
+      # reports that instead) — the same three gates the CLI's notice uses.
+      private def oob_inert_rules(store : Store, rules : Probe::Scan::RuleConfig,
+                                  active : Bool) : Array(String)
+        return [] of String if !active || rules.degraded || Probe::OutOfBand.available?(store)
+        Probe::OOB_RULE_IDS.select { |id| Probe.rule_enabled?(id, rules.disabled) }
       end
 
       # --- persisted probe issues + triage (parity with the TUI Probe tab) -------------------
@@ -456,7 +486,8 @@ module Gori
       private def probe_scan_json(groups : Array(Probe::Group), flows_scanned : Int32, repeater_n : Int32,
                                   active : Bool, allow_unscoped : Bool, scope_configured : Bool,
                                   capped : Bool, unsafe : Bool, aggressive : Bool, limit : Int32,
-                                  scan_errors : Int32 = 0) : String
+                                  scan_errors : Int32 = 0,
+                                  oob_inert : Array(String) = [] of String) : String
         JSON.build do |j|
           j.object do
             j.field "flows_scanned", flows_scanned
@@ -471,6 +502,25 @@ module Gori
               j.field "active_flows_capped", true if capped
               j.field "active_unsafe_methods", true if unsafe # POST/PUT/PATCH/DELETE re-sent
               j.field "active_aggressive", true if aggressive # raised caps + wider bypass sets
+              # The out-of-band rules that were ENABLED and still sent nothing — see
+              # `oob_inert_rules`. Present only when it happened, and carrying the sentence
+              # rather than only the ids: the whole hazard is a reader treating the empty
+              # `issues` array as an answer about blind vulnerabilities, and a bare id list
+              # invites exactly that reading.
+              unless oob_inert.empty?
+                j.field("out_of_band") do
+                  j.object do
+                    j.field "session", false
+                    j.field("inert_rules") { j.array { oob_inert.each { |id| j.string id } } }
+                    j.field "note", "#{oob_inert.join(", ")} #{oob_inert.size == 1 ? "is" : "are"} " \
+                                    "enabled but this project has no OAST session to mint payloads " \
+                                    "against, so no out-of-band probe was sent — an empty result is " \
+                                    "NOT evidence that no blind (out-of-band) vulnerability exists. " \
+                                    "Start a listener (oast_start with persist:true, or the TUI's " \
+                                    "OAST tab) and scan again."
+                  end
+                end
+              end
             end
             j.field "issue_count", groups.size
             j.field("issues") { j.array { groups.first(limit).each { |g| Probe.group_json(j, g) } } }

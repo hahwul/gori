@@ -992,19 +992,18 @@ module Gori
         # token inline every time").
         saved = saved_oast_provider(h)
         return saved if saved.is_a?(Result)
-        if saved
-          kind = Oast::ProviderKind.parse?(saved.kind)
-          return err("saved provider #{saved.key.inspect} has an unknown kind #{saved.kind.inspect}",
-            "INVALID_ARGUMENT", field: "provider_id") unless kind
-          host = saved.host
-          token = saved.token
-        else
-          provider = str(h, "provider") || "interactsh"
-          kind = Oast::ProviderKind.parse?(provider)
-          return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
-          host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
-          return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
-          token = str(h, "token")
+        target = oast_start_target(h, saved)
+        return target if target.is_a?(Result)
+        kind, host, token = target
+        # PERSIST the registration as an `oast_sessions` row, which is what turns an ad-hoc
+        # handle into a project listener. Opt-in, because it changes what `oast_stop` means:
+        # a persisted session is stopped, never deregistered (its payloads are planted out in
+        # the world), so the registration outlives this process until `oast_release`.
+        persist = bool_arg(h, "persist", false)
+        if persist && unbound?
+          return err("'persist' writes an oast_sessions row, which needs a bound project — " \
+                     "switch_project first, or drop persist for an ad-hoc listener",
+            "NO_PROJECT", field: "persist")
         end
         # Bound the number of live sessions: each holds an Oast::Http (socket) for the
         # process life until oast_stop, so an agent that never stops them would leak.
@@ -1014,15 +1013,23 @@ module Gori
         prov = Oast::Provider.build(kind, host, token)
         http = Oast::HttpClient.new(@verify_upstream)
         session = prov.register(http)
+        row = persist ? persist_oast_session(session, saved) : nil
         # Unpredictable session id: a sequential "oast-N" is trivially guessable, so
         # a co-tenant sharing this process could poll another agent's out-of-band
         # callbacks. Secure-random hex removes the guessing surface (mirrors the
         # delete_project confirmation tokens).
         sid = "oast_#{Random::Secure.hex(8)}"
-        @oast_mcp[sid] = OastMcpSession.new(prov, session, http, kind.label)
+        @oast_mcp[sid] = OastMcpSession.new(prov, session, http, kind.label, row)
         payload = prov.generate_payload(session)
-        Result.new({session_id: sid, provider: kind.label, provider_id: saved.try(&.key),
-                    server: host, payload_url: payload}.to_json)
+        Result.new({session_id: sid, store_session_id: row, provider: kind.label,
+                    provider_id: saved.try(&.key), server: host, payload_url: payload,
+                    registration: row ? "kept until oast_release" : "dies with this process",
+                    # Say it when `persist` was asked for and did NOT happen (a busy or
+                    # unwritable store). The listener is live either way, so this is not an
+                    # error — but a caller that reads only `session_id` would go on believing
+                    # it had a project session, and out-of-band probe rules would keep finding
+                    # nothing to mint against.
+                    persist_warning: (persist && row.nil?) ? "the session could NOT be saved (store busy or unwritable) — this handle is ad-hoc, and probe_scan's out-of-band rules still have nothing to mint against" : nil}.to_json)
       rescue ex
         # A remote call that failed, not an argument that was wrong. Uncoded, `classify` files
         # every plain-message error under INVALID_ARGUMENT with `retryable:false` — so a DNS
@@ -1030,6 +1037,54 @@ module Gori
         # do not retry". `send_request` has always answered a transport failure with
         # NETWORK_ERROR + retryable (see `Tools.send_error_code`); this is the same fact.
         err("OAST register failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
+      end
+
+      # Where `oast_start` should register: the {kind, host, token} triple, from the SAVED
+      # provider when one was named and from the ad-hoc arguments otherwise. Split out of
+      # `oast_start` so the register + persist + handle sequence there reads as one path
+      # rather than as a preamble of argument branches.
+      private def oast_start_target(h, saved : Oast::ProviderConfig?) : {Oast::ProviderKind, String, String?} | Result
+        if saved
+          kind = Oast::ProviderKind.parse?(saved.kind)
+          return err("saved provider #{saved.key.inspect} has an unknown kind #{saved.kind.inspect}",
+            "INVALID_ARGUMENT", field: "provider_id") unless kind
+          return {kind, saved.host, saved.token}
+        end
+        provider = str(h, "provider") || "interactsh"
+        kind = Oast::ProviderKind.parse?(provider)
+        return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
+        host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
+        return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
+        {kind, host, str(h, "token")}
+      end
+
+      # Write a fresh registration into `oast_sessions` and stamp it live, returning the row id
+      # (nil when the write did not commit — a busy store must not make this handle claim a row
+      # that is not there, so it stays ad-hoc and the caller reads `store_session_id: null`).
+      #
+      # This is the row three things need and none of them could have from MCP before:
+      # `Probe::OutOfBand::StoreMinter` mints every blind SSRF/XXE/command-injection payload
+      # against one, so an agent that started a listener still got NO out-of-band probe
+      # coverage; `list_oast_sessions` could not show the agent its own listener; and
+      # `oast_resume` had nothing to re-open after the server process ended, which for the one
+      # workbench whose findings arrive hours later is the case that matters most.
+      #
+      # `touch_oast_session` immediately, for the same reason `oast_resume` does: the minter
+      # picks the most-recently-POLLED session, and this one is about to be polled.
+      private def persist_oast_session(session : Oast::Session,
+                                       saved : Oast::ProviderConfig?) : Int64?
+        # The provider row id, and only when it IS a project row: a global provider has no row
+        # in this DB, and `Sessions.config_for` re-resolves those by kind + endpoint. Writing a
+        # global provider's hex id here would point the column at an unrelated project row.
+        row = store.insert_oast_session(saved.try(&.project_id), session.kind.label,
+          session.server_url, session.correlation_id, session.secret,
+          session.private_key_pem, session.token)
+        return nil if row == 0
+        session.id = row
+        store.touch_oast_session(row)
+        row
+      rescue DB::Error | SQLite3::Exception
+        nil
       end
 
       # An OAST handle read: the session, or the refusal that says WHICH mistake was made.

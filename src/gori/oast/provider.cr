@@ -1,4 +1,5 @@
 require "json"
+require "digest/sha256"
 require "./types"
 require "./http"
 require "./session"
@@ -171,6 +172,23 @@ module Gori::Oast
 
     protected def snippet(body : String) : String
       body.size > 120 ? "#{body[0, 120]}…" : body
+    end
+
+    # A dedup key for an interaction whose server gave it no id of its own.
+    #
+    # It must be a function of the CONTENT, never of the clock or a PRNG. `unique_id` is the
+    # only thing that folds a re-poll: `Poller`/`oast_poll`/`gori run oast` all keep a seen-set
+    # of it, `oast_callbacks` enforces UNIQUE(session_id, provider_uid), and a resumed listener
+    # seeds its set from the rows on file (`Sessions.seen_uids`). Three providers used
+    # `Crypto.random_id(16)` here, which cannot dedup by construction: webhook.site and BOAST
+    # both re-serve their whole buffer on every poll, so ONE interaction whose item carried no
+    # `uuid` / `id` was re-announced — a fresh notification, a fresh pane row and a fresh
+    # `oast_callbacks` insert — every POLL_INTERVAL for as long as the listener lived.
+    #
+    # Hashing the item is what interactsh and custom-http already do for the same reason (see
+    # `Interactsh#to_interaction`), and it folds exact replays rather than multiplying them.
+    protected def content_uid(*parts : String?) : String
+      Digest::SHA256.hexdigest(parts.map(&.to_s).join('|'))[0, 40]
     end
 
     # First present value among `keys` as a String (numbers stringified, nulls skipped).

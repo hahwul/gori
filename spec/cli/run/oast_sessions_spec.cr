@@ -7,6 +7,10 @@ module Gori::CLI::Run
     oast_subcommand_index(args)
   end
 
+  def self.spec_strip_project_flags(args : Array(String)) : {Array(String), String?, String?}
+    strip_project_flags(args)
+  end
+
   def self.spec_oast_stream_session(store : Gori::Store, bound : Gori::Oast::Sessions::Bound,
                                     http : Gori::Oast::Http, id : Int64, io : IO, err : IO,
                                     json : Bool = false) : Bool
@@ -46,6 +50,30 @@ describe "gori run oast — persisted sessions" do
       Gori::CLI::Run.spec_oast_subcommand_index(["--db", "/tmp/x.db", "release", "3"]).should eq(2)
       Gori::CLI::Run.spec_oast_subcommand_index(["--json"]).should be_nil
       Gori::CLI::Run.spec_oast_subcommand_index([] of String).should be_nil
+    end
+
+    # `listen` used to be store-free, so strip_project_flags DISCARDED what it stripped and
+    # --project/--db were accepted-and-ignored. `listen --save` writes an `oast_sessions` row,
+    # and a dropped --project there is not a no-op: the row lands in the most-recently-active
+    # project instead of the one named, which is the quiet wrong answer a discarded argument
+    # always produces. Both spellings of both flags have to come back out.
+    it "hands back the --project/--db it strips, in either spelling" do
+      rest, project, db = Gori::CLI::Run.spec_strip_project_flags(
+        ["listen", "--project=lab", "--save"])
+      rest.should eq(["listen", "--save"])
+      project.should eq("lab")
+      db.should be_nil
+
+      rest, project, db = Gori::CLI::Run.spec_strip_project_flags(
+        ["--db", "/tmp/x.db", "listen", "--once"])
+      rest.should eq(["listen", "--once"])
+      db.should eq("/tmp/x.db")
+      project.should be_nil
+
+      rest, project, db = Gori::CLI::Run.spec_strip_project_flags(["listen"])
+      rest.should eq(["listen"])
+      project.should be_nil
+      db.should be_nil
     end
   end
 

@@ -498,3 +498,53 @@ describe "MCP probe_delete guards" do
     end
   end
 end
+
+# --- probe_scan must say when the out-of-band rules were inert ---------------------------
+#
+# An OOB rule closes its loop through a third-party interaction server, not on the sending
+# socket, so it needs an `oast_sessions` row to mint against (`OutOfBand::StoreMinter`). With
+# none it plans nothing, sends nothing, and finds nothing — and an agent reading an empty
+# `issues` array records "no blind SSRF" for a check that never ran. `gori run probe` prints
+# this as a notice and the TUI's Rules sub-tab badges it "needs OAST"; MCP was the one surface
+# that stayed silent, and it is the surface where a clean-looking result is believed without a
+# human reading the run.
+describe "MCP probe_scan — out-of-band reachability" do
+  # The QUERY matches nothing on purpose: the notice is a property of the project's OAST
+  # state, not of what was scanned, so this needs no flow — and an active scan over a real one
+  # would put this example on the wire.
+  it "names the enabled OOB rules and says an empty result is not an answer about them" do
+    with_store do |store|
+      seed_secret_flow(store)
+      store.add_scope_rule("include", "host", "acme.test")
+      tools = tools_for(store)
+      res = call_json(tools, "probe_scan", %({"active":true,"query":"host:nothing.invalid"}))
+      oob = res["out_of_band"]
+      oob["session"].as_bool.should be_false
+      rules = oob["inert_rules"].as_a.map(&.as_s)
+      Gori::Probe::OOB_RULE_IDS.each { |id| rules.should contain(id) }
+      oob["note"].as_s.should contain("NOT evidence")
+      oob["note"].as_s.should contain("persist:true")
+    end
+  end
+
+  it "says nothing once a session exists to mint against" do
+    with_store do |store|
+      seed_secret_flow(store)
+      store.add_scope_rule("include", "host", "acme.test")
+      store.insert_oast_session(nil, "custom-http", "https://oob.example/hits", "corr", "", nil, nil)
+      store.flush
+      res = call_json(tools_for(store), "probe_scan", %({"active":true,"query":"host:nothing.invalid"}))
+      res.as_h.has_key?("out_of_band").should be_false
+    end
+  end
+
+  # A PASSIVE scan plants nothing by design, so reporting a missing listener there would be
+  # noise on the one mode that never sends.
+  it "stays silent on a passive scan" do
+    with_store do |store|
+      seed_secret_flow(store)
+      res = call_json(tools_for(store), "probe_scan", "{}")
+      res.as_h.has_key?("out_of_band").should be_false
+    end
+  end
+end
