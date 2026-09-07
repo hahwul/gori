@@ -159,9 +159,11 @@ module Gori::Tui
       @oast_events = Channel(Oast::Event).new(256)
       @reg_events = Channel(RegResult).new(16)
       @release_events = Channel(ReleaseResult).new(8)
-      @registering = Set(String).new # provider keys with a register round-trip in flight (dedup g/^R)
-      @max_cb_id = 0_i64             # highest callback row id folded in (watermark for reconcile)
-      @cb_version = 0                # bumped on any @callbacks mutation → invalidates the view caches
+      @registering = Set(String).new        # provider keys with a register round-trip in flight (dedup g/^R)
+      @deaf = Set(Int64).new                # sessions already announced as not reaching their provider
+      @poll_error = Hash(Int64, String).new # session_id → the last poll failure's own sentence
+      @max_cb_id = 0_i64                    # highest callback row id folded in (watermark for reconcile)
+      @cb_version = 0                       # bumped on any @callbacks mutation → invalidates the view caches
       @ordered_cache = nil.as(Array(CbRow)?)
       @ordered_cache_key = nil.as({Int32, String, Int32}?)
       @filtered_cache = nil.as(Array(CbRow)?)
@@ -878,14 +880,29 @@ module Gori::Tui
                prov = ep[@payload_pick - 1]?
                prov ? "‹ #{prov.name} ›" : "‹ unknown ›"
              end
-      listening = if @payload_pick == 0
-                    @listeners.any?(&.active?) ? "  ●listening" : ""
-                  else
-                    prov = ep[@payload_pick - 1]?
-                    prov && listener_for(prov.key) ? "  ●listening" : ""
-                  end
+      # A live listener that its provider is REFUSING must not draw the same green dot as one
+      # that is collecting. `active?` is only "a fiber is looping", which a listener whose
+      # endpoint answers 401 to every poll (a rotated api key, an expired webhook token)
+      # satisfies forever — the two states `Provider#poll` raises rather than conflate, and
+      # that `Poller#answering?` exists to keep apart. The tab computed the distinction for the
+      # `last_poll_at` heartbeat and then showed the operator a steady "●listening" regardless,
+      # so the one surface watching the listener was the one that could not see it had stopped
+      # being one. The only other signal was an "OAST poll error" status line, which scrolls
+      # past on the next status write.
+      live = if @payload_pick == 0
+               @listeners.select(&.active?)
+             else
+               one = ep[@payload_pick - 1]?.try { |p| listener_for(p.key) }
+               one ? [one] : [] of Listener
+             end
       x = screen.text(x, rect.y, name, Theme.accent, Theme.panel)
-      screen.text(x, rect.y, listening, Theme.green, Theme.panel) unless listening.empty?
+      unless live.empty?
+        if live.any?(&.answering?)
+          screen.text(x, rect.y, "  ●listening", Theme.green, Theme.panel)
+        else
+          screen.text(x, rect.y, "  ●not answering", Theme.yellow, Theme.panel)
+        end
+      end
       # payload row
       if url = @last_payload
         screen.text(rect.x + 1, rect.y + 1, url, Theme.text_bright, Theme.bg, width: rect.w - 2)
@@ -1443,7 +1460,50 @@ module Gori::Tui
       end
       reanchor_callback_selection(sel_key) if inserted && sel_key
       heartbeat_active_sessions
+      track_listener_health
       applied
+    end
+
+    # Announce a listener that has STOPPED reaching its provider, once per transition.
+    #
+    # "Nothing came back" and "the server refused us" are the two states an out-of-band
+    # listener must never conflate — `Provider#poll` raises rather than answer an empty batch
+    # for exactly that reason — and the operator is the consumer that most needs the
+    # distinction: a rotated api key or an expired webhook token stops the listener being a
+    # listener, and every payload already planted then calls home to nobody while the tab looks
+    # busy. The only signal was the "OAST poll error" status line `apply_callback` writes,
+    # which the next status write scrolls away and which never fires at all off-tab.
+    #
+    # A notification, like `drain_releases`', and for the same reason: the fact outlives the
+    # moment. Edge-triggered on both sides — one warning when it goes deaf, one note when it
+    # comes back — so a provider erroring every POLL_INTERVAL cannot flood the ring.
+    #
+    # This runs on every run-loop tick, so the ordinary state — no listener, nothing tracked —
+    # returns before allocating anything.
+    private def track_listener_health : Nil
+      return if @listeners.empty? && @deaf.empty? && @poll_error.empty?
+      @listeners.each do |l|
+        next unless l.active?
+        sid = l.session.id
+        if l.answering?
+          next unless @deaf.delete(sid)
+          @host.notifications.push(:success,
+            "OAST listener #{l.provider_label} is answering again",
+            Jobs::Goto.new(:oast), source: "oast")
+        else
+          next unless @deaf.add?(sid)
+          why = @poll_error[sid]?
+          @host.notifications.push(:warn,
+            "OAST listener #{l.provider_label} is NOT reaching its provider#{why ? " (#{why})" : ""} — " \
+            "payloads minted from it are calling home to nobody",
+            Jobs::Goto.new(:oast), source: "oast")
+        end
+      end
+      # A listener that was stopped or released takes its flags with it, so a later session
+      # cannot inherit a stale "already announced" for a row id SQLite handed out again.
+      keys = @listeners.map(&.session.id).to_set
+      @deaf.select!(&.in?(keys))
+      @poll_error.select! { |sid, _| keys.includes?(sid) }
     end
 
     # Keep each live session's `last_poll_at` fresh so the probe OOB minter (Oast::StoreMinter)
@@ -1591,6 +1651,10 @@ module Gori::Tui
     private def apply_callback(ev : Oast::Event) : Nil
       case ev
       when Oast::OastErrorEvent
+        # Keep the provider's own sentence — a rotated token, a correlation id the server has
+        # forgotten — for `track_listener_health` to name in its notification. The status line
+        # alone is the transient half of this report.
+        @poll_error[ev.session_id] = ev.message
         @host.status("OAST poll error: #{ev.message}")
       when Oast::CallbackEvent
         sid = ev.session_id

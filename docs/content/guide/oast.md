@@ -54,7 +54,7 @@ The callbacks that matter most arrive late: a stored payload that only fires whe
 
 Callbacks are durable per-project history. Resume is a deliberate action, not something gori does on startup: reopening a project does not put you back on a third-party provider without asking.
 
-All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project, so the tab, a script, and an agent are reading one table. What stays ad-hoc is `gori run oast listen` and MCP `oast_start`: they register with no project behind them, and those registrations end with the process.
+All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project, so the tab, a script, and an agent are reading one table. `gori run oast listen` and MCP `oast_start` are ad-hoc by default — they register with no project behind them, and those registrations end with the process — but `--save` / `persist: true` writes the same kind of row, so a headless or agent-driven listener lands in this picker too.
 
 No surface resumes on its own. Opening a project, binding an MCP server, or starting a `gori run` never re-arms a listener; someone asks for it.
 
@@ -78,13 +78,14 @@ A callback is the strongest evidence this tool produces: the target's own infras
 
 ## Headless
 
-`gori run oast listen` is an ad-hoc, store-free listener: it registers a payload, prints it to stdout, then streams callbacks until you stop it.
+`gori run oast listen` is an ad-hoc, store-free listener by default: it registers a payload, prints it to stdout, then streams callbacks until you stop it. Add `--save` and it becomes a project session instead — its callbacks are written into the project, the registration is kept on exit, and the out-of-band probe rules have something to mint against.
 
 ```bash
 gori run oast presets                          # list the built-in public providers
 gori run oast listen                           # interactsh, poll until Ctrl-C
 gori run oast listen --provider webhook.site   # a different provider
 gori run oast listen --once --json             # poll once, emit JSON lines
+gori run oast listen --save                    # …and keep it as a project session
 ```
 
 The project's saved sessions (the ones the picker above resumes) are reachable headlessly too:
@@ -96,11 +97,13 @@ gori run oast resume 7 --once --json           # one poll, JSON lines, then exit
 gori run oast release 7                        # deregister it; its callbacks stay
 ```
 
-`resume` keeps the registration on exit (Ctrl-C stops polling, nothing more) and persists every callback it catches into the project, so the OAST tab shows the same hits. `release` is the deliberate teardown.
+`resume` keeps the registration on exit (Ctrl-C stops polling, nothing more) and persists every callback it catches into the project, so the OAST tab shows the same hits. `listen --save` behaves the same way from its first poll. `release` is the deliberate teardown for either.
+
+A saved session is also what arms the **blind** active checks. `ssrf_oast`, `xxe_oast` and `cmd_injection_oast` plant a payload and wait for the target to call home, so they mint against a stored session; with none they plan nothing and send nothing, and `gori run probe --active` (and MCP `probe_scan`, under `out_of_band`) says so rather than letting an empty result read as "no blind vulnerability".
 
 The saved providers (the **Providers** sub-tab's rows) are manageable headless too, with `gori run oast providers add|update|enable|disable|delete|list`, and both `listen` and `resume` take `--interval SEC` (default 5) for the poll cadence; the flags are in the [CLI Reference](/reference/cli/#run-oast).
 
-See the [CLI Reference](/reference/cli/#run-oast) for every flag. Over MCP, an agent drives the same engine with `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions` (read) and `oast_start` / `oast_stop` / `oast_resume` / `oast_release` (action). `oast_resume` returns a `session_id` that `oast_poll` and `oast_payload` take, and its polls are persisted like the CLI's; `oast_stop` on a resumed session stops polling but keeps it resumable, exactly as `Ctrl-X` does.
+See the [CLI Reference](/reference/cli/#run-oast) for every flag. Over MCP, an agent drives the same engine with `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions` (read) and `oast_start` / `oast_stop` / `oast_resume` / `oast_release` (action). `oast_start` is the ad-hoc twin of `listen`, and takes `persist: true` for the `--save` behaviour. `oast_resume` returns a `session_id` that `oast_poll` and `oast_payload` take, and its polls are persisted like the CLI's; `oast_stop` on a persisted or resumed session stops polling but keeps it resumable, exactly as `Ctrl-X` does.
 
 > A callback means the target contacted a third-party interaction server, and public interactsh/webhook servers see that callback's metadata. Only run OAST against systems you are authorized to test, and prefer a self-hosted server for sensitive engagements.
 

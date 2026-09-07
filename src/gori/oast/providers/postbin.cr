@@ -92,7 +92,12 @@ module Gori::Oast
 
     private def to_interaction(req : JSON::Any) : Interaction?
       return nil unless req.as_h?
-      uid = field(req, "reqId", "id") || Crypto.random_id(16)
+      # A CONTENT hash, not a random id, when the record carries no reqId — see
+      # `Provider#content_uid`. A drain is destructive so a re-poll cannot repeat the row, but
+      # a random uid still defeats both backstops that assume it identifies the interaction:
+      # `oast_callbacks`' UNIQUE(session_id, provider_uid) and the seen-set a resumed listener
+      # seeds from those rows.
+      uid = field(req, "reqId", "id") || content_uid(req.to_json)
       raw = {
         "method"  => req["method"]?,
         "path"    => req["path"]?,
@@ -100,7 +105,14 @@ module Gori::Oast
         "query"   => req["query"]?,
         "body"    => req["body"]?,
       }.to_json
-      Interaction.new(uid, "http", field(req, "method"), field(req, "ip"), uid, raw, nil,
+      # `full_id` is "the destination sub-id shown in the table (the hostname/path that was
+      # actually hit)", and the PATH is the only thing here that answers that: it carries the
+      # per-payload nonce `generate_payload` minted (`/{binId}/{nonce}`). Repeating the reqId
+      # there gave the OAST tab's destination column an opaque server-side id — identical in
+      # shape for every callback, so the one column that tells two planted payloads apart told
+      # the operator nothing. The reqId stays the dedup key; it was never a destination.
+      Interaction.new(uid, "http", field(req, "method"), field(req, "ip"),
+        field(req, "path").presence || uid, raw, nil,
         parse_time(req["inserted"]? || req["timestamp"]?))
     end
   end

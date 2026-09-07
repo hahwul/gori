@@ -37,10 +37,17 @@ module Gori::Oast
     # This provider's nonce rides in a query parameter, not in the path or the host, so the
     # base implementation (last path segment / first host label) would return the endpoint's
     # path and match every payload it ever minted. Read back the `oid` this class writes.
+    #
+    # The fragment is cut FIRST, exactly as `Provider#payload_token` does: a `#` is never on
+    # the wire (RFC 3986 §3.5 — the client strips it before sending), so a token carrying one
+    # is a token no callback can ever contain, and this override is the only one that reads a
+    # value from the END of the URL where a fragment can sit.
     def payload_token(payload : String) : String
-      idx = payload.rindex("oid=")
+      s = payload.strip
+      s = s[0...s.index('#')] if s.index('#')
+      idx = s.rindex("oid=")
       return super unless idx
-      payload[(idx + 4)..].split('&').first.downcase
+      s[(idx + 4)..].split('&').first.downcase
     end
 
     # 204 is "nothing logged" — the shape a hand-rolled endpoint most often takes for an empty

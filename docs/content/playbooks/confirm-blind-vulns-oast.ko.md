@@ -18,10 +18,11 @@ group = "워크벤치"
 리스너를 스크립트나 에이전트 루프에 두고 싶다면 헤드리스로:
 
 ```bash
-gori run oast listen
+gori run oast listen         # 임시: 등록이 프로세스와 함께 사라짐
+gori run oast listen --save  # …프로젝트 세션으로 저장
 ```
 
-한 가지 유의점: `gori run oast`는 저장소 없는 임시 리스너로, 그 등록은 프로세스와 함께 사라집니다. 리스너를 세션 너머로 유지하는 것은 TUI뿐이므로(나중에 `r`로 재개), 콜백이 늦게 도착할 수 있을 때는 탭을 쓰세요.
+그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라집니다. 몇 시간 뒤에 오는 콜백에겐 페이로드가 이미 죽어 있다는 뜻이죠. `--save`는 이를 프로젝트에 기록합니다 — `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치입니다. TUI의 `Ctrl-R`은 원래부터 세션을 저장하며, `r`로 재개합니다.
 
 **체크포인트.** OAST 탭에 살아 있는 payload URL이 보이고, **Callbacks** 표는 비어 대기 중입니다.
 

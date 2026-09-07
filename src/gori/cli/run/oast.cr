@@ -31,10 +31,10 @@ module Gori
           end
         end
 
-        filtered = strip_project_flags(args)
+        filtered, project_name, db_path = strip_project_flags(args)
         case sub = filtered.first?
         when "presets"           then oast_presets
-        when "listen"            then oast_listen(filtered[1..])
+        when "listen"            then oast_listen(filtered[1..], project_name, db_path)
         when nil, "-h", "--help" then oast_help
         else
           STDERR.puts "gori run oast: unknown subcommand '#{sub}'"
@@ -43,26 +43,39 @@ module Gori
         end
       end
 
-      # oast is a store-free ad-hoc listener, so --project/--db are accepted-and-ignored for
-      # CLI consistency (the top-level help says most subcommands take them). Strip BOTH the
-      # attached `--project=X` and the space-separated `--project X` forms — the old
+      # Pull --project/--db out of the argv, answering {rest, project_name, db_path}. Strips
+      # BOTH the attached `--project=X` and the space-separated `--project X` forms — the old
       # reject-token-only left a stray value that then parsed as the subcommand ("unknown
       # subcommand 'myproj'").
-      private def self.strip_project_flags(args : Array(String)) : Array(String)
+      #
+      # It used to DISCARD what it stripped, because `listen` was store-free and the flags were
+      # accepted-and-ignored for CLI consistency. `listen --save` writes an `oast_sessions` row,
+      # so the project it writes to has to be the one the operator named; silently saving into
+      # the most-recently-active project instead is the kind of quiet wrong answer a discarded
+      # argument produces. `presets` and the help still ignore both values.
+      private def self.strip_project_flags(args : Array(String)) : {Array(String), String?, String?}
         out = [] of String
+        project_name : String? = nil
+        db_path : String? = nil
         i = 0
         while i < args.size
           a = args[i]
           if a == "--project" || a == "--db"
+            v = args[i + 1]?
+            a == "--project" ? (project_name = v) : (db_path = v)
             i += 2 # skip the flag AND its value
-          elsif a.starts_with?("--project=") || a.starts_with?("--db=")
+          elsif a.starts_with?("--project=")
+            project_name = a[10..]
             i += 1 # attached form is a single token
+          elsif a.starts_with?("--db=")
+            db_path = a[5..]
+            i += 1
           else
             out << a
             i += 1
           end
         end
-        out
+        {out, project_name, db_path}
       end
 
       # Index of the first POSITIONAL token — the subcommand — skipping options and the
@@ -92,8 +105,10 @@ module Gori
             presets     List the built-in public providers
             providers   Manage SAVED providers (list, add, update, enable/disable, delete)
 
-          `listen` is store-free: its registration ends with the process. `list`/`resume`/
-          `release` act on the sessions the TUI OAST tab persists, the same rows its RESUME
+          `listen` is store-free by default: its registration ends with the process. Add
+          `--save` and it becomes a project session instead — kept on exit, listed by `list`,
+          re-openable with `resume`, and mintable against by the out-of-band probe rules.
+          `list`/`resume`/`release` act on those rows, the same ones the TUI OAST tab's RESUME
           LISTENER picker shows. Run `gori run oast listen -h` for listen options.
           HELP
       end
@@ -422,7 +437,12 @@ module Gori
           return
         end
         if sessions.empty?
-          STDERR.puts "no saved OAST sessions (start one on the TUI OAST tab, or `gori run oast listen` ad-hoc)"
+          # Name a command that actually WRITES one of these rows. This used to offer
+          # "`gori run oast listen` ad-hoc" beside the TUI tab, under a heading that says
+          # "no saved OAST sessions" — and a bare `listen` is store-free, so following it left
+          # the list just as empty with nothing to say why.
+          STDERR.puts "no saved OAST sessions (`gori run oast listen --save`, or start one on " \
+                      "the TUI OAST tab; a bare `listen` is ad-hoc and saves nothing)"
           return
         end
         sessions.each do |s|
@@ -617,13 +637,15 @@ module Gori
         end
       end
 
-      private def self.oast_listen(args : Array(String)) : Nil
+      private def self.oast_listen(args : Array(String), project_name : String? = nil,
+                                   db_path : String? = nil) : Nil
         provider = "interactsh"
         server : String? = nil
         token : String? = nil
         interval = 5
         json = false
         once = false
+        save = false
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run oast listen [options]"
           p.on("--provider=KIND", "interactsh (default) | custom-http | webhook.site | BOAST | postbin") { |v| provider = v }
@@ -631,6 +653,7 @@ module Gori
           p.on("--token=TOK", "Optional provider auth token") { |v| token = v }
           p.on("--interval=SEC", "Poll interval seconds (default 5)") { |v| interval = parse_count(v, "--interval") }
           p.on("--once", "Poll once and exit (no loop)") { once = true }
+          p.on("--save", "Save this registration as a project OAST session (see `oast list`); its callbacks persist, out-of-band probe rules can mint against it, and the registration is KEPT on exit — release it with `oast release ID`") { save = true }
           p.on("--json", "Emit each callback as a JSON line (same shape as MCP)") { json = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           # Without these, OptionParser's default raises straight past `Run.dispatch` (rescues
@@ -657,17 +680,42 @@ module Gori
           STDERR.puts "gori run oast: --server is required for #{kind.label}"
           exit 1
         end
+        # Resolve --save's project BEFORE registering. A bad project name must fail while the
+        # only cost is an error message; past the register there is third-party state minted
+        # that this process would then have to tear down again to stay honest.
+        store = save ? open_store(resolve_read_project(project_name, db_path)) : nil
         prov = Oast::Provider.build(kind, host, token)
         http = Oast::HttpClient.new
         session = begin
           prov.register(http)
         rescue ex
+          store.try(&.close)
           STDERR.puts "gori run oast: register failed: #{ex.message}"
           exit 1
+        end
+        # The `oast_sessions` row is what makes this a PROJECT listener rather than an ad-hoc
+        # one: `gori run oast list` shows it, `resume` re-opens it in a later process, and
+        # `Probe::OutOfBand::StoreMinter` mints every blind SSRF/XXE/command-injection payload
+        # against it — so without one, `gori run probe --active` runs those rules inert and its
+        # empty result says nothing about blind vulnerabilities (which is why the probe run
+        # prints a notice saying exactly that).
+        session_row = 0_i64
+        if store
+          session_row = store.insert_oast_session(nil, kind.label, session.server_url,
+            session.correlation_id, session.secret, session.private_key_pem, session.token)
+          if session_row == 0
+            store.close
+            STDERR.puts "gori run oast: --save could not write the session (project busy or unwritable)"
+            exit 1
+          end
+          session.id = session_row
+          store.touch_oast_session(session_row)
         end
         payload = prov.generate_payload(session)
         STDERR.puts "listening on #{host} (#{kind.label}) — payload:"
         puts payload
+        STDERR.puts "saved as session ##{session_row} — its registration is KEPT on exit " \
+                    "(`gori run oast resume #{session_row}` to pick it up, `release` to drop it)" if store
         STDERR.puts "waiting for callbacks (Ctrl-C to stop)…" unless once
         seen = Set(String).new
         # Ctrl-C used to do nothing here: the poll loop trapped no signals, so despite the
@@ -681,22 +729,32 @@ module Gori
         once_failed = false
         begin
           loop do
+            # nil, not an empty array: a poll that FAILED and a poll that found nothing are the
+            # two states an out-of-band listener must never conflate, and only the second may
+            # stamp `last_poll_at` — that column is the liveness signal
+            # `OutOfBand::StoreMinter` ranks sessions by, so a listener whose endpoint 401s on
+            # every tick must not keep winning the pick for payloads that then call home to
+            # nobody. Same rule `resume` follows.
             interactions = begin
               prov.poll(http, session)
             rescue ex
               STDERR.puts "poll error: #{ex.message}"
               once_failed = true
-              [] of Oast::Interaction
+              nil
             end
-            interactions.each do |i|
-              next if seen.includes?(i.unique_id)
-              seen << i.unique_id
-              if json
-                puts Oast::Present.interaction(i, kind.label).to_json
-              else
-                puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+            if interactions
+              store.try(&.touch_oast_session(session_row))
+              interactions.each do |i|
+                next if seen.includes?(i.unique_id)
+                seen << i.unique_id
+                store.try { |s| Oast::Sessions.record_callback(s, session_row, i) }
+                if json
+                  puts Oast::Present.interaction(i, kind.label).to_json
+                else
+                  puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+                end
+                STDOUT.flush
               end
-              STDOUT.flush
             end
             break if once
             break if oast_wait_or_stop(stop, interval.seconds)
@@ -706,10 +764,17 @@ module Gori
           # the only path that deregistered; Ctrl-C left a live interactsh/BOAST
           # registration whose payload still resolved with nobody watching.
           #
+          # `--save` is the deliberate exception, and it is the same split `Ctrl-X` and the MCP
+          # `oast_stop` make for a persisted session: the row exists so a payload planted today
+          # can be answered tomorrow, so tearing the registration down on exit would destroy
+          # exactly what was asked for. `gori run oast release ID` is the teardown.
+          #
           # And say so when it does NOT: a backend with no deregistration API (BOAST) leaves a
           # live registration behind, and the silent no-op it used to inherit made that read
           # exactly like a clean teardown. custom-http registered nothing, so it says nothing.
-          if !prov.server_state?
+          if store
+            # kept on purpose — see above
+          elsif !prov.server_state?
             # nothing was ever registered on anyone else's server
           elsif !prov.deregisters?
             STDERR.puts "gori run oast: #{kind.label} has no deregistration API — " \
@@ -721,6 +786,7 @@ module Gori
               STDERR.puts "gori run oast: deregister failed: #{ex.message}"
             end
           end
+          store.try(&.close)
         end
         # A --once run whose single poll FAILED must not exit 0 — a scripted caller can't
         # otherwise tell "polled, found nothing" from "the poll errored". (#416)

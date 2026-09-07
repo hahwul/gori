@@ -84,7 +84,11 @@ module Gori::Oast
 
     private def to_interaction(it : JSON::Any) : Interaction?
       return nil unless it.as_h?
-      uid = field(it, "uuid") || Crypto.random_id(16)
+      # A CONTENT hash, not a random id, when the item carries no uuid — see
+      # `Provider#content_uid`. This poll re-fetches the whole page every cycle, so a random
+      # fallback re-announced that one hit (notification, pane row and `oast_callbacks` insert)
+      # every POLL_INTERVAL for as long as the listener lived.
+      uid = field(it, "uuid") || content_uid(it.to_json)
       # The hit URL carries the per-payload nonce `generate_payload` minted
       # (`…/{uuid}/{nonce}`). `full_id` is "the destination sub-id shown in the table",
       # so prefer the URL over the request uuid. An empty-body GET — the canonical blind

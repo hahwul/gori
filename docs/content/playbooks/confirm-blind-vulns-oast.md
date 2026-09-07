@@ -18,10 +18,11 @@ Open the **OAST** tab (visible by default, next to Fuzzer) and press `Ctrl-R` to
 Headless, when you want the listener in a script or an agent loop:
 
 ```bash
-gori run oast listen
+gori run oast listen         # ad-hoc: the registration dies with the process
+gori run oast listen --save  # …or keep it as a project session
 ```
 
-One caveat: `gori run oast` is a store-free, ad-hoc listener; its registration dies with the process. Only the TUI keeps a listener across a session (resume it later with `r`), so use the tab when the callback might arrive late.
+A bare `listen` is store-free and its registration dies with the process, which for a callback that arrives hours later means the payload is already dead. `--save` writes it into the project instead — `gori run oast list` shows it, `gori run oast resume ID` picks it up in a later process, and `gori run oast release ID` is the teardown. Over MCP the same switch is `oast_start` with `persist: true`. The TUI's `Ctrl-R` has always saved one; resume it with `r`.
 
 **Checkpoint.** The OAST tab shows a live payload URL, and the **Callbacks** table is empty and waiting.
 

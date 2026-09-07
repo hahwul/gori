@@ -382,3 +382,121 @@ describe "Gori::Tui::OastController — the CALLBACKS table on a narrow pane" do
     end
   end
 end
+
+# --- a listener that stopped REACHING its provider must say so ---------------------------
+#
+# "Nothing came back" and "the server refused us" are the two states an out-of-band listener
+# must never conflate: `Provider#poll` raises rather than answer an empty batch for exactly
+# that reason, and `Poller#answering?` carries the verdict. The tab computed that distinction
+# for the `last_poll_at` heartbeat — and then drew the operator a steady green "●listening"
+# regardless, so the one surface watching a listener was the one that could not see it had
+# stopped being one. A rotated api key or an expired webhook token leaves every planted payload
+# calling home to nobody, and the only signal was an "OAST poll error" status line that the
+# next status write scrolls away (and that never fires at all while the operator is off-tab).
+
+# A provider whose poll can be made to fail — the same seam spec/oast/poller_health_spec.cr
+# uses, since `answering?` is a property of a REAL Poller running a real poll.
+private class DeafProvider < Gori::Oast::Provider
+  property? failing : Bool = false
+
+  def initialize
+    super(Gori::Oast::ProviderKind::CustomHttp, "https://oast.test")
+  end
+
+  def register(http : Gori::Oast::Http) : Gori::Oast::Session
+    Gori::Oast::Session.new(1_i64, kind, host, "corr", "")
+  end
+
+  def generate_payload(session : Gori::Oast::Session) : String
+    "https://oast.test?oid=abc"
+  end
+
+  def poll(http : Gori::Oast::Http, session : Gori::Oast::Session) : Array(Gori::Oast::Interaction)
+    raise Gori::Error.new("custom-http poll: HTTP 401 unauthorized") if failing?
+    [] of Gori::Oast::Interaction
+  end
+end
+
+private class SilentHttp < Gori::Oast::Http
+  def request(method : String, url : String,
+              headers : Hash(String, String) = {} of String => String,
+              body : String? = nil) : Gori::Oast::Http::Response
+    Gori::Oast::Http::Response.new(204, "")
+  end
+end
+
+# Attach a live listener to the controller the way `apply_registration` does, and hand back the
+# provider so an example can break its poll mid-flight.
+private def with_live_listener(controller : OastController, session : Gori::Session,
+                               sid : Int64, &)
+  prov = DeafProvider.new
+  engine = Gori::Oast::Session.new(sid, Gori::Oast::ProviderKind::CustomHttp,
+    "https://oast.test", "corr", "")
+  listener = OastController::Listener.new(engine, prov, "p_1", "Lab collab")
+  # A short interval, not the production 5 s: `answering?` only flips on a poll, so an example
+  # that changes the provider's behaviour mid-flight has to let the loop come round again.
+  poller = Gori::Oast::Poller.new(prov, engine, SilentHttp.new, 1.millisecond, controller.@oast_events)
+  listener.poller = poller
+  controller.@listeners << listener
+  poller.start
+  begin
+    yield prov, listener
+  ensure
+    poller.stop
+  end
+end
+
+# Let the poll fiber come round at least once on the millisecond interval above.
+private def poll_tick : Nil
+  sleep 30.milliseconds
+  Fiber.yield
+end
+
+describe "Gori::Tui::OastController — a listener that stops answering" do
+  it "draws 'not answering' instead of a green ●listening, and warns once per transition" do
+    with_oast_controller do |controller, host, session, sid|
+      # The payload bar's pick has to name a provider for the per-provider branch; `All` (0)
+      # reads every live listener, which is the default and the case here.
+      with_live_listener(controller, session, sid) do |prov, _listener|
+        poll_tick
+        controller.drain_events
+        callbacks_pane(controller).should contain("●listening")
+        host.notifications.all.count(&.message.includes?("NOT reaching")).should eq(0)
+
+        prov.failing = true
+        poll_tick
+        controller.drain_events
+
+        pane = callbacks_pane(controller)
+        pane.should contain("not answering")
+        pane.should_not contain("●listening")
+        warns = host.notifications.all.select(&.message.includes?("NOT reaching"))
+        warns.size.should eq(1)
+        # The provider's own sentence is the only thing that names the fixable cause.
+        warns.first.message.should contain("401")
+        warns.first.message.should contain("Lab collab")
+
+        # Edge-triggered: a provider erroring every POLL_INTERVAL must not flood the ring.
+        3.times { controller.drain_events }
+        host.notifications.all.count(&.message.includes?("NOT reaching")).should eq(1)
+      end
+    end
+  end
+
+  it "says so again when the provider comes back" do
+    with_oast_controller do |controller, host, session, sid|
+      with_live_listener(controller, session, sid) do |prov, _listener|
+        prov.failing = true
+        poll_tick
+        controller.drain_events
+        host.notifications.all.count(&.message.includes?("NOT reaching")).should eq(1)
+
+        prov.failing = false
+        poll_tick
+        controller.drain_events
+        host.notifications.all.count(&.message.includes?("answering again")).should eq(1)
+        callbacks_pane(controller).should contain("●listening")
+      end
+    end
+  end
+end
