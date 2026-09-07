@@ -254,7 +254,7 @@ module Gori
       # Build + post-process the tree from the open store in the SAME ORDER as
       # SitemapView#reload (build → tags → scope → id folds → query fold → counts). The scope step
       # differs by design: --in-scope filters whole hosts via Scope#host_in_scope?,
-      # which evaluates the rules regardless of the TUI's persisted ⇧S enabled flag
+      # which evaluates the rules regardless of the TUI's persisted `s` enabled flag
       # (an explicit --in-scope is the opt-in). That host-level gate is coarser than
       # the TUI lens's per-flow SQL filter and conservative on url-level includes.
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,

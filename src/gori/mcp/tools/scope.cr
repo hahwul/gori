@@ -177,7 +177,7 @@ module Gori
         return unless @allow_actions
 
         tool j, "add_scope_rule",
-          "Add a scope include/exclude rule (the Target/Sitemap ⇧S lens, and the intercept " \
+          "Add a scope include/exclude rule (the Target/Sitemap `s` lens, and the intercept " \
           "gate). Deduped on the kind/match_type/pattern triple." do |s|
           s.field "kind", enumprop("whether the rule brings hosts INTO scope or carves them out (default include)", Scope::KINDS)
           s.field "match_type", enumprop("how `pattern` is matched against a request (default host)", Scope::TYPES)

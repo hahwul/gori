@@ -103,10 +103,10 @@ module Gori
         Verb::Scope::Sitemap, [Verb::Chord.new("g", shift: true)],
         mnemonic: 'Q', group: :view) { |ctx| ctx.sitemap_toggle_query_fold; nil }
 
-      # Toggle the scope lens from the Sitemap too (History has its own ⇧S binding).
-      # scope_toggle_lens reloads the active sitemap, and the bar shows the ⇧S chip —
-      # so the toggle is reachable where its effect is visible. Mnemonic 's' for the
-      # action menu (its only chord is ⇧S, which yields no menu key).
+      # Toggle the scope lens from the Sitemap too (the lens key itself is the Global `s`).
+      # scope_toggle_lens reloads the active sitemap, and the bar shows the `s scope` chip —
+      # so the toggle is reachable where its effect is visible. Mnemonic 's' for the action
+      # menu; the verb carries no chord of its own, so it never shadows the Global one.
       r.register Verb::Definition.new(
         "sitemap.scope-toggle", "Toggle scope lens", "Filter the tree to in-scope endpoints on/off",
         Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key

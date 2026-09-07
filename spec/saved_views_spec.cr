@@ -64,7 +64,7 @@ describe Gori::SavedViews do
 
     it "spells a lowercase chip label for each, abbreviating only the one that did not fit" do
       # The filter row's `v:` chip is the one place a view is printed beside `f:follow` and
-      # `⇧S scope:off`, and it is the narrowest. The NAME is untouched — the picker, the CLI's
+      # `s scope:off`, and it is the narrowest. The NAME is untouched — the picker, the CLI's
       # `--view`, MCP and the docs all keep `History + Repeater`, and `resolve_by_name`
       # downcases, so a chip read off the bar and typed back in still resolves.
       Gori::SavedViews::BUILTINS.map(&.chip_label).should eq(

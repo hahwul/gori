@@ -62,7 +62,8 @@ gori에는 같은 프로젝트 데이터와 엔진 모듈을 쓰는 세 진입�
   제거할 수는 있지만 QUIC이나 DNS로 알아낸 경로를 인터셉트할 수는 없습니다.
 - **upstream `https://` 표기는 레거시이며 프록시까지 TLS를 뜻하지 않습니다.** 현재
   `host:port`, `http://…`, `https://…`는 모두 평문 HTTP CONNECT 프록시를 뜻하고, 원 서버
-  HTTPS가 그 터널 안에서 동작합니다. `socks5://`와 `socks5h://`는 SOCKS를 선택합니다.
+  HTTPS가 그 터널 안에서 동작합니다. 프록시까지의 홉을 TLS로 감싸는 표기는 `http+tls://…`이고,
+  `socks5://`와 `socks5h://`는 SOCKS를 선택합니다.
 - **TLS fingerprint 프리셋은 근사치입니다.** OpenSSL이 노출하는 값 수준 ClientHello 필드를
   제어하지만 확장 순서와 GREASE 위치는 제어하지 못하므로, 브라우저의 JA3/JA4와 바이트 단위로
   같다고 약속하지 않습니다.

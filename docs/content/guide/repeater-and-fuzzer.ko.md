@@ -92,7 +92,7 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 
 요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`. 파일 없이 바로 시작), 워드리스트, 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
 
-마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Y`를 누르면 체인 편집기가 열리고, 보내기 전에 값이 각 단계를 거치는 모습을 미리 보여 줍니다. [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 동일합니다.
+마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 값이 각 단계를 거치는 모습을 미리 보여 줍니다. [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 동일합니다.
 
 gRPC 메시지는 마커가 유용하게 쓰이지 않는 유일한 곳입니다. 위치가 바이트 범위가 아니라 스키마가 아는 필드인 [gRPC 필드 스윕](#sweeping-a-grpc-field)을 보세요.
 
@@ -119,26 +119,6 @@ gori run fuzz delete RUN_ID --yes
 ```
 
 평범한 `gori run fuzz …`는 계속 일회성입니다. MCP에서는 `fuzz_start`에 `save_results: true`를 넘긴 뒤 `list_fuzz_runs`, `get_fuzz_run`, `delete_fuzz_run`을 쓰세요. 영구 실행은 History 플로우와 별개입니다. 개별 전송이 History에도 나타날지는 `--record-history` / `record_history`가 계속 결정합니다.
-
-### 실행 저장과 다시 열기 {#saving-and-reopening-runs}
-
-TUI 실행 중 gori는 모든 결과를 비공개 임시 SQLite 스풀에 기록하고, 화면 창은 최대 5,000행 / 동적 결과 데이터 64 MiB로 제한합니다. 최신 행은 계속 조작할 수 있고, 혼자서 지나치게 큰 행은 지표만 표시됩니다. 페이로드/오류 텍스트마저 이 창을 넘으면 해당 필드를 잘라 표시하고 그렇게 표시했음을 알린 뒤, 자리표시자로 요청을 재구성하는 대신 Repeater/Comparer로 보내기를 비활성화합니다. 스풀에는 여전히 완전한 행이 남아 있습니다. 스풀은 소유자 전용이고, 실행을 버리면 작은 백그라운드 트랜잭션으로 정리되며, 프로젝트를 닫으면 통째로 제거됩니다. 스풀 실패는 나가는 트래픽을 결코 멈추지 않으며, 그 실행을 영구 저장할 수 없게 만들 뿐입니다.
-
-비어 있지 않은 실행이 끝나고 스풀이 완전하면, **READ 모드에서 `Shift-S`** 를 눌러 스풀된 모든 행을 프로젝트에 영구 저장합니다. 편집 중에는 대문자 `S`가 평소대로 입력됩니다. 저장은 행 수와 바이트 수가 제한된 백그라운드 배치로 이뤄지고, 상태 줄과 Jobs 패널이 성공 또는 실패를 알립니다. 단축키를 다시 눌러도 사본이 생기지 않으며, 프로젝트 복사가 실패하면 재시도를 위해 임시 스풀이 남습니다.
-
-프로젝트를 다시 열면 처음 선택된 Fuzzer 세션에 대해 마지막으로 성공한 저장 실행이 복원됩니다. 다른 Fuzzer 세션은 처음 선택할 때 지연 복원됩니다. 복원은 가장 최근 5,000행 / 64 MiB만 창에 읽어 들이고 `showing N`으로 표시합니다 — 아카이브 전체는 페이지 단위 CLI/MCP 리더로 계속 읽을 수 있습니다. 진행 중이거나, 일부 실패했거나, 현재 형식 이전의 불완전한 스냅숏은 자동 복원되지 않습니다. **Space → Run history** 를 열면 더 오래된 현재 형식 실행을 고를 수 있고, `Enter`가 불러오고 `d`가 지웁니다. Fuzzer 세션을 닫으면 그 세션의 저장 실행 기록도 함께 삭제되며, 닫기 확인 창이 그 사실을 말해 줍니다.
-
-헤드리스와 에이전트 표면도 같은 영구 저장소를 씁니다:
-
-```bash
-gori run fuzz save 42 --auto --preset sqli
-gori run fuzz list
-gori run fuzz show RUN_ID
-gori run fuzz show RUN_ID RESULT_INDEX --format json
-gori run fuzz delete RUN_ID --yes
-```
-
-평범한 `gori run fuzz …`는 계속 일회성입니다. MCP에서는 `fuzz_start`에 `save_results: true`를 넘긴 뒤 `list_fuzz_runs`, `get_fuzz_run`, `delete_fuzz_run`을 쓰세요. 영구 실행은 History 플로우와 별개입니다 — 개별 전송이 History에도 나타날지는 `--record-history` / `record_history`가 계속 결정합니다.
 
 ### 스윕의 프레이밍 {#framing-a-sweep}
 
@@ -200,7 +180,7 @@ WebSocket 세션도 다른 대상과 똑같이 스윕하지만, 프로토콜에�
 ```bash
 gori run fuzz --repeater 7 \
   --message '{"op":"login","user":"§admin§"}' \
-  --payloads-preset sqli
+  --preset sqli
 ```
 
 WebSocket 세션에 대한 `--repeater N`은 핸드셰이크와 **세션에 저장된 프레임**을 함께 시드하므로, 캡처된 교환을 기록된 그대로 스윕합니다. `--flow N`도 캡처된 소켓에 대해 같은 일을 합니다. 직접 프레임을 작성하려면 `--message` / `--message-frame`으로 대체하면 됩니다. `--message-frame`은 `gori run repeater send`와 동일한 `opcode=…,fin=…,rsv=…,mask=…,len=…,hex=|b64=|text=` 문법을 쓰므로 PING, 코드를 지정한 CLOSE, 마스킹하지 않은 클라이언트 프레임, 페이로드와 어긋나는 길이 필드까지 모두 만들 수 있습니다. `--idle-ms`는 세션별 침묵 대기 시간을, `--ws-keep-key`는 템플릿 자체의 `Sec-WebSocket-Key`를 보내도록 해서 키가 없거나 잘못된 경우 자체를 시험할 수 있게 합니다(RFC 8441 핸드셰이크에는 그런 키가 없으며, 플래그를 무시하는 대신 그 사실을 알려 줍니다).
@@ -239,7 +219,7 @@ gori run fuzz <flow-id> \
   --fs 0
 ```
 
-소스는 캡처된 플로우(`--flow`), 저장된 HTTP 리피터 세션(`--repeater`), 원시 요청 파일(`--request`), 또는 stdin이 될 수 있습니다. 출력은 `text`, `json`, `jsonl`입니다.
+소스는 캡처된 플로우(`--flow`), 저장된 HTTP 리피터 세션(`--repeater`), 원시 요청 파일(`--request`), 또는 stdin이 될 수 있습니다. 출력은 `text`, `json`, `jsonl`입니다. 이 형태는 일회성이며 이전과 호환됩니다. 정확히 같은 인자를 `gori run fuzz save` 뒤에 붙이면 모든 행이 영구 저장됩니다. 저장된 실행은 `fuzz list`, `fuzz show`, `fuzz delete`로 관리합니다.
 
 **TUI의 Repeater 전송은 History에 기록됩니다.** 손으로 요청을 다루는 테스터야말로 증거가 사라지던 쪽이었고, 플로우를 남기지 않는 전송은 비교도 내보내기도 인계도 할 수 없습니다. 상태줄이 방금 쓴 id를 알려 줍니다(`sent → 200 in 391ms · History #84`). Settings → General → *Record Repeater sends*에서 끌 수 있습니다. WebSocket 전송과 send-group은 기록되지 않으며(소켓의 증거는 프레임 트랜스크립트이고 세션이 이미 갖고 있습니다) 상태줄이 한 번 그렇게 알려 줍니다.
 

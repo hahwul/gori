@@ -190,7 +190,7 @@ describe Gori::Tui::SitemapView do
     b.contains?("method:").should be_true
   end
 
-  it "marks in-scope hosts with a scope glyph even when the ⇧S lens is off" do
+  it "marks in-scope hosts with a scope glyph even when the `s` lens is off" do
     with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
       capture(store, "cdn.vendor.test", "GET", "/app.js")

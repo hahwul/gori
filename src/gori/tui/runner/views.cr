@@ -1,7 +1,7 @@
 # History views (#776) — ExecContext verb implementations; reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade and overlays).
 #
-# A view is a named QL query the History list ANDs over the filter bar, the way the ⇧S scope
+# A view is a named QL query the History list ANDs over the filter bar, the way the `s` scope
 # lens does. `SavedViews` owns the model and the two stores; what lives here is the TUI's whole
 # editing surface for them, and it is deliberately overlays-only — no tab, no form.
 #

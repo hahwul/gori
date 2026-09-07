@@ -27,7 +27,7 @@ group = "워크벤치"
 
 ## Providers {#providers}
 
-각 리스너가 하나의 **provider**입니다. **Providers** 서브탭에서 추가하세요(`a` 추가, `e` 편집, `t` 타입 설정, `d` 삭제). public preset은 타입을 고를 때 서버 호스트를 자동으로 채워줍니다.
+각 리스너가 하나의 **provider**입니다. **Providers** 서브탭에서 추가하세요(`a` 추가, `e` 편집, `x` 활성/비활성, `d` 삭제). public preset은 타입을 고를 때 서버 호스트를 자동으로 채워줍니다.
 
 콜백 테이블 위의 바가 `g`와 `Ctrl-R`가 사용할 provider를 고릅니다. `←` / `→`로 순환하며(바에는 `‹ 이름 ›`으로 표시됩니다), **All**은 모든 provider의 콜백을 한 번에 보여줍니다. payload를 받거나 리스닝을 시작하려면 provider가 하나로 정해져야 하므로, **All** 상태에서 활성화된 provider가 둘 이상이면 `g`와 `Ctrl-R`가 선택 카드를 엽니다. `↵`로 고르면 바도 따라갑니다. 활성화된 provider가 하나뿐이면 물어볼 것이 없으니 바로 실행됩니다.
 
@@ -67,10 +67,10 @@ interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를
 | `r` | 저장된 리스너 재개 |
 | `g` | 현재 payload 가져오기 / 복사(**All**이면 provider를 고르는 카드) |
 | `←` / `→` | 바가 사용할 provider 순환 |
-| `y` | 선택한 콜백 복사 |
+| `y` | 목록에서는 현재 payload 복사, 콜백의 `↵` 상세 안에서는 그 콜백 복사 |
 | `Shift-F` | 선택한 콜백을 Issue로 등록 |
 | `/` | 콜백 목록 필터링 |
-| `a` / `e` / `t` / `d` | Providers 서브탭: 추가 / 편집 / 타입 설정 / 삭제 |
+| `a` / `e` / `x` / `d` | Providers 서브탭: 추가 / 편집 / 활성·비활성 / 삭제 |
 
 ## 콜백을 Issue로 {#filing-a-callback}
 
@@ -97,6 +97,8 @@ gori run oast release 7                        # deregister it; its callbacks st
 ```
 
 `resume`은 종료해도 등록을 유지하고(Ctrl-C는 폴링만 멈춥니다) 받은 콜백을 프로젝트에 저장하므로 OAST 탭에서 같은 hit를 봅니다. 정리는 `release`로 명시적으로 합니다.
+
+저장된 provider(**Providers** 서브탭의 행들)도 `gori run oast providers add|update|enable|disable|delete|list`로 헤드리스에서 관리할 수 있고, `listen`과 `resume`은 폴링 주기를 정하는 `--interval SEC`(기본 5)를 받습니다. 플래그는 [CLI Reference](/ko/reference/cli/#run-oast)를 참고하세요.
 
 모든 플래그는 [CLI Reference](/ko/reference/cli/#run-oast)를 참고하세요. MCP에서는 에이전트가 `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions`(읽기)와 `oast_start` / `oast_stop` / `oast_resume` / `oast_release`(동작)로 같은 엔진을 구동합니다. `oast_resume`은 `oast_poll`과 `oast_payload`가 받는 `session_id`를 돌려주고 그 폴링 결과는 CLI와 마찬가지로 저장됩니다. 재개한 세션에 `oast_stop`을 호출하면 `Ctrl-X`처럼 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다.
 

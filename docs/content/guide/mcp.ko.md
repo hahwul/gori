@@ -45,6 +45,8 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 
 **Git 워크스페이스 밖**에서 뜨면(AI 클라이언트가 홈·앱 디렉터리에서 MCP를 띄우는 흔한 경우) 서버는 **unbound**로 시작합니다. MCP 핸드셰이크와 도구 목록은 바로 성공하지만, 트래픽 도구(`list_history`, `send_request` 등)는 에이전트가 `list_projects`, `create_project`(unbound일 때 자동 바인딩), 또는 `switch_project`를 호출하기 전까지 `NO_PROJECT`를 반환합니다. unbound는 활성 TUI/MRU 프로젝트를 슬그머니 열지 않습니다. 그건 명시적 `--use-active-project` 옵트인(또는 `--project` / `--db` / `GORI_MCP_PROJECT` / `GORI_MCP_DB`)이 필요합니다.
 
+프로젝트가 없어도 동작하는 도구 계열이 몇 가지 있습니다. 프로젝트 관리(`project_info`, `list_projects`, `create_project`, `switch_project`, `delete_project`, `diff_projects`), 순수 계산 헬퍼(`decode`, `jwt_*`, `cookie_*`, `sequence_analyze`), 쿼리 언어 레퍼런스(`ql_reference`, `ql_explain`), 그리고 즉석 OAST 리스너(`oast_presets`, `oast_payload`, `oast_start`, `oast_stop`, `oast_poll`)입니다. 그 밖의 도구는 저장된 세션을 다루는 `oast_resume` / `oast_release`까지 포함해, 프로젝트가 바인딩되기 전까지 `NO_PROJECT`를 반환합니다.
+
 **선택된 프로젝트를 열 수 없으면**(데이터베이스가 없거나 깨졌거나 읽을 수 없을 때, 프로젝트 이름이 더 이상 존재하지 않을 때) 서버는 종료하지 않고 핸드셰이크를 마친 뒤 unbound로 시작합니다. 실패 이유는 stderr에 기록되고, 핸드셰이크 `instructions`에 실리며, 모든 `NO_PROJECT` 도구 오류에 함께 반환되고, `project_info`의 `bind_error` 필드로도 보고됩니다. 에이전트는 재시작 없이 `list_projects`와 `switch_project`로 복구할 수 있습니다.
 
 데이터를 사용하기 전에 `project_info`를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처를 보고합니다.
@@ -65,7 +67,7 @@ gori mcp --read-only
 
 ## 노출할 도구 고르기 {#choosing-which-tools-are-exposed}
 
-gori는 MCP 도구를 약 160개 제공한다. 클라이언트는 첫 질문을 던지기 전에 이 목록 전체를 모델 컨텍스트에 싣고 세션 내내 유지한다 — 대략 43,000 토큰이다. `--read-only`는 53개(~12,000 토큰)로 줄여주지만 축이 하나뿐이다. `--tools`는 직접 고르게 해준다:
+gori는 MCP 도구를 약 160개 제공합니다. 클라이언트는 첫 질문을 던지기 전에 이 목록 전체를 모델 컨텍스트에 싣고 세션 내내 유지합니다 — 대략 43,000 토큰입니다. `--read-only`는 53개(~12,000 토큰)로 줄여주지만 축이 하나뿐입니다. `--tools`는 직접 고르게 해줍니다:
 
 ```bash
 gori mcp --tools='list_*,get_*,ql_*,project_info,send_request'   # 정찰 + 재전송, ~11k 토큰
@@ -73,9 +75,9 @@ gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워
 gori mcp --tools='*,-intercept_*'                                # 같은 뜻을 명시적으로
 ```
 
-스펙은 도구 이름과 `*` 글롭을 쉼표로 나열한 것이고 왼쪽부터 적용된다. `-`를 앞에 붙인 항목은 빼낸다. 도구 이름이 이미 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로, 글롭만으로 별도 카탈로그 없이 그룹이 생긴다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 그대로 동작한다.
+스펙은 도구 이름과 `*` 글롭을 쉼표로 나열한 것이고 왼쪽부터 적용됩니다. `-`를 앞에 붙인 항목은 빼냅니다. 도구 이름이 이미 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로, 글롭만으로 별도 카탈로그 없이 그룹이 생깁니다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 그대로 동작합니다.
 
-아무것도 매치하지 않는 패턴은 조용히 좁히는 대신 시작 시 중단하며 후보를 제안한다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 도구가 빠진 서버는 그 기능이 아예 없는 gori와 구분되지 않기 때문이다. 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절한다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록된다.
+아무것도 매치하지 않는 패턴은 조용히 좁히는 대신 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 도구가 빠진 서버는 그 기능이 아예 없는 gori와 구분되지 않기 때문입니다. 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다.
 
 ## TUI에서 에이전트 보기 {#seeing-an-agent-from-the-tui}
 
@@ -122,7 +124,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 | 도구 | 용도 |
 |------|---------|
-| `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 *거를* 수는 있어도 볼 수는 없던 값을 [보여 주는](/ko/guide/proxy/#columns) 쪽입니다. 행마다 읽기가 한 번 늘어나므로 명시할 때만 동작합니다 |
+| `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req\|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 *거를* 수는 있어도 볼 수는 없던 값을 [보여 주는](/ko/guide/proxy/#columns) 쪽입니다. 행마다 읽기가 한 번 늘어나므로 명시할 때만 동작합니다 |
 | `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음. 모든 이벤트가 `actor`(행위 표면: `tui` / `cli` / `mcp`)를 담고 있어 에이전트가 자기 쓰기와 운영자의 쓰기를 구분할 수 있으며, 설정 변경은 누가 하든 기록됩니다. 사람은 같은 피드를 **Project → Activity** 패널에서 읽습니다 |
 | `list_views` | 프로젝트의 History [뷰](/ko/guide/proxy/#views). `list_history{view}`가 렌즈로 적용하는 이름 붙은 QL 쿼리로, `query`를 대체하지 않고 그 위에 AND로 얹힙니다. 기본 뷰 7종(`All`, `History`, `History + Repeater`(기본값), `WebSocket`, `gRPC`, `SSE`, `Errors`) → 글로벌 라이브러리 → 프로젝트 순이며, `active`는 TUI가 보고 있는 뷰를 표시할 뿐 `list_history`에 적용되지 **않습니다**. 그쪽은 넘긴 `view`로만 거릅니다 |
 | `get_flow` | 한 플로우의 전체 요청 + 응답 |
@@ -155,23 +157,22 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | [Cookie 워크벤치](/ko/guide/cookie/)를 순수 오프라인 연산으로: Flask / Rack / Django 서명 세션 쿠키 파싱, 후보 시크릿으로 검증, 워드리스트로 시크릿 브루트포스, 편집한 페이로드 재서명. 네트워크를 쓰지 않으므로 네 개 모두 `--read-only`에서도 살아남습니다 |
 | `sequence_analyze` | 붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수) |
 | `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 현재 페이로드 조회, 실행 중인 리스너의 콜백 폴링 |
-| `discover_status` / `discover_results` | Discover 실행의 진행 상황과 결과 |
 | `project_info` | 플로우 / 이슈 개수, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것 |
-| `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶인다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $AUTH`)을 준다. `include_response_body`는 저장된 마지막 응답 본문을 인라인한다 |
+| `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
 | `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다. `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 말해 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시됩니다 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨):
+**액션 도구**(`--read-only`로 비활성화됨). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
 
 | 도구 | 용도 |
 |------|---------|
 | `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$KEY` 환경 토큰을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림). `reframe_grpc: true`는 실제 전송되는 본문에 맞춰 단항 gRPC 메시지의 5바이트 길이 접두사를 다시 계산합니다. 기본값은 꺼짐이므로 편집된 메시지도 캡처 당시의 접두사 그대로 나갑니다 |
 | `send_websocket` | 저장된 WebSocket Repeater 세션을 실행하고 응답을 수집 |
-| `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 하나를 관리. 모든 응답이 `id` 옆에 `tui_index`를 싣고, 삭제는 없앤 탭 번호(`was_tui_index`)를 밝힌 뒤 나머지를 다시 번호 매긴다 |
+| `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 하나를 관리. 모든 응답이 `id` 옆에 `tui_index`를 싣고, 삭제는 없앤 탭 번호(`was_tui_index`)를 밝힌 뒤 나머지를 다시 번호 매깁니다 |
 | `create_repeaters` | 캡처된 flow 여러 개에서 탭을 하나씩 시드합니다. OpenAPI 임포트의 두 번째 단계입니다(아래 참고). 첫 세션을 만들기 전에 모든 flow의 존재를 확인합니다 |
-| `delete_repeaters` / `update_repeaters` | 일괄 닫기, 일괄 재라벨(태그와 이름 접사만. 요청 바이트를 쓰는 건 `update_repeater`입니다). 둘 다 필터가 아니라 명시적 id만 받습니다: 먼저 `get_repeater_context{filter}`로 좁혀서, 읽은 집합과 작용한 집합이 같게. 삭제는 `confirm:true`가 필요하고, 모르는 id 하나면 호출 전체를 거절한다 |
+| `delete_repeaters` / `update_repeaters` | 일괄 닫기, 일괄 재라벨(태그와 이름 접사만. 요청 바이트를 쓰는 건 `update_repeater`입니다). 둘 다 필터가 아니라 명시적 id만 받습니다: 먼저 `get_repeater_context{filter}`로 좁혀서, 읽은 집합과 작용한 집합이 같게. 삭제는 `confirm:true`가 필요하고, 모르는 id 하나면 호출 전체를 거절합니다 |
 | `move_repeater` | 서브탭 스트립을 재배치합니다. 절대 탭 번호는 `to_index`, 한 칸 이동은 `direction`. 열려 있는 TUI가 알아서 새 순서를 반영합니다 |
 | `minimize_repeater` | Repeater 요청을 같은 응답이 재현되는 최소 형태로 줄임 |
 | `create_issue` / `update_issue` / `delete_issue` | 이슈 기록, 갱신, 삭제 |
@@ -199,15 +200,15 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `set_probe_mode` | 스캔 모드 설정: `off`, `passive`, `active`, `aggressive`(허가된 대상 전용) |
 | `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | 커스텀 매치 규칙 관리와 스캔 규칙 활성화 / 비활성화 |
 | `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | `oast_start`가 사용할 OAST 프로바이더 관리 |
-| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. `save_results:true`는 바이트 상한이 걸린 비동기 기록자를 통해 **모든** 행을 영구 저장하고 데이터베이스 `run_id`를 돌려줍니다. 저장소 백프레셔가 걸리면 나가는 트래픽은 멈추지 않고 저장만 실패로 표시됩니다. 이것은 상한이 걸린 선택적 라이브 잡 캐시나 `record_history`와는 별개입니다. `fuzz_start{fields: ["role"]}`는 단항 요청의 **스키마가 아는 gRPC 필드**를 스윕합니다. 페이로드는 필드 선언을 거쳐 바이트가 되고, 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 길이 접두사가 따라옵니다. 바이트 위치를 쓰는 gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다. `fuzz_results`는 매치되지 않았어도 런이 관찰한 사실이 있는 행(재전송, 리트라이, 잘린 응답)을 함께 보관하므로 각 행의 `matched`를 읽거나 `matched_only: true`를 넘기세요 |
+| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. `save_results:true`는 바이트 상한이 걸린 비동기 기록자를 통해 **모든** 행을 영구 저장하고 데이터베이스 `run_id`를 돌려줍니다. 저장소 백프레셔가 걸리면 나가는 트래픽은 멈추지 않고 저장만 실패로 표시됩니다. 이것은 상한이 걸린 선택적 라이브 잡 캐시나 `record_history`와는 별개입니다. `fuzz_start{fields: ["role"]}`는 단항 요청의 **스키마가 아는 gRPC 필드**를 스윕합니다. 페이로드는 필드 선언을 거쳐 바이트가 되고, 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 길이 접두사가 따라옵니다. 바이트 위치를 쓰는 gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다. `fuzz_results`는 매치되지 않았어도 런이 관찰한 사실이 있는 행(재전송이나 리트라이된 요청, 잘린 응답, 실패한 전송, 실행되지 못해 페이로드가 변환 없이 나간 `¦chain` 스텝)을 함께 보관하므로 각 행의 `matched`를 읽거나 `matched_only: true`를 넘기세요 |
 | `delete_fuzz_run` | 영구 퍼즈 실행 하나와 그 결과를 삭제합니다. 살아 있는 기록자가 확인되면 거부합니다. `force_stale:true`는 죽은 프로세스가 남긴 `running`/`saving` 행을 지우며, 다른 gori가 저장 중일 때는 절대 쓰면 안 됩니다 |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교합니다(접근 제어 결함). 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |
-| `discover_start` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스(`discover_status` / `discover_results`로 폴링) |
+| `discover_start` / `discover_status` / `discover_results` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스, 진행 상황 폴링, 결과 조회. 네 개 모두 액션 도구이므로 읽기 전용 서버에는 Discover 표면이 없습니다 |
 | `oast_start` / `oast_stop` | 즉석 OAST 페이로드 등록 후 콜백 폴링(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다 |
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다. 콜백은 남습니다 |
-| `list_jobs` / `get_job` / `stop_job` | 작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz와 mine 작업 나열, 또는 id로 하나를 조회하고 중지 |
+| `list_jobs` / `get_job` / `stop_job` | 작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize 작업 나열, 또는 id로 하나를 조회하고 중지 |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | 홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭 |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | 캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택 |
 

@@ -1,6 +1,6 @@
 # `gori run views` — manage History views (list, add, rm, rename, set, scope).
 #
-# A view is a named QL query the History list ANDs over its filter bar, the way the ⇧S scope
+# A view is a named QL query the History list ANDs over its filter bar, the way the `s` scope
 # lens does; `gori run history --view NAME` is the headless half. Like colour rules they live in
 # TWO stores — settings.json (`--scope global`, every project) and this project's `saved_views`
 # table (`--scope project`, the default) — and `SavedViews.merged` folds them together.

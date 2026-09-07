@@ -20,7 +20,7 @@ module Gori
             # payload said so — a caller would have to know that the allowlist deliberately reads
             # an empty include set as "block all" rather than "allow all" to derive it.
             j.field "blocks_all", scope.sandbox? && scope.include_count.zero?
-            # `enabled` is the CAPTURE-side lens (the Target/Sitemap ⇧S filter). The gate that
+            # `enabled` is the CAPTURE-side lens (the Target/Sitemap `s` filter). The gate that
             # decides whether THIS server may send — send_request, send_websocket, fuzz, mine,
             # probe active — is `Outbound`, and it keys off `Scope#configured?`, which reads the
             # rules "REGARDLESS of the enabled flag". So `enabled:false` beside a populated rule

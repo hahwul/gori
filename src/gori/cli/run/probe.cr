@@ -72,7 +72,7 @@ module Gori
           p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
           p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
           p.on("--category=CAT", "Only show issues in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
-          p.on("--in-scope", "Only show issues on hosts in the project's configured scope (the TUI's ⇧S lens; ALL flows are still scanned)") { in_scope = true }
+          p.on("--in-scope", "Only show issues on hosts in the project's configured scope (the TUI's `s` lens; ALL flows are still scanned)") { in_scope = true }
           p.on("-a", "--active", "Include light-touch active checks (sends probe requests)") { active = true }
           p.on("--allow-unscoped", "With --active, probe flows even when outside the project scope (default: only scope-included hosts)") { allow_unscoped = true }
           p.on("--unsafe", "With --active, ALSO probe unsafe methods (POST/PUT/PATCH/DELETE) — re-sends may mutate server data") { unsafe = true }

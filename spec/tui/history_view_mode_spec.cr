@@ -4,7 +4,7 @@ require "../support/memory_backend"
 include Gori::Tui
 
 # The History VIEW mode (#776): a named QL query the list ANDs over the filter bar, the way the
-# ⇧S scope lens does. What is pinned here is the behaviour that has no visible symptom until it
+# `s` scope lens does. What is pinned here is the behaviour that has no visible symptom until it
 # has already shown the operator the wrong flows.
 
 private def add_flow(store, source : Gori::FlowSource::Kind, host = "h.test", status = 200)
@@ -141,7 +141,7 @@ describe "HistoryView — view mode" do
   end
 
   it "lowercases an operator's own view name in the chip, and still truncates it" do
-    # The chip is a mode indicator beside `f:follow` and `⇧S scope:off`, not a place a name is
+    # The chip is a mode indicator beside `f:follow` and `s scope:off`, not a place a name is
     # quoted — so a saved view's casing goes the same way a builtin's does. The picker, the CLI
     # and MCP keep the name the operator typed.
     with_store do |store|
@@ -223,7 +223,7 @@ describe "HistoryView — view mode" do
       view.reload(store)
       view.rows.should be_empty
       # The bar is on screen and still does not explain the empty list — the same reason the
-      # ⇧S lens gets a note beside it.
+      # `s` lens gets a note beside it.
       screen_text(view).should contain("v:history also narrows to src:proxy")
     end
   end

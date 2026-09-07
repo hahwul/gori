@@ -701,7 +701,7 @@ module Gori
       end
 
       # `gori run project sandbox` — get/set the HARD-CONTAINMENT sandbox gate (Scope's
-      # blocking policy, distinct from the ⇧S display lens). Until now this could only be
+      # blocking policy, distinct from the `s` display lens). Until now this could only be
       # toggled from the interactive TUI (Project NETWORK pane); this is the headless
       # bootstrap so a CI / authorized-testing run can enable containment without the UI.
       private def self.cmd_project_sandbox(args : Array(String)) : Nil

@@ -112,7 +112,7 @@ gori run issues --format markdown --export report.md
 gori run issues --format sarif --export issues.sarif   # GitHub code scanning / CI 대시보드용
 ```
 
-TUI에서는 `⇧E`가 형식을 먼저, 저장 경로를 그 다음에 묻습니다. SARIF result가 무엇을 담는지는 [리포트 내보내기](/ko/playbooks/triage-and-report/#export-the-report)를 참고하세요.
+TUI에서는 `⇧E`가 형식을 먼저, 저장 경로를 그 다음에 묻습니다. SARIF result가 무엇을 담는지는 [리포트 내보내기](/ko/playbooks/triage-and-report/#5-export-the-report)를 참고하세요.
 
 `⇧X`(또는 `Space` → `X`)는 탭을 비웁니다. 프로젝트의 모든 이슈를 노트·CVSS 점수·증거 링크까지 함께. 먼저 확인을 묻고 총 개수를 밝히며, 그 개수는 필터가 보여주는 행도 표시(mark)한 집합도 아닌 **프로젝트 전체**입니다. `⇧X`는 History·Probe·Authorize·ACTIVITY 피드가 각자의 탭에서 답하는 그 clear-all 키와 같습니다.
 

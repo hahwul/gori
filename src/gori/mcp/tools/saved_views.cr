@@ -39,7 +39,7 @@ module Gori
                     # Which view the TUI is showing this project through. It does NOT apply to
                     # `list_history`, which filters only by the `view` it is passed — a stored
                     # UI preference must never silently drop rows from a headless answer, the
-                    # same line `--in-scope` draws against the persisted ⇧S lens. Reported so an
+                    # same line `--in-scope` draws against the persisted `s` lens. Reported so an
                     # agent can offer the operator's own scoping, not so it is assumed.
                     j.field "active", active ? active.key == v.key : v.key == SavedViews.all_view.key
                     j.field "editable", !v.builtin?

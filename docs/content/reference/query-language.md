@@ -146,6 +146,8 @@ status:>=500        server errors
 size:>100000        large exchanges
 dur:>500            slower than 500 ms
 dur:<2s             faster than 2 s (s / ms suffixes allowed)
+size:>100k          byte fields take k/kb, m/mb, g/gb suffixes
+status:>=4xx        a class shorthand takes a comparison too
 ```
 
 ## Regular Expressions
