@@ -33,7 +33,7 @@ base64-decode | jwt-decode
 
 ```bash
 gori run decoder 'base64-decode | jwt-decode' "$TOKEN"
-echo -n secret | gori run decoder 'sha256 | hex-encode'
+echo -n secret | gori run decoder 'sha256 | base64'
 ```
 
 <figure class="tui-shot">

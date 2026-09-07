@@ -43,7 +43,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 |-----|------|---------|-------------|
 | `bind_host` | string | `127.0.0.1` | 전역 기본 리스닝 주소 (프로젝트에 `net.bind_host`가 없을 때 사용) |
 | `bind_port` | integer | `8070` | 전역 기본 리스닝 포트 (프로젝트에 `net.bind_port`가 없을 때 사용) |
-| `upstream_proxy` | string | `""` | 전역 기본 업스트림: 기존 `host:port`/`http://…`, `http+tls://…`(프록시까지 TLS), 또는 `socks5://…`/`socks5h://…`; 비어 있으면 직접 연결. 설정 시 프로젝트 `net.upstream_proxy`가 우선. `https://…`는 **평문 형식의 기존 표기**입니다. [upstream_rules](#upstream_rules) 참고 |
+| `upstream_proxy` | string | `""` | 전역 기본 업스트림: 기존 `host:port`/`http://…`, `http+tls://…`(프록시까지 TLS), 또는 `socks5://…`/`socks5h://…`; 비어 있으면 직접 연결. 설정 시 프로젝트 `net.upstream_proxy`가 우선. `https://…`는 **평문 형식의 기존 표기**입니다. [upstream_rules](#upstream-rules) 참고 |
 | `upstream_proxy_ca` | string | `""` | `http+tls` 홉에서 **업스트림 프록시 자신의** 인증서를 검증할 PEM 번들. 시스템 스토어에 더해서 신뢰합니다. 비우면 시스템 스토어만 사용. 비밀이 아니라 경로이므로 프로필로 공유해도 안전합니다 |
 | `upstream_proxy_insecure` | bool | `false` | **업스트림 프록시** 인증서 검증을 건너뜁니다. **origin**을 다루는 `verify_upstream`이나 `--insecure-upstream`과는 무관하며 그 플래그에 영향받지 않습니다. 기본이 꺼짐인 이유: 이 홉은 모든 `CONNECT` authority와 모든 `Proxy-Authorization` 자격증명을 실어 나릅니다 |
 | `verify_upstream` | bool | `true` | 시스템 CA 트러스트 스토어로 업스트림 TLS 인증서 검증(표준 위치에서 자동 탐색하며 `SSL_CERT_FILE` / `SSL_CERT_DIR` 존중; 스토어를 못 찾으면 HTTPS 검증 실패. `SSL_CERT_FILE` 지정 또는 끄기). 토글하면 재시작 없이 실행 중인 프록시, 액티브 프로브, Repeater / Fuzzer / Miner 전송기에 즉시 반영됩니다. `--insecure-upstream`은 해당 세션에만 끈 상태로 시작 |
@@ -216,7 +216,7 @@ SOCKS5 리스너(RFC 1928)는 목적지를 핸드셰이크에서 클라이언트
 { "host": "127.0.0.1", "port": 1080, "mode": "socks5" }
 ```
 
-프록시를 지정할 수는 있지만 HTTP 프록시는 지정할 수 없는 클라이언트를 위한 모드입니다. `ALL_PROXY=socks5://127.0.0.1:1080`, 프록시 설정이 SOCKS뿐인 런타임, SOCKS만 할 줄 아는 도구 같은 것들. gori는 이미 같은 프로토콜의 반대쪽 끝도 씁니다. `"kind": "socks5"`인 [`upstream_rules`](#upstream_rules) 항목은 남의 SOCKS 프록시를 *거쳐서* 원 서버에 닿습니다. 같은 단어가 이 문서에 두 번, 서로 반대 방향으로 나오는 셈이고, 이쪽이 들어오는 방향입니다.
+프록시를 지정할 수는 있지만 HTTP 프록시는 지정할 수 없는 클라이언트를 위한 모드입니다. `ALL_PROXY=socks5://127.0.0.1:1080`, 프록시 설정이 SOCKS뿐인 런타임, SOCKS만 할 줄 아는 도구 같은 것들. gori는 이미 같은 프로토콜의 반대쪽 끝도 씁니다. `"kind": "socks5"`인 [`upstream_rules`](#upstream-rules) 항목은 남의 SOCKS 프록시를 *거쳐서* 원 서버에 닿습니다. 같은 단어가 이 문서에 두 번, 서로 반대 방향으로 나오는 셈이고, 이쪽이 들어오는 방향입니다.
 
 목적지가 **선언되어** 도착한다는 점이 투명 모드에 대한 이점입니다. 커널 리다이렉트 규칙이 필요 없고, SNI나 `Host` 헤더에서 목적지를 복구할 일도 없습니다. 평문 연결에서는 `Host`가 다른 곳을 가리키는 요청도 핸드셰이크가 말한 곳으로 나가고, History가 기록하는 authority도 핸드셰이크 쪽이며, 클라이언트의 헤더 자체는 바이트 그대로 전달됩니다. TLS 연결에서는 *이름*을 SNI가 대신 공급합니다. leaf 인증서가 그 이름으로 발급되고, passthrough 목록과 샌드박스도 그 이름으로 매칭하며, History에 보이는 것도 그 이름입니다. 그리고 연결은 핸드셰이크가 선언한 목적지로 dial 합니다. [투명 모드](#transparent-mode)가 이름과 주소를 나누는 것과 같은 구분입니다. SNI가 없는 ClientHello라면 두 가지 모두 선언된 목적지로 떨어집니다.
 
@@ -244,7 +244,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 도달하려는 origin을 이름으로 적는 `CONNECT` 요청 라인과 `Proxy-Authorization` 헤더는 TLS 세션 **안에서만** 전송되며, 그 앞에서는 절대 나가지 않습니다. 핸드셰이크가 끝나기 전에는 요청의 어떤 부분도 전송되지 않습니다.
 
-프록시 leg는 **프록시 자신의** 호스트 이름으로 검증됩니다. SNI와 인증서 이름 검증 대상은 설정한 프록시 주소이며, origin의 이름도 [호스트 오버라이드](#hostname_overrides)도 아닙니다(오버라이드는 origin leg에만 적용됩니다). 이 정책은 `network.upstream_proxy_ca`와 `network.upstream_proxy_insecure`가 결정하며, origin을 설명하는 `verify_upstream` / `--insecure-upstream`이 **아닙니다**. 인증서가 깨진 대상 하나 때문에 origin 정책을 느슨하게 했다고 해서 세션 전체를 실어 나르는 프록시 인증을 멈추지는 않고, 프록시 인증서가 거부되면 `--insecure-upstream`을 해법으로 제시하는 대신 프록시 쪽 용어로 설명합니다.
+프록시 leg는 **프록시 자신의** 호스트 이름으로 검증됩니다. SNI와 인증서 이름 검증 대상은 설정한 프록시 주소이며, origin의 이름도 [호스트 오버라이드](#hostname-overrides)도 아닙니다(오버라이드는 origin leg에만 적용됩니다). 이 정책은 `network.upstream_proxy_ca`와 `network.upstream_proxy_insecure`가 결정하며, origin을 설명하는 `verify_upstream` / `--insecure-upstream`이 **아닙니다**. 인증서가 깨진 대상 하나 때문에 origin 정책을 느슨하게 했다고 해서 세션 전체를 실어 나르는 프록시 인증을 멈추지는 않고, 프록시 인증서가 거부되면 `--insecure-upstream`을 해법으로 제시하는 대신 프록시 쪽 용어로 설명합니다.
 
 `http+tls` 프록시를 거쳐 도달하는 `https://` origin은 TLS 안의 TLS입니다. origin 핸드셰이크가 터널 위에서 수행되므로 origin 인증서는 여전히 자신의 정책 아래 end-to-end로 검증됩니다.
 
@@ -281,6 +281,8 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 **전역 규칙 비밀번호는 `settings.json`에 저장되지 않습니다.** 사용자명과 환경변수 *이름*만 기록되고, 비밀번호는 dial 시점에 OS 환경에서 읽습니다. 따라서 `export CORP_PROXY_PASS=…`가 재시작 없이 반영됩니다. gori 자체의 `env` 섹션은 의도적으로 쓰지 않습니다. 그 변수들은 `settings.json`에 평문으로 저장되므로, 결국 다른 경로로 비밀을 파일에 넣는 셈이고 설정 공유·내보내기([#439](https://github.com/hahwul/gori/issues/439))를 무의미하게 만듭니다. `$`가 포함된 `password_env`는 거부됩니다. 값이 아니라 변수 이름을 담는 필드입니다. Project settings에서 직접 입력한 자격증명의 저장 방식은 [프로젝트별 오버라이드](#per-project-overrides)를 참고하세요.
 
+`network.upstream_proxy_ca`와 `network.upstream_proxy_insecure`는 규칙에서 왔든, 스칼라에서 왔든, 프로젝트 고정값에서 왔든 **모든** `http+tls` 홉에 적용되는 하나의 정책입니다. 규칙별 TLS 필드는 아직 없습니다. 신뢰 앵커가 다른 두 번째 TLS 프록시가 필요해지면 그때 추가합니다.
+
 스칼라와 규칙은 같은 DNS 구분을 사용합니다. `socks5`는 gori 호스트에서 대상 이름을 조회하고, `socks5h`는 프록시에 조회를 맡깁니다. Tor, 분할 DNS, 로컬에서 해석할 수 없는 이름을 아는 점프호스트에는 `socks5h`를 사용하세요. 로컬 조회가 실패하면 프록시에 연결하기 전에 중단되며 원 서버 직결로 폴백하지 않습니다.
 
 우선순위(높은 것부터):
@@ -292,13 +294,15 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 | 3 | `network.upstream_proxy`. 암묵적 catch-all |
 | 4 (최하) | 직접 연결 |
 
-규칙은 [호스트 오버라이드](#hostname_overrides) 적용 **이전의 원래 호스트명**에 대해 매칭됩니다. 오버라이드는 어느 IP로 접속할지만 바꿉니다.
+열려 있는 프로젝트에서는 **Destination host**가 이 테이블보다 먼저 평가됩니다. 기본값 `*`는 위 우선순위를 그대로 두고, 일치하지 않는 목적지는 전역 규칙이나 스칼라 프록시로 폴백하지 않고 직접 연결됩니다.
+
+규칙은 [호스트 오버라이드](#hostname-overrides) 적용 **이전의 원래 호스트명**에 대해 매칭됩니다. 오버라이드는 어느 IP로 접속할지만 바꿉니다.
 
 ### outbound_tls
 
 gori가 **거는** 연결의 목적지별 TLS 정책입니다: 제시할 클라이언트 인증서, 협상할 프로토콜 범위와 암호군, 그리고 gori가 보내는 ClientHello의 형태([TLS 지문](#tls-fingerprint)). 순서가 있고 첫 일치가 이기며, 호스트 패턴 문법은 동일합니다. 편집은 `gori settings --edit`.
 
-[`upstream_rules`](#upstream_rules)와 의도적으로 분리된 테이블입니다. 둘 다 목적지 호스트로 키를 잡지만 답하는 질문이 다르고, 합치면 가장 흔한 형태를 표현할 수 없게 됩니다. "전부 사내 프록시 경유 + 한 호스트만 클라이언트 인증서"를 쓰려면 그 호스트 행에 프록시 주소를 중복해야 합니다. 하나의 first-match 테이블은 호스트당 한 행만 적용할 수 있기 때문입니다.
+[`upstream_rules`](#upstream-rules)와 의도적으로 분리된 테이블입니다. 둘 다 목적지 호스트로 키를 잡지만 답하는 질문이 다르고, 합치면 가장 흔한 형태를 표현할 수 없게 됩니다. "전부 사내 프록시 경유 + 한 호스트만 클라이언트 인증서"를 쓰려면 그 호스트 행에 프록시 주소를 중복해야 합니다. 하나의 first-match 테이블은 호스트당 한 행만 적용할 수 있기 때문입니다.
 
 ```json
 {
@@ -336,6 +340,14 @@ gori가 **거는** 연결의 목적지별 TLS 정책입니다: 제시할 클라�
 | `ocsp_stapling` | bool | `true`면 `status_request` 확장을 추가합니다. 브라우저는 보내고 순정 OpenSSL은 보내지 않는 확장입니다. 생략 = 끔 |
 
 **`min_version`이 필요한 이유.** gori는 기본 상태로 TLS 1.0/1.1만 지원하는 장비에 접근할 수 없고, `verify_upstream: false`로도 해결되지 않습니다. 그건 인증서 *검증*을 끄는 것이지 프로토콜 협상과 무관합니다. Crystal의 TLS 클라이언트 컨텍스트가 생성자에서 TLS 1.0과 1.1을 비활성화하므로, 여기서 하한을 낮추는 것이 유일한 방법입니다. 레거시 장비는 보통 `permissive: true`도 함께 필요합니다. 배포판이 OpenSSL을 옛 암호군을 아예 거부하는 security level로 빌드하기 때문입니다.
+
+**`max_version`이 필요한 이유.** 하한만으로는 버전을 고를 수 없습니다. TLS 1.3도 말하는 origin(요즘 origin은 전부 그렇습니다) 상대로는 하한을 아무리 낮춰도 핸드셰이크가 1.3에 안착하므로, `min_version: "tls1.0"`은 *"이 대상이 아직 TLS 1.0을 받아 주는가?"*에 결코 답하지 못했고 `ciphers`도 적용되지 않았습니다. OpenSSL의 암호군 목록은 TLS 1.2 이하에만 적용되기 때문입니다. 두 경계를 모두 지정해야 "`AES128-SHA`로 TLS 1.2를 협상한다"를 표현할 수 있습니다:
+
+```json
+{ "host": "legacy.internal", "min_version": "tls1.2", "max_version": "tls1.2", "ciphers": "AES128-SHA", "permissive": true }
+```
+
+둘을 같은 값으로 고정하면 정확히 그 한 버전만 제안하므로, 핸드셰이크 실패가 곧 진짜 답이 됩니다: 대상이 그 버전을 받아 주지 않는다는 뜻입니다. `min_version`이 `max_version`보다 높으면 저장 시 거부됩니다. 그 조합은 제안할 버전이 하나도 없고, OpenSSL의 오류는 설정 파일이 아니라 origin을 탓하는 문장으로 나오기 때문입니다.
 
 **인증서는 인라인 값이 아니라 파일 경로입니다.** 개인키는 공유·내보내기 대상인 `settings.json`에 들어갈 것이 아닙니다([#439](https://github.com/hahwul/gori/issues/439)). 패스프레이즈가 걸린 키는 저장 시 거부됩니다. OpenSSL이 TUI가 점유한 터미널에 패스프레이즈를 물어보므로, gori가 그냥 멈춘 것처럼 보이게 됩니다. `openssl pkey -in key.pem -out plain.pem`으로 먼저 복호화하세요.
 
@@ -394,7 +406,7 @@ TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 �
 
 ### layout {#layout}
 
-영역별 TUI 레이아웃 환경설정 (커맨드 팔레트 → **Settings: Layout**). 두 값 모두 공장 기본값이면 생략됩니다.
+영역별 TUI 레이아웃 환경설정 (커맨드 팔레트 → **Settings: Layout**). 모든 값이 공장 기본값이면 생략됩니다.
 
 ```json
 {
@@ -403,7 +415,8 @@ TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 �
     "probe_preview": false,
     "issues_preview": false,
     "history_list_order": "newest",
-    "sitemap_expand_depth": -1
+    "sitemap_expand_depth": -1,
+    "tab_numbers": false
   }
 }
 ```
@@ -415,6 +428,7 @@ TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 �
 | `issues_preview` | bool | `false` | Issues 목록 페이지가 선택한 이슈의 하단 요약을 표시 |
 | `history_list_order` | string | `"newest"` | 목록 정렬: `"newest"`(최신이 위) 또는 `"oldest"`(오래된 것이 위) |
 | `sitemap_expand_depth` | integer | `-1` | 재로딩 후 Sitemap 트리가 열리는 깊이: `-1` = 모두 펼침; `0`-`3` = 이 깊이보다 얕은 노드만 펼침 |
+| `tab_numbers` | bool | `false` | 탭 바의 처음 아홉 탭 앞에 `1:`…`9:`를 표시 — `1`-`9` 점프 키가 가리키는 위치입니다 |
 
 ### statusline {#statusline}
 
@@ -467,8 +481,8 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 | `capturing` | bool | 프록시가 현재 캡처 중인지 여부 |
 | `flows` | integer | 캡처한 플로우 수 |
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | 프록시가 실제로 리스닝 중인 주소 |
-| `upstream` | string | **캐치올** 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. [업스트림 규칙](#upstream_rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
-| `upstream_rules` | integer | 적용 중인 [업스트림 규칙](#upstream_rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
+| `upstream` | string | **캐치올** 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. [업스트림 규칙](#upstream-rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
+| `upstream_rules` | integer | 적용 중인 [업스트림 규칙](#upstream-rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
 
 ### display {#display}
 
@@ -505,10 +519,16 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 ```json
 {
   "hostname_overrides": [
-    { "host": "api.prod.internal", "ip": "10.0.0.42" }
+    { "host": "api.prod.internal", "ip": "10.0.0.42" },
+    { "host": "api.prod.example", "ip": "127.0.0.1:8443" },
+    { "host": "v6.internal", "ip": "[::1]:8443" }
   ]
 }
 ```
+
+값은 IP 리터럴이며 **포트**를 붙일 수 있습니다: `IP`, `IP:PORT`, 또는 `[v6]:PORT`. 포트 없는 IP는 요청 URL의 포트를 그대로 쓰는데, 포트 지원 이전에 적힌 항목이 늘 의미하던 바가 그것입니다. 포트를 붙일 수 있다는 점이 `/etc/hosts`를 넘어서는 유일한 부분이고, 이는 의도적입니다. `/etc/hosts`는 바꿀 포트가 없는 리졸버가 읽지만, gori는 연결을 직접 만드는 쪽입니다. 트래픽이 실제 브라우저나 모바일 앱에서 나올 때는 URL을 gori가 쓰는 것이 아니므로, `https://api.prod.example/`을 `127.0.0.1:8443`의 로컬 빌드로 보내는 일은 이것 없이는 표현할 수 없습니다.
+
+SNI, 인증서 호스트명, `Host` 헤더는 여전히 **원래** 이름을 유지합니다. 바뀌는 것은 TCP 연결 대상만입니다.
 
 Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에서, 또는 프로젝트별 항목은 Project 탭에서 편집합니다. [Proxy & History](/ko/guide/proxy/#host-overrides)를 참고하세요.
 
@@ -600,7 +620,8 @@ Discover 실행의 저장된 기본값입니다. discover 옵션을 저장해야
     "concurrency": 20,
     "spider": true,
     "bruteforce": true,
-    "extensions": false
+    "extensions": false,
+    "keep_alive": true
   }
 }
 ```
@@ -613,6 +634,7 @@ Discover 실행의 저장된 기본값입니다. discover 옵션을 저장해야
 | `spider` | bool | `true` | 응답에서 찾은 링크를 따라감 |
 | `bruteforce` | bool | `true` | 워드리스트로 경로 무차별 탐색 |
 | `extensions` | bool | `false` | 각 후보의 확장자 변형도 함께 시도 |
+| `keep_alive` | bool | `true` | 요청 간에 업스트림 연결을 재사용(Discover 오버레이의 **Keep-alive** 토글). 이 키가 생기기 전에 기록된 파일은 `true`로 읽힘 |
 
 ### mine {#mine}
 
@@ -623,6 +645,7 @@ Param Miner의 저장된 기본값입니다. mine 옵션을 저장해야 기록�
 | `locations` | array | `[]` | 주입 위치: `query`, `form`, `multipart`, `json`, `headers`, `cookies`. 비어 있으면 요청마다 자동 감지 |
 | `concurrency` | integer | `10` | 동시 요청 수 |
 | `notify` | string | `"when-found"` | `"when-found"`, `"always"`, `"off"` |
+| `keep_alive` | bool | `true` | 요청 간에 업스트림 연결을 재사용(Mine 오버레이의 **Keep-alive** 토글). 이 키가 생기기 전에 기록된 파일은 `true`로 읽힘 |
 
 ### scan_rules {#scan-rules}
 
@@ -736,7 +759,7 @@ retention은 **새 기능이 아닙니다**. gori는 프로젝트 DB가 무한�
 | `latest_seen` | string | `""` | 릴리스 피드에서 마지막으로 확인한 버전 |
 | `checked_at` | integer | `0` | 마지막 성공 확인의 unix 초. 하루 동안 결과를 캐시 |
 
-아래 셋은 gori가 관리하는 상태이고, 직접 수정할 값은 `check_enabled`뿐입니다. 기본 설치에서는 섹션 전체가 기록되지 않습니다.
+뒤의 셋은 gori가 관리하는 상태이고, 직접 수정할 값은 `check_enabled`뿐입니다. 기본 설치에서는 섹션 전체가 기록되지 않습니다.
 
 ### fuzzer {#fuzzer}
 
@@ -764,10 +787,11 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 |---------|-------------|
 | `theme` | 활성 테마 이름 (기본값 `goridark`). [테마 가이드](/ko/guide/themes/) 참고 |
 | `mouse` | 마우스 지원 토글 |
+| `mouse_drag` | 드래그를 놓았을 때의 동작: `select`(기본값) 또는 `copy` |
 | `pretty_bodies` | 상세 뷰에서 JSON/XML 등의 본문을 pretty-print |
 | `editor` | 외부 편집기 `command`와 Markdown 처리 |
 | `tabs` | 표시/숨김할 TUI 탭 |
-| `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname_overrides) 참고 |
+| `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname-overrides) 참고 |
 | `env` | Env 토큰 접두사와 전역 값. 위의 [env](#env) 참고 |
 | `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `command_modifier` + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
 | `hooks` | 외부 프로세스 훅: `timeout_secs`(기본 5, 1~60으로 클램프)는 모든 이음매에서 훅 한 번이 받는 벽시계 예산입니다. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
@@ -777,7 +801,7 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
 | `saved_views` | 전역 History **뷰** 라이브러리. 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고 |
 | `companion` | 마스코트 Miss Ring: `enabled`(기본 off), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
-| `layout` | History / Probe / Issues 미리보기 + Sitemap 펼침 깊이. 위의 [layout](#layout) 참고 |
+| `layout` | History / Probe / Issues 미리보기, Sitemap 펼침 깊이, 탭 바 번호. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, `wrap_lines`(긴 줄 접기, 기본 켜짐), 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |
 

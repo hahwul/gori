@@ -490,7 +490,7 @@ module Gori::Tui
       end
     end
 
-    # Mute every OPEN issue carrying `code`, honouring the ⇧S scope lens exactly as the
+    # Mute every OPEN issue carrying `code`, honouring the `s` scope lens exactly as the
     # visible list does: dismissing "all with this code" from a scoped view must not silently
     # mute issues on out-of-scope hosts the operator cannot see, and the returned count must
     # equal what was actually muted.

@@ -23,7 +23,7 @@ group = "워크벤치"
 - **Decode**: INPUT에 토큰을 붙여 넣으면 header, payload, signature가 실시간으로 디코드됩니다. 그 아래에는 생성된 **공격 페이로드**를 고를 수 있는 목록이 있습니다.
 - **Encode**: HEADER와 PAYLOAD를 JSON으로 편집하고, 알고리즘을 선택하며(`Ctrl-A`로 `HS256` / `HS384` / `HS512` / `none` 순환), SECRET을 설정하면 재서명된 토큰이 OUTPUT에 실시간으로 나타납니다.
 
-`l`을 누르면 현재 Decode 쪽에서 디코드된 토큰을 Encode 편집기로 불러옵니다. 그래서 claim 하나를 손보고 두 동작만으로 재서명할 수 있습니다. 결과는 `y`로 복사하세요.
+`Space` → **Load decoded claims**는 현재 Decode 쪽에서 디코드된 토큰을 Encode 편집기로 불러옵니다. 그래서 claim 하나를 손보고 두 동작만으로 재서명할 수 있습니다. 결과는 `y`로 복사하세요.
 
 > signature는 디코드되어 표시되지만 **결코 검증되지 않습니다**. 따라서 디코드는 토큰이 무엇을 주장하는지 알려줄 뿐, 신뢰할 수 있는지는 알려주지 않습니다. Encode는 지정한 secret과 알고리즘으로 실제로 서명합니다. (검증과 재서명을 모두 하는 형제 탭은 [Cookie](/ko/guide/cookie/)입니다.)
 
@@ -33,7 +33,7 @@ group = "워크벤치"
 
 | 공격 | 무엇을 테스트하는가 |
 |--------|---------------|
-| **alg:none** | signature를 제거하고 `alg`를 `none`으로 설정합니다(그리고 `None` / `NONE` 대소문자 변형 포함). 서명 없는 토큰을 받아들이는 서버를 겨냥합니다. |
+| **alg:none** | signature를 제거하고 `alg`를 `none`으로 설정합니다(그리고 `None` / `NONE` / `nOnE` 대소문자 변형 포함). 서명 없는 토큰을 받아들이는 서버를 겨냥합니다. 원래 header를 유지하는 페이로드가 둘 더 있습니다: **signature stripped**(세 번째 세그먼트가 빈 토큰)와 **no signature segment**(세그먼트가 둘뿐인 토큰). |
 | **Weak secret** | 흔한 약한 HMAC secret 목록으로 토큰을 재서명해, 추측 가능한 서명 키를 잡아냅니다. |
 | **Header injection** | `kid`, `jku`, `x5u`, `jwk` header 파라미터를 조작합니다. 공격자가 제공한 키 자료를 신뢰하는 서버를 겨냥합니다. |
 

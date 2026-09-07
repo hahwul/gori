@@ -49,7 +49,7 @@ gzip-decompress | json-unescape
 myenc > url-encode
 ```
 
-이 탭에서만이 아니라 gori가 체인을 받는 모든 곳에서 동작합니다. Repeater 나 Fuzzer의 `§…§` 마커에서 여는 `Ctrl-Y` 체인 편집기, `gori run decoder`, MCP의 `decode` 도구 전부 해당합니다. 자동완성은 저장한 이름을 기본 변환기와 나란히 보여 주고, `gori run decoder list`에는 `saved` 범주로 나옵니다.
+이 탭에서만이 아니라 gori가 체인을 받는 모든 곳에서 동작합니다. Repeater 나 Fuzzer의 `§…§` 마커에서 여는 `Ctrl-Q` 체인 편집기, `gori run decoder`, MCP의 `decode` 도구 전부 해당합니다. 자동완성은 저장한 이름을 기본 변환기와 나란히 보여 주고, `gori run decoder list`에는 `saved` 범주로 나옵니다.
 
 저장한 체인끼리 서로 부를 수도 있습니다. 순환 정의는 멈추지 않고 그 단계가 이유와 함께 실패하며, 기본 변환기가 이미 쓰고 있는 이름(별칭 포함)은 저장 단계에서 거부됩니다. 기본 변환기가 계속 이겨야 하기 때문입니다. 라이브러리가 `base64-decode`를 가릴 수 있게 되면 모든 프로젝트에 이미 있는 체인의 의미가 바뀝니다.
 
@@ -74,7 +74,7 @@ myenc > url-encode
 
 몇 가지는 한 방향으로만 동작하며 체인으로 되돌릴 수 없습니다. `shell-escape`와 `powershell-escape`는 값을 따옴표 리터럴로 감싸고, `homoglyph`는 ASCII 글자를 시각적으로 닮은 유니코드 문자로 바꿉니다(굳어진 대응 문자가 없는 글자는 그대로 둡니다). `typo`는 변환이 아니라 생성기입니다. 글자 누락, 인접 글자 자리바꿈, QWERTY 이웃 키로 만든 오타 변형을 한 줄에 하나씩 내놓습니다.
 
-OUTPUT은 바이너리 결과를 위해 표시 모드(text → hex → base64)를 순환할 수 있습니다. READ 모드에서 `y`로 복사하거나 space 메뉴를 사용하세요.
+OUTPUT은 바이너리 결과를 위해 표시 모드(text → hex → base64)를 순환할 수 있습니다. READ 모드에서는 `y`로, INS 모드로 INPUT을 편집하는 중에는 `Ctrl-Y`로 복사하거나 space 메뉴를 사용하세요.
 
 ## 언제 사용하는가 {#when-to-use-it}
 

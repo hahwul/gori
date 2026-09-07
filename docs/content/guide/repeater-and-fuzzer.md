@@ -94,7 +94,7 @@ Mark positions with `§…§` markers in the request, or let gori place them aut
 
 A gRPC message is the one place a marker cannot go usefully; see [Sweeping a gRPC Field](#sweeping-a-grpc-field), where the position is a schema-known field rather than a byte range.
 
-A single marker can also carry a Decoder chain of its own. Put the cursor inside it and press `Ctrl-Y` to open the chain editor, which previews the value through every step before you send. Anything you [saved in the Decoder library](/guide/decoder/#building-a-chain) can be called there by name, so a chain you built once is one word in a marker: `§admin¦myenc > url-encode§`. Repeater markers work the same way.
+A single marker can also carry a Decoder chain of its own. Put the cursor inside it and press `Ctrl-Q` to open the chain editor, which previews the value through every step before you send. Anything you [saved in the Decoder library](/guide/decoder/#building-a-chain) can be called there by name, so a chain you built once is one word in a marker: `§admin¦myenc > url-encode§`. Repeater markers work the same way.
 
 ### Matching
 
@@ -186,7 +186,7 @@ Mark `§…§` positions **in the frames**, which is where a WebSocket app's par
 ```bash
 gori run fuzz --repeater 7 \
   --message '{"op":"login","user":"§admin§"}' \
-  --payloads-preset sqli
+  --preset sqli
 ```
 
 `--repeater N` on a WebSocket session seeds the handshake **and** the frames the session stored, so a captured exchange is swept as it was recorded; `--flow N` does the same from a captured socket. `--message` / `--message-frame` replace those frames when you want to author your own; `--message-frame` takes the same `opcode=…,fin=…,rsv=…,mask=…,len=…,hex=|b64=|text=` grammar as `gori run repeater send`, so a PING, a CLOSE with a chosen code, an unmasked client frame or a length that disagrees with its payload are all reachable. `--idle-ms` sets the per-session silence timeout and `--ws-keep-key` sends the template's own `Sec-WebSocket-Key` so an absent or malformed key can itself be the test (an RFC 8441 handshake has no such key, and the run says so rather than ignoring the flag).

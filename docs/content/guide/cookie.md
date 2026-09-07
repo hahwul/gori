@@ -18,7 +18,7 @@ One session, two views, toggled with `Ctrl-T`. The top card of each lens carries
 - **Decode**: paste a cookie into INPUT and its parts decode live in DECODED. **OPTIONS** pins how it is read: the format (`Ctrl-A` cycles `auto` / `flask` / `rack` / `django`; `auto` detects it from the punctuation), the Django HMAC algorithm, and a signing salt. **SECRET** holds a candidate key, and its verify verdict (`✓ verified` / `✗ bad key`) is live as you type; press `c` to crack it (see below).
 - **Forge**: edit the session in PAYLOAD (a JSON object for Flask/Django, the opaque base64 value for Rack), set a SECRET, and the re-signed cookie appears live in OUTPUT.
 
-Press `l` to load the payload currently decoded on the Decode side into the Forge editor, so you can tweak a value and re-sign in two moves. Copy any result with `y` (the forged cookie with `t`).
+`Space` → **Load decoded payload** loads the payload currently decoded on the Decode side into the Forge editor, so you can tweak a value and re-sign in two moves. Copy any result with `y` (the forged cookie with `Space` → **Copy forged cookie**).
 
 > Unlike the [JWT](/guide/jwt/) tab, which decodes but never verifies, Cookie has the secret path: a `✓` in SECRET means the key you typed actually signs this cookie. Forge genuinely re-signs with the secret, salt, and algorithm you give it.
 
@@ -53,7 +53,7 @@ gori run cookie --forge --type flask --payload '{"admin":true}' --secret s3cret
 cat cookie.txt | gori run cookie                             # cookie from stdin
 ```
 
-The cookie comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--type` pins the format (default: auto-detect), `--salt` and `--algorithm` thread the Django/Flask knobs, and `--format` is `text` or `json`. Flask/Django `--forge` takes a `--payload` JSON; Rack takes the opaque `--value`. See the [CLI Reference](/reference/cli/#run-cookie).
+The cookie comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--type` pins the format (default: auto-detect), `--salt` sets the Flask/Django signing salt, `--algorithm` the Django HMAC algorithm (`sha256`, the default, or `sha1`), and `--format` is `text` or `json`. Flask/Django `--forge` takes a `--payload` JSON; Rack takes the opaque `--value`; `--timestamp UNIX` stamps the forged cookie with that second instead of now. See the [CLI Reference](/reference/cli/#run-cookie).
 
 Over MCP, `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` are read tools available even under `--read-only`, since they touch no network or state.
 

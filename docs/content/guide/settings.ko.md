@@ -53,9 +53,9 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 
 | 섹션 | 필드 |
 |------|------|
-| **General** | Clipboard (OSC 52), Confirm before quit |
+| **General** | Clipboard (OSC 52), Confirm before quit, Update check, History retention (flows), Record Repeater sends |
 | **Notifications** | Bell on result, Toast on result, Retention (count) |
-| **Statusline** | Statusline on/off, Command, Interval (s) |
+| **Statusline** | Statusline on/off, Command, Interval (s), Timeout (s) |
 | **Reset** | 액션: 모든 설정을 공장 기본값으로 되돌리기 |
 
 알림은 Miner, Fuzzer, Probe, Discover의 백그라운드 결과에서 발생합니다. [Statusline](/ko/reference/config/#statusline)은 셸 명령을 일정 간격으로 실행해 그 stdout를 맨 아래 줄에 표시합니다.
@@ -103,14 +103,14 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 
 | 섹션 | 필드 |
 |------|------|
-| **Network** | Bind IP, Bind Port, Upstream proxy, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules(읽기 전용), Outbound TLS(읽기 전용), Hostname overrides(오프너) |
+| **Network** | Bind IP, Bind Port, Proxy protocol, Proxy host, Proxy port, Proxy TLS CA, Verify proxy TLS, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules(읽기 전용), Outbound TLS(읽기 전용), Hostname overrides(오프너) |
 | **Tabs** | 오프너: 상단 탭 바 표시/숨김과 순서 변경 |
 
 여기의 Network는 **전역 기본값**입니다. 프로젝트는 **Project** 탭에서 자체 바인드 주소, 포트, 업스트림을 고정할 수 있고 그 프로젝트에서는 그쪽이 우선합니다. 전체 우선순위는 [설정](/ko/getting-started/configuration/#network)을 참고하세요.
 
 ## 프로젝트 선택기에서 {#in-the-project-picker}
 
-`Ctrl-,`는 프로젝트를 열기 전, 프로젝트 선택기에서도 같은 모달을 엽니다. 첫 실행에서 테마를 정할 수 있습니다. 다만 그곳에서 편집할 수 있는 것은 **Theme**뿐입니다. 실행 중인 프로젝트가 필요한 섹션(Tabs, Env, Hotkeys, 호스트네임 오버라이드)은 숨겨지거나 프로젝트를 먼저 열라고 안내합니다. **Reset**도 마찬가지입니다. 공장 초기화는 실행 중인 세션에 적용되어야 하기 때문입니다.
+`Ctrl-,`는 프로젝트를 열기 전, 프로젝트 선택기에서도 같은 모달을 엽니다. 첫 실행에서 테마를 정할 수 있습니다. 폼 섹션은 모두 그곳에서도 편집할 수 있고, 오프너 중에서는 **Theme**만 동작합니다. 실행 중인 프로젝트가 필요한 섹션(Tabs, Env, Hotkeys, 호스트네임 오버라이드)은 숨겨지거나 프로젝트를 먼저 열라고 안내합니다. **Reset**도 마찬가지입니다. 공장 초기화는 실행 중인 세션에 적용되어야 하기 때문입니다.
 
 ## 설정이 저장되는 곳 {#where-settings-live}
 

@@ -78,7 +78,7 @@ describe Gori::Tui::FlowPicker do
   it "separates an empty project from one the Scope lens emptied" do
     # The Comparer draws its rows through the lens, so `@rows.empty?` stopped meaning "nothing
     # captured" — and the two readings send the operator opposite ways (hunt for lost traffic
-    # vs press ⇧S). The link picker keeps the unlensed default and the older sentence.
+    # vs press `s`). The link picker keeps the unlensed default and the older sentence.
     lensed = OverlayHarness.new(FlowPicker.new([] of Gori::Store::FlowRow, :a, scoped: true))
     lensed.rendered?("no flows in scope").should be_true
     lensed.rendered?("s toggles the lens").should be_true

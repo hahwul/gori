@@ -199,7 +199,7 @@ module Gori::Tui
     end
 
     # The filter bar row. Its right cluster's chips do exactly what their own chords do —
-    # ⇧S flips the scope lens, `f` follow, `v` opens the view picker — and the field left of
+    # `s` flips the scope lens, `f` follow, `v` opens the view picker — and the field left of
     # them opens for editing like `/`. A chip that is a READOUT rather than a control (the row
     # count, the mark count) still consumes the click: it is chrome, not a list row, and
     # falling through would move the selection out from under the pointer.

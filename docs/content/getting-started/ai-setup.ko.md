@@ -40,7 +40,7 @@ gori mcp --install-hermes        # Hermes
 
 **체크포인트.** 클라이언트가 gori의 도구들(`list_history`, `send_request`, `project_info` 등)을 나열합니다. 나타나지 않으면 클라이언트를 재시작했는지, 그리고 `gori`가 클라이언트가 사용하는 `PATH`에 있는지 확인하세요.
 
-## 2. 프로젝트 바인딩 (또는 에이전트가 고르게) {#2-pin-the-right-project}
+## 2. 프로젝트 바인딩 (또는 에이전트가 고르게) {#2-bind-a-project-or-let-the-agent-pick-one}
 
 각 gori 프로젝트는 별도의 데이터베이스입니다. 설치 후 `gori mcp`는 항상 연결됩니다.
 
@@ -50,7 +50,7 @@ gori mcp --install-hermes        # Hermes
 | Git 밖 (Desktop / 전역 에이전트에서 흔함) | **unbound**로 시작. 핸드셰이크 성공; 에이전트가 트래픽 도구 전에 `list_projects` / `create_project` / `switch_project` 호출 |
 | `--project` / `--db`로 설치 | 첫 도구 호출부터 그 프로젝트 제공 |
 
-에이전트가 먼저 `project_info`를 호출하게 하세요. `bound`가 false이면 프로젝트를 나열·생성(unbound일 때 create는 자동 바인딩)하거나 switch 한 뒤, bound일 때 이름·DB 경로·선택 출처를 확인한 다음 데이터를 건드리게 합니다.
+에이전트가 먼저 `project_info`를 호출하게 하세요. `bound`가 false이면 프로젝트를 나열하거나 생성한 뒤(unbound일 때 create는 자동 바인딩), 필요하면 switch 합니다. bound이면 데이터를 변경하기 전에 이름·데이터베이스 경로·선택 출처를 확인합니다.
 
 설치 시점에 고정 engagement를 박아 두려면:
 

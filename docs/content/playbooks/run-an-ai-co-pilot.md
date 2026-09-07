@@ -66,7 +66,7 @@ gori mcp --read-only --install-claude-code
 
 Read-only keeps every inspection tool (`list_history`, `get_flow`, `list_sitemap`, `compare_flows`) and the pure-compute helpers (`decode`, `jwt_decode`) while disabling `send_request`, issue writes, and the intercept mutators. The agent can read and reason about the whole engagement; it cannot touch the target or change your records.
 
-Scope is the second guardrail, and it holds even with the action tools enabled. An active tool aimed at a host outside your project scope, or without one, is refused with a `SCOPE_BLOCKED` error, whether or not the sandbox is on. So even a full-access agent cannot send a stray request to a host you never scoped; it inherits the same guardrail Repeater and the Fuzzer check.
+Scope is the second guardrail, and it holds even with the action tools enabled. An active tool aimed at a host outside your project scope, or without one, is refused with a `SCOPE_BLOCKED` error, whether or not the sandbox is on, unless the call passes `allow_unscoped:true`, the explicit waiver (the sandbox and explicit excludes still apply even then). So even a full-access agent cannot quietly send a stray request to a host you never scoped; it inherits the same guardrail Repeater and the Fuzzer check.
 
 **Checkpoint.** A read-only agent can list history and analyze flows, but `send_request` comes back disabled, and with the action tools on, a request to an out-of-scope host returns `SCOPE_BLOCKED`.
 

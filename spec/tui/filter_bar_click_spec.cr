@@ -7,8 +7,8 @@ require "../../src/gori/tui/controllers/sitemap_controller"
 
 include Gori::Tui
 
-# Clicking the filter bar (#-): the chips right of the query — `v:` / `f:follow` / `⇧S scope` on
-# History, `g:fold` / `⇧S scope` on the Target tree — are the toggles their chords are, and the
+# Clicking the filter bar (#-): the chips right of the query — `v:` / `f:follow` / `s scope` on
+# History, `g:fold` / `s scope` on the Target tree — are the toggles their chords are, and the
 # field left of them opens for editing like `/`.
 #
 # The property every example here turns on is COLUMN AGREEMENT: the chips drop individually on a

@@ -136,7 +136,7 @@ module Gori::Tui
       true
     end
 
-    # The filter bar row. Its chips do exactly what their own chords do — ⇧S flips the scope
+    # The filter bar row. Its chips do exactly what their own chords do — `s` flips the scope
     # lens, `g` id folding — and the field left of them opens for editing like `/`. The mirror
     # of HistoryController#click_filter_bar, including that a READOUT chip (the host count, the
     # mark count) still consumes the click: the bar is chrome, not a tree row, and falling

@@ -7,7 +7,7 @@ weight = 50
 group = "수동 루프"
 +++
 
-인증된 테스트란 한 번 하는 로그인과 그 뒤로 계속 지니고 다니는 토큰입니다. 이 플레이북은 로그인을 캡처하고, 회전하는 토큰을 이름에 바인딩하고, 그 이름을 이후의 모든 요청에 써 넣은 뒤, 같은 일을 헤드리스에서 명령 하나로 해냅니다. 약 10분 잡으세요.
+인증된 테스트란 한 번 하는 로그인과 그 뒤로 계속 지니고 다니는 토큰입니다. 이 플레이북은 로그인을 캡처하고, 회전하는 토큰을 이름에 바인딩하고, 그 이름을 이후의 모든 요청에 써 넣은 뒤, 같은 일을 헤드리스에서 명령 하나로 해내고, 여러 세션을 나란히 들고 다닙니다. 약 10분 잡으세요.
 
 > **시작하기 전에.** 먼저 [엔게이지먼트 준비](/ko/playbooks/set-up-an-engagement/)를 끝내고, 프록시를 통해 대상에 로그인할 수 있어 그 인증 응답이 캡처되게 하세요. 테스트 권한이 있는 대상만 상대로 세션을 재전송하세요. 예시는 `api.example.com`을 대역으로 씁니다.
 
@@ -53,14 +53,14 @@ gori run rewriter add --op set_header --target request \
 
 ```bash
 gori run fuzz 42 --bind-from 17 --wordlist ids.txt
-# bind-from: flow #17 replayed → bound $SESS
+# bind-from: flow #17 replayed → bound $SESSION
 ```
 
 같은 플래그가 `mine`, `sequence`, `discover`에도 통합니다.
 
 **체크포인트.** 실행이 `bind-from: flow #… replayed → bound $…` 줄을 찍고, 응답이 `401` 벽 대신 인증된 채로 돌아옵니다.
 
-## 5. 세션을 여러 개 들고 다니기 {#carry-more-than-one-session}
+## 5. 세션을 여러 개 들고 다니기 {#5-carry-more-than-one-session}
 
 2~4단계는 세션 *하나*를 들고 다닙니다. 실제 엔게이지먼트는 보통 여러 개(관리자, 저권한 사용자, 익명 클라이언트)를 동시에 필요로 하는데, `$SESSION`은 한 번에 하나만 뜻할 수 있습니다. **세션 슬롯**이 그 이름입니다. 자기 헤더 오버레이와 자기 바인딩 테이블을 가진 아이덴티티이고, **활성** 인 슬롯이 곧 전송이 나가는 신원입니다.
 
@@ -92,6 +92,7 @@ gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
 
 ## 다음 단계 {#next-steps}
 
+- [Authorize](/ko/guide/authorize/): 한 요청을 *모든* 슬롯으로 한꺼번에 재전송해 접근 제어 결함 찾기
 - [디코딩과 변환](/ko/playbooks/decode-and-transform/): 세션이 올라타는 인코딩된 값을 읽고 되쓰기
 - [Session bindings](/ko/guide/proxy/#session-bindings): extract 규칙과 값이 사는 곳의 전체 레퍼런스
 - [Scripting](/ko/guide/scripting/): 헤드리스 스윕 계약, 종료 코드, 그리고 `--bind-from`

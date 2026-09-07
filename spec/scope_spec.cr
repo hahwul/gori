@@ -30,7 +30,7 @@ describe Gori::Scope do
     with_store do |store|
       scope = Gori::Scope.load(store)
       scope.add("include", "host", "acme.test")
-      scope.active?.should be_false                    # never enabled — the ⇧S lens is off
+      scope.active?.should be_false                    # never enabled — the `s` lens is off
       scope.filter.sql.should eq("1")                  # so the ordinary filter is match-all
       scope.filter(force: true).sql.should_not eq("1") # …but the opt-in --in-scope filter is real
 
@@ -50,7 +50,7 @@ describe Gori::Scope do
       scope.add("include", "host", "acme.test")
       scope.add("exclude", "host", "cdn.acme.test")
 
-      scope.active?.should be_false # ⇧S off — a filter TERM is a question, not a mode
+      scope.active?.should be_false # `s` off — a filter TERM is a question, not a mode
       lens = scope.ql_lens
       lens.configured?.should be_true
       lens.predicate.should eq(scope.filter(force: true))
@@ -120,7 +120,7 @@ describe Gori::Scope do
   end
 
   # matches_url? is the Probe Active gate: include rules define the probe target set
-  # even when the ⇧S display lens is off (in_scope_url? is permissive when inactive).
+  # even when the `s` display lens is off (in_scope_url? is permissive when inactive).
   it "matches_url? evaluates include rules with the lens off; false without includes" do
     with_store do |store|
       scope = Gori::Scope.load(store)

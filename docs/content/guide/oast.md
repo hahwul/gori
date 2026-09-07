@@ -27,7 +27,7 @@ A callback is proof the target reached a server it shouldn't have. The absence o
 
 ## Providers
 
-Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `t` set type, `d` delete); a public preset auto-fills the server host when you pick its type.
+Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `x` enable / disable, `d` delete); a public preset auto-fills the server host when you pick its type.
 
 The bar above the callbacks table selects which provider `g` and `Ctrl-R` act on; `←` / `→` cycle it (the bar draws the pick as `‹ name ›`), and **All** shows every provider's callbacks at once. Getting a payload or starting a listener needs one provider, so on **All** with two or more providers enabled, `g` and `Ctrl-R` open a picker card; pick a row with `↵` and the bar follows. With a single enabled provider there is nothing to ask, and the action just runs.
 
@@ -67,10 +67,10 @@ No surface resumes on its own. Opening a project, binding an MCP server, or star
 | `r` | Resume a saved listener |
 | `g` | Get / copy the current payload (asks which provider on **All**) |
 | `←` / `→` | Cycle the provider the bar acts on |
-| `y` | Copy the selected callback |
+| `y` | Copy the current payload (on the list), or the selected callback (inside its `↵` detail) |
 | `Shift-F` | File the selected callback as an Issue |
 | `/` | Filter the callback list |
-| `a` / `e` / `t` / `d` | Providers sub-tab: add / edit / set type / delete |
+| `a` / `e` / `x` / `d` | Providers sub-tab: add / edit / enable or disable / delete |
 
 ## Filing a Callback
 
@@ -97,6 +97,8 @@ gori run oast release 7                        # deregister it; its callbacks st
 ```
 
 `resume` keeps the registration on exit (Ctrl-C stops polling, nothing more) and persists every callback it catches into the project, so the OAST tab shows the same hits. `release` is the deliberate teardown.
+
+The saved providers (the **Providers** sub-tab's rows) are manageable headless too, with `gori run oast providers add|update|enable|disable|delete|list`, and both `listen` and `resume` take `--interval SEC` (default 5) for the poll cadence; the flags are in the [CLI Reference](/reference/cli/#run-oast).
 
 See the [CLI Reference](/reference/cli/#run-oast) for every flag. Over MCP, an agent drives the same engine with `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions` (read) and `oast_start` / `oast_stop` / `oast_resume` / `oast_release` (action). `oast_resume` returns a `session_id` that `oast_poll` and `oast_payload` take, and its polls are persisted like the CLI's; `oast_stop` on a resumed session stops polling but keeps it resumable, exactly as `Ctrl-X` does.
 

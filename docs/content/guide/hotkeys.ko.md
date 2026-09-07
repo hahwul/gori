@@ -32,6 +32,7 @@ Ctrl-P  → settings:hotkeys
 - **Ctrl**은 타이핑 중(INS)에도 작동해야 하는 동작, 그리고 워크벤치의 실행·중지(`Ctrl-R` / `Ctrl-X`)를 위한 것입니다. 맨 글자에서 한 단계 올리는 범용 승격 수단이 아닙니다.
 - **Shift**는 탭 전체를 비우는 동작을 맡습니다. `⇧X`는 clear가 있는 모든 탭(History·Probe·Authorize·Issues·프로젝트 ACTIVITY 피드)에서 같은 키이고, 스페이스 메뉴 글자는 그 옆의 `X`입니다. `c`가 아니라 `x`인 이유는 shift 아래에 무엇이 있느냐입니다: 맨 `x`는 그 다섯 스코프 어디에도 바인딩되어 있지 않지만 맨 `c`는 다섯 곳 모두에서 살아 있고(`capture.toggle`, Probe 목록에서는 dismiss), 프로젝트를 지우는 동작이 하루 종일 누르는 키 바로 위 shift에 있어서는 안 됩니다. 파괴적인 코드는 **누르기 전에 읽을 수 있는 곳에 이름이 적혀 있어야** 하고(스페이스 메뉴만이 아니라 Help 시트와 그 탭의 본문 힌트에), 먼저 확인을 물어야 합니다.
 - **복사가 그 규칙의 실례입니다.** `y`는 READ에서, `Ctrl-Y`는 **INS에서도**, 모든 텍스트 상자에서 복사합니다. INS에서 맨 `y`는 그냥 문자이고, `Shift`+화살표로 만든 선택 위에 타이핑하면 그 선택을 *덮어씁니다*. 그래서 복사 반사에는 타이핑을 견디는 코드가 필요합니다. 둘은 같은 동사(`*.copy`)이므로 재지정은 READ 쪽 글자만 옮기고 **`Ctrl-Y`는 그대로 남습니다**. 모든 스코프에서, 명시적인 해제(unbind)를 해도 마찬가지입니다. `y`를 푸는 것은 READ 모드에 대한 결정이지, 방금 선택한 것을 복사할 방법을 텍스트 패널에서 조용히 없애도 된다는 뜻이 아니기 때문입니다.
+- space 메뉴는 INS의 대체 수단이 **아닙니다**. 텍스트 에디터가 키를 먼저 소비하므로 그곳에서 `Space`는 그냥 문자입니다. 타이핑 중에도 닿아야 하는 동작에는 Ctrl 코드가 필요하고, 니모닉만으로는 부족합니다. (Repeater/Fuzzer의 디코더 체인 편집기가 `Ctrl-Y`를 Copy에 넘겨준 뒤 space 메뉴만이 아니라 `Ctrl-Q`에 실린 이유가 이것입니다.)
 - **History → Repeater**와 **Repeater 전송**은 **`Ctrl-R`**로 유지됩니다(동일한 근육 기억). History→Repeater를 맨 글자 `r`로 옮기지 마세요.
 - Match & Replace와 알림은 키 없이(팔레트 / 배지) 제공됩니다. Global 키 조합을 원하면 재지정하세요.
 
@@ -42,6 +43,7 @@ Ctrl-P  → settings:hotkeys
 | 키 | 동작 |
 |-----|--------|
 | `↑` / `↓` (또는 `j` / `k`), 휠 | 선택 이동 |
+| `/` | 동작 목록 검색 |
 | `e` 또는 `Space` | 선택한 동작 재지정, 그다음 새 키를 누릅니다 |
 | `x` 또는 `Backspace` | 선택한 동작의 바인딩 해제 |
 | `r` | 선택한 동작을 기본값으로 초기화 |
@@ -64,8 +66,8 @@ Ctrl-P  → settings:hotkeys
 
 - **종료**: `Ctrl-C`, `Ctrl-D`.
 - **명명된 키와 구별 불가**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
-- **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, 그리고 맨 `:`(명령줄).
-- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
+- **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, `Space`(space 메뉴 리더), 그리고 맨 `:`(명령줄).
+- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **Reveal whitespace**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
 
   `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다. 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
 

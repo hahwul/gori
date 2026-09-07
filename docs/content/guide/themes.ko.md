@@ -97,7 +97,9 @@ gori는 30개의 내장 컬러 테마를 제공합니다: `goridark`(기본값),
   "syn_header":    "#82a8c4",
   "syn_string":    "#8fb87a",
   "syn_number":    "#ca9b6a",
-  "syn_literal":   "#b08ec2"
+  "syn_literal":   "#b08ec2",
+  "syn_comment":   "#6f8172",
+  "syn_keyword":   "#d08c9a"
 }
 ```
 
@@ -123,9 +125,12 @@ gori는 30개의 내장 컬러 테마를 제공합니다: `goridark`(기본값),
 | `syn_string` | 따옴표 문자열 |
 | `syn_number` | 숫자, 태그 속성 이름 |
 | `syn_literal` | `true` / `false` / `null` |
+| `syn_comment` | 주석(GraphQL `#`, JSONC `//`, HTML `<!-- -->`) |
+| `syn_keyword` | 언어 키워드, 인증 스킴 |
 
 ### 참고 {#notes}
 
+- `"base"`는 내장 테마 이름이어야 합니다. 커스텀 테마를 다른 커스텀 테마의 base로 쓸 수 없고, 알 수 없는 base는 `goridark`로 폴백합니다.
 - 파일 이름은 소문자 `a-z 0-9 - _`로 정규화되며, 다른 문자는 제거됩니다(`My Theme!.json` → `mytheme`).
 - 이름이 내장 테마와 충돌하는 파일(예: `goridark.json`)은 무시됩니다. 내장 테마는 재정의할 수 없습니다.
 - 로딩은 너그럽습니다: 읽을 수 없는 파일, 잘못된 JSON, 객체가 아닌 것은 건너뛰며, 잘못된 색 하나는 테마 전체를 버리는 대신 `base` 값으로 폴백합니다. 깨진 테마 파일이 TUI를 죽이는 일은 없습니다.

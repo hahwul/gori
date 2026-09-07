@@ -13,7 +13,7 @@ group = "워크벤치"
 
 ## 아이덴티티란 {#what-an-identity-is}
 
-gori에는 다중 세션을 다루는 별도 장치가 없습니다. 환경 변수는 키당 값이 하나이고, 세션 바인딩은 프로세스 전역 네임스페이스 하나뿐입니다. 그래서 여기서 아이덴티티는 재전송 직전에 캡처된 요청에 덧씌우는 **정적 헤더 오버레이**입니다. 대부분의 상황을 덮으면서, 한눈에 읽힐 만큼 단순합니다.
+아이덴티티는 **세션 슬롯**입니다. 이름, 재전송 직전에 캡처된 요청에 덧씌우는 정적 헤더 오버레이, 그리고 바인딩된 값이 그 슬롯의 것인 extract 규칙들로 이루어집니다. gori 어디서나 같은 객체입니다. Authorize 탭은 *모든* 슬롯으로 재전송하고, Repeater나 Fuzzer 전송은 활성인 *하나*의 슬롯으로 나갑니다(아래 [세션 슬롯](#session-slots-one-list-two-readers) 참고). 목록 하나, 설정 행 하나, 표면 셋.
 
 | 필드 | 동작 |
 |-------|--------|
@@ -139,6 +139,8 @@ gori에는 다중 세션을 다루는 별도 장치가 없습니다. 환경 변�
 | `i` | Identities: 재전송에 사용할 아이덴티티 집합 편집 |
 | `p` | 패시브 재전송 토글 |
 | `d` | 선택한 요청을 큐에서 제거 |
+| `/` | 큐를 메서드 / 호스트 / 경로 / 판정으로 필터링 |
+| `y` | 선택한 요청을 `METHOD host/path` 형태로 복사 |
 | `↑` / `↓` | 요청 간 이동 |
 | `⇥` | 선택한 요청의 아이덴티티 간 이동 |
 | `PgUp` / `PgDn` | 상세 패널 스크롤 |
@@ -185,6 +187,18 @@ skipped 1 flow · 1 no identity changes them
   #1     GET    http://acme.test/pricing  — no identity changes them
 ```
 
+TUI를 열지 않고도 슬롯 목록(`i` 카드가 편집하는 바로 그 행들)을 관리할 수 있습니다.
+
+```bash
+gori run session list                       # 이름, 오버레이(값은 [REDACTED]), 소유한 규칙
+gori run session add --name low-priv --set 'Cookie: session=…' --rule SESSION
+gori run session edit low-priv --clear-set --set 'Cookie: session=new'
+gori run session baseline as-captured
+gori run session rm low-priv
+```
+
+`gori run session activate`는 없습니다. `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸쳐 있을 시간이 없습니다. 대신 전송 명령에서 아이덴티티를 지명하세요. `--slot NAME`은 `repeater`, `fuzz`, `mine`, `sequence`, `discover`에서 동작하며, `--bind-from`이 시드를 재생하기 전에 적용되므로 시드가 채운 슬롯으로 실행이 전송됩니다.
+
 `--format jsonl`은 요청이 끝나는 대로 한 줄에 하나씩 흘려보내고, `--format json`은 버퍼링했다가 마지막에 배열 하나를 냅니다. 둘 다 와이어 크기와 함께 판정이 실제로 비교한 디코딩 후 크기를 담습니다. gzip 응답이라면 이 두 숫자는 자릿수가 달라집니다. 전체 플래그는 [CLI 레퍼런스](/ko/reference/cli/#run-authorize)에 있습니다.
 
 ## 에이전트에서 {#from-an-agent}
@@ -192,6 +206,8 @@ skipped 1 flow · 1 no identity changes them
 네 개의 MCP 도구가 같은 엔진을 백그라운드 잡으로 구동합니다. `authorize_start`(`job_id`, 예정된 전송 수, 아이덴티티 이름, 스코프 게이트, 건너뛴 목록을 반환), `authorize_status`, `authorize_results`, `authorize_stop`입니다.
 
 `authorize_results`는 답을 맨 앞에 놓습니다. `access_control`이 결과를 한 단어로 말하고(`BYPASS`, `enforced`, `review`, `error`, `nothing_sent`. 뒤의 둘은 비교된 것이 없다는 뜻), `summary`가 한 문장으로 풀어 주며, `bypasses`는 기준선이 아닌 아이덴티티가 기준선의 응답을 받은 요청을 페이징 없이 전부 나열합니다. 다른 것을 하나도 읽지 않는 에이전트도 발견 사항만은 받게 됩니다.
+
+슬롯 자체를 관리하는 도구가 다섯 개 더 있습니다. `list_session_slots`(활성 슬롯을 이름으로 표시하며, 요청하지 않는 한 헤더 값은 `[REDACTED]`), `create_session_slot`, `update_session_slot`, `delete_session_slot`, 그리고 `set_active_session_slot`입니다. 마지막 것은 그 서버 프로세스가 살아 있는 동안 *다른* 모든 도구의 전송이 어떤 아이덴티티로 나갈지 고릅니다.
 
 한 번의 실행은 전송 2,000건으로 제한되며, 이 상한은 `플로우 × 아이덴티티`를 셉니다. 500행 쿼리에 아이덴티티 넷이면 잘려서 실행되는 대신 두 요인을 모두 명시하며 시작 전에 거부됩니다. 잘린 실행은 보내지도 않은 플로우를 "enforced"로 보고하게 되기 때문입니다. 여기서는 Layer 1 스코프가 엄격합니다. 스코프 밖 대상은 `allow_unscoped:true`를 명시해야 합니다. 아무도 그 대상을 눈으로 확인하지 않았기 때문입니다.
 
