@@ -27,6 +27,19 @@ describe Gori::Cvss do
     sev.should eq(Gori::Store::Severity::High)
   end
 
+  # NVD's v2 calculator renders its vector wrapped in parentheses, so that is the form an
+  # operator copying a score out of a CVE record has on the clipboard. gori refused it until
+  # cvss.cr 0.3.0; the parentheses are notation, not part of the vector, and the canonical
+  # form gori stores drops them.
+  it "resolves a parenthesised CVSS v2.0 vector into the bare canonical vector" do
+    res = Gori::Cvss.resolve("(AV:N/AC:L/Au:N/C:P/I:P/A:P)")
+    res.should_not be_nil
+    score, sev, canonical = res.not_nil!
+    score.should eq(7.5)
+    sev.should eq(Gori::Store::Severity::High)
+    canonical.should eq("AV:N/AC:L/Au:N/C:P/I:P/A:P")
+  end
+
   it "resolves numeric scores across severity bands" do
     Gori::Cvss.severity_for("0.0").should eq(Gori::Store::Severity::Info)
     Gori::Cvss.severity_for("0").should eq(Gori::Store::Severity::Info)
