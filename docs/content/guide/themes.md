@@ -97,7 +97,9 @@ Every field, all inheriting from `base` when omitted:
   "syn_header":    "#82a8c4",
   "syn_string":    "#8fb87a",
   "syn_number":    "#ca9b6a",
-  "syn_literal":   "#b08ec2"
+  "syn_literal":   "#b08ec2",
+  "syn_comment":   "#6f8172",
+  "syn_keyword":   "#d08c9a"
 }
 ```
 
@@ -123,9 +125,12 @@ Every field, all inheriting from `base` when omitted:
 | `syn_string` | Quoted strings |
 | `syn_number` | Numbers, tag attribute names |
 | `syn_literal` | `true` / `false` / `null` |
+| `syn_comment` | Comments (GraphQL `#`, JSONC `//`, HTML `<!-- -->`) |
+| `syn_keyword` | Language keywords, auth schemes |
 
 ### Notes
 
+- `"base"` must name a built-in theme. A custom theme can't be the base of another, and an unknown base falls back to `goridark`.
 - The file name is normalised to lower-case `a-z 0-9 - _`; other characters are dropped (`My Theme!.json` → `mytheme`).
 - A file whose name collides with a built-in (e.g. `goridark.json`) is ignored. The built-ins can't be redefined.
 - Loading is tolerant: an unreadable file, invalid JSON, or a non-object is skipped, and a single malformed colour falls back to the `base` value rather than discarding the whole theme. A broken theme file never crashes the TUI.

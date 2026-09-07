@@ -43,7 +43,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 |-----|------|---------|-------------|
 | `bind_host` | string | `127.0.0.1` | Global default listen address (used when a project has no `net.bind_host`) |
 | `bind_port` | integer | `8070` | Global default listen port (used when a project has no `net.bind_port`) |
-| `upstream_proxy` | string | `""` | Global default upstream: legacy `host:port`/`http://…`, `http+tls://…` (TLS to the proxy), or `socks5://…`/`socks5h://…`; empty = direct. Project `net.upstream_proxy` wins when set. `https://…` is the **legacy spelling of the plaintext form**; see [upstream_rules](#upstream_rules) |
+| `upstream_proxy` | string | `""` | Global default upstream: legacy `host:port`/`http://…`, `http+tls://…` (TLS to the proxy), or `socks5://…`/`socks5h://…`; empty = direct. Project `net.upstream_proxy` wins when set. `https://…` is the **legacy spelling of the plaintext form**; see [upstream_rules](#upstream-rules) |
 | `upstream_proxy_ca` | string | `""` | PEM bundle trusted for the **upstream proxy's own** certificate on an `http+tls` hop, in addition to the system store. Blank = system trust only. A path, never a secret, so it is safe to share in a profile |
 | `upstream_proxy_insecure` | bool | `false` | Skip verification of the **upstream proxy's** certificate. Independent of `verify_upstream` and untouched by `--insecure-upstream`, which are about the **origin**. Off by default: that hop carries every `CONNECT` authority and every `Proxy-Authorization` credential |
 | `verify_upstream` | bool | `true` | Verify upstream TLS certificates against the system CA trust store, resolved automatically from standard locations (honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`); if none is found, HTTPS verification fails; set `SSL_CERT_FILE` or turn this off. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. `--insecure-upstream` seeds it off for one session |
@@ -53,7 +53,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 | `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |
 | `http2` | string | `"auto"` | `auto` reflects the origin's ALPN; `off` forces HTTP/1.1 on every tunnelled connection. See [http2](#http2) below |
 | `strip_alt_svc` | bool | `false` | Remove the `Alt-Svc` response fields advertising HTTP/3 before the client sees them, so a browser cannot switch to a transport gori does not carry. See [strip_alt_svc](#strip-alt-svc) below |
-| `tls_passthrough` | array | `[]` | Hosts to relay without decrypting. See [tls_passthrough](#tls_passthrough) below |
+| `tls_passthrough` | array | `[]` | Hosts to relay without decrypting. See [tls_passthrough](#tls-passthrough) below |
 
 CLI `--listen` / `--port` override these for the current process only (not written to disk). See [Per-Project Overrides](#per-project-overrides).
 
@@ -165,11 +165,11 @@ A transparent listener serves clients that believe they are talking to the origi
 
 That answer is an **address and a port**. The port is authoritative: it is the port the client actually connected to, so it outranks both `target_port` and any port in the client's `Host` header. The address is where gori **dials**, whatever the client called the destination.
 
-**The client's own bytes** supply the name: the `Host` header for cleartext, the TLS **SNI** for HTTPS, read out of the ClientHello *before* the handshake. gori keeps using the name whenever there is one, because a name is what everything downstream needs: which leaf certificate to mint, the sandbox gate, the [passthrough list](#tls_passthrough), the origin ALPN probe, scope matching, and what History shows. The kernel's address fills in as the name only when there is no name at all.
+**The client's own bytes** supply the name: the `Host` header for cleartext, the TLS **SNI** for HTTPS, read out of the ClientHello *before* the handshake. gori keeps using the name whenever there is one, because a name is what everything downstream needs: which leaf certificate to mint, the sandbox gate, the [passthrough list](#tls-passthrough), the origin ALPN probe, scope matching, and what History shows. The kernel's address fills in as the name only when there is no name at all.
 
 So the two never compete. The name identifies the destination and travels upstream byte-exact; the address decides which machine the connection reaches. A client that lies in `Host` still gets a certificate for the name it asked for and still shows up in History under it, but it cannot move gori's upstream connection anywhere.
 
-A [hostname override](#hostname_overrides) still wins over the kernel address, because it is a mapping you wrote by name. That is the one way a transparent destination can be redirected, and it takes an entry in your own table to do it.
+A [hostname override](#hostname-overrides) still wins over the kernel address, because it is a mapping you wrote by name. That is the one way a transparent destination can be redirected, and it takes an entry in your own table to do it.
 
 Which source decided a destination is written to the log, once per listener and once again if it ever changes, so a destination that looks wrong can be traced instead of guessed at.
 
@@ -216,7 +216,7 @@ A SOCKS5 listener (RFC 1928) takes its destination from the client in a handshak
 { "host": "127.0.0.1", "port": 1080, "mode": "socks5" }
 ```
 
-This is the mode for a client that *can* be pointed at a proxy, just not at an HTTP one: `ALL_PROXY=socks5://127.0.0.1:1080`, a runtime whose only proxy setting is SOCKS, a tool that speaks SOCKS and nothing else. gori already speaks the other end of the same protocol (an [`upstream_rules`](#upstream_rules) entry with `"kind": "socks5"` reaches an origin *through* somebody else's SOCKS proxy), so the word appears twice in this file, pointing opposite ways. This one is inbound.
+This is the mode for a client that *can* be pointed at a proxy, just not at an HTTP one: `ALL_PROXY=socks5://127.0.0.1:1080`, a runtime whose only proxy setting is SOCKS, a tool that speaks SOCKS and nothing else. gori already speaks the other end of the same protocol (an [`upstream_rules`](#upstream-rules) entry with `"kind": "socks5"` reaches an origin *through* somebody else's SOCKS proxy), so the word appears twice in this file, pointing opposite ways. This one is inbound.
 
 The destination arrives **declared**, which is what it has over transparent mode: no kernel redirect rule, and nothing has to recover the destination from an SNI or a `Host` header. On a cleartext connection a request whose `Host` names somewhere else is still sent where the handshake said, and the handshake's authority is what History records, while the client's own header is forwarded byte for byte. On a TLS connection the SNI supplies the *name* instead (the leaf is minted for it, the passthrough list and the Sandbox match on it, and it is what History shows), while the connection is dialled at the destination the handshake declared: the same split [transparent mode](#transparent-mode) has between the name and the address. A ClientHello carrying no SNI falls back to the declared destination for both.
 
@@ -244,7 +244,7 @@ Every refusal is recorded in the project as a flow carrying its reason, too. A c
 
 The `CONNECT` request line (which names the origin you are reaching for) and the `Proxy-Authorization` header are written **inside** the TLS session, never in front of it. Nothing about the request is sent before the handshake completes.
 
-The proxy leg is verified on its **own** hostname: SNI and the checked certificate name are the proxy address you configured, never the origin's, and never a [host override](#hostname_overrides) (overrides apply to the origin leg only). It is governed by `network.upstream_proxy_ca` and `network.upstream_proxy_insecure`, **not** by `verify_upstream` / `--insecure-upstream`, which describe the origin. A relaxed origin policy for one broken target does not stop authenticating the proxy that carries the whole session, and a rejected proxy certificate says so in those terms rather than offering `--insecure-upstream` as a fix.
+The proxy leg is verified on its **own** hostname: SNI and the checked certificate name are the proxy address you configured, never the origin's, and never a [host override](#hostname-overrides) (overrides apply to the origin leg only). It is governed by `network.upstream_proxy_ca` and `network.upstream_proxy_insecure`, **not** by `verify_upstream` / `--insecure-upstream`, which describe the origin. A relaxed origin policy for one broken target does not stop authenticating the proxy that carries the whole session, and a rejected proxy certificate says so in those terms rather than offering `--insecure-upstream` as a fix.
 
 An `https://` origin reached through an `http+tls` proxy is TLS inside TLS: the origin handshake runs over the tunnel, so the origin's certificate is still verified end to end under its own policy.
 
@@ -298,13 +298,13 @@ For an open project, **Destination host** is evaluated before this table. `*` (t
 leaves the precedence above unchanged; a non-matching destination goes direct without falling
 through to a global rule or scalar proxy.
 
-A rule is matched against the **original** hostname, before any [host override](#hostname_overrides) is applied; an override only changes which IP is dialled.
+A rule is matched against the **original** hostname, before any [host override](#hostname-overrides) is applied; an override only changes which IP is dialled.
 
 ### outbound_tls
 
 Per-destination TLS policy for the connections gori **makes**: a client certificate to present, the protocol range / cipher list to negotiate with, and the shape of the ClientHello gori sends (its [TLS fingerprint](#tls-fingerprint)). Ordered, first match wins, same host-pattern dialect. Edit with `gori settings --edit`.
 
-This is a separate table from [`upstream_rules`](#upstream_rules) on purpose. Both are keyed by destination host, but they answer different questions, and folding them together would make the common shape inexpressible: "everything through the corporate proxy, plus a client certificate for one host" would need the proxy address duplicated onto that host's row, because one first-match table can only apply a single row per host.
+This is a separate table from [`upstream_rules`](#upstream-rules) on purpose. Both are keyed by destination host, but they answer different questions, and folding them together would make the common shape inexpressible: "everything through the corporate proxy, plus a client certificate for one host" would need the proxy address duplicated onto that host's row, because one first-match table can only apply a single row per host.
 
 ```json
 {
@@ -408,7 +408,7 @@ Inbound fingerprint *spoofing* (making the client's own handshake look like some
 
 ### layout
 
-Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted when both values are factory defaults.
+Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted when every value is a factory default.
 
 ```json
 {
@@ -483,8 +483,8 @@ Each run receives a JSON context on stdin describing the live session, so script
 | `capturing` | bool | Whether the proxy is currently capturing |
 | `flows` | integer | Number of captured flows |
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | The address the proxy is actually listening on |
-| `upstream` | string | The **catch-all** upstream proxy address/URI, or empty when connecting directly. A destination matched by an [upstream rule](#upstream_rules) routes elsewhere; this field does not reflect that |
-| `upstream_rules` | integer | Number of [upstream rules](#upstream_rules) in effect. Non-zero means routing is per-destination and `upstream` alone does not describe where traffic goes |
+| `upstream` | string | The **catch-all** upstream proxy address/URI, or empty when connecting directly. A destination matched by an [upstream rule](#upstream-rules) routes elsewhere; this field does not reflect that |
+| `upstream_rules` | integer | Number of [upstream rules](#upstream-rules) in effect. Non-zero means routing is per-destination and `upstream` alone does not describe where traffic goes |
 
 ### display
 
@@ -622,7 +622,8 @@ Saved defaults for a Discover run. Written only once you save the discover optio
     "concurrency": 20,
     "spider": true,
     "bruteforce": true,
-    "extensions": false
+    "extensions": false,
+    "keep_alive": true
   }
 }
 ```
@@ -635,6 +636,7 @@ Saved defaults for a Discover run. Written only once you save the discover optio
 | `spider` | bool | `true` | Follow links found in responses |
 | `bruteforce` | bool | `true` | Brute-force paths from the wordlist |
 | `extensions` | bool | `false` | Also probe extension variants of each candidate |
+| `keep_alive` | bool | `true` | Reuse upstream connections across requests (the **Keep-alive** toggle in the Discover overlay). A file written before the key existed reads as `true` |
 
 ### mine
 
@@ -645,6 +647,7 @@ Saved Param Miner defaults, written only once you save the mine options:
 | `locations` | array | `[]` | Where to inject: `query`, `form`, `multipart`, `json`, `headers`, `cookies`. Empty means auto-detect per request |
 | `concurrency` | integer | `10` | Parallel requests |
 | `notify` | string | `"when-found"` | `"when-found"`, `"always"`, or `"off"` |
+| `keep_alive` | bool | `true` | Reuse upstream connections across requests (the **Keep-alive** toggle in the Mine overlay). A file written before the key existed reads as `true` |
 
 ### scan_rules
 
@@ -790,7 +793,7 @@ Omitted until you apply or star a wordlist.
 | `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view |
 | `editor` | External editor `command` and Markdown handling |
 | `tabs` | Which TUI tabs are shown/hidden |
-| `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname_overrides) above |
+| `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname-overrides) above |
 | `env` | Env-token prefix and global values. See [env](#env) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
 | `hooks` | External process hooks: `timeout_secs` (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See [Process hooks](/guide/scripting/#process-hooks) |

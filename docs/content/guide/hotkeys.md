@@ -43,6 +43,7 @@ The editor opens a working copy. Nothing is saved until you press `Enter`, and `
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` (or `j` / `k`), wheel | Move the selection |
+| `/` | Search the action list |
 | `e` or `Space` | Rebind the selected action, then press the new key |
 | `x` or `Backspace` | Unbind the selected action |
 | `r` | Reset the selected action to its default |
@@ -65,8 +66,8 @@ Some keys can't be rebound because the terminal or gori needs them:
 
 - **Quit**: `Ctrl-C`, `Ctrl-D`.
 - **Indistinguishable from named keys**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
-- **Structural**: `Enter`, `Esc`, `Tab`, `Backspace`, and a bare `:` (the command line).
-- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close the sub-tab, or every marked one), `Ctrl-Z` (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **New repeater request**, and **New fuzz session** aren't listed in the editor. Their key is fixed.
+- **Structural**: `Enter`, `Esc`, `Tab`, `Backspace`, `Space` (the space-menu leader), and a bare `:` (the command line).
+- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close the sub-tab, or every marked one), `Ctrl-Z` (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **Reveal whitespace**, **New repeater request**, and **New fuzz session** aren't listed in the editor. Their key is fixed.
 
   You can't move an individual key out of that family, but you *can* give the whole family a second modifier; see [Command modifier](#command-modifier) below.
 

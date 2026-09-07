@@ -66,7 +66,7 @@ Collected tokens are live credentials, so they are never written to disk and van
 | Action | Key | Writes |
 |--------|-----|--------|
 | Export report | `⇧E` | A Markdown report at a path you choose |
-| Export report (JSON) | palette | The same report as JSON |
+| Export report (JSON) | `Space` → `J`, or the palette | The same report as JSON |
 | File as issue | `Space` → `i` | An Issue in the Issues tab |
 
 **File as issue** records the grade in the Issues report, mapping Critical to `critical`, Weak to `high`, Moderate to `medium`, and Secure to `info`. The Issue carries the target, the token descriptor, the entropy figures, and the full test table as its body, plus the seeding flow as evidence. Neither the export nor the Issue contains a token value: the report is built from frequency tables and verdicts, so there is no sample in it to leak.

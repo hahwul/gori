@@ -66,7 +66,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 | 동작 | 키 | 기록 대상 |
 |------|-----|-----------|
 | Export report | `⇧E` | 직접 지정한 경로의 Markdown 리포트 |
-| Export report (JSON) | 팔레트 | 동일한 리포트의 JSON |
+| Export report (JSON) | `Space` → `J` 또는 팔레트 | 동일한 리포트의 JSON |
 | File as issue | `Space` → `i` | Issues 탭의 Issue |
 
 **File as issue**는 등급을 Issues 리포트에 기록하며 Critical은 `critical`, Weak은 `high`, Moderate는 `medium`, Secure는 `info`로 매핑합니다. Issue 본문에는 대상, token 디스크립터, entropy 수치, 전체 테스트 표가 담기고 근거로 시드가 된 플로우가 연결됩니다. 내보낸 파일과 Issue 어느 쪽에도 token 값은 들어가지 않습니다. 리포트는 빈도표와 판정만으로 만들어지므로 애초에 유출될 샘플이 들어 있지 않습니다.

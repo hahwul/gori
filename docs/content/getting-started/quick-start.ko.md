@@ -116,7 +116,7 @@ gori의 화면은 한 줄로 늘어선 탭입니다. 기본 순서는 Project �
 | `Esc` | 포커스를 탭 바 쪽으로 되돌림 |
 | `Tab` / `Shift-Tab` | 탭 바와 패널 사이로 포커스 이동 |
 
-마우스는 활성화하면(Preferences → **Editor & Keys** → **Editor**) 동작합니다. 탭 클릭, 행 클릭으로 선택, 다시 클릭으로 열기. **Help** 탭은 이 페이지가 열려 있지 않을 때 쓸 수 있는 앱 안의 완전한 키 치트시트입니다.
+마우스는 활성화하면(Preferences → **Editor & Keys** → **Mouse**) 동작합니다. 탭 클릭, 행 클릭으로 선택, 다시 클릭으로 열기. **Help** 탭은 이 페이지가 열려 있지 않을 때 쓸 수 있는 앱 안의 완전한 키 치트시트입니다.
 
 ## 5. History에서 플로우 읽기 {#5-read-a-flow-in-history}
 
@@ -165,6 +165,8 @@ method:POST body:password
    X-Gori-Test: 1
    ```
 4. `Esc`로 편집 모드를 벗어난 뒤 `Ctrl-R`로 **전송**합니다.
+
+   편집 중 복사하기: `Shift`+화살표는 두 모드 모두에서 선택하지만, 복사 키는 다릅니다. READ에서는 `y`이고, INS에서 `y`는 리터럴 문자라 선택 위에 입력하면 선택을 *덮어씁니다*. 그러니 **`Ctrl-Y`**를 쓰세요. `Esc`도 선택을 INS 밖으로 들고 나오므로 `Esc` 뒤 `y`도 됩니다. 어떤 키 입력이 선택을 먹어 버렸다면, `Ctrl-Z`가 한 번에 되돌립니다.
 5. 응답과 타이밍, 이전 응답 대비 diff가 오른쪽에 나타납니다. `Tab`으로 target → request → response를 순회합니다.
 
 <figure class="tui-shot">

@@ -32,7 +32,7 @@ Now only the POSTs to your target are held; the rest pass straight through. The 
 
 ## 2. Catch a request and edit it
 
-Trigger the matching request from your client: a browser click, a `curl`, a Repeater send. Instead of leaving, it stops in the Intercept queue. Select it and open its raw bytes in the editor (the same INS-mode editor the Repeater uses via the `Space` menu), change what you need (a header value, a JSON field, the path), then release it with `f` to **forward** the edited request. `Esc` leaves the editor without sending.
+Trigger the matching request from your client: a browser click, a `curl`, a Repeater send. Instead of leaving, it stops in the Intercept queue. Select it and press `↵` / `e` to open its raw bytes in the editor (the same INS-mode editor the Repeater uses), change what you need (a header value, a JSON field, the path), then release it with `f` to **forward** the edited request. `Esc` leaves the editor without sending.
 
 Headless, the same queue is drivable from a second terminal against a running TUI:
 
@@ -41,7 +41,7 @@ gori run intercept                       # list held items + catch state
 gori run intercept edit 3 --raw-file edited.txt   # forward item 3 with edited bytes
 ```
 
-An edited request is forwarded with `Content-Length` resynced, and no `$KEY` expansion; what you typed is what goes out.
+An edited request is forwarded with `Content-Length` resynced (on by default; `Ctrl-L` toggles it) and `$KEY` [environment variables](/guide/repeater-and-fuzzer/#environment-variables) expanded (`$$` for a literal `$`); extract-rule `$NAME` bindings are not resolved on this path. Otherwise what you typed is what goes out.
 
 **Checkpoint.** The edited request reaches the origin: switch to **History** and read the flow to confirm the change and the origin's response.
 

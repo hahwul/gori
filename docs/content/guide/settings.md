@@ -53,9 +53,9 @@ Openers exist where a section needs more than a row of fields: the theme list, t
 
 | Section | Fields |
 |---------|--------|
-| **General** | Clipboard (OSC 52), Confirm before quit |
+| **General** | Clipboard (OSC 52), Confirm before quit, Update check, History retention (flows), Record Repeater sends |
 | **Notifications** | Bell on result, Toast on result, Retention (count) |
-| **Statusline** | Statusline on/off, Command, Interval (s) |
+| **Statusline** | Statusline on/off, Command, Interval (s), Timeout (s) |
 | **Reset** | Action: restore every setting to its factory default |
 
 Notifications fire on background results from the Miner, Fuzzer, Probe, and Discover. The [Statusline](/reference/config/#statusline) runs a shell command on an interval and renders its stdout as the bottom row.
@@ -103,14 +103,14 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 
 | Section | Fields |
 |---------|--------|
-| **Network** | Bind IP, Bind Port, Upstream proxy, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules (read-only), Outbound TLS (read-only), Hostname overrides (opener) |
+| **Network** | Bind IP, Bind Port, Proxy protocol, Proxy host, Proxy port, Proxy TLS CA, Verify proxy TLS, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules (read-only), Outbound TLS (read-only), Hostname overrides (opener) |
 | **Tabs** | Opener: show/hide and reorder the top tab bar |
 
 Network here is the **global default**. A project can pin its own bind address, port, and upstream from the **Project** tab, and those win for that project. See [Configuration](/getting-started/configuration/#network) for the full precedence order.
 
 ## In the Project Picker
 
-`Ctrl-,` opens the same modal from the project picker, before any project is loaded, so you can set your theme on first launch. Only **Theme** is editable there. The sections that need a live project (Tabs, Env, Hotkeys, and hostname overrides) stay hidden or report that you need to open a project first, and so does **Reset**, because a factory reset has to be applied to a running session.
+`Ctrl-,` opens the same modal from the project picker, before any project is loaded, so you can set your theme on first launch. Every form section is editable there, and **Theme** is the one opener that works. The sections that need a live project (Tabs, Env, Hotkeys, and hostname overrides) stay hidden or report that you need to open a project first, and so does **Reset**, because a factory reset has to be applied to a running session.
 
 ## Where Settings Live
 

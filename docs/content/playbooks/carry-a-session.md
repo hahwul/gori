@@ -53,7 +53,7 @@ gori run rewriter add --op set_header --target request \
 
 ```bash
 gori run fuzz 42 --bind-from 17 --wordlist ids.txt
-# bind-from: flow #17 replayed → bound $SESS
+# bind-from: flow #17 replayed → bound $SESSION
 ```
 
 The same flag works on `mine`, `sequence`, and `discover`.

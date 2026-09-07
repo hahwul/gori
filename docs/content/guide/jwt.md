@@ -23,7 +23,7 @@ One session, two views, toggled with `Ctrl-T`. The top card of each lens carries
 - **Decode**: paste a token into INPUT and the header, payload, and signature decode live. Below them is a selectable list of generated **attack payloads**.
 - **Encode**: edit the HEADER and PAYLOAD as JSON, choose an algorithm (`Ctrl-A` cycles `HS256` / `HS384` / `HS512` / `none`), set a SECRET, and the re-signed token appears live in OUTPUT.
 
-Press `l` to load the token currently decoded on the Decode side into the Encode editors, so you can tweak a claim and re-sign in two moves. Copy any result with `y`.
+`Space` → **Load decoded claims** loads the token currently decoded on the Decode side into the Encode editors, so you can tweak a claim and re-sign in two moves. Copy any result with `y`.
 
 > A signature is decoded and shown but **never verified**, so a decode tells you what a token claims, not whether it is trusted. Encode genuinely signs with the secret and algorithm you give it. (The [Cookie](/guide/cookie/) tab is the sibling that both verifies and re-signs.)
 
@@ -33,7 +33,7 @@ From a decoded token, gori generates ready-to-send variants that probe common JW
 
 | Attack | What it tests |
 |--------|---------------|
-| **alg:none** | Strips the signature and sets `alg` to `none` (plus `None` / `NONE` case variants), for a server that accepts unsigned tokens. |
+| **alg:none** | Strips the signature and sets `alg` to `none` (plus the `None` / `NONE` / `nOnE` case variants), for a server that accepts unsigned tokens. Two more payloads keep the original header: **signature stripped** (an empty third segment) and **no signature segment** (a 2-part token). |
 | **Weak secret** | Re-signs the token with a list of common weak HMAC secrets, to catch a guessable signing key. |
 | **Header injection** | Manipulates the `kid`, `jku`, `x5u`, and `jwk` header parameters, for a server that trusts attacker-supplied key material. |
 

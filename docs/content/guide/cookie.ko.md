@@ -18,7 +18,7 @@ group = "워크벤치"
 - **Decode**: INPUT에 쿠키를 붙여 넣으면 파트가 DECODED에 실시간으로 디코드됩니다. **OPTIONS**는 읽는 방식을 고정합니다: 포맷(`Ctrl-A`로 `auto` / `flask` / `rack` / `django` 순환, `auto`는 문장 부호로 감지), Django HMAC 알고리즘, 서명 salt. **SECRET**은 후보 키를 담으며, 입력하는 동안 검증 결과(`✓ verified` / `✗ bad key`)가 실시간으로 표시됩니다. `c`를 누르면 크랙합니다(아래 참고).
 - **Forge**: PAYLOAD에서 세션을 편집하고(Flask/Django는 JSON 객체, Rack은 불투명한 base64 값), SECRET을 설정하면 재서명된 쿠키가 OUTPUT에 실시간으로 나타납니다.
 
-`l`을 누르면 현재 Decode 쪽에서 디코드된 payload를 Forge 편집기로 불러옵니다. 그래서 값 하나를 손보고 두 동작만으로 재서명할 수 있습니다. 결과는 `y`로(위조된 쿠키는 `t`로) 복사하세요.
+`Space` → **Load decoded payload**는 현재 Decode 쪽에서 디코드된 payload를 Forge 편집기로 불러옵니다. 그래서 값 하나를 손보고 두 동작만으로 재서명할 수 있습니다. 결과는 `y`로(위조된 쿠키는 `Space` → **Copy forged cookie**로) 복사하세요.
 
 > 디코드는 하지만 검증은 하지 않는 [JWT](/ko/guide/jwt/) 탭과 달리, Cookie에는 secret 경로가 있습니다. SECRET의 `✓`는 입력한 키가 실제로 이 쿠키를 서명한다는 뜻입니다. Forge는 지정한 secret, salt, 알고리즘으로 실제로 재서명합니다.
 
@@ -53,7 +53,7 @@ gori run cookie --forge --type flask --payload '{"admin":true}' --secret s3cret
 cat cookie.txt | gori run cookie                             # stdin에서 쿠키
 ```
 
-쿠키는 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수 로컬 연산). `--type`은 포맷을 고정하고(기본: 자동 감지), `--salt`와 `--algorithm`은 Django/Flask 노브를 전달하며, `--format`은 `text` 또는 `json`입니다. Flask/Django `--forge`는 `--payload` JSON을, Rack은 불투명한 `--value`를 받습니다. [CLI 레퍼런스](/ko/reference/cli/#run-cookie)를 참고하세요.
+쿠키는 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수 로컬 연산). `--type`은 포맷을 고정하고(기본: 자동 감지), `--salt`는 Flask/Django 서명 salt를, `--algorithm`은 Django HMAC 알고리즘(기본 `sha256`, 또는 `sha1`)을 지정하며, `--format`은 `text` 또는 `json`입니다. Flask/Django `--forge`는 `--payload` JSON을, Rack은 불투명한 `--value`를 받고, `--timestamp UNIX`는 위조한 쿠키에 현재 시각 대신 그 초를 찍습니다. [CLI 레퍼런스](/ko/reference/cli/#run-cookie)를 참고하세요.
 
 MCP에서는 `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge`가 네트워크나 상태를 건드리지 않는 읽기 도구라, `--read-only`에서도 사용할 수 있습니다.
 

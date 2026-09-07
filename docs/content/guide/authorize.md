@@ -139,6 +139,8 @@ The tab keeps a live readout of what passive has actually done (`N seen · M que
 | `i` | Identities: edit the set every request is replayed under |
 | `p` | Toggle passive replay |
 | `d` | Remove the selected request from the queue |
+| `/` | Filter the queue by method / host / path / verdict |
+| `y` | Copy the selected request as `METHOD host/path` |
 | `↑` / `↓` | Move between requests |
 | `⇥` | Move between the selected request's identities |
 | `PgUp` / `PgDn` | Scroll the detail pane |

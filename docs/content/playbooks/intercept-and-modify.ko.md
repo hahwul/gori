@@ -32,7 +32,7 @@ host:api.example.com method:POST
 
 ## 2. 요청을 잡아 편집하기 {#2-catch-a-request-and-edit-it}
 
-클라이언트에서 매칭되는 요청을 발생시킵니다: 브라우저 클릭, `curl`, Repeater 전송 등. 요청은 떠나는 대신 Intercept 큐에 멈춥니다. 그것을 선택해 raw 바이트를 에디터에서 열고(`Space` 메뉴를 통해 Repeater가 쓰는 것과 같은 INS 모드 에디터), 필요한 것을 바꾼 뒤(헤더 값, JSON 필드, 경로 등) `f`로 편집된 요청을 **forward**(전달)합니다. `Esc`는 전송 없이 에디터를 빠져나옵니다.
+클라이언트에서 매칭되는 요청을 발생시킵니다: 브라우저 클릭, `curl`, Repeater 전송 등. 요청은 떠나는 대신 Intercept 큐에 멈춥니다. 그것을 선택하고 `↵` / `e`를 눌러 raw 바이트를 에디터에서 열고(Repeater가 쓰는 것과 같은 INS 모드 에디터), 필요한 것을 바꾼 뒤(헤더 값, JSON 필드, 경로 등) `f`로 편집된 요청을 **forward**(전달)합니다. `Esc`는 전송 없이 에디터를 빠져나옵니다.
 
 Headless로는 같은 큐를 실행 중인 TUI에 대해 두 번째 터미널에서 조종할 수 있습니다:
 
@@ -41,7 +41,7 @@ gori run intercept                       # 붙잡힌 항목 + catch 상태 나�
 gori run intercept edit 3 --raw-file edited.txt   # 편집된 바이트로 항목 3 전달
 ```
 
-편집된 요청은 `Content-Length`가 재동기화되어 전달되고, `$KEY` 확장은 없습니다. 입력한 그대로 나갑니다.
+편집된 요청은 `Content-Length`가 재동기화되고(기본 켜짐, `Ctrl-L`로 토글) `$KEY` [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)가 확장되어 전달됩니다(리터럴 `$`는 `$$`). extract 규칙의 `$NAME` 바인딩은 이 경로에서 해석되지 않습니다. 그 외에는 입력한 그대로 나갑니다.
 
 **체크포인트.** 편집된 요청이 origin에 닿습니다. **History**로 전환해 그 플로우를 읽어 변경과 origin의 응답을 확인하세요.
 

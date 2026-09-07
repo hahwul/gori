@@ -106,7 +106,7 @@ gori에는 플러그인 SDK가 없고 앞으로도 없습니다. 변환을 *계�
 
 | 이음매 | 위치 | 하는 일 |
 |--------|------|---------|
-| Rewriter `pipe` 액션 | Rewriter 탭, `gori run rewriter add --op=pipe`, MCP `create_rule` | 매치된 구간을 명령에 넘기고 stdout으로 교체. 프록시에서 실시간으로 |
+| Rewriter `pipe` op | Rewriter 탭, `gori run rewriter add --op=pipe`, MCP `create_rule` | 매치된 구간을 명령에 넘기고 stdout으로 교체. 프록시에서 실시간으로 |
 | Decoder `exec:` 스텝 | Decoder 탭 체인, `gori run decoder`, `§value¦chain§` 마커 | 체인의 한 스텝이 컨버터가 아니라 명령 |
 | Probe `exec` 룰 | Probe 룰, `gori run probe rules add --exec` | 구간을 명령에 넘겨 exit 0이면 발견, stdout이 근거 |
 | Miner `--hook` | `gori run mine --hook`, MCP `mine_start`의 `hook` | 조립된 요청 전체를 명령에 넘기고 그 stdout이 실제로 나가는 요청. 프로브 하나당 훅 하나 |

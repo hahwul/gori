@@ -26,7 +26,7 @@ Each flow records the full request and response: start line, headers, and body (
 
 ## Intercept
 
-Press `i` to enable **Intercept**. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about.
+Press `i` to enable **Intercept**. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about. On this tab `c` cycles the catch direction (all / requests / responses) and `/` edits the condition; the capture toggle is `c` everywhere else. Turning intercept **off** releases everything still held with its original bytes, so an edit you had not yet forwarded is discarded.
 
 <figure class="tui-shot">
   <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
@@ -112,12 +112,12 @@ Marks change **what the action menu acts on**, not which actions exist. The effe
 
 | Action | Key | Over marks |
 |--------|-----|-----------|
-| Tag path | `Shift-T` | One editor, one memo, applied to every marked path (blank clears them all) |
+| Tag path | `Space` `T` | One editor, one memo, applied to every marked path (blank clears them all) |
 | Send to Repeater | `r` | One sub-tab per marked endpoint, deduplicated by captured flow (max 20) |
 
-So `/ status:5xx` → mark the paths that matter → `Shift-T` → `auth` tags the lot, and `tag:auth` brings them back later. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Tag 3 paths`, `Send 3 paths to Repeater`). Discover and the Sequencer stay single-target (they scan one subtree / collect one endpoint's token), and their menu entries say `(cursor)` while marks are set.
+So `/ status:5xx` → mark the paths that matter → `Space` → `T` → `auth` tags the lot, and `tag:auth` brings them back later. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Tag 3 paths`, `Send 3 paths to Repeater`). Discover and the Sequencer stay single-target (they scan one subtree / collect one endpoint's token), and their menu entries say `(cursor)` while marks are set.
 
-Note that **`t` marks and `Shift-T` tags**: tagging moved off `t` so that `t` means the same thing in both lists. A synthetic `{uuid}` / `[1, 2, 3 …]` fold is not a real path, so it can't be marked or tagged: a range sweeps over it, and `t` on one says so. Unlike History there is no "mark all": on a tree that would sweep hosts and folders into the same batch as the endpoints under them.
+Note that **`t` marks and `Space` → `T` tags**: tagging is menu-only here, and `⇧T` is deliberately left unbound, so that `t` / `⇧T` keep meaning mark / mark all in every list tab. A synthetic `{uuid}` / `[1, 2, 3 …]` fold is not a real path, so it can't be marked or tagged: a range sweeps over it, and `t` on one says so. Unlike History there is no "mark all": on a tree that would sweep hosts and folders into the same batch as the endpoints under them.
 
 ## Protocol Support
 
@@ -125,7 +125,7 @@ The canonical capture / intercept / replay / fuzz table is the
 [capability matrix](/reference/capabilities/). The details below explain the proxy-side tradeoffs
 behind those boundaries.
 
-**gori does not intercept HTTP/3.** QUIC is UDP and every gori listener is a TCP socket, so an origin answering `Alt-Svc: h3=":443"` is offering the client a way out of the proxy. By default gori leaves the offer in place and says so (the flow carries an advisory naming what got through), so a client that leaves for QUIC is a reported blind spot rather than an unexplained gap in History. Turning on [`network.strip_alt_svc`](/reference/config/#strip-alt-svc) removes the `Alt-Svc` fields advertising `h3` from the response the client receives, on both HTTP/1.1 and HTTP/2, so the response the client reads offers it nowhere to go. (A client that learns an h3 route some other way, such as a DNS `HTTPS` record, is beyond what any response-side strip can reach.) It removes those fields and nothing else: `Alt-Svc: clear` stays, because it tells the client to forget alternatives it has already cached, and a non-h3 alternative like `h2=":8443"` stays too, because that is another TCP port and still comes through gori.
+**gori does not intercept HTTP/3.** QUIC is UDP and every gori listener is a TCP socket, so an origin answering `Alt-Svc: h3=":443"` is offering the client a way out of the proxy. By default gori leaves the offer in place and says so (the flow carries an advisory naming what got through), so a client that leaves for QUIC is a reported blind spot rather than an unexplained gap in History. Turning on [`network.strip_alt_svc`](/reference/config/#strip-alt-svc) removes the `Alt-Svc` fields advertising `h3` from the response the client receives, on both HTTP/1.1 and HTTP/2, so the response the client reads offers it nowhere to go. (A client that learns an h3 route some other way, such as a DNS `HTTPS` record, is beyond what any response-side strip can reach.) It removes those fields and nothing else: `Alt-Svc: clear` stays, because it tells the client to forget alternatives it has already cached, and a field advertising only a non-h3 alternative like `h2=":8443"` stays too, because that is another TCP port and still comes through gori. The unit is the **field**, not the alternative inside it: one field carrying both (`Alt-Svc: h2=":443", h3=":443"`) goes whole rather than being rewritten, because re-joining the remainder would put gori's own spelling of a remote-chosen field on the wire, and the h2 half costs no visibility anyway.
 
 **By default, gori disables WebSocket compression.** gori removes `Sec-WebSocket-Extensions` from the handshake it relays, so `permessage-deflate` is not negotiated and every captured frame is the message that was sent. Without that removal the two peers would agree on compression that gori does not decode, and History, the detail view, `gori run history show`, the MCP tools and export would all show you a deflate stream while presenting it as the payload. Removing the offer is the price of a capture you can trust: an app that would have used compression does not get it while it goes through gori. If you need a particular host's sockets relayed exactly as they are, put the offer back with a Match & Replace head rule on the request. The strip runs *before* Match & Replace so that a rule can do this: restore `Sec-WebSocket-Extensions` and the origin is really offered the extension, so gori relays its acceptance untouched and the two peers negotiate compression as they would without a proxy. The flow is still captured, with a `[gori]` notice on it saying the frames you are looking at are that extension's encoded bytes rather than the messages. [TLS passthrough](/reference/config/#tls-passthrough) also leaves the connection alone, but captures nothing at all for it. Reach for the rule first, and for passthrough when you want the host out of gori entirely.
 
@@ -353,13 +353,13 @@ Marks change **what the space menu acts on**, not which actions exist:
 
 > the effective target is **the marks if any are set, else the cursor row**
 
-So `/ status:5xx` → `Shift-T` → `Space` → `X` deletes every error in one confirm, and `Space` → `Y` copies all their URLs. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 flows`, `Mine 3 flows`) so a batch is never a surprise.
+So `/ status:5xx` → `Shift-T` → `Space` → `D` deletes every error in one confirm, and `Space` → `Y` copies all their URLs. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 flows`, `Mine 3 flows`) so a batch is never a surprise.
 
 | Action | Key | Over marks |
 |--------|-----|-----------|
 | Copy | `y` | The URL list (one per line) |
 | Copy as… | `Space` `Y` | urls / host list / cURL / raw requests / raw responses / req+res pairs |
-| Delete | `Space` `X` | One confirm for the whole set |
+| Delete | `d` or `Space` `D` | One confirm for the whole set (`⇧X` is a different verb: it wipes the project's whole History) |
 | Link… | `Space` `k` | One card lists every issue and note (plus `+ New issue…` / `+ New note…`); pick or create once, attach every flow |
 | Add issue | `Shift-F` | One issue with every flow as evidence |
 | Repeater / Fuzzer | `Ctrl-R` / `Shift-I` | One sub-tab per flow (max 20) |
@@ -430,7 +430,7 @@ Each rule has an operation:
 
 A **Replace** rule targets the request or response, and the **head** (request/status line + headers), the **body** (the entity), or **ws** (a WebSocket message; see [Match & Replace on WebSocket](#match-replace-websocket) below). Choose literal or regex matching; a regex replacement supports `$1`/`$2` capture-group interpolation (write `$$` for a literal `$`). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.
 
-Scope any rule to a **host** glob so it only fires for matching traffic: a plain string matches as a substring (`example.com` matches `api.example.com`), and `*` is a wildcard (`*.example.com`). Leave it empty to apply to every host.
+Scope any rule to a **host** so it only fires for matching traffic: a plain string means that host and its subdomains (`example.com` matches `example.com` and `api.example.com`, but not `xexample.com` or `example.com.evil.net`), and `*` is the explicit wildcard for anything wider (`*.example.com`). Leave it empty to apply to every host.
 
 Manage the list with `a` add, `e`/`Enter` edit, `x` enable/disable, `d` delete, `s` global/project, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules take effect as soon as you save, with no restart.
 
@@ -541,7 +541,7 @@ Head rules apply to HTTP/2 without downgrading the connection, so gRPC keeps wor
 
 Head rules take effect on connections opened after you save. A rule enabled while a long-lived HTTP/2 connection is already open applies from that connection's next request head. Body, short-circuit and body-scoped extract rules do not: they work by taking the host down to HTTP/1.1, that downgrade is decided once when the connection is set up, and an open HTTP/2 connection is never taken back, so one enabled mid-connection fires on nothing the client sends over it until it reconnects, and `gori.log` records that once per connection.
 
-The same rules are scriptable headless: `gori run rewriter` (list / add / rm / enable / disable / preview) and the MCP `create_rule` / `update_rule` / `list_rules` / `preview_rule` tools. Both carry the `scope` argument, so a global rule can be created and toggled without opening the TUI.
+The same rules are scriptable headless: `gori run rewriter` (list / add / rm / enable / disable / preview) and the MCP `create_rule` / `update_rule` / `list_rules` / `preview_rule` tools. Every one of them that stores or lists a rule carries the `scope` argument, so a global rule can be created and toggled without opening the TUI (`preview_rule` has none: it prices a rule it never saves).
 
 ## Colouring rows (Colormarker tab)
 
@@ -562,11 +562,11 @@ The tint **mixes into** the cursor and mark bands rather than replacing them, so
 
 **The first enabled match wins.** This is the one place Colormarker differs from the Rewriter next door: rewrite rules *compose* (every enabled rule runs, in order) while colour rules *resolve*, so the first match paints the row and the rest are never consulted. Order is therefore a real decision, not a tiebreak: `Shift-J` / `Shift-K` reorder, and global rules resolve before project ones, so a standing policy outranks a local layer.
 
-Conditions use the same boolean grammar the conditional-intercept bar speaks: `host:`, `path:`, `method:`, `scheme:`, `status:`, `proto:`, plus `AND` / `OR` / `NOT`, `-negation` and `(grouping)`. `Tab` on the `when:` row completes the token under the caret. Three things behave differently from the History search bar, and gori refuses or warns rather than letting you discover them from an empty list:
+Conditions speak the same query language History's filter bar does — every field it has, plus `AND` / `OR` / `NOT`, `-negation` and `(grouping)`. `Tab` on the `when:` row completes the token under the caret. Three things behave differently from the History search bar, and gori refuses or warns rather than letting you discover them from an empty list:
 
-- **`body:` never matches here.** A History row carries no payload.
+- **A term the row cannot answer is matched against the store.** `body:`, `header:` and `scope:` are not in the row being drawn, so a rule naming one resolves against the project database in one batched query per repaint instead. `body:` reads 64 KiB of each side's bytes as captured, 8× what History's own `body:` index covers, so a colour rule is strictly more thorough than the query that inspired it — and a match past that cap is still missed.
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`.
-- **There is no `header:` / `size:` / `dur:` / `url:` / `stub:`.** Those need a query, and a colour is decided while the row is being drawn. An unknown field is refused; left alone it would quietly become a free-text search and the rule would never fire.
+- **A condition is validated when you save it.** An unknown field, an invalid regex, a condition that matches every flow, and a value the field does not take are all refused with the reason. Left alone, `hsot:evil.com` would quietly become a free-text search and the rule would never fire, and a dropped term would make a standing rule paint more than you wrote.
 
 A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `s` moves it between the two, `x` toggles it here, and `Space → X` flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
 
