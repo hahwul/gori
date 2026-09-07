@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History: `body~`, `header:` and index-free `body:` no longer run the regex engine over every stored byte. A literal needle is answered by a byte search instead, allocating nothing (`body~` across 500k flows: 4.1s → 0.25s, 688MB → ~1KB; `header:` 199ms → 120ms), and a real regex stops paying to validate each body twice (2-4x, whether the capture holds text or compressed bytes). A `body:`/`header:` needle under three characters also folds case the same way a longer one does now, so it can no longer match fewer rows than the longer needle containing it.
 - OAST: `gori run oast listen --save` and MCP `oast_start{persist:true}` keep the registration as a project session, so a headless or agent-driven listener lands in `oast list` / `list_oast_sessions`, is re-openable with `resume`, and — the reason it matters — gives the blind `ssrf_oast` / `xxe_oast` / `cmd_injection_oast` rules a session to mint payloads against. Only the TUI could write one before, so those rules ran inert everywhere else
 - MCP: `probe_scan{active:true}` reports an `out_of_band` block when an enabled out-of-band rule had no OAST session to plant against, instead of returning an empty `issues` array that reads as "no blind vulnerability" — the notice `gori run probe` already printed
 - OAST: a listener that has stopped REACHING its provider (a rotated api key, an expired webhook token) draws "not answering" instead of a green ●listening and raises a notification, rather than looking busy while every planted payload calls home to nobody

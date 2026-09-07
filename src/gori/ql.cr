@@ -859,7 +859,9 @@ module Gori
     # quotes doubled) so arbitrary characters can't form FTS operator syntax. A
     # bodyless flow has an empty FTS row, so it never matches and `-body:x`
     # correctly KEEPS it. The trigram index needs >=3 characters, so shorter
-    # values fall back to the NULL-safe BLOB LIKE scan.
+    # values take the index-free spelling below instead — the same NUL-transparent,
+    # NULL-guarded literal REGEXP `fts:`-off `body:` takes, so the needle's LENGTH never
+    # changes what `body:` means.
     # The body columns a `side` selects — both, or one. Named because `body_cond`,
     # `body_literal_cond` and `body_regex_cond` each build their own clause and must not be able
     # to disagree about what `resp.` means.
@@ -897,35 +899,20 @@ module Gori
       # Dropping the term is what `body:` (genuinely empty) already does; this makes the two
       # spellings agree.
       return nil if value.empty?
-      if value.size < 3
-        # BYTE-wise, not `CAST(... AS TEXT)`: SQLite truncates a BLOB→TEXT cast at the first
-        # NUL, so the LIKE fallback stopped scanning there and a body of
-        # `head\0NULNEEDLE tail` was invisible to `body:nu` while `body:NULNEEDLE` (the FTS
-        # path, >=3 chars) found it. A SHORTER needle matching FEWER rows is a monotonicity
-        # violation that cannot be explained to an operator, and this is a tool whose targets
-        # deliberately put NULs in bodies. `instr` over the raw BLOB is NUL-transparent.
-        #
-        # `instr` is case-SENSITIVE while `body:` promises case-insensitive substring matching,
-        # so match every case permutation of the needle instead — at most four, since this
-        # branch only runs for one or two characters.
-        # `COALESCE`-wrapped, and that is load-bearing: a NULL body (a bodyless GET, or any
-        # response-less/in-flight flow — the common case) makes `instr(NULL, …)` NULL, and
-        # `NOT (NULL > 0)` is NULL, which SQLite's three-valued logic then EXCLUDES — so a bare
-        # `instr` made `-body:x` silently drop every bodyless flow (a silent NARROW, the mirror
-        # of the broaden this path guards against). `COALESCE(…, 0) > 0` is FALSE for a NULL
-        # body, so the positive term still skips it and `NOT FALSE` keeps it under negation.
-        conds = [] of String
-        params = [] of DB::Any
-        cols = body_columns(side)
-        case_permutations(value).each do |v|
-          cols.each do |col|
-            conds << "COALESCE(instr(#{body_col(col, body_max)}, CAST(? AS BLOB)), 0) > 0"
-            params << v
-          end
-        end
-        return {"(#{conds.join(" OR ")})", params}
-      end
-      return body_literal_cond(value, body_max, side) unless fts
+      # Under the trigram minimum the FTS index cannot answer — but the term is still a
+      # literal substring search, and `body_literal_cond` IS that search: NUL-transparent
+      # (SafeRegexp reads the haystack by its true byte length, so a body of
+      # `head\0NULNEEDLE tail` is not invisible to `body:nu` the way a BLOB→TEXT `LIKE`
+      # made it) and NULL-guarded, so `-body:x` still keeps a bodyless flow.
+      #
+      # This used to be spelled as `instr` over every ASCII case permutation of the needle,
+      # because `instr` is case-SENSITIVE and `body:` promises case-insensitive matching.
+      # That cost up to four permutations x two body columns = EIGHT full-BLOB scans per row
+      # where one now suffices, and it folded case by a DIFFERENT rule than every longer
+      # needle used — `body:s` and `body:sql` disagreeing about `ſ` for no reason an operator
+      # could see. One spelling for every needle length, and the shorter needle can no longer
+      # match fewer rows than the longer one.
+      return body_literal_cond(value, body_max, side) if value.size < 3 || !fts
       phrase = %("#{value.gsub('"', "\"\"")}") # quoted phrase → contiguous substring match
       # An FTS5 COLUMN FILTER (`resp : "phrase"`) narrows the match to one indexed column. The
       # column name is this module's own constant, never user input — the value stays inside the
@@ -951,16 +938,6 @@ module Gori
       # can never carry a NUL of its own. `(?i)` because `body:` promises case-insensitive
       # matching where `body~` is case-SENSITIVE by default.
       body_regex_cond("(?i)#{Regex.escape(value)}", body_max, side)
-    end
-
-    # Every upper/lower spelling of a one- or two-character needle, so a byte-wise `instr`
-    # can stand in for a case-insensitive LIKE. Bounded at 4 by `body_cond`'s `size < 3`
-    # guard; a character with no case (a digit, a symbol, most CJK) contributes one variant.
-    private def self.case_permutations(value : String) : Array(String)
-      value.each_char.reduce([""]) do |acc, ch|
-        forms = [ch.downcase, ch.upcase].uniq!
-        acc.flat_map { |prefix| forms.map { |f| prefix + f } }
-      end.uniq!
     end
 
     # Split a leading comparison operator (<= >= < > =, default =) off a value. Shared
@@ -1073,24 +1050,14 @@ module Gori
     # first NUL, so a head that stored an embedded NUL (header-injection / smuggling
     # cases — the codec keeps the octets, P7) made every header after the NUL invisible
     # to `header:` while `header~` (SafeRegexp over the full blob) still found it. Same
-    # trap `body_cond` already routed around. `instr` is case-SENSITIVE, so OR every case
-    # permutation of a short needle; longer needles go through a case-insensitive literal
-    # REGEXP, which SafeRegexp already makes NUL-transparent.
+    # trap `body_cond` already routed around, and the same way: ONE case-insensitive
+    # literal REGEXP, which SafeRegexp makes both NUL-transparent and (for a literal)
+    # allocation-free. A short needle used to take an `instr` per ASCII case permutation
+    # per head column instead — more scans, and a different fold rule at 1-2 characters
+    # than at 3, which `body_cond` explains at more length.
     private def self.header_cond(value : String, side : Symbol? = nil) : {String, Array(DB::Any)}?
       value = value.chars.reject(&.control?).join
       return nil if value.empty?
-      if value.size < 3
-        conds = [] of String
-        params = [] of DB::Any
-        cols = head_columns(side)
-        case_permutations(value).each do |v|
-          cols.each do |col|
-            conds << "COALESCE(instr(#{col}, CAST(? AS BLOB)), 0) > 0"
-            params << v
-          end
-        end
-        return {"(#{conds.join(" OR ")})", params}
-      end
       pat = "(?i)#{Regex.escape(value)}"
       return {"0", [] of DB::Any} unless valid_regex?(pat)
       header_regex_cond(pat, side)

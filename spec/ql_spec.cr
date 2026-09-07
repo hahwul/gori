@@ -129,18 +129,22 @@ describe Gori::QL do
     Gori::QL.analyze("body:\u0001").clean?.should be_false
   end
 
-  it "falls back to a byte-wise blob scan for a body: value below the 3-char trigram floor" do
-    f = Gori::QL.parse("body:ab")
-    f.sql.should contain("COALESCE(instr(request_body, CAST(? AS BLOB)), 0) > 0")
-    f.sql.should contain("COALESCE(instr(response_body, CAST(? AS BLOB)), 0) > 0")
-    f.args.should eq(["ab", "ab", "aB", "aB", "Ab", "Ab", "AB", "AB"]) # every case spelling
+  it "compiles a body: value below the 3-char trigram floor like any other literal needle" do
+    # Only the INDEX has a length floor; the term itself does not change shape, so a short
+    # needle takes the very clause an index-free longer one takes — one NUL-transparent,
+    # NULL-guarded REGEXP per body column. It used to be an `instr` per ASCII case
+    # permutation per column (eight full-BLOB scans for two characters), which also folded
+    # case by a different rule at 1-2 characters than at 3.
+    short = Gori::QL.parse("body:ab")
+    short.sql.should eq(Gori::QL.parse("body:abc", fts: false).sql)
+    short.args.should eq(["(?i)ab", "(?i)ab"])
   end
 
   # The <3-char fallback used `CAST(request_body AS TEXT)`, which SQLite truncates at the first
   # NUL — so a needle sitting AFTER a NUL byte was invisible, a monotonicity violation (a
   # shorter needle matching fewer rows) that cannot be explained to an operator. This is a tool
-  # whose targets deliberately put NULs in bodies, so the short path is now byte-wise `instr`,
-  # which is NUL-transparent. Asserted against a real store because the bug lived in SQLite's
+  # whose targets deliberately put NULs in bodies, so the short path scans the raw bytes
+  # through SafeRegexp, which is NUL-transparent. Asserted against a real store because the bug lived in SQLite's
   # cast, not in the SQL text. (The FTS >=3-char path's handling of a NUL is the trigram
   # tokenizer's, which varies by SQLite build, so it is deliberately not pinned here — this
   # test targets the blob fallback that the fix actually changed.)
@@ -164,9 +168,10 @@ describe Gori::QL do
       store.search(Gori::QL.parse("body:nu"), 50).map(&.id).should eq([buried]) # still case-insensitive
       store.search(Gori::QL.parse("body:zz"), 50).map(&.id).should be_empty
 
-      # `-body:x` (negation) must KEEP a bodyless flow, not drop it. `instr(NULL,…)` is NULL and
-      # `NOT (NULL > 0)` is NULL, which SQLite excludes — so an un-COALESCE'd instr silently
-      # narrowed the negated form. `buried` has `NU`, `bodyless` has no body at all.
+      # `-body:x` (negation) must KEEP a bodyless flow, not drop it. An unguarded predicate
+      # over a NULL body yields NULL, and `NOT NULL` is NULL, which SQLite's three-valued
+      # logic EXCLUDES — a silent narrow of the negated form, which the clause's own
+      # `IS NOT NULL` guard is there to stop. `buried` has `NU`, `bodyless` has no body.
       bodyless = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 3_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/none", http_version: "HTTP/1.1",
@@ -227,16 +232,15 @@ describe Gori::QL do
     f.args.should eq(["(?i)Set\\-Cookie", "(?i)Set\\-Cookie"])
   end
 
-  it "compiles a short header: needle via byte-wise instr (NUL-transparent)" do
+  it "compiles a short header: needle exactly like a long one" do
+    # `header:` has no index to fall off, so it never had a reason for a second spelling.
     f = Gori::QL.parse("header:ab")
-    # case permutations of "ab" → ab/aB/Ab/AB, each against request + response head
-    f.sql.includes?("instr(request_head").should be_true
-    f.sql.includes?("instr(response_head").should be_true
-    f.args.size.should eq(8)
+    f.sql.should eq(Gori::QL.parse("header:abc").sql)
+    f.args.should eq(["(?i)ab", "(?i)ab"])
   end
 
   it "matches header: past an embedded NUL in the stored head bytes" do
-    # CAST AS TEXT LIKE stopped at the first NUL; the REGEXP/instr path must not.
+    # CAST AS TEXT LIKE stopped at the first NUL; the SafeRegexp path must not.
     with_store do |store|
       head = "HTTP/1.1 200 OK\r\nX-Trace: a\u0000b\r\nSet-Cookie: sid=1\r\n\r\n".to_slice
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -637,7 +641,7 @@ describe "Gori::Store#search (QL)" do
       ids.call("resp.body:secrettoken").should eq([resp_side])
       ids.call("res.body:secrettoken").should eq([resp_side]) # `res.` is a synonym of `resp.`
 
-      # a short needle takes the byte-wise `instr` path instead of the index — same scoping
+      # a short needle scans the stored bytes instead of the index — same scoping
       ids.call("req.body:se").should eq([req_side])
       ids.call("resp.body:se").should eq([resp_side])
 
