@@ -129,11 +129,15 @@ describe Gori::QL do
     Gori::QL.analyze("body:\u0001").clean?.should be_false
   end
 
-  it "falls back to a byte-wise blob scan for a body: value below the 3-char trigram floor" do
-    f = Gori::QL.parse("body:ab")
-    f.sql.should contain("COALESCE(instr(request_body, CAST(? AS BLOB)), 0) > 0")
-    f.sql.should contain("COALESCE(instr(response_body, CAST(? AS BLOB)), 0) > 0")
-    f.args.should eq(["ab", "ab", "aB", "aB", "Ab", "Ab", "AB", "AB"]) # every case spelling
+  it "compiles a body: value below the 3-char trigram floor like any other literal needle" do
+    # Only the INDEX has a length floor; the term itself does not change shape, so a short
+    # needle takes the very clause an index-free longer one takes — one NUL-transparent,
+    # NULL-guarded REGEXP per body column. It used to be an `instr` per ASCII case
+    # permutation per column (eight full-BLOB scans for two characters), which also folded
+    # case by a different rule at 1-2 characters than at 3.
+    short = Gori::QL.parse("body:ab")
+    short.sql.should eq(Gori::QL.parse("body:abc", fts: false).sql)
+    short.args.should eq(["(?i)ab", "(?i)ab"])
   end
 
   # The <3-char fallback used `CAST(request_body AS TEXT)`, which SQLite truncates at the first
@@ -227,12 +231,11 @@ describe Gori::QL do
     f.args.should eq(["(?i)Set\\-Cookie", "(?i)Set\\-Cookie"])
   end
 
-  it "compiles a short header: needle via byte-wise instr (NUL-transparent)" do
+  it "compiles a short header: needle exactly like a long one" do
+    # `header:` has no index to fall off, so it never had a reason for a second spelling.
     f = Gori::QL.parse("header:ab")
-    # case permutations of "ab" → ab/aB/Ab/AB, each against request + response head
-    f.sql.includes?("instr(request_head").should be_true
-    f.sql.includes?("instr(response_head").should be_true
-    f.args.size.should eq(8)
+    f.sql.should eq(Gori::QL.parse("header:abc").sql)
+    f.args.should eq(["(?i)ab", "(?i)ab"])
   end
 
   it "matches header: past an embedded NUL in the stored head bytes" do
