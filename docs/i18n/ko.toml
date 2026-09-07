@@ -37,6 +37,7 @@ download_svg_dark = "다크"
 download_svg_color = "컬러"
 copy_url = "SVG URL 복사"
 copied = "복사됨"
+brand_page = "브랜드 키트 →"
 
 [search]
 placeholder = "문서 검색…"

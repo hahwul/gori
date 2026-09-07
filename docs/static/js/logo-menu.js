@@ -39,10 +39,10 @@
   document.addEventListener("click", function (event) {
     if (!menu.contains(event.target)) hideMenu();
   });
-  /* Close after a download choice so the menu does not linger over the page. */
+  /* Close after a download or a link choice so the menu does not linger over
+     the page — including when the link lands on the page already open. */
   menu.addEventListener("click", function (event) {
-    var item = event.target.closest("a[download]");
-    if (item) hideMenu();
+    if (event.target.closest("a")) hideMenu();
   });
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") hideMenu();

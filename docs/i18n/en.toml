@@ -37,6 +37,7 @@ download_svg_dark = "Dark"
 download_svg_color = "Color"
 copy_url = "Copy SVG URL"
 copied = "Copied"
+brand_page = "Brand kit →"
 
 [search]
 placeholder = "Search the docs…"
