@@ -1,3 +1,5 @@
+require "../utf8"
+
 module Gori::Discover
   # Link extraction from a response body — the spider's discovery source. Net-new (the
   # repo's links.cr is unrelated; it resolves DB entity_links). A single bounded pass of
@@ -455,17 +457,12 @@ module Gori::Discover
       text(slice)
     end
 
-    # A response body as a String the PCRE2 scans above can be run over. The scrub is
-    # required — `String.new` validates nothing, and a Regex on invalid UTF-8 raises — but it
-    # is only required for a body that is ACTUALLY invalid, and `String#scrub` charges for the
-    # check either way: it walks the whole string through a `Char::Reader` and returns `self`
-    # at the end, which measured 130µs on a valid 40 KB page against 9µs for
-    # `valid_encoding?`. Every crawled page and every brute-force probe response pays this, so
-    # ask the cheap question first and scrub only the bodies that need it (`scrub` re-walks
-    # them, which is the right trade at ~1 body in a run).
+    # A response body as a String the PCRE2 scans above can be run over. This measured 130µs
+    # on a valid 40 KB page against 9µs for the cheap check, and the fuzz matcher and the
+    # intercept filter were paying the same toll with the slow spelling — so the reasoning and
+    # the code moved to `Gori::Utf8`, which is where the numbers now live.
     private def self.text(slice : Bytes) : String
-      s = String.new(slice)
-      s.valid_encoding? ? s : s.scrub
+      Gori::Utf8.text(slice)
     end
   end
 end

@@ -18,7 +18,7 @@ module Gori
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         save_results = bool_arg(h, "save_results", false)
-        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests =
+        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests, sets_warn =
           build_fuzz_job(h, ob, save_results)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
@@ -68,7 +68,7 @@ module Gori
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} record=#{fjob.record_history} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
-        Result.new(fuzz_start_echo(id, total, fjob, sc, ws_frames, ws_ignored, warn, marks_warn, grpc))
+        Result.new(fuzz_start_echo(id, total, fjob, sc, ws_frames, ws_ignored, warn, marks_warn, sets_warn, grpc))
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       end
@@ -87,7 +87,7 @@ module Gori
       # `follow_redirects` and heard nothing would conclude the sweep followed them.
       private def fuzz_start_echo(id : String, total : Int64?, fjob : FuzzJob, sc,
                                   ws_frames : Int32?, ws_ignored : Array(Symbol),
-                                  warn : String?, marks_warn : String?,
+                                  warn : String?, marks_warn : String?, sets_warn : String? = nil,
                                   grpc : Fuzz::GrpcFieldTemplate? = nil) : String
         JSON.build do |j|
           j.object do
@@ -107,6 +107,10 @@ module Gori
             j.field("ignored_args", ws_ignored.map(&.to_s)) unless ws_ignored.empty?
             j.field("budget_warning", warn) if warn
             j.field("marks_warning", marks_warn) if marks_warn
+            # Payload sets the chosen `mode` will never draw from. Beside `marks_warning` and
+            # for the same reason: the job runs either way, and an agent that passed two
+            # wordlists under the default `sniper` and heard nothing concludes both were swept.
+            j.field("payload_sets_warning", sets_warn) if sets_warn
             # WHICH rpc and message the named `fields` resolved through, and what each one is
             # declared as. The same fact `gori run fuzz` prints once up front and for the same
             # reason: the caller passed a NAME and gori bound it to a declaration in a `.proto`
@@ -496,7 +500,7 @@ module Gori
       # tokens that made no position of their own (`Fuzz::Plan#shadowed_marks`, reported by
       # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
       # input.
-      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?}
+      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?, String?}
         text, default_target, src_h2, evidence, src_sni, src_tls_preset = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
@@ -583,7 +587,7 @@ module Gori
          plan.ws_script.try(&.frames.size), plan.ws_ignored_knobs, plan.grpc_fields,
          plan.tls_preset,
          plan.engine.race_count.try { |n| "race ×#{n}" } || mode.label,
-         effective_sni, config.max_requests}
+         effective_sni, config.max_requests, unused_sets_warning(plan)}
       rescue ex : Fuzz::PlanError
         raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error
@@ -592,6 +596,24 @@ module Gori
         # A payload set's own clean error (a bad wordlist/preset path, an unknown preset
         # reached via size()) — surfaced as a clean arg error, not an internal crash.
         raise FuzzArgError.new(ex.message || "payload set error")
+      end
+
+      # MCP's wording for payload sets the run will never draw from (see
+      # `Fuzz::Plan#unused_payload_sets`). Worded here, from the plan, rather than passed as a
+      # raw count: the remedy differs by mode, and `sniper` (the DEFAULT, so the common way to
+      # arrive here) wants a different answer than `pitchfork` does.
+      private def unused_sets_warning(plan : Fuzz::Plan) : String?
+        n = plan.unused_payload_sets
+        return nil if n.zero?
+        remedy =
+          if plan.config.mode.per_position?
+            "#{plan.config.mode.label} draws set k for position k and this run marks " \
+            "#{plan.position_count}; mark another position or drop the extra set"
+          else
+            "#{plan.config.mode.label} uses ONE shared payload set; pass mode " \
+            "\"pitchfork\" (lockstep) or \"clusterbomb\" (every combination) to use them all"
+          end
+        "#{n} payload set#{n == 1 ? "" : "s"} will not be used: #{remedy}"
       end
 
       # MCP's wording for a plan the args can't produce — the builder reports the

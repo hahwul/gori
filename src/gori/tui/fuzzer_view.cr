@@ -197,6 +197,7 @@ module Gori::Tui
       # about THIS template buffer, and an edit that adds a Content-Length must retract it.
       @unframed_body = false
       @unframed_body_rev = -1
+      @unused_sets = 0
       @sel = 0
       @scroll = 0
       @sort = :index
@@ -1521,6 +1522,14 @@ module Gori::Tui
       # template has a body nothing frames, so the origin reads it as zero-length.
       @unframed_body = plan.unframed_body?
       @unframed_body_rev = @editor.edits
+      # Payload sets this mode will never draw from (see `Fuzz::Plan#unused_payload_sets`).
+      # NOT revision-scoped the way the two framing facts above are, and it cannot be: it turns
+      # on the SET LIST and the MODE, and neither has an edit counter — `@editor.edits` tracks
+      # the template buffer only, so guarding on it would retract the claim when the operator
+      # types in the template and keep it when they change the very rows it is about. Instead
+      # it is written on EVERY `build_engine` (0 included, below), so it only ever describes
+      # the plan just built — which is the tick the run-start line reads it on.
+      @unused_sets = plan.unused_payload_sets
       {plan.engine, nil}
     rescue ex : Fuzz::PlanError
       {nil, fuzz_plan_error(ex)}
@@ -1661,6 +1670,30 @@ module Gori::Tui
                          "chunked Transfer-Encoding, and Auto Content-Length is off — the " \
                          "origin will read a zero-length body. Turn on ^O ▸ Advanced ▸ " \
                          "Auto Content-Length, or declare the header yourself"
+
+    # How many payload-set rows the LAST built plan will never draw from, and this surface's
+    # sentence for it. `gori run fuzz` and MCP say the same fact with their own remedies; here
+    # the remedy is the CONFIG pane's own mode row, because that is what the operator would
+    # reach for. 0 on every ordinary run, so the run-start line is unchanged for them.
+    def unused_payload_sets : Int32
+      @unused_sets
+    end
+
+    # The sentence, built rather than a constant: unlike `CL_REWRITE_NOTE` the count and the
+    # mode are both in it, and the remedy differs by mode — too many sets under Sniper wants a
+    # different mode, while too many under Pitchfork wants another marked position.
+    def unused_sets_note : String
+      n = @unused_sets
+      remedy =
+        if @config.mode.per_position?
+          "#{@config.mode.label} draws set k for position k and this template marks " \
+          "#{position_count} — mark another position (^A / ^K / ^T), or remove the extra set"
+        else
+          "#{@config.mode.label} uses ONE shared set — switch ^O ▸ Mode to pitchfork " \
+          "(lockstep) or clusterbomb (every combination) to use them all"
+        end
+      "#{n} payload set#{n == 1 ? "" : "s"} will not be used: #{remedy}"
+    end
 
     # Whether the run targets HTTP/2 — for Probe's synthetic RepeaterRecord (see
     # FuzzerController#probe_scan_fuzz_result), which needs to know the protocol
