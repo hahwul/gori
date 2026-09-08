@@ -166,6 +166,51 @@ module Gori
         "gq#{Random::Secure.hex(4)}"
       end
 
+      # ── recognising a canary in captured bytes ──────────────────────────────────────
+      # The token SHAPE is a correctness-linked invariant, not a cosmetic one: `Fingerprint`
+      # decides reflection by whether a canary appears in the response, and `Inject` locates the
+      # JSON spans a send seam must protect by the same tokens. If those two ever disagreed about
+      # what a canary looks like, one would mint what the other cannot find. So the shape lives
+      # HERE, beside `fresh` that mints it, and both scanners call it — no second definition to
+      # drift from this one.
+
+      # The 8 bytes at `from` are all lower-hex (0-9 a-f) — a `gq`+8-hex canary's tail. `from`+8
+      # must be in bounds; every caller holds `i <= size - LEN`.
+      def self.hex_tail?(bytes : Bytes, from : Int32) : Bool
+        i = 0
+        while i < LEN - 2
+          b = bytes.unsafe_fetch(from + i)
+          return false unless (b >= 0x30_u8 && b <= 0x39_u8) || (b >= 0x61_u8 && b <= 0x66_u8)
+          i += 1
+        end
+        true
+      end
+
+      # Is `s` exactly a canary — `gq` + 8 lower-hex, `LEN` bytes and no more?
+      def self.shaped?(s : String) : Bool
+        return false unless s.bytesize == LEN
+        b = s.to_slice
+        b.unsafe_fetch(0) == 0x67_u8 && b.unsafe_fetch(1) == 0x71_u8 && hex_tail?(b, 2)
+      end
+
+      # Yield the start offset of every `gq`+8-hex canary token in `bytes`. `Slice(UInt8)#index`
+      # is memchr, so the bytes BETWEEN candidate `g`s are skipped by libc a word at a time
+      # rather than one Crystal comparison each — a `g` is ~2% of ordinary text, so the walk that
+      # matters is the memchr, not this loop. No canary is a substring of another (fixed length)
+      # and no lower-hex byte is `g`, so tokens never overlap and each start is yielded once.
+      def self.each_token(bytes : Bytes, & : Int32 ->) : Nil
+        return if bytes.size < LEN
+        last = bytes.size - LEN
+        i = 0
+        while i <= last
+          break unless found = bytes.index(0x67_u8, i)
+          break if found > last
+          i = found
+          yield i if bytes.unsafe_fetch(i + 1) == 0x71_u8 && hex_tail?(bytes, i + 2)
+          i += 1
+        end
+      end
+
       # `n` canaries from ONE CSPRNG draw. `fresh` costs a `getrandom` syscall per call, and
       # the miner mints one canary per candidate NAME — a bucket is 64 by default and up to
       # 1024 (`Config#bucket`), so a single bucket send was up to 1024 syscalls before a byte

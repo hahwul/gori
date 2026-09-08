@@ -350,6 +350,51 @@ describe Gori::Miner::Inject do
       spans.each { |(a, b)| String.new(bytes[a, b - a]).should eq("\"pMINE\":\"vCANARY\"") }
     end
 
+    # The CANARY fast path (`Inject.json_spans_by_canary`): the engine injects real canaries, so
+    # the spans are found by scanning the body for canary tokens rather than the whole fragment.
+    # The slow path above uses non-canary `vCANARY`; this covers the road the engine takes.
+    it "json: real canary values still yield exactly the per-node fragment spans" do
+      c1 = M::Canary.fresh
+      c2 = M::Canary.fresh
+      base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: 19\r\n\r\n{\"a\":{\"b\":1},\"c\":2}"
+      # A `$`-carrying candidate name is exactly what the spans protect from binding expansion.
+      bytes, spans = M::Inject.apply_with_spans(req(base), M::Location::Json, [{"p$NAME", c1}, {"q", c2}])
+      # 2 candidates × 2 object nodes (root + nested {"b":1}) = 4 spans.
+      spans.size.should eq(4)
+      covered = spans.map { |(a, b)| String.new(bytes[a, b - a]) }
+      covered.count("\"p$NAME\":\"#{c1}\"").should eq(2)
+      covered.count("\"q\":\"#{c2}\"").should eq(2)
+      # The `$`-carrying candidate is inside a span, so a send seam leaves it literal.
+      covered.all? { |s| !s.includes?("$NAME") || s == "\"p$NAME\":\"#{c1}\"" }.should be_true
+    end
+
+    # The by-canary scan finds a fragment by its canary tail, so a canary-shaped token that is
+    # ALREADY in the body — or one that happens to equal an injected value — must not become a
+    # phantom span. The full-fragment verify is what keeps that honest.
+    it "json: a canary-shaped token in the seed body is not mistaken for an injected span" do
+      c = M::Canary.fresh
+      # The seed already carries the very value we inject, as a pre-existing field's value.
+      body = "{\"seed\":\"#{c}\"}"
+      base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+      bytes, spans = M::Inject.apply_with_spans(req(base), M::Location::Json, [{"cand", c}])
+      spans.size.should eq(1) # only the injected "cand":"<c>", not the seed's "seed":"<c>"
+      String.new(bytes[spans[0][0], spans[0][1] - spans[0][0]]).should eq("\"cand\":\"#{c}\"")
+    end
+
+    # A malformed (non-parsing) body takes the byte-splice road, and one ENDING in a bare
+    # canary-shaped token that also equals the injected value put that token at the very end of
+    # the body — one byte short of the fragment's closing quote. The by-canary scan must not read
+    # past the body there (it would raise IndexError); it skips it, exactly as the fragment
+    # search does. `--flow` mines captured bodies, so an adversarial capture can reach this.
+    it "json: a trailing canary-shaped token in a malformed body does not read past the body" do
+      c = M::Canary.fresh
+      body = "{\"x\":1 #{c}" # no closing brace → splice road; body ends in a bare canary token
+      base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+      bytes, spans = M::Inject.apply_with_spans(req(base), M::Location::Json, [{"cand", c}])
+      spans.size.should eq(1) # only the spliced "cand":"<c>", not the trailing bare token
+      String.new(bytes[spans[0][0], spans[0][1] - spans[0][0]]).should eq("\"cand\":\"#{c}\"")
+    end
+
     it "multipart: spans cover the injected part (name and value), seed part excluded" do
       base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=BB\r\nContent-Length: 40\r\n\r\n--BB\r\nContent-Disposition: form-data; name=\"seedm\"\r\n\r\nSEEDVAL\r\n--BB--\r\n"
       bytes, spans = M::Inject.apply_with_spans(req(base), M::Location::Multipart, [{"pMINE", "vCANARY"}])
