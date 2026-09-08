@@ -1421,7 +1421,7 @@ module Gori::Tui
         end_worker(v)
       end
       archive = spool_run ? "" : " · complete archive unavailable"
-      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}", :busy)
+      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}#{sets_note(v)}", :busy)
     end
 
     # How this run frames its body, for the run-start line — the way `gori run fuzz` prints it
@@ -1441,6 +1441,16 @@ module Gori::Tui
       else
         ""
       end
+    end
+
+    # Payload-set rows this run's MODE will never draw from, on the same run-start line and for
+    # the same reason as `framing_note`: the sweep runs either way, and an operator who added a
+    # second set without leaving Sniper otherwise watches a run that swept the first list into
+    # every position and reports it as complete. Its own segment rather than an arm of
+    # `framing_note` — that pair is mutually exclusive by construction and this is a different
+    # axis, so a run can legitimately owe both sentences.
+    private def sets_note(v : FuzzerView) : String
+      v.unused_payload_sets.zero? ? "" : " · note: #{v.unused_sets_note}"
     end
 
     # The three RESULTS-pane views, as verbs: sort column, matched-only lens, distribution

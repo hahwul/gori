@@ -372,6 +372,7 @@ module Gori
         note_fuzz_auto_encode(plan)
         note_fuzz_grpc_fields(plan)
         note_fuzz_ws_ignored(plan)
+        note_fuzz_unused_sets(plan)
         # Last-byte-sync needs ONE persistent socket per connection to hold back the final byte;
         # h2 frames its own connection per send, so `Backend#send_race` degrades to independent
         # sends and a configured --race-warmup cannot be honored. Say so rather than drop it
@@ -571,6 +572,26 @@ module Gori
                     "value while a field position changes the message's size — every request " \
                     "will declare the wrong body length. Drop --verbatim unless the desync is " \
                     "the test"
+      end
+
+      # Payload sets this run was handed and will never draw from — the silent half of
+      # `Generator`'s set contract (see `Plan#unused_payload_sets`). Named with the mode that
+      # decided it and the remedy, because the two ways to get here want opposite fixes: too
+      # many sets for Sniper/BatteringRam wants `--mode pitchfork`, while too many sets for the
+      # per-position modes wants another marked position.
+      private def self.note_fuzz_unused_sets(plan : Fuzz::Plan) : Nil
+        n = plan.unused_payload_sets
+        return if n.zero?
+        remedy =
+          if plan.config.mode.per_position?
+            "#{plan.config.mode.label} draws set k for position k and this run marks " \
+            "#{plan.position_count} — mark another position, or drop the extra set"
+          else
+            "#{plan.config.mode.label} uses ONE shared payload set — pass --mode pitchfork " \
+            "(lockstep) or --mode clusterbomb (every combination) to use them all"
+          end
+        STDERR.puts "gori run fuzz: note: #{n} payload set#{n == 1 ? "" : "s"} " \
+                    "will not be used: #{remedy}"
       end
 
       # Knobs this run cannot honour because it is a WebSocket sweep. Said ONCE, up front, with

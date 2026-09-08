@@ -6,7 +6,15 @@
 #      allocations per active dimension per response. The matcher now precompiles each spec once
 #      (Predicate.compile_num/compile_status) and evaluates parsed terms with plain int compares.
 #
-#   2. Response metrics counted words and lines in TWO full body passes; now fused into ONE.
+#   2. Response metrics counted words and lines in TWO full body passes; now fused into ONE,
+#      and the fused pass classified each byte with a four-way `==` chain — now a 256-entry
+#      table plus a branchless word-transition (`Matcher::WS_TABLE`).
+#
+#   3. The BODY-TEXT passes, which dominate any run that sets `--mr` / `--fr` / `--extract`:
+#      `String.new(body).scrub` walked the body a CHARACTER at a time only to return `self`
+#      for the ~all bodies that were already valid (`Gori::Utf8.text` asks the byte-level
+#      `valid_encoding?` first), and `Regex#matches?` counted the body's characters to turn
+#      the constant character index 0 into byte 0 (`matches_at_byte_index?` does not).
 #
 # Build: crystal build bench/fuzz_match_bench.cr -o bin/fuzz_match_bench --release
 # Run:   bin/fuzz_match_bench
@@ -16,6 +24,7 @@ module Gori
   class Error < Exception; end
 end
 
+require "../src/gori/utf8"
 require "../src/gori/fuzz/matcher"
 
 include Gori::Fuzz
@@ -115,9 +124,69 @@ Benchmark.ips do |x|
   x.report("NEW: precompiled terms      ") { VALUES.each { |v| NUM_TERMS.any?(&.matches?(v)) } }
 end
 
+# The table-driven, branchless successor to `new_count_metrics` — what `Matcher#count_metrics`
+# actually runs. `prev_ws` starts at 1 because a body begins "after whitespace", which is what
+# `in_word = false` meant; a word opens exactly where the previous byte was whitespace and this
+# one is not, so the transition needs no branch.
+WS_TABLE = begin
+  t = StaticArray(UInt8, 256).new(0_u8)
+  t[0x20] = 1_u8
+  t[0x09] = 1_u8
+  t[0x0a] = 1_u8
+  t[0x0d] = 1_u8
+  t
+end
+
+def table_count_metrics(body : Bytes) : {Int32, Int32}
+  words = 0
+  lines = 0
+  prev_ws = 1
+  table = WS_TABLE.to_unsafe
+  p = body.to_unsafe
+  stop = p + body.size
+  while p < stop
+    b = p.value
+    ws = table[b].to_i32
+    words += prev_ws & (ws ^ 1)
+    lines += 1 if b == 0x0a_u8
+    prev_ws = ws
+    p += 1
+  end
+  {words, lines}
+end
+
+# ── body text: the scrub and the regex entry point ────────────────────────────────────────────
+#
+# A REAL response body, not the tiny one above: both costs are linear in body size, and the
+# shape that matters is a page-sized body that is already valid UTF-8 — which is what a sweep
+# gets from essentially every response, and exactly the case the old spellings charged full
+# price for.
+TEXT_BODY = begin
+  io = IO::Memory.new
+  8000.times { io << "lorem ipsum dolor sit amet " }
+  io.to_slice
+end
+
+BODY_RE = Regex.new("dolor si[a-z] amet")
+
 puts
 puts "metrics — words + lines over the body:"
 Benchmark.ips do |x|
-  x.report("OLD: two passes ") { {old_count_words(BODY), old_count_lines(BODY)} }
-  x.report("NEW: fused pass  ") { new_count_metrics(BODY) }
+  x.report("OLD: two passes       ") { {old_count_words(BODY), old_count_lines(BODY)} }
+  x.report("MID: fused pass       ") { new_count_metrics(BODY) }
+  x.report("NEW: fused + table    ") { table_count_metrics(BODY) }
+end
+
+puts
+puts "body text — making a PCRE2 subject out of #{TEXT_BODY.size} valid UTF-8 bytes:"
+Benchmark.ips do |x|
+  x.report("OLD: String.new.scrub ") { String.new(TEXT_BODY).scrub }
+  x.report("NEW: Gori::Utf8.text  ") { Gori::Utf8.text(TEXT_BODY) }
+end
+
+puts
+puts "body regex — --mr over that subject (fresh String each time, as a run gets it):"
+Benchmark.ips do |x|
+  x.report("OLD: matches?(text)   ") { BODY_RE.matches?(String.new(TEXT_BODY)) }
+  x.report("NEW: at_byte_index(0) ") { BODY_RE.matches_at_byte_index?(String.new(TEXT_BODY), 0) }
 end

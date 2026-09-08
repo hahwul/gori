@@ -88,6 +88,8 @@ The Fuzzer is an Intruder-style engine: mark positions in a request, attach payl
 | `pitchfork` | Parallel sets: payload *n* from each set together |
 | `clusterbomb` | Every combination across all sets |
 
+The first two take **one** payload set; the last two take one per marked position. Pass more sets than the mode consumes and gori names the ones it will not draw from before the run starts — two wordlists under the default `sniper` sweep the first one into every position.
+
 ### Positions and Payloads
 
 Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`) for a fast start with no file, a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. A preset can merge an extra file (built-in first, de-duped), and composes with any other set. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.

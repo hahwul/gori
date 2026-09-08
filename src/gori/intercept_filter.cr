@@ -1,4 +1,5 @@
 require "./filter_ast"
+require "./utf8"
 require "./proto"
 
 module Gori
@@ -579,7 +580,7 @@ module Gori
     # A `~` term's match, and the ONLY place this filter runs a regex. Two guards, and neither
     # is optional on this path:
     #
-    #   `.scrub` — PCRE2 RAISES `UTF-8 error: illegal byte` on an invalid byte rather than
+    #   the scrub — PCRE2 RAISES `UTF-8 error: illegal byte` on an invalid byte rather than
     #     simply not matching. The haystack here is a request target an operator or a peer put
     #     on the wire, or raw head/payload bytes; a raise from a hold gate takes down the
     #     connection fiber. This is the same hazard `Gori::SafeRegexp` exists to contain on the
@@ -587,11 +588,15 @@ module Gori
     #   `rescue` — a residual PCRE2 error (recursion/match limit on a pathological pattern) is a
     #     no-match, never an exception escaping onto the proxy path.
     #
-    # `.scrub` allocates a copy of the haystack, so a `~` term costs one string per message it
-    # is asked about. Nothing else in this filter allocates per message, and nothing pays this
-    # unless the operator wrote a `~`.
+    # Through `Gori::Utf8.subject`, not `String#scrub` — this comment used to say the scrub
+    # "allocates a copy of the haystack", which is what a valid haystack does NOT pay and is
+    # not where the cost was: `scrub` returns `self` after walking the whole string a character
+    # at a time to find nothing to repair. The cheap validity check answers the same question
+    # over the raw bytes and hands back the same String. `matches_at_byte_index?` for the twin
+    # reason (see `Fuzz::Matcher#regex_pass?`): `matches?` would count the haystack's characters
+    # to convert index 0 into byte 0.
     protected def self.regex_hit?(pattern : Regex, hay : String) : Bool
-      pattern.matches?(hay.scrub)
+      pattern.matches_at_byte_index?(Gori::Utf8.subject(hay), 0)
     rescue
       false
     end

@@ -266,6 +266,22 @@ module Gori::Fuzz
     # Reported here for the same reason `rewrites_content_length?` is: a fact about the run
     # that only the builder can see, said ONCE, up front, by whichever surface asked.
     getter shadowed_marks : Array(String)
+    # How many payload sets this run was given but will never draw from — the count, not the
+    # sets, because the operator identifies them by the ORDER they typed them in.
+    #
+    # `Generator`'s set contract is silent by construction: Sniper and BatteringRam read
+    # `@sets[0]` and nothing else, and Pitchfork / ClusterBomb map set `k` to position `k`, so
+    # any set past position_count is never opened. Both discards happened with no word said —
+    # `-w users.txt -w passwords.txt` under the DEFAULT mode swept `users.txt` into both
+    # positions and reported `N sent · 0 errors`, a run that looks like the one the operator
+    # asked for and tested half of it. A missing wordlist in the dropped slot did not even
+    # raise, because nothing ever opened it.
+    #
+    # A NOTE and not a refusal, for the reason `ws_ignored_knobs` gives: passing more sets than
+    # a mode consumes is not wrong (a saved command line switched from pitchfork to sniper for
+    # one run is the ordinary case), it is just inert — and being told nothing is how the
+    # operator comes to believe both lists were swept.
+    getter unused_payload_sets : Int32
     # Which positions this run percent-encodes for, and the encode itself. Exposed so a
     # surface can SAY so (the CLI notes it once, up front, and names `--no-encode`) and so
     # the TUI's request RECONSTRUCTION can reproduce the bytes the generator produced —
@@ -327,6 +343,7 @@ module Gori::Fuzz
                    @rewrites_content_length : Bool = false,
                    @unframed_body : Bool = false,
                    @shadowed_marks : Array(String) = [] of String,
+                   @unused_payload_sets : Int32 = 0,
                    @auto_encode : AutoEncode = AutoEncode.none,
                    @ws_script : WsScript? = nil,
                    @ws_ignored_knobs : Array(Symbol) = [] of Symbol,
@@ -495,6 +512,10 @@ module Gori::Fuzz
       # `#total` (the only readers of `@sets`) are never called on that path; `Engine#run_race`
       # calls `Generator#baseline_request` instead, which does not touch `@sets` either.
       gen_sets = sets.empty? ? [] of PayloadSet : (config.mode.per_position? ? sets : [sets.first])
+      # Sets handed over that `Generator` will never draw from. Counted off `gen_sets` and the
+      # run's own position count — the two facts `Generator#set_for` actually maps through — so
+      # this cannot drift from the contract it reports on. See `Plan#unused_payload_sets`.
+      unused_sets = Math.max(sets.size - Math.min(gen_sets.size, marked.position_count), 0)
       # A payload a field's DECLARATION cannot hold, refused before the first dial — `abc` into
       # an `int32`, an enum name the schema does not carry. Beside `refuse_unrunnable_chains`
       # above and for the same reason its comment gives, over the sets the generator will
@@ -553,7 +574,7 @@ module Gori::Fuzz
         rewrites_content_length: config.update_content_length? &&
                                  ContentLength.sync(generator.baseline_raw, false) != generator.baseline_raw,
         unframed_body: unframed_body?(config, generator.baseline_raw),
-        shadowed_marks: shadowed_marks, auto_encode: auto_encode,
+        shadowed_marks: shadowed_marks, unused_payload_sets: unused_sets, auto_encode: auto_encode,
         ws_script: ws_script, ws_ignored_knobs: ws_ignored, grpc_fields: grpc_fields,
         tls_preset: sender.tls_preset)
     end

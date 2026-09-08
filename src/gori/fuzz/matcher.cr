@@ -3,6 +3,7 @@ require "../proxy/h2/grpc"
 require "../intercept_filter"
 require "../repeater/engine"
 require "../ascii_bytes"
+require "../utf8"
 
 module Gori::Fuzz
   # gRPC facts a fuzz run needs off raw wire bytes: the CALL's outcome (which for gRPC is
@@ -334,6 +335,20 @@ module Gori::Fuzz
       @line_tol = Matcher.tolerance(samples.map(&.metrics.lines.to_i64), COUNT_JITTER_FLOOR)
     end
 
+    # `true` for the four bytes `count_metrics` treats as whitespace (space, tab, LF, CR),
+    # `false` for every other byte — as a 256-entry table so that test is one load instead of
+    # four comparisons. Deliberately NOT `Char#whitespace?`: the scan is over raw response
+    # bytes, where a UTF-8 continuation byte must not be read as a character at all, and this
+    # is the same four bytes the previous `==` chain named.
+    WS_TABLE = begin
+      t = StaticArray(UInt8, 256).new(0_u8)
+      t[0x20] = 1_u8 # space
+      t[0x09] = 1_u8 # tab
+      t[0x0a] = 1_u8 # LF
+      t[0x0d] = 1_u8 # CR
+      t
+    end
+
     # A generous per-pair slack (bytes) for the length-tracks-payload check below — covers
     # HTML-entity re-encoding of a few nonce characters, off-by-one wrapper text, etc.
     # without being wide enough to misclassify genuinely-noisy (non-reflecting) targets.
@@ -462,7 +477,11 @@ module Gori::Fuzz
       words, lines = count_metrics(body)
 
       need_text = !@match_regex.nil? || !@filter_regex.nil? || !@extract.nil?
-      text = need_text ? String.new(body).scrub : ""
+      # `Gori::Utf8.text`, not `String.new(body).scrub`: the scrub is mandatory (PCRE2 raises on
+      # an invalid byte rather than not matching) but `String#scrub` charges every VALID body a
+      # full character-by-character decode to be told there was nothing to repair — 681µs against
+      # 81µs on a 216 KB body, once per response, on every run that sets `--mr`/`--fr`/`--extract`.
+      text = need_text ? Gori::Utf8.text(body) : ""
       extracted = extract_value(text)
       matched = decide(raw, status, grpc_status, length, words, lines, elapsed_ms(raw), text)
       keep = keep?(matched)
@@ -660,8 +679,15 @@ module Gori::Fuzz
         regex_pass?(@filter_regex, text, default: false)
     end
 
+    # `matches_at_byte_index?(text, 0)`, not `matches?(text)`. The two run the same PCRE2 match
+    # from the same offset, but `matches?` takes a CHARACTER index and converts it — and
+    # `String#char_index_to_byte_index` asks `single_byte_optimizable?`, which computes
+    # `String#size`, a full UTF-8 character count over the whole body. For the constant 0 that
+    # conversion cannot produce anything but 0, and it measured 593 profile samples against 263
+    # for the match itself: more than twice the response's regex cost spent deciding that byte 0
+    # is byte 0. Same answer, on an empty body too (`char_index_to_byte_index(0)` is 0 there).
     private def regex_pass?(re : Regex?, text : String, default : Bool) : Bool
-      re ? re.matches?(text) : default
+      re ? re.matches_at_byte_index?(text, 0) : default
     rescue Regex::Error
       # A catastrophic-backtracking user regex (--mr / --fr) raises "match limit exceeded" on a
       # large response body instead of returning false; treat an un-evaluable pattern as no-match
@@ -704,7 +730,9 @@ module Gori::Fuzz
     private def extract_value(text : String) : String?
       re = @extract
       return nil if re.nil? || text.empty?
-      md = re.match(text)
+      # `match_at_byte_index`, for the reason `regex_pass?` gives: `Regex#match`'s char-index
+      # conversion is a whole-body character count to turn 0 into 0.
+      md = re.match_at_byte_index(text, 0)
       return nil unless md
       md[1]? || md[0]
     rescue Regex::Error
@@ -740,19 +768,29 @@ module Gori::Fuzz
 
     # Word count (whitespace transitions) AND line count (0x0a bytes) over the decoded body
     # in ONE allocation-free pass. 0x0a is already a whitespace byte in the word scan, so
-    # counting lines inside that same branch is bit-identical to two separate traversals.
+    # counting lines in the same step is bit-identical to two separate traversals.
+    #
+    # Table-driven and branchless on the word half. This runs over EVERY response of every run,
+    # unconditionally — there is no spec to switch it off the way `--mr` switches the regex on —
+    # so the four-way `==` chain per byte was the run's floor. `WS_TABLE` answers "is this byte
+    # whitespace" with one load, and a word OPENS exactly where the previous byte was whitespace
+    # and this one is not, which is `prev & (ws ^ 1)` with no branch to mispredict. Measured
+    # 147µs -> 80µs on a 216 KB body; the counts are unchanged (`prev` starts at 1 because a body
+    # begins "after whitespace", which is what `in_word = false` meant).
     private def count_metrics(body : Bytes) : {Int32, Int32}
       words = 0
       lines = 0
-      in_word = false
-      body.each do |b|
-        if b == 0x20_u8 || b == 0x09_u8 || b == 0x0a_u8 || b == 0x0d_u8
-          in_word = false
-          lines += 1 if b == 0x0a_u8
-        elsif !in_word
-          in_word = true
-          words += 1
-        end
+      prev_ws = 1
+      table = WS_TABLE.to_unsafe
+      p = body.to_unsafe
+      stop = p + body.size
+      while p < stop
+        b = p.value
+        ws = table[b].to_i32
+        words += prev_ws & (ws ^ 1)
+        lines += 1 if b == 0x0a_u8
+        prev_ws = ws
+        p += 1
       end
       {words, lines}
     end
