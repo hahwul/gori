@@ -392,13 +392,34 @@ module Gori::Discover
     # Findings held back because they are the second and later members of such a run — kept
     # until it either BREAKS (they were real divergence after all, and are emitted) or reaches
     # `Engine::DRIFT_RUN` (they were the origin's new uniform answer, and are dropped).
-    getter held : Array({Finding, Exchange?}) = [] of {Finding, Exchange?}
+    getter held : Array(ProbeHit) = [] of ProbeHit
     property? drifted : Bool = false
     property recalibrations : Int32 = 0
 
     def initialize(@baseline : Calibrate::DirBaseline)
     end
   end
+
+  # A brute-force probe that cleared its directory's baseline, with everything
+  # `Engine#emit_probe_finding` needs if the drift guard decides it was real: the finding
+  # itself, the wire bytes to persist, and the links its BODY named.
+  #
+  # The links are the reason this record exists rather than the pair it replaced. A probe hit
+  # is often the most link-dense body a run will ever fetch — an OpenAPI document naming every
+  # route, an autoindex page listing a directory's real contents, a `.env` or a config file
+  # quoting internal URLs — and every one of them used to be discarded, because only
+  # Crawl/Fetch outcomes carried links. The wordlist found `swagger.json`, reported it, and
+  # then learned nothing from it.
+  #
+  # They travel WITH the hold rather than being expanded on arrival for the reason
+  # `emit_probe_finding` states about directories: a finding the guard is still holding may
+  # yet turn out to be a WAF block page, and a block page's links must not seed the frontier
+  # before the guard has decided.
+  private record ProbeHit,
+    finding : Finding,
+    exchange : Exchange?,
+    links : Array(RawLink),
+    doc_base : String?
 
   private record Task,
     kind : TaskKind,
@@ -526,9 +547,26 @@ module Gori::Discover
     #     be worth the request.
     #   .well-known/change-password
     #     RFC-registered pointer at the real credential-management flow.
+    #   apple-app-site-association (at the ROOT, not under .well-known)
+    #     the other location Apple fetches AASA from, and still the deployed one on plenty of
+    #     sites. Same document, same path list, one more request.
+    #   openapi.json / swagger/v1/swagger.json / v3/api-docs / v2/api-docs
+    #     the API's own description of itself, and by some distance the highest-yield body a
+    #     crawl can read: one 200 enumerates EVERY route the service exposes, including the
+    #     ones behind auth and the ones no page links. The three spellings are framework
+    #     DEFAULTS, not guesses — ASP.NET Core's Swashbuckle, springdoc-openapi, and the
+    #     springfox generation still deployed under it — so on a target built with any of
+    #     them this is a fixed path, in the sense the rest of this list is.
     #
-    # Eleven requests per run — a rounding error against a brute-force pass of ~315 per
-    # directory, and the only part of a run that reads a target's own declaration of itself.
+    #     They also appear in `wordlists/paths.txt`, which is not a duplicate: a wordlist
+    #     entry is probed per calibrated DIRECTORY (so never at the origin on a path-confined
+    #     run, and never at all under `--no-bruteforce`), and a probe's body used to be read
+    #     for nothing. Here they are fetched once, at the origin, on every spider run.
+    #
+    # Sixteen requests per run — still a rounding error against a brute-force pass of ~315
+    # per directory, and the only part of a run that reads a target's own declaration of
+    # itself. `enqueue_well_known` registers each in `@seen`, so a directory sweep of the
+    # origin does not pay for any of them twice.
     WELL_KNOWN = {
       {"/robots.txt", Source::Robots},
       {"/sitemap.xml", Source::Sitemap},
@@ -537,10 +575,15 @@ module Gori::Discover
       {"/.well-known/oauth-authorization-server", Source::WellKnown},
       {"/.well-known/oauth-protected-resource", Source::WellKnown},
       {"/.well-known/apple-app-site-association", Source::WellKnown},
+      {"/apple-app-site-association", Source::WellKnown},
       {"/.well-known/assetlinks.json", Source::WellKnown},
       {"/.well-known/security.txt", Source::WellKnown},
       {"/.well-known/host-meta", Source::WellKnown},
       {"/.well-known/change-password", Source::WellKnown},
+      {"/openapi.json", Source::WellKnown},
+      {"/swagger/v1/swagger.json", Source::WellKnown},
+      {"/v3/api-docs", Source::WellKnown},
+      {"/v2/api-docs", Source::WellKnown},
     }
 
     enum State : UInt8
@@ -604,6 +647,7 @@ module Gori::Discover
     @cluster_suppressed : Int32
     @uncalibratable : Int32
     @drift_suppressed : Int32
+    @assets_skipped : Int32
     @conf_hist : Array(Int32)
     @last_dispatch : Time::Instant
     @phase : Phase
@@ -670,6 +714,7 @@ module Gori::Discover
       @cluster_suppressed = 0
       @uncalibratable = 0
       @drift_suppressed = 0
+      @assets_skipped = 0
       @conf_hist = [0, 0, 0, 0]
       @last_dispatch = Time.instant
       @phase = Phase::Seeding
@@ -876,8 +921,19 @@ module Gori::Discover
       # string/regex include rule (#407) — and the EXCLUDE side on the port-bearing one, so a
       # carve-out naming a port holds here as it does on the proxy (#884). `url` keeps its port
       # for the Fetch either way.
-      gate, gate_excl = Url.gate_urls(url)
-      return unless @scope.allowed?(gate, @seed_parts.host, gate_excl)
+      return unless p = Url.parse(url)
+      return unless @scope.allowed?(Url.gate_url(p), @seed_parts.host, Url.exclude_url(p))
+      # Registered in `@seen` AFTER the gate, not before: a URL this refused was never
+      # requested, and marking it visited would hide it from the brute-forcer too — which
+      # asks the same Layer-2 question and would reach the same answer, but must reach it
+      # itself rather than inherit a decision made for a task that does not exist.
+      #
+      # Registered at all because the wordlist and this list OVERLAP on purpose (see
+      # WELL_KNOWN): `robots.txt`, `.well-known/security.txt` and the API-description
+      # spellings all ship in `wordlists/paths.txt`, and without this the origin's own
+      # directory sweep re-requested every one of them — a second GET, judged against a
+      # soft-404 baseline, for a document the run had already fetched and read.
+      @seen << Url.visit_key(p)
       @frontier << Task.new(TaskKind::Fetch, url, 0, source)
     end
 
@@ -972,9 +1028,24 @@ module Gori::Discover
     private def confirm_bruteforce_dir(task : Task, fetched : Calibrate::Fetched) : Nil
       return unless @config.bruteforce?
       s = fetched.status
-      return unless s && (s < 400 || s == 401 || s == 403)
+      return unless s && exists_status?(s)
       return unless p = Url.parse(task.url)
       enqueue_dir(Url.dir_of(p), task.depth)
+    end
+
+    # The statuses that PROVE a resource is there, and the one predicate `record_page` and
+    # `confirm_bruteforce_dir` both ask so they cannot disagree about what "exists" means.
+    #
+    # `< 400` plus the three answers that are ABOUT a resource rather than a denial that it
+    # exists: 401 and 403 gate access to something real (the strongest reason there is to
+    # sweep the neighbours), and 405 says the path ROUTES but not to GET. That last one is a
+    # crawler's blind spot by construction — a `<form method="post" action="/api/orders">`,
+    # a JSON API that takes only POST, a WebDAV or PUT collection are all reached by GET
+    # exactly once, answer 405, and were dropped on the floor. They are also the endpoints
+    # most worth having: an endpoint that refuses to be read is one the operator has to test
+    # by writing to it.
+    private def exists_status?(status : Int32) : Bool
+      status < 400 || status == 401 || status == 403 || status == 405
     end
 
     # A finding the run GUESSED rather than followed a link to: the WELL_KNOWN documents, and
@@ -1012,12 +1083,12 @@ module Gori::Discover
               base = bp
             end
           end
-          oc.links.each { |lnk| consider_link(task, base, lnk) }
+          oc.links.each { |lnk| consider_link(task.depth, base, lnk) }
         end
       end
       if @config.follow_redirects? && (loc = fetched.redirect_to)
         if base = Url.parse(task.url)
-          consider_link(task, base, RawLink.new(loc, Source::Redirect))
+          consider_link(task.depth, base, RawLink.new(loc, Source::Redirect))
         end
       end
     end
@@ -1078,9 +1149,10 @@ module Gori::Discover
         break_run(state) if state
         return
       end
-      admit_hit(state, Finding.new(oc.task.url, "GET", fetched.status, fetched.length,
-        fetched.content_type, Source::Bruteforced, oc.task.depth, oc.confidence, nil),
-        fetched, oc.exchange)
+      admit_hit(state, ProbeHit.new(
+        Finding.new(oc.task.url, "GET", fetched.status, fetched.length,
+          fetched.content_type, Source::Bruteforced, oc.task.depth, oc.confidence, nil),
+        oc.exchange, oc.links, oc.doc_base), fetched)
     end
 
     # A probe that cleared its baseline — emitted, held, or dropped.
@@ -1093,10 +1165,9 @@ module Gori::Discover
     # whole held batch goes in the bin. A run that breaks first releases everything, so the
     # common case — a directory with a handful of scattered real hits — pays nothing but the
     # latency of one more probe outcome.
-    private def admit_hit(state : DirState?, f : Finding, fetched : Calibrate::Fetched,
-                          ex : Exchange?) : Nil
+    private def admit_hit(state : DirState?, hit : ProbeHit, fetched : Calibrate::Fetched) : Nil
       unless state
-        emit_probe_finding(f, ex)
+        emit_probe_finding(hit)
         return
       end
       if state.drifted?
@@ -1110,7 +1181,7 @@ module Gori::Discover
         state.run = 1
         state.run_fp = fetched.simhash
         state.run_status = fetched.status
-        emit_probe_finding(f, ex)
+        emit_probe_finding(hit)
         return
       end
       state.run += 1
@@ -1118,7 +1189,7 @@ module Gori::Discover
         declare_drift(state)
         return
       end
-      state.held << {f, ex}
+      state.held << hit
     end
 
     # Does this outcome look like the one before it — same status, and content inside the
@@ -1134,7 +1205,7 @@ module Gori::Discover
     private def break_run(state : DirState) : Nil
       state.run = 0
       return if state.held.empty?
-      state.held.each { |f, ex| emit_probe_finding(f, ex) }
+      state.held.each { |hit| emit_probe_finding(hit) }
       state.held.clear
     end
 
@@ -1162,16 +1233,43 @@ module Gori::Discover
     # move together on purpose: a finding the drift guard is still holding must not seed a
     # directory before the guard has decided whether it was real — otherwise a WAF block page
     # answering 200 would enqueue a wordlist sweep of its own URL.
-    private def emit_probe_finding(f : Finding, ex : Exchange?) : Nil
-      record_finding(f, ex)
+    private def emit_probe_finding(hit : ProbeHit) : Nil
+      f = hit.finding
+      record_finding(f, hit.exchange)
       s = f.status
       if s && s >= 200 && s < 300 && f.depth < @config.max_depth
         enqueue_dir_from_url(f.url, f.depth + 1)
       end
+      expand_probe_links(hit)
     end
 
-    # Record a crawled/declared page as a finding (skip 404/5xx noise; 401/403 are kept —
-    # they exist but gate access).
+    # The links a confirmed brute-force hit's body named, fed back into the frontier through
+    # the same `consider_link` gauntlet a crawled page's links go through — dedup, template
+    # fold, containment, Layer 2, and the declared/inferred rule that decides whether a link
+    # is worth a wordlist sweep of its own directory.
+    #
+    # Resolved against the PROBE's url and, when the body was html-like and declared one, its
+    # own `<base href>` — identical to `expand_links`, because a body does not become a
+    # different kind of document by having been guessed at rather than followed to.
+    #
+    # Depth is the finding's + 1, so an OpenAPI document reached at depth 3 cannot spend the
+    # whole `max_depth` budget again on the routes it names.
+    private def expand_probe_links(hit : ProbeHit) : Nil
+      links = hit.links
+      return if links.empty?
+      return unless page = Url.parse(hit.finding.url)
+      base = page
+      if b = hit.doc_base
+        if (abs = Url.resolve(page, b)) && (bp = Url.parse(abs))
+          base = bp
+        end
+      end
+      depth = hit.finding.depth + 1
+      links.each { |lnk| consider_link(depth, base, lnk) }
+    end
+
+    # Record a crawled/declared page as a finding — skip 404/5xx noise, keep whatever
+    # `exists_status?` calls proof that something is there.
     # A non-error "error": the engine's own budget or gate declining a send, not a failure
     # reaching the target. Neither is a fault the operator can act on, and both are decisions
     # they configured, so neither belongs in the error count every surface renders.
@@ -1186,7 +1284,7 @@ module Gori::Discover
 
     private def record_page(task : Task, fetched : Calibrate::Fetched, ex : Exchange?) : Nil
       s = fetched.status
-      return unless s && (s < 400 || s == 401 || s == 403)
+      return unless s && exists_status?(s)
       conf = crawl_confidence(task.source, s)
       record_finding(Finding.new(task.url, "GET", s, fetched.length, fetched.content_type,
         task.source, task.depth, conf, nil), ex)
@@ -1250,7 +1348,11 @@ module Gori::Discover
 
     # Resolve a discovered link against its page, dedup, template-fold, bound-check, then
     # enqueue a crawl (spider) and derive a directory (brute).
-    private def consider_link(task : Task, base : Url::Parts, link : RawLink) : Nil
+    #
+    # Takes the source document's DEPTH rather than its Task: the callers are no longer only
+    # `expand_links`, and a brute-force hit's body (`expand_probe_links`) has a depth and a
+    # url but no crawl task of its own.
+    private def consider_link(depth : Int32, base : Url::Parts, link : RawLink) : Nil
       # Bound the dedup/template bookkeeping: past MAX_SEEN, stop tracking + enqueuing new
       # links so @seen/@templates can't bloat on a pathological target (see MAX_SEEN). A URL
       # already in @seen is still cheap to skip below, so honour that first.
@@ -1274,9 +1376,22 @@ module Gori::Discover
       # One normalize for both the bound check and the enqueued Task (it was built twice).
       return unless norm = bounded_url(p)
       @seen << key
-      if @config.spider? && task.depth < @config.max_depth && @crawl_enqueued < @config.max_pages
-        @crawl_enqueued += 1
-        @frontier << Task.new(TaskKind::Crawl, norm, task.depth + 1, link.source)
+      if @config.spider? && depth < @config.max_depth && @crawl_enqueued < @config.max_pages
+        # An image, a font, a track, an archive: a real request and a full body download for
+        # bytes `text_like?` then refuses to scan, so the fetch cannot produce a candidate and
+        # produces only the row for the asset itself. Skipped by default (`Config#crawl_assets?`)
+        # and counted, never silently — the URL was found, and the run is saying it chose not
+        # to spend a request confirming it.
+        #
+        # This is also a crawl-BUDGET fix, not only a bandwidth one: every asset fetched used
+        # to consume a `max_pages` slot, so an image-heavy target reached the cap on pictures
+        # while HTML the run had already discovered sat unvisited in the frontier.
+        if @config.crawl_assets? || !Url.binary_asset?(p.path)
+          @crawl_enqueued += 1
+          @frontier << Task.new(TaskKind::Crawl, norm, depth + 1, link.source)
+        else
+          @assets_skipped += 1
+        end
       end
       # Seeding a brute-force sweep of this link's DIRECTORY costs the whole wordlist — ~315
       # sends with the defaults, before extensions — so it is spent only on a link the target
@@ -1287,7 +1402,10 @@ module Gori::Discover
       # faith turned one response into 38,929 requests for 2 findings. The same guard costs a
       # real SPA nothing — its bundle names routes that answer 200, so every directory it points
       # at is seeded one round-trip later.
-      enqueue_dir(Url.dir_of(p), task.depth) if @config.bruteforce? && link.declared
+      # Asked of the link, NOT of whether the link was crawled: an asset the run declined to
+      # download still proves its directory is real, so `/uploads/` is swept because
+      # `/uploads/photo.jpg` was linked, exactly as before `crawl_assets` existed.
+      enqueue_dir(Url.dir_of(p), depth) if @config.bruteforce? && link.declared
     end
 
     private def enqueue_dir_from_url(url : String, depth : Int32) : Nil
@@ -1342,15 +1460,47 @@ module Gori::Discover
       # spelled differently — so it is checked, not assumed, and a mismatch simply falls back.
       dp = Url.parse(bl.dir)
       base = dp && dp.query.nil? && Url.normalize(dp) == bl.dir ? dp : nil
+      # Each extension paired with its dotted, lowercased spelling, built once for the whole
+      # wordlist rather than once per word — see `redundant_extension?` for what the second
+      # half is compared against.
+      ext_pairs = exts.map { |e| {e, ".#{e}".downcase} }
       @words.each do |w|
         break if @capped.cap_reached?
         break if cap > 0 && count >= cap
         count += 1 if enqueue_probe(task, state, base, w)
-        exts.each do |ext|
-          break if cap > 0 && count >= cap
-          count += 1 if enqueue_probe(task, state, base, "#{w}.#{ext}")
-        end
+        count += enqueue_extension_probes(task, state, base, w, ext_pairs, cap, count)
       end
+    end
+
+    # The `word.ext` half of one wordlist entry, and the number of candidates it queued.
+    #
+    # Its own method because the per-directory cap and `redundant_extension?` between them put
+    # as many branches in this loop as there are in the one above it.
+    private def enqueue_extension_probes(task : Task, state : DirState, base : Url::Parts?,
+                                         word : String, ext_pairs : Array({String, String}),
+                                         cap : Int32, count : Int32) : Int32
+      return 0 if ext_pairs.empty?
+      lower = word.downcase
+      added = 0
+      ext_pairs.each do |ext, dotted|
+        break if cap > 0 && count + added >= cap
+        next if redundant_extension?(lower, dotted)
+        added += 1 if enqueue_probe(task, state, base, "#{word}.#{ext}")
+      end
+      added
+    end
+
+    # Would appending this extension re-state one the word already carries? `admin.php` with
+    # `--extensions php` is `admin.php.php`, which no server routes: one real request, per
+    # directory, per such word — and a third of the built-in list is dotted names.
+    #
+    # Only the EXACT same extension is refused, which is the whole care this needs. `admin.php`
+    # + `bak` is `admin.php.bak`, the canonical editor/deploy backup and one of the
+    # highest-yield candidates in the list, so a rule phrased as "skip extensions on words that
+    # already have one" would delete the reason extensions exist. `word` and `dotted` arrive
+    # lowercased by the caller so an operator's `--extensions PHP` matches `admin.php`.
+    private def redundant_extension?(word : String, dotted : String) : Bool
+      word.bytesize > dotted.bytesize && word.ends_with?(dotted)
     end
 
     # One brute-force candidate against a calibrated directory. True when it entered the
@@ -1517,8 +1667,87 @@ module Gori::Discover
       raw = send_with_retries(task.url)
       body = decode_body(raw)
       fetched = distill(raw, body)
-      links, doc_base = raw.error.nil? ? extract_links(task, fetched, body) : {EMPTY_LINKS, nil}
+      links, doc_base = discovered_links(task, fetched, raw, body)
       Outcome.new(task, fetched, links, nil, false, 0.0, capture_exchange(task.url, raw), 0, doc_base)
+    end
+
+    # Everything ONE response names: the links in its body, and the links in its HEAD.
+    #
+    # The two halves are separate extractors on separate inputs and are joined here because
+    # every caller wants both — `process_fetch` for a crawled page, `process_probe` for a
+    # brute-force hit. A failed send names nothing, and both halves say so with the same
+    # shared empty array rather than each allocating one.
+    private def discovered_links(task : Task, fetched : Calibrate::Fetched,
+                                 raw : Repeater::Result, body : Bytes) : {Array(RawLink), String?}
+      return {EMPTY_LINKS, nil} unless raw.error.nil?
+      links, doc_base = extract_links(task, fetched, body)
+      hdr = header_links(task, raw)
+      return {links, doc_base} if hdr.empty?
+      # Header links FIRST, so when a URL is named both ways the stronger classification is
+      # the one `consider_link`'s `@seen` keeps — a `Link:` target is the origin's own
+      # statement, and the body pass may only have inferred it from a quoted string.
+      {links.empty? ? hdr : hdr.concat(links), doc_base}
+    end
+
+    # Ceiling on the links ONE response's HEAD may contribute. `Extract::MAX_LINKS` bounds the
+    # body for the reason stated there — every entry costs the orchestrator a resolve, a parse
+    # and two keys — and a header block is no different: `Link` is a repeatable field, so a
+    # hostile origin can send as many of them as it likes. Small, because a real response
+    # carries a handful.
+    MAX_HEADER_LINKS = 64
+
+    # The links a response declares in its HEADERS rather than its body — a source no
+    # extractor above can reach, and one that answers on responses that have no body worth
+    # reading at all.
+    #
+    #   Link:              RFC 8288. `rel="next"` is how a paginated API names its next page,
+    #                      and it is named NOWHERE else; `preload`/`prefetch`/`alternate`/
+    #                      `describedby` each name a real resource the markup may not.
+    #   Content-Location:  the canonical spelling of the resource just served under another
+    #                      URL — a negotiated representation, a REST alias.
+    #   Refresh:           the header spelling of `<meta http-equiv="refresh">`. Already
+    #                      followed in markup; the header form was invisible.
+    #   Set-Cookie Path=:  the application stating which subtree it is mounted under. Not a
+    #                      link — nothing says a document lives there — so it enters as
+    #                      INFERRED and has to answer for itself before it earns a wordlist
+    #                      sweep of its directory (`consider_link`, `confirm_bruteforce_dir`).
+    #
+    # `Location` is deliberately absent: `distill` already carries it as `redirect_to` and
+    # `expand_links` follows it under `follow_redirects?`, which is the operator's switch for
+    # exactly this link.
+    private def header_links(task : Task, raw : Repeater::Result) : Array(RawLink)
+      resp = raw.response
+      return EMPTY_LINKS unless resp
+      src = link_source(task)
+      # Allocated on the first HIT, not on the first header: the overwhelming majority of
+      # responses carry none of these four fields, and that case must cost an array as little
+      # as `extract_links` costs one for a body it cannot read.
+      out = nil.as(Array(RawLink)?)
+      resp.headers.each do |h|
+        break if (acc = out) && acc.size >= MAX_HEADER_LINKS
+        header_hrefs(h) do |href, declared|
+          acc = (out ||= [] of RawLink)
+          acc << RawLink.new(href, src, declared) if acc.size < MAX_HEADER_LINKS
+        end
+      end
+      out || EMPTY_LINKS
+    end
+
+    # Every url ONE response header names, with the `declared` bit that separates a field
+    # STATING a link from one that merely locates the application. Split from `header_links`
+    # so the field grammars sit apart from the accumulation and its cap.
+    private def header_hrefs(h : Proxy::Codec::Header, & : String, Bool ->) : Nil
+      name = h.name
+      if name.compare("link", case_insensitive: true) == 0
+        Extract.from_link_header(h.value).each { |u| yield u, true }
+      elsif name.compare("content-location", case_insensitive: true) == 0
+        v = h.value.strip
+        yield v, true unless v.empty?
+      elsif name.compare("refresh", case_insensitive: true) == 0
+        Extract.refresh_url(h.value).try { |u| yield u, true }
+      elsif name.compare("set-cookie", case_insensitive: true) == 0
+        Extract.cookie_path(h.value).try { |p| yield p, false }
+      end
     end
 
     # Pick the link extractor from the RESPONSE, not from how the URL was found. Only the
@@ -1558,7 +1787,7 @@ module Gori::Discover
       # and was dropped into `calibrated_out`, while the identical page reached by a link from
       # `/` was recorded at 0.85. A guess deserves the baseline; a link the target itself
       # published does not.
-      src = task.kind.fetch? && task.source.well_known? ? Source::WellKnown : Source::Crawled
+      src = link_source(task)
       if Extract.sitemap_body?(body)
         return {Extract.from_sitemap(body).map { |h| RawLink.new(h, Source::Sitemap) }, nil}
       end
@@ -1567,8 +1796,11 @@ module Gori::Discover
       # loses nothing by it, since `from_html` runs the endpoint pass too.
       if ct.nil? || html_like?(ct)
         # The one MIXED source: `from_html` runs both the attribute passes and the endpoint pass,
-        # and only it can say which found what.
-        {Extract.from_html(body).map { |f| RawLink.new(f.href, src, f.declared) }, Extract.base_href(body)}
+        # and only it can say which found what. Asked TOGETHER with the `<base href>` the links
+        # resolve against — two questions about the same text, and `from_html_with_base` builds
+        # that text once instead of once each (see its own comment for what the copy cost).
+        found, doc_base = Extract.from_html_with_base(body)
+        {found.map { |f| RawLink.new(f.href, src, f.declared) }, doc_base}
       elsif text_like?(ct)
         # A bundle, a JSON document, a `.map`: not markup, so it declares no links at all and
         # every literal here is inferred.
@@ -1576,6 +1808,18 @@ module Gori::Discover
       else
         {EMPTY_LINKS, nil}
       end
+    end
+
+    # The Source a link found in THIS response inherits — the one-hop well-known rule
+    # `extract_links` explains at length, stated once because `header_links` has to reach the
+    # same answer: an OIDC document's `Link:` header is the same kind of guess its body is.
+    #
+    # A Probe's kind is not `fetch?`, so a brute-force hit's links are ordinary crawl links.
+    # That is the right answer and not an accident of the test: a wordlist hit is a guess, but
+    # what its body then NAMES is the target's own statement, and judging those names against
+    # the seed origin's soft-404 baseline would be the wrong question about them.
+    private def link_source(task : Task) : Source
+      task.kind.fetch? && task.source.well_known? ? Source::WellKnown : Source::Crawled
     end
 
     # Calibration is the ONE task that fans out into many sends — every other `process_*`
@@ -1650,7 +1894,8 @@ module Gori::Discover
 
     private def process_probe(task : Task) : Outcome
       raw = send_with_retries(task.url)
-      fetched = distill(raw, decode_body(raw))
+      body = decode_body(raw)
+      fetched = distill(raw, body)
       # Read through the shared `DirState`, so a probe queued before a drift re-calibration is
       # judged against the baseline in force NOW rather than the one queued alongside it. The
       # baseline and the generation are read TOGETHER, with no yield between them, so the pair
@@ -1664,8 +1909,17 @@ module Gori::Discover
         # a wordlist sweep keeps the bytes of the handful it found and forgets the thousands of
         # soft-404s it did not, instead of shipping every miss's body through the channel for
         # the orchestrator to drop.
-        Outcome.new(task, fetched, EMPTY_LINKS, nil, hit, conf,
-          hit ? capture_exchange(task.url, raw) : nil, gen)
+        #
+        # The links are kept on exactly the same terms, and that is what makes reading a
+        # probe's body affordable at all. A wordlist entry that HITS is often the densest
+        # document a run will ever hold — an OpenAPI spec naming every route, an autoindex
+        # listing a directory's real contents, a config file quoting internal URLs — and the
+        # ~315-per-directory that MISS pay nothing, because a miss never reaches this branch.
+        # Before this the sweep could find `swagger.json`, report it, and learn nothing from it.
+        return Outcome.new(task, fetched, EMPTY_LINKS, nil, false, conf, nil, gen) unless hit
+        links, doc_base = discovered_links(task, fetched, raw, body)
+        Outcome.new(task, fetched, links, nil, true, conf,
+          capture_exchange(task.url, raw), gen, doc_base)
       else
         Outcome.new(task, fetched, EMPTY_LINKS, nil, false, 0.0, nil, gen)
       end
@@ -1827,7 +2081,7 @@ module Gori::Discover
     private def run_stats : RunStats
       RunStats.new(@capped.sent, @found, @calibrated_out, @dedup_suppressed,
         @template_suppressed, @cluster_suppressed, @uncalibratable, @conf_hist.dup,
-        @drift_suppressed)
+        @drift_suppressed, @assets_skipped)
     end
   end
 end

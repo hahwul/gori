@@ -501,4 +501,33 @@ describe Gori::Discover::Url do
       pr.parts.should eq(U.parse("#{dir_url}my%20file.pdf").not_nil!)
     end
   end
+  # The predicate `Engine#consider_link` asks BEFORE a link becomes a request, so the
+  # extension is all it has: the content type only arrives with the body it exists to avoid
+  # downloading.
+  describe ".binary_asset?" do
+    it "answers true for images, fonts, tracks and archives" do
+      %w[/a/photo.jpg /x.PNG /f/icon.ico /f/inter.woff2 /m/clip.mp4 /d/backup.zip /d/app.tar.gz]
+        .each { |path| U.binary_asset?(path).should be_true }
+    end
+
+    # Everything that can NAME another url stays crawlable, which is the whole care this
+    # predicate needs — `.svg` is XML and carries hrefs, `.css` carries `url(…)`, a `.map`
+    # names a bundle's sources, and an exposed `.pdf` is itself the point of a sweep.
+    it "answers false for anything whose body can be read" do
+      %w[/logo.svg /app.css /app.js.map /report.pdf /data.json /page.html /api/v2/orders /]
+        .each { |path| U.binary_asset?(path).should be_false }
+    end
+
+    it "does not read a dot in a DIRECTORY as the file's extension" do
+      U.binary_asset?("/v1.2/report").should be_false
+      U.binary_asset?("/assets.png/index").should be_false
+    end
+
+    # A dotfile has no extension (`.env` is the name), and a trailing dot names nothing.
+    it "answers false for a dotfile and a bare trailing dot" do
+      U.binary_asset?("/.env").should be_false
+      U.binary_asset?("/a/.gitignore").should be_false
+      U.binary_asset?("/a/thing.").should be_false
+    end
+  end
 end

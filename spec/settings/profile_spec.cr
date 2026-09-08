@@ -631,7 +631,7 @@ describe "Settings.import_document — absent mine/discover leave overlay prefs 
 
   it "does not clear discover_prefs_saved when the profile omits discover" do
     with_config_home do
-      Gori::Settings.save_discover_prefs("strict", 3, 8, true, false, true, true)
+      Gori::Settings.save_discover_prefs("strict", 3, 8, true, false, true, true, false)
       Gori::Settings.discover_prefs_saved?.should be_true
       Gori::Settings.import_document(%({"theme":"goriday"}), ["theme"])
       Gori::Settings.discover_prefs_saved?.should be_true

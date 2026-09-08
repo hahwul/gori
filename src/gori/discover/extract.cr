@@ -287,12 +287,30 @@ module Gori::Discover
       d.empty? || !seen.add?(d) ? nil : d
     end
 
+    # The two things `Engine#extract_links` needs from EVERY html-like body: its links, and
+    # the `<base href>` those links resolve against — from ONE pass over the body's text.
+    #
+    # Asked separately they built that text twice, and `scan_text` is not cheap: a
+    # `String.new` copy of up to MAX_SCAN bytes plus a `valid_encoding?` walk of the result.
+    # Measured on a 1 MB page, the duplicate `base_href(body)` cost 1.26ms of which 443µs was
+    # rebuilding a String the caller had just discarded — against 6.7ms for the extraction it
+    # accompanies, so a sixth of the crawl's per-page CPU was spent on a copy.
+    def self.from_html_with_base(body : Bytes) : {Array(Found), String?}
+      text = scan_text(body)
+      {from_html(text), base_href(text)}
+    end
+
     def self.from_html(body : Bytes) : Array(Found)
+      from_html(scan_text(body))
+    end
+
+    # The String half, for a caller that already holds the scanned text (`from_html_with_base`,
+    # and a spec) — the same split `base_href` carries beside it, for the same reason.
+    def self.from_html(text : String) : Array(Found)
       # `acc`, not `out`: `out` is a Crystal keyword in ARGUMENT position, so a local named
       # that cannot be passed to `endpoints` below (it parses as an out-parameter).
       acc = [] of Found
       seen = Set(String).new
-      text = scan_text(body)
       text.scan(ATTR) do |m|
         break if acc.size >= MAX_LINKS
         if v = declared(m[1]? || m[2]? || m[3]?, seen)
@@ -386,6 +404,59 @@ module Gori::Discover
         out << v unless v.empty?
       end
       out
+    end
+
+    # ── links a response declares in its HEAD, not its body ─────────────────────────────
+    #
+    # Every extractor above reads BYTES the origin sent as content. These read the fields it
+    # sent ABOUT that content, and they are a discovery source the body cannot substitute
+    # for: an API that paginates with `Link: <…>; rel="next"` names its next page nowhere
+    # else, a `Content-Location` names the canonical spelling of a resource reached under
+    # another, and a `Set-Cookie` scoped to `Path=/admin` is the application stating where it
+    # is mounted — on a 404, on a redirect, on any response at all.
+    #
+    # Kept here as pure String → String functions rather than taking a header collection, so
+    # this file stays free of a `Proxy::Codec` require; `Engine#header_links` walks the
+    # HeaderList and calls these.
+
+    # An RFC 8288 `Link` field carries one or more `<uri-reference>; param=…` members. Only
+    # the angle-bracketed target is a URL — the parameters are metadata, and `rel`'s value is
+    # a relation type, not a link — so this returns the bracketed runs and nothing else. `>`
+    # cannot appear inside a URI, so the non-greedy class cannot run past its own member.
+    LINK_TARGET = /<([^<>]*)>/
+
+    def self.from_link_header(value : String) : Array(String)
+      out = [] of String
+      value.scan(LINK_TARGET) do |m|
+        v = m[1]?.try(&.strip)
+        out << v if v && !v.empty?
+      end
+      out
+    end
+
+    # The header spelling of `<meta http-equiv="refresh">`: `Refresh: 5; url=/somewhere`.
+    # Same value grammar, so the same tolerance — optional quotes, delay first, `url=`
+    # case-insensitive.
+    REFRESH_URL = /url\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s;]+))/i
+
+    def self.refresh_url(value : String) : String?
+      return nil unless m = value.match(REFRESH_URL)
+      (m[1]? || m[2]? || m[3]?).presence
+    end
+
+    # The `Path` attribute of one `Set-Cookie` field, when it names something narrower than
+    # the origin. `Path=/` is the default and says nothing, so it answers nil — the point of
+    # asking is a cookie the application scoped to the subtree it actually lives under.
+    #
+    # RFC 6265 §5.2.4 takes the LAST `Path` attribute and treats a value not starting with
+    # `/` as the default path, which is the same nil answer here.
+    COOKIE_PATH = /;\s*path\s*=\s*([^;]*)/i
+
+    def self.cookie_path(value : String) : String?
+      last = nil.as(String?)
+      value.scan(COOKIE_PATH) { |m| last = m[1]?.try(&.strip) }
+      return nil unless last && last.starts_with?('/') && last != "/"
+      last
     end
 
     SNIFF_MAX    = 8192 # a sitemap's root element sits at the top; no need to read further

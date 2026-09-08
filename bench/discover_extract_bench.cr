@@ -70,11 +70,27 @@ puts "  from_html links=#{Extract.from_html(HTML).size}"
 puts "  from_text(bundle) links=#{Extract.from_text(BUNDLE).size}"
 puts "  from_text(oidc) links=#{Extract.from_text(OIDC).size}"
 
+# The 1 MB page is where the duplicate `scan_text` actually showed up: it is a `String.new`
+# copy of the body plus a `valid_encoding?` walk of the result, so it scales with the body
+# while the regex passes scale with what is IN it.
+BIG_HTML = (String.new(HTML) * 100).to_slice
+
 Benchmark.ips do |x|
   x.report("from_html (page)        ") { Extract.from_html(HTML) }
   x.report("from_text (bundle)      ") { Extract.from_text(BUNDLE) }
   x.report("from_text (oidc json)   ") { Extract.from_text(OIDC) }
   x.report("sitemap_body? (html)    ") { Extract.sitemap_body?(HTML) }
+end
+
+# What `Engine#extract_links` asks of every html-like body: the links AND the `<base href>`
+# they resolve against. Two calls scanned the body's bytes into a String twice.
+puts ""
+puts "links + <base href> per html response (#{HTML.size}B and #{BIG_HTML.size}B bodies)"
+Benchmark.ips do |x|
+  x.report("two scans   (page)      ") { {Extract.from_html(HTML), Extract.base_href(HTML)} }
+  x.report("one scan    (page)      ") { Extract.from_html_with_base(HTML) }
+  x.report("two scans   (1 MB)      ") { {Extract.from_html(BIG_HTML), Extract.base_href(BIG_HTML)} }
+  x.report("one scan    (1 MB)      ") { Extract.from_html_with_base(BIG_HTML) }
 end
 
 # ── the orchestrator's per-directory brute-force enqueue ────────────────────────────────────

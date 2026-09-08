@@ -152,9 +152,16 @@ module Gori
     #                          paths, so whatever that directory did hold was not measured.
     #                          See `Engine::DRIFT_RUN`.
     #   conf_hist            — 4-bucket confidence distribution [.5,.7) [.7,.85) [.85,.95) [.95,1]
+    #   assets_skipped       — links NOT fetched because they name a binary asset (an image,
+    #                          a font, a track, an archive: `Url::BINARY_EXT`) and
+    #                          `Config#crawl_assets?` is off. Each one is a request and a
+    #                          full body download the run did not spend on a body no
+    #                          extractor can read. Reported rather than silent because it is
+    #                          the one counter that describes URLs the run KNOWS about and
+    #                          deliberately did not visit — `--assets` turns it into zero.
     #
-    # `drift_suppressed` is last and defaulted so the seven counters that predate it keep
-    # their positions — three surfaces construct and destructure this.
+    # `drift_suppressed` and `assets_skipped` are last and defaulted so the seven counters
+    # that predate them keep their positions — three surfaces construct and destructure this.
     record RunStats,
       sent : Int64,
       found : Int32,
@@ -164,7 +171,8 @@ module Gori
       cluster_suppressed : Int32,
       uncalibratable_dirs : Int32,
       conf_hist : Array(Int32),
-      drift_suppressed : Int32 = 0
+      drift_suppressed : Int32 = 0,
+      assets_skipped : Int32 = 0
 
     # Engine → consumer events (a record union, matching Fuzz/Miner so a Channel(Event)
     # carries them without boxing). Progress is droppable (latest wins); the rest never
@@ -220,6 +228,23 @@ module Gori
       property max_pages : Int32           # global crawl page cap
       property? follow_redirects : Bool    # enqueue a 3xx Location as a discovery
       property template_saturation : Int32 # distinct URLs per folded template before it freezes
+      # Fetch the images, fonts, tracks and archives a page names (`Url::BINARY_EXT`).
+      #
+      # OFF by default, and it is the crawl's single largest saving: a page references dozens
+      # of them, each costs a real request and a full body download (up to `MAX_BODY`), and
+      # every one of those bodies then fails `text_like?` and yields not one candidate. They
+      # also spend the `max_pages` budget, so on an image-heavy target the cap was reached on
+      # pictures while HTML the run had already found sat unvisited in the frontier — a
+      # coverage loss paid for with bandwidth.
+      #
+      # What is NOT lost when it is off: the asset's DIRECTORY. `consider_link` seeds a
+      # brute-force sweep of it from the declared link exactly as before, so `/uploads/` is
+      # still swept because `/uploads/photo.jpg` was linked; only the download of photo.jpg
+      # is skipped, and with it the finding row for the picture itself.
+      #
+      # Turn it on to inventory a target's static surface (`RunStats#assets_skipped` says how
+      # many rows that would add).
+      property? crawl_assets : Bool
 
       # bruteforce
       property user_wordlist : String?
@@ -247,6 +272,7 @@ module Gori
                      @keep_alive = true,
                      @spider = true, @bruteforce = true,
                      @max_depth = 4, @max_pages = 5000, @follow_redirects = true, @template_saturation = 20,
+                     @crawl_assets = false,
                      @user_wordlist = nil, @extensions = [] of String, @per_dir_cap = 0, @calibrate_probes = 3,
                      @cluster_saturation = 15, @simhash_distance = 3,
                      @confidence_floor = 0.5, @containment = Containment::ScopeAware,

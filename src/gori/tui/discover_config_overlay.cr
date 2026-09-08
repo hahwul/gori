@@ -41,9 +41,10 @@ module Gori::Tui
     ROW_CONC    =  6
     ROW_EXT     =  7
     ROW_KEEP    =  8
-    ROW_HEADERS =  9
-    ROW_START   = 10
-    ROWS        = 11
+    ROW_ASSETS  =  9
+    ROW_HEADERS = 10
+    ROW_START   = 11
+    ROWS        = 12
 
     getter seed : DiscoverSeed
     # Custom request headers ({name, value}) prefilled from a History flow and/or
@@ -65,6 +66,7 @@ module Gori::Tui
       @maxreq_idx = 0
       @ext = false
       @keep_alive = true
+      @assets = false
       @selected = 0
       restore_saved_prefs
     end
@@ -89,7 +91,7 @@ module Gori::Tui
     # Remember the last confirmed overlay for the next Sitemap/History discovery.
     def save_prefs : Bool
       Settings.save_discover_prefs(CONTAINMENTS[@contain_idx].label, DEPTHS[@depth_idx],
-        CONCS[@conc_idx], @spider, @bruteforce, @ext, @keep_alive)
+        CONCS[@conc_idx], @spider, @bruteforce, @ext, @keep_alive, @assets)
     end
 
     private def restore_saved_prefs : Nil
@@ -98,6 +100,7 @@ module Gori::Tui
       @bruteforce = Settings.discover_bruteforce?
       @ext = Settings.discover_extensions?
       @keep_alive = Settings.discover_keep_alive?
+      @assets = Settings.discover_assets?
       DEPTHS.index(Settings.discover_max_depth).try { |i| @depth_idx = i }
       CONCS.index(Settings.discover_concurrency).try { |i| @conc_idx = i }
       if c = Discover::Containment.parse?(Settings.discover_containment)
@@ -183,6 +186,7 @@ module Gori::Tui
       when ROW_BRUTE                                                then @bruteforce = !@bruteforce
       when ROW_EXT                                                  then @ext = !@ext
       when ROW_KEEP                                                 then @keep_alive = !@keep_alive
+      when ROW_ASSETS                                               then @assets = !@assets
       when ROW_TARGET, ROW_DEPTH, ROW_CONTAIN, ROW_CONC, ROW_MAXREQ then adjust(1)
       end
     end
@@ -199,6 +203,7 @@ module Gori::Tui
         containment: CONTAINMENTS[@contain_idx],
         extensions: @ext ? COMMON_EXT.dup : [] of String,
         keep_alive: @keep_alive,
+        crawl_assets: @assets,
         headers: @headers)
     end
 
@@ -243,6 +248,7 @@ module Gori::Tui
       when ROW_BRUTE   then check(screen, x, py, bg, sel, @bruteforce, "bruteforce (probe paths)")
       when ROW_EXT     then check(screen, x, py, bg, sel, @ext, "probe common extensions")
       when ROW_KEEP    then check(screen, x, py, bg, sel, @keep_alive, "reuse connections (keep-alive)")
+      when ROW_ASSETS  then check(screen, x, py, bg, sel, @assets, "fetch images/fonts/media")
       when ROW_DEPTH   then Frame.option_cycle(screen, x, py, box.right - 2, bg, "max depth:", DEPTHS.map(&.to_s), @depth_idx, sel)
       when ROW_CONTAIN then Frame.option_cycle(screen, x, py, box.right - 2, bg, "scope:", CONTAINMENTS.map(&.label), @contain_idx, sel)
       when ROW_CONC    then Frame.option_cycle(screen, x, py, box.right - 2, bg, "concurrency:", CONCS.map(&.to_s), @conc_idx, sel)

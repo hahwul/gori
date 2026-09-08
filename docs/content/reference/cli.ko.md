@@ -566,6 +566,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--containment=MODE` | `same-origin` \| `scope-aware`(기본) \| `host+subdomains` |
 | `--concurrency` (20), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | 속도 제어 |
 | `--no-keep-alive` | origin별 연결 재사용 대신 프로브마다 새로 연결 |
+| `--assets` | 링크된 이미지·폰트·미디어·아카이브도 내려받기(기본은 디렉터리만 기록하고 다운로드는 생략) |
 | `-k`, `--insecure-upstream` | 업스트림 TLS 검증 생략 |
 | `--bind-from=FLOW-ID` | 캡처된 그 플로우를 먼저 재생해, 응답이 남은 실행 동안 쓸 `$NAME` 세션 바인딩을 채우게 합니다 |
 | `--slot=NAME` | 이 [세션 슬롯](#run-session)으로 전송합니다: 그 슬롯의 헤더 오버레이, 그리고 `$NAME`을 위한 그 슬롯의 바인딩 테이블. `--bind-from`보다 먼저 적용되므로 시드가 채우는 슬롯이 곧 실행이 나가는 슬롯입니다 |

@@ -13,6 +13,7 @@ module Gori::Settings
   DEFAULT_DISCOVER_BRUTEFORCE  = true
   DEFAULT_DISCOVER_EXTENSIONS  = false
   DEFAULT_DISCOVER_KEEP_ALIVE  = true
+  DEFAULT_DISCOVER_ASSETS      = false
 
   # Last Discover overlay choices (global scratch — not project data).
   class_property discover_containment : String = DEFAULT_DISCOVER_CONTAINMENT
@@ -22,6 +23,7 @@ module Gori::Settings
   class_property? discover_bruteforce : Bool = DEFAULT_DISCOVER_BRUTEFORCE
   class_property? discover_extensions : Bool = DEFAULT_DISCOVER_EXTENSIONS
   class_property? discover_keep_alive : Bool = DEFAULT_DISCOVER_KEEP_ALIVE
+  class_property? discover_assets : Bool = DEFAULT_DISCOVER_ASSETS
   class_property? discover_prefs_saved : Bool = false
 
   private def self.parse_discover_prefs(node : JSON::Any?) : Nil
@@ -45,12 +47,16 @@ module Gori::Settings
     # turn the reuse pool off for every saved overlay (the shape the fuzzer tab guards at
     # fuzzer_view.cr:1411).
     self.discover_keep_alive = obj["keep_alive"]?.try(&.as_bool?) != false
+    # Plain `try`, unlike keep-alive above: this one's factory value is FALSE, so a prefs
+    # file written before it existed reads as off — which is the default — and no guard is
+    # needed to keep a missing key from flipping anything on.
+    obj["assets"]?.try(&.as_bool?).try { |b| self.discover_assets = b }
   end
 
   # Persist the Discover overlay's last confirmed choices (called when a run starts).
   def self.save_discover_prefs(containment : String, max_depth : Int32, concurrency : Int32,
                                spider : Bool, bruteforce : Bool, extensions : Bool,
-                               keep_alive : Bool) : Bool
+                               keep_alive : Bool, assets : Bool) : Bool
     self.discover_containment = containment
     self.discover_max_depth = max_depth
     self.discover_concurrency = concurrency
@@ -58,6 +64,7 @@ module Gori::Settings
     self.discover_bruteforce = bruteforce
     self.discover_extensions = extensions
     self.discover_keep_alive = keep_alive
+    self.discover_assets = assets
     self.discover_prefs_saved = true
     save
   end
@@ -74,6 +81,7 @@ module Gori::Settings
     self.discover_bruteforce = DEFAULT_DISCOVER_BRUTEFORCE
     self.discover_extensions = DEFAULT_DISCOVER_EXTENSIONS
     self.discover_keep_alive = DEFAULT_DISCOVER_KEEP_ALIVE
+    self.discover_assets = DEFAULT_DISCOVER_ASSETS
     self.discover_prefs_saved = false
   end
 
@@ -88,6 +96,7 @@ module Gori::Settings
           j.field "bruteforce", discover_bruteforce?
           j.field "extensions", discover_extensions?
           j.field "keep_alive", discover_keep_alive?
+          j.field "assets", discover_assets?
         end
       end
     end
