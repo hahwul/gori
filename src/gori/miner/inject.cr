@@ -363,14 +363,87 @@ module Gori::Miner
       io.write(new_body)
       out = io.to_slice
 
-      # A JSON candidate is reserialized (`any.to_json`) or textually spliced, so its final
-      # position is only known after the fact: locate every injected `"name":"value"` fragment
-      # in the new body (the SAME spelling both paths emit — `n.to_json`/`v.to_json`, no space,
-      # Crystal-compact). A name is injected into every object node, so a fragment can recur;
-      # each occurrence is a span. Values are canaries here (unique), so a fragment cannot
-      # collide with pre-existing body content, and merge_spans folds any incidental overlap so
-      # the list stays sorted+disjoint for `Env.expand_bindings`' cursor.
       body_off = head.size + eol.bytesize * 2
+      {out, merge_spans(json_spans(new_body, body_off, params))}
+    end
+
+    # Byte spans of every injected `"name":"value"` fragment in the reserialized body.
+    #
+    # A JSON candidate is reserialized (`any.to_json`) or textually spliced, so its final
+    # position is only known after the fact — and a name is injected into EVERY object node, so
+    # each fragment can recur, each occurrence its own span. The SAME spelling both inject paths
+    # emit (`n.to_json`/`v.to_json`, no space, Crystal-compact) is what is searched for.
+    #
+    # Two roads to the identical span set. The general one (`json_spans_by_fragment`) searches
+    # the whole body for each fragment, which is O(body) PER candidate: measured, a 128-name
+    # bucket over a 32-node body spent ~29 ms here, ~80× the ~370 µs the reserialization itself
+    # costs — the span scan, not the JSON work, was the JSON location's real per-probe cost. The
+    # fast one exploits what the miner ALWAYS injects: DISTINCT canary values (`Canary.fresh`).
+    # Every fragment ends in its canary, and a canary appears nowhere else, so ONE
+    # memchr-accelerated scan of the body for canary tokens — the same scan `Fingerprint` runs —
+    # locates all of them at once, O(body) for the whole bucket. It falls back to the general
+    # search the moment a value is not a distinct canary (the specs, any hand-driven
+    # `apply_with_spans`), so the answer is byte-identical either way.
+    #
+    # Returns spans in whatever order each road emits them; `inject_json` runs `merge_spans` on
+    # the result to give `Env.expand_bindings`' single-cursor walk the sorted+disjoint list it
+    # requires.
+    private def self.json_spans(new_body : Bytes, body_off : Int32,
+                                params : Array({String, String})) : Array({Int32, Int32})
+      if by_canary = canary_fragments(params)
+        json_spans_by_canary(new_body, body_off, by_canary)
+      else
+        json_spans_by_fragment(new_body, body_off, params)
+      end
+    end
+
+    # `{canary => its full "name":"value" fragment}`, or nil the moment a value is not a
+    # DISTINCT canary — the signal to take the general span search instead. A canary
+    # (`Canary.shaped?`: `gq` + 8 lower-hex) needs no JSON escaping, so the fragment's tail is
+    # exactly `"` + canary + `"` and the canary's byte offset inside the fragment is fixed at
+    # `frag.size - Canary::LEN - 1`. A repeated value would make one canary map to two fragments,
+    # which the by-canary scan cannot disambiguate, so that too falls back.
+    private def self.canary_fragments(params : Array({String, String})) : Hash(String, Bytes)?
+      map = Hash(String, Bytes).new(initial_capacity: params.size)
+      params.each do |(n, v)|
+        return nil unless Canary.shaped?(v)
+        return nil if map.has_key?(v)
+        map[v] = "#{n.to_json}:#{v.to_json}".to_slice
+      end
+      map
+    end
+
+    # Locate injected fragments by scanning ONCE for their canary tails (`Canary.each_token`, the
+    # same memchr scan `Fingerprint` runs). A body position holding a canary is the tail of
+    # exactly one fragment; its start is a fixed offset back, and the full-fragment VERIFY keeps a
+    # stray canary-shaped token in PRE-EXISTING body content — or one that happens to also equal
+    # an injected value — from ever becoming a span (the general search would not have matched
+    # there either).
+    private def self.json_spans_by_canary(new_body : Bytes, body_off : Int32,
+                                          by_canary : Hash(String, Bytes)) : Array({Int32, Int32})
+      spans = [] of {Int32, Int32}
+      Canary.each_token(new_body) do |i|
+        # `each_token` already validated the shape, so the map lookup only has to reject a token
+        # that is not one of THIS bucket's injected values.
+        next unless frag = by_canary[String.new(new_body[i, Canary::LEN])]?
+        # `start >= 0` AND `start + frag.size <= size`: a canary at the very END of the body (a
+        # bare canary-shaped token in a malformed, non-parsing body — the `splice_json_object`
+        # road — that also equals an injected value) leaves no room for the fragment's closing
+        # quote, so the slice read would run past the body. The general search never matches
+        # there either, so skipping keeps the two roads identical.
+        start = i - (frag.size - Canary::LEN - 1)
+        if start >= 0 && start + frag.size <= new_body.size && new_body[start, frag.size] == frag
+          spans << {body_off + start, body_off + start + frag.size}
+        end
+      end
+      spans
+    end
+
+    # The general span search: O(body) per candidate. Correct for ANY value (the specs' plain
+    # `"v"`, a hand-driven `apply_with_spans`), and the fallback when the fast canary scan cannot
+    # apply. Returns spans grouped by candidate, not ordered — `json_spans`' caller merges them.
+    private def self.json_spans_by_fragment(new_body : Bytes, body_off : Int32,
+                                            params : Array({String, String})) : Array({Int32, Int32})
       spans = [] of {Int32, Int32}
       params.each do |(n, v)|
         frag = "#{n.to_json}:#{v.to_json}".to_slice
@@ -380,7 +453,7 @@ module Gori::Miner
           from = idx + frag.size
         end
       end
-      {out, merge_spans(spans)}
+      spans
     end
 
     # The new JSON body for `body`, or nil when this location has nothing to inject into.

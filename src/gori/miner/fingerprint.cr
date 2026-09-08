@@ -41,38 +41,13 @@ module Gori::Miner
       Probe.new(metrics, found)
     end
 
-    # Collect every `gq`+8-lower-hex token (Canary.fresh's exact shape, LEN=10) present in
-    # `bytes` into `into`. A verbatim canary occurrence lands at its own start offset, so the
-    # set holds exactly the tokens the old per-canary `includes?` would have matched — same
-    # reflected set, same echo-control result. No canary can be a substring of another (fixed
-    # length), and no lower-hex byte is `g` (0x67), so tokens never overlap.
+    # Collect every canary token present in `bytes` into `into`. A verbatim canary occurrence
+    # lands at its own start offset, so the set holds exactly the tokens the old per-canary
+    # `includes?` would have matched — same reflected set, same echo-control result. The scan
+    # (and the `gq`+8-lower-hex shape it recognises) is `Canary.each_token`, shared with
+    # `Inject`'s JSON span finder so the two cannot disagree about what a canary looks like.
     private def self.scan_canaries(bytes : Bytes, into : Set(String)) : Nil
-      return if bytes.size < Canary::LEN
-      last = bytes.size - Canary::LEN
-      i = 0
-      while i <= last
-        # `Slice(UInt8)#index` is memchr, so the bytes BETWEEN candidate starts are skipped by
-        # libc a word at a time instead of one comparison each in Crystal. Every response body
-        # of the run is walked here, and a `g` is ~2% of ordinary text — so 98% of the walk was
-        # a loop doing nothing but failing its first test.
-        break unless found = bytes.index(0x67_u8, i)
-        break if found > last
-        i = found
-        if bytes.unsafe_fetch(i + 1) == 0x71_u8 && canary_tail?(bytes, i + 2)
-          into << String.new(bytes[i, Canary::LEN])
-        end
-        i += 1
-      end
-    end
-
-    # The 8 bytes after `gq` are all lower-hex (0-9 a-f). `from` + 8 is in bounds by the
-    # `i <= last` invariant in scan_canaries, so unsafe_fetch is safe.
-    private def self.canary_tail?(bytes : Bytes, from : Int32) : Bool
-      8.times do |k|
-        b = bytes.unsafe_fetch(from + k)
-        return false unless (b >= 0x30_u8 && b <= 0x39_u8) || (b >= 0x61_u8 && b <= 0x66_u8)
-      end
-      true
+      Canary.each_token(bytes) { |i| into << String.new(bytes[i, Canary::LEN]) }
     end
 
     # Word count over decoded bytes, allocation-free (whitespace transitions) — lifted
