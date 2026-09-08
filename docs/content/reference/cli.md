@@ -566,6 +566,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--containment=MODE` | `same-origin` \| `scope-aware` (default) \| `host+subdomains` |
 | `--concurrency` (20), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control |
 | `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one per origin |
+| `--assets` | Also fetch the linked images, fonts, media and archives (default: record their directory, skip the download) |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
 | `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$NAME` session bindings for the rest of the run |
 | `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |

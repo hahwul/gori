@@ -84,6 +84,7 @@ module Gori
           retries: (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i,
           max_requests: cap ? {cap, DISCOVER_MAX_REQUESTS}.min : DISCOVER_MAX_REQUESTS,
           keep_alive: bool_arg(h, "keep_alive", true),
+          crawl_assets: bool_arg(h, "crawl_assets", false),
           # Both default ON, and both must be readable as a NAMED refusal when the value is
           # unintelligible: `spider: 0` used to come back as nil → `true`, so the crawl ran
           # after the caller asked for it off AND slipped past the "at least one technique"
@@ -311,6 +312,10 @@ module Gori
               # Non-zero means the ORIGIN stopped discriminating between paths mid-sweep, so
               # an agent must read that directory's silence as unmeasured rather than empty.
               j.field "drift_suppressed", s.drift_suppressed
+              # URLs the run FOUND and deliberately did not request: a linked image, font,
+              # track or archive, whose body no extractor can read. Non-zero is not a gap in
+              # the crawl — set crawl_assets to turn them into rows.
+              j.field "assets_skipped", s.assets_skipped
               j.field("confidence_histogram") { j.array { s.conf_hist.each { |c| j.number(c) } } }
             end
             emit_audit(j, djob.audit, djob.ended_at_ms)
@@ -408,6 +413,7 @@ module Gori
           s.field "throttle_ms", intprop("fixed delay between requests in ms — an alternative to 'rate' for a target that rate-limits on inter-request gap rather than throughput (mirrors CLI --throttle)")
           s.field "max_requests", intprop("caller cap on total requests")
           s.field "keep_alive", boolprop("reuse one HTTP/1.1 connection per origin across many probes (default true) — one TCP/TLS handshake per worker instead of per probe, which is the largest cost of a brute-force pass. Set false to dial a fresh connection per probe, which is what you want when the target behaves per-connection (connection-scoped rate limits, a load balancer pinning by connection).")
+          s.field "crawl_assets", boolprop("fetch the images, fonts, media and archives a page links (default false). Off, those URLs are not requested at all: their bodies carry no endpoint any extractor can read, they cost a full download each, and they spend the same page budget as HTML. Their DIRECTORY is still brute-forced, so /uploads/ is still swept because /uploads/photo.jpg was linked — only the picture's own row is missing. Turn on to inventory a target's static surface; discover_status.assets_skipped says how many rows that adds.")
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED for an out-of-scope target, or when no scope is configured")
         end
 

@@ -24,6 +24,7 @@ module Gori
         retries = 1
         max_requests : Int64? = nil
         keep_alive = true
+        crawl_assets = false
         insecure = false
         sni : String? = nil
         http2 = false
@@ -55,6 +56,7 @@ module Gori
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
           p.on("--no-keep-alive", "Dial a fresh connection for every probe (default: reuse)") { keep_alive = false }
+          p.on("--assets", "Also fetch linked images/fonts/media/archives (default: record their directories, skip the download)") { crawl_assets = true }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--http2", "Force HTTP/2") { http2 = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
@@ -101,7 +103,7 @@ module Gori
         config = Discover::Config.new(
           concurrency: concurrency, rps: rate, throttle_ms: throttle, timeout: timeout,
           retries: retries, max_requests: max_requests, keep_alive: keep_alive,
-          spider: spider, bruteforce: bruteforce,
+          spider: spider, bruteforce: bruteforce, crawl_assets: crawl_assets,
           max_depth: max_depth, user_wordlist: wordlist, extensions: extensions,
           containment: containment, headers: parsed_headers)
 
@@ -309,7 +311,9 @@ module Gori
         STDERR.puts "done · #{s.found} found · #{s.sent} sent · #{ev.progress.errors} errors" \
                     " · calibrated-out #{s.calibrated_out} · dedup #{s.dedup_suppressed}" \
                     " · template #{s.template_suppressed} · cluster #{s.cluster_suppressed}" \
-                    "#{s.drift_suppressed > 0 ? " · drift #{s.drift_suppressed}" : ""}#{ev.stopped ? " (stopped)" : ""}"
+                    "#{s.drift_suppressed > 0 ? " · drift #{s.drift_suppressed}" : ""}" \
+                    "#{s.assets_skipped > 0 ? " · assets #{s.assets_skipped} (--assets to fetch)" : ""}" \
+                    "#{ev.stopped ? " (stopped)" : ""}"
         # A sweep that stopped on its budget must never read like one that finished: with
         # `--max-requests 8` against a 283-candidate wordlist this line said `5 found` and
         # exited 0, and 275 of those candidates were never sent. `queued` is what is still
