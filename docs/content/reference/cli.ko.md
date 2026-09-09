@@ -155,12 +155,15 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--column=SPEC` | 행마다 추출한 값을 함께 출력합니다 (반복 가능). `[LABEL=][req\|res:]kind:selector` 형식으로, 예: `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. `--column`을 하나라도 주면 이 프로젝트에 설정된 [History 컬럼](/ko/guide/proxy/#columns)을 **대체**합니다 |
 | `--no-columns` | 이 프로젝트에 설정된 History 컬럼을 그리지 않습니다 |
 | `--format=FMT` | `text`, `json` / `jsonl` (둘 다 JSON-Lines), 또는 `har` |
+| `--include-sensitive` | `json`의 행별 `headers`에서 `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API 키 값을 `[REDACTED]` 대신 그대로 냅니다. 다른 형식에서는 아무 효과가 없으며, 그 사실을 STDERR로 알립니다 |
 
 서브커맨드: `history show <id>` (`run show`와 동일), `history delete <id>`, `history delete -q QL --yes`, `history clear --yes`.
 
 이 프로젝트의 [History 컬럼](/ko/guide/proxy/#columns)은 기본으로 함께 그려지므로, 헤드리스 목록도 TUI의 History 탭과 같은 값을 보여 줍니다. 컬럼 없는 기본 목록으로 돌아가려면 `--no-columns`를 쓰세요. `text`에서는 행 끝에 `label=value`로 붙고(빈 값도 포함해서 전부입니다. "이 디스크립터는 여기서 아무것도 못 찾았다"도 봐야 할 답입니다), `json`에서는 `columns` 객체로 실립니다(컬럼이 없으면 키 자체가 없습니다). `=`는 첫 `:`보다 **앞에** 올 때만 라벨 구분자이므로 `regex:token=(\w+)`는 `regex:token`이라는 컬럼이 아니라 패턴 그대로입니다. 컬럼 하나당 출력되는 행마다 읽기 한 번이 추가되고, 본문을 읽는 세 종류는 본문을 최대 512 KiB까지 읽습니다.
 
 `json`/`jsonl`의 각 행은 플로우의 절대 `url`과 요청 헤더를 담은 `headers` 객체를 함께 싣습니다 (같은 이름이 반복되면 배열이 됩니다). 본문은 넣지 않습니다. 그건 `run show`의 몫입니다.
+
+**그 객체의 민감한 헤더 값은 기본으로 `[REDACTED]`로 가려지며**, 하나라도 가려졌으면 행에 `sensitive_headers_redacted: true`가 붙습니다. 목록은 인벤토리이고, "내가 무엇을 캡처했나"를 확인하려고 한 번 실행한 명령이 살아 있는 세션 쿠키를 터미널 로그나 에이전트 대화 기록에 남겨서는 안 되기 때문입니다. 정확한 바이트가 필요하면 `--include-sensitive`를 쓰세요. 어느 쪽이든 헤더 이름과 와이어 순서, 반복 횟수는 그대로 남으므로 가려진 행도 그 요청이 무엇이었는지는 여전히 말해 줍니다. 두 가지는 여기에 포함되지 않습니다. 직접 정의한 `--column`은 추출할 헤더를 *이름으로 지정한* 것이므로 값이 요청한 대로 출력되고(`RID=req:header:authorization`), 쿼리 스트링에 담긴 자격 증명은 `url`과 `target`의 일부입니다. `--format har`은 교환용 문서이므로 캡처된 메시지를 의도적으로 온전히 담습니다.
 
 각 행에는 `source`도 실립니다. 이 플로우가 어디서 왔는지(`proxy`, `repeater`, `fuzzer`, `discover`, `import` …)이며, 출처를 기록하기 전에 캡처된 플로우는 `null`입니다. 값이 있을 때 `source_surface`(`tui` / `cli` / `mcp`)와 `source_ref`도 함께 나옵니다. text 형식은 평범한 캡처 트래픽이 아닌 행에 `[repeater]` 같은 칩을 찍습니다. [`src:`](/ko/reference/query-language/#src-provenance)로 필터링하며, MCP `list_history`와 `get_flow`도 같은 키를 냅니다.
 

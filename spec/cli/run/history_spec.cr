@@ -693,7 +693,10 @@ describe "gori run history --format json — the listing's url and headers" do
       id: 1_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "accounts.test",
       port: 443, target: "/login", status: 200, size: 0_i64,
       state: Gori::Store::FlowState::Complete)
-    json = JSON.parse(Gori::CLI::Output.flow_row_json(row, head))
+    # `include_sensitive`, because `Cookie` is the fixture's repeated name and the default is
+    # now redaction — the fold is a property of the OBJECT, so it has to be pinned on the
+    # values the caller asked for. The redacted counterpart is pinned below.
+    json = JSON.parse(Gori::CLI::Output.flow_row_json(row, head, include_sensitive: true))
     json["headers"]["Cookie"].as_a.map(&.as_s).should eq(["a=1", "b=2"])
   end
 
@@ -722,6 +725,94 @@ describe "gori run history --format json — the listing's url and headers" do
     keys = JSON.parse(Gori::CLI::Output.flow_row_json(row)).as_h.keys
     keys.should_not contain("url")
     keys.should_not contain("headers")
+  end
+end
+
+# #1002: the `headers` block rides along on an INVENTORY row, so `gori run history
+# --format json` — a command run to answer "what did I capture?" — was putting live session
+# material into whatever terminal log or agent transcript read the listing. The MCP surface
+# has redacted by default since it shipped (`get_flow`, `compare_flows`, `intercept_get`);
+# on the CLI only `gori run intercept list/get` did, and this is the listing brought level
+# with it, `--include-sensitive` spelled the same way.
+describe "gori run history --format json — sensitive header values" do
+  private_head = ("POST /login HTTP/1.1\r\nHost: accounts.test\r\n" \
+                  "Authorization: Bearer supersecret\r\nCookie: sid=AAAA\r\nCOOKIE: csrf=BBBB\r\n" \
+                  "X-Api-Key: key-9999\r\nSet-Cookie: echoed=1\r\nProxy-Authorization: Basic Zm9v\r\n" \
+                  "X-Auth-Token: tok\r\nApi-Key: k\r\nAccept: application/json\r\n\r\n").to_slice
+
+  row = Gori::Store::FlowRow.new(
+    id: 1_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "accounts.test",
+    port: 443, target: "/login", status: 200, size: 0_i64,
+    state: Gori::Store::FlowState::Complete)
+
+  it "redacts every sensitive header value by default and leaves the rest alone" do
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head))["headers"]
+    headers["Authorization"].as_s.should eq("[REDACTED]")
+    headers["X-Api-Key"].as_s.should eq("[REDACTED]")
+    headers["Set-Cookie"].as_s.should eq("[REDACTED]")
+    headers["Proxy-Authorization"].as_s.should eq("[REDACTED]")
+    headers["X-Auth-Token"].as_s.should eq("[REDACTED]")
+    headers["Api-Key"].as_s.should eq("[REDACTED]")
+    # NAMES, wire order and the non-sensitive values are untouched: the row still answers
+    # "what request was this?", which is the whole reason the block exists.
+    headers["Host"].as_s.should eq("accounts.test")
+    headers["Accept"].as_s.should eq("application/json")
+  end
+
+  # The fold emits the FIRST spelling seen as the key, so a redaction keyed off the emitted
+  # key rather than the downcased name would let `COOKIE: csrf=BBBB` through whenever it
+  # arrived first. Both occurrences stay in the array — the count is the shape of the
+  # message (a split `Cookie`), not the secret.
+  it "redacts a case-varying repeat of a sensitive name, keeping one entry per occurrence" do
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head))["headers"]
+    headers["Cookie"].as_a.map(&.as_s).should eq(["[REDACTED]", "[REDACTED]"])
+  end
+
+  it "returns the exact bytes with include_sensitive" do
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head, include_sensitive: true))["headers"]
+    headers["Authorization"].as_s.should eq("Bearer supersecret")
+    headers["Cookie"].as_a.map(&.as_s).should eq(["sid=AAAA", "csrf=BBBB"])
+    headers["X-Api-Key"].as_s.should eq("key-9999")
+  end
+
+  # Presence, not a boolean on every row: the same discipline `advisory`/`headers`/`columns`
+  # keep, and on a JSON-Lines feed a `false` per row is a per-row cost for a fact about the
+  # invocation.
+  it "marks the row only when a value actually was redacted" do
+    JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head))["sensitive_headers_redacted"]
+      .as_bool.should be_true
+
+    plain = "GET /a HTTP/1.1\r\nHost: h\r\nAccept: */*\r\n\r\n".to_slice
+    JSON.parse(Gori::CLI::Output.flow_row_json(row, plain)).as_h
+      .has_key?("sensitive_headers_redacted").should be_false
+    JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head, include_sensitive: true)).as_h
+      .has_key?("sensitive_headers_redacted").should be_false
+    JSON.parse(Gori::CLI::Output.flow_row_json(row)).as_h
+      .has_key?("sensitive_headers_redacted").should be_false
+  end
+
+  # `flow_row_fields` is the seam a NEW emitter reaches for (`show_json` already does, with no
+  # head), and its own default has to be the fail-closed one — a caller that never heard of
+  # the flag must redact. Pinned directly, because every example above goes through
+  # `flow_row_json`, which passes the flag explicitly and so hides what the inner default is.
+  it "fails closed at the flow_row_fields seam too, not only at flow_row_json" do
+    doc = JSON.parse(JSON.build { |j| Gori::CLI::Output.flow_row_fields(j, row, private_head) })
+    doc["headers"]["Authorization"].as_s.should eq("[REDACTED]")
+    doc["sensitive_headers_redacted"].as_bool.should be_true
+  end
+
+  # The emitter fails closed, so the dangerous direction is safe whatever the call site does.
+  # The other direction is not: a `--include-sensitive` that silently changes nothing is a
+  # shape this CLI has already shipped twice (`gori run` flag-before-verb, the `--` guards).
+  # `cmd_history_list` opens a store and writes to STDOUT, so there is no in-process harness
+  # for it — asserted over the SOURCE, the way `unknown_args_sweep_spec` asserts its guard,
+  # and DERIVED rather than listed so a second `--format json` emit site is covered too.
+  it "forwards the flag from every listing emit site in history.cr" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "history.cr"))
+    src.should contain("p.on(\"--include-sensitive\"")
+    calls = src.scan(/CLI::Output\.flow_row_json\([^\n]*/).map(&.[0])
+    calls.empty?.should be_false
+    calls.each { |c| c.should contain("include_sensitive: include_sensitive") }
   end
 end
 

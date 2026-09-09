@@ -155,12 +155,15 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--column=SPEC` | Show an extracted value per row (repeatable). `[LABEL=][req\|res:]kind:selector`, e.g. `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. Any `--column` **replaces** this project's configured [History columns](/guide/proxy/#columns) |
 | `--no-columns` | Don't draw this project's configured History columns |
 | `--format=FMT` | `text`, `json` / `jsonl` (both JSON-Lines), or `har` |
+| `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values in `json`'s per-row `headers` instead of `[REDACTED]`. Inert in the other formats, which say so on STDERR |
 
 Subcommands: `history show <id>` (same as `run show`), `history delete <id>`, `history delete -q QL --yes`, `history clear --yes`.
 
 This project's [History columns](/guide/proxy/#columns) are drawn by default, so a headless listing shows what the TUI's History tab shows; `--no-columns` is the way back to the plain listing. In `text` they print as `label=value` after the row (every column, empty ones included; "the descriptor found nothing here" is an answer worth seeing); in `json` they arrive as a `columns` object, absent when no column is defined. A `=` separates the label only when it comes *before* the first `:`, so `regex:token=(\w+)` is the pattern and not a column named `regex:token`. Each column costs one extra read per printed row, and up to 512 KiB of body for the three body-scoped kinds.
 
 Each `json`/`jsonl` row carries the flow's absolute `url` and a compact `headers` object for the request (a repeated header name becomes an array). Bodies are not inlined; that is `run show`.
+
+**Sensitive header values are `[REDACTED]` in that object by default**, and the row is marked `sensitive_headers_redacted: true` when any were — a listing is an inventory, and one run to answer "what did I capture?" should not put a live session cookie in a terminal log or an agent transcript. `--include-sensitive` returns the exact bytes. Names, wire order and the repeat count survive either way, so the redacted row still says what the request was. Two things it does **not** cover: a `--column` you defined *names* the header it extracts, so its value is printed as asked (`RID=req:header:authorization`), and a credential in the query string is part of `url` and `target`. `--format har` is an interchange document and carries the captured message in full, by design.
 
 Every row also carries `source`, where the flow came from (`proxy`, `repeater`, `fuzzer`, `discover`, `import`, …; `null` on a flow captured before gori recorded provenance), plus `source_surface` (`tui` / `cli` / `mcp`) and `source_ref` when there is one. The text format prints a `[repeater]`-style chip on anything that is not ordinary captured traffic. Filter on it with [`src:`](/reference/query-language/#src-provenance); the same keys are on MCP `list_history` and `get_flow`.
 

@@ -13,6 +13,10 @@ require "../notes"
 require "../issues_export" # Issues::Export.one_line / .scrub_only
 require "../jwt"
 require "../authorize/engine"
+# `Serialize.sensitive_header?` — the ONE predicate behind every `[REDACTED]` in the tree.
+# `cli/run/intercept.cr` already reaches for its `redact_head`/`redact_message_lines`: the
+# layering contract gates CORE subsystems knowing about a surface, not surface ↔ surface.
+require "../mcp/serialize"
 require "../tui/screen" # Screen.display_width — the cell measure every column here pads against
 
 module Gori
@@ -23,8 +27,9 @@ module Gori
     module Output
       # One JSON object (one line, for JSON-Lines streams) describing a flow row.
       def self.flow_row_json(row : Store::FlowRow, request_head : Bytes? = nil,
-                             columns : Array({String, String})? = nil) : String
-        JSON.build { |j| flow_row_fields(j, row, request_head, columns) }
+                             columns : Array({String, String})? = nil,
+                             *, include_sensitive : Bool = false) : String
+        JSON.build { |j| flow_row_fields(j, row, request_head, columns, include_sensitive: include_sensitive) }
       end
 
       # Emits the flow-row fields into an open builder (reused by `show`, which
@@ -39,9 +44,15 @@ module Gori
       # full?") and a script that wants one wants the other; the plain `flow_row_json(row)`
       # that `gori run capture`'s live stream and MCP's serializer mirror is byte-identical
       # to what it always was. See spec/cli/run/history_spec.cr, which pins that key set.
+      #
+      # `include_sensitive` defaults to FALSE — an inventory row's `headers` block carries
+      # Authorization/Cookie VALUES only when the caller asks for them (#1002). The default
+      # is the fail-closed one because the parameter is threaded through existing call sites
+      # that predate it, so a caller that never heard of the flag redacts.
       def self.flow_row_fields(j : JSON::Builder, row : Store::FlowRow,
                                request_head : Bytes? = nil,
-                               columns : Array({String, String})? = nil) : Nil
+                               columns : Array({String, String})? = nil,
+                               *, include_sensitive : Bool = false) : Nil
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
@@ -96,7 +107,13 @@ module Gori
             # re-deriving it from scheme/host/port/target gets exactly those three cases
             # wrong, which is why the field exists at all.
             json_captured(j, "url", row.url)
-            j.field("headers") { request_headers_json(j, head) }
+            # `sensitive_headers_redacted` only when a value ACTUALLY was — the same
+            # field-presence discipline `advisory`, `headers` and `columns` keep here, and the
+            # reason it matters more on this feed than on a detail object: a `false` on every
+            # row of a JSON-Lines stream is a per-row cost for a fact about the invocation.
+            redacted = false
+            j.field("headers") { redacted = request_headers_json(j, head, include_sensitive) }
+            j.field "sensitive_headers_redacted", true if redacted
           end
           # User-defined History columns (#819), when the caller asked for any. Emitted only
           # then, so a script keying off field presence is not broken by a field it never asked
@@ -143,7 +160,25 @@ module Gori
       # A duplicate name that differs only in CASE is one JSON key (`Accept` and `accept` are
       # the same field, RFC 9110 §5.1) and folds into the same array; the FIRST spelling seen
       # is the key, so the object reads like the wire it came from.
-      private def self.request_headers_json(j : JSON::Builder, head : Bytes) : Nil
+      #
+      # Authorization/Cookie/Set-Cookie/API-key VALUES are `[REDACTED]` unless the caller
+      # passed `include_sensitive` (#1002): this block rides along on an INVENTORY row, so a
+      # `gori run history --format json` run to answer "what did I capture?" was placing
+      # session material in whatever log or agent transcript read the listing. Redacted per
+      # NAME rather than by running `Serialize.redact_head` over the bytes and re-parsing:
+      # the stored octets are canonical and this object is a derived projection of them, so
+      # the projection is what filters — re-parsing a head nothing ever sent inverts that.
+      # `Serialize.sensitive_header?` is the ONE predicate (same list `redact_head` and every
+      # redacting MCP tool use); a second copy here is a second answer, and the wrong answer
+      # prints a secret. Redaction keys off the DOWNCASED name, not the emitted key, because
+      # the fold emits the first spelling seen — `COOKIE:` has to redact too.
+      #
+      # A repeated sensitive name stays an ARRAY of `[REDACTED]`, one per occurrence: the
+      # count is the shape of the message (a split `Cookie`), not the secret, and collapsing
+      # it would make the redacted listing disagree with the unredacted one about what the
+      # wire held. Returns whether anything was redacted, for the row's marker field.
+      private def self.request_headers_json(j : JSON::Builder, head : Bytes,
+                                            include_sensitive : Bool) : Bool
         # Insertion-ordered, keyed case-insensitively: Hash keeps insertion order in Crystal,
         # so one pass gives both wire order and the fold.
         order = [] of String
@@ -157,16 +192,26 @@ module Gori
             order << h.name
           end
         end
+        redacted = false
         j.object do
           order.each do |name|
-            values = by_key[name.downcase]
-            if values.size == 1
+            key = name.downcase
+            values = by_key[key]
+            if !include_sensitive && MCP::Serialize.sensitive_header?(key)
+              redacted = true
+              if values.size == 1
+                j.field name.scrub, "[REDACTED]"
+              else
+                j.field(name.scrub) { j.array { values.size.times { j.string("[REDACTED]") } } }
+              end
+            elsif values.size == 1
               json_captured(j, name.scrub, values[0])
             else
               j.field(name.scrub) { j.array { values.each { |v| j.string(v.scrub) } } }
             end
           end
         end
+        redacted
       end
 
       # Emit `name` carrying a CAPTURED string, scrubbed to U+FFFD. The JSON counterpart of

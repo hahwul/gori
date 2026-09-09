@@ -360,6 +360,7 @@ module Gori
         format = :text
         lenient = false
         in_scope = false
+        include_sensitive = false
         view_name : String? = nil
         column_specs = [] of String
         no_columns = false
@@ -381,6 +382,7 @@ module Gori
             format = parse_format(v, [:text, :json, :jsonl, :har])
             format = :json if format == :jsonl # this listing's json IS JSON-Lines; accept the standard name too
           end
+          p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
@@ -412,6 +414,17 @@ module Gori
         # one line down rather than picking one reading of a contradictory command line.
         if !column_specs.empty? && no_columns
           abort "gori run history: --column and --no-columns contradict each other — pass one"
+        end
+        # A flag that does nothing says so, keyed off the FLAG and not off derived state — the
+        # same discipline as the `--column is not carried by --format har` note below. Only
+        # `--format json` carries per-row header VALUES, so this is inert in the other two, and
+        # for opposite reasons: the text listing prints no headers at all, while a HAR is an
+        # interchange document whose entries carry the captured message in full so the export
+        # can be replayed elsewhere. Redacting THAT silently would break the reader, so it is
+        # not redacted and the flag has nothing to turn off.
+        if include_sensitive && format != :json
+          STDERR.puts "gori run history: --include-sensitive only changes --format json " \
+                      "(the text listing prints no header values, and --format har carries the captured bytes in full)"
         end
         ad_hoc = DisplayColumns.parse_specs(column_specs)
         abort "gori run history: #{ad_hoc}" if ad_hoc.is_a?(String)
@@ -581,7 +594,7 @@ module Gori
             # One extra read per row for the head the projection does not carry — that is what
             # buys `url` and `headers` on the JSON-Lines row (`Output.flow_row_fields`). Heads
             # are small and this streams row by row, so a large `-n` costs queries, not memory.
-            rows.each { |r| puts CLI::Output.flow_row_json(r, store.request_head(r.id), row_columns(store, r, prepared)) }
+            rows.each { |r| puts CLI::Output.flow_row_json(r, store.request_head(r.id), row_columns(store, r, prepared), include_sensitive: include_sensitive) }
           elsif rows.empty?
             STDERR.puts empty_listing_note(query, view_label, in_scope)
           else
