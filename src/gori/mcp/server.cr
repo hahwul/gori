@@ -41,17 +41,21 @@ module Gori
 
       EMPTY_ARGS = JSON::Any.new({} of String => JSON::Any)
 
-      def initialize(@store : Store? = nil, *, allow_actions : Bool, verify_upstream : Bool,
-                     @project_name : String? = nil, @project_slug : String? = nil,
-                     @db_path : String? = nil, @selection_source : String? = nil,
-                     @workspace_root : String? = nil, @project_id : String? = nil,
-                     @bind_error : String? = nil, tool_filter : ToolFilter? = nil,
+      # The project arguments are handed STRAIGHT to `Tools` and not kept here. Tools owns the
+      # binding — `switch_project` rewrites it — and a copy on this side is a copy that goes
+      # stale on the first switch while still being read out as the server's configuration
+      # (#1003). `instructions_text` asks `@tools` for the current one instead.
+      def initialize(store : Store? = nil, *, allow_actions : Bool, verify_upstream : Bool,
+                     project_name : String? = nil, project_slug : String? = nil,
+                     db_path : String? = nil, selection_source : String? = nil,
+                     workspace_root : String? = nil, project_id : String? = nil,
+                     bind_error : String? = nil, tool_filter : ToolFilter? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
-        @tools = Tools.new(@store, allow_actions, verify_upstream,
-          project_name: @project_name, project_slug: @project_slug, db_path: @db_path,
-          selection_source: @selection_source, workspace_root: @workspace_root,
-          project_id: @project_id, bind_error: @bind_error, tool_filter: tool_filter)
+        @tools = Tools.new(store, allow_actions, verify_upstream,
+          project_name: project_name, project_slug: project_slug, db_path: db_path,
+          selection_source: selection_source, workspace_root: workspace_root,
+          project_id: project_id, bind_error: bind_error, tool_filter: tool_filter)
         @initialized = false
         # Set when the output pipe breaks (client vanished mid-write): the loop then
         # stops rather than thrashing on a dead stream or raising an unhandled error.
@@ -340,26 +344,43 @@ module Gori
       # Surfaced at the handshake so the client/model knows up front what this server
       # exposes — in particular whether the (otherwise simply absent) action tools are
       # disabled by read-only mode, rather than discovering it only on a rejected call.
+      #
+      # The project half is read from `@tools` at the moment it is built, never from a copy
+      # taken at construction: a client may re-handshake, and the binding it should be told
+      # about is the one in force NOW.
       private def instructions_text : String
         # The bind failure comes FIRST when there is one: it is why the traffic tools are
         # refusing, and an agent that reads only the head of `instructions` still gets it.
-        failure = @bind_error.try { |reason| " The configured project could not be opened: #{reason}." }
-        selected = if @store.nil?
+        failure = @tools.bind_error.try { |reason| " The configured project could not be opened: #{reason}." }
+        slug = @tools.project_slug
+        name = @tools.project_name || slug
+        root = @tools.workspace_root
+        selected = if @tools.unbound?
                      " No project is bound yet. Call list_projects to see available projects, " \
                      "create_project to make one (auto-binds when unbound), or switch_project " \
                      "before using traffic tools (list_history, send_request, …). Pure tools " \
                      "(decode, jwt_*, ql_reference) work immediately."
-                   elsif @project_name || @project_slug
-                     " This server is pinned to project #{@project_name || @project_slug}#{" [#{@project_slug}]" if @project_slug}" \
-                     " via #{@selection_source || "an explicit database"}#{" for workspace #{@workspace_root}" if @workspace_root}."
+                   elsif name
+                     " At this handshake the server is bound to project #{name}#{" [#{slug}]" if slug}" \
+                     " via #{@tools.selection_source || "an explicit database"}#{" for workspace #{root}" if root}."
                    else
-                     " Project selection source: #{@selection_source || "unknown"}; call project_info before using data."
+                     " Project selection source: #{@tools.selection_source || "unknown"}; call project_info before using data."
                    end
+        # …and that binding is a SNAPSHOT, not a pin. `switch_project` repoints the server for
+        # every later call, MCP has no way to re-send `instructions`, and a client caches this
+        # text for the whole session — so a sentence that reads as configuration ("this server
+        # is pinned to X") went on naming X while writes landed in Y. Name the authority
+        # instead: what a call actually touches is what project_info reports (#1003).
+        drift = " The binding is not fixed for the session and this text is never re-sent: " \
+                "switch_project (and create_project when it auto-binds) repoints the server " \
+                "mid-session, so project_info — or the result of the switch itself — is the " \
+                "authority on which project a call reads and writes. Re-check it before " \
+                "recording evidence."
         base = "gori MCP exposes the selected project's captured HTTP traffic " \
                "(history, flows, sitemap, scope, issues, notes, match&replace rules), plus a " \
                "pure `decoder` encode/decode/hash tool. Call ql_reference before " \
                "writing list_history/list_sitemap queries. Timestamps include unix " \
-               "microseconds plus *_iso RFC3339 fields where available.#{failure}#{selected}"
+               "microseconds plus *_iso RFC3339 fields where available.#{failure}#{selected}#{drift}"
         if @allow_actions
           "#{base} Action tools are enabled: send_request (supports flow_id/repeater_id), " \
           "send_websocket (executes a persisted WS repeater), " \

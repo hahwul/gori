@@ -204,6 +204,93 @@ describe "Gori::MCP::Tools unbound mode" do
     end
   end
 
+  # `instructions` is delivered ONCE, at the handshake, and the client caches that text for
+  # the whole session — MCP has no way to re-send it. So the sentence naming the project must
+  # not read as a permanent pin ("this server is pinned to X" went on naming X while every
+  # later call read and wrote Y), and a client that DOES re-handshake has to be told the
+  # binding in force now rather than the one the process booted with (#1003).
+  describe "project binding in the handshake instructions" do
+    it "follows a mid-session switch and points at project_info as the authority" do
+      root = File.tempname("gori-instr-binding")
+      Dir.mkdir_p(root)
+      prev = ENV["GORI_HOME"]?
+      ENV["GORI_HOME"] = root
+      reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      alpha = reg.create("Alpha")
+      beta = reg.create("Beta")
+      Gori::Store.open(beta.db_path).close
+      store = Gori::Store.open(alpha.db_path)
+      begin
+        input = IO::Memory.new(<<-JSON)
+          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+          {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"switch_project","arguments":{"project":"Beta"}}}
+          {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+          JSON
+        output = IO::Memory.new
+        Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          project_name: alpha.name, project_slug: reg.slug_of(alpha), db_path: alpha.db_path,
+          selection_source: "workspace-created", input: input, output: output).run
+        lines = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
+
+        first = lines[0]["result"]["instructions"].as_s
+        first.should contain("Alpha")
+        # The claim that could go false, and the pointer that replaces it.
+        first.should_not contain("pinned")
+        first.should contain("never re-sent")
+        first.should contain("project_info")
+
+        # The switch result is the one place the contradiction can be settled as it is made.
+        sw = JSON.parse(lines[1]["result"]["content"][0]["text"].as_s)
+        sw["project"].as_s.should eq("Beta")
+        sw["previous_project"].as_s.should eq("Alpha")
+        sw["note"].as_s.should contain("project_info")
+
+        # What a reconnecting client is handed: the project in force NOW.
+        second = lines[2]["result"]["instructions"].as_s
+        second.should contain("Beta")
+        second.should_not contain("Alpha")
+        second.should contain("via switch_project")
+      ensure
+        store.close rescue nil
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(root)
+      end
+    end
+
+    # The other half of the same staleness: a server that started with nothing bound said so
+    # in `instructions`, and kept saying so to a re-handshake taken after create/switch had
+    # given it a project.
+    it "stops reporting 'no project bound' once a switch has bound one" do
+      root = File.tempname("gori-instr-unbound")
+      Dir.mkdir_p(root)
+      prev = ENV["GORI_HOME"]?
+      ENV["GORI_HOME"] = root
+      reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      seeded = reg.create("Seeded")
+      Gori::Store.open(seeded.db_path).close
+      begin
+        input = IO::Memory.new(<<-JSON)
+          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+          {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"switch_project","arguments":{"project":"Seeded"}}}
+          {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+          JSON
+        output = IO::Memory.new
+        Gori::MCP::Server.new(nil, allow_actions: true, verify_upstream: false,
+          selection_source: "unbound", input: input, output: output).run
+        lines = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
+
+        lines[0]["result"]["instructions"].as_s.should match(/No project is bound/i)
+        JSON.parse(lines[1]["result"]["content"][0]["text"].as_s)["switched"].as_bool.should be_true
+        second = lines[2]["result"]["instructions"].as_s
+        second.should_not match(/No project is bound/i)
+        second.should contain("Seeded")
+      ensure
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(root)
+      end
+    end
+  end
+
   it "handshakes an unbound Server over stdio" do
     input = IO::Memory.new(<<-JSON)
       {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}
