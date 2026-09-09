@@ -208,6 +208,7 @@ protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
 - **JWT**: `Authorization`, 쿠키, URL, 본문에서 헤더와 페이로드를 디코드합니다(서명은 표시되지만 검증하지 않습니다).
 - **SAML**: `SAMLRequest` / `SAMLResponse`에 대해 base64(그리고 리다이렉트 바인딩의 경우 DEFLATE)를 디코드합니다.
 - **GraphQL**: 실제 API가 노출하는 모든 형태에서 `query`, `operationName`, `variables`를 파싱합니다: POST JSON 본문, GET `?query=`, `query=…&variables=…` urlencoded 본문, 배치 배열, persisted query(`extensions.persistedQuery`. 와이어에 문서 자체가 없습니다), multipart 업로드 뮤테이션, 그리고 `Content-Type: application/graphql` 원문 문서. GraphQL을 실어 나르는데 파싱되지 않는 요청은 패널을 잃는 대신 **이유**를 말합니다. 읽을 가치가 있는 쪽은 보통 그 망가진 요청입니다. **구독(subscription)도 포함됩니다.** 캡처된 소켓의 `graphql-transport-ws` 또는 구형 `subscriptions-transport-ws` 프레임도 같은 GRAPHQL 패널로 디코드되며, 판정 기준은 서브프로토콜이 프레임 `type`을 뭐라고 부르는지가 아니라 payload가 GraphQL 봉투인지입니다.
+- **실시간 프레이밍**: 소켓 *안에* 실려 다니는 봉투 — **Socket.IO / Engine.IO**(`42["chat",{…}]`), **SignalR**(`0x1e`로 구분되는 허브 레코드), **STOMP**, **SockJS**, **Action Cable** — 를 프레이밍 이름을 단 패널로 디코드합니다. 프레임 한 줄마다 이벤트 이름, 허브 메서드, destination, 채널이 봉투 밖으로 끌려 나옵니다. 판정은 payload로 합니다. 다른 것일 수 없는 프레임이 트랜스크립트에 하나라도 있어야 그 프로토콜이 열리므로, `2`를 텍스트 프레임으로 보내는 채팅 앱이 Socket.IO로 보고되지 않습니다. 핸드셰이크의 `Sec-WebSocket-Protocol`은 하트비트뿐인 세션에서 디코더를 켜주는 힌트일 뿐, 프레임이 무엇인지에 대한 권위가 아닙니다. SockJS는 다른 프레이밍을 감싸므로 메시지를 벗겨 다른 디코더에 넘깁니다(`stomp via sockjs`). 원본 프레임은 MESSAGES에서 그대로 보이고, 파싱되지 않는 프레임은 추측이 아니라 원문으로 떨어집니다.
 - **Form 파라미터**: `application/x-www-form-urlencoded` 및 `multipart/form-data` 요청 본문과 URL 쿼리 문자열을 PARAMS 패널에서 단순한 key=value 목록으로 디코드합니다(multipart 파일 파트는 요약됩니다).
 
 ## 이 플로우는 어디서 왔나 {#flow-source}

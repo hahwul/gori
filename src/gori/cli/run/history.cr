@@ -1166,6 +1166,17 @@ module Gori
           puts CLI::Output.term_safe("=== GRAPHQL over WEBSOCKET (#{GraphqlWs.summary(ws_ops)}) ===")
           puts CLI::Output.term_safe_multiline(GraphqlWs.display(ws_ops).scrub)
         end
+        # …and every other real-time framing the transcript carries (Socket.IO / SignalR /
+        # STOMP / SockJS / Action Cable). Same reason, same source: the envelope is in the
+        # FRAMES, so a headless reader that only ever saw heads and bodies saw none of it.
+        # The negotiated subprotocol is a hint only, and is read from whichever head is
+        # included — `--response-only` still decodes, it just decodes without the hint.
+        ws_frames = WsProto.from_messages(ws_msgs, WsProto.subprotocols(rh, sh))
+        unless ws_frames.empty?
+          puts ""
+          puts CLI::Output.term_safe("=== WEBSOCKET PROTOCOL (#{WsProto.summary(ws_frames)}) ===")
+          puts CLI::Output.term_safe_multiline(WsProto.display(ws_frames).scrub)
+        end
         if fields = FormData.from_flow(tgt, rh, rb)
           puts ""
           puts "=== PARAMS (#{fields.size}) ==="
