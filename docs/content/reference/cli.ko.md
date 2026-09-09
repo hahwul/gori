@@ -311,12 +311,17 @@ gori run repeater create --flow 42 --name "clone of 42"
 generate-request | gori run repeater create --target https://api.example.com --request-stdin
 ```
 
+세 가지 요청 소스는 함께 쓸 수 없습니다. 두 개를 지정하면 플래그 순서로 하나를 고르는 대신
+거부됩니다. 또한 빈 요청(빈 파일, `--request-raw ''`, 아무것도 내보내지 않은 파이프)은 전송할 수
+없는 세션을 만드는 대신 거부됩니다. `--flow`는 이 셋 중 하나가 아니며 — 출처 역할도 하므로 —
+셋 중 어느 하나와도 함께 쓸 수 있습니다.
+
 | Option | Description |
 |--------|-------------|
 | `-t`, `--target=URL` | 대상 URL (`--flow`로 복제하는 경우가 아니면 필수) |
-| `-f`, `--request-file=FILE` | FILE에서 원시 HTTP 요청을 읽음 |
-| `-r`, `--request-raw=RAW` | 원시 HTTP 요청 문자열 그대로 |
-| `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 크거나 바이너리에서 파생된 요청을 인자 벡터 밖에 두므로 프로세스 목록에 남지 않고 명령줄 길이 제한에도 걸리지 않습니다 |
+| `-f`, `--request-file=FILE` | FILE에서 원시 HTTP 요청을 읽음 (`--request-raw` / `--request-stdin`과 함께 쓸 수 없음) |
+| `-r`, `--request-raw=RAW` | 원시 HTTP 요청 문자열 그대로 (`--request-file` / `--request-stdin`과 함께 쓸 수 없음) |
+| `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 요청을 인자 벡터 밖에 둡니다 (`--request-file` / `--request-raw`과 함께 쓸 수 없음) |
 | `--flow=ID` | 캡처한 플로우에서 요청 / 대상 / HTTP/2 복제 |
 | `--name=NAME`, `--tags=TAGS` | 사용자 지정 탭 이름, 그리고 TUI 하위 탭 라벨이 되는 자유 텍스트 태그 |
 | `--http2` / `--http1` (`--no-http2`) | 프로토콜 선택. `--http1`은 h2로 캡처된 `--flow`를 덮어씁니다 |

@@ -429,15 +429,19 @@ module Gori
         ok
       end
 
+      # `request_sources` / `request_source_error` / `request_content` are PUBLIC for the same
+      # reason `two_targets_error` is: they are split from the `abort` so a spec can pin both
+      # the condition and the wording, and `cmd_repeater_create` ends in `abort`, which a spec
+      # cannot drive. Same precedent as `colormarker_rule_row` and `view_row`.
+      #
       # The request sources `repeater create` accepts, in the parser's order, filtered to the
-      # ones actually given. ONE list, read by both the mutual-exclusion gate below and the
-      # `--flow` seeding test in `cmd_repeater_create`: the two questions are "how many
+      # ones actually given. ONE list, built once by the caller and read by both the
+      # mutual-exclusion gate and the `--flow` seeding test: the two questions are "how many
       # sources?" and "was there one at all?", and asking them of separately maintained
-      # expressions is how a source gets refused in one place and silently overwritten in
-      # the other. `--flow` is deliberately NOT on this list — it doubles as provenance for a
+      # expressions is how a source gets refused in one place and silently overwritten in the
+      # other. `--flow` is deliberately NOT on this list — it doubles as provenance for a
       # hand-authored request, so `--flow 42 --request-stdin` is a legitimate pair.
-      private def self.request_sources(*, file : String?, raw : String?,
-                                       stdin : Bool) : Array(String)
+      def self.request_sources(*, file : String?, raw : String?, stdin : Bool) : Array(String)
         sources = [] of String
         sources << "--request-file" if file
         sources << "--request-raw" if raw
@@ -445,52 +449,82 @@ module Gori
         sources
       end
 
-      # nil when the options name exactly one request source (or none, with `--flow` standing
-      # in for it); the sentence to `abort` with otherwise. `abort` is not spec-able, which is
-      # why the decision and the message are a function.
+      # nil when `sources` names exactly one request source (or none, with `--flow` standing in
+      # for it); the sentence to `abort` with otherwise.
       #
-      # The over-specified half is not new: the branch that reads the request is an
-      # `if/elsif` chain, so `--request-file a.txt --request-raw 'GET / HTTP/1.1'` stored the
-      # FILE and never mentioned the string. Two sources cannot both be the request, and
-      # picking one by parser order is a guess made silently.
-      private def self.request_source_error(*, file : String?, raw : String?, stdin : Bool,
-                                            flow : Bool) : String?
-        given = request_sources(file: file, raw: raw, stdin: stdin)
-        if given.size > 1
-          return "gori run repeater create: #{given.join(", ")} cannot be combined — pick one request source"
+      # The over-specified half is not new: the branch that reads the request is an `if/elsif`
+      # chain, so `--request-file a.txt --request-raw 'GET / HTTP/1.1'` stored the FILE and
+      # never mentioned the string. Two sources cannot both be the request, and picking one by
+      # parser order is a guess made silently. The sentence hardcodes the command because
+      # `repeater create` is the only site: `fuzz` already refuses every pair of its three
+      # sources, and `mine`/`sequence` each refuse their one pair.
+      def self.request_source_error(sources : Array(String), *, flow : Bool) : String?
+        if sources.size > 1
+          return "gori run repeater create: #{sources.join(", ")} cannot be combined — pick one request source"
         end
-        if given.empty? && !flow
+        if sources.empty? && !flow
           return "gori run repeater create: either --request-file, --request-raw, --request-stdin, or --flow is required"
         end
         nil
       end
 
-      # `--request-stdin`: the request bytes, verbatim. Byte-for-byte what
-      # `read_input_file` returns for the same content in a file — `IO#gets_to_end` and
-      # `File.read` are both an `IO.copy` into a `String::Builder`, so CRLF line endings stay
-      # CRLF and a body that is not valid UTF-8 (protobuf, a gzip'd POST, a latin-1 field)
-      # arrives as its own octets. That is the issue's requirement and P7 besides: these are
-      # operator bytes, and gori does not sanitize the payload.
+      # nil when the content is usable; the sentence to `abort` with otherwise. Refused for
+      # EVERY source, not just the pipe: a session whose request is empty cannot be sent
+      # (`PlanError::NoRequest`) and MCP's `create_repeater` already refuses one, so
+      # `--request-raw ''`, an empty file and a generator that died each used to buy a dead row
+      # reported as a clean "session #N created successfully." `sources` names the culprit, and
+      # an EMPTY `sources` is the `--flow` case, whose request is seeded from the capture after
+      # this point. Same shape and reason as `intercept edit`'s empty-replacement refusal.
+      def self.request_content_error(sources : Array(String), content : String) : String?
+        return nil if sources.empty? || !content.empty?
+        "gori run repeater create: the request must not be empty (#{sources.first} gave no bytes)"
+      end
+
+      # The request bytes from whichever single source the gate allowed through. `""` means no
+      # source at all, which is only reachable with `--flow`, whose capture seeds the request
+      # instead. The branch SELECTION lives here rather than inline in `cmd_repeater_create` so
+      # a spec can prove each door hands back its own bytes — an inline chain is only reachable
+      # through a command that opens a store and ends in `abort`, so deleting a branch from it
+      # is a silent behavior change no spec sees.
+      def self.request_content(*, file : String?, raw : String?, stdin : Bool,
+                               io : IO, what : String) : String
+        if f = file
+          read_input_file(f, what)
+        elsif r = raw
+          r
+        elsif stdin
+          read_request_stdin(io, what)
+        else
+          ""
+        end
+      end
+
+      # `--request-stdin`: the request bytes, verbatim. Byte-for-byte what `read_input_file`
+      # returns for the same content in a file — `IO#gets_to_end` and `File.read` are both an
+      # `IO.copy` into a `String::Builder`, so CRLF line endings stay CRLF and a body that is
+      # not valid UTF-8 (protobuf, a gzip'd POST, a latin-1 field) arrives as its own octets.
+      # That is the issue's requirement and P7 besides: these are operator bytes, and gori does
+      # not sanitize the payload.
       #
-      # No `STDIN.tty?` guard, unlike `fuzz_source`/`mine_source`/`sequence_source`. Their
+      # No `STDIN.tty?` *guard*, unlike `fuzz_source`/`mine_source`/`sequence_source`. Their
       # stdin road is IMPLICIT — the fallback when no source flag was passed — so without the
       # guard a bare `gori run mine` would hang on a terminal. This flag was named by the
-      # operator, so blocking until EOF is the answer to what they asked for (and an
-      # interactive paste ending in ^D is a real use).
+      # operator, so blocking until EOF is the answer to what they asked for. It does get a
+      # NOTICE, though: without one a forgotten pipe is indistinguishable from a hung command,
+      # and every other interactive read in gori announces itself first (`gori ca`).
       #
-      # nil when the pipe was EMPTY, which the caller refuses — and only here:
-      # `generator | gori run repeater create --request-stdin` with a generator that died
-      # writes nothing and says nothing, and the session created from it would hold an empty
-      # request under a clean "session #N created successfully." An empty `--request-raw ''`
-      # or an empty file is in front of the operator; a dead pipe is not. `io` is a parameter,
-      # and the emptiness is a return value rather than an `abort` in here, so both halves
-      # are readable from a spec without the process's own stdin.
-      private def self.read_request_stdin(io : IO) : String?
-        # `.empty?`, not `.presence`/`blank?`: EMPTY is a dead upstream, whereas a pipe that
-        # yielded only whitespace yielded octets, and which octets frame a request is not
-        # this door's call to make (P7).
-        raw = io.gets_to_end
-        raw.empty? ? nil : raw
+      # The rescue is the point of routing through here rather than a bare `io.gets_to_end`.
+      # `Run.dispatch` re-raises any non-EPIPE `IO::Error` and `CLI.run` rescues only
+      # `Gori::Error`, so an unreadable stdin — fd 0 closed by a cron/systemd unit, or a
+      # `Process.run` with no stdin pipe — reached the operator as a Crystal backtrace. This is
+      # the same guard, and the same reason for it, as `read_input_file`'s `File::Error` rescue.
+      def self.read_request_stdin(io : IO, what : String) : String
+        if io.is_a?(IO::FileDescriptor) && io.tty?
+          STDERR.puts "#{what}: reading the request from stdin — press ^D to finish"
+        end
+        io.gets_to_end
+      rescue ex : IO::Error
+        abort "#{what}: cannot read the request from stdin: #{ex.message}"
       end
 
       private def self.cmd_repeater_create(args : Array(String)) : Nil
@@ -545,29 +579,27 @@ module Gori
         parse_no_positionals(parser, args, "gori run repeater create",
           "pass the request via --request-file/--request-raw/--request-stdin/--flow and the origin via --target")
 
-        # BEFORE the read, deliberately: `--request-file f --request-stdin` has to report the
-        # conflict, not block on a terminal while it waits for a pipe the operator never opened.
-        if err = request_source_error(file: request_file, raw: request_raw,
-             stdin: request_stdin, flow: !flow_id.nil?)
+        # ONE build of the source list, shared by the gate below and the `--flow` seeding
+        # further down, so the two can never disagree about whether a request was handed in.
+        sources = request_sources(file: request_file, raw: request_raw, stdin: request_stdin)
+
+        # EVERY argv-only refusal goes above the read, because `--request-stdin` blocks until
+        # EOF: a conflict, or a missing --target, used to drain the pipe first — and hang
+        # outright on a terminal — before reporting something knowable from the arguments
+        # alone. `--target` pairs with `--flow` here only because a capture can supply it;
+        # the later `tgt_str.empty?` check still catches a --flow whose own target is unusable.
+        if err = request_source_error(sources, flow: !flow_id.nil?)
           abort err
         end
+        abort "gori run repeater create: --target is required" if target.nil? && flow_id.nil?
 
-        # ONE read of the source list, shared by the gate above and the `--flow` seeding
-        # below, so the two can never disagree about whether a request was handed in.
-        authored = !request_sources(file: request_file, raw: request_raw,
-          stdin: request_stdin).empty?
-
-        req_content = ""
-        if file = request_file
-          req_content = read_input_file(file, "gori run repeater create")
-        elsif raw = request_raw
-          req_content = raw
-        elsif request_stdin
-          # Read here, before `open_store`: a pipe that never ends must not be holding the
-          # project's shared open-lock while it waits (`Store.open` → `<db>.open.lock`).
-          piped = read_request_stdin(STDIN)
-          abort "gori run repeater create: --request-stdin read an empty request from stdin" if piped.nil?
-          req_content = piped
+        authored = !sources.empty?
+        # Read here, before `open_store`: a pipe that never ends must not be holding the
+        # project's shared open-lock while it waits (`Store.open` → `<db>.open.lock`).
+        req_content = request_content(file: request_file, raw: request_raw,
+          stdin: request_stdin, io: STDIN, what: "gori run repeater create")
+        if err = request_content_error(sources, req_content)
+          abort err
         end
 
         project = resolve_read_project(project_name, db_path)

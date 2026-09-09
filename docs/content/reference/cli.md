@@ -311,12 +311,17 @@ gori run repeater create --flow 42 --name "clone of 42"
 generate-request | gori run repeater create --target https://api.example.com --request-stdin
 ```
 
+The three request sources are mutually exclusive — naming two is refused rather than
+resolved by flag order — and a request that arrives empty (an empty file, `--request-raw ''`,
+or a pipe that produced nothing) is refused instead of creating a session that cannot be sent.
+`--flow` is not one of the three: it doubles as provenance, so it pairs with any one of them.
+
 | Option | Description |
 | -------- | ------------- |
 | `-t`, `--target=URL` | Target URL (required unless cloned from `--flow`) |
-| `-f`, `--request-file=FILE` | Read the raw HTTP request from FILE |
-| `-r`, `--request-raw=RAW` | Verbatim raw HTTP request string |
-| `--request-stdin` | Read the raw HTTP request from stdin, byte-for-byte, as `--request-file` reads a file. Keeps a large or binary-derived request out of the argument vector, so it stays out of the process listing and cannot hit the command-line length limit |
+| `-f`, `--request-file=FILE` | Read the raw HTTP request from FILE (mutually exclusive with `--request-raw` / `--request-stdin`) |
+| `-r`, `--request-raw=RAW` | Verbatim raw HTTP request string (mutually exclusive with `--request-file` / `--request-stdin`) |
+| `--request-stdin` | Read the raw HTTP request from stdin, byte-for-byte as `--request-file` reads a file, keeping it out of the argument vector (mutually exclusive with `--request-file` / `--request-raw`) |
 | `--flow=ID` | Clone request / target / HTTP/2 from a captured flow |
 | `--name=NAME`, `--tags=TAGS` | Custom tab name, and free-text tags that become the TUI subtab label |
 | `--http2` / `--http1` (`--no-http2`) | Pick a protocol; `--http1` overrides an h2-captured `--flow` |
