@@ -195,11 +195,18 @@ module Gori::Tui
     # `when:` band — a plain text field where `?` types a `?`. An unconditional chip would make
     # this generator advertise a key on a surface that does not have it, which is the exact
     # failure the hand-written FILTER_HINT/QUERY_HINT pair was replaced for.
+    # `regex` and `compare` are the two clauses that are NOT true of every backend, and
+    # defaulting them to QL's answer is how this generator came to name a field a surface does
+    # not have. `Issues::Filter` and `Probe::Filter` refuse `~` outright (`known_field?` takes
+    # a `regex` argument precisely to say so) and neither has a `size` or `dur` axis, so the
+    # unparameterised text would re-break what b28aaaaa fixed — the fix that put these two
+    # bars' field vocabulary under a spec in the first place. `compare: nil` drops the clause.
     def self.cold_hint(fields : Array(String) = QL::HINT_FIELDS, width : Int32? = nil,
-                       note : String? = nil, help_key : Bool = false) : String
+                       note : String? = nil, help_key : Bool = false,
+                       regex : Bool = true, compare : String? = "status size dur") : String
       n = {fields.size, HINT_MAX}.min
       loop do
-        line = compose(fields.first(n), note, help_key)
+        line = compose(fields.first(n), note, help_key, regex, compare)
         return line if width.nil? || n == 0 || fits?(line, width)
         n -= 1
       end
@@ -211,7 +218,8 @@ module Gori::Tui
     # offers names until a `:` is typed — so without this nothing on the bar shows that `status:`
     # takes an operator at all.
     private def self.compose(fields : Array(String), note : String? = nil,
-                             help_key : Bool = false) : String
+                             help_key : Bool = false, regex : Bool = true,
+                             compare : String? = "status size dur") : String
       # AFTER `-term excludes`, not before it. Leading with the chip read better and was wrong:
       # it is 16 columns, and `fits?` below protects `-term excludes` by INDEX, so putting
       # anything ahead of that token pushes it right on every surface at once — measured, it
@@ -224,7 +232,11 @@ module Gori::Tui
       help = help_key ? "? reference  ·  " : ""
       chips = fields.empty? ? "" : "fields: #{sample(fields)}  ·  "
       tail = note ? "#{note}  ·  " : ""
-      "#{chips}-term excludes  ·  #{help}#{tail}OR NOT ( ) group  ·  ~regex  ·  >= < on status size dur"
+      # Appended rather than interpolated in place, so the QL defaults still compose the exact
+      # string every existing caller (and its spec) already gets.
+      rx = regex ? "  ·  ~regex" : ""
+      cmp = compare ? "  ·  >= < on #{compare}" : ""
+      "#{chips}-term excludes  ·  #{help}#{tail}OR NOT ( ) group#{rx}#{cmp}"
     end
 
     # Does the operator that matters survive this width? Not "does the whole line fit" — the tail

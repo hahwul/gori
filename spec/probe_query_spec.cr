@@ -448,4 +448,111 @@ describe Gori::Probe::Filter do
       Gori::Probe::Filter::FIELDS.should eq(["severity:", "status:", "category:", "host:", "code:"])
     end
   end
+
+  # The twin of `issues_query_spec`'s completion-help block, for the same reason: the row the
+  # bar draws and the arms `build_term` dispatches on are the same knowledge, and this backend
+  # is where the two most recently drifted (see b28aaaaa).
+  describe "the completion help table" do
+    it "describes every canonical field, and nothing else" do
+      Gori::Probe::Filter::FIELD_HELP.keys.sort!.should eq(Gori::Probe::Filter::ALIASES.keys.sort!)
+      Gori::Probe::Filter::FIELD_HELP.each_value(&.should_not(be_empty))
+    end
+
+    it "answers for every spelling build_term dispatches on" do
+      Gori::Probe::Filter::KNOWN.each do |spelling|
+        Gori::Probe::Filter.field_help(spelling).should_not be_nil
+      end
+    end
+
+    it "declines a field this backend does not implement" do
+      Gori::Probe::Filter.field_help("path").should be_nil
+      Gori::Probe::Filter.field_help("cvss").should be_nil
+    end
+
+    it "keeps ALSO_ACCEPTED to the aliases only" do
+      expected = Gori::Probe::Filter::ALIASES.flat_map { |canon, sp| sp.reject { |x| x == canon } }.sort!
+      Gori::Probe::Filter::ALSO_ACCEPTED.keys.sort!.should eq(expected)
+    end
+  end
+
+  describe ".suggestions" do
+    it "completes a field name, carrying the grammar's punctuation through" do
+      Gori::Probe::Filter.suggestions("cat", 3).should eq(["category:"])
+      Gori::Probe::Filter.suggestions("-cat", 4).should eq(["-category:"])
+      Gori::Probe::Filter.suggestions("(cat", 4).should eq(["(category:"])
+    end
+
+    it "completes `category:` from the list `--category` validates against" do
+      # ONE list, not a copy: this bar and the CLI flag must not come to disagree about which
+      # lenses exist.
+      Gori::Probe::Filter.suggestions("category:", 9).should eq(
+        Gori::Probe::FILTER_CATEGORIES.map { |c| "category:#{c}" })
+      Gori::Probe::Filter.suggestions("category:c", 10).should eq(["category:cookies", "category:cors", "category:client", "category:custom"])
+    end
+
+    it "offers only values the matcher actually accepts" do
+      states = {
+        "open"           => Gori::Store::Status::Open,
+        "confirmed"      => Gori::Store::Status::Confirmed,
+        "false-positive" => Gori::Store::Status::FalsePositive,
+        "resolved"       => Gori::Store::Status::Resolved,
+      }
+      Gori::Probe::Filter::STATUS_VALUES.each do |v|
+        next if v == "closed"
+        hits?("status:#{v}", make_issue("c", status: states[v])).should be_true
+      end
+      sevs = {
+        "info"     => Gori::Store::Severity::Info,
+        "low"      => Gori::Store::Severity::Low,
+        "medium"   => Gori::Store::Severity::Medium,
+        "high"     => Gori::Store::Severity::High,
+        "critical" => Gori::Store::Severity::Critical,
+      }
+      Gori::Probe::Filter::SEVERITY_VALUES.each do |v|
+        hits?("severity:#{v}", make_issue("c", severity: sevs[v])).should be_true
+      end
+      Gori::Probe::FILTER_CATEGORIES.each do |c|
+        hits?("category:#{c}", make_issue("c", category: c)).should be_true
+      end
+    end
+
+    it "completes host: and code: from the caller's pools" do
+      Gori::Probe::Filter.suggestions("host:a", 6, ["acme.test", "b.test"]).should eq(["host:acme.test"])
+      Gori::Probe::Filter.suggestions("code:mis", 8, [] of String, ["missing_csp", "weak_tls"]).should eq(["code:missing_csp"])
+    end
+
+    it "offers nothing on blank space" do
+      Gori::Probe::Filter.suggestions("", 0).should be_empty
+      Gori::Probe::Filter.suggestions("host:a ", 7).should be_empty
+    end
+  end
+
+  describe "the ? reference page" do
+    it "states this backend's grammar, not QL's" do
+      body = (Gori::Probe::Filter::SYNTAX_HELP + Gori::Probe::Filter::CAVEATS).map { |(a, b)| "#{a} #{b}" }.join("\n")
+      %w[dur: respsize: resp.body: req.header: scope: src: cvss: title:].each do |absent|
+        body.should_not contain(absent)
+      end
+      body.should contain("no regex")
+    end
+
+    # The examples an operator copies off this page must PARSE on this backend. Derived, not
+    # listed: the absent-list above is a denylist and cannot catch a field nobody thought to
+    # name — `title:"missing header"` shipped in Probe's SYNTAX_HELP and `title` is not a Probe
+    # field, which is precisely the defect class ("a filter bar naming a field it does not
+    # have") these tables exist to end.
+    #
+    # Only the EXAMPLE half is scanned. The meaning half is English, and says things like "any
+    # non-open triage state: confirmed, fp or resolved" — there `state:` is prose.
+    it "teaches only fields this backend actually parses" do
+      offenders = [] of String
+      (Gori::Probe::Filter::SYNTAX_HELP + Gori::Probe::Filter::CAVEATS).each do |(example, _)|
+        example.scan(/(?:^|[\s("\-])-?([a-z][a-z0-9.]*):/) do |m|
+          name = m[1]
+          offenders << "#{name}: in #{example.inspect}" unless Gori::Probe::Filter.known_field?(name)
+        end
+      end
+      offenders.should be_empty
+    end
+  end
 end

@@ -66,11 +66,18 @@ module Gori::Tui
       @issues.detail_open? || preview_scroll_focused? ? nil : @issues.list_page_rows
     end
 
-    # ⇥ / ⇧⇥ between the list and its preview; off either end the ring returns to the tab
-    # bar. The focus-ring hook — a `key.tab?` arm in `handle_body_key` never ran (the Runner
-    # claims ⇥ for the ring first), so the `↹ preview` the hint promised was mouse-only.
+    # ⇥ / ⇧⇥ across this tab's panes. The focus-ring hook — a `key.tab?` arm in
+    # `handle_body_key` never ran (the Runner claims ⇥ for the ring first), so the
+    # `↹ preview` the hint promised was mouse-only.
+    #
+    # An open DETAIL walks its own two panes (`IssuesView#step_detail_focus`) and never
+    # answers false. It used to answer false unconditionally, which sent focus to the tab bar
+    # while `handle_detail_key` stayed gated on `@focus == :body` — one ⇥ and the detail was
+    # still on screen with every key dead, back keys included. On the LIST page false is
+    # correct and is what returns focus to the tab bar off either end.
     def pane_advance(dir : Int32) : Bool
-      return false if @issues.detail_open? || !@issues.preview_enabled?
+      return @issues.step_detail_focus(dir) if @issues.detail_open?
+      return false unless @issues.preview_enabled?
       @issues.step_preview_focus(dir)
     end
 
@@ -93,12 +100,15 @@ module Gori::Tui
         if @issues.notes_insert_mode?
           "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
         elsif @issues.notes_focused?
-          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · esc links"
+          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · ↹/←/esc related"
         else
-          keys("↑/↓ links · ↵ open · i/↵ notes · {issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+          # `↹/↓ notes`, and `i edit` rather than the old `i/↵ notes`: ↵ in this pane opens
+          # the selected RELATED item (`issue.open-link`), so naming it as the way into the
+          # notes editor was wrong about one of the two keys it listed.
+          keys("↑/↓ links · ↵ open · ↹/↓ notes · i edit · {issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
         end
       elsif @issues.querying?
-        "type to filter · ↹ complete · ↵ apply · esc clear"
+        "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
       elsif @issues.preview_enabled? && @issues.preview_focus == :preview
         "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs"
       elsif @issues.mark_count > 0
@@ -256,9 +266,9 @@ module Gori::Tui
         @issues.focus_links!
       when key.enter?, c == 'i'
         @issues.enter_notes_insert!
-      when nav_up?(ev)                       then @issues.notes_read_move(-1, 0, selecting: selecting)
+      when nav_up?(ev)                       then notes_read_up(ev, selecting)
       when nav_down?(ev)                     then @issues.notes_read_move(1, 0, selecting: selecting)
-      when key.left?                         then @issues.notes_read_move(0, -1, selecting: selecting)
+      when key.left?                         then notes_read_left(ev, selecting)
       when key.right?                        then @issues.notes_read_move(0, 1, selecting: selecting)
       when @issues.notes_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
       # `x` carries its own modifier guard rather than the method taking one at the top:
@@ -274,6 +284,33 @@ module Gori::Tui
         return false
       end
       true
+    end
+
+    # `↑` on the first NOTES row and `←` at the start of a line hand focus back to RELATED —
+    # the return leg of the ↓ handoff in `issue_link_move`, and the only keyboard way OUT of
+    # this pane besides `esc`. Both keys are free at those edges: `ReadCursor#move` CLAMPS the
+    # column rather than wrapping to the previous line's end, so neither did anything at all
+    # there before.
+    #
+    # Folded INTO the two motion arms rather than sitting ahead of them as two more `when`s:
+    # `handle_notes_read_key` sits exactly on the cyclomatic ceiling CI gates, so a third arm
+    # tipped it over — and "does this key leave the pane" is local to the key anyway.
+    private def notes_read_up(ev : Termisu::Event::Key, selecting : Bool) : Nil
+      return @issues.focus_links! if notes_crossing?(ev) && @issues.notes_at_top?
+      @issues.notes_read_move(-1, 0, selecting: selecting)
+    end
+
+    private def notes_read_left(ev : Termisu::Event::Key, selecting : Bool) : Nil
+      return @issues.focus_links! if notes_crossing?(ev) && @issues.notes_at_doc_start?
+      @issues.notes_read_move(0, -1, selecting: selecting)
+    end
+
+    # A crossing claims only a BARE press. ⇧ means a ⇧arrow selection is mid-build and leaving
+    # the pane would abandon it instead of extending it; ⌃/⌥ belong to
+    # `notes_read_motion_key`, the shared editor set that owns ⌃←/⌥← as word motion. Same
+    # guard, same reason, as `RewriterController#handle_preview_in_key`.
+    private def notes_crossing?(ev : Termisu::Event::Key) : Bool
+      !ev.shift? && !ev.ctrl? && !ev.alt?
     end
 
     private def handle_notes_insert_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
@@ -332,14 +369,14 @@ module Gori::Tui
     def handle_query_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char
+      return true if query_nav(ev)
       case
-      when key.enter?                  then @issues.stop_query
-      when key.escape?                 then @issues.cancel_query
-      when key.tab?                    then @issues.query_complete
-      when (act = LineEdit.action(ev)) then @issues.query_edit(act) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before plain ⌫, which would swallow ⌥⌫
-      when key.backspace?              then @issues.query_backspace
-      when key.left?                   then @issues.query_move(-1)
-      when key.right?                  then @issues.query_move(1)
+      when key.enter?     then query_enter
+      when key.escape?    then query_escape
+      when key.tab?       then @issues.query_complete
+      when key.backspace? then @issues.query_backspace
+        # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
+      when TabController.ql_help_key?(ev, @issues.query) then @host.open_help_query(:issues)
       else
         if c && !ev.ctrl? && !ev.alt?
           @issues.query_insert(c)
@@ -347,6 +384,44 @@ module Gori::Tui
         end
       end
       true
+    end
+
+    # ↓/↑ drive the dropdown, ←/→ the caret. Handled ahead of the `case` above rather than as
+    # four more arms in it, for the reason `SitemapController#query_nav` gives: the two
+    # dropdown keys push `handle_query_key` past the complexity gate CI runs, and "move
+    # something" is a different question from "what does this key do". Both keys were DEAD in
+    # this bar before the dropdown — a one-line field has no second row to move a caret to —
+    # which is why they can be claimed without displacing anything.
+    private def query_nav(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
+        @issues.query_edit(act)
+      when key.down?  then @issues.popup_down
+      when key.up?    then @issues.popup_up
+      when key.left?  then @issues.query_move(-1)
+      when key.right? then @issues.query_move(1)
+      else                 return false
+      end
+      true
+    end
+
+    # Open dropdown ⇒ ↵ takes the highlighted candidate and shuts it; closed ⇒ apply the
+    # filter and leave edit mode. Mirrors History and Sitemap — one grammar, one set of
+    # gestures.
+    private def query_enter : Nil
+      if @issues.popup_open?
+        @issues.query_complete(close: true)
+      else
+        @issues.stop_query
+      end
+    end
+
+    # esc closes the dropdown first, so opening the list to look at it never costs the typed
+    # query.
+    private def query_escape : Nil
+      return @issues.popup_close if @issues.popup_open?
+      @issues.cancel_query
     end
 
     def on_enter : Nil
@@ -624,6 +699,18 @@ module Gori::Tui
 
     def issue_link_move(delta : Int32) : Nil
       return if @issues.notes_insert_mode? || @issues.notes_focused?
+      # ↓ past the last RELATED row hands focus to NOTES instead of clamping — the missing
+      # entry that made NOTES unreachable in READ mode at all. Every other route into it went
+      # through INS (`i`, `↵`, `e`) or the mouse, so "read the writeup without opening an
+      # editor over it" had no keyboard path.
+      #
+      # Deliberately HERE, on the keyboard path, and not in `IssuesView#move_links`, which
+      # `scroll_links_wheel` shares: a wheel reads as "scroll the viewport", not as a focus
+      # gesture, and must not move focus out from under the pointer.
+      if delta > 0 && @issues.links_at_bottom?
+        @issues.focus_notes!
+        return
+      end
       @issues.move_links(delta)
     end
 

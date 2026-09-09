@@ -3382,6 +3382,19 @@ module Gori::Tui
         # pulls it out first) and so cannot come from QL's table.
         HelpPopupOverlay.query_reference("SITEMAP FILTER",
           HelpView.query_rows(["tag"] + QL::FIELDS, SitemapView::QL_HELP))
+      when :issues
+        # Five fields, none of them QL's. Without this arm `?` fell through to the generic
+        # reference below — the full QL vocabulary, of which `Issues::Filter` implements two
+        # names and reads one of those (`status:`) as something else entirely.
+        HelpPopupOverlay.query_reference("ISSUES FILTER",
+          HelpView.query_rows(Issues::Filter::HINT_FIELDS, Issues::Filter::FIELD_HELP_PROC,
+            Issues::Filter::ALSO_ACCEPTED, Issues::Filter::SYNTAX_HELP,
+            Issues::Filter::CAVEATS, regex: false))
+      when :probe
+        HelpPopupOverlay.query_reference("PROBE FILTER",
+          HelpView.query_rows(Probe::Filter::HINT_FIELDS, Probe::Filter::FIELD_HELP_PROC,
+            Probe::Filter::ALSO_ACCEPTED, Probe::Filter::SYNTAX_HELP,
+            Probe::Filter::CAVEATS, regex: false))
       else
         HelpPopupOverlay.query_reference
       end

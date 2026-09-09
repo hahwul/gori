@@ -41,6 +41,129 @@ module Gori
         !regex && KNOWN.includes?(name.downcase)
       end
 
+      # Canonical name for a spelling — `sev` is `severity`. The completion row asks for help
+      # by the name the OPERATOR typed (`QuerySuggest.field_of`), so a table keyed only by
+      # canonical names would leave every alias in `ALIASES` undescribed.
+      CANONICAL = begin
+        h = {} of String => String
+        ALIASES.each { |canon, spellings| spellings.each { |sp| h[sp] = canon } }
+        h
+      end
+
+      # What each field means ON THIS BAR — deliberately NOT `QL::FIELD_HELP`, even though
+      # `FilterAst` and two of the names are shared, and this is the reason the help source is
+      # a parameter of `QuerySuggest.render` at all. QL describes `status:` as an HTTP code
+      # with 5xx classes and comparisons; here it is a TRIAGE state, so QL's table would state
+      # this field's meaning backwards on the one surface where the bar is the only place the
+      # vocabulary is ever learned. `host:` would be nearly right and still wrong: QL's line
+      # advertises `host~` for regex, which `known_field?` above refuses outright.
+      FIELD_HELP = {
+        "severity" => "info low medium high critical — takes >= <= > <",
+        "status"   => "triage state — open confirmed fp resolved (closed = any non-open)",
+        "host"     => "the issue's host — substring",
+        "title"    => "the issue's title — substring",
+        "cvss"     => "score, with >= <= > < — or a substring of the vector",
+      }
+
+      # As a proc, built once: the bar draws this every frame while the filter is being
+      # edited, and an inline closure at the call site allocates one per frame.
+      FIELD_HELP_PROC = ->(f : String) do
+        canon = CANONICAL[f.downcase]?
+        canon ? FIELD_HELP[canon]? : nil
+      end
+
+      def self.field_help(name : String) : String?
+        FIELD_HELP_PROC.call(name)
+      end
+
+      # The subset a one-row cold hint samples — see `QL::HINT_FIELDS` for why a hint samples
+      # at all. All five fit, so this is the whole vocabulary rather than a sample.
+      HINT_FIELDS = ALIASES.keys
+
+      # The spellings the `?` reference lists under ALSO ACCEPTED. `CANONICAL` maps every
+      # spelling including the canonical one to itself, and a page saying `severity: =
+      # severity:` is noise, so the identity entries go.
+      ALSO_ACCEPTED = CANONICAL.reject { |from, to| from == to }
+
+      # The `?` reference's SYNTAX section. `HelpView.query_rows` defaults to `QL::SYNTAX_HELP`
+      # and more than half of it is untrue here: it teaches `body~secret\d+`, `dur:>1.5s` and
+      # the `req.`/`resp.` side prefixes, none of which this parser has. What IS shared is the
+      # boolean grammar, because it is literally the same `FilterAst`.
+      SYNTAX_HELP = [
+        {"severity:high status:open", "space = AND (both must hold)"},
+        {"status:open OR status:confirmed", "OR; NOT > AND > OR, ( ) to group"},
+        {"-status:resolved", "leading - excludes — so does NOT status:resolved"},
+        {"NOT (severity:info OR severity:low)", "NOT or -( negates a whole group"},
+        {"severity:>=high cvss:>=7.0", ">= <= > < = on severity and cvss"},
+        {"title:\"sql injection\"", "quotes keep spaces inside one term"},
+        {"login", "a bare word searches title and host"},
+      ]
+
+      # WORTH KNOWING, for this backend. Every entry is a rule written somewhere below in this
+      # file, which is the point: the page states what the matcher does, not what QL's does.
+      CAVEATS = [
+        {"there is no regex", "title~admin free-texts the whole token — see known_field?"},
+        {"status:closed", "any non-open triage state: confirmed, fp or resolved"},
+        {"cvss: reads two ways", "with an operator it compares the score; bare, it also matches the vector"},
+        {"an empty value passes all", "status: mid-type matches everything, so the list never blanks as you type"},
+        {"-status: matches none", "the negation of \"matches all\" — deliberate, and spec-pinned"},
+        {"matching is in memory", "issues are a small severity-sorted list, so there is no index and no size limit"},
+      ]
+
+      # The closed value vocabularies, spelled the way `severity_value` and `match_status`
+      # below actually match them. Only the CANONICAL spelling of each is offered: `med` and
+      # `crit` still parse, but a completion list carrying both spellings of five severities
+      # spends the whole row saying one thing twice.
+      SEVERITY_VALUES = %w[info low medium high critical]
+      STATUS_VALUES   = %w[open confirmed false-positive resolved closed]
+
+      # Comparison SAMPLES for the two ordinal fields. No list can be `cvss:`'s vocabulary —
+      # it is a float — so these exist to teach syntax, which completion otherwise cannot:
+      # ↹ offers NAMES until a `:` is typed, so without these nothing on the bar ever shows
+      # that these two fields take an operator at all.
+      SEVERITY_SAMPLES = %w[>=medium >=high >=critical]
+      CVSS_SAMPLES     = %w[>=4.0 >=7.0 >=9.0]
+
+      # ↹ candidates for the token under `cx`: field names until a `:` is typed, then that
+      # field's values. The grammar's punctuation is carried through by `FilterAst::Cursor`,
+      # so `-sev` → `-severity:` and `(sev` → `(severity:` — which the bar's old
+      # `[/\S*\z/]` tokenizer could not do, so a negated field never completed at all.
+      #
+      # `hosts` is the caller's host pool. The view reads it straight off the in-memory issue
+      # list, so unlike History there is no store round-trip here and no async cache to
+      # invalidate.
+      def self.suggestions(query : String, cx : Int32, hosts : Array(String) = [] of String) : Array(String)
+        cur = FilterAst.token_at(query, cx)
+        return [] of String if cur.core.empty?
+        if (colon = cur.core.index(':')) && colon > 0
+          field = cur.core[0...colon].downcase
+          prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
+          suggest_values(field, prefix, hosts).map { |v| "#{cur.prefix}#{field}:#{FilterAst.quote(v)}" }
+        else
+          FIELDS.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}" }
+        end
+      end
+
+      private def self.suggest_values(field : String, prefix : String, hosts : Array(String)) : Array(String)
+        values = value_pool(field, hosts)
+        return [] of String unless values
+        p = prefix.downcase
+        values.select(&.downcase.starts_with?(p))
+      end
+
+      # The pool for one field, or nil when the field has no closed vocabulary to offer
+      # (`title:` is free text, and a name that completes over an EMPTY value list reads as a
+      # closed field with nothing in it). Plain values lead the ordinal fields so ↹ on a bare
+      # `severity:` takes a severity rather than an operator.
+      private def self.value_pool(field : String, hosts : Array(String)) : Array(String)?
+        case CANONICAL[field]?
+        when "severity" then SEVERITY_VALUES + SEVERITY_SAMPLES
+        when "status"   then STATUS_VALUES
+        when "cvss"     then CVSS_SAMPLES
+        when "host"     then hosts
+        end
+      end
+
       # One parsed clause. `op` only matters for ordinal (severity) comparisons.
       private record Term, kind : Symbol, op : Symbol, text : String, negate : Bool
 

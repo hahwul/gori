@@ -165,4 +165,135 @@ describe Gori::Issues::Filter do
       Issues::Filter::FIELDS.should eq(["severity:", "status:", "host:", "title:", "cvss:"])
     end
   end
+
+  # The completion row is the only place most operators ever read this grammar, so the table
+  # it reads from has to stay in step with the table `build_term` dispatches on — the same
+  # reason `ALIASES` is pinned against `build_term` above. A field with no help entry renders
+  # a bright candidate and a blank explanation; a help entry with no field describes a term
+  # the parser free-texts.
+  describe "the completion help table" do
+    it "describes every canonical field, and nothing else" do
+      Issues::Filter::FIELD_HELP.keys.sort!.should eq(Issues::Filter::ALIASES.keys.sort!)
+      Issues::Filter::FIELD_HELP.each_value(&.should_not(be_empty))
+    end
+
+    it "answers for every spelling build_term dispatches on, canonical or alias" do
+      Issues::Filter::KNOWN.each do |spelling|
+        Issues::Filter.field_help(spelling).should_not be_nil
+      end
+    end
+
+    it "declines a field this backend does not implement" do
+      # `QuerySuggest.describe_for` asks by the name the OPERATOR typed, so a table that
+      # answered for QL's vocabulary would explain a term that compiles to free text.
+      Issues::Filter.field_help("path").should be_nil
+      Issues::Filter.field_help("dur").should be_nil
+    end
+
+    it "keeps ALSO_ACCEPTED to the aliases, never the canonical spellings" do
+      # The `?` reference prints these as `from: = to:`; an identity row is noise.
+      Issues::Filter::ALSO_ACCEPTED.each { |from, to| from.should_not eq(to) }
+      Issues::Filter::ALSO_ACCEPTED.each_value { |to| Issues::Filter::ALIASES.has_key?(to).should be_true }
+      expected = Issues::Filter::ALIASES.flat_map { |canon, sp| sp.reject { |x| x == canon } }.sort!
+      Issues::Filter::ALSO_ACCEPTED.keys.sort!.should eq(expected)
+    end
+  end
+
+  describe ".suggestions" do
+    it "completes a field name, carrying the grammar's punctuation through" do
+      # The old `[/\S*\z/]` tokenizer tested the WHOLE chunk, so `-sev` never matched
+      # `"severity:".starts_with?` and a negated field had no completion at all.
+      Issues::Filter.suggestions("sev", 3).should eq(["severity:"])
+      Issues::Filter.suggestions("-sev", 4).should eq(["-severity:"])
+      Issues::Filter.suggestions("(sev", 4).should eq(["(severity:"])
+      Issues::Filter.suggestions("st", 2).should eq(["status:"])
+    end
+
+    it "completes VALUES once a `:` is typed — which it could not do before at all" do
+      Issues::Filter.suggestions("status:", 7).should eq(
+        ["status:open", "status:confirmed", "status:false-positive", "status:resolved", "status:closed"])
+      Issues::Filter.suggestions("status:c", 8).should eq(["status:confirmed", "status:closed"])
+      Issues::Filter.suggestions("severity:h", 10).should eq(["severity:high"])
+    end
+
+    it "offers only values `match_status` and `severity_value` actually accept" do
+      # The test is that each offered value MATCHES an issue in that very state. A bogus
+      # spelling free-texts over title + host, matches nothing, and would sail past any
+      # weaker check that merely asserted "does not match this one issue".
+      states = {
+        "open"           => Store::Status::Open,
+        "confirmed"      => Store::Status::Confirmed,
+        "false-positive" => Store::Status::FalsePositive,
+        "resolved"       => Store::Status::Resolved,
+      }
+      Issues::Filter::STATUS_VALUES.each do |v|
+        next if v == "closed" # a CLASS of states rather than one of them — asserted below
+        Issues::Filter.parse("status:#{v}").matches?(fnd("x", Store::Severity::High, states[v])).should be_true
+      end
+      sevs = {
+        "info"     => Store::Severity::Info,
+        "low"      => Store::Severity::Low,
+        "medium"   => Store::Severity::Medium,
+        "high"     => Store::Severity::High,
+        "critical" => Store::Severity::Critical,
+      }
+      Issues::Filter::SEVERITY_VALUES.each do |v|
+        Issues::Filter.parse("severity:#{v}").matches?(fnd("x", sevs[v])).should be_true
+      end
+      Issues::Filter.parse("status:closed").matches?(fnd("x", Store::Severity::High, Store::Status::Resolved)).should be_true
+      Issues::Filter.parse("status:closed").matches?(fnd("x", Store::Severity::High, Store::Status::Open)).should be_false
+    end
+
+    it "teaches the comparison operators completion can never reach" do
+      # ↹ offers NAMES until a `:` is typed, so without these samples nothing on the bar ever
+      # shows that these two fields take an operator.
+      Issues::Filter.suggestions("severity:>", 10).should eq(["severity:>=medium", "severity:>=high", "severity:>=critical"])
+      Issues::Filter.suggestions("cvss:>", 6).should eq(["cvss:>=4.0", "cvss:>=7.0", "cvss:>=9.0"])
+    end
+
+    it "completes host: from the caller's pool and title: from nothing" do
+      hosts = ["api.example.com", "app.example.com"]
+      Issues::Filter.suggestions("host:a", 6, hosts).should eq(["host:api.example.com", "host:app.example.com"])
+      # `title:` is free text. A name that completes over an EMPTY value list reads as a
+      # closed field with nothing in it, so it must offer none at all.
+      Issues::Filter.suggestions("title:", 6, hosts).should be_empty
+    end
+
+    it "offers nothing on blank space" do
+      Issues::Filter.suggestions("", 0).should be_empty
+      Issues::Filter.suggestions("host:a ", 7).should be_empty
+    end
+  end
+
+  describe "the ? reference page" do
+    it "states this backend's grammar, not QL's" do
+      body = (Issues::Filter::SYNTAX_HELP + Issues::Filter::CAVEATS).map { |(a, b)| "#{a} #{b}" }.join("\n")
+      # Every one of these is a QL axis this parser does not have; naming any of them is the
+      # defect b28aaaaa fixed, arriving from the reference page instead of the hint row.
+      %w[dur: respsize: reqsize: resp.body: req.header: scope: src:].each do |absent|
+        body.should_not contain(absent)
+      end
+      # …and it says so about the one an operator is most likely to try.
+      body.should contain("no regex")
+    end
+
+    # The examples an operator copies off this page must PARSE on this backend. Derived, not
+    # listed: the absent-list above is a denylist and cannot catch a field nobody thought to
+    # name — `title:"missing header"` shipped in Probe's SYNTAX_HELP and `title` is not a Probe
+    # field, which is precisely the defect class ("a filter bar naming a field it does not
+    # have") these tables exist to end.
+    #
+    # Only the EXAMPLE half is scanned. The meaning half is English, and says things like "any
+    # non-open triage state: confirmed, fp or resolved" — there `state:` is prose.
+    it "teaches only fields this backend actually parses" do
+      offenders = [] of String
+      (Gori::Issues::Filter::SYNTAX_HELP + Gori::Issues::Filter::CAVEATS).each do |(example, _)|
+        example.scan(/(?:^|[\s("\-])-?([a-z][a-z0-9.]*):/) do |m|
+          name = m[1]
+          offenders << "#{name}: in #{example.inspect}" unless Gori::Issues::Filter.known_field?(name)
+        end
+      end
+      offenders.should be_empty
+    end
+  end
 end

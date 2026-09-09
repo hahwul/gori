@@ -56,7 +56,13 @@ class FakeHost
   def open_palette : Nil
   end
 
+  # Recorded, not ignored: each `/` bar routes `?` to its OWN reference page, and the
+  # surface symbol is the whole of that wiring — hand `:issues` the Probe tables and every
+  # other assertion still passes.
+  getter help_query_surfaces = [] of Symbol
+
   def open_help_query(surface : Symbol) : Nil
+    @help_query_surfaces << surface
   end
 
   getter sitemap_opens = 0

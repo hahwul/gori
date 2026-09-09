@@ -99,7 +99,18 @@ module Gori::Tui
     # the tab bar. The focus-ring hook — a `key.tab?` arm in `handle_body_key` never ran (the
     # Runner claims ⇥ for the ring first), so the `↹ preview` the hint promised was mouse-only.
     def pane_advance(dir : Int32) : Bool
-      return false if rules_tab? || @probe.detail_open? || !@probe.preview_enabled?
+      # An open detail is ONE pane, so ⇥ has nowhere to go — but it must not answer false
+      # either. False is how a view hands focus to the tab bar, and `handle_body_key`'s
+      # detail arm below only ever runs with body focus, so one ⇥ left the detail fully drawn
+      # with every key dead (see `IssuesController#pane_advance`, the same trap). Swallow it.
+      #
+      # BEFORE the Rules-tab arm, not after: `move_subtab`/`jump_subtab` only move `@sub_idx`,
+      # so a detail opened on Findings is still open with Rules selected, and testing the
+      # sub-tab first handed that state the very answer the rest of this method exists to stop
+      # giving.
+      return true if @probe.detail_open?
+      return false if rules_tab?
+      return false unless @probe.preview_enabled?
       @probe.step_preview_focus(dir)
     end
 
@@ -144,7 +155,7 @@ module Gori::Tui
         # the same pair for the same reason (`↵ open` over its related links, `o flow`).
         keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · {probe.open-flow} flow · {probe.repeater-flow} repeater · {probe.promote} promote · space cmds · ←/esc back")
       elsif @probe.querying?
-        "type to filter · ↹ complete · ↵ apply · esc clear"
+        "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
       elsif @probe.mode.off?
         "#{mode} enable scanning · #{filt} filter · #{clear} clear · space cmds · esc tabs"
       elsif @probe.preview_enabled? && @probe.preview_focus == :preview
@@ -282,14 +293,14 @@ module Gori::Tui
     def handle_query_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char
+      return true if query_nav(ev)
       case
-      when key.enter?                  then @probe.stop_query
-      when key.escape?                 then @probe.cancel_query
-      when key.tab?                    then @probe.query_complete
-      when (act = LineEdit.action(ev)) then @probe.query_edit(act) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before plain ⌫, which would swallow ⌥⌫
-      when key.backspace?              then @probe.query_backspace
-      when key.left?                   then @probe.query_move(-1)
-      when key.right?                  then @probe.query_move(1)
+      when key.enter?     then query_enter
+      when key.escape?    then query_escape
+      when key.tab?       then @probe.query_complete
+      when key.backspace? then @probe.query_backspace
+        # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
+      when TabController.ql_help_key?(ev, @probe.query) then @host.open_help_query(:probe)
       else
         if c && !ev.ctrl? && !ev.alt?
           @probe.query_insert(c)
@@ -297,6 +308,37 @@ module Gori::Tui
         end
       end
       true
+    end
+
+    # ↓/↑ drive the dropdown, ←/→ the caret — see `IssuesController#query_nav`, the sibling
+    # bar over the sibling backend.
+    private def query_nav(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
+        @probe.query_edit(act)
+      when key.down?  then @probe.popup_down
+      when key.up?    then @probe.popup_up
+      when key.left?  then @probe.query_move(-1)
+      when key.right? then @probe.query_move(1)
+      else                 return false
+      end
+      true
+    end
+
+    private def query_enter : Nil
+      if @probe.popup_open?
+        @probe.query_complete(close: true)
+      else
+        @probe.stop_query
+      end
+    end
+
+    # esc closes the dropdown first, so opening the list to look at it never costs the typed
+    # query.
+    private def query_escape : Nil
+      return @probe.popup_close if @probe.popup_open?
+      @probe.cancel_query
     end
 
     def set_preedit(text : String) : Bool
