@@ -231,15 +231,21 @@ module Gori::Tui
       # subscriptions-transport-ws). A subscription's document never touches a request body,
       # so the same pane has to be fed from the transcript for a WebSocket flow.
       @detail_graphql_ws = [] of GraphqlWs::Frame
-      # The ws message COUNT @detail_graphql_ws was last built from, so a 101 detail left open
-      # during a live socket re-parses the transcript only when it actually GREW, not on every
-      # refresh poke. −1 = never built / a different flow.
-      @graphql_ws_len = -1
+      # WHICH transcript window @detail_graphql_ws / @detail_ws_proto were last built from, so
+      # a 101 detail left open during a live socket re-parses only when the window actually
+      # MOVED, not on every refresh poke. {-1, -1} = never built / a different flow.
+      #
+      # Size AND newest row id, not the size alone: `store.ws_messages(id, DETAIL_LOG_CAP)`
+      # returns the LAST 10,000 rows, so past that mark the size pins at 10,000 while the
+      # window's contents keep sliding — and a count-keyed cache stops invalidating for the
+      # rest of the socket's life, freezing both panes on frames that have scrolled out.
+      @ws_decode_key = {-1, -1_i64}
       # …and the OTHER real-time framings a transcript can carry (Socket.IO / SignalR / STOMP /
       # SockJS / Action Cable) → the WS-protocol pane. Same growing source as @detail_graphql_ws
       # above, so it shares that pane's rebuild-only-when-it-grew discipline.
       @detail_ws_proto = [] of WsProto::Frame
       @ws_subprotocols = [] of String                # the handshake's Sec-WebSocket-Protocol — a decode HINT
+      @ws_proto_label = nil.as(String?)              # the chip's name for the framing, fixed once per flow
       @detail_form = nil.as(Array(FormData::Field)?) # form/multipart params → PARAMS pane
       @decoded_id = nil.as(Int64?)                   # flow the decoded panes above were parsed from (skip re-decode)
       # Scroll anchor: a (logical line, visual sub-row) pair rather than a flat visual-row
@@ -1496,7 +1502,8 @@ module Gori::Tui
       @detail_graphql_ws = [] of GraphqlWs::Frame
       @detail_ws_proto = [] of WsProto::Frame
       @ws_subprotocols = [] of String
-      @graphql_ws_len = -1
+      @ws_proto_label = nil
+      @ws_decode_key = {-1, -1_i64}
       @detail_form = nil
       @decoded_id = nil
       @detail_hex_bytes = nil
@@ -1548,7 +1555,8 @@ module Gori::Tui
         @detail_graphql_ws = [] of GraphqlWs::Frame
         @detail_ws_proto = [] of WsProto::Frame
         @ws_subprotocols = [] of String
-        @graphql_ws_len = -1
+        @ws_proto_label = nil
+        @ws_decode_key = {-1, -1_i64}
         @decoded_id = nil
         return
       end
@@ -1571,17 +1579,26 @@ module Gori::Tui
         # rather than on every transcript rebuild.
         @ws_subprotocols = WsProto.subprotocols(rh, sh)
         @decoded_id = detail.row.state.complete? ? detail.row.id : nil
-        @graphql_ws_len = -1 # the flow changed → force the transcript pane to rebuild below
+        @ws_decode_key = {-1, -1_i64} # the flow changed → force the transcript panes to rebuild
+        @ws_proto_label = nil
       end
       # The WS GraphQL pane is the one derived from a GROWING source, so it alone tracks the
       # transcript length: a busy socket left open re-parses its frames only when the window
       # actually gained rows, not on every poll. `load_detail_logs` fills @detail_ws before
       # this runs, so the count here is the same window the MESSAGES pane shows.
       ws = @detail_ws || [] of Store::WsMessage
-      if @graphql_ws_len != ws.size
+      key = {ws.size, ws.last?.try(&.id) || -1_i64}
+      if @ws_decode_key != key
         @detail_graphql_ws = GraphqlWs.from_messages(ws)
         @detail_ws_proto = WsProto.from_messages(ws, @ws_subprotocols)
-        @graphql_ws_len = ws.size
+        @ws_decode_key = key
+        # The chip label is decided ONCE per opened flow, on the first rebuild that decodes
+        # anything, and then held. `WsProto.primary` moves as a socket talks — a SockJS session
+        # whose first strong frame is the wrapper reads `SOCKJS` until a carried STOMP frame
+        # arrives — and a chip that CHANGES WIDTH mid-session shifts every chip to its right,
+        # which is the same hazard the MESSAGES label refuses a live `(N)` count for (below).
+        # The pane's own summary line is the live answer and does name a later protocol.
+        @ws_proto_label ||= WsProto.primary(@detail_ws_proto).try { |p| WsProto.label(p).upcase }
       end
     end
 
@@ -2379,9 +2396,9 @@ module Gori::Tui
       when :jwt     then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
       when :graphql then "GRAPHQL"
         # Named after the FRAMING, not after gori's module — an operator working a Socket.IO
-        # app is looking for a chip that says Socket.IO. `primary` picks the protocol that read
-        # the most frames, so a SockJS transcript names what it carries rather than the wrapper.
-      when :ws_proto then WsProto.label(WsProto.primary(@detail_ws_proto) || "WS").upcase
+        # app is looking for a chip that says Socket.IO. Fixed for the life of the opened flow
+        # (see decode_protocols); "WS PROTO" only until the first rebuild names one.
+      when :ws_proto then @ws_proto_label || "WS PROTO"
       when :params   then "PARAMS"
         # No `(N)` here, unlike JWT: a JWT set is fixed once the bytes are captured, while a live
         # socket's total moves on every poll (`refresh_detail` does not early-return for one) —

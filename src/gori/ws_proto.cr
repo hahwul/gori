@@ -29,17 +29,39 @@ module Gori
       enabled = enabled_protocols(msgs, subprotocols)
       return [] of Frame if enabled.empty?
       frames = [] of Frame
+      capped = false
       msgs.each_with_index do |m, i|
-        break if frames.size >= MAX_FRAMES
+        if frames.size >= MAX_FRAMES
+          capped = true # there was another message to read, so something WAS dropped
+          break
+        end
         next unless decodable?(m)
         records = decode_frame(m.payload, enabled) || next
         records.each do |(protocol, d, via)|
-          break if frames.size >= MAX_FRAMES
+          if frames.size >= MAX_FRAMES
+            capped = true
+            break
+          end
           frames << Frame.new(i + 1, m.direction, protocol, d.kind, d.name, d.id, d.note,
             d.payload, via)
         end
       end
+      cap_marker(frames) if capped
       frames
+    end
+
+    # The cap is a fact about the RESULT, and it is reported the way `MAX_RECORDS` is reported
+    # inside a single frame: as a row. A list that simply stops at 500 reads as "the socket said
+    # nothing more" — and on a LIVE socket it is worse, because the pane then sits on the oldest
+    # decoded frames while MESSAGES keeps growing, with nothing on screen saying which it is.
+    #
+    # The marker borrows the last real frame's coordinates so `primary` and `protocols` — which
+    # answer "what does this socket speak" — are not perturbed by a row that speaks nothing.
+    private def cap_marker(frames : Array(Frame)) : Nil
+      last = frames.last? || return
+      frames << Frame.new(last.index, last.direction, last.protocol, TRUNCATION_KIND, nil, nil,
+        "#{MAX_FRAMES}-frame cap reached; later frames are not decoded — MESSAGES has them all",
+        nil, nil)
     end
 
     # Which decoders this transcript has EARNED. A protocol is enabled by one unmistakable
@@ -236,9 +258,12 @@ module Gori
 
     # A one-line summary for a pane header / CLI section title.
     def summary(frames : Array(Frame)) : String
+      # A truncation marker is a note about frames NOT shown, so it is not one of them — and
+      # the count saying `500` while the list holds 501 rows is its own small lie.
+      shown = frames.count { |f| f.kind != TRUNCATION_KIND }
       labels = protocols(frames).map { |p| label(p) }
       names = frames.compact_map(&.name).uniq!
-      s = "#{frames.size} frame#{frames.size == 1 ? "" : "s"} · #{labels.join(" + ")}"
+      s = "#{shown} frame#{shown == 1 ? "" : "s"}#{shown == frames.size ? "" : " (cap reached)"} · #{labels.join(" + ")}"
       names.empty? ? s : "#{s} · #{names.first(4).join(", ")}#{names.size > 4 ? ", …" : ""}"
     end
   end

@@ -44,12 +44,27 @@ module Gori
       payload : String? = nil,
       strong : Bool = true
 
+    # The record a decoder appends IN PLACE of one it could not read, beside the ones it
+    # could. Returning nil for the whole frame instead throws away every record already
+    # decoded from it: SignalR tells servers to ignore unknown message types for forward
+    # compatibility, so one `{"type":99}` from a newer hub made the real invocations packed
+    # into that frame invisible. The frame's bytes are still in MESSAGES, which is where an
+    # unreadable record belongs — this row only says one was there.
+    def self.unreadable : Decoded
+      Decoded.new(kind: "unreadable", strong: false,
+        note: "this record did not parse; its bytes are in MESSAGES")
+    end
+
     # The record a decoder appends when ONE frame carried more than `MAX_RECORDS`. A cap that
     # just stops reads as "the frame ended here", which for a batching framing is the same
     # mistake as reporting a filtered list as an empty one — so the cap says so in the pane.
     # `strong: false`, because a truncation marker is not evidence of a protocol.
+    # The kind both truncation markers carry. They are notes about records/frames that are
+    # NOT shown, so a count of what IS shown must not include them.
+    TRUNCATION_KIND = "truncated"
+
     def self.truncated : Decoded
-      Decoded.new(kind: "truncated", strong: false,
+      Decoded.new(kind: TRUNCATION_KIND, strong: false,
         note: "more records in this frame than the #{MAX_RECORDS} cap decodes")
     end
 

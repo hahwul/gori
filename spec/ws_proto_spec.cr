@@ -104,6 +104,19 @@ describe Gori::WsProto do
       fs.map(&.index).should eq([1, 1]) # both point back at the one frame they came out of
     end
 
+    # SignalR tells servers to ignore unknown message types for forward compatibility, so one
+    # `{"type":99}` from a newer hub must not take the real invocations packed beside it down.
+    it "keeps the records it read when one in the same frame is unreadable" do
+      fs = decode([%({"type":1,"target":"A","arguments":[]}) + RS + %({"type":99}) + RS])
+      fs.map(&.name).should eq(["A", nil])
+      fs[1].kind.should eq("unreadable")
+      fs[1].note.should_not be_nil # the row exists so the gap is visible, not silent
+    end
+
+    it "still falls through to raw when a frame yields nothing readable" do
+      decode([%({"type":99}) + RS, %({"type":98}) + RS]).should be_empty
+    end
+
     it "requires the record separator, so ordinary JSON is not a hub message" do
       WP::SignalR.decode(%({"type":1,"target":"A","arguments":[]}).to_slice).should be_nil
       decode([%({"type":1,"target":"A","arguments":[]})]).should be_empty
@@ -137,10 +150,34 @@ describe Gori::WsProto do
               "SEND\ndestination:/x\n\n" + NUL])[0].payload.should eq("passcode: a\\cb")
     end
 
+    # §3.2 makes `content-length` authoritative exactly so a body MAY contain NUL bytes — a
+    # broker relaying a binary payload sends them. Splitting on every NUL cut such a frame in
+    # half, and the unreadable half discarded the whole WebSocket message with it.
+    it "honours content-length, so a NUL inside a body is not a frame boundary" do
+      fs = decode(["SEND\ndestination:/x\ncontent-length:3\n\na" + NUL + "b" + NUL])
+      fs.size.should eq(1)
+      fs[0].name.should eq("/x")
+
+      # …and the sibling packed alongside it survives, which is what actually went missing.
+      packed = decode(["SEND\ndestination:/ok\n\nhi" + NUL +
+                       "SEND\ndestination:/x\ncontent-length:3\n\na" + NUL + "b" + NUL])
+      packed.map(&.name).should eq(["/ok", "/x"])
+    end
+
+    # A declared length that does not land on the terminator is a lie about the frame, not a
+    # longer frame: fall through to raw rather than re-guess the boundary.
+    it "refuses a content-length that does not reach the terminator" do
+      WP::Stomp.decode("SEND\ndestination:/x\ncontent-length:99\n\nhi#{NUL}".to_slice).should be_nil
+    end
+
     it "requires the NUL terminator, so an uppercase word is not a frame" do
       WP::Stomp.decode("SEND\ndestination:/app/chat\n\nhi".to_slice).should be_nil
       WP::Stomp.decode("SENDING\ndestination:/x\n\n#{NUL}".to_slice).should be_nil
-      WP::Stomp.decode("SEND\ndestination:/x\n\nhi#{NUL}trailing".to_slice).should be_nil
+      # …and a message whose TAIL is junk keeps the complete frame in front of it, with the
+      # tail reported rather than dropped: discarding the whole message over its tail is what
+      # lost a valid frame's siblings.
+      tail = WP::Stomp.decode("SEND\ndestination:/x\n\nhi#{NUL}trailing".to_slice).not_nil!
+      tail.map(&.kind).should eq(["SEND", "unreadable"])
     end
 
     # A bare EOL is real STOMP traffic but could be any protocol's whitespace, so on its own
@@ -229,6 +266,17 @@ describe Gori::WsProto do
       decode([%({"type":"ping","message":1699000000})]).map(&.kind).should eq(["ping"])
     end
 
+    # `identifier` + `message` is a GENERIC pair, unlike `command` + `identifier` which only
+    # this protocol spells that way — so a broadcast is evidence of Action Cable only when the
+    # identifier really is the stringified JSON naming a channel.
+    it "does not let a bare identifier+message pair open the pane" do
+      decode([%({"identifier":"abc","message":"hello"}),
+              %({"identifier":"abc","message":"world"})]).should be_empty
+      # …the same frame IS decoded once a real Action Cable frame has opened the decoder.
+      fs = decode([%({"type":"welcome"}), %({"identifier":"abc","message":"hello"})])
+      fs.map(&.kind).should eq(["welcome", "broadcast"])
+    end
+
     it "does not claim an unrelated JSON protocol" do
       decode([%({"type":"search","query":"shoes"}), %({"jsonrpc":"2.0","method":"x"})]).should be_empty
     end
@@ -292,11 +340,6 @@ describe Gori::WsProto do
       WP.primary(fs).should eq("sockjs")
     end
 
-    it "caps the frames one transcript contributes" do
-      fs = WP.from_messages(Array.new(WP::MAX_FRAMES + 50) { frame(%(42["chat",{}])) })
-      fs.size.should eq(WP::MAX_FRAMES)
-    end
-
     # A cap that just stops reads as "the frame ended here", which for a batching framing is
     # the same lie as reporting a filtered list as an empty one.
     it "says so in the pane when one frame carries more records than the cap decodes" do
@@ -307,6 +350,23 @@ describe Gori::WsProto do
       fs.size.should eq(WP::MAX_RECORDS + 1)
       fs.last.kind.should eq("truncated")
       fs.last.note.should_not be_nil
+    end
+
+    # A cap that just stops reads as "the socket said nothing more" — and on a LIVE socket it
+    # is worse, because the pane then sits on the oldest decoded frames while MESSAGES keeps
+    # growing, with nothing on screen saying which it is.
+    it "says so when the frame cap drops the rest of the transcript" do
+      fs = WP.from_messages(Array.new(WP::MAX_FRAMES + 100) { frame(%(42["chat",{}])) })
+      fs.size.should eq(WP::MAX_FRAMES + 1)
+      fs.last.kind.should eq(WP::TRUNCATION_KIND)
+      # …and the marker is not counted as one of the frames it is a note about, nor allowed to
+      # perturb what the socket is reported to speak.
+      WP.summary(fs).should start_with("#{WP::MAX_FRAMES} frames (cap reached) · Socket.IO")
+      WP.protocols(fs).should eq(["socketio"])
+      # An exact fit dropped nothing, so it claims nothing.
+      exact = WP.from_messages(Array.new(WP::MAX_FRAMES) { frame(%(42["chat",{}])) })
+      exact.size.should eq(WP::MAX_FRAMES)
+      exact.last.kind.should eq("event")
     end
 
     it "skips a frame past the size cap rather than parsing it" do

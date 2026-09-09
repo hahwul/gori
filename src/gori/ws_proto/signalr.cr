@@ -44,10 +44,12 @@ module Gori
           idx = s.index(RS_CHAR, pos) || break
           raw, pos = s[pos, idx - pos], idx + 1
           next if raw.empty?
-          out << (hub_record(raw) || return nil)
+          out << (hub_record(raw) || WsProto.unreadable)
         end
         out << WsProto.truncated if out.size == MAX_RECORDS && s.index(RS_CHAR, pos)
-        out.empty? ? nil : out
+        # Every SignalR record is `strong` (the separator is proof), so a frame that yielded
+        # only unreadable rows was never SignalR — it falls through to raw, as it must.
+        out.any?(&.strong) ? out : nil
       rescue
         nil
       end

@@ -52,31 +52,84 @@ module Gori
         # whitespace, so it never enables the decoder on its own.
         return [Decoded.new(kind: "heartbeat", strong: false)] if eol_only?(payload)
         return nil unless payload.index(0_u8) # no terminator, no STOMP
-        s = String.new(payload).scrub
-        last = s.rindex('\0') || return nil
-        # Everything after the LAST NUL must be terminator slack (inter-frame EOL/heartbeats);
-        # trailing bytes mean the frame was cut or this was never STOMP.
-        return nil unless s[(last + 1)..].strip("\r\n").empty?
-        frames(s, last)
+        frames(payload)
       rescue
         nil
       end
 
-      # The frames one WebSocket message packs, back to back. A bounded scan rather than
-      # `split`, so a message of nothing but NULs cannot materialise a substring per byte
-      # before the cap gets a look at it.
-      private def frames(s : String, last : Int32) : Array(Decoded)?
+      # The frames one WebSocket message packs, back to back. Byte offsets throughout, and
+      # never a `split`: a message of nothing but NULs would otherwise materialise a substring
+      # per byte before any cap could look at it, and — see `frame_end` — a NUL is not reliably
+      # a boundary in the first place.
+      private def frames(payload : Bytes) : Array(Decoded)?
         out = [] of Decoded
         pos = 0
-        while out.size < MAX_RECORDS && pos <= last
-          idx = s.index('\0', pos) || break
-          chunk = s[pos, idx - pos].lstrip("\r\n") # heartbeats sent between frames
-          pos = idx + 1
-          next if chunk.empty?
-          out << (frame(chunk) || return nil)
+        while out.size < MAX_RECORDS && pos < payload.size
+          pos = skip_eol(payload, pos) # heartbeats sent between frames
+          break if pos >= payload.size
+          stop = frame_end(payload, pos) || break
+          out << (frame(String.new(payload[pos, stop - pos]).scrub) || WsProto.unreadable)
+          pos = stop + 1
         end
-        out << WsProto.truncated if out.size == MAX_RECORDS && pos <= last
-        out.empty? ? nil : out
+        out << WsProto.truncated if out.size == MAX_RECORDS && payload.index(0_u8, pos)
+        # Bytes after the last terminator that are not inter-frame EOL: a message cut short, or
+        # one that was never STOMP. Either way the frames already read stay read — dropping the
+        # whole message over its tail is what lost a valid frame's siblings — and the tail gets
+        # a row rather than vanishing.
+        out << WsProto.unreadable if skip_eol(payload, pos) < payload.size
+        # Every real STOMP frame is `strong`, so a message that yielded only unreadable rows
+        # was never STOMP and falls through to raw.
+        out.any?(&.strong) ? out : nil
+      end
+
+      # Where the frame beginning at `start` ends: the index of its terminating NUL.
+      #
+      # **`content-length` is authoritative** (STOMP 1.1/1.2 §3.2), and it exists precisely so
+      # a body may contain NUL bytes — a broker relaying a binary payload sends them. Splitting
+      # on every NUL cut such a frame in half, and because an unreadable half discarded the
+      # whole message, every sibling frame packed alongside it vanished from the pane too.
+      private def frame_end(payload : Bytes, start : Int32) : Int32?
+        head_end = header_end(payload, start) || return payload.index(0_u8, start)
+        if n = content_length(payload[start, head_end - start])
+          stop = head_end + n
+          # A declared length that does not land on the terminator is a lie about the frame,
+          # not a longer frame: fall through to raw rather than re-guess the boundary.
+          return nil unless stop < payload.size && payload.unsafe_fetch(stop) == 0_u8
+          return stop
+        end
+        payload.index(0_u8, head_end)
+      end
+
+      # One past the blank line that ends the head — `\n\n` or `\n\r\n`.
+      private def header_end(payload : Bytes, start : Int32) : Int32?
+        i = start
+        while nl = payload.index(0x0a_u8, i)
+          i = nl + 1
+          return i + 1 if i < payload.size && payload.unsafe_fetch(i) == 0x0a_u8
+          return i + 2 if i + 1 < payload.size &&
+                          payload.unsafe_fetch(i) == 0x0d_u8 && payload.unsafe_fetch(i + 1) == 0x0a_u8
+        end
+        nil
+      end
+
+      private def content_length(head : Bytes) : Int32?
+        String.new(head).scrub.each_line do |raw|
+          line = raw.rstrip('\r')
+          ci = line.index(':') || next
+          next unless line[0, ci].strip.compare("content-length", case_insensitive: true) == 0
+          n = line[(ci + 1)..].strip.to_i?
+          return n if n && n >= 0
+        end
+        nil
+      end
+
+      private def skip_eol(payload : Bytes, pos : Int32) : Int32
+        while pos < payload.size
+          b = payload.unsafe_fetch(pos)
+          break unless b == 0x0a_u8 || b == 0x0d_u8
+          pos += 1
+        end
+        pos
       end
 
       private def frame(chunk : String) : Decoded?

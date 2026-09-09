@@ -105,9 +105,16 @@ module Gori
         # A broadcast: no `type`, just the subscription it belongs to and the payload.
         identifier = h["identifier"]?.try(&.as_s?) || return nil
         message = h["message"]? || return nil
+        # `identifier` + `message` is a GENERIC pair — unlike `command` + `identifier`, which
+        # only this protocol spells that way. So a broadcast is evidence of Action Cable only
+        # when the identifier really is the stringified JSON naming a channel; otherwise it is
+        # decoded (the pane is already open) but may not be what OPENS the pane, or a chat
+        # protocol sending `{"identifier":"abc","message":"hi"}` would label the socket
+        # ACTION CABLE. See `Decoded#strong`.
         channel = inner(identifier, "channel")
         Decoded.new(kind: "broadcast", name: channel, note: channel ? nil : identifier.presence,
-          payload: render({"identifier", identifier}, {"message", message.to_json}))
+          payload: render({"identifier", identifier}, {"message", message.to_json}),
+          strong: !channel.nil?)
       end
 
       # One key out of a JSON document that travelled as a JSON STRING. nil when the string is
