@@ -6,11 +6,15 @@ require "file_utils"
 # the question the issue settles is a lifecycle one, and a recording double would prove nothing
 # about whether a socket actually came up, went down, or was left alone.
 
-private def free_port : Int32
-  s = TCPServer.new("127.0.0.1", 0)
-  port = s.local_address.port
-  s.close
-  port
+private def free_ports(count : Int32) : Array(Int32)
+  # Hold every socket until all ports are chosen. Closing each one immediately lets
+  # the OS reuse it for the next allocation, so a "removed" listener can accidentally
+  # have the same address as its replacement and fail the capture-resume assertion.
+  sockets = [] of TCPServer
+  count.times { sockets << TCPServer.new("127.0.0.1", 0) }
+  sockets.map(&.local_address.port)
+ensure
+  sockets.try &.each(&.close)
 end
 
 private def accepts?(port : Int32) : Bool
@@ -70,7 +74,7 @@ end
 
 describe Gori::Session, "#reconcile_listeners! (#508)" do
   it "starts a listener added to settings.json, with no restart" do
-    a, b = free_port, free_port
+    a, b = free_ports(2)
     with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}}])) do |session, cfg|
       accepts?(a).should be_true
       accepts?(b).should be_false
@@ -88,7 +92,7 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
   end
 
   it "stops a listener removed from settings.json, with no restart" do
-    a, b = free_port, free_port
+    a, b = free_ports(2)
     with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}}, {"host": "127.0.0.1", "port": #{b}}])) do |session, cfg|
       accepts?(b).should be_true
 
@@ -106,7 +110,7 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
   # the SERVER OBJECT rather than on `accepts?`, because a socket that went down and came back up
   # inside one reconcile would still pass a connect test having dropped every connection on it.
   it "never touches a listener the edit did not concern" do
-    a, b = free_port, free_port
+    a, b = free_ports(2)
     with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}}, {"host": "127.0.0.1", "port": #{b}, "mode": "reverse", "origin": "https://one.example"}])) do |session, cfg|
       untouched = servers_of(session).find { |s| s.port == a }.not_nil!
 
@@ -128,10 +132,10 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
   end
 
   it "reports a listener that cannot bind, and keeps serving the rest" do
-    a = free_port
     blocker = TCPServer.new("127.0.0.1", 0)
     taken = blocker.local_address.port
     begin
+      a = free_ports(1).first
       with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}}])) do |session, cfg|
         rewrite(cfg, %([{"host": "127.0.0.1", "port": #{a}}, {"host": "127.0.0.1", "port": #{taken}}]))
         result = session.reconcile_listeners!.not_nil!
@@ -156,10 +160,10 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
   # A listener whose bind failed at open is retried, so a reconcile is also how an operator
   # recovers one after freeing its port — without restarting the ones that did come up.
   it "retries a listener that is configured but not serving" do
-    a = free_port
     blocker = TCPServer.new("127.0.0.1", 0)
     taken = blocker.local_address.port
     begin
+      a = free_ports(1).first
       entries = %([{"host": "127.0.0.1", "port": #{a}}, {"host": "127.0.0.1", "port": #{taken}}])
       with_reconcile_session(entries) do |session, _cfg|
         servers_row(session, taken).listening.should be_false
@@ -177,7 +181,7 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
   end
 
   it "refuses to reconcile against a settings.json it cannot parse" do
-    a = free_port
+    a = free_ports(1).first
     with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}}])) do |session, cfg|
       File.write(cfg, "{not json")
       session.reconcile_listeners!.should be_nil
@@ -193,7 +197,7 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
     # answer with the modes it could tell apart from the outside. A socks5 listener came back
     # labelled "proxy", which is the one label that would send an operator looking for a
     # forward proxy that is not there.
-    a, b, c = free_port, free_port, free_port
+    a, b, c = free_ports(3)
     with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}, "mode": "socks5"},
                               {"host": "127.0.0.1", "port": #{b}, "mode": "transparent"},
                               {"host": "127.0.0.1", "port": #{c}}])) do |session, _|
@@ -215,7 +219,7 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
   end
 
   it "clears the drift notice once the edit has been applied" do
-    a, b = free_port, free_port
+    a, b = free_ports(2)
     with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}}])) do |session, cfg|
       session.listeners_changed_on_disk?.should be_false
       rewrite(cfg, %([{"host": "127.0.0.1", "port": #{b}}]))
@@ -227,7 +231,7 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
 
   # `Server#rebind`'s rule one level up: not listening means record the new set and bind nothing.
   it "records the new set without binding while capture is off" do
-    a, b = free_port, free_port
+    a, b = free_ports(2)
     with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}}])) do |session, cfg|
       session.toggle_capture.should be_false
       accepts?(a).should be_false
