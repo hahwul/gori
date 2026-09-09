@@ -42,6 +42,11 @@ module Gori::Tui
     # sibling backend.
     QUERY_KNOWN = ->(f : String, op : Char) { Probe::Filter.known_field?(f, regex: op == '~') }
 
+    # The detail's one card. Named once because `Frame.border_meta` has to be told the title
+    # it must not overwrite, so the two would otherwise be a literal repeated at the two sites
+    # that must agree.
+    AFFECTED_TITLE = "AFFECTED URLS"
+
     getter query : String
     getter mode : Probe::Mode
 
@@ -521,12 +526,31 @@ module Gori::Tui
       issue.affected[@affected.cursor.cy]?
     end
 
-    # The AFFECTED list's rect inside the detail card — the derivation `render_detail` walks, so
-    # the click and the draw address the same rows. nil when the card is too short for any.
+    # Rows the detail's meta block owns before the AFFECTED card: title, chips, remediation,
+    # detail, evidence. One more than `IssuesView::DETAIL_HEAD_ROWS`, which spends its four on
+    # title, chips, timestamps and a single evidence line — a scanner finding carries a
+    # remediation line as well, and splits its own evidence across two.
+    DETAIL_HEAD_ROWS = 5
+
+    # The AFFECTED card's outer rect — everything under the meta block. ONE derivation, which
+    # `render_detail`, `affected_rect` and through it both pointer hit-tests all read.
+    #
+    # It used to be two: `render_detail` walked `rect.y + 5` → divider → heading → list, and
+    # this method wrote out the `+ 7` that lands on, under a comment claiming it was "the
+    # derivation `render_detail` walks". They agreed by arithmetic, not by construction — move
+    # one row in the renderer and every click in the list addresses the wrong URL, silently.
+    # `IssuesView#detail_split` was extracted for exactly this.
+    def affected_card_rect(rect : Rect) : Rect
+      top = rect.y + DETAIL_HEAD_ROWS
+      Rect.new(rect.x, top, rect.w, {rect.bottom - top, 0}.max)
+    end
+
+    # The AFFECTED list's rect — the card's framed interior, which is what `ReadPane` draws
+    # into and what a click is measured against. nil when the card is too small to hold a row
+    # (`Frame.card` spends two rows and two columns on its own outline).
     def affected_rect(rect : Rect) : Rect?
-      list_y = rect.y + 7 # header row + 3 meta rows + divider + section head (see render_detail)
-      h = {rect.bottom - list_y, 0}.max
-      h > 0 ? Rect.new(rect.x + 1, list_y, {rect.w - 2, 0}.max, h) : nil
+      body = affected_card_rect(rect).inset(1, 1)
+      body.empty? ? nil : body
     end
 
     def detail_click(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
@@ -951,15 +975,41 @@ module Gori::Tui
            end
       screen.text(rect.x + 1, rect.y + 4, ev, Theme.muted, width: w)
 
-      y = rect.y + 5
-      Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
-      head = "AFFECTED URLS (#{issue.affected.size})  ·  seen ×#{Fmt.count(issue.hit_count)}"
-      screen.text(rect.x + 1, y + 1, head, Theme.accent, attr: Attribute::Bold)
-      list_y = y + 2
-      avail = {rect.bottom - list_y, 0}.max
-      return if avail <= 0
+      render_affected_card(screen, rect, issue, focused)
+    end
+
+    # The AFFECTED URLS card — the same correction `IssuesView`'s RELATED card is.
+    #
+    # It was an OPEN region: an `inner_divider`, a text heading, then the URL rows running to
+    # the bottom of the detail. An open-ended block reads as "the rest of this pane", not as a
+    # thing with its own edges, and the pane it sits in is a drill-in whose whole job is to be
+    # left again — so the one region an operator navigates had no outline while the frame
+    # around it did.
+    #
+    # Row-budget neutral, exactly as the Issues change was: the heading rides the top border
+    # and the card's bottom border takes the row that frees, so the list keeps every row it
+    # drew before.
+    private def render_affected_card(screen : Screen, rect : Rect, issue : Store::ProbeIssue,
+                                     focused : Bool) : Nil
+      card = affected_card_rect(rect)
+      return if card.h < 2 || card.w < 2
+      Frame.card(screen, card, AFFECTED_TITLE, bg: Theme.bg, border: Frame.pane_border(focused))
+      # The count and `seen ×N` move into the right-aligned meta slot rather than riding the
+      # title. Both of `shared_chrome_spec`'s rules point here: a count in a card title makes
+      # the title's width a moving target, and a hand-placed right-aligned string on a card's
+      # top border is `Frame.border_meta`'s job.
+      Frame.border_meta(screen, card, AFFECTED_TITLE,
+        "#{issue.affected.size} · seen ×#{Fmt.count(issue.hit_count)}")
+      body = affected_rect(rect) || return
       sync_affected(issue)
-      @affected.render(screen, Rect.new(rect.x + 1, list_y, w, avail), focused)
+      # `parse_affected` answers `[]` for a row whose JSON will not parse, so an empty list is
+      # reachable — and `ReadPane` draws nothing at all for one, which left a bordered card
+      # with a blank interior and no account of itself.
+      if issue.affected.empty?
+        screen.text(body.x, body.y, "(none recorded)", Theme.muted, width: body.w)
+        return
+      end
+      @affected.render(screen, body, focused)
     end
 
     # Point the AFFECTED pane at the open issue's URL list. Cheap and idempotent, so every
