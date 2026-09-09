@@ -360,6 +360,7 @@ module Gori
         format = :text
         lenient = false
         in_scope = false
+        include_sensitive = false
         view_name : String? = nil
         column_specs = [] of String
         no_columns = false
@@ -381,6 +382,7 @@ module Gori
             format = parse_format(v, [:text, :json, :jsonl, :har])
             format = :json if format == :jsonl # this listing's json IS JSON-Lines; accept the standard name too
           end
+          p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
@@ -415,6 +417,19 @@ module Gori
         end
         ad_hoc = DisplayColumns.parse_specs(column_specs)
         abort "gori run history: #{ad_hoc}" if ad_hoc.is_a?(String)
+        # A flag that does nothing says so, keyed off the FLAG and not off derived state — the
+        # same discipline as the `--column is not carried by --format har` note below. Below the
+        # `--column` abort, though, and not beside the refusals above it: the note describes a
+        # run, and narrating a flag on an invocation that then aborts is noise.
+        #
+        # It says only which format the flag changes. It used to add "the text listing prints
+        # no header values", which is FALSE — a `header:`/`cookie:` History column prints its
+        # value on the text row too, and the configured set is drawn by default. `--format har`
+        # is untouched on purpose (an interchange document has to carry the message in full to
+        # be replayable), but that is a paragraph for the docs, not a claim to make here.
+        if include_sensitive && format != :json
+          STDERR.puts "gori run history: --include-sensitive only changes --format json"
+        end
 
         # `body:` drains FTS, which is a write. Everything else is a read (#752).
         #
@@ -581,30 +596,61 @@ module Gori
             # One extra read per row for the head the projection does not carry — that is what
             # buys `url` and `headers` on the JSON-Lines row (`Output.flow_row_fields`). Heads
             # are small and this streams row by row, so a large `-n` costs queries, not memory.
-            rows.each { |r| puts CLI::Output.flow_row_json(r, store.request_head(r.id), row_columns(store, r, prepared)) }
+            rows.each do |r|
+              cols, cols_redacted = row_columns(store, r, prepared, include_sensitive) || {nil, false}
+              puts CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
+                include_sensitive: include_sensitive, columns_redacted: cols_redacted)
+            end
           elsif rows.empty?
             STDERR.puts empty_listing_note(query, view_label, in_scope)
           else
             (note = history_truncation_note(truncated, limit)) && STDERR.puts("gori run history: #{note}")
-            rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared)) }
+            # `include_sensitive: true` on purpose — the text listing is out of #1002's scope
+            # (it is the interactive read, not the feed a script or an agent captures) and the
+            # note above promises the flag changes `--format json` alone. Stated at the call
+            # site rather than defaulted, so the choice is visible where it is made.
+            rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true).try(&.[0])) }
           end
         ensure
           store.close
         end
       end
 
-      # One row's user-column values as `{label, value}` pairs, or nil when no column is defined.
+      # One row's user-column values as `{label, value}` pairs plus whether any value was
+      # withheld, or nil when no column is defined.
       #
       # ONE capped read per PRINTED row and none at all for a set that reads only heads — the
       # same P8 discipline the TUI row loop keeps, applied to a listing that is already bounded
       # by `--limit`. A flow a peer deleted between the search and this read yields blanks rather
       # than dropping the row: the row matched, and the listing has to say so.
+      #
+      # A column extracting a sensitive header (`Output.sensitive_column?`) is `[REDACTED]`
+      # under the same `--include-sensitive` the `headers` block obeys, and for a reason the
+      # `headers` block alone could not fix: the project's CONFIGURED columns are drawn by
+      # default, so a `req:header:authorization` set once in the TUI printed the credential on
+      # every later `--format json` run — in the same object as the
+      # `sensitive_headers_redacted: true` the redacted `headers` block had just asserted. Only
+      # an EMPTY value is left alone, so a column that found nothing still reads as nothing
+      # rather than claiming a secret was there.
+      #
+      # Applied here, where the column DESCRIPTORS are: `Output.columns_json` sees only
+      # `{label, value}` and cannot tell a header column from a jsonpath one.
       private def self.row_columns(store : Store, row : Store::FlowRow,
-                                   prepared : DisplayColumns::Prepared) : Array({String, String})?
+                                   prepared : DisplayColumns::Prepared,
+                                   include_sensitive : Bool) : {Array({String, String}), Bool}?
         return nil if prepared.empty?
         detail = store.get_flow(row.id, body_max: prepared.body_scoped? ? DisplayColumns::BODY_CAP : 0)
         values = detail ? prepared.values(detail) : Array.new(prepared.size, "")
-        prepared.columns.map_with_index { |c, i| {c.label, values[i]? || ""} }
+        redacted = false
+        pairs = prepared.columns.map_with_index do |c, i|
+          v = values[i]? || ""
+          if !include_sensitive && !v.empty? && CLI::Output.sensitive_column?(c)
+            redacted = true
+            v = "[REDACTED]"
+          end
+          {c.label, v}
+        end
+        {pairs, redacted}
       end
 
       # The sentence an empty listing prints. It names EVERY lens that narrowed the answer, not

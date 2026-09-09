@@ -256,8 +256,10 @@ describe "gori run history — CLI::Output rows" do
   end
 
   # The half the key-set pin cannot see. `Output.iso_time_utc` is a reimplementation of
-  # `Serialize.unix_micros_iso` (CLI::Output deliberately takes no dependency on MCP::), so
-  # nothing but this assertion stops the two from drifting.
+  # `Serialize.unix_micros_iso` — kept on churn grounds, not dependency grounds: `CLI::Output`
+  # took a declared dependency on `MCP::Serialize` in #1002 for the sensitive-header predicate,
+  # so this assertion is now the ONLY thing stopping the two from drifting, and it is the whole
+  # reason the reimplementation is allowed to stand.
   it "renders created_at_iso byte-for-byte the same as the MCP serializer" do
     row = Gori::Store::FlowRow.new(
       id: 1_i64, created_at: 1_700_000_000_123_456_i64, scheme: "https", method: "GET",
@@ -693,7 +695,10 @@ describe "gori run history --format json — the listing's url and headers" do
       id: 1_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "accounts.test",
       port: 443, target: "/login", status: 200, size: 0_i64,
       state: Gori::Store::FlowState::Complete)
-    json = JSON.parse(Gori::CLI::Output.flow_row_json(row, head))
+    # `include_sensitive`, because `Cookie` is the fixture's repeated name and the default is
+    # now redaction — the fold is a property of the OBJECT, so it has to be pinned on the
+    # values the caller asked for. The redacted counterpart is pinned below.
+    json = JSON.parse(Gori::CLI::Output.flow_row_json(row, head, include_sensitive: true))
     json["headers"]["Cookie"].as_a.map(&.as_s).should eq(["a=1", "b=2"])
   end
 
@@ -722,6 +727,149 @@ describe "gori run history --format json — the listing's url and headers" do
     keys = JSON.parse(Gori::CLI::Output.flow_row_json(row)).as_h.keys
     keys.should_not contain("url")
     keys.should_not contain("headers")
+  end
+end
+
+# #1002: the `headers` block rides along on an INVENTORY row, so `gori run history
+# --format json` — a command run to answer "what did I capture?" — was putting live session
+# material into whatever terminal log or agent transcript read the listing. The MCP surface
+# has redacted by default since it shipped (`get_flow`, `compare_flows`, `intercept_get`);
+# on the CLI only `gori run intercept list/get` did, and this is the listing brought level
+# with it, `--include-sensitive` spelled the same way.
+describe "gori run history --format json — sensitive header values" do
+  private_head = ("POST /login HTTP/1.1\r\nHost: accounts.test\r\n" \
+                  "Authorization: Bearer supersecret\r\nCookie: sid=AAAA\r\nCOOKIE: csrf=BBBB\r\n" \
+                  "X-Api-Key: key-9999\r\nSet-Cookie: echoed=1\r\nProxy-Authorization: Basic Zm9v\r\n" \
+                  "X-Auth-Token: tok\r\nApi-Key: k\r\nAccept: application/json\r\n\r\n").to_slice
+
+  row = Gori::Store::FlowRow.new(
+    id: 1_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "accounts.test",
+    port: 443, target: "/login", status: 200, size: 0_i64,
+    state: Gori::Store::FlowState::Complete)
+
+  it "redacts every sensitive header value by default and leaves the rest alone" do
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head))["headers"]
+    headers["Authorization"].as_s.should eq("[REDACTED]")
+    headers["X-Api-Key"].as_s.should eq("[REDACTED]")
+    headers["Set-Cookie"].as_s.should eq("[REDACTED]")
+    headers["Proxy-Authorization"].as_s.should eq("[REDACTED]")
+    headers["X-Auth-Token"].as_s.should eq("[REDACTED]")
+    headers["Api-Key"].as_s.should eq("[REDACTED]")
+    # NAMES, wire order and the non-sensitive values are untouched: the row still answers
+    # "what request was this?", which is the whole reason the block exists.
+    headers["Host"].as_s.should eq("accounts.test")
+    headers["Accept"].as_s.should eq("application/json")
+  end
+
+  # The fold emits the FIRST spelling seen as the key, so a redaction keyed off the emitted
+  # key rather than the downcased name would let `COOKIE: csrf=BBBB` through whenever it
+  # arrived first. Both occurrences stay in the array — the count is the shape of the
+  # message (a split `Cookie`), not the secret.
+  it "redacts a case-varying repeat of a sensitive name, keeping one entry per occurrence" do
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head))["headers"]
+    headers["Cookie"].as_a.map(&.as_s).should eq(["[REDACTED]", "[REDACTED]"])
+  end
+
+  it "returns the exact bytes with include_sensitive" do
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head, include_sensitive: true))["headers"]
+    headers["Authorization"].as_s.should eq("Bearer supersecret")
+    headers["Cookie"].as_a.map(&.as_s).should eq(["sid=AAAA", "csrf=BBBB"])
+    headers["X-Api-Key"].as_s.should eq("key-9999")
+  end
+
+  # Presence, not a boolean on every row: the same discipline `advisory`/`headers`/`columns`
+  # keep, and on a JSON-Lines feed a `false` per row is a per-row cost for a fact about the
+  # invocation.
+  it "marks the row only when a value actually was redacted" do
+    JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head))["sensitive_headers_redacted"]
+      .as_bool.should be_true
+
+    plain = "GET /a HTTP/1.1\r\nHost: h\r\nAccept: */*\r\n\r\n".to_slice
+    JSON.parse(Gori::CLI::Output.flow_row_json(row, plain)).as_h
+      .has_key?("sensitive_headers_redacted").should be_false
+    JSON.parse(Gori::CLI::Output.flow_row_json(row, private_head, include_sensitive: true)).as_h
+      .has_key?("sensitive_headers_redacted").should be_false
+    JSON.parse(Gori::CLI::Output.flow_row_json(row)).as_h
+      .has_key?("sensitive_headers_redacted").should be_false
+  end
+
+  # `flow_row_fields` is the seam a NEW emitter reaches for (`show_json` already does, with no
+  # head), and its own default has to be the fail-closed one — a caller that never heard of
+  # the flag must redact. Pinned directly, because every example above goes through
+  # `flow_row_json`, which passes the flag explicitly and so hides what the inner default is.
+  it "fails closed at the flow_row_fields seam too, not only at flow_row_json" do
+    doc = JSON.parse(JSON.build { |j| Gori::CLI::Output.flow_row_fields(j, row, private_head) })
+    doc["headers"]["Authorization"].as_s.should eq("[REDACTED]")
+    doc["sensitive_headers_redacted"].as_bool.should be_true
+  end
+
+  # An obs-fold continuation is part of the field it continues (RFC 9110 §5.2), but
+  # `Codec::Http1.parse_headers` has no fold handling: it splits every colon-bearing line at
+  # its own first colon, so a folded `Cookie` carrying a URL arrived as a SECOND header named
+  # `" redirect=https"` whose value printed in the clear beside `Cookie: [REDACTED]`. Redacting
+  # only the value would not have closed it either — the split put `redirect=https` in the KEY.
+  it "does not leak an obs-fold continuation of a sensitive header, in the key or the value" do
+    folded = ("GET /a HTTP/1.1\r\nHost: h\r\n" \
+              "Cookie: sid=X;\r\n redirect=https://evil/?tok=SECRET\r\n\r\n").to_slice
+    doc = Gori::CLI::Output.flow_row_json(row, folded)
+    doc.should_not contain("SECRET")
+    doc.should_not contain("evil")
+    doc.should_not contain("redirect")
+    headers = JSON.parse(doc)["headers"]
+    # ONE `Cookie`, redacted — not a Cookie plus an invented sibling.
+    headers.as_h.keys.should eq(["Host", "Cookie"])
+    headers["Cookie"].as_s.should eq("[REDACTED]")
+  end
+
+  # The same unfold, without redaction in the way: the continuation joins the field it
+  # continues (one SP, RFC 7230 §3.2.4) instead of becoming a header of its own. Correct
+  # independent of #1002 — this projection used to invent a field the wire never carried.
+  it "joins an obs-fold continuation into the field it continues" do
+    folded = ("GET /a HTTP/1.1\r\nHost: h\r\n" \
+              "X-Trace: a=1;\r\n b=https://x/?q=2\r\n\r\n").to_slice
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, folded))["headers"]
+    headers.as_h.keys.should eq(["Host", "X-Trace"])
+    headers["X-Trace"].as_s.should eq("a=1; b=https://x/?q=2")
+  end
+
+  # A continuation with nothing to continue is malformed. Dropped, not hung on an invented
+  # field — and it must not crash the emitter, which is the whole listing for that run.
+  it "drops a continuation that has no field before it" do
+    orphan = "GET /a HTTP/1.1\r\n oops=https://x/?t=1\r\nHost: h\r\n\r\n".to_slice
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, orphan))["headers"]
+    headers.as_h.keys.should eq(["Host"])
+  end
+
+  # The emitter fails closed, so the dangerous direction is safe whatever the call site does.
+  # The other direction is not: a `--include-sensitive` that silently changes nothing is a
+  # shape this CLI has already shipped twice (`gori run` flag-before-verb, the `--` guards).
+  # `cmd_history_list` opens a store and writes to STDOUT, so there is no in-process harness
+  # for it — asserted over the SOURCE, the way `unknown_args_sweep_spec` asserts its guard,
+  # and DERIVED rather than listed so a second `--format json` emit site is covered too.
+  it "forwards the flag from every listing emit site in history.cr" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "history.cr"))
+    src.should contain("p.on(\"--include-sensitive\"")
+    # Three things this guard got wrong the first time, each of which made it green on the
+    # drift it exists to catch:
+    #
+    # 1. It matched `CLI::Output.flow_row_json(`. history.cr is `module Gori::CLI::Run`, so the
+    #    bare `Output.flow_row_json(...)` spelling resolves and compiles — this file already
+    #    writes bare `Output.term_safe(...)` elsewhere. A site written that way scored zero
+    #    matches while the existing qualified call kept the population floor satisfied.
+    # 2. It asserted `include_sensitive: include_sensitive`, pinning a LOCAL's name rather than
+    #    the argument being passed — a future site correctly passing `include_sensitive: true`
+    #    would have failed.
+    # 3. It was line-anchored, and the json branch's call now wraps across lines. Each site's
+    #    window is therefore the call line plus the three after it. Loose on purpose: a drift
+    #    guard that under-matches is worthless, and one that over-matches only ever costs a
+    #    reader looking one line further.
+    lines = src.lines
+    sites = [] of String
+    lines.each_with_index do |l, i|
+      sites << lines[i, 4].join('\n') if l.includes?("Output.flow_row_json(")
+    end
+    sites.empty?.should be_false
+    sites.each(&.should(contain("include_sensitive:")))
   end
 end
 
