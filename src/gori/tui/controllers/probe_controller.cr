@@ -99,16 +99,17 @@ module Gori::Tui
     # the tab bar. The focus-ring hook — a `key.tab?` arm in `handle_body_key` never ran (the
     # Runner claims ⇥ for the ring first), so the `↹ preview` the hint promised was mouse-only.
     def pane_advance(dir : Int32) : Bool
-      # An open detail is ONE pane, so ⇥ has nowhere to go — but it must not answer false
-      # either. False is how a view hands focus to the tab bar, and `handle_body_key`'s
-      # detail arm below only ever runs with body focus, so one ⇥ left the detail fully drawn
-      # with every key dead (see `IssuesController#pane_advance`, the same trap). Swallow it.
+      # An open detail walks its own two panes — AFFECTED URLS and DESCRIPTION — and never
+      # answers false. False is how a view hands focus to the tab bar, and `handle_body_key`'s
+      # detail arm below only ever runs with body focus, so one ⇥ would leave the detail fully
+      # drawn with every key dead (see `IssuesController#pane_advance`, the same trap). This
+      # arm SWALLOWED ⇥ while the detail held one pane; now there is somewhere for it to go.
       #
       # BEFORE the Rules-tab arm, not after: `move_subtab`/`jump_subtab` only move `@sub_idx`,
       # so a detail opened on Findings is still open with Rules selected, and testing the
       # sub-tab first handed that state the very answer the rest of this method exists to stop
       # giving.
-      return true if @probe.detail_open?
+      return @probe.step_detail_focus(dir) if @probe.detail_open?
       return false if rules_tab?
       return false unless @probe.preview_enabled?
       @probe.step_preview_focus(dir)
@@ -150,10 +151,19 @@ module Gori::Tui
         edits = rules_custom_selected? ? " · ↵/e edit · {probe-rules.delete} delete" : ""
         return keys("↑/↓ select · {probe-rules.toggle} on/off · {probe-rules.add} add#{edits} · space cmds · ↑ sub-tabs · esc sub-tabs")
       elsif @probe.detail_open?
-        # `↵ open` and `o flow` are two different destinations and both belong here — the
-        # caret's own affected URL, and the issue's sample evidence. The Issues detail names
-        # the same pair for the same reason (`↵ open` over its related links, `o flow`).
-        keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · {probe.open-flow} flow · {probe.repeater-flow} repeater · {probe.promote} promote · space cmds · ←/esc back")
+        # Two panes now, and they do not offer the same keys, so the hint splits with them.
+        # DESCRIPTION has no `↵` (there is no URL under the caret to open — `affected_url`
+        # answers nil there, which is what gates the verb) and its rows are wrapped prose
+        # rather than URLs, so naming "↑/↓ URL" over it would be the confident lie this line
+        # exists to avoid.
+        if @probe.desc_focused?
+          keys("↑/↓ read · ⇧arrows select · {probe.copy} copy · ↹ urls · space cmds · ←/esc back")
+        else
+          # `↵ open` and `o flow` are two different destinations and both belong here — the
+          # caret's own affected URL, and the issue's sample evidence. The Issues detail names
+          # the same pair for the same reason (`↵ open` over its related links, `o flow`).
+          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · {probe.open-flow} flow · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
+        end
       elsif @probe.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
       elsif @probe.mode.off?
@@ -278,11 +288,36 @@ module Gori::Tui
       end
       return false if ev.ctrl? || ev.alt?
       if @probe.detail_open?
+        return true if detail_cross_pane(ev)
         case
         when key.up?, key.lower_k?   then @probe.detail_move(-1, ev.shift?)
         when key.down?, key.lower_j? then @probe.detail_move(1, ev.shift?)
         else                              return @probe.detail_motion_key(ev) # Home/End/PgUp/PgDn, ⇧ extending
         end
+        return true
+      end
+      false
+    end
+
+    # ↓ off the last AFFECTED URL, ↑ off the first DESCRIPTION row — the two edges where the
+    # key had nowhere else to go and so did nothing at all. ⇥ is the ring, but nobody reaches
+    # for ⇥ at the bottom of a list; they press ↓ again. Mirrors the crossings
+    # `IssuesController` gained between RELATED and NOTES.
+    #
+    # BARE presses only. A ⇧arrow is a selection gesture — handing it to the other pane would
+    # abandon the selection mid-extend — and `LineEdit`'s modified arrows are word motions.
+    # `j`/`k` are deliberately NOT crossings: they are the vim aliases for a step within a
+    # pane, and a `j` that silently changed which pane `y` copies would be the surprise this
+    # is meant to remove.
+    private def detail_cross_pane(ev : Termisu::Event::Key) : Bool
+      return false if ev.shift? || ev.ctrl? || ev.alt?
+      key = ev.key
+      if key.down? && !@probe.desc_focused? && @probe.affected_at_bottom?
+        @probe.focus_desc!
+        return true
+      end
+      if key.up? && @probe.desc_focused? && @probe.desc_at_top?
+        @probe.focus_affected!
         return true
       end
       false

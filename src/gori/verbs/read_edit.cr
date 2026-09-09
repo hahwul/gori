@@ -222,24 +222,29 @@ module Gori
         Verb::Scope::OastCallbacks,
         available: in_oast_detail, mnemonic: 'y', section: :detail) { |ctx| ctx.read_copy; nil }
 
-      # A Probe issue's AFFECTED URLS. `Verb::Scope::ProbeDetail` carries one mnemonic of its
-      # own — `u` on `probe.open-affected`, the ↵ that opens the highlighted URL's flow — so
-      # `x`/`v`/`S`/`y` still land in `:common` with nothing to collide with, but a new key
-      # here does have to be checked against it (and against the scope's plain chords o/r/p/c/d,
-      # which `menu_key` derives menu entries from).
+      # A Probe issue's detail, which is TWO read panes — AFFECTED URLS and DESCRIPTION — and
+      # these verbs act on whichever holds focus. `ProbeView` routes them through one `pane`
+      # accessor for exactly that reason, so the wording here has to stay pane-neutral: `y` on
+      # the remediation text is the point of giving that pane focus at all.
+      #
+      # `Verb::Scope::ProbeDetail` carries one mnemonic of its own — `u` on
+      # `probe.open-affected`, the ↵ that opens the highlighted URL's flow — so `x`/`v`/`S`/`y`
+      # still land in `:common` with nothing to collide with, but a new key here does have to be
+      # checked against it (and against the scope's plain chords o/r/p/c/d, which `menu_key`
+      # derives menu entries from).
       in_probe_detail = ->(ctx : Verb::ExecContext) { ctx.probe_detail_readable? }
       r.register Verb::Definition.new(
-        "probe.select-line", "Select URL", "Select the affected URL under the cursor",
+        "probe.select-line", "Select line", "Select the line under the cursor in the focused pane",
         Verb::Scope::ProbeDetail, [Verb::Chord.new("x")],
         available: in_probe_detail, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
-        "probe.clear-selection", "Clear selection", "Clear the affected-URL selection",
+        "probe.clear-selection", "Clear selection", "Clear the selection in the focused pane",
         Verb::Scope::ProbeDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
-        "probe.send-to", "Send selection to…", "Send the selected URLs to another tool (Decoder, …)",
+        "probe.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
         Verb::Scope::ProbeDetail, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
-        "probe.copy", "Copy", "Copy the selected affected URLs, or every affected URL if nothing is selected",
+        "probe.copy", "Copy", "Copy the selection, or the whole focused pane if nothing is selected",
         Verb::Scope::ProbeDetail, [Verb::Chord.new("y")],
         available: in_probe_detail, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
