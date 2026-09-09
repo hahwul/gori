@@ -361,21 +361,30 @@ module Gori
                      "before using traffic tools (list_history, send_request, …). Pure tools " \
                      "(decode, jwt_*, ql_reference) work immediately."
                    elsif name
+                     # "registered to", not "for": at start-up `workspace_root` is the git root
+                     # that SELECTED the project and `bind_project` overwrites it with
+                     # `ProjectRegistry#workspace_of` — the workspace the project belongs to.
+                     # Those coincide only until a switch, and "for workspace X" would then have
+                     # this server claiming to serve a directory it has never been run in. The
+                     # project's registration is what both values actually are.
                      " At this handshake the server is bound to project #{name}#{" [#{slug}]" if slug}" \
-                     " via #{@tools.selection_source || "an explicit database"}#{" for workspace #{root}" if root}."
+                     " via #{@tools.selection_source || "an explicit database"}#{", registered to workspace #{root}" if root}."
                    else
                      " Project selection source: #{@tools.selection_source || "unknown"}; call project_info before using data."
                    end
         # …and that binding is a SNAPSHOT, not a pin. `switch_project` repoints the server for
-        # every later call, MCP has no way to re-send `instructions`, and a client caches this
-        # text for the whole session — so a sentence that reads as configuration ("this server
-        # is pinned to X") went on naming X while writes landed in Y. Name the authority
-        # instead: what a call actually touches is what project_info reports (#1003).
-        drift = " The binding is not fixed for the session and this text is never re-sent: " \
+        # every later call, MCP has no notification that refreshes `instructions`, and a client
+        # caches this text for the whole session — so a sentence that reads as configuration
+        # ("this server is pinned to X") went on naming X while writes landed in Y. Name the
+        # authority instead: what a call actually touches is what project_info reports (#1003).
+        #
+        # "nothing pushes an update", NOT "never re-sent": a second `initialize` DOES rebuild
+        # this text, which is the whole point of reading the binding live above. Overstating it
+        # would be the same unkeepable claim one sentence further on.
+        drift = " That is the binding at handshake time and nothing pushes an update: " \
                 "switch_project (and create_project when it auto-binds) repoints the server " \
-                "mid-session, so project_info — or the result of the switch itself — is the " \
-                "authority on which project a call reads and writes. Re-check it before " \
-                "recording evidence."
+                "mid-session without the client seeing new instructions. project_info — or the " \
+                "switch's own result — is the live answer; re-check it before recording evidence."
         base = "gori MCP exposes the selected project's captured HTTP traffic " \
                "(history, flows, sitemap, scope, issues, notes, match&replace rules), plus a " \
                "pure `decoder` encode/decode/hash tool. Call ql_reference before " \

@@ -317,10 +317,11 @@ module Gori
       # binding has to ask HERE rather than keep the copy it was constructed with — a second
       # copy is a second answer, and the one the server held went stale the moment a switch
       # landed while still being read out as the server's configuration (#1003).
+      # Only what a reader outside this class actually asks for. `project_id`/`db_path` stay
+      # private: nothing reports them from out here, and a getter with no caller is a contract
+      # no one is keeping.
       getter project_name : String?
       getter project_slug : String?
-      getter project_id : String?
-      getter db_path : String?
       getter selection_source : String?
       getter workspace_root : String?
       getter bind_error : String?

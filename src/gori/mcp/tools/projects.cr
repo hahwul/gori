@@ -87,8 +87,13 @@ module Gori
             j.field "db_path", proj.db_path
             j.field "created", created # false = reopened an existing same-name project
             j.field "switched", auto_bound
-            # Same correction the switch path owes, on the one create path that also rebinds.
-            j.field "note", REBIND_NOTE if auto_bound
+            if auto_bound
+              # Same shape as switch_project's receipt, down to the always-null
+              # `previous_project` (create only auto-binds from unbound): a client that parses
+              # rebind receipts uniformly must not have to tell "key absent" from "was unbound".
+              j.field "previous_project", nil
+              j.field "note", REBIND_NOTE
+            end
           end
         end)
       rescue ex : Gori::Error
@@ -107,20 +112,31 @@ module Gori
         bind_project(proj, reg, source: "switch_project")
       end
 
-      # What every bind reports back, because the handshake `instructions` cannot be corrected:
-      # MCP delivers them once and a client caches that text for the session, so the sentence
-      # naming the project the server STARTED on outlives the switch that moved it. The result
-      # of the switch is the only place the contradiction can be settled at the moment it is
-      # created — an agent holding both then knows which one a write follows (#1003).
+      # What every bind reports back, because nothing pushes a correction to the handshake
+      # `instructions`: a client caches that text for the session, so whatever it said about the
+      # binding outlives the switch that moved it. The result of the switch is the only place
+      # the contradiction can be settled at the moment it is created — an agent holding both
+      # then knows which one a write follows (#1003).
+      #
+      # Deliberately says nothing about WHICH project the instructions named: on the unbound
+      # start (`gori mcp` outside a git workspace, and the only path where create_project
+      # rebinds) they named none at all, and "they still name the project it started on" would
+      # send the agent looking for a contradiction that does not exist — the same unkeepable
+      # claim this whole change exists to remove.
       REBIND_NOTE = "This server now reads and writes THIS project for every later call. " \
-                    "The handshake instructions still name the project it started on — they " \
-                    "are sent once and never refreshed; project_info is the live answer."
+                    "The handshake instructions describe the binding as it was then and are " \
+                    "not updated; project_info is the live answer."
 
       # Open *proj* as the server's store and update selection metadata.
       # Closes a Tools-owned previous store; never closes a CLI-owned initial store
       # unless Tools already took ownership via a prior switch.
       private def bind_project(proj : Project, reg : ProjectRegistry, *, source : String) : Result
-        previous = @project_name || @project_slug
+        # `@db_path` last, and it is not a fallback for tidiness: a server bound by `--db
+        # /engagements/acme.db` has NO name or slug (the file is not a registry project), so
+        # without it the first switch reports `previous_project: null` — reading as "there was
+        # no previous project" for the one binding whose identity appears nowhere else in the
+        # receipt, after hours of capture.
+        previous = @project_name || @project_slug || @db_path
         new_store = begin
           # Same never-prune stance as `gori mcp`'s initial open (cli.cr). Without this a
           # switch_project silently re-enabled the sweep the entry point disabled. `read_only`

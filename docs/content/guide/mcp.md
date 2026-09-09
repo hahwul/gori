@@ -51,6 +51,8 @@ A few tool families never need a project and work unbound: project management (`
 
 Call `project_info` before using data. It reports `bound`, the selected project, database path, workspace root, and selection source.
 
+**The project named in `instructions` is the one bound at the handshake.** That text is sent once and nothing pushes an update to it, so after a `switch_project` it still describes the binding as it was then while every later call reads and writes the new project. `project_info` is the live answer. `switch_project` — and `create_project` when it auto-binds — return the same correction in their result, alongside `previous_project`, the binding they moved off.
+
 ## Read-Only Mode
 
 By default the server also exposes action tools that send live requests and write issues. To expose only the read tools (safe for handing a project to an untrusted agent), start it read-only:
