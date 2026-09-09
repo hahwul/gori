@@ -204,6 +204,172 @@ describe "Gori::MCP::Tools unbound mode" do
     end
   end
 
+  # `instructions` is delivered ONCE, at the handshake, and the client caches that text for
+  # the whole session — MCP has no way to re-send it. So the sentence naming the project must
+  # not read as a permanent pin ("this server is pinned to X" went on naming X while every
+  # later call read and wrote Y), and a client that DOES re-handshake has to be told the
+  # binding in force now rather than the one the process booted with (#1003).
+  describe "project binding in the handshake instructions" do
+    it "follows a mid-session switch and points at project_info as the authority" do
+      root = File.tempname("gori-instr-binding")
+      Dir.mkdir_p(root)
+      prev = ENV["GORI_HOME"]?
+      ENV["GORI_HOME"] = root
+      # `switch_project` installs the new project's bindings as the PROCESS-GLOBAL send-time
+      # layer, and the store it opens belongs to Tools (nothing out here can close it). The
+      # project dir is removed below, so without this the rest of the suite inherits an
+      # `Env.layer` backed by a deleted database — the swap hazard #910 already records.
+      prev_layer = Gori::Env.layer
+      reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      alpha = reg.create("Alpha")
+      beta = reg.create("Beta")
+      Gori::Store.open(beta.db_path).close
+      store = Gori::Store.open(alpha.db_path)
+      begin
+        input = IO::Memory.new(<<-JSON)
+          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+          {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"switch_project","arguments":{"project":"Beta"}}}
+          {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+          JSON
+        output = IO::Memory.new
+        Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          project_name: alpha.name, project_slug: reg.slug_of(alpha), db_path: alpha.db_path,
+          selection_source: "workspace-created", input: input, output: output).run
+        lines = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
+
+        first = lines[0]["result"]["instructions"].as_s
+        first.should contain("Alpha")
+        # The claim that could go false, and the pointer that replaces it. The hedge is
+        # "nothing pushes an update" and NOT "never re-sent" — line 3 below re-sends it.
+        first.should_not contain("pinned")
+        first.should contain("nothing pushes an update")
+        first.should contain("project_info")
+
+        # The switch result is the one place the contradiction can be settled as it is made.
+        sw = JSON.parse(lines[1]["result"]["content"][0]["text"].as_s)
+        sw["project"].as_s.should eq("Beta")
+        sw["previous_project"].as_s.should eq("Alpha")
+        sw["note"].as_s.should contain("project_info")
+
+        # What a reconnecting client is handed: the project in force NOW.
+        second = lines[2]["result"]["instructions"].as_s
+        second.should contain("Beta")
+        second.should_not contain("Alpha")
+        second.should contain("via switch_project")
+      ensure
+        store.close rescue nil # bind_project already closed it; close is idempotent
+        Gori::Env.layer = prev_layer
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(root)
+      end
+    end
+
+    # The other half of the same staleness, and BOTH server-side copies it came from: a server
+    # that started with nothing bound said so in `instructions`, and a degraded start went on
+    # blaming the db it could not open — each to a re-handshake taken after a switch had given
+    # it a working project. `project_info` reported the truth all along; the handshake text
+    # read from its own construction-time copies and did not.
+    it "stops reporting 'no project bound' (and the failed db) once a switch has bound one" do
+      root = File.tempname("gori-instr-unbound")
+      Dir.mkdir_p(root)
+      prev = ENV["GORI_HOME"]?
+      ENV["GORI_HOME"] = root
+      prev_layer = Gori::Env.layer
+      reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      seeded = reg.create("Seeded")
+      Gori::Store.open(seeded.db_path).close
+      begin
+        input = IO::Memory.new(<<-JSON)
+          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+          {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"switch_project","arguments":{"project":"Seeded"}}}
+          {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+          JSON
+        output = IO::Memory.new
+        Gori::MCP::Server.new(nil, allow_actions: true, verify_upstream: false,
+          selection_source: "unbound", bind_error: "cannot open database /tmp/x.db: file is not a database",
+          input: input, output: output).run
+        lines = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
+
+        first = lines[0]["result"]["instructions"].as_s
+        first.should match(/No project is bound/i)
+        first.should contain("file is not a database")
+
+        JSON.parse(lines[1]["result"]["content"][0]["text"].as_s)["switched"].as_bool.should be_true
+
+        second = lines[2]["result"]["instructions"].as_s
+        second.should_not match(/No project is bound/i)
+        second.should contain("Seeded")
+        second.should_not contain("file is not a database")
+      ensure
+        Gori::Env.layer = prev_layer
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(root)
+      end
+    end
+
+    # The other path that rebinds, and the only one create_project takes: it auto-binds when
+    # the server started unbound, so it owes the same receipt as a switch.
+    it "gives create_project's auto-bind the same rebind receipt as a switch" do
+      root = File.tempname("gori-instr-create")
+      Dir.mkdir_p(root)
+      prev = ENV["GORI_HOME"]?
+      ENV["GORI_HOME"] = root
+      prev_layer = Gori::Env.layer
+      tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false,
+        selection_source: "unbound")
+      begin
+        made = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Fresh"}))).text)
+        made["switched"].as_bool.should be_true
+        made["note"].as_s.should contain("project_info")
+        # Present and null rather than absent: a client parsing rebind receipts uniformly must
+        # not have to tell "this path omits the key" from "there was nothing to move off".
+        made.as_h.has_key?("previous_project").should be_true
+        made["previous_project"].raw.should be_nil
+
+        # A second create does NOT rebind (already bound), so it owes no receipt…
+        second = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Second"}))).text)
+        second["switched"].as_bool.should be_false
+        second.as_h.has_key?("note").should be_false
+
+        # …and the switch that does names the project it moved off.
+        moved = JSON.parse(tools.call("switch_project", JSON.parse(%({"project":"Second"}))).text)
+        moved["project"].as_s.should eq("Second")
+        moved["previous_project"].as_s.should eq("Fresh")
+      ensure
+        Gori::Env.layer = prev_layer
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(root)
+      end
+    end
+  end
+
+  # `gori mcp --db /engagements/acme.db` binds a file that is not a registry project, so it has
+  # no display name and no slug — and `previous_project: null` on the first switch would read as
+  # "there was no previous project" for a binding that had been capturing all along.
+  it "names a --db binding by its path when a switch moves off it" do
+    root = File.tempname("gori-prev-db")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    prev_layer = Gori::Env.layer
+    reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+    seeded = reg.create("Seeded")
+    Gori::Store.open(seeded.db_path).close
+    loose = File.join(root, "acme.db")
+    store = Gori::Store.open(loose)
+    tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false,
+      db_path: loose, selection_source: "--db")
+    begin
+      sw = JSON.parse(tools.call("switch_project", JSON.parse(%({"project":"Seeded"}))).text)
+      sw["previous_project"].as_s.should eq(loose)
+    ensure
+      store.close rescue nil
+      Gori::Env.layer = prev_layer
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+
   it "handshakes an unbound Server over stdio" do
     input = IO::Memory.new(<<-JSON)
       {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}

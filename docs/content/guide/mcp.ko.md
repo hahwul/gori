@@ -51,6 +51,8 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 
 데이터를 사용하기 전에 `project_info`를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처를 보고합니다.
 
+**`instructions`에 적힌 프로젝트는 핸드셰이크 시점의 바인딩입니다.** 이 텍스트는 한 번만 전달되고 갱신을 밀어주는 수단이 없어서, `switch_project` 이후에도 그때의 바인딩을 계속 설명합니다. 실제 읽기와 쓰기는 새 프로젝트로 갑니다. 현재 값은 `project_info`가 답합니다. `switch_project`(그리고 자동 바인딩하는 `create_project`)는 같은 정정을 결과에 담아, 직전 바인딩을 `previous_project`로 함께 돌려줍니다.
+
 ## 읽기 전용 모드 {#read-only-mode}
 
 기본적으로 서버는 실시간 요청을 보내고 이슈를 기록하는 액션 도구도 노출합니다. 읽기 도구만 노출하려면(신뢰할 수 없는 에이전트에게 프로젝트를 넘길 때 안전합니다) 읽기 전용으로 시작하세요.
