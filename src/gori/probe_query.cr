@@ -1,5 +1,6 @@
 require "./store"
 require "./filter_ast"
+require "./probe/issue" # FILTER_CATEGORIES — the one list `category:` and `--category` share
 
 module Gori
   module Probe
@@ -39,6 +40,114 @@ module Gori
       # `title~admin` is free-texted whole and must not be coloured as a match nobody performs.
       def self.known_field?(name : String, regex : Bool = false) : Bool
         !regex && KNOWN.includes?(name.downcase)
+      end
+
+      # Canonical name for a spelling — `cat` is `category`. Same reason as
+      # `Issues::Filter::CANONICAL`: the completion row asks for help by the name the operator
+      # typed, so a table keyed only by canonical names leaves every alias undescribed.
+      CANONICAL = begin
+        h = {} of String => String
+        ALIASES.each { |canon, spellings| spellings.each { |sp| h[sp] = canon } }
+        h
+      end
+
+      # What each field means ON THIS BAR — not `QL::FIELD_HELP`, for the reason
+      # `Issues::Filter::FIELD_HELP` spells out: `status:` here is a triage state, not an HTTP
+      # code, and QL's `host:` line advertises a `host~` regex this parser refuses.
+      FIELD_HELP = {
+        "severity" => "info low medium high critical — takes >= <= > <",
+        "status"   => "triage state — open confirmed fp resolved (closed = any non-open)",
+        "category" => "which check found it — #{FILTER_CATEGORIES.join(" ")}",
+        "host"     => "the finding's host — substring",
+        "code"     => "the rule's code — substring",
+      }
+
+      # Built once — the bar draws it every frame while the filter is being edited.
+      FIELD_HELP_PROC = ->(f : String) do
+        canon = CANONICAL[f.downcase]?
+        canon ? FIELD_HELP[canon]? : nil
+      end
+
+      def self.field_help(name : String) : String?
+        FIELD_HELP_PROC.call(name)
+      end
+
+      # All five fit a one-row hint, so this is the whole vocabulary rather than a sample.
+      HINT_FIELDS = ALIASES.keys
+
+      # ALSO ACCEPTED on the `?` reference — the identity entries in `CANONICAL` dropped.
+      ALSO_ACCEPTED = CANONICAL.reject { |from, to| from == to }
+
+      # This backend's own SYNTAX / WORTH KNOWING for the `?` reference, for the reason
+      # `Issues::Filter::SYNTAX_HELP` gives: the boolean grammar is shared `FilterAst`, the
+      # fields and the regex are not.
+      SYNTAX_HELP = [
+        {"category:tech severity:high", "space = AND (both must hold)"},
+        {"host:api OR host:cdn", "OR; NOT > AND > OR, ( ) to group"},
+        {"-category:tech", "leading - excludes — so does NOT category:tech"},
+        {"NOT (severity:info OR severity:low)", "NOT or -( negates a whole group"},
+        {"severity:>=high", ">= <= > < = on severity"},
+        {"code:\"missing csp\"", "quotes keep spaces inside one term"},
+        {"reflected", "a bare word searches title, host and code"},
+      ]
+
+      CAVEATS = [
+        {"there is no regex", "code~x-frame free-texts the whole token — see known_field?"},
+        {"status:closed", "any non-open triage state: confirmed, fp or resolved"},
+        {"no status: term", "the list shows OPEN findings only — name a status to see the rest"},
+        {"an empty value passes all", "even negated: -host: filters nothing, so a half-typed exclusion cannot blank the list"},
+        {"one row per code+host", "findings are grouped before this filter ever sees them"},
+      ]
+
+      # Spelled the way `severity_value` / `match_status` below match them; only the canonical
+      # spelling of each is offered (`med`, `crit`, `conf`, `fp`, `done` still parse).
+      SEVERITY_VALUES = %w[info low medium high critical]
+      STATUS_VALUES   = %w[open confirmed false-positive resolved closed]
+
+      # Comparison samples, so the bar can show that `severity:` takes an operator at all —
+      # completion offers NAMES until a `:` is typed and can never teach this.
+      SEVERITY_SAMPLES = %w[>=medium >=high >=critical]
+
+      # ↹ candidates for the token under `cx` — field names until a `:` is typed, then values.
+      # Punctuation rides through on `FilterAst::Cursor`, so `-cat` → `-category:`, which the
+      # old `[/\S*\z/]` tokenizer could not complete. `hosts` and `codes` are the caller's
+      # pools, read off the in-memory issue list.
+      def self.suggestions(query : String, cx : Int32, hosts : Array(String) = [] of String,
+                           codes : Array(String) = [] of String) : Array(String)
+        cur = FilterAst.token_at(query, cx)
+        return [] of String if cur.core.empty?
+        if (colon = cur.core.index(':')) && colon > 0
+          field = cur.core[0...colon].downcase
+          prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
+          suggest_values(field, prefix, hosts, codes).map { |v| "#{cur.prefix}#{field}:#{FilterAst.quote(v)}" }
+        else
+          FIELDS.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}" }
+        end
+      end
+
+      private def self.suggest_values(field : String, prefix : String, hosts : Array(String),
+                                      codes : Array(String)) : Array(String)
+        values = value_pool(field, hosts, codes)
+        return [] of String unless values
+        p = prefix.downcase
+        values.select(&.downcase.starts_with?(p))
+      end
+
+      # nil when the field has no closed vocabulary to offer — a name that completes over an
+      # EMPTY value list reads as a closed field with nothing in it.
+      #
+      # `category:` completes from `FILTER_CATEGORIES`, the one list the CLI and the MCP tools
+      # already validate against, rather than a copy: this bar and `--category` must not come
+      # to disagree about which lenses exist.
+      private def self.value_pool(field : String, hosts : Array(String),
+                                  codes : Array(String)) : Array(String)?
+        case CANONICAL[field]?
+        when "severity" then SEVERITY_VALUES + SEVERITY_SAMPLES
+        when "status"   then STATUS_VALUES
+        when "category" then FILTER_CATEGORIES
+        when "host"     then hosts
+        when "code"     then codes
+        end
       end
 
       private record Term, kind : Symbol, op : Symbol, text : String, negate : Bool

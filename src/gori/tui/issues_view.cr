@@ -13,6 +13,8 @@ require "../issues_query"
 require "../links"
 require "./preview_split"
 require "./line_edit"
+require "./query_suggest"
+require "./suggest_popup"
 require "./issue_presentation"
 
 module Gori::Tui
@@ -27,7 +29,22 @@ module Gori::Tui
     include PreviewPane
     include IssuePresentation
 
-    QUERY_FIELDS = Issues::Filter::FIELDS
+    # The `/` bar's own label, hoisted out of `render_filter_bar` because the dropdown
+    # anchors to the column the query text starts in and must not re-measure it.
+    QUERY_PREFIX = "filter › "
+
+    # The idle bar's one-liner and the cold-start suggestion row, both GENERATED from this
+    # backend's vocabulary rather than written out. The literal they replace named `severity:`,
+    # `cvss:>=7`, `status:` and `host:` but not `title:`, and no boolean operator at all — the
+    # exact drift `QuerySuggest`'s own header cites Issues for.
+    #
+    # `regex: false` and `compare:` are not decoration. `cold_hint`'s defaults name `~regex`
+    # and `>= < on status size dur`; `Issues::Filter.known_field?` refuses `~` outright and
+    # this backend has no `size`/`dur`, so the default text would re-break what
+    # b28aaaaa fixed — a filter bar naming a field it does not have.
+    FILTER_HINT = QuerySuggest.idle_hint("/ filter", Issues::Filter::HINT_FIELDS)
+    QUERY_HINT  = QuerySuggest.cold_hint(Issues::Filter::HINT_FIELDS, help_key: true,
+      regex: false, compare: "severity cvss")
 
     # The bar's field vocabulary, asked per separator (`FilterAst.spans`). Without it an
     # unrecognised `hsot:` rendered in the same confident blue as a real field — the one
@@ -84,6 +101,10 @@ module Gori::Tui
       @qcx = 0
       @preedit_q = ""
       @querying = false
+      # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
+      @popup = SuggestPopup.new
+      # `host:` completion pool, rebuilt on reload — see `host_pool`.
+      @host_pool = nil.as(Array(String)?)
       # settings:layout Issues preview (list page bottom pane)
       @preview_scroll = 0
       @preview_focus = :list # :list | :preview
@@ -95,6 +116,7 @@ module Gori::Tui
 
     def reload(store : Store) : Nil
       @all = store.issues
+      @host_pool = nil
       apply_filter
       @loaded = true
     end
@@ -124,13 +146,26 @@ module Gori::Tui
       reset_mark_anchor # a plain move re-seeds the range anchor, like a GUI list
     end
 
-    # Inverts render_list's row layout (filter bar at rect.y, header at +1, divider
-    # at +2, rows from top = rect.y + 3 spanning @scroll..): maps a click to a
-    # issue index, or nil past the last populated row / outside the list pane.
+    # The first ISSUE-row screen-y — ONE derivation, so `render_list` and both hit-tests
+    # cannot drift. The filter bar owns `rect.y`; while the bar is being EDITED the suggestion
+    # row takes the next one; then the column header and its divider.
+    #
+    # Extracted before the suggestion row existed: `rect.y + 3` was written out at three
+    # sites, and a row added without this puts every click one row off — but only while the
+    # bar is open, which is a state a render assertion never reaches. Mirrors
+    # `HistoryView#list_top`.
+    private def list_top(list_rect : Rect) : Int32
+      hdr_y = list_rect.y + 1
+      hdr_y += 1 if @querying
+      hdr_y + 2 # past the column header and its divider
+    end
+
+    # Inverts render_list's row layout: maps a click to an issue index, or nil past the last
+    # populated row / outside the list pane.
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       list_rect, _ = list_split(rect)
       return nil if mx < list_rect.x || mx >= list_rect.right
-      top = list_rect.y + 3 # filter bar (y) + header (y+1) + divider (y+2)
+      top = list_top(list_rect)
       list_h = {list_rect.bottom - top, 0}.max
       i = my - top
       return nil if i < 0 || i >= list_h
@@ -144,7 +179,7 @@ module Gori::Tui
     # so the answer is a selection, not an offset. See `Frame.scroll_gauge_row`.
     def gauge_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       list_rect, _ = list_split(rect)
-      top = list_rect.y + 3 # same band list_row_at and the gauge draw measure
+      top = list_top(list_rect) # same band list_row_at and the gauge draw measure
       Frame.scroll_gauge_row(Rect.new(list_rect.x, top, list_rect.w, {list_rect.bottom - top, 0}.max),
         @issues.size, mx, my)
     end
@@ -210,6 +245,73 @@ module Gori::Tui
       @detail_focus = :links
     end
 
+    def focus_notes! : Nil
+      @detail_focus = :notes
+    end
+
+    # The detail's pane ring, top to bottom — the shape every multi-pane view in the tree
+    # uses (`DiscoverView#pane_advance` is the canonical copy). `@detail_focus` was always a
+    # two-value symbol; what it never had was a ring the shell's ⇥ could walk.
+    DETAIL_PANES = [:links, :notes]
+
+    # ⇥ / ⇧⇥ inside an open detail. WRAPS, and always answers true, rather than returning
+    # false at the ends like a list-page ring does.
+    #
+    # `false` is how a view tells `Runner#focus_advance` to hand focus to the TAB BAR — and
+    # `handle_detail_key` is gated on `@focus == :body` (see the arm in `runner.cr` that
+    # routes it). So the old `return false if detail_open?` left the detail fully DRAWN with
+    # every key dead, back keys included, and the very next ← switched tab. ⇥ is exactly what
+    # an operator presses to move between two panes, which made it the fastest route into a
+    # screen that looked alive and answered nothing.
+    #
+    # Two panes, and the detail is a drill-in with its own way out (`esc`, `←`, `h`), so
+    # wrapping is both what the keypress means here and the only answer that cannot strand
+    # anyone.
+    def step_detail_focus(dir : Int32) : Bool
+      i = DETAIL_PANES.index(@detail_focus) || 0
+      @detail_focus = DETAIL_PANES[(i + dir) % DETAIL_PANES.size]
+      true
+    end
+
+    # At the last RELATED row — the edge `↓` hands focus to NOTES from. An EMPTY list answers
+    # true, so `↓` reaches NOTES on an issue with no links at all: that is the shape `n`
+    # creates, and it was the one where a focus move had no visible effect whatsoever.
+    def links_at_bottom? : Bool
+      @detail_resolved.empty? || @selected_link >= @detail_resolved.size - 1
+    end
+
+    # The NOTES read caret has no row above it — the edge `↑` crosses back to RELATED on.
+    #
+    # This pane WRAPS (`@notes.wrap = true`), and `TextReadState#move` routes every `dr != 0`
+    # through `TextArea#visual_row_target`, so `↑` steps one VISUAL row, not one logical line.
+    # A wrapped first paragraph is N drawn rows of logical line 0, so testing `cursor.cy <= 0`
+    # ejected the pane on every `↑` inside it — which for prose in a ~34-column card is the
+    # normal case, not an edge. Ask the layout's owner instead: `visual_row_target(-1)` returns
+    # the position the step would land on, and a step with nowhere to go returns the caret
+    # itself (`Wrap.step_caret` breaks at the document top and re-derives the same row). It
+    # answers nil only when the pane is not wrapping at all — no width measured yet, or the
+    # app-wide preference off — and there the logical line IS the row.
+    def notes_at_top? : Bool
+      if target = @notes.visual_row_target(-1)
+        target == {@notes.cy, @notes.cx}
+      else
+        @notes_read.cursor.cy <= 0
+      end
+    end
+
+    # The NOTES read caret sits at the very start of the document — the edge `←` crosses back
+    # to RELATED on.
+    #
+    # DOCUMENT start, not line start. `ReadCursor#move` clamps the column only in its
+    # SELECTING branch; a bare `←` takes the branch below it (`read_cursor.cr:138-147`), which
+    # WRAPS a column-0 press to the previous line's end. So gating on `cx <= 0` alone stole a
+    # real motion on every note with more than one line. The caret is seeded at (0, 0) whenever
+    # the pane is entered, so `←` still reads as "back" on arrival; it stops being back exactly
+    # once you have navigated into the text, which is when you want the motion instead.
+    def notes_at_doc_start? : Bool
+      @notes_read.cursor.cy <= 0 && @notes_read.cursor.cx <= 0
+    end
+
     # --- `/` filter bar ------------------------------------------------------
     # Issues are in memory, so filtering is live (no debounce) — each edit
     # re-derives the visible list. Mirrors History's QL-bar editing surface.
@@ -232,10 +334,12 @@ module Gori::Tui
 
     def stop_query : Nil # Enter: keep the filter, leave edit mode
       @querying = false
+      popup_close
     end
 
     def cancel_query : Nil # Esc: clear the filter, leave edit mode
       @querying = false
+      popup_close
       @query = ""
       @qcx = 0
       @preedit_q = ""
@@ -245,18 +349,91 @@ module Gori::Tui
     def query_insert(ch : Char) : Nil
       @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
       @qcx += 1
-      apply_filter
+      query_edited
     end
 
     def query_backspace : Nil
       return if @qcx == 0
       @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
       @qcx -= 1
-      apply_filter
+      query_edited
     end
 
     def query_move(d : Int32) : Nil
       @qcx = (@qcx + d).clamp(0, @query.size)
+      sync_popup
+    end
+
+    # `QueryBarEdit`'s hook, and the ONE place an edit to this bar settles. It also closes a
+    # gap older than the dropdown: `query_edit` (⌃/⌥←→, Home/End, Delete, ⌥⌫) went through
+    # `LineEdit.apply` and then the base no-op, so a word-delete on this bar changed the query
+    # and never re-derived the list — the results stayed stale until the next plain keystroke.
+    def query_edited : Nil
+      apply_filter
+      sync_popup
+    end
+
+    # …and the other half of that gap, in the other direction. `QueryBarEdit#query_edit` fires
+    # the hook for EVERY action, so Home, End, ⌥← and ⌥→ — four actions that change no text —
+    # re-parsed the query and re-ran the predicate over every issue. A caret move takes the
+    # caret-move path, exactly the split `HistoryController` and `SitemapController` write as
+    # `schedule_query_reload if LineEdit.mutating?(act)`.
+    def query_edit(action : Symbol) : Nil
+      @query, @qcx = LineEdit.apply(action, @query, @qcx)
+      LineEdit.mutating?(action) ? query_edited : sync_popup
+    end
+
+    # --- the opt-in completion dropdown (`↓`) ---------------------------------
+    # Same component and contract as History's and Sitemap's; see `SuggestPopup`.
+
+    def popup_open? : Bool
+      @popup.open?
+    end
+
+    # `↓`: open the dropdown, or move down inside it.
+    def popup_down : Nil
+      return @popup.move(1) if @popup.open?
+      @popup.set(query_suggestions)
+      @popup.open!
+    end
+
+    def popup_up : Nil
+      @popup.move(-1)
+    end
+
+    def popup_close : Nil
+      @popup.close
+    end
+
+    private def sync_popup : Nil
+      @popup.set(query_suggestions) if @popup.open?
+    end
+
+    # Field names until a `:` is typed, then that field's values, then the boolean operators
+    # no field pool can offer. All of it comes from `Issues::Filter`, which is also what
+    # EVALUATES the query — so the bar cannot offer a term its own backend refuses.
+    def query_suggestions : Array(String)
+      # …then the boolean operators, which no field pool can ever offer: `NOT (` is the only
+      # way to exclude a disjunction (`-` negates a TERM, not a GROUP) and it had no discovery
+      # at all. Appended HERE and not in the backend — `QuerySuggest` is a TUI module, and a
+      # parser must not require the view layer. Same seam `InterceptView` uses.
+      QuerySuggest.with_operators(Issues::Filter.suggestions(@query, @qcx, host_pool),
+        FilterAst.token_at(@query, @qcx))
+    end
+
+    # Distinct hosts for `host:` completion. `@all`, not `@issues`: completing off the
+    # FILTERED list would offer only the hosts the half-typed query already matches, so
+    # narrowing a filter would shrink its own vocabulary. Memoised because `render_suggestions`
+    # runs on the draw path; `reload` is the only thing that moves `@all`, and it clears this.
+    private def host_pool : Array(String)
+      pool = @host_pool
+      return pool if pool
+      seen = Set(String).new
+      @all.each do |f|
+        h = f.host
+        seen << h if h && !h.empty?
+      end
+      @host_pool = seen.to_a.sort!
     end
 
     # IME composing text for the filter bar (underlined, doesn't touch @query).
@@ -264,19 +441,27 @@ module Gori::Tui
       @preedit_q = text
     end
 
-    # Tab-complete the field name under the cursor (severity:/status:/host:/title:).
-    def query_complete : Bool
-      # The trailing run of non-whitespace right at the cursor — "" when the prefix
-      # ends in a space (don't complete; `split.last` would grab a non-adjacent word
-      # and the slice below would mangle the query).
-      token = @query[0, @qcx][/\S*\z/]
-      return false if token.empty? || token.includes?(':')
-      if field = QUERY_FIELDS.find(&.starts_with?(token.downcase))
-        @query = "#{@query[0, @qcx - token.size]}#{field}#{@query[@qcx..]}"
-        @qcx += field.size - token.size
-        return true
-      end
-      false
+    # Complete the token under the cursor to the SELECTED candidate (dropdown open) or the
+    # first (closed). `close` is ↵'s — see `HistoryView#query_complete` for why ↵ must shut
+    # the popup.
+    #
+    # Splices over `FilterAst::Cursor`'s span rather than a `[/\S*\z/]` trailing run. Three
+    # things the old tokenizer could not do: complete a NEGATED or grouped field (`-sev` lexes
+    # as one word, so `"severity:".starts_with?("-sev")` was false and nothing was offered),
+    # complete a VALUE (it bailed on any `:`), and see the text to the RIGHT of the caret.
+    def query_complete(close : Bool = false) : Bool
+      sugg = query_suggestions
+      pick = @popup.choice(sugg)
+      return false unless pick
+      cur = FilterAst.token_at(@query, @qcx)
+      @query = "#{@query[0, cur.start]}#{pick}#{@query[cur.stop..]}"
+      @qcx = cur.start + pick.size
+      # Completing consumes the choice: the token is whole now, so the old candidate set is
+      # stale. Re-derive it (a field completion opens a value list) and let `set` close the
+      # popup if that leaves nothing.
+      close ? popup_close : sync_popup
+      apply_filter
+      true
     end
 
     def open_detail(store : Store) : Bool
@@ -367,6 +552,9 @@ module Gori::Tui
 
     # Max link rows shown in the detail pane (the rest scroll).
     LINKS_VISIBLE = 4
+
+    # Rows the last RELATED frame drew — see `links_visible_rows`.
+    @links_last_h = LINKS_VISIBLE
 
     # The hidden `]`/`[` one-step cycle. Returns whether the write COMMITTED, like the
     # picker path (`Runner#apply_issue_choice`) and `delete_ids` beside it — an
@@ -800,6 +988,9 @@ module Gori::Tui
         @preview_focus = :list if preview_rect.nil?
         render_list(screen, list_rect, focused && @preview_focus == :list)
         render_preview_pane(screen, preview_rect, focused) if preview_rect
+        # LAST: the dropdown is the only thing allowed to occlude the list, so it has to be
+        # painted over both panes rather than inside `render_list`.
+        render_query_popup(screen, list_rect)
       end
     end
 
@@ -813,11 +1004,25 @@ module Gori::Tui
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       render_filter_bar(screen, rect)
-      screen.text(rect.x + 1, rect.y + 1, "SEV", Theme.muted)
-      screen.text(rect.x + 6, rect.y + 1, "ST", Theme.muted)
-      screen.text(rect.x + 11, rect.y + 1, "TITLE", Theme.muted)
-      Frame.inner_divider(screen, rect, rect.y + 2, border: Frame.pane_border(focused))
-      top = rect.y + 3
+      # The suggestion row exists only while the bar is being edited, so the column header
+      # and everything under it shift down by one for exactly that state. `list_top` is the
+      # inverse and the hit-tests read it.
+      hdr_y = rect.y + 1
+      if @querying
+        render_suggestions(screen, rect, hdr_y)
+        hdr_y += 1
+      end
+      # Bounds-guarded like Probe's twin: `Screen#text` clips to the SCREEN, not to this pane,
+      # so on a one-row interior the header used to paint over the shell's key hints. The
+      # divider clamps itself (see `Frame.inner_divider`); this row did not.
+      # Contract: `spec/tui/contract_render_bounds_spec.cr`.
+      if hdr_y < rect.bottom
+        screen.text(rect.x + 1, hdr_y, "SEV", Theme.muted)
+        screen.text(rect.x + 6, hdr_y, "ST", Theme.muted)
+        screen.text(rect.x + 11, hdr_y, "TITLE", Theme.muted)
+      end
+      Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
+      top = list_top(rect)
       list_h = {rect.bottom - top, 0}.max
       @list_last_h = list_h
 
@@ -907,8 +1112,15 @@ module Gori::Tui
         TrafficEmptyState.render(screen, list_rect, variant: :issues)
         return
       end
+      # `Screen#text` clips to the SCREEN, not to this pane, so this line owes both bounds
+      # itself. The row guard is what the suggestion row's +1 shift made load-bearing: at
+      # h = 10 or 11 with the bar open, `top` lands past the pane and the message painted over
+      # the shell's key hints. The width has been missing since the message was written — 38
+      # chars overran a 36-column interior at every height.
+      return if top >= rect.bottom
       hint = querying? ? "esc clears the filter" : "/ to edit the filter"
-      screen.text(rect.x + 1, top, "no issues match · #{hint}", Theme.muted)
+      screen.text(rect.x + 1, top, "no issues match · #{hint}", Theme.muted,
+        width: {rect.w - 2, 0}.max)
     end
 
     private def render_preview_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -974,10 +1186,9 @@ module Gori::Tui
     # otherwise the applied query (+ a match count) or a usage hint.
     private def render_filter_bar(screen : Screen, rect : Rect) : Nil
       if @querying
-        prefix = "filter › "
-        screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
-        base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
+        screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
+        base = rect.x + 1 + QUERY_PREFIX.size
+        screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
           colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
             known: QUERY_KNOWN))
         return
@@ -996,8 +1207,44 @@ module Gori::Tui
           Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  cvss:>=7  status:open  status:closed  host:", Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
       end
+    end
+
+    # The completion row under the bar: what ↹ would take, what it MEANS, and what else is on
+    # offer — else the standing hint at a cold start. `Issues::Filter::FIELD_HELP_PROC`, never
+    # the default: `QuerySuggest`'s fallback is `QL::FIELD_HELP`, which would describe this
+    # bar's triage-state `status:` as an HTTP code.
+    private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
+      # This row owes its own vertical bound, like the column header below it: `Screen#text`
+      # clips to the SCREEN, not to this pane, and a 40x9 terminal (`Layout.usable?`'s floor
+      # plus a row) leaves this list a one-row interior — the `↹ …` row landed on the shell's
+      # key-hint line. Contract: `spec/tui/contract_render_bounds_spec.cr`.
+      return if y >= rect.bottom
+      w = {rect.w - 2, 0}.max
+      sugg = query_suggestions
+      unless sugg.empty?
+        QuerySuggest.render(screen, rect.x + 1, y, w, sugg, Issues::Filter::FIELD_HELP_PROC)
+        return
+      end
+      # Nothing to complete. At a cold start (nothing typed, or the caret just past a space)
+      # show the standing hint so the grammar is discoverable from the moment `/` opens; on a
+      # non-empty token that matches nothing stay quiet — the operator is free-texting a word.
+      return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)
+      screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: w)
+    end
+
+    # Anchored under the suggestion row and bounded by the list, which is the only region it
+    # may occlude. Anchored at the START of the query text, not at the token's offset within
+    # it: `Screen#input_line` scrolls its window once the query outgrows the bar, so
+    # `base + token.start` stops being the token's screen column on exactly the long queries
+    # where precision would matter.
+    private def render_query_popup(screen : Screen, rect : Rect) : Nil
+      return unless @querying && @popup.open?
+      top = list_top(rect)
+      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, top - 1, bounds,
+        Issues::Filter::FIELD_HELP_PROC)
     end
 
     # Mark count, drawn right-to-left ending just left of `right_x`; returns the new left
@@ -1061,44 +1308,69 @@ module Gori::Tui
                  end
       screen.text(rect.x + 1, rect.y + 3, evidence, Theme.muted, width: w)
 
-      # y4+ — RELATED links, then NOTES.
-      y = rect.y + 4
-      Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
-      rel_head = "RELATED (#{@detail_resolved.size})"
-      screen.text(rect.x + 1, y + 1, rel_head, Theme.accent, attr: Attribute::Bold)
-      unless notes_insert_mode?
-        links_hint = "space l"
-        screen.text(rect.right - links_hint.size - 1, y + 1, links_hint, Theme.muted)
-      end
-      list_y = y + 2
-      list_h = links_visible_rows
-      @links_scroll = Viewport.clamp_scroll(@links_scroll, list_h, @detail_resolved.size)
+      # y4+ — RELATED and NOTES, two CLOSED sibling cards.
+      #
+      # RELATED used to be an OPEN region — an `inner_divider`, a text heading, then the link
+      # rows — with the closed NOTES card directly beneath it, and an open-ended block above a
+      # closed one reads as containment: NOTES looked like it lived INSIDE RELATED.
+      #
+      # Worse, nothing in that region varied with `@detail_focus`. The divider and gauge took
+      # the pane-level `focused`, the row band took the selected INDEX, and the heading was
+      # unconditional — so `esc` out of NOTES moved focus somewhere with no signal at all, and
+      # on an issue with no links (the shape `n` creates) there was not even a band to notice.
+      # One `Frame.card` whose border reads `@detail_focus` answers both.
+      rel_card, notes_card = detail_split(rect)
+      render_related_card(screen, rel_card, focused && @detail_focus == :links)
+      render_notes_card(screen, notes_card, focused)
+    end
+
+    # The RELATED card. Costs exactly the six rows the divider + heading + `LINKS_VISIBLE`
+    # rows used to: the heading rides the top border, so closing the card is free.
+    private def render_related_card(screen : Screen, card : Rect, active : Bool) : Nil
+      return if card.h < 2 || card.w < 2
+      Frame.card(screen, card, "RELATED", bg: Theme.bg, border: Frame.pane_border(active))
+      # The count and the `space l` affordance share the RIGHT-ALIGNED meta slot instead of
+      # riding the title. Two rules meet here, both `shared_chrome_spec`'s: a hand-placed
+      # `rect.right - hint.size - 1` string is forbidden (`Frame.border_meta` is the slot), and
+      # so is a count inside a card title — it makes the title's width a moving target, which
+      # is what a badge's `min_x` is derived from. The hint half drops while INS owns the
+      # keyboard, exactly as the old inline hint did; the count never does.
+      n = @detail_resolved.size
+      Frame.border_meta(screen, card, "RELATED", notes_insert_mode? ? n.to_s : "#{n} · space l")
+      body = card.inset(1, 1)
+      # The scroll window the NEXT `move_links` measures against — the `@list_last_h`
+      # convention. It has to be the rows this card ACTUALLY drew, not `LINKS_VISIBLE`: a
+      # short pane clamps the card (see `detail_split`), and a viewport wider than the card
+      # would scroll the selection to a row nothing paints.
+      @links_last_h = {body.h, 0}.max
+      return if body.empty?
+      @links_scroll = Viewport.clamp_scroll(@links_scroll, body.h, @detail_resolved.size)
       if @detail_resolved.empty?
-        screen.text(rect.x + 1, list_y, "(none — space l to link History/Repeater/…)", Theme.muted, width: w)
-      else
-        (0...list_h).each do |i|
-          idx = @links_scroll + i
-          break if idx >= @detail_resolved.size
-          res = @detail_resolved[idx]
-          active = idx == @selected_link
-          fg = res.stale? ? Theme.muted : (active ? Theme.text_bright : Theme.text)
-          # The marker column is written on EVERY row and the band is filled behind the
-          # selected one — the shape every other list in gori uses. This list drew the bar
-          # ONLY when active and then pushed the row's text one column right to make room,
-          # so the selected link was both hard to see (no band at all) and visibly out of
-          # line with its neighbours.
-          y = list_y + i
-          bg = active ? Theme.accent_bg : Theme.bg
-          screen.fill(Rect.new(rect.x + 1, y, w, 1), bg) if active
-          screen.cell(rect.x + 1, y, active ? '▎' : ' ', Theme.accent, bg)
-          screen.text(rect.x + 2, y, res.line, fg, bg, width: {w - 1, 1}.max)
-        end
-        Frame.scroll_gauge(screen, Rect.new(rect.x, list_y, rect.w, list_h),
-          @detail_resolved.size, @links_scroll, focused)
+        screen.text(body.x, body.y, "(none — space l to link History/Repeater/…)",
+          Theme.muted, width: body.w)
+        return
       end
-      # NOTES — a real Frame.card (like Decoder INPUT) so INS/READ borders are rounded
-      # and the editor body is inset, never colliding with the outline.
-      card = notes_card_rect(rect)
+      (0...body.h).each do |i|
+        idx = @links_scroll + i
+        break if idx >= @detail_resolved.size
+        res = @detail_resolved[idx]
+        y = body.y + i
+        sel = idx == @selected_link
+        fg = res.stale? ? Theme.muted : (sel ? Theme.text_bright : Theme.text)
+        # Dim band when the pane is not focused, accent when it is — `render_list`'s own
+        # `row_bg` rule. The cursor row used to keep the accent band in both states, which
+        # is the other half of why a focus move in and out of this pane was invisible.
+        bg = sel ? (active ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
+        screen.fill(Rect.new(body.x, y, body.w, 1), bg) if sel
+        screen.cell(body.x, y, sel ? '▎' : ' ', Theme.accent, bg)
+        screen.text(body.x + 1, y, res.line, fg, bg, width: {body.w - 1, 1}.max)
+      end
+      Frame.scroll_gauge(screen, body, @detail_resolved.size, @links_scroll, active)
+    end
+
+    # NOTES — a real Frame.card (like Decoder INPUT) so INS/READ borders are rounded
+    # and the editor body is inset, never colliding with the outline.
+    private def render_notes_card(screen : Screen, card : Rect, focused : Bool) : Nil
       return if card.h < 2
       notes_active = focused && notes_focused?
       ins = focused && notes_insert_mode?
@@ -1117,12 +1389,42 @@ module Gori::Tui
       paint_notes_read_chrome(screen, body, notes_active && !notes_insert_mode?)
     end
 
+    # Rows the detail's meta block owns before the two cards: title, chips, timestamps,
+    # evidence.
+    DETAIL_HEAD_ROWS = 4
+
+    # The RELATED and NOTES rects for a detail interior — ONE derivation, so `render_detail`
+    # and the four hit-tests in `IssuesController` (the NOR/INS chip, click-to-cursor, drag,
+    # double-click) can never disagree about which row a click landed on. `render_detail` and
+    # `notes_card_rect` used to derive the same arithmetic independently, with the controller
+    # reading only the second: move one and not the other and clicks land on the wrong rows
+    # with nothing raising.
+    #
+    # RELATED asks for `LINKS_VISIBLE` rows plus its own frame, which is exactly the six the
+    # divider + heading + rows cost before — so this is row-budget neutral and NOTES keeps
+    # the height it had.
+    #
+    # CLAMPED, not merely floored. `Frame.card` needs two rows for its own frame and the
+    # container may grant fewer than the meta block plus both cards want (a 40x9 terminal is
+    # inside `Layout.usable?`). RELATED gives its rows up first — NOTES is the pane you read
+    # and type in — and both rects stay inside `rect`, which every view owes
+    # `pane_overspill_spec`.
+    def detail_split(rect : Rect) : {Rect, Rect}
+      top = rect.y + DETAIL_HEAD_ROWS
+      avail = {rect.bottom - top, 0}.max
+      # Leave NOTES a frame plus one text row wherever the height allows one at all.
+      rel_h = {LINKS_VISIBLE + 2, {avail - 3, 0}.max}.min
+      # …and never keep a row RELATED cannot draw with. `Frame.card` needs two rows for its
+      # own frame, so a granted `h == 1` paints nothing at all — it just costs NOTES the row.
+      rel_h = 0 if rel_h < 2
+      notes_top = top + rel_h
+      {Rect.new(rect.x, top, rect.w, rel_h),
+       Rect.new(rect.x, notes_top, rect.w, {rect.bottom - notes_top, 0}.max)}
+    end
+
     # Outer NOTES card geometry (full width of the detail pane, under RELATED).
     def notes_card_rect(rect : Rect) : Rect
-      y0 = rect.y + 4
-      list_y = y0 + 2
-      top = list_y + links_visible_rows # immediately under the last RELATED row
-      Rect.new(rect.x, top, rect.w, {rect.bottom - top, 0}.max)
+      detail_split(rect)[1]
     end
 
     # Interior of the NOTES card (where TextArea draws) — matches Frame.card inset.
@@ -1220,8 +1522,11 @@ module Gori::Tui
       nil
     end
 
+    # The RELATED scroll window: the rows the last frame drew, floored at 1 so a
+    # never-rendered or fully-clamped card still lets `move_links` step. Written by
+    # `render_related_card`, the same shape `@list_last_h` / `list_page_rows` use.
     private def links_visible_rows : Int32
-      LINKS_VISIBLE
+      {@links_last_h, 1}.max
     end
 
     private def ellipsize(s : String, w : Int32) : String

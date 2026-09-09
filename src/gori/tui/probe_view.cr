@@ -10,6 +10,8 @@ require "../probe"
 require "../probe_query"
 require "./preview_split"
 require "./line_edit"
+require "./query_suggest"
+require "./suggest_popup"
 require "./issue_presentation"
 require "./viewport"
 
@@ -27,7 +29,14 @@ module Gori::Tui
     include PreviewPane
     include IssuePresentation
 
-    QUERY_FIELDS = Probe::Filter::FIELDS
+    # See `IssuesView::QUERY_PREFIX` / `FILTER_HINT` / `QUERY_HINT` — the sibling bar over the
+    # sibling backend, and the same two reasons: the dropdown anchors to the column the query
+    # starts in, and `cold_hint`'s defaults name a `~regex` and `size`/`dur` axes this parser
+    # does not have.
+    QUERY_PREFIX = "filter › "
+    FILTER_HINT  = QuerySuggest.idle_hint("/ filter", Probe::Filter::HINT_FIELDS)
+    QUERY_HINT   = QuerySuggest.cold_hint(Probe::Filter::HINT_FIELDS, help_key: true,
+      regex: false, compare: "severity")
 
     # The bar's field vocabulary — see `IssuesView::QUERY_KNOWN`, the sibling bar over the
     # sibling backend.
@@ -56,6 +65,11 @@ module Gori::Tui
       @qcx = 0
       @preedit_q = ""
       @querying = false
+      # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
+      @popup = SuggestPopup.new
+      # `host:` / `code:` completion pools, rebuilt on reload — see `host_pool`.
+      @host_pool = nil.as(Array(String)?)
+      @code_pool = nil.as(Array(String)?)
       @show_closed = false # default lens: open issues only (triaged ones drop out of view)
       @scope = nil.as(Scope?)
       @pre_scope_empty = false
@@ -102,6 +116,8 @@ module Gori::Tui
     # and slow beats fast and misleading on a triage list.
     def reload(store : Store) : Nil
       @all = store.probe_issues
+      @host_pool = nil
+      @code_pool = nil
       @mode = store.probe_mode
       @tech = scoped_tech(store.probe_tech_rows)
       @custom_desc = Probe.custom_rules(store).to_h { |r| {r.code, r.description} }
@@ -243,12 +259,22 @@ module Gori::Tui
       !@query.blank? || scope_active?
     end
 
-    # Click hit-test: the MODE band (y), filter bar (y+1), header (y+2), divider (y+3),
-    # rows from y+4 — one row deeper than Issues because of the MODE band.
+    # The first FINDING-row screen-y — ONE derivation, so `render_list` and both hit-tests
+    # cannot drift. The MODE band owns `rect.y`, the filter bar `+1`, the suggestion row `+2`
+    # while the bar is being EDITED, then the column header and its divider. One row deeper
+    # than Issues throughout, because of the MODE band. See `IssuesView#list_top`.
+    private def list_top(list_rect : Rect) : Int32
+      hdr_y = list_rect.y + 2
+      hdr_y += 1 if @querying
+      hdr_y + 2 # past the column header and its divider
+    end
+
+    # Click hit-test: maps a click to a finding index, or nil past the last populated row /
+    # outside the list pane.
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       list_rect, _ = list_split(rect)
       return nil if mx < list_rect.x || mx >= list_rect.right
-      top = list_rect.y + 4
+      top = list_top(list_rect)
       list_h = {list_rect.bottom - top, 0}.max
       i = my - top
       return nil if i < 0 || i >= list_h
@@ -262,7 +288,7 @@ module Gori::Tui
     # an offset. See `Frame.scroll_gauge_row`.
     def gauge_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       list_rect, _ = list_split(rect)
-      top = list_rect.y + 4 # the band list_row_at and the gauge draw both measure
+      top = list_top(list_rect) # the band list_row_at and the gauge draw both measure
       Frame.scroll_gauge_row(Rect.new(list_rect.x, top, list_rect.w, {list_rect.bottom - top, 0}.max),
         @issues.size, mx, my)
     end
@@ -282,10 +308,12 @@ module Gori::Tui
 
     def stop_query : Nil
       @querying = false
+      popup_close
     end
 
     def cancel_query : Nil
       @querying = false
+      popup_close
       @query = ""
       @qcx = 0
       @preedit_q = ""
@@ -295,33 +323,113 @@ module Gori::Tui
     def query_insert(ch : Char) : Nil
       @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
       @qcx += 1
-      apply_filter
+      query_edited
     end
 
     def query_backspace : Nil
       return if @qcx == 0
       @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
       @qcx -= 1
-      apply_filter
+      query_edited
     end
 
     def query_move(d : Int32) : Nil
       @qcx = (@qcx + d).clamp(0, @query.size)
+      sync_popup
+    end
+
+    # `QueryBarEdit`'s hook, and the one place an edit to this bar settles — see
+    # `IssuesView#query_edited`, including the older gap it closes: `query_edit` (⌃/⌥←→,
+    # Home/End, Delete, ⌥⌫) reached the base no-op, so a word-delete changed the query and
+    # never re-derived the list.
+    def query_edited : Nil
+      apply_filter
+      sync_popup
+    end
+
+    # A caret move must not re-run the predicate. `QueryBarEdit#query_edit` fires the hook for
+    # EVERY action, so Home, End, ⌥← and ⌥→ re-derived the whole list — and here that is
+    # `apply_filter`, which additionally re-selects `@all` by status, runs `recount` and
+    # applies the scope lens. Same split as `HistoryController`/`SitemapController`.
+    def query_edit(action : Symbol) : Nil
+      @query, @qcx = LineEdit.apply(action, @query, @qcx)
+      LineEdit.mutating?(action) ? query_edited : sync_popup
+    end
+
+    # --- the opt-in completion dropdown (`↓`) ---------------------------------
+
+    def popup_open? : Bool
+      @popup.open?
+    end
+
+    def popup_down : Nil
+      return @popup.move(1) if @popup.open?
+      @popup.set(query_suggestions)
+      @popup.open!
+    end
+
+    def popup_up : Nil
+      @popup.move(-1)
+    end
+
+    def popup_close : Nil
+      @popup.close
+    end
+
+    private def sync_popup : Nil
+      @popup.set(query_suggestions) if @popup.open?
+    end
+
+    def query_suggestions : Array(String)
+      # …then the boolean operators, which no field pool can ever offer: `NOT (` is the only
+      # way to exclude a disjunction (`-` negates a TERM, not a GROUP) and it had no discovery
+      # at all. Appended HERE and not in the backend — `QuerySuggest` is a TUI module, and a
+      # parser must not require the view layer. Same seam `InterceptView` uses.
+      QuerySuggest.with_operators(Probe::Filter.suggestions(@query, @qcx, host_pool, code_pool),
+        FilterAst.token_at(@query, @qcx))
+    end
+
+    # `@all`, not `@issues`: completing off the FILTERED list would offer only the values the
+    # half-typed query already matches. Memoised because `render_suggestions` runs on the draw
+    # path, and cleared by `reload`, the only thing that moves `@all`.
+    private def host_pool : Array(String)
+      pool = @host_pool
+      return pool if pool
+      @host_pool = distinct(&.host)
+    end
+
+    private def code_pool : Array(String)
+      pool = @code_pool
+      return pool if pool
+      @code_pool = distinct(&.code)
+    end
+
+    private def distinct(& : Store::ProbeIssue -> String) : Array(String)
+      seen = Set(String).new
+      @all.each do |i|
+        v = yield i
+        seen << v unless v.empty?
+      end
+      seen.to_a.sort!
     end
 
     def query_set_preedit(text : String) : Nil
       @preedit_q = text
     end
 
-    def query_complete : Bool
-      token = @query[0, @qcx][/\S*\z/]
-      return false if token.empty? || token.includes?(':')
-      if field = QUERY_FIELDS.find(&.starts_with?(token.downcase))
-        @query = "#{@query[0, @qcx - token.size]}#{field}#{@query[@qcx..]}"
-        @qcx += field.size - token.size
-        return true
-      end
-      false
+    # Complete to the SELECTED candidate (dropdown open) or the first (closed) — see
+    # `IssuesView#query_complete` for the three things the old `[/\S*\z/]` tokenizer could
+    # not do (negated fields, values, text right of the caret).
+    def query_complete(close : Bool = false) : Bool
+      sugg = query_suggestions
+      pick = @popup.choice(sugg)
+      return false unless pick
+      cur = FilterAst.token_at(@query, @qcx)
+      @query = "#{@query[0, cur.start]}#{pick}#{@query[cur.stop..]}"
+      @qcx = cur.start + pick.size
+      close ? popup_close : sync_popup
+      apply_filter
+      true
     end
 
     # --- detail / mutations ---------------------------------------------------
@@ -509,25 +617,39 @@ module Gori::Tui
         render_list(screen, list_rect, focused && @preview_focus == :list,
           listen: listen, capturing: capturing)
         render_preview_pane(screen, preview_rect, focused) if preview_rect
+        # LAST: the dropdown is the only thing allowed to occlude the list.
+        render_query_popup(screen, list_rect)
       end
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool, *,
                             listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       render_mode_band(screen, rect)
-      render_filter_bar(screen, rect, rect.y + 1)
-      # The column header owns row 2 of the pane, so it exists only once the pane HAS one.
-      # Unguarded, a 40x9 terminal (Layout.usable?'s floor plus a row) gives this list a
-      # one-row interior and `SEV CAT TITLE` was painted on the shell's status line, over the
-      # key hints. The divider below clamps itself (see Frame.inner_divider); this row did not.
-      # Contract: `spec/tui/contract_render_bounds_spec.cr`.
-      if rect.h > 2
-        screen.text(rect.x + 1, rect.y + 2, "SEV", Theme.muted)
-        screen.text(rect.x + 7, rect.y + 2, "CAT", Theme.muted)
-        screen.text(rect.x + 14, rect.y + 2, "TITLE", Theme.muted)
+      # Row-guarded like every row below it. The MODE band owns `rect.y` here, so the bar sits
+      # one row in and a one-row rect has nowhere to put it — `Screen#text` clips to the
+      # SCREEN, not to this pane, so an unguarded call paints outside. (Issues' bar owns
+      # `rect.y` itself and needs no guard.)
+      render_filter_bar(screen, rect, rect.y + 1) if rect.y + 1 < rect.bottom
+      # The suggestion row exists only while the bar is being edited, so the column header and
+      # everything under it shift down by one for exactly that state. `list_top` is the
+      # inverse and the hit-tests read it.
+      hdr_y = rect.y + 2
+      if @querying
+        render_suggestions(screen, rect, hdr_y)
+        hdr_y += 1
       end
-      Frame.inner_divider(screen, rect, rect.y + 3, border: Frame.pane_border(focused))
-      top = rect.y + 4
+      # The column header exists only once the pane HAS that row. Unguarded, a 40x9 terminal
+      # (Layout.usable?'s floor plus a row) gives this list a one-row interior and
+      # `SEV CAT TITLE` was painted on the shell's status line, over the key hints. The
+      # divider below clamps itself (see Frame.inner_divider); this row did not.
+      # Contract: `spec/tui/contract_render_bounds_spec.cr`.
+      if hdr_y < rect.bottom
+        screen.text(rect.x + 1, hdr_y, "SEV", Theme.muted)
+        screen.text(rect.x + 7, hdr_y, "CAT", Theme.muted)
+        screen.text(rect.x + 14, hdr_y, "TITLE", Theme.muted)
+      end
+      Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
+      top = list_top(rect)
       list_h = {rect.bottom - top, 0}.max
       @list_last_h = list_h
       return render_empty(screen, rect, top, listen: listen, capturing: capturing) if @issues.empty?
@@ -639,13 +761,20 @@ module Gori::Tui
       # is caused by the triage lens or the scope lens, where "esc clears the filter"
       # would mislead. Mirrors HistoryView/SitemapView's ordering.
       list_rect = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+      # No row left for a list means no row for a message about one either — the suggestion
+      # row's +1 shift is what made this load-bearing (at h = 13/14 with the bar open `top`
+      # lands past the pane), and `width:` has been missing on all three since they were
+      # written: the longest overruns a 36-column interior.
+      return if top >= rect.bottom
+      w = {rect.w - 2, 0}.max
       if !@query.blank?
         msg = @querying ? "no issues match · esc clears the filter" : "no issues match · / to edit the filter"
-        screen.text(rect.x + 1, top, msg, Theme.muted)
+        screen.text(rect.x + 1, top, msg, Theme.muted, width: w)
       elsif @pre_scope_empty && !@all.empty? && !@show_closed
-        screen.text(rect.x + 1, top, "no open issues · all #{@all.size} triaged · press a to show closed", Theme.muted)
+        screen.text(rect.x + 1, top, "no open issues · all #{@all.size} triaged · press a to show closed",
+          Theme.muted, width: w)
       elsif scope_active?
-        screen.text(rect.x + 1, top, "no issues in scope · s clears the scope lens", Theme.muted)
+        screen.text(rect.x + 1, top, "no issues in scope · s clears the scope lens", Theme.muted, width: w)
       else
         TrafficEmptyState.render(screen, list_rect, variant: :probe, listen: listen,
           capturing: capturing, scan_on: !@mode.off?,
@@ -729,10 +858,9 @@ module Gori::Tui
 
     private def render_filter_bar(screen : Screen, rect : Rect, y : Int32) : Nil
       if @querying
-        prefix = "filter › "
-        screen.text(rect.x + 1, y, prefix, Theme.accent)
-        base = rect.x + 1 + prefix.size
-        screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
+        screen.text(rect.x + 1, y, QUERY_PREFIX, Theme.accent)
+        base = rect.x + 1 + QUERY_PREFIX.size
+        screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
           colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
             known: QUERY_KNOWN))
         return
@@ -750,8 +878,35 @@ module Gori::Tui
         label = @query.blank? ? "(in-scope only)" : ": #{@query}"
         screen.text(rect.x + 1, y, label, Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, y, "/ filter  ·  severity:  status:open  category:tech  host:", Theme.muted, width: left_w)
+        screen.text(rect.x + 1, y, FILTER_HINT, Theme.muted, width: left_w)
       end
+    end
+
+    # The completion row under the bar — see `IssuesView#render_suggestions`.
+    # `Probe::Filter::FIELD_HELP_PROC`, never the default: `QuerySuggest`'s fallback is
+    # `QL::FIELD_HELP`, which would describe this bar's triage-state `status:` as an HTTP code.
+    private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
+      # This row owes its own vertical bound, like the column header below it: `Screen#text`
+      # clips to the SCREEN, not to this pane, and a 40x9 terminal (`Layout.usable?`'s floor
+      # plus a row) leaves this list a one-row interior — the `↹ …` row landed on the shell's
+      # key-hint line. Contract: `spec/tui/contract_render_bounds_spec.cr`.
+      return if y >= rect.bottom
+      w = {rect.w - 2, 0}.max
+      sugg = query_suggestions
+      unless sugg.empty?
+        QuerySuggest.render(screen, rect.x + 1, y, w, sugg, Probe::Filter::FIELD_HELP_PROC)
+        return
+      end
+      return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)
+      screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: w)
+    end
+
+    private def render_query_popup(screen : Screen, rect : Rect) : Nil
+      return unless @querying && @popup.open?
+      top = list_top(rect)
+      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, top - 1, bounds,
+        Probe::Filter::FIELD_HELP_PROC)
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil

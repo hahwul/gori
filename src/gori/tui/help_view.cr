@@ -668,17 +668,26 @@ module Gori::Tui
     # comment says it was merged-not-copied to prevent — a reference stating the opposite of what
     # the bar under it will do. Aliases are filtered to targets that survive `fields` for the
     # same reason: `res.header:` is not "also accepted" where `resp.header:` does not exist.
+    # `syntax`, `caveats` and `regex` are the parts of this page that are true of QL and not
+    # of every backend that borrows the grammar. Defaulted to QL's, because the store-backed
+    # surfaces are QL — but `Issues::Filter` and `Probe::Filter` refuse `~` outright and have
+    # no `size`/`dur`/`req.`/`resp.` axes at all, so handing them QL's lists would print a
+    # reference page for a language they do not speak. Same correction, and the same reason,
+    # as `QuerySuggest.cold_hint`'s.
     def self.query_rows(fields : Array(String) = QL::FIELDS,
                         help : Proc(String, String?) = QL_FIELD_HELP,
-                        aliases : Hash(String, String) = QL::FIELD_ALIASES) : Array(Row)
+                        aliases : Hash(String, String) = QL::FIELD_ALIASES,
+                        syntax : Array({String, String}) = QL::SYNTAX_HELP,
+                        caveats : Array({String, String}) = QL::CAVEATS,
+                        regex : Bool = true) : Array(Row)
       rows = [] of Row
       rows << Row.new(:head, "SYNTAX", "")
-      QL::SYNTAX_HELP.each { |(example, meaning)| rows << Row.new(:item, example, meaning) }
+      syntax.each { |(example, meaning)| rows << Row.new(:item, example, meaning) }
 
       # Fields in `FIELDS` order — the order completion offers them, so the page and the Tab key
       # agree about what comes first.
       rows << Row.new(:gap, "", "")
-      rows << Row.new(:head, "FIELDS  (: matches, ~ is regex)", "")
+      rows << Row.new(:head, regex ? "FIELDS  (: matches, ~ is regex)" : "FIELDS  (: matches — substring or ordinal)", "")
       fields.each do |name|
         rows << Row.new(:item, "#{name}:", help.call(name) || "")
       end
@@ -694,7 +703,7 @@ module Gori::Tui
 
       rows << Row.new(:gap, "", "")
       rows << Row.new(:head, "WORTH KNOWING", "")
-      QL::CAVEATS.each { |(what, why)| rows << Row.new(:item, what, why) }
+      caveats.each { |(what, why)| rows << Row.new(:item, what, why) }
       rows
     end
 
