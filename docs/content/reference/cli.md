@@ -308,6 +308,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 ```bash
 gori run repeater create --target https://api.example.com --request-file req.txt --name "login probe"
 gori run repeater create --flow 42 --name "clone of 42"
+generate-request | gori run repeater create --target https://api.example.com --request-stdin
 ```
 
 | Option | Description |
@@ -315,6 +316,7 @@ gori run repeater create --flow 42 --name "clone of 42"
 | `-t`, `--target=URL` | Target URL (required unless cloned from `--flow`) |
 | `-f`, `--request-file=FILE` | Read the raw HTTP request from FILE |
 | `-r`, `--request-raw=RAW` | Verbatim raw HTTP request string |
+| `--request-stdin` | Read the raw HTTP request from stdin, byte-for-byte, as `--request-file` reads a file. Keeps a large or binary-derived request out of the argument vector, so it stays out of the process listing and cannot hit the command-line length limit |
 | `--flow=ID` | Clone request / target / HTTP/2 from a captured flow |
 | `--name=NAME`, `--tags=TAGS` | Custom tab name, and free-text tags that become the TUI subtab label |
 | `--http2` / `--http1` (`--no-http2`) | Pick a protocol; `--http1` overrides an h2-captured `--flow` |

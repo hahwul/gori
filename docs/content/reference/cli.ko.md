@@ -308,6 +308,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 ```bash
 gori run repeater create --target https://api.example.com --request-file req.txt --name "login probe"
 gori run repeater create --flow 42 --name "clone of 42"
+generate-request | gori run repeater create --target https://api.example.com --request-stdin
 ```
 
 | Option | Description |
@@ -315,6 +316,7 @@ gori run repeater create --flow 42 --name "clone of 42"
 | `-t`, `--target=URL` | 대상 URL (`--flow`로 복제하는 경우가 아니면 필수) |
 | `-f`, `--request-file=FILE` | FILE에서 원시 HTTP 요청을 읽음 |
 | `-r`, `--request-raw=RAW` | 원시 HTTP 요청 문자열 그대로 |
+| `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 크거나 바이너리에서 파생된 요청을 인자 벡터 밖에 두므로 프로세스 목록에 남지 않고 명령줄 길이 제한에도 걸리지 않습니다 |
 | `--flow=ID` | 캡처한 플로우에서 요청 / 대상 / HTTP/2 복제 |
 | `--name=NAME`, `--tags=TAGS` | 사용자 지정 탭 이름, 그리고 TUI 하위 탭 라벨이 되는 자유 텍스트 태그 |
 | `--http2` / `--http1` (`--no-http2`) | 프로토콜 선택. `--http1`은 h2로 캡처된 `--flow`를 덮어씁니다 |

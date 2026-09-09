@@ -429,12 +429,77 @@ module Gori
         ok
       end
 
+      # The request sources `repeater create` accepts, in the parser's order, filtered to the
+      # ones actually given. ONE list, read by both the mutual-exclusion gate below and the
+      # `--flow` seeding test in `cmd_repeater_create`: the two questions are "how many
+      # sources?" and "was there one at all?", and asking them of separately maintained
+      # expressions is how a source gets refused in one place and silently overwritten in
+      # the other. `--flow` is deliberately NOT on this list — it doubles as provenance for a
+      # hand-authored request, so `--flow 42 --request-stdin` is a legitimate pair.
+      private def self.request_sources(*, file : String?, raw : String?,
+                                       stdin : Bool) : Array(String)
+        sources = [] of String
+        sources << "--request-file" if file
+        sources << "--request-raw" if raw
+        sources << "--request-stdin" if stdin
+        sources
+      end
+
+      # nil when the options name exactly one request source (or none, with `--flow` standing
+      # in for it); the sentence to `abort` with otherwise. `abort` is not spec-able, which is
+      # why the decision and the message are a function.
+      #
+      # The over-specified half is not new: the branch that reads the request is an
+      # `if/elsif` chain, so `--request-file a.txt --request-raw 'GET / HTTP/1.1'` stored the
+      # FILE and never mentioned the string. Two sources cannot both be the request, and
+      # picking one by parser order is a guess made silently.
+      private def self.request_source_error(*, file : String?, raw : String?, stdin : Bool,
+                                            flow : Bool) : String?
+        given = request_sources(file: file, raw: raw, stdin: stdin)
+        if given.size > 1
+          return "gori run repeater create: #{given.join(", ")} cannot be combined — pick one request source"
+        end
+        if given.empty? && !flow
+          return "gori run repeater create: either --request-file, --request-raw, --request-stdin, or --flow is required"
+        end
+        nil
+      end
+
+      # `--request-stdin`: the request bytes, verbatim. Byte-for-byte what
+      # `read_input_file` returns for the same content in a file — `IO#gets_to_end` and
+      # `File.read` are both an `IO.copy` into a `String::Builder`, so CRLF line endings stay
+      # CRLF and a body that is not valid UTF-8 (protobuf, a gzip'd POST, a latin-1 field)
+      # arrives as its own octets. That is the issue's requirement and P7 besides: these are
+      # operator bytes, and gori does not sanitize the payload.
+      #
+      # No `STDIN.tty?` guard, unlike `fuzz_source`/`mine_source`/`sequence_source`. Their
+      # stdin road is IMPLICIT — the fallback when no source flag was passed — so without the
+      # guard a bare `gori run mine` would hang on a terminal. This flag was named by the
+      # operator, so blocking until EOF is the answer to what they asked for (and an
+      # interactive paste ending in ^D is a real use).
+      #
+      # nil when the pipe was EMPTY, which the caller refuses — and only here:
+      # `generator | gori run repeater create --request-stdin` with a generator that died
+      # writes nothing and says nothing, and the session created from it would hold an empty
+      # request under a clean "session #N created successfully." An empty `--request-raw ''`
+      # or an empty file is in front of the operator; a dead pipe is not. `io` is a parameter,
+      # and the emptiness is a return value rather than an `abort` in here, so both halves
+      # are readable from a spec without the process's own stdin.
+      private def self.read_request_stdin(io : IO) : String?
+        # `.empty?`, not `.presence`/`blank?`: EMPTY is a dead upstream, whereas a pipe that
+        # yielded only whitespace yielded octets, and which octets frame a request is not
+        # this door's call to make (P7).
+        raw = io.gets_to_end
+        raw.empty? ? nil : raw
+      end
+
       private def self.cmd_repeater_create(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         target : String? = nil
         request_file : String? = nil
         request_raw : String? = nil
+        request_stdin = false
         name : String? = nil
         tags : String? = nil
         http2 = false
@@ -454,6 +519,7 @@ module Gori
           p.on("-tURL", "--target=URL", "Target URL (scheme://host[:port])") { |v| target = v }
           p.on("-fFILE", "--request-file=FILE", "Read raw HTTP request from FILE") { |v| request_file = v }
           p.on("-rRAW", "--request-raw=RAW", "Verbatim raw HTTP request string") { |v| request_raw = v }
+          p.on("--request-stdin", "Read the raw HTTP request from stdin, byte-for-byte, as --request-file reads a file (`generator | gori run repeater create --target … --request-stdin`). Keeps a large or binary-derived request out of the argument vector, so it is not in the process listing and cannot hit the command-line length limit") { request_stdin = true }
           p.on("--name=NAME", "Custom repeater tab name") { |v| name = v }
           p.on("--tags=TAGS", "Free-text tags for grouping tabs (the TUI subtab label)") { |v| tags = v }
           p.on("--http2", "Use HTTP/2 (default: false, or how --flow was captured)") { http2 = true; http2_given = true }
@@ -477,17 +543,31 @@ module Gori
         # pass through a flag, and creating the session WITHOUT it left a row whose request
         # was not the one they typed — reported as a clean "session #N created".
         parse_no_positionals(parser, args, "gori run repeater create",
-          "pass the request via --request-file/--request-raw/--flow and the origin via --target")
+          "pass the request via --request-file/--request-raw/--request-stdin/--flow and the origin via --target")
+
+        # BEFORE the read, deliberately: `--request-file f --request-stdin` has to report the
+        # conflict, not block on a terminal while it waits for a pipe the operator never opened.
+        if err = request_source_error(file: request_file, raw: request_raw,
+             stdin: request_stdin, flow: !flow_id.nil?)
+          abort err
+        end
+
+        # ONE read of the source list, shared by the gate above and the `--flow` seeding
+        # below, so the two can never disagree about whether a request was handed in.
+        authored = !request_sources(file: request_file, raw: request_raw,
+          stdin: request_stdin).empty?
 
         req_content = ""
         if file = request_file
           req_content = read_input_file(file, "gori run repeater create")
         elsif raw = request_raw
           req_content = raw
-        else
-          if flow_id.nil?
-            abort "gori run repeater create: either --request-file, --request-raw, or --flow is required"
-          end
+        elsif request_stdin
+          # Read here, before `open_store`: a pipe that never ends must not be holding the
+          # project's shared open-lock while it waits (`Store.open` → `<db>.open.lock`).
+          piped = read_request_stdin(STDIN)
+          abort "gori run repeater create: --request-stdin read an empty request from stdin" if piped.nil?
+          req_content = piped
         end
 
         project = resolve_read_project(project_name, db_path)
@@ -509,9 +589,12 @@ module Gori
             built = Repeater::FlowRequest.build(detail, rewrite_absolute_form: !keep_request_line)
             warn_request_line_rewrite(built, "gori run repeater create")
             # Only seed the request from the flow when the user didn't hand one in: --flow
-            # doubles as provenance (the flow_id column) for a custom --request-raw/-file,
+            # doubles as provenance (the flow_id column) for a custom --request-raw/-file/-stdin,
             # so an explicit request must NOT be silently overwritten by the flow's bytes.
-            req_content = String.new(built.bytes) if request_file.nil? && request_raw.nil?
+            # `authored` and not a hand-written chain of `.nil?`s — the list of sources is one
+            # thing, and the gate above and this test have to read the same one or a fourth
+            # source arrives here already overwritten.
+            req_content = String.new(built.bytes) unless authored
             if tgt_str.empty?
               bt = built.target
               tgt_str = bt ? bt : ""
@@ -1537,7 +1620,7 @@ module Gori
           p.banner = "Usage: gori run repeater <flow-id> [options]\n\n" \
                      "Re-send a captured flow. Or manage repeater sessions:\n" \
                      "  gori run repeater list                List repeater sessions in the workbench\n" \
-                     "  gori run repeater create [options]    Create a repeater session (--flow/--request-file/--request-raw)\n" \
+                     "  gori run repeater create [options]    Create a repeater session (--flow/--request-file/--request-raw/--request-stdin)\n" \
                      "  gori run repeater send <id> [opts]    Replay a saved repeater SESSION (not a flow id)\n" \
                      "  gori run repeater h2 [options]        Send a field-native HTTP/2 request (--target/--fields)\n\n" \
                      "Options (single-flow replay):"
