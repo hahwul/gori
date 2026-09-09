@@ -31,8 +31,14 @@ abstract class Gori::Verb::ExecContext
   abstract def probe_active_selected : Nil      # active-scan History's selected (or open) flow
   abstract def probe_active_rescan : Nil        # re-active-scan the selected Probe issue's sample flow
   abstract def probe_active_from_repeater : Nil # active-scan the current Repeater session's last send
-  # A Probe issue's detail is open — the gate for the AFFECTED URLS list's read verbs.
+  # A Probe issue's detail is open — the gate for its read panes' verbs. TRUE for either
+  # pane: `x`/`v`/`S`/`y` act on whichever holds focus.
   abstract def probe_detail_readable? : Bool
+
+  # …and narrower: an AFFECTED URL sits under the caret. The detail's other pane holds
+  # remediation prose with no URL in it, so `probe.open-affected` has nothing to open
+  # while DESCRIPTION has focus and must not offer itself in the space menu there.
+  abstract def probe_affected_selected? : Bool
 
   # The issue LIST is in front (no detail open) and an issue is under the cursor.
   abstract def probe_issue_selected? : Bool

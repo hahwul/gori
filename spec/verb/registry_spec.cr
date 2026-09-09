@@ -1581,6 +1581,10 @@ private class FakeContext < ExecContext
     false
   end
 
+  def probe_affected_selected? : Bool
+    probe_detail_readable?
+  end
+
   def sequencer_analysis_readable? : Bool
     false
   end

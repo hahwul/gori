@@ -303,6 +303,36 @@ module Gori::Tui
       layout_of(0, @last_cw).row_of(@cursor.cx) == 0
     end
 
+    # …and the other end: the test a controller uses to decide whether ↓ should leave for the
+    # pane BELOW. `at_top?`'s mirror, and it owes the same wrap correction — a caret on the
+    # last logical line but three visual rows short of its end still has rows under it here.
+    #
+    # It does NOT test `@scroll`, which is the asymmetry with `at_top?` and is deliberate: the
+    # top edge is reached by scrolling to it, but a pane shorter than its viewport never
+    # scrolls at all, so a bottom test gated on the scroll offset would answer false forever
+    # on exactly the short content this is asked about. The caret's position is the whole
+    # question; `ensure_visible` guarantees the window follows it.
+    #
+    # An EMPTY pane answers true — the same choice `IssuesView#links_at_bottom?` makes, since a
+    # pane with no rows has no caret to move and the key must not become a no-op. It needs no
+    # arm of its own: `@size == 0` puts `last` at -1, which any caret clears, and `wrapping?`
+    # is already false without content. `spec/tui/read_pane_wrap_spec.cr` pins the answer so
+    # this stays true if either changes.
+    # `visual` is the half `at_top?` never needed a switch for, and it must match how the
+    # CALLER'S ↓ steps. A pane whose ↓ is `move` walks visual rows, so its bottom edge is the
+    # last row of the last line (`visual: true`). A pane whose ↓ is `goto_line` — Probe's
+    # AFFECTED URLS, where one row is one URL and the wrapped remainder is the same entry —
+    # steps LOGICAL lines, and asking the visual question there answers false on a wrapped
+    # last URL forever: `goto_line` has clamped, so the caret cannot advance, and the visual
+    # test says there is still somewhere to go. The key does nothing at all.
+    def at_bottom?(visual : Bool = true) : Bool
+      last = @size - 1
+      return false unless @cursor.cy >= last
+      return true unless visual && wrapping?
+      lay = layout_of(last, @last_cw)
+      lay.row_of(@cursor.cx) >= lay.rows - 1
+    end
+
     # --- mouse ----------------------------------------------------------------
 
     # Place the caret at (mx, my) inside `rect` — the SAME rect `render` was given.

@@ -46,6 +46,7 @@ module Gori::Tui
     # it must not overwrite, so the two would otherwise be a literal repeated at the two sites
     # that must agree.
     AFFECTED_TITLE = "AFFECTED URLS"
+    DESC_TITLE     = "DESCRIPTION"
 
     getter query : String
     getter mode : Probe::Mode
@@ -66,6 +67,17 @@ module Gori::Tui
       # Soft wrap: these rows are URLs, and a URL long enough to matter is exactly the one the
       # right edge used to eat.
       @affected = ReadPane.new(wrap: true)
+      # The DESCRIPTION pane — the rule's remediation text, which used to be a single row of
+      # the meta block and was therefore never READ: `Probe.remediation` writes a sentence, the
+      # row gave it one line of a ~76-column pane, and every rule but the tersest ended in `…`.
+      # A `ReadPane`, not a `TextArea`: it is generated text, so the pane must take focus and
+      # a selection (that is what makes `y` and the space menu's copy reach it) without ever
+      # taking an edit.
+      @desc = ReadPane.new(wrap: true)
+      # What `@desc` was last sourced with — see `sync_desc`.
+      @desc_text = ""
+      # Which detail pane the keyboard and the read verbs address. See `DETAIL_PANES`.
+      @detail_focus = :affected
       @query = ""
       @qcx = 0
       @preedit_q = ""
@@ -445,18 +457,83 @@ module Gori::Tui
       @detail = issue
       @detail_flow = issue.sample_flow_id.try { |fid| store.flow_row(fid) }
       @affected.reset
+      @desc.reset
+      @desc_text = ""
+      # Every drill-in arrives on its first pane. The ring survives nothing else: a detail
+      # closed with DESCRIPTION focused would otherwise reopen on another finding's remediation
+      # text, with the URL list — the reason the detail was opened — silently not taking keys.
+      @detail_focus = :affected
       true
     end
 
     def close_detail : Nil
       @detail = nil
       @affected.reset
+      @desc.reset
+      @desc_text = ""
+      @detail_focus = :affected
     end
 
-    # ↑/↓ (⇧ to select) walk the AFFECTED URLS; the wheel scrolls the viewport and leaves the
+    # --- the detail's pane ring ------------------------------------------------
+    # Top to bottom, the shape every multi-pane view in the tree uses
+    # (`IssuesView::DETAIL_PANES` is the sibling copy).
+
+    DETAIL_PANES = [:affected, :desc]
+
+    getter detail_focus : Symbol
+
+    def focus_affected! : Nil
+      @detail_focus = :affected
+    end
+
+    def focus_desc! : Nil
+      @detail_focus = :desc
+    end
+
+    def desc_focused? : Bool
+      @detail_focus == :desc
+    end
+
+    # ⇥ / ⇧⇥ inside an open detail. WRAPS, and always answers true, rather than returning false
+    # at the ends like a list-page ring does — false is how a view hands focus to the TAB BAR,
+    # and `handle_body_key`'s detail arm is gated on body focus, so the end of the ring would
+    # be a fully-drawn detail with a dead keyboard. See `IssuesView#step_detail_focus`, which
+    # this is the second copy of; `pane_advance` used to swallow ⇥ outright here because there
+    # was only one pane for it to reach.
+    def step_detail_focus(dir : Int32) : Bool
+      i = DETAIL_PANES.index(@detail_focus) || 0
+      @detail_focus = DETAIL_PANES[(i + dir) % DETAIL_PANES.size]
+      true
+    end
+
+    # The pane the keyboard and the read verbs address. ONE accessor, so a verb, a key and a
+    # click can never disagree about which pane they are acting on.
+    private def pane : ReadPane
+      desc_focused? ? @desc : @affected
+    end
+
+    # At the last row of AFFECTED URLS — the edge `↓` hands focus to DESCRIPTION from. An empty
+    # list answers true, so the crossing works on a finding whose stored URL list would not
+    # parse, which is the one shape where the pane has no caret to move at all.
+    def affected_at_bottom? : Bool
+      # `visual: false` — this pane's plain ↓ is `goto_line` (see `detail_move`), so its last
+      # row is the last URL, not the last drawn row of it. With the visual test a finding whose
+      # last affected URL wraps could never be left with ↓ at all: `goto_line` clamps at the
+      # line and the edge test says there is still a row below.
+      @affected.at_bottom?(visual: false)
+    end
+
+    # The DESCRIPTION caret has no row above it — the edge `↑` crosses back to AFFECTED on.
+    # `ReadPane#at_top?` is already visual-row aware, which is what this needs: the pane wraps,
+    # so a caret three rows into a wrapped first line still has rows above it here.
+    def desc_at_top? : Bool
+      @desc.at_top?
+    end
+
+    # ↑/↓ (⇧ to select) walk the FOCUSED pane; the wheel scrolls the viewport and leaves the
     # caret put, the split every read pane in the tree makes.
     def scroll_detail(delta : Int32) : Nil
-      with_affected { @affected.move(delta, 0) }
+      with_panes { pane.move(delta, 0) }
     end
 
     # A plain ↑/↓ steps one URL, not one drawn row. The pane soft-wraps and `ReadPane#move`
@@ -468,102 +545,193 @@ module Gori::Tui
     # ⇧arrows keep `move`'s per-row character selection — that gesture is about text, so it
     # has to be able to land inside a wrapped row. `goto_line` drops the selection, which is
     # what a plain cursor key means everywhere else in the app.
+    # A plain ↑/↓ on the URL list steps one URL, not one drawn row. That pane soft-wraps and
+    # `ReadPane#move` steps VISUAL rows there — right for a body of prose, wrong for a list
+    # whose row is the thing `↵` opens and `y` copies: a 155-character URL on an 80-column pane
+    # took three presses to reach the next entry, and the first two changed nothing about what
+    # those two keys would act on while the hint said "↑/↓ URL".
+    #
+    # DESCRIPTION takes the visual step instead, and that is not an inconsistency: its rows are
+    # not addressable things, they are the wrapped run of one sentence. A logical step there
+    # would leap the whole card in one press and make most of it unreachable.
+    #
+    # ⇧arrows keep `move`'s per-row character selection on both — that gesture is about text,
+    # so it has to be able to land inside a wrapped row. `goto_line` drops the selection, which
+    # is what a plain cursor key means everywhere else in the app.
     def detail_move(delta : Int32, selecting : Bool) : Nil
-      with_affected do
-        if selecting
-          @affected.move(delta, 0, selecting: true)
+      with_panes do
+        p = pane
+        if selecting || desc_focused?
+          p.move(delta, 0, selecting: selecting)
         else
-          @affected.goto_line(@affected.cursor.cy + delta)
+          p.goto_line(p.cursor.cy + delta)
         end
       end
     end
 
     def detail_wheel(delta : Int32) : Nil
-      with_affected { @affected.scroll_view(delta) }
+      with_panes { pane.scroll_view(delta) }
     end
 
     def detail_motion_key(ev : Termisu::Event::Key) : Bool
-      issue = @detail || return false
-      sync_affected(issue)
-      @affected.motion_key(ev)
+      return false unless @detail
+      with_panes { return pane.motion_key(ev) }
+      false
     end
 
     def detail_at_top? : Bool
-      @affected.at_top?
+      pane.at_top?
     end
 
     def detail_select_line : Nil
-      with_affected { @affected.select_line }
+      with_panes { pane.select_line }
     end
 
     def detail_clear_selection : Nil
-      @affected.clear_selection
+      pane.clear_selection
     end
 
     def detail_selection? : Bool
-      !@detail.nil? && @affected.selection?
+      !@detail.nil? && pane.selection?
     end
 
     def detail_copy_text : String
-      issue = @detail || return ""
-      sync_affected(issue)
-      @affected.copy_text
+      return "" unless @detail
+      with_panes { return pane.copy_text }
+      ""
     end
 
     def detail_copy_all : String
-      issue = @detail || return ""
-      sync_affected(issue)
-      @affected.copy_all
+      return "" unless @detail
+      with_panes { return pane.copy_all }
+      ""
     end
 
     # The AFFECTED URL the caret sits on — what `↵` navigates to. One row is one URL (the pane
     # soft-wraps, so a long URL spans several visual rows but stays one LINE), which is why the
     # caret's line index addresses the list directly. nil when no detail is open or the issue
     # has no affected URLs.
+    #
+    # …and nil while DESCRIPTION holds focus, which is what keeps `↵` honest: the verb is
+    # gated on this, so the key that opens a URL in History simply has nothing to open when the
+    # caret is sitting in a paragraph of remediation text.
     def affected_url : String?
       issue = @detail || return nil
+      return nil if desc_focused?
       sync_affected(issue)
       issue.affected[@affected.cursor.cy]?
     end
 
-    # Rows the detail's meta block owns before the AFFECTED card: title, chips, remediation,
-    # detail, evidence. One more than `IssuesView::DETAIL_HEAD_ROWS`, which spends its four on
-    # title, chips, timestamps and a single evidence line — a scanner finding carries a
-    # remediation line as well, and splits its own evidence across two.
-    DETAIL_HEAD_ROWS = 5
-
-    # The AFFECTED card's outer rect — everything under the meta block. ONE derivation, which
-    # `render_detail`, `affected_rect` and through it both pointer hit-tests all read.
+    # Rows the detail's meta block owns before the two cards: title, chips, detail, evidence.
+    # One more than `IssuesView::DETAIL_HEAD_ROWS` because a scanner finding splits its
+    # evidence across two lines where an Issue states one.
     #
-    # It used to be two: `render_detail` walked `rect.y + 5` → divider → heading → list, and
-    # this method wrote out the `+ 7` that lands on, under a comment claiming it was "the
-    # derivation `render_detail` walks". They agreed by arithmetic, not by construction — move
-    # one row in the renderer and every click in the list addresses the wrong URL, silently.
-    # `IssuesView#detail_split` was extracted for exactly this.
-    def affected_card_rect(rect : Rect) : Rect
-      top = rect.y + DETAIL_HEAD_ROWS
-      Rect.new(rect.x, top, rect.w, {rect.bottom - top, 0}.max)
+    # It was FIVE until the remediation text moved into its own pane — that fifth row is the
+    # one this change reclaims.
+    DETAIL_HEAD_ROWS = 4
+
+    # Text rows the DESCRIPTION card asks for. `Probe.remediation` writes one sentence, so
+    # three wrapped rows hold every built-in rule's text on a normal-width pane and the pane
+    # scrolls for the rest (it takes focus and a caret, so a longer custom rule's description
+    # is reachable rather than clipped).
+    #
+    # A FIXED budget, and it is DESCRIPTION that gets it rather than the list — the inverse of
+    # `IssuesView`'s split, on purpose. There the fixed pane is on top; here the flexible one
+    # is, because AFFECTED URLS is the pane an operator navigates and it can hold up to the
+    # store's per-issue cap, while a remediation sentence that was given the leftovers would
+    # leave a mostly-empty card at every height.
+    DESC_VISIBLE = 3
+
+    # The AFFECTED and DESCRIPTION card rects — ONE derivation, which `render_detail`, both
+    # `*_rect` accessors and through them all four pointer hit-tests read.
+    #
+    # This is the guard `IssuesView#detail_split` was extracted for, and Probe had the same
+    # defect: `render_detail` walked `rect.y + 5` → divider → heading → list while
+    # `affected_rect` wrote out the `+ 7` that lands on, under a comment claiming it was "the
+    # derivation `render_detail` walks". They agreed by arithmetic, not by construction — and
+    # adding a second card is exactly the edit that would have broken them apart, putting every
+    # click in the URL list on the wrong row with nothing raising.
+    #
+    # CLAMPED, not merely floored. `Frame.card` needs two rows for its own frame and the
+    # container may grant fewer than both cards want (a 40x9 terminal is inside
+    # `Layout.usable?`). DESCRIPTION gives its rows up first — AFFECTED URLS is the pane that
+    # takes keys and holds the finding's evidence — and both rects stay inside `rect`, which
+    # every view owes `pane_overspill_spec`.
+    def detail_split(rect : Rect) : {Rect, Rect}
+      # CLAMPED to the pane's own bottom, which only bites when the interior is shorter than
+      # the meta block itself (a 40x6 terminal). Unclamped, both cards come back `h == 0` at a
+      # `y` PAST `rect.bottom` — nothing draws, because every draw path bails on `h < 2`, but
+      # a rect positioned outside the pane it belongs to is the shape a later hit-test reads
+      # as real. `pane_overspill_spec` measures painted cells and would never have caught it.
+      top = {rect.y + DETAIL_HEAD_ROWS, rect.bottom}.min
+      avail = {rect.bottom - top, 0}.max
+      # Leave AFFECTED a frame plus one row wherever the height allows one at all.
+      desc_h = {DESC_VISIBLE + 2, {avail - 3, 0}.max}.min
+      # …and never keep a row DESCRIPTION cannot draw with: at `h == 1` `Frame.card` paints
+      # nothing at all, so the row would be spent on neither pane.
+      desc_h = 0 if desc_h < 2
+      aff_h = avail - desc_h
+      {Rect.new(rect.x, top, rect.w, aff_h),
+       Rect.new(rect.x, top + aff_h, rect.w, desc_h)}
     end
 
-    # The AFFECTED list's rect — the card's framed interior, which is what `ReadPane` draws
-    # into and what a click is measured against. nil when the card is too small to hold a row
-    # (`Frame.card` spends two rows and two columns on its own outline).
+    def affected_card_rect(rect : Rect) : Rect
+      detail_split(rect)[0]
+    end
+
+    def desc_card_rect(rect : Rect) : Rect
+      detail_split(rect)[1]
+    end
+
+    # A card's framed interior — what `ReadPane` draws into and what a click is measured
+    # against. nil when the card is too small to hold a row (`Frame.card` spends two rows and
+    # two columns on its own outline).
     def affected_rect(rect : Rect) : Rect?
-      body = affected_card_rect(rect).inset(1, 1)
+      body_of(affected_card_rect(rect))
+    end
+
+    def desc_rect(rect : Rect) : Rect?
+      body_of(desc_card_rect(rect))
+    end
+
+    private def body_of(card : Rect) : Rect?
+      body = card.inset(1, 1)
       body.empty? ? nil : body
     end
 
+    # A press inside either card takes focus AND places that pane's caret — the one gesture,
+    # like clicking a pane in any other multi-pane view. A press on the chrome (the meta block,
+    # a card's own border) is not a miss to be swallowed silently; it just leaves focus where
+    # it was, which is what `nil` here means to the controller.
+    #
+    # `selecting` is the DRAG half, and it deliberately does not re-target: a drag that starts
+    # in AFFECTED and wanders into DESCRIPTION must keep extending the selection it began,
+    # not hand the anchor to the other pane mid-gesture.
+    def detail_pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      aff, desc = detail_split(rect)
+      return :affected if aff.contains?(mx, my)
+      return :desc if desc.contains?(mx, my)
+      nil
+    end
+
     def detail_click(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
-      box = affected_rect(rect) || return
-      with_affected { @affected.click(box, mx, my, selecting) }
+      @detail_focus = detail_pane_at(rect, mx, my) || @detail_focus unless selecting
+      box = focused_pane_rect(rect) || return
+      with_panes { pane.click(box, mx, my, selecting) }
     end
 
     def detail_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
-      box = affected_rect(rect)
-      return false unless box
-      issue = @detail || return false
-      sync_affected(issue)
-      @affected.select_word(box, mx, my)
+      @detail_focus = detail_pane_at(rect, mx, my) || @detail_focus
+      box = focused_pane_rect(rect) || return false
+      return false unless @detail
+      with_panes { return pane.select_word(box, mx, my) }
+      false
+    end
+
+    # The interior of whichever card `@detail_focus` names — the rect the focused pane was
+    # RENDERED into, which is the only one `ReadPane#click` may be measured against.
+    private def focused_pane_rect(rect : Rect) : Rect?
+      desc_focused? ? desc_rect(rect) : affected_rect(rect)
     end
 
     # `c`: one-key dismiss for the targeted issue. open → false-positive (mute), anything
@@ -956,14 +1124,16 @@ module Gori::Tui
         Frame.tag_chip(screen, cx + 1, rect.y + 1, " #{id} ", Theme.muted)
       end
 
-      hint = detail_hint(issue.code)
-      screen.text(rect.x + 1, rect.y + 2, hint, Theme.muted, width: w) unless hint.empty?
+      # The remediation line that used to sit here is now the DESCRIPTION card below, so the
+      # meta block is a row shorter and `DETAIL_HEAD_ROWS` went 5 → 4. It was the one row of
+      # this block holding a SENTENCE rather than a field, and a `width:`-capped row ended
+      # nearly every rule's text in `…`.
       evidence = if issue.evidence
                    "detail   #{issue.evidence}"
                  else
                    "detail   (see affected URLs)"
                  end
-      screen.text(rect.x + 1, rect.y + 3, evidence, Theme.muted, width: w)
+      screen.text(rect.x + 1, rect.y + 2, evidence, Theme.muted, width: w)
       ev = if flow = @detail_flow
              "evidence #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
            elsif fid = issue.sample_flow_id
@@ -973,9 +1143,11 @@ module Gori::Tui
            else
              "evidence (none)"
            end
-      screen.text(rect.x + 1, rect.y + 4, ev, Theme.muted, width: w)
+      screen.text(rect.x + 1, rect.y + 3, ev, Theme.muted, width: w)
 
-      render_affected_card(screen, rect, issue, focused)
+      aff_card, desc_card = detail_split(rect)
+      render_affected_card(screen, aff_card, issue, focused && !desc_focused?)
+      render_desc_card(screen, desc_card, issue, focused && desc_focused?)
     end
 
     # The AFFECTED URLS card — the same correction `IssuesView`'s RELATED card is.
@@ -989,18 +1161,17 @@ module Gori::Tui
     # Row-budget neutral, exactly as the Issues change was: the heading rides the top border
     # and the card's bottom border takes the row that frees, so the list keeps every row it
     # drew before.
-    private def render_affected_card(screen : Screen, rect : Rect, issue : Store::ProbeIssue,
-                                     focused : Bool) : Nil
-      card = affected_card_rect(rect)
+    private def render_affected_card(screen : Screen, card : Rect, issue : Store::ProbeIssue,
+                                     active : Bool) : Nil
       return if card.h < 2 || card.w < 2
-      Frame.card(screen, card, AFFECTED_TITLE, bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, card, AFFECTED_TITLE, bg: Theme.bg, border: Frame.pane_border(active))
       # The count and `seen ×N` move into the right-aligned meta slot rather than riding the
       # title. Both of `shared_chrome_spec`'s rules point here: a count in a card title makes
       # the title's width a moving target, and a hand-placed right-aligned string on a card's
       # top border is `Frame.border_meta`'s job.
       Frame.border_meta(screen, card, AFFECTED_TITLE,
         "#{issue.affected.size} · seen ×#{Fmt.count(issue.hit_count)}")
-      body = affected_rect(rect) || return
+      body = body_of(card) || return
       sync_affected(issue)
       # `parse_affected` answers `[]` for a row whose JSON will not parse, so an empty list is
       # reachable — and `ReadPane` draws nothing at all for one, which left a bordered card
@@ -1009,7 +1180,31 @@ module Gori::Tui
         screen.text(body.x, body.y, "(none recorded)", Theme.muted, width: body.w)
         return
       end
-      @affected.render(screen, body, focused)
+      @affected.render(screen, body, active)
+    end
+
+    # The DESCRIPTION card — the rule's remediation text, which was a single `width:`-capped
+    # row of the meta block and so was never actually readable: `Probe.remediation` writes a
+    # sentence and the row gave it one line, ending all but the tersest in `…`. The text was
+    # in the binary, on screen, and unreadable.
+    #
+    # A pane rather than more meta rows, because a card can take FOCUS: `⇥` reaches it, the
+    # caret moves inside it, ⇧arrows select, and `y` / the space menu's Copy act on it — all of
+    # which `screen.text` could never offer. Read-only throughout; `ReadPane` has no edit path
+    # at all, which is the point rather than a limitation.
+    private def render_desc_card(screen : Screen, card : Rect, issue : Store::ProbeIssue,
+                                 active : Bool) : Nil
+      return if card.h < 2 || card.w < 2
+      Frame.card(screen, card, DESC_TITLE, bg: Theme.bg, border: Frame.pane_border(active))
+      body = body_of(card) || return
+      sync_desc(issue)
+      # A rule with no remediation text is not a bug — some custom rules carry none — but a
+      # bordered card with nothing in it says the pane failed to load. Name the absence.
+      if detail_hint(issue.code).empty?
+        screen.text(body.x, body.y, "(no description)", Theme.muted, width: body.w)
+        return
+      end
+      @desc.render(screen, body, active)
     end
 
     # Point the AFFECTED pane at the open issue's URL list. Cheap and idempotent, so every
@@ -1018,9 +1213,34 @@ module Gori::Tui
       @affected.source(issue.affected)
     end
 
-    private def with_affected(&) : Nil
+    # ONE logical line, not one per wrapped row: the pane soft-wraps, so the sentence stays a
+    # single line the reader's ⇧arrows can select across and `y` copies whole. Splitting it
+    # into visual rows here would put a newline into the clipboard at every wrap point, which
+    # moves with the pane's width.
+    #
+    # Guarded on the text rather than re-sourced unconditionally the way `sync_affected` is,
+    # and the reason is `ReadPane#source`'s own: it drops the pane's wrap memo. This runs on
+    # the draw path AND on every keystroke, and this is the one Probe pane holding prose — the
+    # pane the memo exists for. `sync_affected` re-points at an array it does not rebuild;
+    # this one would re-wrap a paragraph every frame for a string that changes only when the
+    # open finding does.
+    private def sync_desc(issue : Store::ProbeIssue) : Nil
+      text = detail_hint(issue.code)
+      return if @desc_text == text
+      @desc_text = text
+      @desc.source([text])
+    end
+
+    # Points BOTH panes at the open finding before the block runs. Both, not just the focused
+    # one, and that is load-bearing rather than tidy: `detail_selection?` and `detail_copy_text`
+    # are called for whichever pane `@detail_focus` names, and a pane that has never been
+    # sourced answers `empty?` — so a ⇥ into DESCRIPTION followed by `y` would have copied ""
+    # from a pane that was fully drawn on screen. Cheap and idempotent, the same contract
+    # `sync_affected` already carried.
+    private def with_panes(&) : Nil
       issue = @detail || return
       sync_affected(issue)
+      sync_desc(issue)
       yield
     end
 

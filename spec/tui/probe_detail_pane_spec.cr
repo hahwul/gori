@@ -114,15 +114,43 @@ describe "Probe detail — AFFECTED URLS card" do
     end
   end
 
-  it "keeps every row the open region drew" do
+  it "spends no rows on its own frame" do
     detail_store do |store|
       detail(store) do |view|
         _, inner = draw(view)
-        # Row-budget neutral, the same trade the Issues change made: the heading moves onto the
-        # top border and the card's bottom border takes the row that frees. The old region ran
-        # from `inner.y + 7` to the bottom of the pane.
+        # The card itself is row-budget neutral against the open region it replaced — the
+        # heading moved onto the top border and the bottom border took the row that frees, so
+        # the frame is free and the interior is whatever the split granted.
+        #
+        # It is stated against the CARD rather than against `inner.y + 7`, which is what this
+        # example used to pin: that number was the old open region's first row, and it stopped
+        # being the list's the moment DESCRIPTION took the bottom of the pane. Pinning the
+        # absolute row made a spec that failed on a layout change it had no opinion about.
+        card = view.affected_card_rect(inner)
         body = view.affected_rect(inner).not_nil!
-        body.h.should eq(inner.bottom - (inner.y + 7))
+        body.h.should eq(card.h - 2)
+        body.y.should eq(card.y + 1)
+      end
+    end
+  end
+
+  it "gives the list the rows DESCRIPTION does not take" do
+    detail_store do |store|
+      detail(store) do |view|
+        _, inner = draw(view)
+        aff, desc = view.detail_split(inner)
+        # The two cards partition everything under the meta block, with no row falling between
+        # them and none past the pane.
+        aff.y.should eq(inner.y + ProbeView::DETAIL_HEAD_ROWS)
+        desc.y.should eq(aff.bottom)
+        desc.bottom.should eq(inner.bottom)
+        # And the trade is honest, stated in the rows an operator can actually read URLs on —
+        # card INTERIORS, not card heights. The old list ran from `inner.y + 7` (5 meta rows,
+        # a divider, a heading) to the bottom of the pane; the remediation row then left the
+        # meta block, so the list is down only by what DESCRIPTION took, minus that reclaimed
+        # row.
+        old_list_h = inner.bottom - (inner.y + 7)
+        view.affected_rect(inner).not_nil!.h.should eq(old_list_h + 1 - desc.h)
       end
     end
   end

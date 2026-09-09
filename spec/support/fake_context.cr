@@ -330,6 +330,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     @probe_detail_read
   end
 
+  def probe_affected_selected? : Bool
+    probe_detail_readable?
+  end
+
   def sequencer_analysis_readable? : Bool
     @sequencer_analysis
   end

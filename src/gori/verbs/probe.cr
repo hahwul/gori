@@ -145,6 +145,7 @@ module Gori
       r.register Verb::Definition.new(
         "probe.open-affected", "Open affected URL", "Open the flow the highlighted affected URL was captured on",
         Verb::Scope::ProbeDetail, [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")],
+        available: ->(ctx : Verb::ExecContext) { ctx.probe_affected_selected? },
         mnemonic: 'u') { |ctx| ctx.probe_open_affected; nil }
 
       r.register Verb::Definition.new(

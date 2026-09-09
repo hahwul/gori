@@ -190,9 +190,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     probe_controller.rules_custom_selected?
   end
 
-  # A Probe issue's detail is open — the gate for its AFFECTED URLS read verbs.
+  # A Probe issue's detail is open — the gate for its read panes' verbs (either pane).
   def probe_detail_readable? : Bool
     probe_controller.probe_detail_readable?
+  end
+
+  # An AFFECTED URL is under the caret — `probe_affected_url` already answers nil while
+  # DESCRIPTION holds focus, so this reads the same fact `probe_open_affected` acts on rather
+  # than a second one that could disagree with it.
+  def probe_affected_selected? : Bool
+    !probe_controller.probe_affected_url.nil?
   end
 
   def probe_issue_selected? : Bool
