@@ -256,8 +256,10 @@ describe "gori run history — CLI::Output rows" do
   end
 
   # The half the key-set pin cannot see. `Output.iso_time_utc` is a reimplementation of
-  # `Serialize.unix_micros_iso` (CLI::Output deliberately takes no dependency on MCP::), so
-  # nothing but this assertion stops the two from drifting.
+  # `Serialize.unix_micros_iso` — kept on churn grounds, not dependency grounds: `CLI::Output`
+  # took a declared dependency on `MCP::Serialize` in #1002 for the sensitive-header predicate,
+  # so this assertion is now the ONLY thing stopping the two from drifting, and it is the whole
+  # reason the reimplementation is allowed to stand.
   it "renders created_at_iso byte-for-byte the same as the MCP serializer" do
     row = Gori::Store::FlowRow.new(
       id: 1_i64, created_at: 1_700_000_000_123_456_i64, scheme: "https", method: "GET",
@@ -801,6 +803,43 @@ describe "gori run history --format json — sensitive header values" do
     doc["sensitive_headers_redacted"].as_bool.should be_true
   end
 
+  # An obs-fold continuation is part of the field it continues (RFC 9110 §5.2), but
+  # `Codec::Http1.parse_headers` has no fold handling: it splits every colon-bearing line at
+  # its own first colon, so a folded `Cookie` carrying a URL arrived as a SECOND header named
+  # `" redirect=https"` whose value printed in the clear beside `Cookie: [REDACTED]`. Redacting
+  # only the value would not have closed it either — the split put `redirect=https` in the KEY.
+  it "does not leak an obs-fold continuation of a sensitive header, in the key or the value" do
+    folded = ("GET /a HTTP/1.1\r\nHost: h\r\n" \
+              "Cookie: sid=X;\r\n redirect=https://evil/?tok=SECRET\r\n\r\n").to_slice
+    doc = Gori::CLI::Output.flow_row_json(row, folded)
+    doc.should_not contain("SECRET")
+    doc.should_not contain("evil")
+    doc.should_not contain("redirect")
+    headers = JSON.parse(doc)["headers"]
+    # ONE `Cookie`, redacted — not a Cookie plus an invented sibling.
+    headers.as_h.keys.should eq(["Host", "Cookie"])
+    headers["Cookie"].as_s.should eq("[REDACTED]")
+  end
+
+  # The same unfold, without redaction in the way: the continuation joins the field it
+  # continues (one SP, RFC 7230 §3.2.4) instead of becoming a header of its own. Correct
+  # independent of #1002 — this projection used to invent a field the wire never carried.
+  it "joins an obs-fold continuation into the field it continues" do
+    folded = ("GET /a HTTP/1.1\r\nHost: h\r\n" \
+              "X-Trace: a=1;\r\n b=https://x/?q=2\r\n\r\n").to_slice
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, folded))["headers"]
+    headers.as_h.keys.should eq(["Host", "X-Trace"])
+    headers["X-Trace"].as_s.should eq("a=1; b=https://x/?q=2")
+  end
+
+  # A continuation with nothing to continue is malformed. Dropped, not hung on an invented
+  # field — and it must not crash the emitter, which is the whole listing for that run.
+  it "drops a continuation that has no field before it" do
+    orphan = "GET /a HTTP/1.1\r\n oops=https://x/?t=1\r\nHost: h\r\n\r\n".to_slice
+    headers = JSON.parse(Gori::CLI::Output.flow_row_json(row, orphan))["headers"]
+    headers.as_h.keys.should eq(["Host"])
+  end
+
   # The emitter fails closed, so the dangerous direction is safe whatever the call site does.
   # The other direction is not: a `--include-sensitive` that silently changes nothing is a
   # shape this CLI has already shipped twice (`gori run` flag-before-verb, the `--` guards).
@@ -810,9 +849,27 @@ describe "gori run history --format json — sensitive header values" do
   it "forwards the flag from every listing emit site in history.cr" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "history.cr"))
     src.should contain("p.on(\"--include-sensitive\"")
-    calls = src.scan(/CLI::Output\.flow_row_json\([^\n]*/).map(&.[0])
-    calls.empty?.should be_false
-    calls.each { |c| c.should contain("include_sensitive: include_sensitive") }
+    # Three things this guard got wrong the first time, each of which made it green on the
+    # drift it exists to catch:
+    #
+    # 1. It matched `CLI::Output.flow_row_json(`. history.cr is `module Gori::CLI::Run`, so the
+    #    bare `Output.flow_row_json(...)` spelling resolves and compiles — this file already
+    #    writes bare `Output.term_safe(...)` elsewhere. A site written that way scored zero
+    #    matches while the existing qualified call kept the population floor satisfied.
+    # 2. It asserted `include_sensitive: include_sensitive`, pinning a LOCAL's name rather than
+    #    the argument being passed — a future site correctly passing `include_sensitive: true`
+    #    would have failed.
+    # 3. It was line-anchored, and the json branch's call now wraps across lines. Each site's
+    #    window is therefore the call line plus the three after it. Loose on purpose: a drift
+    #    guard that under-matches is worthless, and one that over-matches only ever costs a
+    #    reader looking one line further.
+    lines = src.lines
+    sites = [] of String
+    lines.each_with_index do |l, i|
+      sites << lines[i, 4].join('\n') if l.includes?("Output.flow_row_json(")
+    end
+    sites.empty?.should be_false
+    sites.each(&.should(contain("include_sensitive:")))
   end
 end
 

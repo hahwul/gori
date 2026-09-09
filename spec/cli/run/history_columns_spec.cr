@@ -53,3 +53,75 @@ describe "gori run history — user-defined columns" do
     plain.as_h.has_key?("columns").should be_false
   end
 end
+
+# #1002, the half the `headers` block alone could not fix. This project's CONFIGURED columns
+# are drawn by DEFAULT — `DisplayColumns.load(store)` when no `--column` was passed — so a
+# `req:header:authorization` set once in the TUI's Columns… dialog kept printing the
+# credential on every later `--format json` run, in the same object as the
+# `sensitive_headers_redacted: true` the redacted `headers` block had just asserted. A row
+# cannot both withhold a credential and print it.
+private def col(kind : Gori::ExtractKind, selector : String) : Gori::Store::DisplayColumn
+  Gori::Store::DisplayColumn.new(id: 1_i64, position: 0, label: "C",
+    side: Gori::MessageSide::Request, kind: kind, selector: selector)
+end
+
+describe "gori run history --format json — sensitive History columns" do
+  it "covers a header column whose selector names a sensitive header, in any case" do
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "authorization")).should be_true
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "Authorization")).should be_true
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "SET-COOKIE")).should be_true
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "x-api-key")).should be_true
+  end
+
+  # A named cookie's value is by construction a substring of the `Cookie` header the row
+  # redacts, so covering `header:cookie` and not `cookie:sid` would leave the same credential
+  # printing beside the same `[REDACTED]`.
+  it "covers a cookie column whatever its selector" do
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Cookie, "sid")).should be_true
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Cookie, "theme")).should be_true
+  end
+
+  # The three content-scoped kinds can lift a credential out of any byte of the message and
+  # the descriptor cannot say whether they do. Left alone rather than guessed at — the docs
+  # name them as uncovered instead of implying a guarantee.
+  it "does not claim the content-scoped kinds, nor an ordinary header" do
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "x-request-id")).should be_false
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Regex, "tok=(\\w+)")).should be_false
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::JsonPath, "data.token")).should be_false
+    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Position, "")).should be_false
+  end
+
+  # The marker has to be true for a row whose ONLY redaction was a column: a
+  # `res:header:set-cookie` column reads the RESPONSE, and the `headers` block is
+  # request-only, so the block's own hit count cannot stand in for it.
+  it "marks a row whose only redaction was a column, head or no head" do
+    head = "GET /x HTTP/1.1\r\nHost: h.test\r\nAccept: */*\r\n\r\n".to_slice
+    # `has_key?` before `as_bool`: `JSON::Any#[]` RAISES on a missing key, so asserting the
+    # value directly turns a caught regression into an ERROR rather than a failure — which
+    # reads like a broken spec instead of a broken guarantee.
+    doc = JSON.parse(Gori::CLI::Output.flow_row_json(row, head, [{"C", "[REDACTED]"}],
+      columns_redacted: true)).as_h
+    doc.has_key?("sensitive_headers_redacted").should be_true
+    doc["sensitive_headers_redacted"].as_bool.should be_true
+    # No request head at all — a Pending capture. The marker still has to appear.
+    pending = JSON.parse(Gori::CLI::Output.flow_row_json(row, nil, [{"C", "[REDACTED]"}],
+      columns_redacted: true)).as_h
+    pending.has_key?("sensitive_headers_redacted").should be_true
+    # And stays absent when nothing anywhere was withheld.
+    JSON.parse(Gori::CLI::Output.flow_row_json(row, head, [{"C", "abc-1"}])).as_h
+      .has_key?("sensitive_headers_redacted").should be_false
+  end
+
+  # `row_columns` is private and the command it serves opens a store and writes to STDOUT, so
+  # the APPLICATION of the policy is asserted over the source, like the `--include-sensitive`
+  # wiring guard in history_spec. Both listing branches must state their intent explicitly —
+  # the parameter carries no default precisely so neither can inherit a fail-open one.
+  it "applies the policy in row_columns and makes both listing branches declare intent" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "history.cr"))
+    src.should contain("CLI::Output.sensitive_column?(c)")
+    src.should contain("include_sensitive : Bool) : {Array({String, String}), Bool}?")
+    sites = src.lines.select(&.includes?("row_columns(store, r, prepared"))
+    sites.size.should eq(2)
+    sites.each { |l| l.should match(/row_columns\(store, r, prepared, (include_sensitive|include_sensitive: true)\)/) }
+  end
+end

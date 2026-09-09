@@ -28,8 +28,12 @@ module Gori
       # One JSON object (one line, for JSON-Lines streams) describing a flow row.
       def self.flow_row_json(row : Store::FlowRow, request_head : Bytes? = nil,
                              columns : Array({String, String})? = nil,
-                             *, include_sensitive : Bool = false) : String
-        JSON.build { |j| flow_row_fields(j, row, request_head, columns, include_sensitive: include_sensitive) }
+                             *, include_sensitive : Bool = false,
+                             columns_redacted : Bool = false) : String
+        JSON.build do |j|
+          flow_row_fields(j, row, request_head, columns,
+            include_sensitive: include_sensitive, columns_redacted: columns_redacted)
+        end
       end
 
       # Emits the flow-row fields into an open builder (reused by `show`, which
@@ -49,10 +53,16 @@ module Gori
       # Authorization/Cookie VALUES only when the caller asks for them (#1002). The default
       # is the fail-closed one because the parameter is threaded through existing call sites
       # that predate it, so a caller that never heard of the flag redacts.
+      # `columns_redacted` says whether the CALLER already blanked a sensitive column value
+      # (`sensitive_column?`, applied where the column descriptors are — see
+      # `Run.row_columns`). It only feeds the marker: a `res:header:set-cookie` column can be
+      # the sole redaction on a row whose REQUEST carried nothing sensitive, and the marker
+      # has to be true for that row rather than only for the `headers` block's own hits.
       def self.flow_row_fields(j : JSON::Builder, row : Store::FlowRow,
                                request_head : Bytes? = nil,
                                columns : Array({String, String})? = nil,
-                               *, include_sensitive : Bool = false) : Nil
+                               *, include_sensitive : Bool = false,
+                               columns_redacted : Bool = false) : Nil
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
@@ -101,20 +111,23 @@ module Gori
           unless advisories.empty?
             j.field("advisory") { j.array { advisories.each { |l| j.string(term_safe(l)) } } }
           end
+          redacted = false
           if head = request_head
             # `FlowRow#url` — the ONE definition of a flow's absolute URL (default-port
             # elision, IPv6 bracketing, an absolute-form target passed through). A script
             # re-deriving it from scheme/host/port/target gets exactly those three cases
             # wrong, which is why the field exists at all.
             json_captured(j, "url", row.url)
-            # `sensitive_headers_redacted` only when a value ACTUALLY was — the same
-            # field-presence discipline `advisory`, `headers` and `columns` keep here, and the
-            # reason it matters more on this feed than on a detail object: a `false` on every
-            # row of a JSON-Lines stream is a per-row cost for a fact about the invocation.
-            redacted = false
             j.field("headers") { redacted = request_headers_json(j, head, include_sensitive) }
-            j.field "sensitive_headers_redacted", true if redacted
           end
+          # `sensitive_headers_redacted` only when a value ACTUALLY was — the same
+          # field-presence discipline `advisory`, `headers` and `columns` keep here, and the
+          # reason it matters more on this feed than on a detail object: a `false` on every row
+          # of a JSON-Lines stream is a per-row cost for a fact about the invocation.
+          #
+          # OUTSIDE the head block, because a redacted COLUMN is a redaction whether or not
+          # this row has a request head to show (a Pending capture has none).
+          j.field "sensitive_headers_redacted", true if redacted || columns_redacted
           # User-defined History columns (#819), when the caller asked for any. Emitted only
           # then, so a script keying off field presence is not broken by a field it never asked
           # for — the same discipline `advisory` and `headers` keep here.
@@ -183,8 +196,15 @@ module Gori
         # so one pass gives both wire order and the fold.
         order = [] of String
         by_key = {} of String => Array(String)
+        # The field the next obs-fold continuation belongs to.
+        last_key : String? = nil
         Proxy::Codec::Http1.parse_request_head(head).headers.each do |h|
+          if fold_continuation?(h.name)
+            fold_into(by_key, last_key, h)
+            next
+          end
           key = h.name.downcase
+          last_key = key
           if bucket = by_key[key]?
             bucket << h.value
           else
@@ -195,23 +215,83 @@ module Gori
         redacted = false
         j.object do
           order.each do |name|
-            key = name.downcase
-            values = by_key[key]
-            if !include_sensitive && MCP::Serialize.sensitive_header?(key)
-              redacted = true
-              if values.size == 1
-                j.field name.scrub, "[REDACTED]"
-              else
-                j.field(name.scrub) { j.array { values.size.times { j.string("[REDACTED]") } } }
-              end
-            elsif values.size == 1
-              json_captured(j, name.scrub, values[0])
+            values = by_key[name.downcase]
+            # The redaction decision is per NAME and the single/array split is per VALUE
+            # COUNT, so hoisting the first above the second is what keeps this two branches
+            # instead of the four an inline test produced — the emit was written twice with
+            # only the value expression differing.
+            #
+            # `SENSITIVE_HEADERS` directly rather than `sensitive_header?`, which re-runs
+            # `strip.downcase` on a key this loop already downcased: `String#downcase` always
+            # allocates, and this is a per-header, per-row loop on a streaming listing. The
+            # predicate stays for its un-normalized callers.
+            sensitive = !include_sensitive && MCP::Serialize::SENSITIVE_HEADERS.includes?(name.downcase)
+            redacted ||= sensitive
+            if values.size == 1
+              j.field name.scrub, sensitive ? "[REDACTED]" : values[0].scrub
             else
-              j.field(name.scrub) { j.array { values.each { |v| j.string(v.scrub) } } }
+              j.field(name.scrub) { j.array { values.each { |v| j.string(sensitive ? "[REDACTED]" : v.scrub) } } }
             end
           end
         end
         redacted
+      end
+
+      # Is this parsed header name actually an obs-fold CONTINUATION of the field before it?
+      #
+      # A field line beginning with SP or HTAB is a continuation by definition (RFC 9110 §5.2,
+      # RFC 7230 §3.2.4), and `Codec::Http1.parse_headers` has no fold handling at all: it
+      # splits every colon-bearing line into name/value, so
+      # `Cookie: sid=X` + `\r\n redirect=https://x/?tok=T` arrived here as a SECOND header
+      # literally named `" redirect=https"` with value `"//x/?tok=T"`. That invented field was
+      # not sensitive by name, so its value printed in the clear beside the `Cookie: [REDACTED]`
+      # it was part of — and redacting only the VALUE would not have been enough either,
+      # because the split put `redirect=https` in the KEY. `Serialize.redact_head` states the
+      # rule this path was missing: "An obs-fold continuation of a sensitive field is
+      # sensitive too."
+      #
+      # `name` is unstripped here (parse_headers takes the bytes before the colon verbatim), so
+      # leading whitespace appears if and only if the LINE had it — the signal is exact.
+      private def self.fold_continuation?(name : String) : Bool
+        name.starts_with?(' ') || name.starts_with?('\t')
+      end
+
+      # Join a continuation into the field it continues, per RFC 7230 §3.2.4 (the fold becomes
+      # one SP), instead of emitting it as a field of its own. The colon the parser cut on is
+      # put back, because it was value bytes.
+      #
+      # This closes the colon-bearing case, which is the one that LEAKED — a colonless
+      # continuation never reaches here at all (`parse_headers` keeps only lines with a colon),
+      # so it stays silently dropped from this projection exactly as before. That is a fidelity
+      # gap, not a disclosure: `--include-sensitive` under-reports such a fold, and the
+      # byte-exact channel for it is `gori run show --format raw`. Closing it properly means
+      # teaching the CODEC about obs-fold, which is a change to the canonical parse and not to
+      # a listing.
+      #
+      # Dropped when there is nothing to continue: a head whose first field line is a
+      # continuation is malformed, and inventing a field to hang it on is the bug above.
+      private def self.fold_into(by_key : Hash(String, Array(String)), last_key : String?,
+                                 h : Proxy::Codec::Header) : Nil
+        return unless lk = last_key
+        return unless bucket = by_key[lk]?
+        bucket[-1] = "#{bucket[-1]} #{h.name.strip}:#{h.value}"
+      end
+
+      # Does this History column extract a SENSITIVE header value (#1002)?
+      #
+      # It exists because the project's CONFIGURED columns are drawn by default, with no flag
+      # on the invocation: a `req:header:authorization` set once in the TUI's Columns… dialog
+      # printed its value on every later `--format json` run, in the same object as the
+      # `sensitive_headers_redacted: true` the redacted `headers` block had just asserted. One
+      # row cannot both withhold a credential and print it.
+      #
+      # `cookie:` is covered whatever its selector, because a named cookie's value is by
+      # construction a substring of the `Cookie` header this row redacts. The three
+      # content-scoped kinds (`regex:`, `jsonpath:`, `position:`) are NOT: they can lift a
+      # credential out of any byte of the message and the descriptor cannot say whether they
+      # do, so the docs name them as uncovered rather than implying a guarantee.
+      def self.sensitive_column?(c : Store::DisplayColumn) : Bool
+        c.kind.cookie? || (c.kind.header? && MCP::Serialize.sensitive_header?(c.selector))
       end
 
       # Emit `name` carrying a CAPTURED string, scrubbed to U+FFFD. The JSON counterpart of
@@ -1314,14 +1394,17 @@ module Gori
       # this — the same lockstep-by-spec arrangement `emit_body_json` and
       # `emit_trailers_json` already have with their MCP counterparts.
       #
-      # Reimplemented rather than called: `CLI::Output` has no dependency on `MCP::` and
-      # should not gain one for four lines. The dependency between these two surfaces is
-      # one-way but still UNDECLARED: `cli/run/{intercept,history}.cr` call `MCP::Serialize.*`
-      # with no `require` of their own (they link because `src/gori.cr` pulls in both). That is
-      # the direction DESIGN.md §2.1 already documents and tolerates; the reverse edge — MCP
-      # reaching into `CLI::Output` for the WS shape — is gone, moved onto the model that owns
-      # the data (`Store::WsMessage#emit_shape_json`). Reimplementing here keeps `CLI::Output`
-      # itself free of `MCP::` rather than adding the first such call to this file.
+      # Reimplemented rather than called, and it stays that way on CHURN grounds now rather
+      # than on dependency grounds. This file DOES depend on `MCP::` as of #1002 — see the
+      # declared `require` at the top and `sensitive_header?` in `request_headers_json` — so
+      # the original reasoning ("keeps `CLI::Output` itself free of `MCP::`") no longer holds
+      # and is not worth re-establishing for four lines that are pinned against their
+      # counterpart by spec. The direction is what DESIGN.md §2.1 documents and tolerates
+      # (surface → surface, one-way); `cli/run/{intercept,history}.cr` have called
+      # `MCP::Serialize.*` all along, undeclared, linking because `src/gori.cr` pulls in both.
+      # The reverse edge — MCP reaching into `CLI::Output` for the WS shape — is gone, moved
+      # onto the model that owns the data (`Store::WsMessage#emit_shape_json`), and that is the
+      # part that must stay gone.
       def self.iso_time_utc(micros : Int64) : String
         sec, micro = micros.divmod(1_000_000)
         (Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds).to_s("%Y-%m-%dT%H:%M:%S.%LZ")
