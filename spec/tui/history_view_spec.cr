@@ -1206,6 +1206,74 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # …and the SAME hole for every other real-time framing: a Socket.IO event rode as
+  # `42["chat",{…}]` in MESSAGES, with the event name — the thing an operator enumerates —
+  # spelled inside an envelope no pane read.
+  it "offers a pane named after the framing a transcript carries" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/socket.io/", 101)
+      store.insert_ws_message(id, "in", 1, %(0{"sid":"lv_VI97","pingInterval":25000}).to_slice)
+      store.insert_ws_message(id, "out", 1, %(42["chat message",{"room":"general"}]).to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      3.times { view.toggle_pane } # REQUEST → RESPONSE → MESSAGES → SOCKET.IO
+
+      backend = MemoryBackend.new(100, 16)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+      # The chip names the FRAMING, not gori's module — that is what an operator looks for.
+      backend.contains?("SOCKET.IO").should be_true
+      backend.contains?("2 frames · Socket.IO · chat message").should be_true
+      backend.contains?("frame #2 socketio event chat message").should be_true
+      backend.contains?(%({"room":"general"})).should be_true
+    end
+  end
+
+  # Same growing source as the GRAPHQL pane, so the same count-keyed cache — and the same
+  # obligation to invalidate rather than go stale.
+  it "picks up a new Socket.IO event on refresh" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/socket.io/", 101)
+      store.insert_ws_message(id, "out", 1, %(42["join",{"room":"a"}]).to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      3.times { view.toggle_pane }
+
+      backend = MemoryBackend.new(100, 16)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+      backend.contains?("event join").should be_true
+
+      store.insert_ws_message(id, "out", 1, %(42["leave",{"room":"a"}]).to_slice)
+      view.refresh_detail(store)
+
+      backend2 = MemoryBackend.new(100, 16)
+      view.render_detail(Screen.new(backend2), Rect.new(0, 0, 100, 16))
+      backend2.contains?("event join").should be_true
+      backend2.contains?("event leave").should be_true
+    end
+  end
+
+  it "offers no framing pane for a socket carrying ordinary JSON" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/ws", 101)
+      store.insert_ws_message(id, "out", 1, %({"type":"search","query":"shoes"}).to_slice)
+      store.insert_ws_message(id, "out", 1, "2".to_slice) # a lone digit is not Socket.IO
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      4.times do
+        view.toggle_pane
+        backend = MemoryBackend.new(100, 12)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 12))
+        backend.contains?("SOCKET.IO").should be_false
+      end
+    end
+  end
+
   it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
     with_store do |store|
       add_flow(store, "GET", "/api", 200)
