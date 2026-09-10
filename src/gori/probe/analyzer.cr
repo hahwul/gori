@@ -115,11 +115,36 @@ module Gori
         @disabled, @disabled_degraded = load_disabled
         @warned_degraded = false unless @disabled_degraded # re-arm the warning if the store re-breaks
         @custom = load_custom
-        # Re-resolve the OAST minter too: starting a listener is exactly the kind of change that
-        # should arm the out-of-band rules without a restart, and this is the one place every
-        # surface already calls after touching probe config.
+        # Re-resolve the OAST minter too, so a Rules-tab edit picks up a listener started since
+        # construction. The OAST tab arms it directly through `rearm_out_of_band` (starting a
+        # listener is not a probe-config edit, so it does not route here).
         @oob = load_oob
         @analyzed.clear
+      end
+
+      # Re-resolve the OAST minter after a listener is registered or resumed, so the out-of-band
+      # rules can plant against it WITHOUT a restart or a Rules-tab edit. `@oob` is otherwise
+      # built once at construction and refreshed only by `reload_rule_config` (a Rules-tab edit /
+      # factory reset) — neither of which fires when the OAST tab starts a listener, so a project
+      # opened with no session left the blind SSRF/XXE/command-injection rules INERT with a live
+      # listener until gori restarted, and an active scan's empty result read as "no blind vuln"
+      # when it meant "never planted".
+      #
+      # `arm_active_backfill`, not `@analyzed.clear`: this re-arms the ACTIVE pipeline ONLY, the
+      # same mechanism `set_mode` uses to enter an actively-probing mode. Clearing @analyzed would
+      # additionally re-run PASSIVE analysis over recent flows, and `upsert_probe_issues` bumps
+      # `hit_count` for every existing (code, host) — so merely starting a listener would inflate
+      # the count of unrelated passive findings and repeat that I/O on every register. An OOB rule
+      # recorded NO @active_seen key while unarmed (its `dedup_key` returns nil with no minter), so
+      # a plain backfill re-enqueues and fires it while every already-planted non-OOB rule skips on
+      # its existing key. It arms only in an actively-probing mode; in Passive/Off there is nothing
+      # to plant yet, and the next set_mode into Active runs the same backfill against the minter
+      # this just resolved. Already-probed flows keep the payloads planted under the prior session
+      # (@active_seen has no session id) — a stop keeps those resolving, so it is a re-plant this
+      # deliberately does not force, not a coverage gap.
+      def rearm_out_of_band : Nil
+        @oob = load_oob
+        arm_active_backfill
       end
 
       # {the operator's disabled set, degraded}. `degraded` = the list could NOT be read (store

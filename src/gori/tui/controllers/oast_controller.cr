@@ -1644,6 +1644,13 @@ module Gori::Tui
         # Mark the session live NOW so a probe scan in the ≤SESSION_HEARTBEAT window before the
         # first heartbeat still mints against it rather than an older polled session.
         @host.session.store.touch_oast_session(id)
+        # Arm the live probe analyzer's OAST minter against this session. It is resolved once at
+        # construction and otherwise only on a Rules-tab edit, so a project opened with no
+        # session left the out-of-band probe rules (blind SSRF/XXE/command-injection) INERT with
+        # a listener running here until a restart — the callbacks arrived nowhere and the active
+        # scan read clean. Both a fresh register and a resume land here, and this is past the
+        # discard early-return above, so a listener whose provider vanished mid-flight never arms.
+        @host.session.probe.rearm_out_of_band
         if reg.want_payload
           deliver_payload(reg.provider.generate_payload(reg.session))
         elsif reg.resumed
