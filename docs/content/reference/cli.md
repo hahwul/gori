@@ -651,12 +651,27 @@ Out-of-band listener. `listen` is ad-hoc and store-free by default (register a p
 
 ```bash
 gori run oast presets                          # list built-in public providers
+gori run oast presets --check                  # …and probe each one for reachability
 gori run oast listen                           # interactsh, poll until Ctrl-C
 gori run oast listen --provider webhook.site --once --json
 gori run oast listen --save                    # …and keep it as a project session
 ```
 
-`presets` lists the public providers. `listen` options:
+`presets` lists the public providers, and `presets --check` PROBES each one over the network and prints the stage it fails at (`dns` / `connect` / `tls-verify` / `tls` / `timeout` / `exchange`) — which is what separates a custom trust store or a restricted resolver from a provider outage. It exits non-zero only when nothing answered.
+
+```bash
+gori run oast presets --check
+gori run oast presets --check --format json
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--check` | Probe each preset over the network and report reachability |
+| `--format=FMT` | `text` (default) or `json` |
+
+A failed `listen` names the same stage. On `tls-verify` the remedy is this machine's trust store, not another provider: run with `SSL_CERT_FILE=/path/to/ca-bundle.crt` (or `SSL_CERT_DIR=/path/to/certs`) so the private or TLS-inspecting CA is trusted. For gori's own service traffic that bundle is **additive** — the system store is still loaded — so the public presets keep working. There is no `--ca-file` flag.
+
+`listen` options:
 
 | Option | Description |
 | -------- | ------------- |

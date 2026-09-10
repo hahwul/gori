@@ -55,6 +55,20 @@ module Gori::Oast
           payload = read_capped(resp.body_io, host)
         end
         Response.new(status, payload)
+      rescue ex : Gori::Error
+        # Already worded by a layer that knows what broke — `HttpTransport::Error` names the
+        # dial stage, `read_capped` names the cap. Re-wording either here would bury it.
+        raise ex
+      rescue IO::TimeoutError
+        raise Gori::Error.new("OAST: #{host} accepted the connection but did not answer " \
+                              "within #{TIMEOUT.total_seconds.round}s")
+      rescue ex
+        # Everything past the handshake: a reset, a truncated response, a body that is not what
+        # the provider's reader expects. Naming the stage keeps it apart from the dial failures
+        # above, whose remedies (a CA bundle, a resolver) are wrong for a connection that was
+        # established and then broke (#1020).
+        raise Gori::Error.new("OAST: the #{method.upcase} to #{host} failed after the " \
+                              "connection was established: #{ex.message.presence || ex.class}")
       ensure
         client.close
       end

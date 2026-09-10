@@ -82,11 +82,45 @@ interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를
 
 ```bash
 gori run oast presets                          # list the built-in public providers
+gori run oast presets --check                  # …각 프리셋의 도달 가능성까지 확인
 gori run oast listen                           # interactsh, poll until Ctrl-C
 gori run oast listen --provider webhook.site   # a different provider
 gori run oast listen --once --json             # poll once, emit JSON lines
 gori run oast listen --save                    # …프로젝트 세션으로 저장
 ```
+
+### 등록이 실패할 때 {#when-registration-fails}
+
+등록은 서드파티 서버와 HTTPS로 통신하므로, 밖에서 보면 똑같아 보이는 네 가지 이유로 실패할 수 있습니다. 이름이 해석되지 않거나, 포트가 차단됐거나, 이 머신의 트러스트 스토어가 인증서를 거부했거나, 프로바이더가 죽었거나. gori는 **단계(stage)**를 이름으로 밝힙니다. 단계가 곧 해법이기 때문입니다.
+
+| 단계 | 의미 | 할 일 |
+|------|------|-------|
+| `dns` | 이름이 해석되지 않아 아무것도 다이얼하지 않음 | 제한된/split-horizon 리졸버. 다른 프리셋은 해석되는지 확인 |
+| `connect` | TCP 연결이 거부·차단·타임아웃 | 이그레스 필터링이거나 그 호스트가 죽음 — `--server=URL`로 형제 프리셋 |
+| `tls-verify` | 인증서 체인을 트러스트 스토어가 거부 | **프로바이더가 아니라 이 머신** — 아래 CA 번들 참고 |
+| `tls` | 인증서를 판정하기도 전에 핸드셰이크가 깨짐 | 신뢰 문제가 아니므로 CA 번들로는 해결 불가 |
+| `timeout` | 포트는 연결을 받고 아무 말도 하지 않음 | 조용한 드롭(인라인 IPS, 블랙홀 이그레스) |
+| `exchange` | 연결은 됐고 전송이나 응답이 깨짐 | 프로바이더 자신의 판정 — `--token` 확인 |
+
+`gori run oast presets --check`는 내장 프로바이더 전부를 한 번에 프로브해 프리셋별 단계를 출력합니다. 이게 경우를 갈라 줍니다. 한 호스트만 실패하고 형제 넷은 응답하면 그 호스트의 장애이고, **전부** `tls-verify`로 실패하면 이 머신의 CA 스토어입니다.
+
+```bash
+gori run oast presets --check
+[ ok ] interactsh    Public Interactsh (oast.pro)   https://oast.pro    ok         HTTP 200
+[fail] interactsh    Public Interactsh (oast.fun)   https://oast.fun    dns        DNS lookup for oast.fun failed — …
+```
+
+**아무것도** 응답하지 않았을 때만 비정상 종료 코드를 반환하므로, 스크립트에서 "이 머신이 OAST를 할 수 있는가" 게이트로 쓸 수 있습니다.
+
+### 커스텀 CA 번들 {#custom-ca-bundles}
+
+TLS를 검사하는 프록시 뒤에 있거나, 사설 CA로 서명한 자체 호스팅 interactsh를 쓴다면 `tls-verify`를 보게 됩니다. `SSL_CERT_FILE`을 그 CA가 든 PEM 번들로(또는 `SSL_CERT_DIR`을 인증서 디렉터리로) 지정하세요.
+
+```bash
+SSL_CERT_FILE=/path/to/corp-ca-bundle.crt gori run oast listen
+```
+
+gori **자신의** 서비스 트래픽(OAST 프로바이더와 업데이터)에서 이건 **가산적**입니다. 시스템 트러스트 스토어를 그대로 로드하므로, 사내 루트만 든 번들을 지정해도 공개 프리셋이 멈추지 않습니다. (타깃 트래픽은 스토어를 대체하는 통상적 의미를 유지합니다 — [verify_upstream](/ko/reference/config/) 참고.) `--ca-file` 플래그는 없습니다. 환경 변수 하나가 모든 프로바이더, 모든 표면, 그리고 gori 옆에서 이미 쓰는 도구들에 함께 적용되기 때문입니다.
 
 위 피커가 재개하는 프로젝트의 저장된 세션도 헤드리스로 다룰 수 있습니다.
 

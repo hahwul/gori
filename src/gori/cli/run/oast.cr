@@ -33,7 +33,7 @@ module Gori
 
         filtered, project_name, db_path = strip_project_flags(args)
         case sub = filtered.first?
-        when "presets"           then oast_presets
+        when "presets"           then oast_presets(filtered[1..])
         when "listen"            then oast_listen(filtered[1..], project_name, db_path)
         when nil, "-h", "--help" then oast_help
         else
@@ -102,7 +102,7 @@ module Gori
             list        List this project's SAVED listening sessions
             resume      Resume a saved session and stream its callbacks
             release     Deregister a saved session server-side (its callbacks stay)
-            presets     List the built-in public providers
+            presets     List the built-in public providers (--check probes each one)
             providers   Manage SAVED providers (list, add, update, enable/disable, delete)
 
           `listen` is store-free by default: its registration ends with the process. Add
@@ -631,9 +631,117 @@ module Gori
         bound
       end
 
-      private def self.oast_presets : Nil
-        Oast::Presets.all.each do |p|
-          puts "#{p.kind.label.ljust(13)} #{p.name.ljust(34)} #{p.host}"
+      # `presets` lists the built-in public providers, and with `--check` PROBES them.
+      #
+      # The probe exists because a failed registration is ambiguous in exactly the way an
+      # operator cannot resolve from one line: a custom trust store, a restricted resolver, an
+      # enterprise TLS-inspecting proxy and a provider outage all end `oast listen` the same
+      # way. Running every preset at once turns that into an answer — one host failing while
+      # its four siblings answer is an outage, all eight failing at `tls-verify` is this
+      # machine's CA store (#1020).
+      private def self.oast_presets(args : Array(String)) : Nil
+        check = false
+        format = :text
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run oast presets [options]\n\n" \
+                     "List the built-in public OAST providers. --check probes each one and\n" \
+                     "names the stage that fails (dns / connect / tls-verify / tls / timeout /\n" \
+                     "exchange), which is what tells a trust-store or resolver problem apart\n" \
+                     "from a provider outage."
+          p.on("--check", "Probe each preset over the network and report reachability") { check = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run oast presets: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast presets: missing value for #{f}" }
+        end
+        parse_no_positionals(parser, args, "gori run oast presets",
+          "it takes no arguments; add --check to probe them")
+
+        presets = Oast::Presets.all
+        unless check
+          if format == :json
+            puts(JSON.build do |j|
+              j.array do
+                presets.each do |pr|
+                  j.object do
+                    j.field "kind", pr.kind.label
+                    j.field "name", pr.name
+                    j.field "host", pr.host
+                  end
+                end
+              end
+            end)
+            return
+          end
+          presets.each do |pr|
+            puts "#{pr.kind.label.ljust(13)} #{pr.name.ljust(34)} #{pr.host}"
+          end
+          return
+        end
+
+        results = Oast::Preflight.check_all(presets)
+        if format == :json
+          puts results.to_json
+        else
+          results.each do |r|
+            mark = r.ok ? "[ ok ]" : "[fail]"
+            puts "#{mark} #{r.preset.kind.label.ljust(13)} #{CLI::Output.pad(r.preset.name, 34)} " \
+                 "#{r.preset.host.ljust(30)} #{r.stage.ljust(10)} #{r.detail}"
+          end
+        end
+        # A non-zero exit only when NOTHING answered: one dead preset out of eight is the
+        # normal state of the public interactsh fleet, and failing the command for it would
+        # make the exit status useless as a "can this machine do OAST at all" gate.
+        exit 1 if results.none?(&.ok)
+      end
+
+      # The line AFTER a failed registration: what to try, given the stage that broke.
+      #
+      # The message itself already names the stage and (for a rejected certificate) the CA
+      # remedy — that wording lives in `HttpTransport` so the TUI and MCP get it too. What only
+      # the CLI can add is the next command, and it must fit the verdict: another public
+      # interactsh server is a real answer to "that host is down" and no answer at all to "this
+      # machine rejects every public certificate", where offering it just wastes four more
+      # timeouts (#1020).
+      private def self.oast_register_hint(kind : Oast::ProviderKind, host : String,
+                                          ex : Exception) : String
+        # Not a transport failure at all: the exchange completed and the PROVIDER refused
+        # (a bad token, a correlation id it rejects, an error page). No network remedy applies.
+        unless ex.is_a?(Gori::HttpTransport::Error)
+          return "the provider answered and refused, so this is the server's own verdict — " \
+                 "check --token, or `gori run oast presets --check` for another provider"
+        end
+        case ex.kind
+        when Nil
+          "`gori run oast presets --check` probes every built-in provider and reports which " \
+          "stage each one fails at"
+        when .tls_verify?
+          "this is THIS machine's trust store, not the provider: " \
+          "`SSL_CERT_FILE=/path/to/ca-bundle.crt gori run oast listen …` (add the CA your " \
+          "TLS-inspecting proxy presents). `gori run oast presets --check` shows whether every " \
+          "preset fails the same way, which confirms it"
+        when .dns?
+          "the name never resolved — `gori run oast presets --check` shows whether the other " \
+          "presets resolve; if none do, it is this machine's resolver, not the providers"
+        else
+          # A host that refused, timed out, or broke the handshake: a sibling preset of the SAME
+          # kind is the one remedy that costs nothing to try. `URI.parse` is rescued because
+          # this runs on the error path — a malformed --server must not replace the diagnostic
+          # the operator came for with a crash.
+          alternatives = begin
+            failed = URI.parse(host).host
+            Oast::Presets.all.select { |pr| pr.kind == kind && URI.parse(pr.host).host != failed }
+              .map(&.host)
+          rescue
+            [] of String
+          end
+          if alternatives.empty?
+            "`gori run oast presets --check` probes every built-in provider and reports which " \
+            "stage each one fails at"
+          else
+            "try another #{kind.label} server — #{alternatives.join(", ")} — with " \
+            "`--server=URL`, or `gori run oast presets --check` to probe them all first"
+          end
         end
       end
 
@@ -691,6 +799,7 @@ module Gori
         rescue ex
           store.try(&.close)
           STDERR.puts "gori run oast: register failed: #{ex.message}"
+          STDERR.puts oast_register_hint(kind, host, ex)
           exit 1
         end
         # The `oast_sessions` row is what makes this a PROJECT listener rather than an ad-hoc

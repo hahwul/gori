@@ -651,12 +651,27 @@ gori run sitemap tag --list
 
 ```bash
 gori run oast presets                          # list built-in public providers
+gori run oast presets --check                  # …각 프리셋의 도달 가능성 프로브
 gori run oast listen                           # interactsh, poll until Ctrl-C
 gori run oast listen --provider webhook.site --once --json
 gori run oast listen --save                    # …프로젝트 세션으로 저장
 ```
 
-`presets`는 공개 프로바이더를 나열합니다. `listen` 옵션:
+`presets`는 공개 프로바이더를 나열하고, `presets --check`는 각각을 네트워크로 **프로브**해 실패한 단계(`dns` / `connect` / `tls-verify` / `tls` / `timeout` / `exchange`)를 출력합니다. 커스텀 트러스트 스토어나 제한된 리졸버를 프로바이더 장애와 갈라 주는 정보입니다. 아무것도 응답하지 않았을 때만 비정상 종료 코드를 반환합니다.
+
+```bash
+gori run oast presets --check
+gori run oast presets --check --format json
+```
+
+| 옵션 | 설명 |
+| -------- | ------------- |
+| `--check` | 각 프리셋을 네트워크로 프로브해 도달 가능성 보고 |
+| `--format=FMT` | `text`(기본) 또는 `json` |
+
+`listen`이 실패할 때도 같은 단계를 이름으로 밝힙니다. `tls-verify`의 해법은 다른 프로바이더가 아니라 이 머신의 트러스트 스토어입니다. `SSL_CERT_FILE=/path/to/ca-bundle.crt`(또는 `SSL_CERT_DIR=/path/to/certs`)로 실행해 사설 CA나 TLS 검사 프록시의 CA를 신뢰시키세요. gori 자신의 서비스 트래픽에서 이 번들은 **가산적**이라(시스템 스토어를 그대로 로드) 공개 프리셋도 계속 동작합니다. `--ca-file` 플래그는 없습니다.
+
+`listen` 옵션:
 
 | Option | Description |
 |--------|-------------|
