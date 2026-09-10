@@ -30,9 +30,22 @@ describe Gori::Jwt do
     end
 
     it "raises ForgeError on an unsupported alg" do
+      # ES256K (secp256k1) is registered in the wild but not in Jwt::ALGS. RS256 is NOT the
+      # example any more — it is supported now, and asking for it with a non-PEM key raises
+      # the KEY error, not the alg one.
       expect_raises(Gori::Jwt::ForgeError, /unsupported alg/) do
-        Gori::Jwt.sign("a.b", "RS256", "k")
+        Gori::Jwt.sign("a.b", "ES256K", "k")
       end
+    end
+
+    it "raises ForgeError when an asymmetric alg is handed something that is not a PEM key" do
+      # The message must never echo the value back: an operator who passes an HMAC secret to
+      # RS256 would otherwise read their own key material out of the error.
+      ex = expect_raises(Gori::Jwt::ForgeError) do
+        Gori::Jwt.sign("a.b", "RS256", "sup3r-s3cr3t-hmac")
+      end
+      ex.message.not_nil!.should contain("neither an inline PEM block nor a readable file")
+      ex.message.not_nil!.should_not contain("sup3r-s3cr3t-hmac")
     end
   end
 

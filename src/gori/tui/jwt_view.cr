@@ -192,23 +192,28 @@ module Gori::Tui
       ed.render(screen, card.inset(1, 1), cursor: active, highlight: :json, gauge: true, gauge_focused: active)
     end
 
-    # ---- SECRET single-line field + alg badge ----
+    # ---- SECRET / KEY single-line field + alg badge ----
+    # One field, two meanings, and the title says which: an HS algorithm takes the HMAC
+    # secret typed inline, while RS/PS/ES/EdDSA take a PEM key — which is multi-line and so
+    # cannot be typed here at all, hence the path placeholder (the engine accepts either).
     private def render_secret(screen : Screen, card : Rect, secret : String, cx : Int32,
                               pre : String, alg : String, active : Bool) : Nil
-      Frame.card(screen, card, "SECRET", bg: Theme.bg, border: Frame.pane_border(active))
-      # ` ^A:ALG ` badge (cycled by jwt.cycle-alg) — lit when a real HS key matters.
+      pem = Gori::Jwt::Asym.alg?(alg)
+      Frame.card(screen, card, pem ? "KEY" : "SECRET", bg: Theme.bg, border: Frame.pane_border(active))
+      # ` ^A:ALG ` badge (cycled by jwt.cycle-alg) — lit when a real key matters.
       Frame.toggle_badge(screen, card.right - 1, card.y, card.x + 9, "^A", alg, alg != "none")
       c = card.inset(1, 1)
       return if c.h <= 0
       screen.text(c.x, c.y, "› ", Theme.accent, Theme.bg)
       fg = active ? Theme.text_bright : Theme.text
       vw = {c.w - 2, 1}.max
+      empty_hint = pem ? "(path to a PEM private key)" : "(empty key)"
       if alg == "none"
         screen.text(c.x + 2, c.y, "(no secret — alg=none is unsigned)", Theme.muted, Theme.bg, width: vw)
       elsif active
         screen.input_line(c.x + 2, c.y, secret, cx, pre, fg, Theme.bg, width: vw)
       else
-        screen.text(c.x + 2, c.y, secret.empty? ? "(empty key)" : secret, secret.empty? ? Theme.muted : fg, Theme.bg, width: vw)
+        screen.text(c.x + 2, c.y, secret.empty? ? empty_hint : secret, secret.empty? ? Theme.muted : fg, Theme.bg, width: vw)
       end
     end
 

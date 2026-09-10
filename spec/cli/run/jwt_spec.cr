@@ -1,5 +1,6 @@
 require "../../spec_helper"
 require "json"
+require "../../support/jose_keys"
 
 # `gori run jwt` builds its JSON from the shared engine emitters (jwt/present.cr) so the
 # CLI and the MCP jwt_* tools stay byte-identical; the text formatter is CLI-only.
@@ -23,10 +24,41 @@ describe "gori run jwt" do
 
   it "decode_json carries nested header/payload objects + the signed flag" do
     j = JSON.parse(Gori::Jwt.decode_json(jwt))
+    j["type"].as_s.should eq("JWS")
     j["alg"].as_s.should eq("HS256")
     j["header"]["typ"].as_s.should eq("JWT")
     j["payload"]["sub"].as_s.should eq("1")
     j["signed"].as_bool.should be_true
+  end
+
+  it "verify_json is {alg, verified, reason} with reason null on the plain answers" do
+    # `--verify --format json` and MCP jwt_verify emit this same object. A script selects on
+    # `verified`; `reason` exists so a "no" that is not "the signature is wrong" can say so.
+    ok = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(jwt, "k")))
+    ok["alg"].as_s.should eq("HS256")
+    ok["verified"].as_bool.should be_true
+    ok["reason"].raw.should be_nil
+
+    no = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(jwt, "wrong")))
+    no["verified"].as_bool.should be_false
+    no["reason"].raw.should be_nil # a wrong key needs no prose
+
+    unsigned = Gori::Jwt.encode("{}", %({"s":1}), "none", "")
+    j = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(unsigned, "k")))
+    j["verified"].as_bool.should be_false
+    j["reason"].as_s.should contain("UNSIGNED")
+  end
+
+  it "attacks_json carries the alg-confusion rows when a public key is supplied" do
+    rs = Gori::Jwt.encode("{}", %({"sub":"a"}), "RS256", JoseKeys::RSA)
+    arr = JSON.parse(Gori::Jwt.attacks_json(Gori::Jwt.attacks(rs, JoseKeys::RSA_PUB))).as_a
+    rows = arr.select { |a| a["category"].as_s == "alg-confusion" }
+    rows.should_not be_empty
+    rows.each do |a|
+      a["name"].as_s.should contain("public key")
+      a["note"].as_s.should contain("HS256")
+      a["verified"].as_bool.should be_false # a payload to go try, never a finding
+    end
   end
 
   it "attacks_json is an array of {name, category, note, token}" do

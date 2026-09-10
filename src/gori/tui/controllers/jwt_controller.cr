@@ -1009,7 +1009,7 @@ module Gori::Tui
         # Same trade as HEADER/PAYLOAD above, minus `⇧arrows select`: SECRET is a plain String
         # + caret index (JwtSession#secret_cx), not a TextArea, so it has no band to grow.
         # `^Y` still copies the whole field.
-        keys("type secret · ^Y copy · {jwt.cycle-alg} alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · esc sub-tabs")
+        keys("type #{Jwt::Asym.alg?(s.alg) ? "PEM key path" : "secret"} · ^Y copy · {jwt.cycle-alg} alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · esc sub-tabs")
       when :output
         keys("↑/↓ scroll · #{y} copy token · space cmds · {jwt.cycle-alg} alg · #{lens} decode · esc sub-tabs")
       else

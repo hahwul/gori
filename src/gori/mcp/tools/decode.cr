@@ -168,7 +168,14 @@ module Gori
         header = raw_header || (token ? Jwt.header_json(token.strip) : "{}")
         payload = raw_payload || (token ? Jwt.payload_json(token.strip) : "{}")
         alg = str(h, "alg") || "HS256"
+        # `secret` and `key` fill the SAME engine slot; the alg decides how it is read. Both
+        # present would silently pick one, so refuse rather than sign with the wrong material.
         secret = str(h, "secret") || ""
+        pem = str(h, "key").try(&.presence)
+        if pem && !secret.empty?
+          return Result.new("'secret' and 'key' are two names for the same key — pass one", is_error: true)
+        end
+        secret = pem || secret
         # `set` patches individual claims (`role=admin`), the same knob as `gori run jwt --set`.
         # `payload` replaces the claims wholesale, so the two are mutually exclusive — a `set` on
         # top of a wholesale `payload` would depend on order.
@@ -189,9 +196,35 @@ module Gori
       private def jwt_attacks_tool(h) : Result
         token = str(h, "token")
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
-        attacks = Jwt.attacks(token.strip)
-        return Result.new("not a decodable JWT — no payloads generated", is_error: true) if attacks.empty?
+        attacks = begin
+          Jwt.attacks(token.strip, str(h, "public_key").try(&.presence))
+        rescue ex : Jwt::ForgeError
+          return Result.new("public_key: #{ex.message}", is_error: true)
+        end
+        if attacks.empty?
+          return Result.new("not a decodable JWT — no payloads generated (an encrypted JWE has no " \
+                            "claims to tamper with and no signature to strip)", is_error: true)
+        end
         Result.new(Jwt.attacks_json(attacks))
+      end
+
+      # Verify is its own tool rather than a flag on jwt_decode: decoding is pure and needs
+      # nothing, verifying needs key material, and folding them would make every decode call
+      # look like it might be checking a signature when it never was.
+      @[Tool("jwt_verify", unbound: true)]
+      private def jwt_verify_tool(h) : Result
+        token = str(h, "token")
+        return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
+        secret = str(h, "secret") || ""
+        pem = str(h, "key").try(&.presence)
+        if pem && !secret.empty?
+          return Result.new("'secret' and 'key' are two names for the same key — pass one", is_error: true)
+        end
+        begin
+          Result.new(Jwt.verify_json(Jwt.verify(token.strip, pem || secret)))
+        rescue ex : Jwt::ForgeError
+          Result.new(ex.message || "invalid key", is_error: true)
+        end
       end
 
       # The tools/list schemas for the decoder / JWT tools, kept beside the handlers that
@@ -223,29 +256,52 @@ module Gori
 
         tool j, "jwt_decode",
           "Decode a JWT into its header + payload JSON and signature — the same engine as the " \
-          "TUI JWT tab. Pure transform: no network, no state, no signature verification. Returns " \
-          "{alg, header, payload, signature, signed}." do |s|
-          s.field "token", strprop("the JWT (header.payload[.signature])"), required: true
+          "TUI JWT tab. Pure transform: no network, no state, no signature verification (use " \
+          "jwt_verify for that). A SIGNED token returns {type:\"JWS\", alg, header, payload, " \
+          "signature, signed}. An ENCRYPTED five-part token (JWE) returns {type:\"JWE\", alg, enc, " \
+          "kid, header, payload:null, encrypted:true, encrypted_key, iv, ciphertext, tag} — gori " \
+          "reads the JWE protected header and does NOT decrypt, so the claims are not available " \
+          "at any surface and `payload` is null rather than absent. Branch on `type`." do |s|
+          s.field "token", strprop("the JWT: a JWS (header.payload[.signature]) or a JWE (header.encrypted_key.iv.ciphertext.tag)"), required: true
+        end
+
+        tool j, "jwt_verify",
+          "Check whether a JWT's OWN signature verifies under a key you supply — the question " \
+          "\"would a server holding this key accept this token\". Verification always uses the alg " \
+          "the TOKEN declares, never one you pick, because that is what a vulnerable server does " \
+          "too. Pure compute: no network. Returns {alg, verified, reason}; `reason` is set only " \
+          "when the \"no\" needs explaining (alg=none, an alg gori cannot check). A false " \
+          "`verified` is an ANSWER, not an error." do |s|
+          s.field "token", strprop("the JWT to check"), required: true
+          s.field "secret", strprop("HMAC secret, for an HS256/384/512 token")
+          s.field "key", strprop("PEM key for an RS/PS/ES/EdDSA token — inline PEM text, or a path to a .pem file. A PUBLIC KEY, a CERTIFICATE, or the private key all work. Mutually exclusive with 'secret'")
         end
 
         tool j, "jwt_encode",
-          "Re-sign a JWT with a chosen algorithm + secret — the classic testing move (swap alg to " \
+          "Re-sign a JWT with a chosen algorithm + key — the classic testing move (swap alg to " \
           "none, or re-sign with a guessed HS secret). Takes the header + payload from `token` " \
           "(or the explicit `header`/`payload` JSON overrides), FORCES `alg` into the header, and " \
-          "HMAC-signs with `secret` (HS256/384/512) or leaves it unsigned (none). Returns {token, alg}." do |s|
+          "signs: HMAC with `secret` for HS256/384/512, the PEM private key in `key` for " \
+          "RS/PS/ES/EdDSA, or nothing at all for `none`. gori generates no keys — an asymmetric " \
+          "alg requires the private key you already hold. Returns {token, alg}." do |s|
           s.field "token", strprop("a JWT to take the header + payload from (optional if header+payload are given)")
           s.field "header", strprop("header JSON object (overrides the token's header)")
           s.field "payload", strprop("payload JSON (overrides the token's payload wholesale; mutually exclusive with 'set')")
           s.field "set", strarrprop("patch individual claims before signing, each \"key=value\" (e.g. \"role=admin\"); value is JSON if it parses (true/3), else a string. Mutually exclusive with 'payload'")
           s.field "alg", enumprop("signing algorithm (default HS256; none emits an unsigned token)", Gori::Jwt::ALGS)
           s.field "secret", strprop("HMAC secret for an HS algorithm")
+          s.field "key", strprop("PEM PRIVATE key for an RS/PS/ES/EdDSA algorithm — inline PEM text, or a path to a .pem file. Mutually exclusive with 'secret'")
         end
 
         tool j, "jwt_attacks",
           "Generate testing payloads from a JWT: alg:none variants + signature strip, weak-secret " \
           "HS256 re-signs, and header-parameter injection (kid path-traversal/SQLi, jku/x5u/jwk). " \
-          "Pure transform: no network. Returns an array of {name, category, note, token}." do |s|
+          "With `public_key`, also the algorithm-confusion family for an RS/PS/ES token — HS256 " \
+          "re-signs keyed with the public key's own bytes, in each spelling a server might hold. " \
+          "Pure transform: no network. Returns an array of {name, category, note, token, verified}. " \
+          "An encrypted JWE yields nothing: it has no claims segment to tamper with." do |s|
           s.field "token", strprop("the JWT to derive testing payloads from"), required: true
+          s.field "public_key", strprop("the server's PUBLIC verification key for the algorithm-confusion family — inline PEM text (a PUBLIC KEY or a CERTIFICATE), or a path to a .pem file. Only meaningful for a token whose alg is RS*/PS*/ES*")
         end
       end
     end

@@ -711,22 +711,26 @@ gori run oast providers enable p_1
 
 ### run jwt {#run-jwt}
 
-JWT를 디코드, 재서명, 또는 공격 페이로드를 생성합니다. 저장소 없는 계산이며, 토큰은 `<token>` 인자나 stdin에서 받습니다.
+JWT를 디코드, 검증, 재서명하거나 공격 페이로드를 생성합니다. 저장소 없는 계산이며, 토큰은 `<token>` 인자나 stdin에서 받습니다. 5개 세그먼트의 암호화 토큰(JWE)은 보호 헤더까지만 디코드합니다 — gori는 `alg`/`enc`/`kid`를 읽을 뿐 클레임을 복호화하지 않습니다.
 
 ```bash
 gori run jwt eyJhbGci...                        # decode (default)
 gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
 gori run jwt eyJhbGci... --encode --set role=admin --secret s3cret
-gori run jwt eyJhbGci... --attacks
+gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem
+gori run jwt eyJhbGci... --verify --key ./public.pem
+gori run jwt eyJhbGci... --attacks --key ./public.pem
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--decode` | header / payload / signature 디코드(기본) |
-| `--encode` | `--alg` / `--secret`로 토큰 클레임 재서명 |
+| `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명 |
+| `--verify` | 토큰 자신의 서명을 `--secret` / `--key`로 검증; `verified: yes\|no`를 출력합니다(`no`도 실패가 아니라 답이므로 종료 코드는 0) |
 | `--attacks` | 테스트 페이로드 생성(alg:none, weak-secret, header injection) |
-| `--alg=ALG` | `--encode`용 서명 alg: `HS256`(기본) \| `HS384` \| `HS512` \| `none` |
-| `--secret=SECRET` | HS 알고리즘 `--encode`용 HMAC 시크릿 |
+| `--alg=ALG` | `--encode`용 서명 alg: `HS256`(기본) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
+| `--secret=SECRET` | HS 알고리즘용 HMAC 시크릿 |
+| `--key=PEM` | RS/PS/ES/EdDSA 알고리즘용 PEM 키 — PEM 본문을 그대로 넣거나 `.pem` 파일 경로. `--encode`는 개인키가 필요하고, `--verify`는 공개키·인증서·개인키 중 아무거나 받으며, `--attacks`는 서버의 공개키를 받아 알고리즘 혼동(algorithm confusion) 페이로드를 추가합니다. `--secret`과 상호 배타적 |
 | `--payload=JSON` | `--encode`: 재서명 전에 클레임을 통째로 교체(`--set`과 상호 배타적) |
 | `--set=CLAIM` | `--encode`: 재서명 전에 클레임 하나를 `key=value`로 패치, 반복 가능; 값이 JSON으로 파싱되면(`true`/`3`) 그 타입, 아니면 문자열 |
 | `--format` | `text`(기본) 또는 `json` |

@@ -711,22 +711,26 @@ gori run oast providers enable p_1
 
 ### run jwt
 
-Decode, re-sign, or generate attack payloads for a JWT. Store-free compute; the token comes from the `<token>` argument or stdin.
+Decode, verify, re-sign, or generate attack payloads for a JWT. Store-free compute; the token comes from the `<token>` argument or stdin. An encrypted five-part token (JWE) decodes to its protected header — gori reads `alg`/`enc`/`kid` and does not decrypt the claims.
 
 ```bash
 gori run jwt eyJhbGci...                        # decode (default)
 gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
 gori run jwt eyJhbGci... --encode --set role=admin --secret s3cret
-gori run jwt eyJhbGci... --attacks
+gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem
+gori run jwt eyJhbGci... --verify --key ./public.pem
+gori run jwt eyJhbGci... --attacks --key ./public.pem
 ```
 
 | Option | Description |
 | -------- | ------------- |
 | `--decode` | Decode header / payload / signature (default) |
-| `--encode` | Re-sign the token's claims with `--alg` / `--secret` |
+| `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key` |
+| `--verify` | Check the token's own signature against `--secret` / `--key`; prints `verified: yes\|no` (a `no` is an answer, not a failure — exit status stays 0) |
 | `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |
-| `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `none` |
-| `--secret=SECRET` | HMAC secret for `--encode` with an HS algorithm |
+| `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
+| `--secret=SECRET` | HMAC secret, for an HS algorithm |
+| `--key=PEM` | PEM key for an RS/PS/ES/EdDSA algorithm — inline PEM text or a path to a `.pem` file. `--encode` needs the PRIVATE key; `--verify` takes a public key, a certificate, or the private key; `--attacks` takes the server's PUBLIC key and adds the algorithm-confusion payloads. Mutually exclusive with `--secret` |
 | `--payload=JSON` | `--encode`: replace the claims wholesale before re-signing (mutually exclusive with `--set`) |
 | `--set=CLAIM` | `--encode`: patch one claim before re-signing, as `key=value`, repeatable; the value is JSON if it parses (`true`/`3`), else a string |
 | `--format` | `text` (default) or `json` |

@@ -5,6 +5,12 @@ require "openssl"
 # Validated end-to-end against OpenSSL 3.x (see SPIKE 1). Type aliases use names
 # not already defined by stdlib to avoid collisions; `X509`, `X509_NAME`, `Bio`,
 # `EVP_MD`, `EC_KEY`, `X509_EXTENSION` etc. are reused from stdlib.
+#
+# This file is also the SHARED home for the generic EVP/BIO funs more than one
+# subsystem needs: `lib LibCrypto` is reopened in `../../oast/rsa.cr` (RSA keygen +
+# OAEP) and `../../jwt/asym.cr` (JWS sign/verify), and a `fun` declared twice across
+# those files collides. Anything generic enough for a second caller belongs here;
+# only the algorithm-specific remainder stays in the reopening file.
 lib LibCrypto
   type EVP_PKEY = Void*
   type ASN1_TIME = Void*
@@ -51,6 +57,27 @@ lib LibCrypto
   # form). Like i2d_X509_PUBKEY, a null `pp` returns the length so we can size the
   # buffer before encoding.
   fun i2d_x509 = i2d_X509(x : X509, pp : UInt8**) : Int
+
+  # Memory BIOs — the in-process read/write path for PEM. Shared: OAST reads its own
+  # private-key PEM back and writes an SPKI PEM out, the JWT workbench reads the
+  # operator's signing/verification key in. `BIO_new` / `BIO_free` come from stdlib.
+  fun bio_s_mem = BIO_s_mem : BioMethod*
+  fun bio_read = BIO_read(b : Bio*, data : UInt8*, dlen : Int) : Int
+  fun bio_new_mem_buf = BIO_new_mem_buf(buf : UInt8*, len : Int) : Bio*
+
+  # EVP_PKEY operation contexts. `EVP_PKEY_CTX_ctrl` is the version-independent way to
+  # reach what OpenSSL 1.1.1 spells as macros and 3.x as functions (RSA padding, PSS
+  # salt length, OAEP digests) — see the ctrl call sites for the numeric cmd constants.
+  type EVP_PKEY_CTX = Void*
+  fun evp_pkey_ctx_new = EVP_PKEY_CTX_new(pkey : EVP_PKEY, e : Void*) : EVP_PKEY_CTX
+  fun evp_pkey_ctx_free = EVP_PKEY_CTX_free(ctx : EVP_PKEY_CTX)
+  fun evp_pkey_ctx_ctrl = EVP_PKEY_CTX_ctrl(ctx : EVP_PKEY_CTX, keytype : Int, optype : Int,
+                                            cmd : Int, p1 : Int, p2 : Void*) : Int
+
+  # SPKI public-key PEM out. Shared: OAST publishes its own public key, and the JWT
+  # workbench re-serializes an operator's key (or a certificate's) into the canonical PEM
+  # a server would hold, for the algorithm-confusion family.
+  fun pem_write_bio_pubkey = PEM_write_bio_PUBKEY(bio : Bio*, pkey : EVP_PKEY) : Int
 
   # PEM persistence via file BIOs (root CA only; leaves stay in memory)
   fun bio_new_file = BIO_new_file(filename : Char*, mode : Char*) : Bio*

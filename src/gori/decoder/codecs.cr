@@ -5,6 +5,7 @@ require "compress/zlib"
 require "compress/deflate"
 require "big"
 require "../cookie"
+require "../jwt/jwe"
 require "../proxy/codec/brotli"
 require "../proxy/codec/zstd"
 
@@ -463,7 +464,14 @@ module Gori::Decoder
 
     # ---- JWT (header.payload[.signature]) — decode only, no signature verify ----
     def jwt_decode(data : Bytes) : String
-      parts = String.new(data).strip.split('.')
+      text = String.new(data).strip
+      # A five-part JWE is a JWT too, just an encrypted one — its protected header decodes
+      # and is the first thing an operator needs. Checked before the JWS path because the
+      # segment positions differ: parts[1] there is a wrapped KEY, not the claims.
+      if jwe = Gori::Jwt::Jwe.parse(text)
+        return Gori::Jwt::Jwe.render(jwe)
+      end
+      parts = text.split('.')
       raise DecoderError.new("not a JWT (need 2-3 dot-separated parts)") unless parts.size >= 2
       sig = parts[2]?
       String.build do |io|
@@ -479,13 +487,14 @@ module Gori::Decoder
         if (alg = jwt_alg(parts[0])) && alg.downcase == "none"
           io << "\n\n// WARNING: alg=none — this token is UNSIGNED and can be forged by anyone; never trust it as authentication."
         end
-        # >3 segments isn't a plain JWT (JWS) — most commonly a 5-part JWE (header,
-        # encrypted key, IV, ciphertext, tag), but could just as well be smuggled/obfuscated
-        # data riding after a valid-looking JWS prefix. Either way, silently decoding only
-        # parts[0..2] would hide it. Surface the extra segments rather than dropping them.
+        # >3 segments isn't a plain JWT (JWS). A real 5-part JWE never reaches here (it is
+        # rendered above), so what is left is smuggled/obfuscated data riding after a
+        # valid-looking JWS prefix — or a JWE-shaped blob whose header carries no `enc`, which
+        # is not a JWE either. Silently decoding only parts[0..2] would hide it; surface the
+        # extra segments rather than dropping them.
         if parts.size > 3
           extra = parts[3..]
-          shape = parts.size == 5 ? "JWE-shaped (5 parts: header.key.iv.ciphertext.tag) — not JOSE/JWS-decodable" : "not a standard JWT"
+          shape = parts.size == 5 ? "JWE-shaped (5 parts) but the header declares no `enc` — not a JWE" : "not a standard JWT"
           io << "\n\n// WARNING: #{parts.size} dot-separated parts (#{shape}); #{extra.size} extra segment(s) beyond header.payload.signature, shown raw:\n"
           extra.each_with_index(3) { |seg, i| io << "//   [#{i}] #{seg}\n" }
         end

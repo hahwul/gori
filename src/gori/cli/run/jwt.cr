@@ -7,25 +7,32 @@ module Gori
       # MCP jwt_* tools (all three drive the pure Gori::Jwt engine).
 
       @[Subcommand("jwt", help: [
-        {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
+        {"jwt [<token>]", "Decode, verify, re-sign, or generate testing payloads for a JWT"},
       ])]
       private def self.cmd_jwt(args : Array(String)) : Nil
         action = :decode
         alg = "HS256"
         secret = ""
+        key = ""
         format = :text
         payload_override = nil.as(String?)
         sets = [] of String
         positional = [] of String
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run jwt [<token>] [options]\n\n" \
-                     "Decode, re-sign, or generate testing payloads for a JWT. The token is read\n" \
+                     "Decode, verify, re-sign, or generate testing payloads for a JWT (JWS) —\n" \
+                     "or read the protected header of an encrypted one (JWE). The token is read\n" \
                      "from the <token> argument, or from STDIN when none is given."
           p.on("--decode", "Decode header / payload / signature (default)") { action = :decode }
-          p.on("--encode", "Re-sign the token's claims with --alg / --secret") { action = :encode }
+          p.on("--encode", "Re-sign the token's claims with --alg and --secret / --key") { action = :encode }
+          p.on("--verify", "Check the token's own signature against --secret / --key") { action = :verify }
           p.on("--attacks", "Generate testing payloads (alg:none, weak-secret, header injection)") { action = :attacks }
-          p.on("--alg=ALG", "Signing alg for --encode: HS256 (default) | HS384 | HS512 | none") { |v| alg = v }
-          p.on("--secret=SECRET", "HMAC secret for --encode with an HS algorithm") { |v| secret = v }
+          p.on("--alg=ALG", "Signing alg for --encode: HS256 (default) | HS384 | HS512 | " \
+                            "RS/PS/ES with 256/384/512 | EdDSA | none") { |v| alg = v }
+          p.on("--secret=SECRET", "HMAC secret, for an HS algorithm") { |v| secret = v }
+          p.on("--key=PEM", "PEM key for an RS/PS/ES/EdDSA algorithm — inline, or a path to a .pem file. " \
+                            "--encode wants the private key; --verify takes a public key, a certificate, or the private one; " \
+                            "--attacks takes the server's PUBLIC key and adds the algorithm-confusion payloads") { |v| key = v }
           p.on("--payload=JSON", "--encode: replace the claims (payload) wholesale before re-signing") { |v| payload_override = v }
           p.on("--set=CLAIM", "--encode: patch one claim before re-signing, as key=value (repeatable). value is JSON if it parses (true/3), else a string") { |v| sets << v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -36,6 +43,22 @@ module Gori
         end
         parser.parse(args)
 
+        jwt_refuse_conflicts(action, payload_override, sets, secret, key)
+        key_material = key.presence || secret
+
+        token = jwt_token_input(positional)
+        abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty?
+        case action
+        when :encode  then emit_jwt_encode(token, alg, key_material, payload_override, sets, format)
+        when :verify  then emit_jwt_verify(token, key_material, format)
+        when :attacks then emit_jwt_attacks(token, key.presence, format)
+        else               emit_jwt_decode(token, format)
+        end
+      end
+
+      # The flag combinations that would otherwise resolve silently, and wrongly.
+      private def self.jwt_refuse_conflicts(action : Symbol, payload_override : String?,
+                                            sets : Array(String), secret : String, key : String) : Nil
         # --payload and --set are two ways to write the same claims object; taking both would
         # make the result depend on apply order, so refuse it rather than pick one.
         abort "gori run jwt: --payload and --set are mutually exclusive" if payload_override && !sets.empty?
@@ -44,14 +67,9 @@ module Gori
         if action != :encode && (payload_override || !sets.empty?)
           abort "gori run jwt: --payload / --set apply to --encode only"
         end
-
-        token = jwt_token_input(positional)
-        abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty?
-        case action
-        when :encode  then emit_jwt_encode(token, alg, secret, payload_override, sets, format)
-        when :attacks then emit_jwt_attacks(token, format)
-        else               emit_jwt_decode(token, format)
-        end
+        # --secret and --key fill the SAME slot (the engine takes one key string, and the alg
+        # decides how to read it). Taking both would silently pick one, so refuse.
+        abort "gori run jwt: --secret and --key are two names for the same key — pass one" if !secret.empty? && !key.empty?
       end
 
       private def self.jwt_token_input(positional : Array(String)) : String
@@ -78,6 +96,24 @@ module Gori
         abort "gori run jwt: #{ex.message}"
       end
 
+      # Verify the token's own signature. `verified: false` is a legitimate ANSWER, not a
+      # failure — it exits 0 in text form and emits `{"verified":false}` in JSON, so a script
+      # reads the field rather than the exit code.
+      private def self.emit_jwt_verify(token : String, key : String, format : Symbol) : Nil
+        v = Jwt.verify(token, key)
+        if format == :json
+          puts Jwt.verify_json(v)
+        else
+          puts "verified: #{v.verified ? "yes" : "no"}#{v.alg.empty? ? "" : " (alg #{v.alg})"}"
+          # The reason quotes the token's own alg, which is captured (hostile) text.
+          if reason = v.reason
+            puts "reason: #{CLI::Output.term_safe(reason)}"
+          end
+        end
+      rescue ex : Jwt::ForgeError
+        abort "gori run jwt: #{ex.message}"
+      end
+
       private def self.emit_jwt_encode(token : String, alg : String, secret : String,
                                        payload_override : String?, sets : Array(String), format : Symbol) : Nil
         header = Jwt.header_json(token)
@@ -100,9 +136,16 @@ module Gori
         abort "gori run jwt: #{ex.message}"
       end
 
-      private def self.emit_jwt_attacks(token : String, format : Symbol) : Nil
-        attacks = Jwt.attacks(token)
-        abort "gori run jwt: not a decodable JWT — no payloads generated" if attacks.empty?
+      private def self.emit_jwt_attacks(token : String, public_key : String?, format : Symbol) : Nil
+        attacks = begin
+          Jwt.attacks(token, public_key)
+        rescue ex : Jwt::ForgeError
+          abort "gori run jwt: --key: #{ex.message}"
+        end
+        if attacks.empty?
+          abort "gori run jwt: not a decodable JWT — no payloads generated " \
+                "(an encrypted JWE has no claims to tamper with and no signature to strip)"
+        end
         if format == :json
           puts Jwt.attacks_json(attacks)
         else

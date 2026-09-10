@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/mcp_harness"
+require "../support/jose_keys"
 
 describe Gori::MCP::Server do
   describe "ql_reference" do
@@ -238,12 +239,83 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "all three jwt tools are listed even in read-only mode" do
+    it "every jwt tool is listed even in read-only mode" do
       with_store do |store|
         names = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/list"}), allow_actions: false)[0]["result"]["tools"].as_a.map(&.["name"].as_s)
         names.should contain("jwt_decode")
         names.should contain("jwt_encode")
         names.should contain("jwt_attacks")
+        names.should contain("jwt_verify")
+      end
+    end
+
+    it "jwt_encode signs with a PEM key for an asymmetric alg" do
+      with_store do |store|
+        pem = JoseKeys::EC256.gsub('\n', "\\n")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"token":"#{jwt}","alg":"ES256","key":"#{pem}"}}})
+        resp = mcp_drive(store, call)[0]
+        resp["result"]["isError"]?.try(&.as_bool).should_not be_true
+        token = mcp_tool_payload(resp)["token"].as_s
+        Gori::Jwt.verify(token, JoseKeys::EC256_PUB).verified.should be_true
+      end
+    end
+
+    it "jwt_encode refuses secret and key together rather than picking one" do
+      with_store do |store|
+        pem = JoseKeys::EC256.gsub('\n', "\\n")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"token":"#{jwt}","alg":"ES256","key":"#{pem}","secret":"k"}}})
+        mcp_drive(store, call)[0]["result"]["isError"].as_bool.should be_true
+      end
+    end
+
+    it "jwt_verify answers yes/no rather than erroring on a bad signature" do
+      with_store do |store|
+        ok = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{jwt}","secret":"secret"}}})
+        no = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{jwt}","secret":"nope"}}})
+        resps = mcp_drive(store, ok, no, allow_actions: false)
+        mcp_tool_payload(resps[0])["verified"].as_bool.should be_true
+        # A "no" is an ANSWER: the tool must not report it as an error, or an agent reads a
+        # failed verification as a broken call and retries instead of concluding.
+        resps[1]["result"]["isError"]?.try(&.as_bool).should_not be_true
+        mcp_tool_payload(resps[1])["verified"].as_bool.should be_false
+      end
+    end
+
+    it "jwt_verify checks an ES256 token against a PEM public key" do
+      with_store do |store|
+        token = Gori::Jwt.encode("{}", %({"sub":"1"}), "ES256", JoseKeys::EC256)
+        pem = JoseKeys::EC256_PUB.gsub('\n', "\\n")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{token}","key":"#{pem}"}}})
+        payload = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0])
+        payload["alg"].as_s.should eq("ES256")
+        payload["verified"].as_bool.should be_true
+      end
+    end
+
+    it "jwt_attacks adds the algorithm-confusion family only with a public_key" do
+      with_store do |store|
+        token = Gori::Jwt.encode("{}", %({"sub":"1"}), "RS256", JoseKeys::RSA)
+        pem = JoseKeys::RSA_PUB.gsub('\n', "\\n")
+        plain = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{token}"}}})
+        keyed = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{token}","public_key":"#{pem}"}}})
+        resps = mcp_drive(store, plain, keyed, allow_actions: false)
+        mcp_tool_payload(resps[0]).as_a.map(&.["category"].as_s).should_not contain("alg-confusion")
+        mcp_tool_payload(resps[1]).as_a.map(&.["category"].as_s).should contain("alg-confusion")
+      end
+    end
+
+    it "jwt_decode reports an encrypted token as a JWE with no payload" do
+      with_store do |store|
+        header = Base64.urlsafe_encode(%({"alg":"RSA-OAEP","enc":"A256GCM"}), padding: false)
+        jwe = "#{header}.d3JhcA.aXYtMTIz.Y2lwaGVy.dGFn"
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_decode","arguments":{"token":"#{jwe}"}}})
+        resp = mcp_drive(store, call, allow_actions: false)[0]
+        resp["result"]["isError"]?.try(&.as_bool).should_not be_true
+        payload = mcp_tool_payload(resp)
+        payload["type"].as_s.should eq("JWE")
+        payload["enc"].as_s.should eq("A256GCM")
+        payload["payload"].raw.should be_nil
+        payload["encrypted"].as_bool.should be_true
       end
     end
 

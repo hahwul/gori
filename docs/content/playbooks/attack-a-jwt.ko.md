@@ -26,7 +26,7 @@ JWT는 서버가 서명을 검사하는 만큼만 믿을 수 있습니다. 이 �
 
 ## 2. 클레임 변조 {#2-tamper-a-claim}
 
-`Ctrl-T`로 Encode 렌즈로 전환하거나, `l`을 눌러 디코드된 토큰을 곧장 Encode 편집기로 불러오세요. **PAYLOAD** JSON을 편집합니다. `role`을 올리고, `sub`를 바꾸고, `exp`를 늘리세요. `Ctrl-A`로 알고리즘을 고르고(`HS256` / `HS384` / `HS512` / `none`을 순환), HMAC 알고리즘으로 서명한다면 **SECRET**을 설정하면, 다시 서명된 토큰이 OUTPUT에 라이브로 나타납니다. `y`로 복사하세요.
+`Ctrl-T`로 Encode 렌즈로 전환하거나, `l`을 눌러 디코드된 토큰을 곧장 Encode 편집기로 불러오세요. **PAYLOAD** JSON을 편집합니다. `role`을 올리고, `sub`를 바꾸고, `exp`를 늘리세요. `Ctrl-A`로 알고리즘을 고르고(HMAC 계열 → `RS`/`PS`/`ES`의 256/384/512 → `EdDSA` → `none` 순환), HMAC 알고리즘이면 **SECRET**을 설정하거나 비대칭 알고리즘이면 **KEY** 카드에 PEM 개인키 경로를 지정하면, 다시 서명된 토큰이 OUTPUT에 라이브로 나타납니다. `y`로 복사하세요.
 
 같은 클레임 편집이 헤드리스로도 실행되며, 토큰은 인수나 stdin에서 받습니다. `--set KEY=VALUE`는 클레임 하나를 패치하고(반복 가능), `--payload`는 클레임을 통째로 교체합니다:
 
@@ -36,6 +36,13 @@ gori run jwt eyJhbGci... --encode --payload '{"sub":"1","admin":true}' --secret 
 ```
 
 `--set`의 값은 JSON으로 파싱되면 그 타입을 유지하므로 `admin=true`는 불리언, `role=admin`은 문자열입니다. MCP에서도 `jwt_encode`가 같은 `set` / `payload` 편집을 받습니다.
+
+토큰이 `ES256` / `RS256` / `EdDSA`이고 서명 키를 가지고 있다면 `--key`로 넘기고(PEM 본문 또는 경로), `--verify`가 디코드로는 답할 수 없는 질문에 답합니다:
+
+```bash
+gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem --set role=admin
+gori run jwt eyJhbGci... --verify --key ./public.pem                # verified: yes | no
+```
 
 **체크포인트.** OUTPUT에 편집한 클레임을 담고, 고른 알고리즘과 비밀키로 다시 서명된 토큰이 있습니다.
 
@@ -48,14 +55,20 @@ gori run jwt eyJhbGci... --encode --payload '{"sub":"1","admin":true}' --secret 
 | **alg:none** | 서명을 제거하고 `alg`를 `none`으로 설정합니다(`None` / `NONE` 대소문자 변형 포함). 서명 없는 토큰을 받아들이는 서버를 잡습니다. |
 | **Weak secret** | 흔한 약한 HMAC 비밀키 목록으로 다시 서명합니다. 추측 가능한 서명 키를 잡습니다. |
 | **Header injection** | `kid`, `jku`, `x5u`, `jwk` 헤더 파라미터를 조작합니다. 공격자가 제공한 키 자료를 신뢰하는 서버를 잡습니다. |
+| **Algorithm confusion** | 서버의 공개키가 필요합니다. `RS`/`PS`/`ES` 토큰을 `HS256`으로 낮추고 공개키 바이트 자체를 HMAC 키로 씁니다. 토큰의 `alg`로 분기하면서 검증 키를 재사용하는 서버를 잡습니다. |
 
 같은 세트를 헤드리스로 생성합니다:
 
 ```bash
 gori run jwt eyJhbGci... --attacks
+gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...algorithm confusion까지
 ```
 
-MCP에서는 `jwt_attacks` 도구가 동일한 목록을 반환합니다(`jwt_decode` / `jwt_encode`가 1·2단계를 담당). 셋 다 네트워크를 건드리지 않으므로 `--read-only`에서도 쓸 수 있는 읽기 도구입니다.
+공개키는 대상이 공개하는 것이면 무엇이든 됩니다 — JWKS의 `x5c` 인증서도 순수 `PUBLIC KEY` 블록과 똑같이 동작하며, gori가 어느 쪽이든 서버가 들고 있을 SPKI PEM으로 환원합니다.
+
+MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 동일한 목록을 반환합니다(`jwt_decode` / `jwt_verify` / `jwt_encode`가 1·2단계를 담당). 모두 네트워크를 건드리지 않으므로 `--read-only`에서도 쓸 수 있는 읽기 도구입니다.
+
+세그먼트가 셋이 아니라 다섯인 **암호화된** 토큰은 JWE이며, 위 내용은 하나도 적용되지 않습니다. gori는 무엇을 보고 있는지 알 수 있도록 보호 헤더(`alg`, `enc`, `kid`)를 보여주고, 페이로드는 생성하지 않습니다 — 조작할 클레임 세그먼트도, 제거할 서명도 없기 때문입니다.
 
 **체크포인트.** ATTACKS 목록이 바로 보낼 수 있는 토큰 변형들로 채워집니다.
 
