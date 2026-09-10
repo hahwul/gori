@@ -29,6 +29,40 @@ describe "gori run jwt" do
     j["header"]["typ"].as_s.should eq("JWT")
     j["payload"]["sub"].as_s.should eq("1")
     j["signed"].as_bool.should be_true
+    # A plain 3-part token carries no extra-segment fields — the shape stays clean.
+    j["extra_segments"]?.should be_nil
+    j["note"]?.should be_nil
+  end
+
+  it "decode_json surfaces segments smuggled after a JWS instead of dropping them" do
+    # The text decoder WARNS on a >3-segment token (decoder_spec, fix #22) and `verify`
+    # REFUSES it, but `decode_json` used to report a clean {type:JWS, signed:true} and drop
+    # parts[3..] on the floor — so `gori run jwt --format json` / MCP `jwt_decode` hid data
+    # smuggled after a valid-looking JWS prefix. It now rides in `extra_segments` + `note`,
+    # keyed on presence the way a JWE is keyed on `type`.
+    smuggled = "#{jwt}.SMUGGLED"
+    j = JSON.parse(Gori::Jwt.decode_json(smuggled))
+    j["type"].as_s.should eq("JWS")
+    j["extra_segments"].as_a.map(&.as_s).should eq(["SMUGGLED"])
+    j["note"].as_s.should contain("4 dot-separated segments")
+
+    # A five-part blob that is not a decodable JWE (no `enc`) surfaces both extras too, and
+    # is NOT reported as a JWE (that discrimination lives in Jwe.parse).
+    five = "#{jwt}.extra.more"
+    j5 = JSON.parse(Gori::Jwt.decode_json(five))
+    j5["type"].as_s.should eq("JWS")
+    j5["extra_segments"].as_a.map(&.as_s).should eq(["extra", "more"])
+  end
+
+  it "decode_json flags an under-segmented blob instead of reporting a clean JWS" do
+    # The other end of the same divergence: a single dotted-less segment is "not a decodable
+    # JWT" to `verify` and the text decoder, but decode_json used to report a success-shaped
+    # {type:JWS, payload:null, signed:false}. It now carries a `note` (no extra_segments).
+    j = JSON.parse(Gori::Jwt.decode_json("eyJhbGciOiJIUzI1NiJ9"))
+    j["type"].as_s.should eq("JWS")
+    j["signed"].as_bool.should be_false
+    j["note"].as_s.should contain("not a decodable token")
+    j["extra_segments"]?.should be_nil
   end
 
   it "verify_json is {alg, verified, reason} with reason null on the plain answers" do

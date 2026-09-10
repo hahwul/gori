@@ -27,6 +27,27 @@ module Gori
           sig = parts[2]?
           j.field "signature", (sig || "")
           j.field "signed", !(sig.nil? || sig.empty?)
+          # `note` (and, for a long token, `extra_segments`) rides on exactly the malformed
+          # shapes the sibling surfaces refuse, so the JSON projection can't quietly disagree
+          # with them — the divergence this file's header comment warns against. The ordinary
+          # 2/3-segment JWS carries neither field, so its shape is unchanged and a consumer
+          # keys on `note`/`extra_segments` presence the way it keys on `type` for a JWE.
+          if parts.size < 2
+            # A single dotted-less blob is not a JWS at all — `verify` calls it "not a
+            # decodable JWT" and the text decoder raises "need 2-3 dot-separated parts", while
+            # this used to report a clean {type:JWS, payload:null, signed:false} for junk.
+            j.field "note", "only #{parts.size} segment — a JWS needs at least header.payload " \
+                            "(2 or 3 dot-separated parts); not a decodable token"
+          elsif parts.size > 3
+            # Anything past three segments is smuggled/obfuscated data riding after a
+            # valid-looking JWS prefix (a JWE, at five, was already returned above). `parts[3..]`
+            # would otherwise be dropped on the floor and the token reported as a clean signed
+            # JWS — what the text decoder WARNS on (fix #22) and `verify` REFUSES.
+            extra = parts[3..]
+            j.field "extra_segments" { j.array { extra.each { |seg| j.string seg } } }
+            j.field "note", "#{parts.size} dot-separated segments — a JWS has 3 and a JWE 5; " \
+                            "#{extra.size} segment(s) beyond header.payload.signature shown raw, not decoded"
+          end
         end
       end
     end

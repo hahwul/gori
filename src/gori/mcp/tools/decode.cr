@@ -265,7 +265,10 @@ module Gori
           "signature, signed}. An ENCRYPTED five-part token (JWE) returns {type:\"JWE\", alg, enc, " \
           "kid, header, payload:null, encrypted:true, encrypted_key, iv, ciphertext, tag} — gori " \
           "reads the JWE protected header and does NOT decrypt, so the claims are not available " \
-          "at any surface and `payload` is null rather than absent. Branch on `type`." do |s|
+          "at any surface and `payload` is null rather than absent. Branch on `type`. A " \
+          "malformed token stays type JWS but also carries a `note`: one segment (not a " \
+          "decodable token) or, past three, `extra_segments` too — the raw trailing segments " \
+          "of data smuggled after a JWS prefix, which `jwt_verify` refuses." do |s|
           s.field "token", strprop("the JWT: a JWS (header.payload[.signature]) or a JWE (header.encrypted_key.iv.ciphertext.tag)"), required: true
         end
 
