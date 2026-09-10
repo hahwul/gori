@@ -4,6 +4,9 @@
 module Gori
   module CLI
     module Run
+      EVIDENCE_LINK_HELP = "See also — attach flow/repeater/fuzz/miner evidence to an issue:\n" \
+                           "  gori run links add --owner=issue --id=ISSUE_ID --ref=repeater --ref-id=REPEATER_ID"
+
       @[Subcommand("links", help: [
         {"links", "List/add/delete an issue's or note's evidence links"},
       ])]
