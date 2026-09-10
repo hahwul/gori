@@ -20,6 +20,10 @@ module Gori::CLI::Run
   def self.issue_flow_error_for_spec(store : Gori::Store, flow_id : Int64?) : String?
     issue_flow_error(store, flow_id)
   end
+
+  def self.issue_flow_range_error_for_spec(flow_id : Int64?) : String?
+    issue_flow_range_error(flow_id)
+  end
 end
 
 private def captured_flow(store : Gori::Store) : Int64
@@ -54,6 +58,20 @@ describe "gori run issues create --flow" do
       Gori::CLI::Run.issue_flow_error_for_spec(store, -5_i64)
         .should eq("invalid --flow -5 (expected a positive flow id)")
     end
+  end
+
+  # The `<= 0` half answers with NO store, which is what lets `create` ask it before
+  # `--notes-stdin` blocks to EOF (#1019): draining a generator's output and then refusing an
+  # argument that was wrong the moment it was typed costs the operator the write-up. A positive
+  # id gets nil here on purpose — whether it EXISTS is a question only the store can answer, and
+  # that is the one refusal on this command a pipe is legitimately drained for.
+  it "answers the zero/negative half without a store, and leaves existence to the store" do
+    Gori::CLI::Run.issue_flow_range_error_for_spec(0_i64)
+      .should eq("invalid --flow 0 (expected a positive flow id)")
+    Gori::CLI::Run.issue_flow_range_error_for_spec(-5_i64)
+      .should eq("invalid --flow -5 (expected a positive flow id)")
+    Gori::CLI::Run.issue_flow_range_error_for_spec(424_242_i64).should be_nil
+    Gori::CLI::Run.issue_flow_range_error_for_spec(nil).should be_nil
   end
 
   it "accepts a real flow id, and says nothing when --flow was not given" do

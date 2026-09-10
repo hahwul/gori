@@ -499,32 +499,12 @@ module Gori
         end
       end
 
-      # `--request-stdin`: the request bytes, verbatim. Byte-for-byte what `read_input_file`
-      # returns for the same content in a file — `IO#gets_to_end` and `File.read` are both an
-      # `IO.copy` into a `String::Builder`, so CRLF line endings stay CRLF and a body that is
-      # not valid UTF-8 (protobuf, a gzip'd POST, a latin-1 field) arrives as its own octets.
-      # That is the issue's requirement and P7 besides: these are operator bytes, and gori does
-      # not sanitize the payload.
-      #
-      # No `STDIN.tty?` *guard*, unlike `fuzz_source`/`mine_source`/`sequence_source`. Their
-      # stdin road is IMPLICIT — the fallback when no source flag was passed — so without the
-      # guard a bare `gori run mine` would hang on a terminal. This flag was named by the
-      # operator, so blocking until EOF is the answer to what they asked for. It does get a
-      # NOTICE, though: without one a forgotten pipe is indistinguishable from a hung command,
-      # and every other interactive read in gori announces itself first (`gori ca`).
-      #
-      # The rescue is the point of routing through here rather than a bare `io.gets_to_end`.
-      # `Run.dispatch` re-raises any non-EPIPE `IO::Error` and `CLI.run` rescues only
-      # `Gori::Error`, so an unreadable stdin — fd 0 closed by a cron/systemd unit, or a
-      # `Process.run` with no stdin pipe — reached the operator as a Crystal backtrace. This is
-      # the same guard, and the same reason for it, as `read_input_file`'s `File::Error` rescue.
+      # `--request-stdin`: the request bytes, verbatim — the tty notice, the byte fidelity and
+      # the `IO::Error` rescue all live in `read_stdin_text`, which `issues create/update`'s
+      # `--notes-stdin` reads through too. Public (and kept as its own name) so the spec can
+      # drive THIS door rather than the shared reader: the noun is half the contract.
       def self.read_request_stdin(io : IO, what : String) : String
-        if io.is_a?(IO::FileDescriptor) && io.tty?
-          STDERR.puts "#{what}: reading the request from stdin — press ^D to finish"
-        end
-        io.gets_to_end
-      rescue ex : IO::Error
-        abort "#{what}: cannot read the request from stdin: #{ex.message}"
+        read_stdin_text(io, what, "request")
       end
 
       private def self.cmd_repeater_create(args : Array(String)) : Nil

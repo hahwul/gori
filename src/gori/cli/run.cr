@@ -456,6 +456,37 @@ module Gori
         abort "#{what}: cannot read '#{path}': #{ex.message}"
       end
 
+      # The bytes an operator piped in for an EXPLICIT `--…-stdin` flag, verbatim. Byte-for-byte
+      # what `read_input_file` returns for the same content in a file — `IO#gets_to_end` and
+      # `File.read` are both an `IO.copy` into a `String::Builder`, so CRLF stays CRLF and text
+      # that is not valid UTF-8 (a latin-1 note, a captured body pasted into evidence) arrives
+      # as its own octets rather than as U+FFFD. That is P7 besides: these are operator bytes,
+      # and gori does not sanitize them.
+      #
+      # No `STDIN.tty?` *guard*, unlike `fuzz_source`/`mine_source`/`sequence_source`. Their
+      # stdin road is IMPLICIT — the fallback when no source flag was passed — so without the
+      # guard a bare `gori run mine` would hang on a terminal. A flag NAMED by the operator
+      # makes blocking until EOF the answer to what they asked for. It does get a NOTICE,
+      # though: without one a forgotten pipe is indistinguishable from a hung command, and
+      # every other interactive read in gori announces itself first (`gori ca`).
+      #
+      # The rescue is the point of routing through here rather than a bare `io.gets_to_end`.
+      # `Run.dispatch` re-raises any non-EPIPE `IO::Error` and `CLI.run` rescues only
+      # `Gori::Error`, so an unreadable stdin — fd 0 closed by a cron/systemd unit, or a
+      # `Process.run` with no stdin pipe — reached the operator as a Crystal backtrace. Same
+      # guard, and same reason for it, as `read_input_file`'s `File::Error` rescue.
+      #
+      # `noun` names what is being read in both sentences, so each caller's prompt and refusal
+      # read like the flag the operator typed ("the request", "the notes").
+      private def self.read_stdin_text(io : IO, what : String, noun : String) : String
+        if io.is_a?(IO::FileDescriptor) && io.tty?
+          STDERR.puts "#{what}: reading the #{noun} from stdin — press ^D to finish"
+        end
+        io.gets_to_end
+      rescue ex : IO::Error
+        abort "#{what}: cannot read the #{noun} from stdin: #{ex.message}"
+      end
+
       # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;
       # turn that into a clean CLI error instead of an unhandled backtrace.
       # `read_only` for commands that never persist (history list/show, compare, issues

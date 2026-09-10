@@ -811,14 +811,20 @@ Write issues from scripts with `create` / `update`:
 gori run issues create --title "Reflected XSS on /search" --cvss 8.8 --host app.example.com --flow 42
 gori run issues update 7 --status confirmed --notes "Verified on staging" --severity critical
 gori run issues delete 7
+
+# The notes body can come from a file or a pipe instead of the argument vector
+gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-file writeup.md
+report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
+
+`--notes`, `--notes-file` and `--notes-stdin` are mutually exclusive, and the body is read byte-for-byte — multiline UTF-8, CRLF and all (the value of a bound project env var is still masked to `$NAME` on the way in, as it is for every issue field). A long write-up piped in or read from a file stays out of the process listing and the shell history; on `create` it is written with the issue in one transaction, so a script no longer needs a create-then-update pair. `--notes ''` clears the notes on `update`; a file or a pipe that yields nothing is refused instead, so a report generator that dies cannot silently erase a write-up.
 
 | Option | Description |
 | -------- | ------------- |
 | `--format` | `text` (default) \| `json` \| `markdown` \| `sarif`, the same reports the TUI's Export writes |
 | `--export=PATH` | Write to `PATH` instead of STDOUT (bytes verbatim; STDOUT is escape-scrubbed) |
-| `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
-| `update <id>` | `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
+| `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
+| `update <id>` | `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes` (empty to clear), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
 | `delete <id>` | Delete the issue and its evidence links. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
 
 `--format sarif` writes a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log, the format GitHub code scanning, DefectDojo and Azure DevOps ingest. Each issue becomes one result: its severity maps to a SARIF `level` (with `rank` and the rule's `security-severity` preserving the full five-way scale), a `false-positive` or `resolved` triage status becomes a `suppression` so a dismissed finding does not reappear as open, and a linked flow rides along as `webRequest`/`webResponse` with real headers and (decoded, 64 KiB-capped) bodies.
