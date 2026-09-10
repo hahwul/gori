@@ -7,6 +7,7 @@ require "./media_type"
 require "./binary_document"
 require "./msgpack"
 require "./cbor"
+require "./decoder/serialized"
 
 module Gori
   # Display-only body pretty-printer. Sits BETWEEN the transform layer
@@ -57,8 +58,9 @@ module Gori
       # content-type has to say so — this is a dispatch, not a guess (`MediaType.binary_document?`).
       return try_binary_doc(body, ct) if MediaType.binary_document?(ct)
 
-      # Content sniffs FIRST — JWT/GraphQL masquerade under generic content-types.
-      if r = try_jwt(str)
+      # Content sniffs FIRST — a native-serialization blob and a JWT both masquerade under
+      # generic content-types (and the four serialization formats have no content-type at all).
+      if r = sniffed(body, str)
         return r
       end
       return try_json_or_graphql(str) if MediaType.json?(ct)
@@ -70,6 +72,14 @@ module Gori
       markup_or_graphql(body, str, ct, ctl)
     rescue
       nil # last-resort net: Pretty must never raise into the render path
+    end
+
+    # The HEAD of `format`'s chain: the two sniffs that run before any content-type is
+    # consulted, in the order they have to run in. A serialized object graph is dispatched on
+    # its own marker (`try_serialized`) because none of those four formats has a content type;
+    # a JWT is a body shape that appears under every generic type there is.
+    private def sniffed(body : Bytes, str : String) : Result?
+      try_serialized(body) || try_jwt(str)
     end
 
     # The TAIL of `format`'s chain, split out so the whole dispatch is not one method past
@@ -106,6 +116,35 @@ module Gori
     # on the one surface an operator looks at, while the headless projection kept both.
     private def try_binary_doc(body : Bytes, ct : String?) : Result?
       format, r = BinaryDocument.render(body, ct, indent: "  ") || return nil
+      return nil if r.json.bytesize > MAX_OUT_PRETTY
+      note = String.build do |io|
+        io << "decoded: " << format
+        io << " (partial — the document ends mid-value)" unless r.complete
+      end
+      Result.new(r.json.to_slice, note, kind: :json)
+    rescue
+      nil # last-resort net, the same one `format` carries: never raise into the render path
+    end
+
+    # ---- native serialization (Java / ViewState / PHP / pickle) ------------
+
+    # A body somebody's RUNTIME wrote — a Java `ObjectOutputStream` stream, an ASP.NET
+    # ViewState, a PHP `serialize()` value, a Python pickle. Same projection and same `kind`
+    # override as `try_binary_doc`, and nil for a body whose bytes are not what their marker
+    # claims, so the caller falls through to the hex view.
+    #
+    # A MARKER and not a content-type, which is the one thing that differs from the sibling
+    # above: none of these four formats has a content-type of its own. A Java stream comes
+    # back as `application/octet-stream`, a serialized PHP value as `text/plain`. Each marker
+    # is structural rather than a keyword (`Decoder::Serialized.sniff`), which is what keeps
+    # this from firing on an ordinary body.
+    #
+    # A ViewState is the one that will rarely reach here, and that is expected rather than a
+    # gap: it lives in an `<input value=…>` inside an HTML body, not as the body. The converter
+    # (`dotnet-viewstate`) is where an operator reads one, and the Decoder tab is where they
+    # paste it.
+    private def try_serialized(body : Bytes) : Result?
+      format, r = Decoder::Serialized.sniff(body, indent: "  ") || return nil
       return nil if r.json.bytesize > MAX_OUT_PRETTY
       note = String.build do |io|
         io << "decoded: " << format

@@ -60,7 +60,7 @@ myenc > url-encode
 | **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩, WAF 우회용), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`) |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (헤더 없는 RFC 1951), `brotli-decompress`, `zstd-decompress` |
-| **Serialization** | `msgpack-decode`, `cbor-decode`. 바이너리 문서를 JSON 텍스트로 렌더 |
+| **Serialization** | `msgpack-decode`, `cbor-decode`(바이너리 문서를 JSON 텍스트로), 그리고 네이티브 직렬화 리더 `java-deserialize`, `dotnet-viewstate`, `php-unserialize`, `pickle-disasm` |
 | **Token** | `jwt-decode` (헤더 + 페이로드; 서명은 표시되지만 검증하지 않음), 그리고 서명된 세션 쿠키 리더 `cookie-decode`(프레임워크 자동 판별), `flask-decode`(itsdangerous), `django-decode`(`django.core.signing`), `rack-decode`(Ruby) |
 | **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |
 | **Escape** | `html-escape` / `html-unescape`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
@@ -71,6 +71,8 @@ myenc > url-encode
 세션 쿠키 리더 네 개는 봉투를 디코드해 쿠키가 무엇을 싣고 있는지 보여 줄 뿐, 서명은 검증하지 않습니다. 서명 키 크래킹, 쿠키 위조, 라이브 검증은 [Cookie 워크벤치](/ko/guide/cookie/)의 몫이고, 이 탭은 체인 안에서 부를 수 있는 읽기 전용 절반입니다.
 
 `msgpack-decode`와 `cbor-decode`는 남이 쓴 바이너리 문서를 읽어 JSON으로 렌더합니다. 한 방향이고, 그 방향이 필요한 쪽입니다. 여기서 JSON은 *투영*이지 재인코딩이 아닙니다. JSON에 담을 자리가 없는 것은 접어 없애지 않고 이름을 달아 돌려줍니다(바이트 문자열은 `{"$bin": …}`, CBOR 태그는 `{"$tag": …}`, MessagePack 확장은 `{"$ext": …}`, JSON 숫자로는 정확하지 않은 정수는 10진 문자열). 입력이 도중에 끊긴 문서는 읽은 데까지 렌더하고 멈춘 자리를 `{"$partial": …}`로 표시합니다. 캡처 상한에 잘린 본문에서 흔한 경우입니다. 투영에는 모호함이 하나 따라옵니다. 문서 자신의 맵 키가 문자 그대로 `$bin`이나 `$tag`이면 래퍼와 같은 모양으로 렌더됩니다. 그런 본문 하나를 막자고 모든 본문의 모든 키를 이스케이프하면 흔한 본문이 오히려 읽기 어려워집니다.
+
+네 개의 **네이티브 직렬화** 리더는 `serialized_object`가 열어 놓고 답하지 못하던 질문에 답합니다. gori가 쿠키나 파라미터 속의 Java·ViewState·PHP blob을 찾아내면, 이것들이 그것을 읽습니다. `java-deserialize`는 `ObjectOutputStream` 문법을 걸어 인스턴스마다 `{"$object": …}`와 선언된 필드, `writeObject` annotation을 냅니다. `dotnet-viewstate`는 `ObjectStateFormatter` 토큰 트리를 읽고 MAC이 있는지 말합니다(`"mac": false`가 곧 발견입니다). `php-unserialize`는 `\0Class\0prop`의 망글링을 풀어 `prop`으로 돌리고 가시성은 `$private` / `$protected`에 남깁니다. `pickle-disasm`은 실행하지 않고 **디스어셈블**만 하며, 스트림이 이름을 대는 모든 호출 대상을 `globals`에, 호출 횟수를 `reduce`에 모읍니다. 넷 다 읽기 전용입니다. 역참조는 펼치지 않고 `{"$ref": n}`으로 돌아오고, 어떤 것도 다시 인코딩하지 않습니다(가젯 체인 *생성*은 여전히 `ysoserial` 같은 도구 밖의 단계입니다). 입력은 바이트라서 `base64-decode > java-deserialize`가 쿠키에서 꺼낸 blob이 지나가는 모양입니다. 컨버터는 상세 패널의 마커 스니핑보다 관대한데, 이름을 직접 친다는 것이 스니핑은 결코 할 수 없는 판단이기 때문입니다. 헤더가 없어 패널이 거절하는 protocol 0 pickle도 `pickle-disasm`은 읽습니다.
 
 몇 가지는 한 방향으로만 동작하며 체인으로 되돌릴 수 없습니다. `shell-escape`와 `powershell-escape`는 값을 따옴표 리터럴로 감싸고, `homoglyph`는 ASCII 글자를 시각적으로 닮은 유니코드 문자로 바꿉니다(굳어진 대응 문자가 없는 글자는 그대로 둡니다). `typo`는 변환이 아니라 생성기입니다. 글자 누락, 인접 글자 자리바꿈, QWERTY 이웃 키로 만든 오타 변형을 한 줄에 하나씩 내놓습니다.
 

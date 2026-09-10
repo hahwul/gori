@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "./support/serialized_vectors"
 
 # The decode panes are all keyed on a request or response BODY, and the surfaces that render
 # them are four: History, `gori run show` (text and JSON), and MCP `get_flow`. A 101 flow has
@@ -94,6 +95,39 @@ describe Gori::DecodedView do
     doc[0]["format"].as_s.should eq("msgpack")
     doc[0]["complete"].as_bool.should be_true
     doc[0]["json"].as_s.should eq(%({"a":1,"b":{"$bin":"//4="}}))
+  end
+
+  it "emits a NATIVE-serialization body too, so the headless surfaces match the pane" do
+    # #1011's four readers dispatch on a marker rather than a content type, and wiring them
+    # into `Pretty` alone would put the detail pane and `get_flow` at odds about the same
+    # body — the exact split this module exists to prevent. An agent driving gori over MCP
+    # would see an opaque blob where a human sees the class names.
+    json = JSON.build do |j|
+      j.object do
+        Gori::DecodedView.emit_json(j, target: "/rpc",
+          req_head: "POST /rpc HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, req_body: nil,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n".to_slice,
+          resp_body: SerializedVectors::JAVA_HASHMAP)
+      end
+    end
+    doc = JSON.parse(json)["binary_documents"].as_a
+    doc.size.should eq(1)
+    doc[0]["format"].as_s.should eq("java-serialized")
+    doc[0]["json"].as_s.should contain(%("$object":"java.util.HashMap"))
+  end
+
+  it "leaves an oversize body to the hex view, the ceiling the pane already applies" do
+    # The content-type readers run only on a body whose header asked for them; the marker
+    # sniff is offered every body there is, so it carries `Pretty::MAX_PRETTY`'s bound — and
+    # carries the SAME one, or the two surfaces disagree about which bodies get a projection.
+    big = SerializedVectors::JAVA_HASHMAP + Bytes.new(1024 * 1024, 0x70_u8)
+    json = JSON.build do |j|
+      j.object do
+        Gori::DecodedView.emit_json(j, target: "/", req_head: nil, req_body: nil,
+          resp_head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, resp_body: big)
+      end
+    end
+    JSON.parse(json).as_h.has_key?("binary_documents").should be_false
   end
 
   it "says nothing for a flow that carries none" do

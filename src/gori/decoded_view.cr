@@ -8,6 +8,7 @@ require "./form_data"
 require "./media_type"
 require "./binary_document"
 require "./msgpack"
+require "./decoder/serialized"
 require "./cbor"
 
 module Gori
@@ -162,10 +163,11 @@ module Gori
       end
     end
 
-    # A body somebody SERIALIZED rather than wrote — MessagePack or CBOR — as the JSON
-    # projection its reader produces. Headless surfaces get the same rendering the detail pane
-    # shows, which is the whole reason this module exists: `gori run show --format json` and
-    # MCP `get_flow` must not each grow their own idea of what a body says.
+    # A body somebody SERIALIZED rather than wrote — MessagePack or CBOR by content type, or a
+    # Java / ViewState / PHP / pickle graph by its own marker — as the JSON projection its
+    # reader produces. Headless surfaces get the same rendering the detail pane shows, which is
+    # the whole reason this module exists: `gori run show --format json` and MCP `get_flow`
+    # must not each grow their own idea of what a body says.
     #
     # `json` is the projection as TEXT, not a nested object: it can hold a value JSON has no
     # literal for (a `$bin` wrapper, a decimal string for a wide integer) and a DUPLICATE member
@@ -177,7 +179,7 @@ module Gori
                                       resp_head : Bytes?, resp_body : Bytes?, clip : Int32?) : Nil
       found = [] of {String, String, BinaryDocument::Rendering}
       { {"request", req_head, req_body}, {"response", resp_head, resp_body} }.each do |(side, head, body)|
-        format, r = BinaryDocument.render(body, MediaType.of(head)) || next
+        format, r = BinaryDocument.render(body, MediaType.of(head)) || sniff_serialized(body) || next
         found << {side, format, r}
       end
       return if found.empty?
@@ -193,6 +195,19 @@ module Gori
           end
         end
       end
+    end
+
+    # The marker-driven half, for the four formats that have no content type of their own
+    # (`Decoder::Serialized.sniff`). Bounded by size where the content-type readers are not,
+    # and the two facts are the same fact: those run only on a body whose header ASKED for
+    # them, while this one is offered every body there is. `MAX_SNIFF` is `Pretty::MAX_PRETTY`,
+    # the ceiling the detail pane already declines above — so the two surfaces agree about
+    # which bodies get a projection, which is the property this method exists to hold.
+    MAX_SNIFF = 1024 * 1024
+
+    private def sniff_serialized(body : Bytes?) : {String, BinaryDocument::Rendering}?
+      return nil unless body && body.size <= MAX_SNIFF
+      Decoder::Serialized.sniff(body)
     end
 
     # Emit a (possibly nil) text field, clipped to `clip` bytes when set; a clip flags

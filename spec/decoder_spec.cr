@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "./support/serialized_vectors"
 
 private REG = Gori::Decoder.default_registry
 
@@ -342,6 +343,53 @@ describe Gori::Decoder do
       # base64 in, JSON out — the shape of a body pasted out of a header or a JSON string.
       chain = Gori::Decoder.run(REG, "kQE=".to_slice, "base64-decode > msgpack-decode")
       String.new(chain.output.not_nil!).should eq("[1]")
+    end
+
+    # The four native-serialization readers (#1011). Their own grammars are covered under
+    # `spec/decoder/serialized/`; what is here is that each one is REACHABLE by the name and
+    # the aliases the catalog claims, chains off a base64 step the way an operator pastes a
+    # cookie, and refuses a body it made nothing of.
+    it "reads the four native-serialization formats under the names the catalog registers" do
+      String.new(conv_bytes("java-deserialize", SerializedVectors::JAVA_HASHMAP))
+        .should contain(%("$object":"java.util.HashMap"))
+      String.new(conv_bytes("dotnet-viewstate", SerializedVectors::VIEWSTATE_CLASSIC))
+        .should contain(%("$format":"aspnet-viewstate"))
+      String.new(conv_bytes("php-unserialize", SerializedVectors::PHP_OBJECT))
+        .should contain(%("$class":"MyClass"))
+      String.new(conv_bytes("pickle-disasm", SerializedVectors::PICKLE_REDUCE))
+        .should contain(%("globals":["posix.system"]))
+      # …and by their aliases, which is how an operator actually types them.
+      {"java", "viewstate", "php", "pickle"}.each { |a| REG[a]?.should_not be_nil }
+    end
+
+    it "chains a serialization reader off a base64 step, the way a blob arrives" do
+      b64 = Base64.strict_encode(SerializedVectors::PICKLE_REDUCE).to_slice
+      chain = Gori::Decoder.run(REG, b64, "base64-decode > pickle-disasm")
+      String.new(chain.output.not_nil!).should contain(%("op":"REDUCE"))
+    end
+
+    it "refuses a body a serialization reader made NOTHING of" do
+      # Three of the four write an envelope before they read a value, so `document`'s
+      # "the whole rendering is one $partial" test can never fire for them — `decoded` is the
+      # same question asked where it still has an answer.
+      png = Bytes[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x11]
+      expect_raises(Gori::Decoder::DecoderError, /not a Java serialized stream/) do
+        conv_bytes("java-deserialize", png)
+      end
+      expect_raises(Gori::Decoder::DecoderError, /not a ViewState/) do
+        conv_bytes("dotnet-viewstate", png)
+      end
+      expect_raises(Gori::Decoder::DecoderError, /not a PHP serialize\(\) value/) do
+        conv_bytes("php-unserialize", "hello".to_slice)
+      end
+    end
+
+    it "reads a pickle the SNIFF would decline, because the operator named the format" do
+      # Protocol 0 has no header, so `Serialized.sniff` cannot claim it — but a converter the
+      # operator typed is a decision already made. Same split as `document`'s permissiveness.
+      p0 = "cposix\nsystem\np0\n(V id\np1\ntp2\nRp3\n.".to_slice
+      Gori::Decoder::Serialized.sniff(p0).should be_nil
+      String.new(conv_bytes("pickle-disasm", p0)).should contain(%("globals":["posix.system"]))
     end
   end
 

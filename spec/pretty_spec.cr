@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "./support/serialized_vectors"
 
 # Build a minimal head carrying just the Content-Type, then pretty-format a body.
 private def pretty(ct : String, body : String | Bytes) : Gori::Pretty::Result?
@@ -328,6 +329,53 @@ describe Gori::Pretty do
       pretty("application/x-amz-json-1.1", %({"a":1,"b":[1,2]})).not_nil!.note.should eq("pretty: json")
     end
   end
+  describe "native serialization" do
+    # The sibling of the block below, and the one difference is the whole design: these four
+    # formats have no content-type, so the dispatch is the bytes' own marker
+    # (`Decoder::Serialized.sniff`) rather than a header. #1011.
+    it "renders a Java stream carried as an ordinary binary body, and styles the pane as JSON" do
+      r = Gori::Pretty.format(head_ct("application/octet-stream"), SerializedVectors::JAVA_HASHMAP).not_nil!
+      r.note.should eq("decoded: java-serialized")
+      r.kind.should eq(:json)
+      String.new(r.bytes).should contain(%("$object": "java.util.HashMap"))
+    end
+
+    it "renders a serialized PHP body under the text/plain a PHP endpoint sends it as" do
+      r = Gori::Pretty.format(head_ct("text/plain"), SerializedVectors::PHP_OBJECT).not_nil!
+      r.note.should eq("decoded: php-serialized")
+      String.new(r.bytes).should contain(%("$class": "MyClass"))
+    end
+
+    it "renders a pickle body, and a ViewState pasted as one" do
+      Gori::Pretty.format(head_ct("application/octet-stream"), SerializedVectors::PICKLE_REDUCE)
+        .not_nil!.note.should eq("decoded: python-pickle")
+      Gori::Pretty.format(nil, SerializedVectors::VIEWSTATE_CLASSIC)
+        .not_nil!.note.should eq("decoded: aspnet-viewstate")
+    end
+
+    it "leaves an ordinary body alone, whatever it opens with" do
+      # nil = the caller shows what it would have shown anyway. A marker-driven sniff that
+      # fires on ordinary traffic is worse than no sniff: it replaces the body an operator
+      # came to read with a tree built out of something else.
+      rng = Random.new(11)
+      tail = Bytes.new(4_000) { rng.rand(256).to_u8 }
+      Gori::Pretty.format(head_ct("application/octet-stream"),
+        Bytes[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] + tail).should be_nil
+      Gori::Pretty.format(head_ct("text/plain"), "hello world, an ordinary page".to_slice).should be_nil
+      # An HTML page that merely CONTAINS the shape still renders as HTML.
+      Gori::Pretty.format(head_ct("text/html"), "<html><body>a:1:{}</body></html>".to_slice)
+        .try(&.note).should_not eq("decoded: php-serialized")
+      # A JSON body is still JSON — the sniff runs first, and has to decline it.
+      Gori::Pretty.format(head_ct("application/json"), %({"a":1,"b":[1,2]}).to_slice)
+        .not_nil!.note.should eq("pretty: json")
+    end
+
+    it "leaves a body whose marker is right and whose bytes are not" do
+      Gori::Pretty.format(head_ct("application/octet-stream"),
+        SerializedVectors::VIEWSTATE_CLASSIC + Bytes.new(300, 0x41_u8)).should be_nil
+    end
+  end
+
   describe "binary documents" do
     it "renders a MessagePack body as JSON, and styles the pane as JSON" do
       r = Gori::Pretty.format(head_ct("application/msgpack"), msgpack_body).not_nil!

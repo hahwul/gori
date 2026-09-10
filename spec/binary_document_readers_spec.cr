@@ -1,22 +1,36 @@
 require "./spec_helper"
+require "./support/serialized_vectors"
 
-# `Gori::Msgpack` and `Gori::Cbor` each make the same two promises, and neither can be checked
-# by reading: NEVER RAISE on any input, and always emit a document that parses. A body handed to
-# either one came off the wire, so hostile and truncated input is the normal case — and the
+# The SIX schema-less readers each make the same two promises, and neither can be checked by
+# reading: NEVER RAISE on any input, and always emit a document that parses. A body handed to
+# any of them came off the wire, so hostile and truncated input is the normal case — and the
 # failure mode of getting this wrong is a raise unwinding into a TUI draw, or a JSON document
 # with a hole in it reaching an agent.
 #
-# A cross-cutting spec because the property is one and the readers are two: it belongs to
-# neither file, and a copy in each is how the two would drift.
+# `Gori::Msgpack` and `Gori::Cbor` read a binary DOCUMENT; the four under
+# `Gori::Decoder::Serialized` read a native-serialization OBJECT GRAPH (#1011). They are swept
+# together because the promise is one and the readers are six: it belongs to no one file, and a
+# copy in each is how they would drift.
+# name => the two-element `{json, complete}` form every one of the six exposes. `private`
+# because every spec file compiles into ONE binary, so a bare constant here is a global.
+private DOC_READERS = {
+  "msgpack"   => ->(d : Bytes) { Gori::Msgpack.to_json(d) },
+  "cbor"      => ->(d : Bytes) { Gori::Cbor.to_json(d) },
+  "java"      => ->(d : Bytes) { Gori::Decoder::Serialized::Java.to_json(d) },
+  "viewstate" => ->(d : Bytes) { Gori::Decoder::Serialized::DotnetViewState.to_json(d) },
+  "php"       => ->(d : Bytes) { Gori::Decoder::Serialized::Php.to_json(d) },
+  "pickle"    => ->(d : Bytes) { Gori::Decoder::Serialized::Pickle.to_json(d) },
+}
+
 describe "the binary document readers" do
   it "survives every byte, every prefix, and thousands of random buffers" do
     raises = [] of String
     bad_json = [] of String
 
     check = ->(label : String, data : Bytes) do
-      {"msgpack", "cbor"}.each do |fmt|
+      DOC_READERS.each do |fmt, read|
         begin
-          json, _ = fmt == "msgpack" ? Gori::Msgpack.to_json(data) : Gori::Cbor.to_json(data)
+          json, _ = read.call(data)
           begin
             JSON.parse(json)
           rescue
@@ -40,7 +54,8 @@ describe "the binary document readers" do
     # every prefix of a real document of each kind
     mp = Bytes[0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62, 0xc4, 0x02, 0xff, 0xfe]
     cb = "a26178830102a1617922617aa1646465657082f5f4".hexbytes
-    [mp, cb].each_with_index do |doc, di|
+    [mp, cb, SerializedVectors::JAVA_HASHMAP, SerializedVectors::VIEWSTATE_CLASSIC,
+     SerializedVectors::PICKLE_REDUCE, SerializedVectors::PHP_OBJECT].each_with_index do |doc, di|
       (0..doc.size).each { |n| check.call("prefix #{di}/#{n}", doc[0, n]) }
     end
 
@@ -70,13 +85,13 @@ describe "the binary document readers" do
     20.times do
       data = Bytes.new(200_000) { rng.rand(256).to_u8 }
       t = Time.instant
-      Gori::Msgpack.to_json(data)
-      Gori::Cbor.to_json(data)
+      DOC_READERS.each_value(&.call(data))
       ms = (Time.instant - t).total_milliseconds
       worst = ms if ms > worst
     end
-    # Measured at ~1 ms for 200 KB. The ceiling is loose on purpose — this guards against a
-    # quadratic path opening up, not against a slow machine.
+    # Measured at ~4 ms for 200 KB across all six readers (it was ~1 ms when this ran two).
+    # The ceiling is loose on purpose — this guards against a quadratic path opening up, not
+    # against a slow machine.
     worst.should be < 1000.0
   end
   it "renders a document's own $-named key the same as a marker, which is a decision" do
@@ -177,5 +192,39 @@ describe "the binary document readers" do
       end
       refused.should eq([] of String)
     end
+  end
+
+  # The random tier above is the FLOOR and cannot reach this: every buffer it makes is short,
+  # and an output blow-up needs a small input REPEATED. Each of these is a one- or two-byte
+  # form that renders a dozen bytes, or a length field claiming more than any machine has —
+  # the two shapes that get past a reader whose only ceiling is on the input walk.
+  #
+  # All three were live. `Java#content` sent `TC_BLOCKDATA` past `step?` entirely, so `77 00`
+  # repeated amplified ~13x with nothing counting it; `Token_EventValidationStore` multiplied
+  # its count by 16 BEFORE checking it, and Crystal's checked multiply raises `OverflowError`,
+  # which `Serialized.build` does not catch and `CLI.run` does not either; and PHP's `S:`
+  # allocated `Bytes.new(n)` for a declared length it had not compared against the input.
+  it "bounds the OUTPUT of a small input repeated, and never allocates a declared length" do
+    bombs = {
+      "java empty block data" => {"java", Bytes[0xac, 0xed, 0x00, 0x05] + Bytes.new(800_000) { |i| i.even? ? 0x77_u8 : 0x00_u8 }},
+      "java null contents"    => {"java", Bytes[0xac, 0xed, 0x00, 0x05] + Bytes.new(400_000, 0x70_u8)},
+      "viewstate evs count"   => {"viewstate", Bytes[0xff, 0x01, 29, 0] + SerializedVectors.e7(0x7fff_fff0)},
+      "viewstate empty strs"  => {"viewstate", Bytes[0xff, 0x01, 21] + SerializedVectors.e7(400_000) + Bytes.new(400_000, 0_u8)},
+      "viewstate nulls"       => {"viewstate", Bytes[0xff, 0x01, 22] + SerializedVectors.e7(400_000) + Bytes.new(400_000, 100_u8)},
+      # 16 input bytes in, 34 output bytes out, per entry — and its loop emits without
+      # descending through `value`, so it has to charge the budget itself.
+      "viewstate evs store" => {"viewstate", Bytes[0xff, 0x01, 29, 0] + SerializedVectors.e7(250_000) + Bytes.new(250_000 * 16, 0xaa_u8)},
+      "php lying S length"  => {"php", %(S:2000000000:"ab";).to_slice},
+      "php lying s length"  => {"php", %(s:2000000000:"ab";).to_slice},
+      "pickle empty tuples" => {"pickle", Bytes[0x80, 0x04] + Bytes.new(400_000, 0x29_u8)},
+    }
+
+    over = [] of String
+    bombs.each do |label, (fmt, data)|
+      json, _ = DOC_READERS[fmt].call(data)
+      JSON.parse(json)
+      over << "#{label}: #{json.bytesize}" if json.bytesize > Gori::Decoder::Serialized::MAX_JSON_BYTES
+    end
+    over.should eq([] of String)
   end
 end
