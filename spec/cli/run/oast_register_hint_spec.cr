@@ -25,13 +25,6 @@ end
 # machine rejects every public certificate to try four more interactsh servers just spends
 # four more timeouts arriving at the same wrong conclusion.
 describe "Gori::CLI::Run.oast_register_hint" do
-  it "sends a rejected chain to the trust store, and does NOT offer another server" do
-    line = hint(transport(Kind::TlsVerify))
-    line.should contain("SSL_CERT_FILE=")
-    line.should contain("THIS machine's trust store")
-    line.should_not contain("--server=")
-  end
-
   it "sends an unresolved name to the resolver, and does NOT offer another server" do
     line = hint(transport(Kind::Dns))
     line.should contain("resolver")
@@ -58,6 +51,48 @@ describe "Gori::CLI::Run.oast_register_hint" do
     line.should contain("the provider answered and refused")
     line.should contain("--token")
     line.should_not contain("SSL_CERT_FILE")
+  end
+
+  it "does not blame a token for a peer that never answered" do
+    # `Oast::ExchangeError` is a failure PAST the dial — the socket was open and the transfer
+    # broke. Folding it into the provider-refusal branch printed "the provider answered and
+    # refused — check --token" directly under gori's own "…did not answer within 20s".
+    line = hint(Gori::Oast::ExchangeError.new(
+      "OAST: oast.pro accepted the connection but did not answer within 20s"))
+    line.should contain("established and then broke")
+    line.should_not contain("--token")
+    line.should_not contain("SSL_CERT_FILE")
+    line.should_not contain("--server=")
+  end
+
+  it "sends a refusing upstream proxy to the proxy, not to four identical siblings" do
+    line = hint(transport(Kind::Proxy))
+    line.should contain("network.upstream_proxy")
+    line.should_not contain("--server=")
+  end
+
+  it "offers no sibling for a connect failure that took an upstream proxy leg" do
+    # Every sibling routes through the same proxy, so naming them is advice that cannot work.
+    Gori::Settings.upstream_proxy = "http://127.0.0.1:3128"
+    line = hint(transport(Kind::Connect), host: "https://oast.pro")
+    line.should contain("same leg")
+    line.should_not contain("https://oast.live")
+  ensure
+    Gori::Settings.upstream_proxy = ""
+  end
+
+  it "hedges on tls-verify — an expired leaf earns the same OpenSSL verdict as an untrusted one" do
+    # `Upstream.tls_dial_error` folds an expired certificate and a hostname mismatch into
+    # TlsVerify. Asserting "this is your CA store" would withhold the one remedy that works
+    # when a free public interactsh host's certificate lapses.
+    line = hint(transport(Kind::TlsVerify))
+    line.should contain("SSL_CERT_FILE")
+    line.should contain("presets --check")
+    line.should contain("--server=URL")
+  end
+
+  it "falls back to the probe when the transport could not attribute a stage" do
+    hint(transport(nil)).should contain("presets --check")
   end
 
   it "survives a malformed --server rather than replacing the diagnostic with a crash" do

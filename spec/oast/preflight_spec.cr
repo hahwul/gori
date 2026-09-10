@@ -68,6 +68,15 @@ describe Gori::Oast::Preflight do
       end
     end
 
+    it "does not call an unattributable transport failure an exchange" do
+      # nil kind is a malformed provider URL or a raise past the dial — the host was NEVER
+      # reached, which is the opposite of what `exchange` means in this report.
+      result = O::Preflight.check(preset("https://oast.pro"),
+        ScriptedHttp.new(Gori::HttpTransport::Error.new("HTTP URL needs a host")))
+      result.stage.should eq("dial")
+      result.ok.should be_false
+    end
+
     it "calls a failure past the dial an exchange, so a CA/resolver remedy is not implied" do
       result = O::Preflight.check(preset("https://oast.pro"),
         ScriptedHttp.new(Gori::Error.new("OAST: the GET to oast.pro failed after the connection was established: reset")))

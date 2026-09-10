@@ -96,14 +96,17 @@ module Gori::Oast
     # past the dial, which is a reachable host by any reading.
     private def self.stage_for(kind : Proxy::Upstream::DialErrorKind?) : String
       case kind
-      when Nil                                        then "exchange"
-      when .dns?                                      then "dns"
-      when .connect?                                  then "connect"
-      when .proxy?                                    then "proxy"
-      when .tls_verify?                               then "tls-verify"
-      when .tls?                                      then "tls"
-      when .timeout?                                  then "timeout"
-      else                                                 "error"
+      # A transport failure the dialer could not attribute to a stage — a malformed provider
+      # URL, or a raise past the dial itself. NOT "exchange": by this file's own definition that
+      # means the host was reached, which is the opposite of what happened.
+      when Nil          then "dial"
+      when .dns?        then "dns"
+      when .connect?    then "connect"
+      when .proxy?      then "proxy"
+      when .tls_verify? then "tls-verify"
+      when .tls?        then "tls"
+      when .timeout?    then "timeout"
+      else                   "error"
       end
     end
 

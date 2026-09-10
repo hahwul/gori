@@ -97,10 +97,12 @@ Registration talks to a third-party server over HTTPS, so it can fail four ways 
 |-------|---------------|------------|
 | `dns` | The name never resolved, so nothing was dialed | A restricted or split-horizon resolver. Check whether the other presets resolve |
 | `connect` | TCP connect refused, filtered, or timed out | Egress filtering, or that host is down — try a sibling preset with `--server=URL` |
-| `tls-verify` | The certificate chain was rejected by the trust store | **This machine, not the provider.** See the CA bundle below |
+| `proxy` | Your upstream proxy refused before any provider was contacted | `network.upstream_proxy*` in settings.json. Another provider takes the same leg |
+| `tls-verify` | The certificate chain was rejected | Either this machine's trust store (see below) **or** that host's own certificate having expired. `--check` tells them apart |
 | `tls` | The handshake broke before any certificate was judged | Not a trust problem; a CA bundle cannot help |
 | `timeout` | The port accepted the connection and then said nothing | A silent drop (inline IPS, black-holed egress) |
-| `exchange` | Connected fine, then the transfer or the provider's answer broke | The provider's own verdict — check `--token` |
+| `exchange` | Connected fine, then the transfer broke, or the provider refused | A reset or a silent peer; when the provider answered, its own verdict — check `--token` |
+| `dial` | The provider URL itself is malformed | Fix `--server` |
 
 `gori run oast presets --check` probes every built-in provider at once and prints that stage per preset, which is what separates the cases: one host failing while its four siblings answer is an outage; **all** of them failing at `tls-verify` is your CA store.
 
@@ -110,7 +112,7 @@ gori run oast presets --check
 [fail] interactsh    Public Interactsh (oast.fun)   https://oast.fun    dns        DNS lookup for oast.fun failed — …
 ```
 
-It exits non-zero only when **nothing** answered, so it works as a "can this machine do OAST at all" gate in a script.
+It exits non-zero only when **nothing** answered, so it works as a "can this machine do OAST at all" gate in a script. Pass `--project NAME` (or `--db PATH`) to probe the way *that* project dials — through its pinned upstream proxy and timeouts — which is the only way the answer describes the run it is diagnosing.
 
 ### Custom CA Bundles
 

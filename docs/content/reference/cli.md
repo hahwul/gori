@@ -657,7 +657,7 @@ gori run oast listen --provider webhook.site --once --json
 gori run oast listen --save                    # …and keep it as a project session
 ```
 
-`presets` lists the public providers, and `presets --check` PROBES each one over the network and prints the stage it fails at (`dns` / `connect` / `tls-verify` / `tls` / `timeout` / `exchange`) — which is what separates a custom trust store or a restricted resolver from a provider outage. It exits non-zero only when nothing answered.
+`presets` lists the public providers, and `presets --check` PROBES each one over the network and prints the stage it fails at (`dns` / `connect` / `proxy` / `tls-verify` / `tls` / `timeout` / `exchange` / `dial`) — which is what separates a custom trust store or a restricted resolver from a provider outage. It exits non-zero only when nothing answered.
 
 ```bash
 gori run oast presets --check
@@ -668,6 +668,7 @@ gori run oast presets --check --format json
 | -------- | ------------- |
 | `--check` | Probe each preset over the network and report reachability |
 | `--format=FMT` | `text` (default) or `json` |
+| `--project=NAME` · `--db=PATH` | With `--check`: probe the way that project dials (its pinned upstream proxy and timeouts) |
 
 A failed `listen` names the same stage. On `tls-verify` the remedy is this machine's trust store, not another provider: run with `SSL_CERT_FILE=/path/to/ca-bundle.crt` (or `SSL_CERT_DIR=/path/to/certs`) so the private or TLS-inspecting CA is trusted. For gori's own service traffic that bundle is **additive** — the system store is still loaded — so the public presets keep working. There is no `--ca-file` flag.
 

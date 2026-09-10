@@ -33,7 +33,7 @@ module Gori
 
         filtered, project_name, db_path = strip_project_flags(args)
         case sub = filtered.first?
-        when "presets"           then oast_presets(filtered[1..])
+        when "presets"           then oast_presets(filtered[1..], project_name, db_path)
         when "listen"            then oast_listen(filtered[1..], project_name, db_path)
         when nil, "-h", "--help" then oast_help
         else
@@ -639,15 +639,19 @@ module Gori
       # way. Running every preset at once turns that into an answer — one host failing while
       # its four siblings answer is an outage, all eight failing at `tls-verify` is this
       # machine's CA store (#1020).
-      private def self.oast_presets(args : Array(String)) : Nil
+      private def self.oast_presets(args : Array(String), project_name : String? = nil,
+                                    db_path : String? = nil) : Nil
         check = false
         format = :text
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run oast presets [options]\n\n" \
+          p.banner = "Usage: gori run oast presets [options] [--project NAME | --db PATH]\n\n" \
                      "List the built-in public OAST providers. --check probes each one and\n" \
-                     "names the stage that fails (dns / connect / tls-verify / tls / timeout /\n" \
-                     "exchange), which is what tells a trust-store or resolver problem apart\n" \
-                     "from a provider outage."
+                     "names the stage that fails (dns / connect / proxy / tls-verify / tls /\n" \
+                     "timeout / exchange / dial), which is what tells a trust-store, proxy or\n" \
+                     "resolver problem apart from a provider outage.\n\n" \
+                     "--project / --db make the probe dial the way THAT project dials (its\n" \
+                     "pinned upstream proxy and timeouts) — which is the only way the answer\n" \
+                     "describes the run it is diagnosing."
           p.on("--check", "Probe each preset over the network and report reachability") { check = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -658,6 +662,19 @@ module Gori
           "it takes no arguments; add --check to probe them")
 
         presets = Oast::Presets.all
+        # A named project is only meaningful to `--check`: the LIST is constants. Accepting and
+        # ignoring it is the quiet wrong answer this file already refuses elsewhere.
+        if !check && (project_name || db_path)
+          abort "gori run oast presets: --project/--db only apply to --check (the list is built in)"
+        end
+        # Load that project's network settings BEFORE probing. Without this, `oast listen
+        # --save --project P` could fail at stage `proxy` through P's pinned upstream while
+        # `presets --check` dialled DIRECT and reported every preset reachable — the diagnostic
+        # contradicting the thing it diagnoses. Resolved only when asked, so `presets` still
+        # works on a machine with no projects yet.
+        if check && (project_name || db_path)
+          open_store(resolve_read_project(project_name, db_path), read_only: true).close
+        end
         unless check
           if format == :json
             puts(JSON.build do |j|
@@ -701,33 +718,59 @@ module Gori
       # remedy — that wording lives in `HttpTransport` so the TUI and MCP get it too. What only
       # the CLI can add is the next command, and it must fit the verdict: another public
       # interactsh server is a real answer to "that host is down" and no answer at all to "this
-      # machine rejects every public certificate", where offering it just wastes four more
-      # timeouts (#1020).
+      # machine rejects every public certificate" or "the upstream proxy refused", where the
+      # siblings fail identically and just spend four more timeouts getting there (#1020).
       private def self.oast_register_hint(kind : Oast::ProviderKind, host : String,
                                           ex : Exception) : String
-        # Not a transport failure at all: the exchange completed and the PROVIDER refused
-        # (a bad token, a correlation id it rejects, an error page). No network remedy applies.
-        unless ex.is_a?(Gori::HttpTransport::Error)
-          return "the provider answered and refused, so this is the server's own verdict — " \
-                 "check --token, or `gori run oast presets --check` for another provider"
+        case ex
+        when Gori::HttpTransport::Error
+          oast_dial_hint(kind, host, ex)
+        when Oast::ExchangeError
+          # The socket WAS open and then the transfer broke. Neither dial remedy applies, and
+          # neither does --token: a peer that never answered said nothing about credentials.
+          "the connection was established and then broke, so no CA bundle, resolver or token " \
+          "is involved — retry, or `gori run oast presets --check` to see whether the provider " \
+          "is healthy from here"
+        else
+          "the provider answered and refused, so this is the server's own verdict — check " \
+          "--token, or `gori run oast presets --check` for another provider"
         end
-        case ex.kind
+      end
+
+      # The dial half, branched on the stage the transport identified.
+      private def self.oast_dial_hint(kind : Oast::ProviderKind, host : String,
+                                      err : Gori::HttpTransport::Error) : String
+        case err.kind
         when Nil
           "`gori run oast presets --check` probes every built-in provider and reports which " \
           "stage each one fails at"
+        when .proxy?
+          # Every sibling preset routes through this same proxy, so offering one is advice that
+          # cannot work. The remedy is the proxy's own settings, the way Upstream words it.
+          "the upstream proxy refused before any provider was contacted — a different server " \
+          "would route through the same proxy; fix `network.upstream_proxy*` in settings.json"
         when .tls_verify?
-          "this is THIS machine's trust store, not the provider: " \
-          "`SSL_CERT_FILE=/path/to/ca-bundle.crt gori run oast listen …` (add the CA your " \
-          "TLS-inspecting proxy presents). `gori run oast presets --check` shows whether every " \
-          "preset fails the same way, which confirms it"
+          # NOT flatly "your CA store": OpenSSL folds an EXPIRED leaf and a hostname mismatch
+          # into the same verdict as an untrusted chain (see Upstream.tls_dial_error), and an
+          # expired certificate on one free public interactsh host is a routine event whose fix
+          # is a sibling server. `presets --check` is what tells the two apart, so it leads.
+          "`gori run oast presets --check` tells the two causes apart: EVERY preset failing " \
+          "this way is this machine's trust store (a TLS-inspecting proxy or a private CA — " \
+          "add it with `SSL_CERT_FILE=/path/to/ca-bundle.crt`), one failing is that host's own " \
+          "certificate, and `--server=URL` moves to a sibling"
         when .dns?
           "the name never resolved — `gori run oast presets --check` shows whether the other " \
           "presets resolve; if none do, it is this machine's resolver, not the providers"
         else
-          # A host that refused, timed out, or broke the handshake: a sibling preset of the SAME
-          # kind is the one remedy that costs nothing to try. `URI.parse` is rescued because
-          # this runs on the error path — a malformed --server must not replace the diagnostic
-          # the operator came for with a crash.
+          # A host that refused, timed out, or broke the handshake. A sibling preset of the SAME
+          # kind is the one remedy that costs nothing to try — unless this dial went through an
+          # upstream proxy, where the siblings share that leg and would fail identically.
+          if label = oast_proxy_label(host)
+            return "this dial went through #{label}, so a different provider would take the " \
+                   "same leg — check that proxy before trying another server"
+          end
+          # `URI.parse` is rescued because this runs on the error path: a malformed --server must
+          # not replace the diagnostic the operator came for with a crash.
           alternatives = begin
             failed = URI.parse(host).host
             Oast::Presets.all.select { |pr| pr.kind == kind && URI.parse(pr.host).host != failed }
@@ -743,6 +786,16 @@ module Gori
             "`--server=URL`, or `gori run oast presets --check` to probe them all first"
           end
         end
+      end
+
+      # The upstream proxy this host's dial would take, or nil for a direct route. Asks the same
+      # single decision point the dial itself asked (`Upstream.proxied_via`) rather than parsing
+      # it back out of the error text.
+      private def self.oast_proxy_label(host : String) : String?
+        name = URI.parse(host).host
+        name ? Gori::Proxy::Upstream.proxied_via(name) : nil
+      rescue
+        nil
       end
 
       private def self.oast_listen(args : Array(String), project_name : String? = nil,
