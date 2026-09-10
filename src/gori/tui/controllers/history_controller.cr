@@ -101,7 +101,7 @@ module Gori::Tui
         # while the active chip lights a gold pill (strip_focused).
         strip_here = body_focused && @history.detail_strip_focus?
         body_here = body_focused && !@history.detail_strip_focus?
-        BodyChrome.framed(screen, rect, body_here) { |inner| @history.render_detail(screen, inner, focused: body_here, strip_focused: strip_here) }
+        BodyChrome.framed(screen, rect, body_here) { |inner| @history.render_drill(screen, inner, body_here, strip_here) }
       else
         # The list's user-defined columns (#819) read flow bytes for the rows they are about to
         # draw, and the list holds no store of its own — same seam, and same reason, as the
@@ -155,14 +155,34 @@ module Gori::Tui
     # read cursor pins it to the first text row, which is what an upward drag means.
     private def detail_text_rect(rect : Rect) : Rect?
       # The view owns the derivation: it is the side that also draws the footer strip under
-      # the text, and the strip's height is what this rect must stop above.
-      @history.detail_text_rect(rect.inset(1, 1))
+      # the text, and the strip's height is what this rect must stop above. `detail_body_rect`
+      # is the other half — the text sits under the LIST RAIL when one fits, so an `inset`
+      # alone would hit-test three rows above where the body was drawn.
+      @history.detail_text_rect(@history.detail_body_rect(rect.inset(1, 1)))
     end
 
     # A click inside the detail drill-in: the pane chips, then the mode chips (both on the
     # strip rows), then the text. Lifted out of `handle_click`, which carries the LIST arm as
     # well and was over ameba's complexity ceiling with a third condition on this ladder.
     private def click_detail(rect : Rect, inner : Rect, mx : Int32, my : Int32) : Nil
+      rail = @history.rail_rect(inner)
+      inner = @history.detail_body_rect(inner)
+      # The crumb's `‹` — a real button now. First arm, because it rides a row nothing else
+      # in the drill-in claims (the frame's top edge, or the rail's divider), and because
+      # "leave" must win over any pane hit-test a stray column might also match.
+      if (c = @history.detail_crumb) && Frame.crumb_rect(inner, c).try(&.contains?(mx, my))
+        @host.focus_body
+        close_detail
+        return
+      end
+      # A rail row: open THAT flow, staying in the drill-in. The rail shows the list, so a
+      # click on it means what a click on the list means — with the one difference that you
+      # are already inside an item, so it opens rather than merely selecting.
+      if i = DrillIn.rail_row_at(rail, mx, my, @history.rail_window[0].size)
+        @host.focus_body
+        detail_step_item(i - @history.rail_window[1])
+        return
+      end
       if pane = @history.detail_pane_at(inner, mx, my)
         @history.set_detail_pane_public(pane)
         @history.set_detail_focus(:strip) # a chip click parks focus on the strip
@@ -355,21 +375,35 @@ module Gori::Tui
       @history.detail_strip_focus? ? handle_detail_strip_key(ev) : handle_detail_body_key(ev)
     end
 
-    # STRIP level: the chip row acts as a focusable sub-tab strip. ←/→ switch panes
-    # (clamped at both ends — no auto-close), ↓/↵/j descend into the body, ↑/k pop out
-    # (close detail → the tab bar). esc/Tab/toggles fall through (return false).
+    # STRIP level: the chip row acts as a focusable sub-tab strip. → switches panes, ←
+    # walks back and LEAVES at the first one, ↓/↵/j descend into the body, ↑/k pop out to
+    # the list. esc/Tab/toggles fall through (return false).
+    #
+    # ↑ used to close the detail AND jump to the TAB BAR, skipping the list the drill-in
+    # came from — two levels on one press, from a strip whose own ←/→ are tab-switch keys
+    # one level up. It copied `handle_subtabs_key`, which is right for a strip that IS a
+    # sibling of the tab bar and wrong for one nested under a list.
     private def handle_detail_strip_key(ev : Termisu::Event::Key) : Bool
       return false if ev.ctrl? || ev.alt?
       key = ev.key
       case
-      when key.left?, key.lower_h?             then @history.detail_pane_advance(-1)
+      when key.left?, key.lower_h?             then detail_pane_back
       when key.right?, key.lower_l?            then @history.detail_pane_advance(1)
       when key.down?, key.lower_j?, key.enter? then @history.set_detail_focus(:body)
-      when key.up?, key.lower_k?               then close_detail; @host.request_focus(:menu)
+      when key.up?, key.lower_k?               then close_detail
       else
         return false
       end
       true
+    end
+
+    # ← on the chip strip: walk back a pane, and at the FIRST pane leave for the list.
+    # It used to clamp and do nothing there — a dead key under a border that said `‹ list`,
+    # while Issues and Probe both closed on ←. One arrow, three tabs, three meanings; the
+    # register comment above the pane verbs ("neither ever closes the detail") documented
+    # the divergence rather than resolving it.
+    private def detail_pane_back : Nil
+      close_detail unless @history.detail_pane_advance(-1)
     end
 
     # BODY level: caret move + shift-selection (all four directions, incl. horizontal
@@ -450,12 +484,17 @@ module Gori::Tui
       filter = Hotkeys.binding_label(reg, "history.query", "/")
       intercept = Hotkeys.binding_label(reg, "intercept.toggle", "i")
       if @host.overlay == :detail
+        # Each level names the key that leaves FROM HERE, and only that key. ← really does
+        # go back from the strip (it walks panes and then leaves at the first one) and really
+        # does not from the body, where the caret owns it — so the body's line says `esc`
+        # alone. Naming a key that does nothing from where you are is the defect the old
+        # ` ‹ list ` border chip had.
         if @history.detail_strip_focus?
-          return "←/→ panes · ↓/↵ enter · ↑ tabs · ↹ pane · space cmds · esc back"
+          return "←/→ panes · ↓/↵ enter · ⇧N/⇧P flow · ↑/← list · ↹ pane · space cmds · esc back"
         end
         nav = @history.detail_navigable? ? "↑/↓ move · ←/→ caret" : "↑/↓ scroll"
         dy = Hotkeys.binding_label(reg, "detail.copy", "y")
-        return "#{nav} · ⇧arrows select · #{dy} copy · ↑ strip · ↹ pane · space cmds · esc back"
+        return "#{nav} · ⇧arrows select · #{dy} copy · ⇧N/⇧P flow · ↑ strip · ↹ pane · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:
@@ -665,6 +704,31 @@ module Gori::Tui
     def close_detail : Nil
       @host.request_overlay(:none)
       @history.close_detail
+    end
+
+    # ⇧N/⇧P inside the drill-in: open the next/previous flow of the list behind WITHOUT
+    # going back to it.
+    #
+    # The drill-in had no way to step, so reading twenty rows meant `esc ↓ ↵` twenty times.
+    # That is most of what "going back is inconvenient" was measuring: not the cost of one
+    # exit, but paying a full exit and re-entry for every row. The crumb's `12/123` is this
+    # verb's affordance — a position readout is what makes "there is a next one" visible.
+    #
+    # Carries the pane you were reading (`open_detail` resets it), and does nothing at the
+    # ends of the list: `move` clamps, so a step that changed no row must not re-open the
+    # same flow and throw away its scroll position.
+    def detail_step_item(delta : Int32) : Nil
+      return unless @host.overlay == :detail
+      pane = @history.detail_pane
+      before = @history.selected_index
+      # `select_row`, not `move`: `move` routes to the REQ/RES preview whenever that pane
+      # holds focus, and the preview's focus survives opening the detail (it is not drawn
+      # there, so nothing resets it). A step would then scroll a pane nobody can see and
+      # read as a dead key.
+      @history.select_row(before + delta)
+      return if @history.selected_index == before
+      open_detail
+      @history.set_detail_pane_public(pane)
     end
 
     def toggle_follow : Nil

@@ -48,22 +48,64 @@ module Gori::Tui
       end
     end
 
-    # A "‹ list" back affordance riding the top-left border of a detail drill-in, where
-    # `inner` is the framed interior (the frame sits one column outside it, as produced
-    # by BodyChrome.framed / rect.inset(1, 1)). Advertises that ←/esc return to the list
-    # behind the detail — the whole point being discoverability, since users miss the
-    # status-bar "esc back". Rides the border at Frame.card's title column so it reads as
-    # a control on the frame; call it AFTER the frame so it overwrites the hairline cleanly.
-    def self.list_back_hint(screen : Screen, inner : Rect, bg : Color = Theme.bg) : Nil
-      y = inner.y - 1
-      # ` ‹ list ` is 8 cells from inner.x + 1; require inner.w > 8 so its trailing cell
-      # stays left of the frame's top-right ╮ (at inner.x + inner.w) — never clobber it.
-      return if y < 0 || inner.w <= 8
-      screen.text(inner.x + 1, y, " ‹ list ", Theme.accent, bg, Attribute::Bold)
+    # The breadcrumb a detail drill-in rides on its top-left border, where `Frame.card`
+    # would put a title: ` ‹ HISTORY · 12/123 · GET api.demo.test/v1/me `. `inner` is the
+    # framed interior (the frame sits one column outside it, as produced by
+    # BodyChrome.framed / rect.inset(1, 1)).
+    #
+    # It replaces a bare ` ‹ list `, which named neither WHERE you were nor WHAT you had
+    # opened — the drill-in's whole identity problem. Once the detail replaces the tab body
+    # the card loses its title and the tab bar renders exactly as it does over the list, so
+    # nothing on screen said "this is one row of History". The old hint also advertised a
+    # control that did not exist: no tab hit-tested those cells, and in History `←` did not
+    # even close (it walked panes and clamped), so the one glyph pointing the way out named
+    # a key that did nothing there.
+    #
+    # `pos` is the cursor's place in the list behind ("12/123"). It is also the affordance
+    # for the ⇧J/⇧K item step — without a visible position, stepping is a key nobody finds.
+    record Crumb, tab : String, subject : String, pos : String? = nil do
+      # The full run, padded the way every other border decoration in this module pads
+      # itself. ONE derivation, read by the draw AND by the click hit-test, so the `‹`
+      # cannot be drawn in cells the pointer misses.
+      def text : String
+        parts = [@tab]
+        if pos = @pos
+          parts << pos
+        end
+        parts << @subject unless @subject.empty?
+        " ‹ #{parts.join(" · ")} "
+      end
+    end
+
+    # Where the crumb lands: the border row above `inner`, or `row` for a drill-in that sits
+    # under a rail and rides that divider instead. nil when there is no room — the same
+    # refusal the old hint made, so a narrow pane simply has no crumb rather than a clipped
+    # one that overwrites the frame's top-right ╮ (at inner.x + inner.w).
+    def self.crumb_rect(inner : Rect, crumb : Crumb, row : Int32? = nil) : Rect?
+      y = row || (inner.y - 1)
+      return nil if y < 0 || inner.w <= 8
+      w = {Screen.draw_width(crumb.text), inner.w - 2}.min
+      return nil if w < 6
+      Rect.new(inner.x + 1, y, w, 1)
+    end
+
+    # Draws it. Call AFTER the frame, like every border decoration here — it overwrites the
+    # hairline. The `‹` is accent-bold because it IS the button (its hit-test is
+    # `crumb_rect`, the very rect this draws into); the tab name is bright so the eye lands
+    # on "which list is behind this"; the rest stays muted so the subject does not compete
+    # with the content underneath.
+    def self.crumb(screen : Screen, inner : Rect, crumb : Crumb, row : Int32? = nil,
+                   bg : Color = Theme.bg) : Nil
+      r = crumb_rect(inner, crumb, row) || return
+      screen.text(r.x, r.y, crumb.text, Theme.muted, bg, width: r.w)
+      return if r.w < 5
+      screen.text(r.x + 1, r.y, "‹", Theme.accent, bg, Attribute::Bold)
+      screen.text(r.x + 3, r.y, crumb.tab, Theme.text_bright, bg, Attribute::Bold,
+        width: {r.w - 3, 0}.max)
     end
 
     # A short right-aligned annotation riding a card's TOP border, right of the title —
-    # "2/2 enabled", "lens:off · 3", "4 entries". Rides the hairline the way `list_back_hint`
+    # "2/2 enabled", "lens:off · 3", "4 entries". Rides the hairline the way `crumb`
     # does, so it costs no interior row.
     #
     # Every card that wanted one used to hand-roll this, and the copies had drifted into

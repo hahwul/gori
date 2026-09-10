@@ -31,6 +31,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.close_detail
   end
 
+  # ⇧N/⇧P in the drill-in — the next/previous flow, in place. `@detail_pin` is deliberately
+  # NOT set: unlike `close_detail`, this stays in the detail, and the pin exists for verbs
+  # that leave it and then resolve a target.
+  def detail_step_item(delta : Int32) : Nil
+    history_controller.detail_step_item(delta)
+  end
+
   def toggle_follow : Nil
     history_controller.toggle_follow
   end

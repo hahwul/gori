@@ -1183,7 +1183,15 @@ module Gori::Tui
     end
 
     # --- status bar ---
-    def body_badge : Symbol # :editor (captures text) | :body (navigable/read-only)
+    # :editor (captures text) | :detail (an ITEM is open over this tab's list) | :body
+    # (navigable/read-only).
+    #
+    # `:detail` exists because the badge was the one always-visible slot that could say "you
+    # are a level down", and it said so on exactly one of the three tabs that have the level:
+    # History's drill-in lives in the shell (`@overlay == :detail`) so `focus_label` saw it,
+    # while Issues' and Probe's live in their views, and both read `BODY` — the same state,
+    # two different words, on adjacent tabs.
+    def body_badge : Symbol
       :body
     end
 

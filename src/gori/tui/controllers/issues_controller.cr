@@ -82,7 +82,11 @@ module Gori::Tui
     end
 
     def body_badge : Symbol
-      @issues.notes_insert_mode? ? :editor : :body
+      # INS wins over the drill-in: what the keys under your fingers DO outranks where you
+      # are, and it is also what `body_editor?` (paste routing, the copy verbs' INS gate)
+      # reads this for.
+      return :editor if @issues.notes_insert_mode?
+      @issues.detail_open? ? :detail : :body
     end
 
     def body_hint(focus : Symbol) : String
@@ -100,12 +104,12 @@ module Gori::Tui
         if @issues.notes_insert_mode?
           "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
         elsif @issues.notes_focused?
-          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · ↹/←/esc related"
+          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · ⇧N/⇧P issue · space cmds · ↹/←/esc related"
         else
           # `↹/↓ notes`, and `i edit` rather than the old `i/↵ notes`: ↵ in this pane opens
           # the selected RELATED item (`issue.open-link`), so naming it as the way into the
           # notes editor was wrong about one of the two keys it listed.
-          keys("↑/↓ links · ↵ open · ↹/↓ notes · i edit · {issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+          keys("↑/↓ links · ↵ open · ↹/↓ notes · i edit · ⇧N/⇧P issue · {issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -149,9 +153,17 @@ module Gori::Tui
     # Measured with `Frame.card`'s own refusal (`render_related_card` / `render_notes_card`
     # return on the same test), so this cannot drift from what was painted.
     private def detail_card_lit?(rect : Rect) : Bool
-      inner = BodyChrome.frame_inner(rect)
+      inner = detail_inner(rect)
       card = @issues.notes_focused? ? @issues.notes_card_rect(inner) : @issues.links_card_rect(inner)
       card.h >= 2 && card.w >= 2
+    end
+
+    # The DETAIL's rect inside the drill-in. `frame_inner` alone stopped being the answer
+    # once the list rail could sit above it, and every detail hit-test in this file measures
+    # against THIS — a card drawn under the rail and clicked as though it were not there is a
+    # dead row, which is the failure `detail_split`'s own comment exists to prevent.
+    private def detail_inner(rect : Rect) : Rect
+      @issues.detail_body_rect(BodyChrome.frame_inner(rect))
     end
 
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
@@ -175,12 +187,12 @@ module Gori::Tui
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless supports_drag?
-      @issues.notes_drag_to_cursor(rect.inset(1, 1), mx, my)
+      @issues.notes_drag_to_cursor(detail_inner(rect), mx, my)
     end
 
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless @issues.detail_open?
-      inner = rect.inset(1, 1)
+      inner = detail_inner(rect)
       return double_click_related(inner, mx, my) if @issues.links_card_rect(inner).contains?(mx, my)
       # The NOTES BODY, and only it. `notes_select_word` forces INSERT and hit-tests nothing,
       # so a pair of presses on the meta block up top (title, chips, timestamps, evidence)
@@ -257,6 +269,25 @@ module Gori::Tui
       # The detail is a body pane like any other, and this branch never took focus: with the
       # tab bar focused, a click placed the notes caret and then sent the typing to the bar.
       @host.focus_body
+      rail = @issues.rail_rect(inner)
+      inner = @issues.detail_body_rect(inner)
+      # A rail row: open THAT issue, staying in the drill-in. The rail shows the list, so a
+      # click on it means what a click on the list means.
+      if i = DrillIn.rail_row_at(rail, mx, my, @issues.rail_window[0].size)
+        issue_step_item(i - @issues.rail_window[1])
+        return true
+      end
+      # The crumb's `‹` — a real button now. Ahead of every pane hit-test, because it rides a
+      # row nothing else in the drill-in claims (the frame's top edge, or the rail's divider)
+      # and because "leave" must win over any stray column that also matches.
+      if (c = @issues.detail_crumb) && Frame.crumb_rect(inner, c).try(&.contains?(mx, my))
+        # Persist first, and stay when that write is refused — leaving by pointer means what
+        # `esc` means (`leave_notes_editor`). Without it this one gesture would be the only
+        # way out of the detail that silently drops an unsaved writeup, which is exactly the
+        # text a conflict refusal has just told the operator to look at.
+        issue_close if leave_notes_editor
+        return true
+      end
       card = @issues.notes_card_rect(inner)
       # NOR/INS chip on the NOTES card border toggles insert. `↵` on the way IN, and on the way
       # out the `^W`-less half of `esc`: it drops to READ without saving, which is what makes
@@ -326,7 +357,7 @@ module Gori::Tui
         # Pointer-aware inside the detail too: RELATED scrolls under the pointer while the
         # NOTES editor keeps the keyboard, and vice versa. Off both cards (the meta block up
         # top) the focused pane still moves, which is what `handle_wheel` answers.
-        inner = rect.inset(1, 1)
+        inner = detail_inner(rect)
         return (@issues.scroll_links_wheel(step); true) if @issues.links_card_rect(inner).contains?(mx, my)
         return (@issues.notes_scroll_wheel(step); true) if @issues.notes_card_rect(inner).contains?(mx, my)
         return handle_wheel(step)
@@ -679,6 +710,25 @@ module Gori::Tui
 
     def issue_close : Nil
       @issues.close_detail
+    end
+
+    # ⇧N/⇧P inside the drill-in: open the next/previous issue WITHOUT going back to the list.
+    # See HistoryController#detail_step_item for why the step exists at all.
+    #
+    # Saves the notes buffer first, exactly as leaving by pointer or `esc` does, and ABORTS
+    # when that write is refused — a conflict keeps INS on with the typed text still on
+    # screen, and stepping off it would drop the paragraph the operator was just warned
+    # about. Same rule the sub-tab strip follows: save the outgoing one FIRST.
+    def issue_step_item(delta : Int32) : Nil
+      return unless @issues.detail_open?
+      return unless leave_notes_editor
+      before = @issues.selected_index
+      # `select_index`, not `move`: `move` routes to the PREVIEW pane whenever that side holds
+      # focus, and its focus survives opening the detail (the preview is not drawn there, so
+      # nothing resets it). A step would then scroll a pane nobody can see.
+      @issues.select_index(before + delta)
+      return if @issues.selected_index == before
+      issues_open
     end
 
     # --- marks (multi-select) -------------------------------------------------

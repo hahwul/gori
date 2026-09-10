@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./drill_in"
 require "./query_suggest"
 require "./suggest_popup"
 require "./traffic_empty_state"
@@ -1081,6 +1082,61 @@ module Gori::Tui
     # The flow id currently open in the detail overlay (nil when the list is showing).
     def detail_flow_id : Int64?
       @detail.try(&.row.id)
+    end
+
+    # The rail's window of list context around the open flow — see DrillIn. Maps the list
+    # row onto the shared three-part shape; nothing of the list RENDERER is involved, which
+    # is what keeps a 200-line column layout out of a three-row readout.
+    def rail_window : {Array(DrillIn::RailRow), Int32}
+      return {[] of DrillIn::RailRow, 0} if @rows.empty?
+      start = DrillIn.window_start(@rows.size, @selected)
+      slice = @rows[start, {DrillIn::RAIL_ROWS, @rows.size - start}.min]
+      rows = slice.map do |r|
+        status, scolor = FlowStatus.cell(r)
+        DrillIn::RailRow.new(status, "#{r.method} #{r.host}#{origin_path_memo(r)}",
+          fmt_time_memo(r.created_at), scolor)
+      end
+      {rows, @selected - start}
+    end
+
+    # The drill-in as a whole: the list rail (when it fits) over the flow detail. ONE entry
+    # point, so the controller cannot draw the rail and then hit-test as though it were not
+    # there. The crumb needs no rail-awareness — it rides `body.y - 1`, which IS the rail's
+    # divider when there is one and the card's own top border when there is not.
+    def render_drill(screen : Screen, inner : Rect, focused : Bool, strip_focused : Bool) : Nil
+      rows, cur = rail_window
+      rail, body = DrillIn.rail_split(inner, rows.size)
+      if rail
+        DrillIn.render_rail(screen, rail, rows, cur, focused: focused || strip_focused)
+        Frame.inner_divider(screen, inner, rail.bottom, border: Frame.pane_border(focused))
+      end
+      render_detail(screen, body, focused: focused, strip_focused: strip_focused)
+    end
+
+    # The DETAIL's rect inside the drill-in. `inset` alone stopped being the answer once the
+    # rail could sit above it, and every hit-test measures against this.
+    def detail_body_rect(inner : Rect) : Rect
+      DrillIn.rail_split(inner, rail_window[0].size)[1]
+    end
+
+    # The RAIL's rect, or nil when it is not shown. The twin of `detail_body_rect`, so the
+    # two sides of one split are read from one derivation rather than recomputed per caller.
+    def rail_rect(inner : Rect) : Rect?
+      DrillIn.rail_split(inner, rail_window[0].size)[0]
+    end
+
+    # The drill-in's breadcrumb. ONE derivation, read by `render_detail` AND by
+    # HistoryController's click hit-test — the `‹` is a control, and a control drawn from
+    # one rect and hit-tested against another is a dead button (which is what the old
+    # ` ‹ list ` was in all three tabs).
+    #
+    # `pos` counts the FILTERED list, not the store: it names the row the cursor is on in
+    # what is actually on screen behind, which is what ⇧N/⇧P steps through.
+    def detail_crumb : Frame::Crumb?
+      d = @detail || return nil
+      row = d.row
+      pos = @rows.empty? ? nil : "#{@selected + 1}/#{@rows.size}"
+      Frame::Crumb.new("HISTORY", "#{row.method} #{row.host}#{origin_path_memo(row)}", pos)
     end
 
     def selected_id : Int64?
@@ -2455,6 +2511,15 @@ module Gori::Tui
       set_detail_pane(pane) if detail_panes.includes?(pane)
     end
 
+    # Which pane is on screen. Read by the ⇧N/⇧P item step so it can carry the pane you are
+    # reading into the next flow — comparing one pane across rows is what stepping is FOR,
+    # and `open_detail_id` resets to `initial_detail_pane` on every open. `set_detail_pane_public`
+    # is the other half: it declines a pane the new flow does not offer, so a step off a JWT
+    # request onto one without a token lands on that flow's opening pane rather than nothing.
+    def detail_pane : Symbol
+      @detail_pane
+    end
+
     # Two-level detail focus: the chip row (:strip) vs the caret/text body (:body).
     # ←/→ switch panes at the strip level and move the caret at the body level; the
     # split is invisible to the verb layer (current_scope keys off @overlay only).
@@ -3183,8 +3248,11 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, "no flow selected", Theme.muted)
         return
       end
-      # Back-to-list affordance on the top border (← past REQUEST / esc → the list).
-      Frame.list_back_hint(screen, rect)
+      # Back-to-list breadcrumb on the top border: which list, which row of it, and what is
+      # open. See Frame::Crumb — the `‹` is a button, hit-tested off the same rect.
+      if c = detail_crumb
+        Frame.crumb(screen, rect, c)
+      end
       # Pane strip: show ALL panes as chips with the active one highlighted, so it's
       # obvious there's more behind (←/→ walk `detail_panes`, in that order).
       x = render_detail_chips(screen, rect, strip_focused)

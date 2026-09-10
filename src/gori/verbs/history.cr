@@ -443,8 +443,11 @@ module Gori
         available: in_repeater, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
 
       # --- detail view ---
-      # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and → forward
-      # (REQ→RES→FRAMES); both clamp at the ends, so neither ever closes the detail.
+      # esc/q always leave. → walks forward through the panes (REQ→RES→FRAMES) and clamps at
+      # the end; ← walks back and, at the FIRST pane, leaves for the list — which is what
+      # Issues and Probe have always done with ←, and what the border crumb has always
+      # implied. It used to clamp there instead, so one arrow meant three things across the
+      # three tabs that have a drill-in, and the only one that pointed at a way out was dead.
       r.register Verb::Definition.new(
         "detail.close", "Close detail", "Return to the History list", Verb::Scope::HistoryDetail,
         [Verb::Chord.new("escape"), Verb::Chord.new("q")],
@@ -456,7 +459,7 @@ module Gori
         hidden: true) { |ctx| ctx.move_detail_pane(1); nil }
 
       r.register Verb::Definition.new(
-        "detail.prev-pane", "Previous pane ←", "Move to the previous detail pane (FRAMES → RES → REQ)",
+        "detail.prev-pane", "Previous pane ←", "Previous detail pane (FRAMES → RES → REQ); at REQ, back to the list",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("left"), Verb::Chord.new("h")],
         hidden: true) { |ctx| ctx.move_detail_pane(-1); nil }
 
@@ -476,6 +479,27 @@ module Gori
       r.register Verb::Definition.new(
         "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("tab")], hidden: true) { |ctx| ctx.toggle_detail_pane; nil }
+
+      # ⇧N/⇧P: the next/previous FLOW, without leaving the drill-in. Hidden like the other
+      # nav verbs here (←/→/⇥) — the crumb's `12/123` is the affordance and the status hint
+      # names the keys.
+      #
+      # NOT ⇧J/⇧K, the obvious spelling: `handle_detail_body_select` claims every ⇧ + h/j/k/l
+      # for the text selection this pane has always had, and a controller claim runs BEFORE
+      # this keymap — so those two would have been dead here and live on the chip strip, which
+      # is the position-dependent trap the ← fix exists to remove.
+      #
+      # Spelled `Chord.new("n", shift: true)`, never `Chord.new("N")`: `Keybind.from_event`
+      # normalises a capital to shift + lowercase, so the latter never fires.
+      r.register Verb::Definition.new(
+        "detail.next-item", "Next flow", "Open the next flow in the list without leaving the detail",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("n", shift: true)],
+        hidden: true) { |ctx| ctx.detail_step_item(1); nil }
+
+      r.register Verb::Definition.new(
+        "detail.prev-item", "Previous flow", "Open the previous flow in the list without leaving the detail",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("p", shift: true)],
+        hidden: true) { |ctx| ctx.detail_step_item(-1); nil }
 
       # The view-toggles are NON-hidden so they front the detail's "space" action menu
       # (the palette stays Global-only, so un-hiding doesn't leak there). ws/pretty take

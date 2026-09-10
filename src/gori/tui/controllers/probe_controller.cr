@@ -122,7 +122,9 @@ module Gori::Tui
     end
 
     def body_badge : Symbol
-      :body # read-only/navigable list + detail (no inline text editor)
+      # No inline text editor anywhere in this tab, so the only split is list vs drill-in.
+      # `rules_tab?` has no detail of its own — its editor is a modal.
+      !rules_tab? && @probe.detail_open? ? :detail : :body
     end
 
     def body_hint(focus : Symbol) : String
@@ -157,12 +159,12 @@ module Gori::Tui
         # rather than URLs, so naming "↑/↓ URL" over it would be the confident lie this line
         # exists to avoid.
         if @probe.desc_focused?
-          keys("↑/↓ read · ⇧arrows select · {probe.copy} copy · ↹ urls · space cmds · ←/esc back")
+          keys("↑/↓ read · ⇧arrows select · {probe.copy} copy · ⇧N/⇧P finding · ↹ urls · space cmds · ←/esc back")
         else
           # `↵ open` and `o flow` are two different destinations and both belong here — the
           # caret's own affected URL, and the issue's sample evidence. The Issues detail names
           # the same pair for the same reason (`↵ open` over its related links, `o flow`).
-          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · {probe.open-flow} flow · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
+          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · ⇧N/⇧P finding · {probe.open-flow} flow · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
         end
       elsif @probe.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -210,9 +212,25 @@ module Gori::Tui
         return true
       end
       if @probe.detail_open?
+        rail = @probe.rail_rect(content)
+        body = @probe.detail_body_rect(content)
+        # A rail row: open THAT finding, staying in the drill-in. The rail shows the list, so
+        # a click on it means what a click on the list means.
+        if i = DrillIn.rail_row_at(rail, mx, my, @probe.rail_window[0].size)
+          @host.focus_body
+          probe_step_item(i - @probe.rail_window[1])
+          return true
+        end
+        # The crumb's `‹` — a real button now. Ahead of the pane hit-test, because it rides a
+        # row nothing else in the drill-in claims (the frame's top edge, or the rail's
+        # divider) and because "leave" must win over any stray column that also matches.
+        if (c = @probe.detail_crumb) && Frame.crumb_rect(body, c).try(&.contains?(mx, my))
+          probe_close
+          return true
+        end
         # The AFFECTED URLS list takes a caret from the pointer; the rest of the card is chrome.
         @host.focus_body
-        @probe.detail_click(content, mx, my)
+        @probe.detail_click(body, mx, my)
         return true
       end
       @host.focus_body
@@ -485,6 +503,19 @@ module Gori::Tui
 
     def probe_close : Nil
       @probe.close_detail
+    end
+
+    # ⇧N/⇧P inside the drill-in: open the next/previous finding WITHOUT going back to the
+    # list. See HistoryController#detail_step_item for why the step exists at all. Nothing to
+    # persist here — this detail is read-only.
+    def probe_step_item(delta : Int32) : Nil
+      return unless @probe.detail_open?
+      before = @probe.selected_index
+      # `select_index`, not `move`: `move` routes to the PREVIEW pane whenever that side holds
+      # focus, and its focus survives opening the detail. A step would scroll a hidden pane.
+      @probe.select_index(before + delta)
+      return if @probe.selected_index == before
+      probe_open
     end
 
     def probe_query : Nil
@@ -807,9 +838,16 @@ module Gori::Tui
       !rules_tab? && @probe.detail_open?
     end
 
+    # The DETAIL's rect inside the drill-in. `content_rect` alone stopped being the answer
+    # once the list rail could sit above it, and every detail hit-test here measures against
+    # THIS — a pane drawn under the rail and clicked as though it were not there is dead.
+    private def detail_inner(rect : Rect) : Rect
+      @probe.detail_body_rect(BodyChrome.content_rect(rect, strip: true))
+    end
+
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless supports_drag?
-      @probe.detail_click(BodyChrome.content_rect(rect, strip: true), mx, my, selecting: true)
+      @probe.detail_click(detail_inner(rect), mx, my, selecting: true)
     end
 
     # RULES: a pair on a row opens its editor — what ↵ / `e` (`probe-rules.edit`) do, and the
@@ -828,7 +866,7 @@ module Gori::Tui
         return true
       end
       return false unless supports_drag?
-      @probe.detail_select_word(content, mx, my)
+      @probe.detail_select_word(detail_inner(rect), mx, my)
     end
 
     # --- READ-pane delegators (the detail's read verbs + the Runner's read_* ladders) ---

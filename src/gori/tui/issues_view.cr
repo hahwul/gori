@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./drill_in"
 require "./traffic_empty_state"
 require "./text_area"
 require "./input_mode"
@@ -229,6 +230,53 @@ module Gori::Tui
 
     def detail_open? : Bool
       !@detail.nil?
+    end
+
+    # The drill-in's breadcrumb. ONE derivation, read by `render_detail` AND by
+    # IssuesController's click hit-test — the `‹` is a control, and a control drawn from one
+    # rect and hit-tested against another is a dead button (which is what ` ‹ list ` was).
+    # `pos` counts the FILTERED list behind, which is what ⇧N/⇧P steps through.
+    # The rail's window of list context around the open issue — see DrillIn.
+    def rail_window : {Array(DrillIn::RailRow), Int32}
+      return {[] of DrillIn::RailRow, 0} if @issues.empty?
+      start = DrillIn.window_start(@issues.size, @selected)
+      slice = @issues[start, {DrillIn::RAIL_ROWS, @issues.size - start}.min]
+      rows = slice.map do |i|
+        DrillIn::RailRow.new(severity_badge(i.severity), i.title,
+          i.host.try(&.presence), severity_color(i.severity))
+      end
+      {rows, @selected - start}
+    end
+
+    # The drill-in as a whole: the list rail (when it fits) over the issue detail. ONE entry
+    # point — see HistoryView#render_drill, which this mirrors. The crumb needs no
+    # rail-awareness: it rides `body.y - 1`, the rail's divider or the card's top border.
+    private def render_drill(screen : Screen, rect : Rect, focused : Bool) : Nil
+      rows, cur = rail_window
+      rail, body = DrillIn.rail_split(rect, rows.size)
+      if rail
+        DrillIn.render_rail(screen, rail, rows, cur, focused: focused)
+        Frame.inner_divider(screen, rect, rail.bottom)
+      end
+      render_detail(screen, body, focused)
+    end
+
+    # The DETAIL's rect inside the drill-in — what every detail hit-test measures against
+    # (`detail_split` and the four card rects below all take THIS, not the framed interior).
+    def detail_body_rect(rect : Rect) : Rect
+      DrillIn.rail_split(rect, rail_window[0].size)[1]
+    end
+
+    # The RAIL's rect, or nil when it is not shown. The twin of `detail_body_rect`, so the
+    # two sides of one split are read from one derivation rather than recomputed per caller.
+    def rail_rect(rect : Rect) : Rect?
+      DrillIn.rail_split(rect, rail_window[0].size)[0]
+    end
+
+    def detail_crumb : Frame::Crumb?
+      issue = @detail || return nil
+      pos = @issues.empty? ? nil : "#{@selected + 1}/#{@issues.size}"
+      Frame::Crumb.new("ISSUES", issue.title, pos)
     end
 
     getter notes_mode : InputMode
@@ -978,7 +1026,7 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       if @detail
-        render_detail(screen, rect, focused)
+        render_drill(screen, rect, focused)
       else
         list_rect, preview_rect = list_split(rect)
         # No preview pane at this size (or after a resize down) ⇒ snap focus back to the list,
@@ -1261,8 +1309,11 @@ module Gori::Tui
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
       issue = @detail.not_nil!
-      # Back-to-list affordance on the top border (←/esc → the issue list).
-      Frame.list_back_hint(screen, rect)
+      # Back-to-list breadcrumb on the top border: which list, which row of it, and what is
+      # open. See Frame::Crumb — the `‹` is a button, hit-tested off the same rect.
+      if c = detail_crumb
+        Frame.crumb(screen, rect, c)
+      end
       w = {rect.w - 2, 0}.max
 
       # y0 — title row: a severity-coloured bullet + the bright title; #id at the right.

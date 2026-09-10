@@ -152,7 +152,7 @@ describe Gori::Tui::IssuesView do
     end
   end
 
-  it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
+  it "renders the breadcrumb on the detail's top frame border (framed path)" do
     with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
       view = IssuesView.new
@@ -164,7 +164,10 @@ describe Gori::Tui::IssuesView do
       BodyChrome.framed(screen, Rect.new(0, 0, 80, 16), true) do |inner|
         view.render(screen, inner, focused: true)
       end
-      backend.row(0).includes?("‹ list").should be_true
+      row = backend.row(0)
+      row.includes?("‹ ISSUES").should be_true
+      row.includes?("1/1").should be_true
+      row.includes?("SQL injection").should be_true
     end
   end
 

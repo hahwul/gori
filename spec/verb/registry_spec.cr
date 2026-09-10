@@ -112,6 +112,10 @@ private class FakeContext < ExecContext
     @calls << :close_detail
   end
 
+  def detail_step_item(delta : Int32) : Nil
+    @calls << :detail_step_item
+  end
+
   def toggle_follow : Nil
     @calls << :toggle_follow
   end
@@ -868,6 +872,10 @@ private class FakeContext < ExecContext
     @calls << :issue_close
   end
 
+  def issue_step_item(delta : Int32) : Nil
+    @calls << :issue_step_item
+  end
+
   def issues_delete : Nil
     @calls << :issues_delete
   end
@@ -1007,6 +1015,10 @@ private class FakeContext < ExecContext
 
   def probe_close : Nil
     @calls << :probe_close
+  end
+
+  def probe_step_item(delta : Int32) : Nil
+    @calls << :probe_step_item
   end
 
   def probe_query : Nil

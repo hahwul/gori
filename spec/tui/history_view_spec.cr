@@ -1338,7 +1338,7 @@ describe Gori::Tui::HistoryView do
     end
   end
 
-  it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
+  it "renders the breadcrumb on the detail's top frame border (framed path)" do
     with_store do |store|
       add_flow(store, "GET", "/api", 200)
       view = HistoryView.new
@@ -1352,7 +1352,62 @@ describe Gori::Tui::HistoryView do
       BodyChrome.framed(screen, Rect.new(0, 0, 80, 16), true) do |inner|
         view.render_detail(screen, inner, focused: true)
       end
-      backend.row(0).includes?("‹ list").should be_true
+      row = backend.row(0)
+      # Names WHERE you are, WHICH row of it, and WHAT is open — the three facts the old
+      # ` ‹ list ` marker left off, and the reason the drill-in read as a different screen.
+      row.includes?("‹ HISTORY").should be_true
+      row.includes?("1/1").should be_true
+      row.includes?("GET").should be_true
+    end
+  end
+
+  it "puts the list rail over the detail and moves the crumb onto its divider" do
+    with_store do |store|
+      5.times { |i| add_flow(store, "GET", "/api/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.move(2) # land mid-list so the rail has a neighbour on either side
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(90, 30)
+      screen = Screen.new(backend)
+      inner = uninitialized Rect
+      BodyChrome.framed(screen, Rect.new(0, 0, 90, 30), true) do |i|
+        inner = i
+        view.render_drill(screen, i, true, false)
+      end
+
+      # The rail sits at the top of the interior, with the open row wearing the list's own
+      # cursor gutter — that glyph is what makes it read as the list rather than a new widget.
+      rail = view.rail_rect(inner).not_nil!
+      backend.row(rail.y + 1).includes?("▎").should be_true
+      # …and the crumb rides the rail's DIVIDER, not the card's top border, so the two
+      # derivations (render + hit-test) cannot drift apart.
+      backend.row(rail.bottom).includes?("‹ HISTORY").should be_true
+      backend.row(0).includes?("‹ HISTORY").should be_false
+      # The hit-test rect is the one the detail was drawn into.
+      view.detail_body_rect(inner).y.should eq(rail.bottom + 1)
+    end
+  end
+
+  it "keeps the whole interior for the detail when the pane is too short for a rail" do
+    with_store do |store|
+      3.times { |i| add_flow(store, "GET", "/api/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(80, 16)
+      screen = Screen.new(backend)
+      inner = uninitialized Rect
+      BodyChrome.framed(screen, Rect.new(0, 0, 80, 16), true) do |i|
+        inner = i
+        view.render_drill(screen, i, true, false)
+      end
+      view.rail_rect(inner).should be_nil
+      view.detail_body_rect(inner).should eq(inner)
+      # With no rail the crumb is the ONLY thing naming where you are, so it must still be up.
+      backend.row(0).includes?("‹ HISTORY").should be_true
     end
   end
 
