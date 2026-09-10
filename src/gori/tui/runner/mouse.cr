@@ -331,6 +331,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
     sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?, strip_divider: subtab_strip_divider?)
     return false unless sub_rect && sub_rect.contains?(mx, my)
+    # The strip owns its CHIP row; the hairline under it is the body's top boundary, and
+    # `BodyChrome.tab_row`'s own comment already says hit-tests ignore the divider. Swallowing
+    # that row (this method consumes anything inside sub_rect) made every control a tab draws
+    # there dead — a drill-in's `‹` back button rides exactly that hairline whenever no list
+    # rail is up, so on Probe it silently worked or did not depending on how many findings
+    # the filter left.
+    return false unless my == BodyChrome.tab_row(sub_rect).y
     icon, chips = subtab_strip_split(sub_rect)
     if icon.try(&.contains?(mx, my))
       open_subtab_find_from_click

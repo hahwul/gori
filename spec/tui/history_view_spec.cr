@@ -1390,6 +1390,45 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "anchors the rail and the crumb on the OPEN flow, not on the list cursor" do
+    with_store do |store|
+      3.times { |i| add_flow(store, "GET", "/api/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.move(2)
+      view.open_detail(store).should be_true
+      opened = view.detail_flow_id
+
+      # Live capture under follow (the default) snaps the LIST cursor to the newest row while
+      # the drill-in stays on its own flow — the divergence `history_target_flow_id` warns
+      # every detail verb about. Everything the drill-in draws has to follow the DETAIL.
+      view.select_row(0)
+      view.selected_index.should eq(0)
+      view.detail_flow_id.should eq(opened)
+      view.detail_row_index.should eq(2)
+      view.detail_crumb.not_nil!.pos.should eq("3/3")
+      # …including the band: the row it lands on is the one the crumb names, not the cursor's.
+      view.rail_rows[view.rail_cursor].text.should eq(view.detail_crumb.not_nil!.subject)
+    end
+  end
+
+  it "has no rail and no position when the open flow is not in the filtered list" do
+    with_store do |store|
+      add_flow(store, "GET", "/keep", 200)
+      other = add_flow(store, "GET", "/hidden", 200)
+      view = HistoryView.new
+      view.reload(store)
+      # A deep link (Issues/Sitemap/Discover/link jump) can open a flow the filter excludes;
+      # `open_detail_id` leaves @selected alone there, so there is no row to anchor on.
+      view.open_detail_id(other, store).should be_true
+      view.set_query("path:/keep")
+      view.reload(store)
+      view.detail_row_index.should be_nil
+      view.rail_count.should eq(0)
+      view.detail_crumb.not_nil!.pos.should be_nil
+    end
+  end
+
   it "keeps the whole interior for the detail when the pane is too short for a rail" do
     with_store do |store|
       3.times { |i| add_flow(store, "GET", "/api/#{i}", 200) }

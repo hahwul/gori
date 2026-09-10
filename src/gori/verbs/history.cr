@@ -480,25 +480,29 @@ module Gori
         "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("tab")], hidden: true) { |ctx| ctx.toggle_detail_pane; nil }
 
-      # ⇧N/⇧P: the next/previous FLOW, without leaving the drill-in. Hidden like the other
-      # nav verbs here (←/→/⇥) — the crumb's `12/123` is the affordance and the status hint
-      # names the keys.
+      # `n` / `⇧N`: the next/previous FLOW, without leaving the drill-in. Hidden like the
+      # other nav verbs here (←/→/⇥) — the rail's gutter names them beside the row each one
+      # lands on, and the status hint names them too.
       #
-      # NOT ⇧J/⇧K, the obvious spelling: `handle_detail_body_select` claims every ⇧ + h/j/k/l
-      # for the text selection this pane has always had, and a controller claim runs BEFORE
-      # this keymap — so those two would have been dead here and live on the chip strip, which
-      # is the position-dependent trap the ← fix exists to remove.
+      # This pair, and not ⇧J/⇧K or ⇧N/⇧P. ⇧J/⇧K is claimed a level below: the detail body's
+      # `handle_detail_body_select` takes every ⇧ + h/j/k/l for its text selection, and a
+      # controller claim runs BEFORE this keymap, so those two would be dead in the body and
+      # live on the chip strip — the position-dependent trap the ← fix exists to remove.
+      # ⇧N/⇧P collided in meaning instead of in scope: `comparer.prev-change` is ⇧N one tab
+      # over, so ⇧N would have moved forward here and backward there, and `validate_chords!`
+      # cannot see it (its seen-set is per Scope). `n` forward / `⇧N` back is what the
+      # Comparer, vim and less all already mean.
       #
       # Spelled `Chord.new("n", shift: true)`, never `Chord.new("N")`: `Keybind.from_event`
       # normalises a capital to shift + lowercase, so the latter never fires.
       r.register Verb::Definition.new(
         "detail.next-item", "Next flow", "Open the next flow in the list without leaving the detail",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("n", shift: true)],
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("n")],
         hidden: true) { |ctx| ctx.detail_step_item(1); nil }
 
       r.register Verb::Definition.new(
         "detail.prev-item", "Previous flow", "Open the previous flow in the list without leaving the detail",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("p", shift: true)],
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("n", shift: true)],
         hidden: true) { |ctx| ctx.detail_step_item(-1); nil }
 
       # The view-toggles are NON-hidden so they front the detail's "space" action menu

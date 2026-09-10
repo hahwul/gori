@@ -27,11 +27,12 @@ module Gori::Tui
   # `PreviewSplit` already took, and the one every HTTP proxy's master/detail uses.
   module DrillIn
     # Rows of list context: the item before, the item itself, the item after. Three is the
-    # fewest that can show a NEIGHBOUR ON EITHER SIDE, which is what makes ⇧N/⇧P legible as
+    # fewest that can show a NEIGHBOUR ON EITHER SIDE, which is what makes the step keys legible as
     # "there is more this way" rather than as a key you have to be told about.
     RAIL_ROWS = 3
 
-    # What the rail costs the detail: its rows plus the divider that anchors it.
+    # What a FULL rail costs the detail: its rows plus the divider that anchors it. The real
+    # cost is `{count, RAIL_ROWS}.min + 1` — see `rail_split`, which sizes to the window.
     RAIL_H = RAIL_ROWS + 1
 
     # Interior rows the DETAIL must keep for the rail to be affordable. Under this the rail
@@ -43,13 +44,19 @@ module Gori::Tui
     # rail: on a short terminal the crumb is the ONLY thing saying where you are.
     MIN_DETAIL_H = 12
 
-    # Default labels for the two chords that step the drill-in through the list. Literals,
+    # Default labels for the two chords that step the drill-in through the list — `n` forward
+    # and `⇧N` back, which is what `comparer.next-change` / `comparer.prev-change` already
+    # mean one tab over (and what vim and less mean everywhere). The first spelling here was
+    # ⇧N/⇧P, which made ⇧N move FORWARD in a drill-in and BACKWARD in the Comparer; the boot
+    # gate cannot see that, because `Registry#validate_chords!` builds its seen-set per Scope.
+    #
+    # Literals,
     # because the rail renders with no registry in reach — the fallback every registry-less
     # render in this codebase keeps. A controller that HAS the registry pushes the effective
     # labels down instead (see the `step_keys` setter on each view), so a rebind moves what
     # the gutter prints.
-    NEXT_KEY = "⇧N"
-    PREV_KEY = "⇧P"
+    NEXT_KEY = "n"
+    PREV_KEY = "⇧N"
 
     # One rail row, in the three parts every one of these lists happens to have: a short
     # coloured lead (status code / severity), the identity, and a muted tail (host, type).
@@ -57,23 +64,25 @@ module Gori::Tui
     record RailRow, lead : String, text : String, tail : String? = nil, lead_color : Color? = nil
 
     # Split a drill-in's framed interior into {rail, detail}. `rail` is nil when the pane is
-    # too short to keep both, and then `detail` is the whole interior — byte-identical to
-    # what the drill-in drew before the rail existed.
+    # too short to keep both or there is no context to show, and then `detail` is the whole
+    # interior — byte-identical to what the drill-in drew before the rail existed.
     #
     # ONE derivation: the render calls it, and so does every hit-test, because a body drawn
     # against one rect and clicked against another is a dead row.
     #
-    # `count` is how many rows of context there actually ARE. One is not context — a
-    # single-row list has no neighbour either side, so the rail would spend four rows to
-    # redraw the row the crumb already names.
-    def self.rail_split(inner : Rect, count : Int32 = RAIL_ROWS) : {Rect?, Rect}
-      return {nil, inner} if count <= 1 || inner.h < RAIL_H + MIN_DETAIL_H
-      rail = Rect.new(inner.x, inner.y, inner.w, RAIL_ROWS)
-      detail = Rect.new(inner.x, inner.y + RAIL_H, inner.w, inner.h - RAIL_H)
+    # `count` is how many rows of context there actually ARE, and it SIZES the rail as well
+    # as gating it. A fixed RAIL_ROWS-tall rail on a two-item list left an undrawn row
+    # between the last entry and the divider, and forced every hit-test to carry `count` a
+    # second time just to reject clicks on it.
+    def self.rail_split(inner : Rect, count : Int32) : {Rect?, Rect}
+      h = {count, RAIL_ROWS}.min
+      return {nil, inner} if count <= 1 || inner.h < h + 1 + MIN_DETAIL_H
+      rail = Rect.new(inner.x, inner.y, inner.w, h)
       # The divider between them IS `detail.y - 1`, which is where `Frame.crumb` puts itself
-      # by default — so the crumb rides the rail's divider with a rail and the card's own top
-      # border without one, and neither the drill-in's render nor its hit-test has to know
-      # which case it is in.
+      # — so the crumb rides the rail's divider with a rail and the card's own top border
+      # without one, and neither the drill-in's render nor its hit-test has to know which
+      # case it is in.
+      detail = Rect.new(inner.x, inner.y + h + 1, inner.w, inner.h - h - 1)
       {rail, detail}
     end
 
@@ -150,13 +159,72 @@ module Gori::Tui
     end
 
     # Which rail row (0-based within the drawn window) the pointer is over, or nil. Read off
-    # the same `rail_split` rect the render used, so a click cannot land on a row that was
-    # never drawn.
-    def self.rail_row_at(rail : Rect?, mx : Int32, my : Int32, count : Int32) : Int32?
+    # the same `rail_split` rect the render used — and that rect is exactly as tall as the
+    # window has rows, so every row inside it was drawn.
+    def self.rail_row_at(rail : Rect?, mx : Int32, my : Int32) : Int32?
       r = rail || return nil
-      return nil unless r.contains?(mx, my)
-      i = my - r.y
-      i < count ? i : nil
+      r.contains?(mx, my) ? my - r.y : nil
+    end
+
+    # The half of the drill-in every one of the three tabs implements identically: the
+    # split's two rects, the rail draw, and the step-key labels the controller pushes down.
+    # Included by HistoryView, IssuesView and ProbeView, the same three that already share
+    # `PreviewSplit` — and for the same reason. Three copies of this had already drifted
+    # apart on the day they were written (one gilded the rail's divider and two did not).
+    #
+    # The includer supplies `rail_count`, `rail_window` and `detail_crumb`; everything below
+    # is derived, so a fourth drill-in gets the whole contract by including this.
+    module Host
+      # The effective labels for the item-step chords, pushed down each frame by the
+      # controller — the side that can read the keymap. Literal defaults so a registry-less
+      # render (every view spec) still prints something, which is the fallback convention
+      # every such render in this codebase keeps.
+      property step_keys : {String, String} = {DrillIn::NEXT_KEY, DrillIn::PREV_KEY}
+
+      # How many rows the rail would draw — answered WITHOUT building them. Every geometry
+      # caller needs only this, and `rail_window` allocates a record and a string per row:
+      # a single click used to rebuild it four times, and a drag once per motion event.
+      abstract def rail_count : Int32
+
+      # The rows themselves, and — separately, so a caller that only needs the index pays
+      # nothing — where the OPEN row sits within them. A click on rail row `i` steps by
+      # `i - rail_cursor`.
+      abstract def rail_rows : Array(RailRow)
+      abstract def rail_cursor : Int32
+
+      abstract def detail_crumb : Frame::Crumb?
+
+      # The RAIL's rect, or nil when it is not shown.
+      def rail_rect(inner : Rect) : Rect?
+        DrillIn.rail_split(inner, rail_count)[0]
+      end
+
+      # The DETAIL's rect inside the drill-in. `inset` alone stopped being the answer once
+      # the rail could sit above it, and every hit-test measures against this.
+      def detail_body_rect(inner : Rect) : Rect
+        DrillIn.rail_split(inner, rail_count)[1]
+      end
+
+      # Draw the rail and its divider; answer {detail rect, crumb meta}.
+      #
+      # `focused` is the frame's own state (it colours the divider, so the line matches the
+      # border it meets); `active` is "the drill-in has the keyboard at all", which is what
+      # lights the open row's band — on History those differ, because the chip strip holds
+      # focus without the body frame gilding.
+      def render_rail_chrome(screen : Screen, inner : Rect, focused : Bool,
+                             active : Bool = focused) : {Rect, String?}
+        rail, body = DrillIn.rail_split(inner, rail_count)
+        unless rail
+          # No rail to hang the step keys off, so they ride the crumb's row instead — the
+          # affordance must not depend on the terminal being tall enough. Nothing to step
+          # to on a single-row list, and then neither surface offers them.
+          return {body, rail_count <= 1 ? nil : "#{@step_keys[0]}/#{@step_keys[1]}"}
+        end
+        DrillIn.render_rail(screen, rail, rail_rows, rail_cursor, focused: active,
+          next_key: @step_keys[0], prev_key: @step_keys[1])
+        Frame.inner_divider(screen, inner, rail.bottom, border: Frame.pane_border(focused))
+        {body, nil}
+      end
     end
   end
 end

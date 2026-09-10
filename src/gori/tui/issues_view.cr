@@ -29,6 +29,7 @@ module Gori::Tui
     include PreviewSplit
     include PreviewPane
     include IssuePresentation
+    include DrillIn::Host # the rail/detail split, its render, and the step-key labels
 
     # The `/` bar's own label, hoisted out of `render_filter_bar` because the dropdown
     # anchors to the column the query text starts in and must not re-measure it.
@@ -235,57 +236,62 @@ module Gori::Tui
     # The drill-in's breadcrumb. ONE derivation, read by `render_detail` AND by
     # IssuesController's click hit-test — the `‹` is a control, and a control drawn from one
     # rect and hit-tested against another is a dead button (which is what ` ‹ list ` was).
-    # `pos` counts the FILTERED list behind, which is what ⇧N/⇧P steps through.
-    # The rail's window of list context around the open issue — see DrillIn.
-    def rail_window : {Array(DrillIn::RailRow), Int32}
-      return {[] of DrillIn::RailRow, 0} if @issues.empty?
-      start = DrillIn.window_start(@issues.size, @selected)
-      slice = @issues[start, {DrillIn::RAIL_ROWS, @issues.size - start}.min]
-      rows = slice.map do |i|
-        DrillIn::RailRow.new(severity_badge(i.severity), i.title,
-          i.host.try(&.presence), severity_color(i.severity))
-      end
-      {rows, @selected - start}
+    # `pos` counts the FILTERED list behind, which is what the step chords move through.
+    # The row the drill-in actually has OPEN, as an index into the filtered list — not the
+    # cursor. The two are the same at open time and a reload re-anchors the cursor by id, but
+    # keying the rail off the OPEN item is the only spelling that cannot band a row the detail
+    # is not showing (see HistoryView#detail_row_index, where live capture makes them diverge
+    # every few seconds).
+    def detail_row_index : Int32?
+      d = @detail || return nil
+      @issues.index { |i| i.id == d.id }
     end
 
-    # The drill-in as a whole: the list rail (when it fits) over the issue detail. ONE entry
-    # point — see HistoryView#render_drill, which this mirrors. The crumb needs no
-    # rail-awareness: it rides `body.y - 1`, the rail's divider or the card's top border.
-    # The effective labels for the item-step chords, pushed down each frame by the controller
-    # — the side that can read the keymap. Literal defaults so a registry-less render (every
-    # view spec) still prints something, which is the fallback convention every such render
-    # in this codebase keeps.
-    property step_keys : {String, String} = {DrillIn::NEXT_KEY, DrillIn::PREV_KEY}
+    # Rows in the filtered list — the bound the item step clamps against.
+    def row_count : Int32
+      @issues.size
+    end
 
-    private def render_drill(screen : Screen, rect : Rect, focused : Bool) : Nil
-      rows, cur = rail_window
-      rail, body = DrillIn.rail_split(rect, rows.size)
-      if rail
-        DrillIn.render_rail(screen, rail, rows, cur, focused: focused,
-          next_key: @step_keys[0], prev_key: @step_keys[1])
-        Frame.inner_divider(screen, rect, rail.bottom)
+    # See DrillIn::Host.
+    def rail_count : Int32
+      detail_row_index ? {DrillIn::RAIL_ROWS, @issues.size}.min : 0
+    end
+
+    # First index of the window the rail shows. Private: everything outside reads
+    # `rail_rows`/`rail_cursor`, which are derived from it.
+    private def rail_start : Int32
+      here = detail_row_index || return 0
+      DrillIn.window_start(@issues.size, here)
+    end
+
+    # See DrillIn::Host.
+    def rail_cursor : Int32
+      (detail_row_index || 0) - rail_start
+    end
+
+    # The rail's window of list context around the open item — see DrillIn.
+    def rail_rows : Array(DrillIn::RailRow)
+      n = rail_count
+      return [] of DrillIn::RailRow if n == 0
+      @issues[rail_start, n].map do |i|
+        DrillIn::RailRow.new(severity_badge(i.severity), i.title, i.host.try(&.presence),
+          severity_color(i.severity))
       end
-      # See HistoryView#render_drill: the chip is the no-rail fallback, and a single-row list
-      # gets neither (there is nowhere to step).
-      meta = rail || rows.size <= 1 ? nil : "#{@step_keys[0]}/#{@step_keys[1]}"
+    end
+
+    # The drill-in as a whole: the list rail (when it fits) over the item detail. ONE entry
+    # point — see HistoryView#render_drill, which this mirrors.
+    private def render_drill(screen : Screen, rect : Rect, focused : Bool) : Nil
+      body, meta = render_rail_chrome(screen, rect, focused)
       render_detail(screen, body, focused, step_meta: meta)
     end
 
-    # The DETAIL's rect inside the drill-in — what every detail hit-test measures against
-    # (`detail_split` and the four card rects below all take THIS, not the framed interior).
-    def detail_body_rect(rect : Rect) : Rect
-      DrillIn.rail_split(rect, rail_window[0].size)[1]
-    end
-
-    # The RAIL's rect, or nil when it is not shown. The twin of `detail_body_rect`, so the
-    # two sides of one split are read from one derivation rather than recomputed per caller.
-    def rail_rect(rect : Rect) : Rect?
-      DrillIn.rail_split(rect, rail_window[0].size)[0]
-    end
-
+    # The drill-in's breadcrumb. ONE derivation, read by `render_detail` AND by the
+    # controller's click hit-test — the `‹` is a control, and a control drawn from one rect
+    # and hit-tested against another is a dead button (which is what ` ‹ list ` was).
     def detail_crumb : Frame::Crumb?
       issue = @detail || return nil
-      pos = @issues.empty? ? nil : "#{@selected + 1}/#{@issues.size}"
+      pos = detail_row_index.try { |i| "#{i + 1}/#{@issues.size}" }
       Frame::Crumb.new("ISSUES", issue.title, pos)
     end
 

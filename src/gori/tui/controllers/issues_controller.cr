@@ -93,7 +93,6 @@ module Gori::Tui
       reg = @host.session.registry
       filt = Hotkeys.binding_label(reg, "issues.filter", "/")
       nnew = Hotkeys.binding_label(reg, "issues.new", "n")
-      y = Hotkeys.binding_label(reg, "issue.copy", "y")
       # Named in every state the chord can FIRE from, which is every list state — `command_scope`
       # answers Scope::Issues for the marks state and both preview focuses too, and only an open
       # detail (or the `/` bar, which claims every key) leaves it. Naming it in the default branch
@@ -104,7 +103,7 @@ module Gori::Tui
         if @issues.notes_insert_mode?
           "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
         elsif @issues.notes_focused?
-          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · #{step_key_labels.join("/")} issue · space cmds · ↹/←/esc related"
+          keys("↑/↓ move · ⇧arrows select · {issue.copy} copy · i/↵ edit · {issue.next-item}/{issue.prev-item} issue · space cmds · ↹/←/esc related")
         else
           # `↹/↓ notes`, and `i edit` rather than the old `i/↵ notes`: ↵ in this pane opens
           # the selected RELATED item (`issue.open-link`), so naming it as the way into the
@@ -282,14 +281,14 @@ module Gori::Tui
       inner = @issues.detail_body_rect(inner)
       # A rail row: open THAT issue, staying in the drill-in. The rail shows the list, so a
       # click on it means what a click on the list means.
-      if i = DrillIn.rail_row_at(rail, mx, my, @issues.rail_window[0].size)
-        issue_step_item(i - @issues.rail_window[1])
+      if i = DrillIn.rail_row_at(rail, mx, my)
+        issue_step_item(i - @issues.rail_cursor)
         return true
       end
       # The crumb's `‹` — a real button now. Ahead of every pane hit-test, because it rides a
       # row nothing else in the drill-in claims (the frame's top edge, or the rail's divider)
       # and because "leave" must win over any stray column that also matches.
-      if (c = @issues.detail_crumb) && Frame.crumb_rect(inner, c).try(&.contains?(mx, my))
+      if (c = @issues.detail_crumb) && Frame.crumb_hit_rect(inner, c).try(&.contains?(mx, my))
         # Persist first, and stay when that write is refused — leaving by pointer means what
         # `esc` means (`leave_notes_editor`). Without it this one gesture would be the only
         # way out of the detail that silently drops an unsaved writeup, which is exactly the
@@ -721,7 +720,7 @@ module Gori::Tui
       @issues.close_detail
     end
 
-    # ⇧N/⇧P inside the drill-in: open the next/previous issue WITHOUT going back to the list.
+    # `n`/`⇧N` inside the drill-in: open the next/previous issue WITHOUT going back to the list.
     # See HistoryController#detail_step_item for why the step exists at all.
     #
     # Saves the notes buffer first, exactly as leaving by pointer or `esc` does, and ABORTS
@@ -731,13 +730,22 @@ module Gori::Tui
     def issue_step_item(delta : Int32) : Nil
       return unless @issues.detail_open?
       return unless leave_notes_editor
-      before = @issues.selected_index
+      # Anchored on the issue the detail HAS OPEN, and clamped BEFORE the list is touched:
+      # `select_index` re-seeds the ⇧-range mark anchor even when the index does not move,
+      # so a step at either end would quietly destroy a range the operator had built.
+      here = @issues.detail_row_index || return
+      target = here + delta
+      return if target < 0 || target >= @issues.row_count
+      notes = @issues.notes_focused?
       # `select_index`, not `move`: `move` routes to the PREVIEW pane whenever that side holds
       # focus, and its focus survives opening the detail (the preview is not drawn there, so
       # nothing resets it). A step would then scroll a pane nobody can see.
-      @issues.select_index(before + delta)
-      return if @issues.selected_index == before
+      @issues.select_index(target)
       issues_open
+      # The LEVEL survives the step, as the pane does on History: `open_detail` lands every
+      # open on RELATED, which is right for a fresh drill-in and wrong for a step taken while
+      # reading the notes.
+      @issues.focus_notes! if notes
     end
 
     # --- marks (multi-select) -------------------------------------------------

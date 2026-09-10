@@ -128,16 +128,16 @@ module Gori
         "probe.close", "Back to list", "Return to the issue list", Verb::Scope::ProbeDetail,
         [Verb::Chord.new("escape"), Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.probe_close; nil }
 
-      # ⇧N/⇧P: the next/previous FINDING, without leaving the drill-in. Same spelling as
-      # History's and Issues' pair (see verbs/history.cr for why it is not ⇧J/⇧K).
+      # n/⇧N: the next/previous FINDING, without leaving the drill-in. Same spelling as
+      # History's and Issues' pair (see verbs/history.cr for the spelling).
       r.register Verb::Definition.new(
         "probe.next-item", "Next finding", "Open the next finding in the list without leaving the detail",
-        Verb::Scope::ProbeDetail, [Verb::Chord.new("n", shift: true)],
+        Verb::Scope::ProbeDetail, [Verb::Chord.new("n")],
         hidden: true) { |ctx| ctx.probe_step_item(1); nil }
 
       r.register Verb::Definition.new(
         "probe.prev-item", "Previous finding", "Open the previous finding in the list without leaving the detail",
-        Verb::Scope::ProbeDetail, [Verb::Chord.new("p", shift: true)],
+        Verb::Scope::ProbeDetail, [Verb::Chord.new("n", shift: true)],
         hidden: true) { |ctx| ctx.probe_step_item(-1); nil }
 
       # ↵ over the AFFECTED URLS list: the caret's OWN url, which is not what `o` opens — that

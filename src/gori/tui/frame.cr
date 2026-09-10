@@ -62,7 +62,7 @@ module Gori::Tui
     # a key that did nothing there.
     #
     # `pos` is the cursor's place in the list behind ("12/123"). It is also the affordance
-    # for the ⇧J/⇧K item step — without a visible position, stepping is a key nobody finds.
+    # for the item step — without a visible position, stepping is a key nobody finds.
     record Crumb, tab : String, subject : String, pos : String? = nil do
       # The full run, padded the way every other border decoration in this module pads
       # itself. ONE derivation, read by the draw AND by the click hit-test, so the `‹`
@@ -77,37 +77,49 @@ module Gori::Tui
       end
     end
 
-    # Where the crumb lands: the border row above `inner`, or `row` for a drill-in that sits
-    # under a rail and rides that divider instead. nil when there is no room — the same
-    # refusal the old hint made, so a narrow pane simply has no crumb rather than a clipped
-    # one that overwrites the frame's top-right ╮ (at inner.x + inner.w).
-    def self.crumb_rect(inner : Rect, crumb : Crumb, row : Int32? = nil) : Rect?
-      y = row || (inner.y - 1)
+    # Where the crumb lands: the border row above `inner`. nil when there is no room — so a
+    # narrow pane simply has no crumb rather than a clipped one that overwrites the frame's
+    # top-right ╮ (at inner.x + inner.w).
+    #
+    # There is no `row` parameter and there must not be: the crumb rides `inner.y - 1`, which
+    # IS the list rail's divider when a rail is up and the card's own top border when it is
+    # not (see DrillIn.rail_split), so no caller has to be rail-aware to place it.
+    def self.crumb_rect(inner : Rect, crumb : Crumb) : Rect?
+      y = inner.y - 1
       return nil if y < 0 || inner.w <= 8
       w = {Screen.draw_width(crumb.text), inner.w - 2}.min
       return nil if w < 6
       Rect.new(inner.x + 1, y, w, 1)
     end
 
+    # The CLICKABLE run within that: ` ‹ TAB `, and not the position or the subject after it.
+    #
+    # The hit rect used to be the whole crumb — 45-60 columns of muted label — so a click
+    # anywhere on the path text left the drill-in, while the only part drawn as a control was
+    # the accent `‹` and the bright tab name. A button you cannot see is as wrong as a label
+    # that acts like one; this is the run that LOOKS pressable, so it is the run that is.
+    def self.crumb_hit_rect(inner : Rect, crumb : Crumb) : Rect?
+      r = crumb_rect(inner, crumb) || return nil
+      Rect.new(r.x, r.y, {Screen.draw_width(crumb.tab) + 4, r.w}.min, 1)
+    end
+
     # Draws it. Call AFTER the frame, like every border decoration here — it overwrites the
     # hairline. The `‹` is accent-bold because it IS the button (its hit-test is
-    # `crumb_rect`, the very rect this draws into); the tab name is bright so the eye lands
-    # on "which list is behind this"; the rest stays muted so the subject does not compete
-    # with the content underneath.
+    # `crumb_hit_rect`, the run this draws bright); the rest stays muted so the subject does
+    # not compete with the content underneath.
+    #
     # `meta` rides the same row, right-aligned: the keys that CHANGE the position the crumb
     # just printed. It is what the drill-in shows when there is no list rail to hang those
     # keys off (the rail prints them in its own gutter, beside the row each one lands on), so
     # the affordance does not depend on the terminal being tall enough for a rail. Dropped
     # whole when it would collide with the crumb, like every other border decoration here.
-    def self.crumb(screen : Screen, inner : Rect, crumb : Crumb, row : Int32? = nil,
-                   bg : Color = Theme.bg, meta : String? = nil) : Nil
-      r = crumb_rect(inner, crumb, row) || return
+    def self.crumb(screen : Screen, inner : Rect, crumb : Crumb, bg : Color = Theme.bg,
+                   meta : String? = nil) : Nil
+      r = crumb_rect(inner, crumb) || return
       screen.text(r.x, r.y, crumb.text, Theme.muted, bg, width: r.w)
-      if r.w >= 5
-        screen.text(r.x + 1, r.y, "‹", Theme.accent, bg, Attribute::Bold)
-        screen.text(r.x + 3, r.y, crumb.tab, Theme.text_bright, bg, Attribute::Bold,
-          width: {r.w - 3, 0}.max)
-      end
+      screen.text(r.x + 1, r.y, "‹", Theme.accent, bg, Attribute::Bold)
+      screen.text(r.x + 3, r.y, crumb.tab, Theme.text_bright, bg, Attribute::Bold,
+        width: {r.w - 3, 0}.max)
       return unless meta && !meta.empty?
       mx = inner.right - 1 - Screen.draw_width(meta) - 2
       return if mx <= r.right

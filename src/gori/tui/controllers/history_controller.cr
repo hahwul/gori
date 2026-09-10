@@ -180,7 +180,7 @@ module Gori::Tui
       # The crumb's `‹` — a real button now. First arm, because it rides a row nothing else
       # in the drill-in claims (the frame's top edge, or the rail's divider), and because
       # "leave" must win over any pane hit-test a stray column might also match.
-      if (c = @history.detail_crumb) && Frame.crumb_rect(inner, c).try(&.contains?(mx, my))
+      if (c = @history.detail_crumb) && Frame.crumb_hit_rect(inner, c).try(&.contains?(mx, my))
         @host.focus_body
         close_detail
         return
@@ -188,9 +188,9 @@ module Gori::Tui
       # A rail row: open THAT flow, staying in the drill-in. The rail shows the list, so a
       # click on it means what a click on the list means — with the one difference that you
       # are already inside an item, so it opens rather than merely selecting.
-      if i = DrillIn.rail_row_at(rail, mx, my, @history.rail_window[0].size)
+      if i = DrillIn.rail_row_at(rail, mx, my)
         @host.focus_body
-        detail_step_item(i - @history.rail_window[1])
+        detail_step_item(i - @history.rail_cursor)
         return
       end
       if pane = @history.detail_pane_at(inner, mx, my)
@@ -413,7 +413,7 @@ module Gori::Tui
     # register comment above the pane verbs ("neither ever closes the detail") documented
     # the divergence rather than resolving it.
     private def detail_pane_back : Nil
-      close_detail unless @history.detail_pane_advance(-1)
+      move_detail_pane(-1)
     end
 
     # BODY level: caret move + shift-selection (all four directions, incl. horizontal
@@ -717,7 +717,7 @@ module Gori::Tui
       @history.close_detail
     end
 
-    # ⇧N/⇧P inside the drill-in: open the next/previous flow of the list behind WITHOUT
+    # `n`/`⇧N` inside the drill-in: open the next/previous flow of the list behind WITHOUT
     # going back to it.
     #
     # The drill-in had no way to step, so reading twenty rows meant `esc ↓ ↵` twenty times.
@@ -730,16 +730,24 @@ module Gori::Tui
     # same flow and throw away its scroll position.
     def detail_step_item(delta : Int32) : Nil
       return unless @host.overlay == :detail
+      # Anchored on the flow the detail HAS OPEN, not on the list cursor: live capture
+      # advances the cursor under follow while the drill-in stays put, so stepping from
+      # `selected_index` walks away from whatever the tail happens to be showing.
+      here = @history.detail_row_index || return
+      target = here + delta
+      # Clamp and bail BEFORE touching the list: `select_row` re-seeds the ⇧-range mark
+      # anchor and drops the preview even when the index does not move, so a ⇧N at the end
+      # of the list would silently destroy a mark range the operator had built.
+      return if target < 0 || target >= @history.row_count
       pane = @history.detail_pane
-      before = @history.selected_index
-      # `select_row`, not `move`: `move` routes to the REQ/RES preview whenever that pane
-      # holds focus, and the preview's focus survives opening the detail (it is not drawn
-      # there, so nothing resets it). A step would then scroll a pane nobody can see and
-      # read as a dead key.
-      @history.select_row(before + delta)
-      return if @history.selected_index == before
+      strip = @history.detail_strip_focus?
+      @history.select_row(target)
       open_detail
       @history.set_detail_pane_public(pane)
+      # …and the LEVEL, not just the pane. `open_detail_id` lands every open on the chip
+      # strip, so a step out of a response body used to put ↑/↓ back on pane-switching — and
+      # the very next ↑ leaves the drill-in entirely.
+      @history.set_detail_focus(strip ? :strip : :body)
     end
 
     def toggle_follow : Nil
@@ -1078,8 +1086,13 @@ module Gori::Tui
     # the STRIP level above does for the same keys: `handle_detail_strip_key` claims ←/h first,
     # so this verb only fires under a rebinding, and a rebound ← must not close the detail
     # when the stock one does not. esc/q are the way out.
+    # ←/→ between the detail's panes, and at the FIRST pane ← leaves for the list. Both the
+    # keymap verb (`detail.prev-pane`) and the chip strip's literal ← arm come through here,
+    # so a rebound prev-pane behaves like the arrow instead of clamping dead — the very key
+    # this contract exists to remove.
     def move_detail_pane(dir : Int32) : Nil
-      @history.detail_pane_advance(dir)
+      return if @history.detail_pane_advance(dir)
+      close_detail if dir < 0
     end
 
     def toggle_detail_hex : Nil

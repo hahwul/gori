@@ -225,15 +225,19 @@ module Gori::Tui
         body = @probe.detail_body_rect(content)
         # A rail row: open THAT finding, staying in the drill-in. The rail shows the list, so
         # a click on it means what a click on the list means.
-        if i = DrillIn.rail_row_at(rail, mx, my, @probe.rail_window[0].size)
+        if i = DrillIn.rail_row_at(rail, mx, my)
           @host.focus_body
-          probe_step_item(i - @probe.rail_window[1])
+          probe_step_item(i - @probe.rail_cursor)
           return true
         end
         # The crumb's `‹` — a real button now. Ahead of the pane hit-test, because it rides a
         # row nothing else in the drill-in claims (the frame's top edge, or the rail's
         # divider) and because "leave" must win over any stray column that also matches.
-        if (c = @probe.detail_crumb) && Frame.crumb_rect(body, c).try(&.contains?(mx, my))
+        if (c = @probe.detail_crumb) && Frame.crumb_hit_rect(body, c).try(&.contains?(mx, my))
+          # Focus first, like the rail branch above and like History's and Issues' crumbs:
+          # with the tab bar holding the keyboard, returning to the list without taking it
+          # left ↑/↓ switching TABS over a list that looked focused.
+          @host.focus_body
           probe_close
           return true
         end
@@ -514,17 +518,22 @@ module Gori::Tui
       @probe.close_detail
     end
 
-    # ⇧N/⇧P inside the drill-in: open the next/previous finding WITHOUT going back to the
+    # `n`/`⇧N` inside the drill-in: open the next/previous finding WITHOUT going back to the
     # list. See HistoryController#detail_step_item for why the step exists at all. Nothing to
     # persist here — this detail is read-only.
     def probe_step_item(delta : Int32) : Nil
       return unless @probe.detail_open?
-      before = @probe.selected_index
+      # Anchored on the finding the detail HAS OPEN, and clamped BEFORE the list is touched —
+      # see IssuesController#issue_step_item for both.
+      here = @probe.detail_row_index || return
+      target = here + delta
+      return if target < 0 || target >= @probe.row_count
+      desc = @probe.desc_focused?
       # `select_index`, not `move`: `move` routes to the PREVIEW pane whenever that side holds
       # focus, and its focus survives opening the detail. A step would scroll a hidden pane.
-      @probe.select_index(before + delta)
-      return if @probe.selected_index == before
+      @probe.select_index(target)
       probe_open
+      @probe.focus_desc! if desc
     end
 
     def probe_query : Nil

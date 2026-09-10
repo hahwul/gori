@@ -10,7 +10,7 @@ end
 describe Gori::Tui::DrillIn do
   describe ".rail_split" do
     it "gives the rail its rows plus a divider and hands the rest to the detail" do
-      rail, detail = DrillIn.rail_split(Rect.new(2, 3, 80, 30))
+      rail, detail = DrillIn.rail_split(Rect.new(2, 3, 80, 30), 3)
       rail.should_not be_nil
       rail = rail.not_nil!
       rail.y.should eq(3)
@@ -24,7 +24,7 @@ describe Gori::Tui::DrillIn do
       # One row under the floor. The detail is what the drill-in is FOR; a four-line detail
       # with context above it is worse than a full one with the crumb alone.
       short = DrillIn::RAIL_H + DrillIn::MIN_DETAIL_H - 1
-      rail, detail = DrillIn.rail_split(Rect.new(0, 0, 80, short))
+      rail, detail = DrillIn.rail_split(Rect.new(0, 0, 80, short), 3)
       rail.should be_nil
       detail.h.should eq(short) # byte-identical to the pre-rail drill-in
     end
@@ -43,7 +43,7 @@ describe Gori::Tui::DrillIn do
       # This identity is what lets `Frame.crumb`'s default row be right in BOTH cases, so
       # neither the render nor the hit-test needs a rail-aware branch.
       inner = Rect.new(1, 5, 80, 40)
-      rail, detail = DrillIn.rail_split(inner)
+      rail, detail = DrillIn.rail_split(inner, 3)
       (detail.y - 1).should eq(rail.not_nil!.bottom)
 
       _, unrailed = DrillIn.rail_split(inner, 1)
@@ -78,9 +78,9 @@ describe Gori::Tui::DrillIn do
       DrillIn.render_rail(screen, Rect.new(0, 0, 80, 3), rail_rows(3), 1)
       # The key rides the cursor bar's own column, so "press this, land here" is one fact
       # rather than two the operator has to connect.
-      backend.row(0).starts_with?("⇧P").should be_true
+      backend.row(0).starts_with?("⇧N").should be_true
       backend.row(1).starts_with?("▎").should be_true
-      backend.row(2).starts_with?("⇧N").should be_true
+      backend.row(2).starts_with?("n").should be_true
     end
 
     it "labels only rows ONE press away, at either end of the list" do
@@ -90,7 +90,7 @@ describe Gori::Tui::DrillIn do
       # and the row two below must NOT wear ⇧N — one press does not reach it.
       DrillIn.render_rail(screen, Rect.new(0, 0, 80, 3), rail_rows(3), 0)
       backend.row(0).starts_with?("▎").should be_true
-      backend.row(1).starts_with?("⇧N").should be_true
+      backend.row(1).starts_with?("n").should be_true
       backend.row(2).strip.starts_with?("⇧").should be_false
     end
 
@@ -113,13 +113,10 @@ describe Gori::Tui::DrillIn do
   describe ".rail_row_at" do
     it "answers only for rows that were actually drawn" do
       rail = Rect.new(0, 4, 80, DrillIn::RAIL_ROWS)
-      DrillIn.rail_row_at(rail, 10, 4, 3).should eq(0)
-      DrillIn.rail_row_at(rail, 10, 6, 3).should eq(2)
-      # Near the ends of a short list the window holds fewer rows than the rect has: a click
-      # on an undrawn row must miss, not select whatever index the arithmetic yields.
-      DrillIn.rail_row_at(rail, 10, 6, 2).should be_nil
-      DrillIn.rail_row_at(rail, 10, 7, 3).should be_nil # past the rail
-      DrillIn.rail_row_at(nil, 10, 4, 3).should be_nil  # no rail at this size
+      DrillIn.rail_row_at(rail, 10, 4).should eq(0)
+      DrillIn.rail_row_at(rail, 10, 6).should eq(2)
+      DrillIn.rail_row_at(rail, 10, 7).should be_nil # past the rail
+      DrillIn.rail_row_at(nil, 10, 4).should be_nil  # no rail at this size
     end
   end
 end
@@ -157,12 +154,12 @@ describe Gori::Tui::Frame::Crumb do
       backend = MemoryBackend.new(80, 6)
       screen = Screen.new(backend)
       inner = Rect.new(1, 1, 78, 4)
-      Frame.crumb(screen, inner, Frame::Crumb.new("HISTORY", "GET /a", "4/120"), meta: "⇧N/⇧P")
+      Frame.crumb(screen, inner, Frame::Crumb.new("HISTORY", "GET /a", "4/120"), meta: "n/⇧N")
       row = backend.row(0)
       row.includes?("‹ HISTORY").should be_true
-      row.includes?("⇧N/⇧P").should be_true
+      row.includes?("n/⇧N").should be_true
       # Right-aligned, clear of the frame's top-right corner.
-      row.rstrip.ends_with?("⇧N/⇧P").should be_true
+      row.rstrip.ends_with?("n/⇧N").should be_true
     end
 
     it "drops the step keys rather than colliding with the crumb" do
@@ -170,13 +167,13 @@ describe Gori::Tui::Frame::Crumb do
       screen = Screen.new(backend)
       inner = Rect.new(1, 1, 38, 4)
       long = Frame::Crumb.new("HISTORY", "GET a-very-long-host.example/deep/path/here", "9/99")
-      Frame.crumb(screen, inner, long, meta: "⇧N/⇧P")
-      backend.row(0).includes?("⇧N/⇧P").should be_false
+      Frame.crumb(screen, inner, long, meta: "n/⇧N")
+      backend.row(0).includes?("n/⇧N").should be_false
     end
 
-    it "rides an explicit row — the rail's divider — when given one" do
+    it "rides the row above its interior, which is the rail's divider or the card's edge" do
       inner = Rect.new(1, 1, 40, 20)
-      Frame.crumb_rect(inner, Frame::Crumb.new("HISTORY", "GET /a"), 7).not_nil!.y.should eq(7)
+      Frame.crumb_rect(inner, Frame::Crumb.new("HISTORY", "GET /a")).not_nil!.y.should eq(0)
     end
   end
 end
