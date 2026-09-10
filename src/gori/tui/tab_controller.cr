@@ -62,6 +62,12 @@ module Gori::Tui
     def diff_to_comparer : Nil
     end
 
+    # The Issues detail's RELATED row ↵ (`issue.open-link`) — it navigates to the linked
+    # flow / repeater / … in that item's own tab, so it lives on the Runner like the four
+    # above, and a double-click on a link row asks for exactly what the key asks for.
+    def issue_open_link : Nil
+    end
+
     # The Probe MODE picker (`probe.set-mode`), which the MODE band's chip raises on a click.
     # A Runner verb body like the three above — but it was never DECLARED here: the call in
     # `ProbeController#handle_click` compiled only because the Runner is the one production
