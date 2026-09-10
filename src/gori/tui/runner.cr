@@ -4781,11 +4781,10 @@ module Gori::Tui
     # Bounded so a keystroke stays responsive; nothing is written.
     private def colormarker_preview_text(candidate : Store::ColorRule) : String
       engine = @session.colormarker
-      # Only the rules AHEAD of this one can claim a row from it. For a new rule that is every
-      # enabled rule; for an edit it is the ones above it in precedence order.
-      rules = engine.rules
-      idx = rules.index { |r| r.id == candidate.id && r.scope == candidate.scope }
-      ahead = idx ? rules[0, idx] : rules
+      # Only the rules AHEAD of this one can claim a row from it: for an edit, the ones above
+      # it in precedence order; for a rule that does not exist yet, the ones that would be —
+      # which is NOT the whole list when the scope row says global. See `Colormarker.rules_ahead`.
+      ahead = Colormarker.rules_ahead(engine.rules, candidate.id, candidate.scope)
       pv = Colormarker.preview(@session.store, candidate.match_filter, ahead, 200)
       more = pv.total > pv.scanned ? " (of #{pv.total})" : ""
       claimed = pv.matched - pv.painted

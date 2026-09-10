@@ -4,11 +4,12 @@ module Gori
   module CLI
     module Run
       @[Subcommand("colormarker", help: [
-        {"colormarker", "Manage History row-colour rules (list, add, rm, enable/disable, move, preview)"},
+        {"colormarker", "Manage History row-colour rules (list, add, update, rm, enable/disable, move, preview)"},
       ])]
       private def self.cmd_colormarker(args : Array(String)) : Nil
         case sub = args.first?
         when "add"             then cmd_colormarker_add(args[1..])
+        when "update", "edit"  then cmd_colormarker_update(args[1..])
         when "rm", "delete"    then cmd_colormarker_rm(args[1..])
         when "enable"          then cmd_colormarker_set_enabled(true, args[1..])
         when "disable"         then cmd_colormarker_set_enabled(false, args[1..])
@@ -18,16 +19,18 @@ module Gori
         when "list"            then cmd_colormarker_list(args[1..])
         when nil               then cmd_colormarker_list(args)
         else
-          if (s = sub) && s.starts_with?('-')
-            cmd_colormarker_list(args)
-          else
-            STDERR.puts "gori run colormarker: unknown subcommand '#{sub}'"
-            STDERR.puts "Usage: gori run colormarker [list options] | add | rm|delete <id> | enable <id> | disable <id>"
-            STDERR.puts "       gori run colormarker move <id> --up|--down | preview --when=FILTER"
-            STDERR.puts "       gori run colormarker color list | add --name=NAME --hex=#rrggbb | update <name> | rm <name>"
-            exit 1
-          end
+          sub.try(&.starts_with?('-')) ? cmd_colormarker_list(args) : colormarker_usage_error(sub)
         end
+      end
+
+      # The refusal for a word that is neither a subcommand nor an option — a typo'd verb must
+      # not fall through to `list`, which would report success for a command nobody ran.
+      private def self.colormarker_usage_error(sub : String?) : NoReturn
+        STDERR.puts "gori run colormarker: unknown subcommand '#{sub}'"
+        STDERR.puts "Usage: gori run colormarker [list options] | add | update|edit <id> | rm|delete <id> | enable <id> | disable <id>"
+        STDERR.puts "       gori run colormarker move <id> --up|--down | preview --when=FILTER"
+        STDERR.puts "       gori run colormarker color list | add --name=NAME --hex=#rrggbb | update <name> | rm <name>"
+        exit 1
       end
 
       # `gori run colormarker color …` — the GLOBAL custom-colour palette (settings.json), the
@@ -279,7 +282,7 @@ module Gori
         # silently and a typo'd subcommand would list instead of erroring.
         parser.unknown_args { |before, after| leftover = before + after }
         parser.parse(args)
-        refuse_list_leftovers(leftover, "colormarker", "add, rm/delete, enable, disable, move, preview, color")
+        refuse_list_leftovers(leftover, "colormarker", "add, update/edit, rm/delete, enable, disable, move, preview, color")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project, read_only: true)
@@ -369,6 +372,115 @@ module Gori
         end
       end
 
+      # Edit an existing rule's fields in place. Present for the same reason `colormarker color
+      # update` is, one level up: `update_color_rule` existed on MCP and in the TUI form and had
+      # no CLI, so a headless operator could create and delete a rule but never change one — and
+      # delete + re-add is NOT the same action here. A colour rule's POSITION is its meaning
+      # (the first enabled match paints the row and the rest are never consulted), and a re-add
+      # lands at the END of its scope block, so the rule that used to outrank three others comes
+      # back outranking none of them. It also burns an id, which a project's override map for a
+      # GLOBAL rule is keyed by.
+      #
+      # Every field is optional and defaults to the rule's current value, so `--color` alone is
+      # a recolour and `--when` alone a re-aim. `enabled` is NOT among them: that is `enable` /
+      # `disable`, which for a global rule is a statement about THIS project rather than the
+      # library, and folding the two would make one flag mean two different scopes.
+      private def self.cmd_colormarker_update(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        color_s : String? = nil
+        style_s : String? = nil
+        name : String? = nil
+        filter : String? = nil
+        scope = Store::RuleScope::Project
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run colormarker update <id> [options]\n\n" \
+                     "Edits a rule in place, keeping its PRECEDENCE — which delete + re-add does\n" \
+                     "not: a re-added rule lands at the end of its scope block. Every field is\n" \
+                     "optional and defaults to the rule's current value. Use enable/disable to\n" \
+                     "change whether it is armed. Display only: a colour rule never modifies traffic."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-wFILTER", "--when=FILTER", "New condition (default: unchanged)") { |v| filter = v }
+          p.on("--color=NAME", "#{marker_color_choices} (default: unchanged)") { |v| color_s = v }
+          p.on("--style=STYLE", "full | strip (default: unchanged)") { |v| style_s = v }
+          p.on("--name=NAME", "New rule label — pass an empty string to clear it (default: unchanged)") { |v| name = v }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run colormarker update: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run colormarker update: missing value for #{f}" }
+        end
+        parser.unknown_args { |before, after| positional = before + after }
+        parser.parse(args)
+        abort "gori run colormarker update: missing <id>" if positional.empty?
+        abort "gori run colormarker update: too many arguments (expected one <id>)" if positional.size > 1
+        id = positional[0].to_i64? || abort("gori run colormarker update: invalid rule id '#{positional[0]}'")
+        # Copied out of the OptionParser closures before use, so Crystal narrows them below —
+        # a block-assigned variable stays nilable at the call site (see `color update`).
+        want_filter, want_color, want_style, want_name = filter, color_s, style_s, name
+        if {want_filter, want_color, want_style, want_name}.all?(Nil)
+          abort "gori run colormarker update: pass --when, --color, --style and/or --name — there is nothing else to change"
+        end
+        if (f = want_filter) && (reason = Colormarker.unusable_reason(f))
+          abort "gori run colormarker update: #{reason}"
+        end
+        # Vetted BEFORE the store is opened, because these abort: `abort` exits the process, so
+        # an `ensure` never runs and a refusal past `open_store` would leak the handle — the same
+        # reason every branch below closes the store by hand before its own abort.
+        new_color = want_color ? parse_marker_color(want_color) : nil
+        new_style = want_style ? parse_marker_style(want_style) : nil
+
+        if scope.global?
+          colormarker_update_global(id, want_filter, new_color, new_style, want_name)
+        else
+          colormarker_update_project(project_name, db_path, id, want_filter, new_color, new_style, want_name)
+        end
+      end
+
+      # The library half. Read against the list on DISK, for the reason `move`'s global branch
+      # spells out: the mutator re-reads the section itself, so a check made against this
+      # process's start-up copy can pass while the write refuses for not-found — reporting
+      # "settings not writable" for a rule a peer had already deleted.
+      private def self.colormarker_update_global(id : Int64, filter : String?, color : String?,
+                                                 style : Store::MarkerStyle?, name : String?) : Nil
+        Settings.reload_colormarker_from_disk
+        current = Settings.colormarker_rules.find { |r| r.id == id }
+        abort "gori run colormarker update: no global rule with id #{id}" unless current
+        f = filter || current.match_filter
+        unless Settings.update_colormarker_rule(id, f, color || current.color,
+                 style.try(&.label) || current.style, name || current.name)
+          abort "gori run colormarker update: settings not writable — the rule is unchanged"
+        end
+        puts "Global colour rule ##{id} updated — in every project."
+        print_color_advice(f)
+      end
+
+      private def self.colormarker_update_project(project_name : String?, db_path : String?,
+                                                  id : Int64, filter : String?, color : String?,
+                                                  style : Store::MarkerStyle?, name : String?) : Nil
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          current = store.color_rules.find { |r| r.id == id }
+          unless current
+            store.close
+            abort "gori run colormarker update: no colour rule with id #{id}"
+          end
+          f = filter || current.match_filter
+          unless store.update_color_rule(id, f, color || current.color,
+                   style || current.style, name || current.name)
+            store.close
+            abort "gori run colormarker update: project is busy (write did not commit) — the rule is unchanged"
+          end
+          puts "Colour rule ##{id} updated."
+          print_color_advice(f)
+        ensure
+          store.close
+        end
+      end
+
       private def self.cmd_colormarker_rm(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -393,6 +505,13 @@ module Gori
         # surface cannot reach every project's DB to sweep it. It stays inert: global ids come
         # from a monotonic counter and are never reused, so nothing can inherit the override.
         if scope.global?
+          # Against the list on DISK — see `colormarker_update_global`. `delete_colormarker_rule`
+          # opens with its own `reload_colormarker_from_disk` and answers false for BOTH "no such
+          # rule" and "not saved", so an existence check made against this process's start-up copy
+          # hands back the wrong one of the two sentences whenever a peer wrote the file in
+          # between: "no global rule with id N" for a rule that exists, or "settings not writable"
+          # for one that is already gone.
+          Settings.reload_colormarker_from_disk
           abort "gori run colormarker rm: no global rule with id #{id}" unless Settings.colormarker_rules.any? { |r| r.id == id }
           abort "gori run colormarker rm: settings not writable (nothing was deleted)" unless Settings.delete_colormarker_rule(id)
           puts "Global colour rule ##{id} deleted — from every project."
@@ -449,6 +568,7 @@ module Gori
         # below compares against it to decide between an override and dropping one.
         default = nil.as(Bool?)
         if scope.global?
+          Settings.reload_colormarker_from_disk # the list the mutator acts on — see `cmd_colormarker_rm`
           rule = Settings.colormarker_rules.find { |r| r.id == id }
           abort "gori run colormarker #{action}: no global rule with id #{id}" unless rule
           default = rule.enabled
@@ -574,6 +694,7 @@ module Gori
         project_name : String? = nil
         filter : String? = nil
         format = :text
+        scope = Store::RuleScope::Project
         limit = Colormarker::PREVIEW_SCAN
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run colormarker preview --when=FILTER [options]\n\n" \
@@ -583,6 +704,11 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-wFILTER", "--when=FILTER", "Condition to test (required)") { |v| filter = v }
+          # Not decoration: every global rule resolves before every project one, so the scope
+          # the rule would be CREATED at decides which existing rules can claim a row from it.
+          # Without this the answer was always the project one, and a `--scope=global` rule was
+          # previewed as though every project rule outranked it.
+          p.on("--scope=SCOPE", "Preview as a project (default) | global rule — global resolves first") { |v| scope = parse_color_scope(v) }
           p.on("--limit=N", "Recent flows to scan (default #{Colormarker::PREVIEW_SCAN})") { |v| limit = parse_count(v, "--limit") }
           p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -599,12 +725,16 @@ module Gori
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          existing = Gori::Colormarker.merged(store)
-          pv = Gori::Colormarker.preview(store, f, existing, limit)
+          ahead = Gori::Colormarker.rules_ahead(Gori::Colormarker.merged(store), 0_i64, scope)
+          pv = Gori::Colormarker.preview(store, f, ahead, limit)
           notes = Colormarker.advise(f)
           if format == :json
             puts(JSON.build do |j|
               j.object do
+                # WHICH scope the numbers below were computed for, the same field MCP's
+                # `preview_color_rule` returns: `would_paint` depends on it, so a machine reader
+                # must not have to remember which flag it passed to interpret the answer.
+                j.field "scope", scope.label
                 j.field "would_match", pv.matched
                 j.field "would_paint", pv.painted
                 j.field "scanned", pv.scanned
@@ -617,7 +747,11 @@ module Gori
             more = pv.total > pv.scanned ? " (of #{pv.total} total; scan capped)" : ""
             claimed = pv.matched - pv.painted
             tail = claimed > 0 ? "; #{pv.painted} would actually be painted (#{claimed} claimed by an earlier rule)" : ""
-            puts "Would match #{pv.matched} of #{pv.scanned} recent flows#{more}#{tail}."
+            # The scope LEADS, and it is printed even at the default: `would be painted` depends
+            # on it, so a transcript of `preview --scope=global` that looked identical to the
+            # project answer would be a number nobody could interpret afterwards. The JSON branch
+            # above carries the same field for the same reason.
+            puts "As a #{scope.label} rule: would match #{pv.matched} of #{pv.scanned} recent flows#{more}#{tail}."
             notes.each { |n| STDERR.puts "note: #{n}" }
           end
         ensure

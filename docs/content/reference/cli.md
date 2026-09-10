@@ -87,7 +87,7 @@ gori run <subcommand> [verb] [options]
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `rewriter preset list` · `add` | List the response-modification presets, and install one as ordinary Match & Replace rules |
 | `rewriter extract` · `bindings` | Manage session-binding extract rules, and list the `$NAME`s they declare |
-| `colormarker` · `add` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | Manage History row-colour rules |
+| `colormarker` · `add` · `update` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | Manage History row-colour rules |
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views: named QL queries the list is narrowed by, as a lens |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | Session slots: the named identities a send or an Authorize run goes out as |
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
@@ -965,8 +965,10 @@ Manage **Colormarker** rules: which captured History rows get coloured, and how.
 gori run colormarker                                        # list rules in precedence order
 gori run colormarker add --when 'status:>=500' --color red --style full --name 'prod 5xx'
 gori run colormarker add --when 'host:cdn' --color blue --style strip --scope global
+gori run colormarker update 2 --color orange                # edit in place, keeping precedence
 gori run colormarker move 2 --up                            # higher precedence
 gori run colormarker preview --when 'method:DELETE'
+gori run colormarker preview --when 'resp.body:secret' --scope global
 gori run colormarker disable 1 --scope global               # off in THIS project only
 gori run colormarker disable 1 --scope global --everywhere  # off by default, everywhere
 gori run colormarker rm 3
@@ -975,7 +977,7 @@ gori run colormarker rm 3
 | Option | Description |
 | -------- | ------------- |
 | `-w`, `--when=FILTER` | Required. The condition a flow must match; see below |
-| `--color=NAME` | `red`, `orange`, `yellow` (default), `green`, `blue`, `purple`. Resolved through the active theme, so it reads correctly on light and dark alike |
+| `--color=NAME` | `red`, `orange`, `yellow` (default), `green`, `blue`, `purple` — resolved through the active theme, so they read correctly on light and dark alike — **or** the name of a custom colour (see below), which carries an absolute hex |
 | `--style=STYLE` | `full` (default) tints the whole row · `strip` paints one colour cell in a narrow column ahead of `TIME` |
 | `--name=NAME` | Label shown in the rule list |
 | `--disabled` | Create the rule without arming it |
@@ -984,17 +986,20 @@ gori run colormarker rm 3
 | `--up` / `--down` | On `move`: raise or lower the rule's precedence |
 | `--limit=N` | On `preview`: how many recent flows to scan (default 500) |
 
+On `update` every field is optional and defaults to the rule's current value, so `--color` alone is a recolour and `--when` alone a re-aim. Use it rather than delete + re-add: a colour rule's **position is its meaning** (the first enabled match paints the row), and a re-added rule lands at the end of its scope block, outranking nothing it used to outrank. `enable` / `disable` stay separate, because for a global rule they are a statement about *this* project rather than the library.
+
 **Precedence is the rule set's meaning.** Match & Replace rules *compose*: every enabled rule runs, in order. Colour rules *resolve*: the **first enabled match paints the row** and the rest are never consulted. That is why `move` exists here and not on `rewriter`. Global rules resolve before project ones, so a standing policy outranks a local layer.
 
-`--when` uses the same boolean grammar the conditional-intercept bar speaks (`host:` `path:` `method:` `scheme:` `status:` `proto:`, plus `AND` / `OR` / `NOT`, `-negation` and `(grouping)`), evaluated against the captured flow row. Three caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from an empty list:
+`--when` is a **History QL** condition — the same grammar, the same field set and the same answers as the filter bar above the list it paints, `~regex` and `AND` / `OR` / `NOT` / `-negation` / `(grouping)` included. A term the captured row can answer (`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`) is matched in memory with no query at all; the rest (`body:` `header:` `size:` `dur:` `stub:` `src:` `scope:`) resolve against the project database in one batched query per repaint. Four caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from a list that never turns colour:
 
-- **`body:` never matches here.** A History row carries no payload. (Warned, not refused, since the term is legal.)
+- **`body:` *scans* here, it does not read the text index.** So a colour rule reaches binary bodies the filter bar's `body:` skips — but only the first **64 KiB of each side**, and the bytes are as *captured*, so a match past that bound or inside a compressed body is not painted. (Warned.)
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`. (Warned.)
-- **There is no `header:` / `size:` / `dur:` / `url:` / `stub:`.** Those are History QL fields that need a query, and this is evaluated on the render path. An unknown field is **refused**; left alone it would quietly become a free-text search and the rule would never fire.
+- **A flow with no response yet has no status.** A `status:` rule paints the row once the response lands. (Warned.)
+- **`scope:` follows the project's scope rules and ignores the `s` display lens.** With no scope rules configured *nothing* is in scope, so `scope:in` and `scope:out` both paint nothing — while a negated one (`-scope:in`) paints every row. (Warned.)
 
-A condition that matches *every* flow (empty, or a half-typed `host:`) is refused too.
+Refused, rather than warned: an unknown field (`hsot:` — left alone it becomes a free-text search and the rule never fires), a `~` pattern that will not compile, a term whose value that field does not take (`size:>bogus`, which would be *dropped* and leave the rule painting more than it says), and a condition that matches *every* flow (empty, or a half-typed `host:`).
 
-`preview` reports how many recent flows the condition **matches** and how many it would actually **paint**. The two differ whenever an earlier enabled rule already claims the row. `rm` (`delete`), `enable`, `disable` and `move` take a rule id from the list, and `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default).
+`preview` reports how many recent flows the condition **matches** and how many it would actually **paint**. The two differ whenever an earlier enabled rule already claims the row — which is why `preview` takes `--scope` as well: every global rule resolves before every project one, so no project rule can claim a row from a `--scope=global` candidate. `update`, `rm` (`delete`), `enable`, `disable` and `move` take a rule id from the list, and `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default).
 
 The tab is **hidden by default**; show it from `settings:tabs`, next to Rewriter. See [Proxy & History](/guide/proxy/) for the interactive editor.
 

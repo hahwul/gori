@@ -549,6 +549,23 @@ module Gori::Tui
       @col_values.clear
     end
 
+    # Drop everything remembered ABOUT A FLOW ID: this view's colour and path memos and the
+    # Colormarker engine's store-tier answers. Called where flows are DESTROYED, never where
+    # they merely change (`:updated` has its own, narrower pair). See `delete_ids` for why a
+    # reusable rowid makes this load-bearing.
+    #
+    # These three and no others, and the boundary is the KEY rather than the topic: `@time_memo`
+    # is keyed by `created_at` and `@mime_memo` by the content-type string, so neither can be
+    # handed a different flow's answer by a rowid coming round again.
+    private def forget_row_memos(ids : Array(Int64)) : Nil
+      cm = @colormarker
+      ids.each do |id|
+        @color_memo.delete(id)
+        @path_memo.delete(id)
+        cm.try(&.forget(id))
+      end
+    end
+
     # Where the row loop reads flow bytes from. Nil until the controller sets it, in which case
     # every user column draws blank — the same answer a descriptor that matches nothing gives,
     # and the list itself never opens a store.
@@ -1265,6 +1282,12 @@ module Gori::Tui
       # that collision require a shared capture microsecond; dropping the memo here removes it
       # outright for every deletion gori itself performs.
       forget_column_values
+      # The colour memo, the PATH memo and the engine's store-tier cache are keyed by the BARE
+      # id, so they had no such near-miss to rely on: delete the only flow, capture one more,
+      # and SQLite hands the new flow the same rowid — which then read the deleted flow's
+      # answer and was painted by a rule it does not match, under the deleted flow's path.
+      # All three are dropped for exactly the ids that went.
+      forget_row_memos(ids)
       remove_deleted_rows(ids)
       reload(store)
       true
@@ -1296,6 +1319,12 @@ module Gori::Tui
       clear_preview
       clear_marks
       forget_column_values # see delete_ids: a clear RESTARTS rowid numbering
+      # And the id-keyed memos, for the same reason one line up — with the collision no longer
+      # hypothetical: after a wipe the next capture is rowid 1, which is the id these are most
+      # likely to still be holding an answer for.
+      @color_memo.clear
+      @path_memo.clear
+      @colormarker.try(&.forget_all)
       @rows.clear
       @selected = 0
       @scroll = 0

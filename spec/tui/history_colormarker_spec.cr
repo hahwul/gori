@@ -243,6 +243,78 @@ describe "History — Colormarker row marks" do
     end
   end
 
+  # `flows.id` is a REUSABLE rowid, so a delete is the one event after which a memo keyed by it
+  # can be asked about a DIFFERENT flow — and the colour memo is keyed by the BARE id, with no
+  # `{created_at, state}` near-miss to fall back on. Delete the only flow, capture one more, and
+  # the new row was painted by a rule it does not match.
+  it "does not paint a reused flow id with the deleted flow's colour" do
+    with_globals do
+      with_store do |store|
+        cm = Gori::Colormarker.load(store)
+        cm.add("host:evil.test", RED, STRIP)
+        id = add_flow(store, host: "evil.test")
+        view = HistoryView.new
+        view.set_colormarker(cm)
+        view.reload(store)
+        painted = MemoryBackend.new(80, 12)
+        view.render_list(Screen.new(painted), Rect.new(0, 0, 80, 12))
+        painted.grid[3][1].should eq('█') # the premise: the swatch is drawn and memoised
+
+        view.delete_ids(store, [id]).should be_true
+        add_flow(store, host: "good.test").should eq(id) # the rowid really is handed out again
+        view.reload(store)
+        after = MemoryBackend.new(80, 12)
+        view.render_list(Screen.new(after), Rect.new(0, 0, 80, 12))
+        after.grid[3][1].should eq(' ')
+      end
+    end
+  end
+
+  # The colour memo is not the only thing keyed by the bare id: `@path_memo` is too, so the same
+  # delete leaves the new flow drawn under the DELETED one's path. One drop covers both.
+  it "does not draw a reused flow id under the deleted flow's path" do
+    with_store do |store|
+      id = add_flow(store, target: "/deleted-secret")
+      view = HistoryView.new
+      view.reload(store)
+      first = MemoryBackend.new(120, 12)
+      view.render_list(Screen.new(first), Rect.new(0, 0, 120, 12))
+      first.contains?("/deleted-secret").should be_true # the premise: it is drawn and memoised
+
+      view.delete_ids(store, [id]).should be_true
+      add_flow(store, target: "/brand-new").should eq(id)
+      view.reload(store)
+      after = MemoryBackend.new(120, 12)
+      view.render_list(Screen.new(after), Rect.new(0, 0, 120, 12))
+      after.contains?("/brand-new").should be_true
+      after.contains?("/deleted-secret").should be_false
+    end
+  end
+
+  # `clear` is the sharper case: it RESTARTS rowid numbering, so the next capture is id 1 —
+  # which is the id the memo is most likely to still be holding an answer for.
+  it "does not paint the first flow after a clear with the wiped flow's colour" do
+    with_globals do
+      with_store do |store|
+        cm = Gori::Colormarker.load(store)
+        cm.add("host:evil.test", RED, STRIP)
+        add_flow(store, host: "evil.test")
+        view = HistoryView.new
+        view.set_colormarker(cm)
+        view.reload(store)
+        view.render_list(Screen.new(MemoryBackend.new(80, 12)), Rect.new(0, 0, 80, 12))
+
+        view.clear(store).should be_true
+        add_flow(store, host: "good.test", target: "/brand-new").should eq(1_i64)
+        view.reload(store)
+        after = MemoryBackend.new(120, 12)
+        view.render_list(Screen.new(after), Rect.new(0, 0, 120, 12))
+        after.grid[3][1].should eq(' ')
+        after.contains?("/brand-new").should be_true # the path memo goes with it
+      end
+    end
+  end
+
   # The strip column is the only thing that moves the layout, so the narrow-pane behaviour the
   # existing spec pins has to survive it being armed.
   it "keeps PATH legible at 65 columns with the swatch column armed" do

@@ -601,7 +601,7 @@ A rule lives either in this project or in the **global library** every project r
 
 The rule form previews as you type: how many recent flows the condition **matches**, and how many it would actually **paint**. The two differ when an earlier rule already claims the row.
 
-Scriptable headless too: `gori run colormarker` (list / add / rm / enable / disable / move / preview) and the MCP `create_color_rule` / `list_color_rules` / `move_color_rule` / `preview_color_rule` tools.
+Scriptable headless too: `gori run colormarker` (list / add / update / rm / enable / disable / move / preview) and the MCP `create_color_rule` / `list_color_rules` / `move_color_rule` / `preview_color_rule` tools.
 
 ## Session bindings
 

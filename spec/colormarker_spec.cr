@@ -872,6 +872,81 @@ describe Gori::Colormarker do
     end
   end
 
+  describe ".rules_ahead" do
+    # The bug this exists for: a rule that is not in the list yet is APPENDED to the end of its
+    # OWN scope block, and every global rule resolves before every project one — so handing a
+    # global candidate the whole merged list counted project rules as claiming rows they can
+    # never claim, and `preview` answered "0 would be painted" for a rule that paints all of them.
+    it "excludes project rules from what resolves ahead of a NEW global rule" do
+      with_globals do
+        with_store do |store|
+          store.insert_color_rule("host:acme", RED, FULL, "p", true)
+          cm = Gori::Colormarker.load(store)
+          Gori::Colormarker.rules_ahead(cm.rules, 0_i64, GLOBAL).should be_empty
+          # A new PROJECT rule lands behind everything, global block included.
+          Gori::Colormarker.rules_ahead(cm.rules, 0_i64, Gori::Store::RuleScope::Project)
+            .size.should eq(1)
+        end
+      end
+    end
+
+    it "answers the prefix before an EXISTING rule, by {id, scope}" do
+      with_globals do
+        with_store do |store|
+          cm = Gori::Colormarker.load(store)
+          cm.add("host:a", RED, FULL, scope: GLOBAL)
+          cm.add("host:b", BLUE, FULL, scope: GLOBAL)
+          cm.add("host:c", YELLOW, FULL)
+          rules = cm.rules
+          second = rules[1]
+          ahead = Gori::Colormarker.rules_ahead(rules, second.id, second.scope)
+          ahead.map(&.match_filter).should eq(["host:a"])
+        end
+      end
+    end
+
+    # The two stores number independently and both count from 1, so the SCOPE half of the
+    # identity is what keeps a project #1 from being resolved as global #1.
+    it "does not confuse a project rule with the global rule of the same id" do
+      with_globals do
+        with_store do |store|
+          cm = Gori::Colormarker.load(store)
+          cm.add("host:g", RED, FULL, scope: GLOBAL) # global #1
+          cm.add("host:p", BLUE, FULL)               # project #1
+          rules = cm.rules
+          project_one = rules.find { |r| !r.global? }.not_nil!
+          project_one.id.should eq(1_i64)
+          Gori::Colormarker.rules_ahead(rules, project_one.id, project_one.scope)
+            .map(&.match_filter).should eq(["host:g"])
+        end
+      end
+    end
+  end
+
+  describe "#forget_all" do
+    # `flows.id` is a reusable rowid: delete the flow a store-tier rule was asked about, capture
+    # another, and SQLite hands the new one the same id. Without a wholesale drop the memo
+    # answered for the DELETED flow's bytes and painted a row that matches nothing.
+    it "stops a reused flow id from inheriting the deleted flow's answer" do
+      with_globals do
+        with_store do |store|
+          cm = Gori::Colormarker.load(store)
+          cm.add("body:secret", RED, FULL)
+          hit = captured(store, "a.test", "/", body: "secret")
+          cm.match(hit).try(&.color).should eq(RED)
+
+          store.delete_flows([hit.id]).should be_true
+          reused = captured(store, "b.test", "/", body: "nothing here")
+          reused.id.should eq(hit.id)                  # the premise: the rowid really is handed out again
+          cm.match(reused).try(&.color).should eq(RED) # the stale answer, still cached
+
+          cm.forget_all
+          cm.match(reused).should be_nil
+        end
+      end
+    end
+  end
+
   describe ".summary" do
     it "renders a rule the same way every surface does" do
       unnamed = Gori::Store::ColorRule.new(1_i64, true, "status:5xx", RED, FULL)

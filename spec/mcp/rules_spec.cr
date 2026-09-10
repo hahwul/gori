@@ -89,6 +89,39 @@ describe Gori::MCP::Server do
       end
     end
 
+    # `would_paint` is the number that answers "will I see this", and it depends on WHERE the
+    # rule would live: every global rule resolves before every project one, so a project rule
+    # can never claim a row from a global candidate. Previewing everything as a project rule
+    # reported 0 painted for a rule that paints every row.
+    it "counts what resolves ahead of a preview candidate by the scope it would live in" do
+      with_store do |store|
+        3.times do |i|
+          store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+            method: "GET", target: "/#{i}", http_version: "HTTP/1.1",
+            head: "GET /#{i} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil,
+            source: Gori::FlowSource::Kind::Proxy))
+        end
+        store.insert_color_rule("host:acme", "red", Gori::Store::MarkerStyle::Full, "claims", true)
+
+        as_project = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"preview_color_rule","arguments":{"when":"host:acme"}}})
+        p1 = mcp_tool_payload(mcp_drive(store, as_project)[0])
+        p1["scope"].as_s.should eq("project")
+        p1["would_match"].as_i64.should eq(3)
+        p1["would_paint"].as_i64.should eq(0) # the project rule above it claims all three
+
+        as_global = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"preview_color_rule","arguments":{"when":"host:acme","scope":"global"}}})
+        p2 = mcp_tool_payload(mcp_drive(store, as_global)[0])
+        p2["scope"].as_s.should eq("global")
+        p2["would_match"].as_i64.should eq(3)
+        p2["would_paint"].as_i64.should eq(3) # …and cannot claim anything from a global one
+
+        # An unrecognised scope is refused, not clamped — the same answer every other tool gives.
+        bad = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"preview_color_rule","arguments":{"when":"host:acme","scope":"globl"}}})
+        mcp_drive(store, bad)[0]["result"]["isError"].as_bool.should be_true
+      end
+    end
+
     it "manages custom colours, which a rule can then reference on any surface" do
       before = Gori::Settings.colormarker_colors
       begin

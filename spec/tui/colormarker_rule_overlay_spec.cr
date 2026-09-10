@@ -230,6 +230,74 @@ describe ColormarkerRuleOverlay do
       end
     end
 
+    it "shows the SAME caveat the CLI and MCP report, and only when there is one" do
+      # `Colormarker.advise`'s own contract is that all three surfaces say these word for word.
+      # This form was the one that never said them at all: it drew a match count and a
+      # completion band and nothing about what the condition actually means.
+      quiet = MemoryBackend.new(100, 24)
+      ColormarkerRuleOverlay.new(match_filter: "method:GET")
+        .render(Screen.new(quiet), Rect.new(0, 0, 100, 24))
+      quiet.contains?("⚠").should be_false # a condition with no caveat spends no row on one
+
+      noisy = MemoryBackend.new(100, 24)
+      ColormarkerRuleOverlay.new(match_filter: "host:alpha.test")
+        .render(Screen.new(noisy), Rect.new(0, 0, 100, 24))
+      # Word for word what `gori run colormarker add` prints on STDERR and MCP returns in
+      # `notes`, as far as the card is wide enough to draw it.
+      Gori::Colormarker.advise("host:alpha.test").first
+        .should start_with("`host:` is a substring here")
+      noisy.contains?("⚠ `host:` is a substring here").should be_true
+    end
+
+    it "re-previews when the SCOPE row is cycled, not only the condition" do
+      # `candidate_rule` feeds the scope to `Colormarker.rules_ahead`, which answers a different
+      # set of rules-ahead for a global candidate than for a project one. Gated on the condition
+      # alone, `→` on the scope row left the band showing the other scope's number — the exact
+      # stale answer `rules_ahead` exists to remove, arriving by the back door.
+      seen = [] of Gori::Store::RuleScope
+      ov = ColormarkerRuleOverlay.new(match_filter: "host:a")
+      ov.on_preview = ->(r : Gori::Store::ColorRule) { seen << r.scope; "matched 1 of 1 recent flows" }
+      area = Rect.new(0, 0, 100, 24)
+      ov.render(Screen.new(MemoryBackend.new(100, 24)), area)
+      seen.map(&.label).should eq(["project"])
+
+      ov.set_selected(ColormarkerRuleOverlay::ROW_SCOPE)
+      ov.handle_key(key(Termisu::Input::Key::Right))
+      ov.render(Screen.new(MemoryBackend.new(100, 24)), area)
+      seen.map(&.label).should eq(["project", "global"])
+
+      # …and still only on a real change: a redraw at the same scope and condition re-scans nothing.
+      ov.render(Screen.new(MemoryBackend.new(100, 24)), area)
+      seen.size.should eq(2)
+    end
+
+    it "leads with the count, which an ellipsis would otherwise eat" do
+      # The card is capped at RULE_FORM_W and these sentences are longer, so a trailing
+      # "(+1 more)" is the first thing clipped — and "there is another caveat" is exactly the
+      # part that must not go missing.
+      backend = MemoryBackend.new(100, 24)
+      ColormarkerRuleOverlay.new(match_filter: "host:a status:401")
+        .render(Screen.new(backend), Rect.new(0, 0, 100, 24))
+      Gori::Colormarker.advise("host:a status:401").size.should eq(2)
+      backend.contains?("⚠ 2 caveats · ").should be_true
+    end
+
+    it "yields its caveat row to the fields on a card too short for one" do
+      # `rule_form_box` shrinks with the terminal, and at the floor that row IS a field. The
+      # caveat must give way rather than overwrite one.
+      backend = MemoryBackend.new(80, 13)
+      ColormarkerRuleOverlay.new(match_filter: "host:alpha.test")
+        .render(Screen.new(backend), Rect.new(0, 0, 80, 13))
+      backend.contains?("[ Save rule ]").should be_true
+      backend.contains?("⚠ `host:` is a substring here").should be_true
+
+      floor = MemoryBackend.new(80, 12)
+      ColormarkerRuleOverlay.new(match_filter: "host:alpha.test")
+        .render(Screen.new(floor), Rect.new(0, 0, 80, 12))
+      floor.contains?("[ Save rule ]").should be_true # the form still opens at its floor
+      floor.contains?("⚠").should be_false
+    end
+
     it "offers a registered custom colour without duplicating it" do
       prev = Gori::Settings.colormarker_colors
       begin
