@@ -155,7 +155,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `list_oast_providers` | Configured OAST providers and which one is active |
 | `list_oast_sessions` | The project's persisted OAST listening sessions (payload host, hits, last poll), the rows `oast_resume` re-arms |
 | `decode` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
-| `jwt_decode` / `jwt_encode` / `jwt_attacks` | Decode, re-sign, or generate attack payloads for a JWT (pure compute; available even under `--read-only`) |
+| `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` | Decode (a JWS or the protected header of an encrypted JWE), verify a signature against a key you hold, re-sign with HMAC or a PEM key, or generate attack payloads for a JWT (pure compute; available even under `--read-only`) |
 | `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | The [Cookie workbench](/guide/cookie/) as pure offline compute: parse a Flask / Rack / Django signed session cookie, check it against a candidate secret, brute-force the secret over a wordlist, and re-sign an edited payload. No network, so all four survive `--read-only` |
 | `sequence_analyze` | Grade a pasted token list for randomness / predictability (pure) |
 | `oast_presets` / `oast_payload` / `oast_poll` | List OAST providers, read the active payload, and poll a running listener for callbacks |

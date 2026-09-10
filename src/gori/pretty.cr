@@ -8,6 +8,7 @@ require "./binary_document"
 require "./msgpack"
 require "./cbor"
 require "./decoder/serialized"
+require "./jwt/jwe"
 
 module Gori
   # Display-only body pretty-printer. Sits BETWEEN the transform layer
@@ -30,9 +31,10 @@ module Gori
     MAX_PARTS      = 256             # multipart parts shown
     PART_BODY_MAX  = 64 * 1024       # inline a multipart part body only if small + UTF-8
 
-    # A single-token JWT (header.payload[.signature]); the header is additionally
+    # A single-token JWS (header.payload[.signature]); the header is additionally
     # required to base64url-decode to a JSON object (see `try_jwt`) to avoid treating
-    # an ordinary dotted word like "a.b.c" as a token.
+    # an ordinary dotted word like "a.b.c" as a token. The five-part JWE shape is a
+    # separate predicate (`Jwt::Jwe::JWE_RE`), tried first in `try_jwt`.
     JWT_RE = /\A[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]*)?\z/
 
     RAW_ELEMENTS  = {"script", "style", "pre", "textarea"}
@@ -223,6 +225,14 @@ module Gori
 
     private def try_jwt(str : String) : Result?
       t = str.strip
+      # A JWE first: it is five segments, so JWT_RE would reject it and the body would render
+      # as an opaque dotted string with nothing to read. The rendered form is header-only —
+      # the claims stay encrypted, and the label says so rather than implying a decode.
+      if jwe = Jwt::Jwe.parse(t)
+        slice = Jwt::Jwe.render(jwe).to_slice
+        return nil if slice.size > MAX_OUT_PRETTY
+        return Result.new(slice, "pretty: jwe (encrypted · protected header only)", :json)
+      end
       return nil unless t =~ JWT_RE
       # Strong signal: a JWT header always base64url-decodes to a JSON object.
       header = Base64.decode(t.split('.').first)

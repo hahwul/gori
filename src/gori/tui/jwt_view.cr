@@ -77,6 +77,7 @@ module Gori::Tui
     # ===================== DECODE lens =====================
     def render_decode(screen : Screen, rect : Rect, *, input : TextArea, input_mode : InputMode,
                       input_read : TextReadState, decoded : String, attacks : Array(Jwt::Attack),
+                      input_jwe : Bool = false,
                       pane : Symbol, focused : Bool, lens_chord : String) : Nil
       return if rect.empty?
       input_c, dec_c, atk_c = decode_layout(rect)
@@ -87,7 +88,7 @@ module Gori::Tui
         @dec_lines = lines.size
         @dec_h, @dec_scroll = draw_text_card(screen, dec_c, "DECODED", lines, @dec_scroll, focused && pane == :decoded)
       end
-      render_attacks(screen, atk_c, attacks, focused && pane == :attacks) unless atk_c.empty?
+      render_attacks(screen, atk_c, attacks, focused && pane == :attacks, input_jwe) unless atk_c.empty?
     end
 
     # ===================== ENCODE lens =====================
@@ -192,34 +193,44 @@ module Gori::Tui
       ed.render(screen, card.inset(1, 1), cursor: active, highlight: :json, gauge: true, gauge_focused: active)
     end
 
-    # ---- SECRET single-line field + alg badge ----
+    # ---- SECRET / KEY single-line field + alg badge ----
+    # One field, two meanings, and the title says which: an HS algorithm takes the HMAC
+    # secret typed inline, while RS/PS/ES/EdDSA take a PEM key — which is multi-line and so
+    # cannot be typed here at all, hence the path placeholder (the engine accepts either).
     private def render_secret(screen : Screen, card : Rect, secret : String, cx : Int32,
                               pre : String, alg : String, active : Bool) : Nil
-      Frame.card(screen, card, "SECRET", bg: Theme.bg, border: Frame.pane_border(active))
-      # ` ^A:ALG ` badge (cycled by jwt.cycle-alg) — lit when a real HS key matters.
+      pem = Gori::Jwt::Asym.alg?(alg)
+      Frame.card(screen, card, pem ? "KEY" : "SECRET", bg: Theme.bg, border: Frame.pane_border(active))
+      # ` ^A:ALG ` badge (cycled by jwt.cycle-alg) — lit when a real key matters.
       Frame.toggle_badge(screen, card.right - 1, card.y, card.x + 9, "^A", alg, alg != "none")
       c = card.inset(1, 1)
       return if c.h <= 0
       screen.text(c.x, c.y, "› ", Theme.accent, Theme.bg)
       fg = active ? Theme.text_bright : Theme.text
       vw = {c.w - 2, 1}.max
+      empty_hint = pem ? "(path to a PEM private key)" : "(empty key)"
       if alg == "none"
         screen.text(c.x + 2, c.y, "(no secret — alg=none is unsigned)", Theme.muted, Theme.bg, width: vw)
       elsif active
         screen.input_line(c.x + 2, c.y, secret, cx, pre, fg, Theme.bg, width: vw)
       else
-        screen.text(c.x + 2, c.y, secret.empty? ? "(empty key)" : secret, secret.empty? ? Theme.muted : fg, Theme.bg, width: vw)
+        screen.text(c.x + 2, c.y, secret.empty? ? empty_hint : secret, secret.empty? ? Theme.muted : fg, Theme.bg, width: vw)
       end
     end
 
     # ---- ATTACKS list (one selectable row per generated payload) ----
-    private def render_attacks(screen : Screen, card : Rect, attacks : Array(Jwt::Attack), focused : Bool) : Nil
+    private def render_attacks(screen : Screen, card : Rect, attacks : Array(Jwt::Attack),
+                               focused : Bool, input_jwe : Bool) : Nil
       Frame.card(screen, card, "ATTACKS", bg: Theme.bg, border: Frame.pane_border(focused))
       Frame.border_meta(screen, card, "ATTACKS", attacks.size.to_s)
       body = card.inset(1, 1)
       return if body.h <= 0
       if attacks.empty?
-        screen.text(body.x, body.y, "(paste a JWT into INPUT to generate testing payloads)", Theme.muted, Theme.bg, width: body.w)
+        # An encrypted token reaches here with a perfectly good JWT in INPUT and no payloads,
+        # so "paste a JWT" would be wrong twice: they did, and there is nothing to generate.
+        # `input_jwe` is computed once per EDIT beside `attacks` — this pane is empty for the
+        # whole time a token is being typed, so deciding it here would parse on every frame.
+        screen.text(body.x, body.y, empty_attacks_hint(input_jwe), Theme.muted, Theme.bg, width: body.w)
         return
       end
       @atk_h = body.h
@@ -326,6 +337,14 @@ module Gori::Tui
 
     def select_attack_row(idx : Int32, count : Int32) : Nil
       @atk_sel = idx.clamp(0, {count - 1, 0}.max)
+    end
+
+    private def empty_attacks_hint(input_jwe : Bool) : String
+      if input_jwe
+        "(encrypted JWE — no claims to tamper with, no signature to strip)"
+      else
+        "(paste a JWT into INPUT to generate testing payloads)"
+      end
     end
 
     # Hit-test the SECRET card's ` ^A:<alg> ` badge. Geometry mirrors render_secret. The

@@ -132,6 +132,18 @@ module Gori
           # JSON object, or carries no string `alg`, is not a token we can say anything about.
           header = header_object(token)
           return if header.nil?
+          # A JWE is out of scope for every check below: its `alg` names a KEY MANAGEMENT
+          # algorithm (`RSA-OAEP`, `dir`, `ECDH-ES`), so `check_alg` read it as a signing alg
+          # and reported every encrypted token as "signed with a non-standard algorithm", and
+          # its second segment is a wrapped key, not claims.
+          #
+          # The gate is the full `Jwe.jwe?` predicate — FIVE segments and an `enc` — and not
+          # `enc` alone. `enc` is a JOSE header parameter anyone can add: on the header test
+          # by itself, a three-segment `{"alg":"none","enc":"A256GCM"}` JWS suppressed every
+          # check here, including the High `jwt_alg_none`, which turns one attacker-addable
+          # field into detection evasion. The dot count short-circuits before the parse, so
+          # the ordinary three-segment token pays nothing.
+          return if token.count('.') == 4 && Gori::Jwt::Jwe.jwe?(token)
           alg = header["alg"]?.try(&.as_s?)
           return if alg.nil?
           check_alg(ctx, acc, location, alg)

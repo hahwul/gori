@@ -1,5 +1,6 @@
 require "../../spec_helper"
 require "json"
+require "../../support/jose_keys"
 
 # `gori run jwt` builds its JSON from the shared engine emitters (jwt/present.cr) so the
 # CLI and the MCP jwt_* tools stay byte-identical; the text formatter is CLI-only.
@@ -23,10 +24,56 @@ describe "gori run jwt" do
 
   it "decode_json carries nested header/payload objects + the signed flag" do
     j = JSON.parse(Gori::Jwt.decode_json(jwt))
+    j["type"].as_s.should eq("JWS")
     j["alg"].as_s.should eq("HS256")
     j["header"]["typ"].as_s.should eq("JWT")
     j["payload"]["sub"].as_s.should eq("1")
     j["signed"].as_bool.should be_true
+  end
+
+  it "verify_json is {alg, verified, reason} with reason null on the plain answers" do
+    # `--verify --format json` and MCP jwt_verify emit this same object. A script selects on
+    # `verified`; `reason` exists so a "no" that is not "the signature is wrong" can say so.
+    ok = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(jwt, "k")))
+    ok["alg"].as_s.should eq("HS256")
+    ok["verified"].as_bool.should be_true
+    ok["reason"].raw.should be_nil
+
+    no = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(jwt, "wrong")))
+    no["verified"].as_bool.should be_false
+    no["reason"].raw.should be_nil # a wrong key needs no prose
+
+    unsigned = Gori::Jwt.encode("{}", %({"s":1}), "none", "")
+    j = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(unsigned, "k")))
+    j["verified"].as_bool.should be_false
+    j["reason"].as_s.should contain("UNSIGNED")
+  end
+
+  it "neutralizes the token's alg on BOTH verify lines, not just the reason" do
+    # `alg` is read straight off a captured header, so it is attacker-chosen text on its way
+    # to a terminal. The `verified:` line interpolated it raw: a header of
+    # {"alg":"<ESC>[2J<ESC>]0;pwn<BEL>"} cleared the screen and rewrote the window title.
+    esc = 27.chr
+    hostile = "#{esc}[2J#{esc}]0;pwn#{7.chr}HS256"
+    token = "#{Gori::Jwt.b64url({"alg" => hostile}.to_json)}.#{Gori::Jwt.b64url("{}")}.AAAA"
+    lines = Gori::CLI::Run.jwt_verify_lines(Gori::Jwt.verify(token, "k"))
+    lines.first.should contain("verified: no")
+    lines.each do |line|
+      line.should_not contain(esc)
+      line.should_not contain(7.chr)
+    end
+  end
+
+  it "attacks_json carries the alg-confusion rows when a public key is supplied" do
+    rs = Gori::Jwt.encode("{}", %({"sub":"a"}), "RS256", JoseKeys::RSA)
+    arr = JSON.parse(Gori::Jwt.attacks_json(Gori::Jwt.attacks(rs, JoseKeys::RSA_PUB))).as_a
+    rows = arr.select { |a| a["category"].as_s == "alg-confusion" }
+    rows.should_not be_empty
+    rows.each do |a|
+      a["name"].as_s.should contain("public key")
+      a["note"].as_s.should contain("HS256")
+      a["verified"].as_bool.should be_false # a payload to go try, never a finding
+    end
   end
 
   it "attacks_json is an array of {name, category, note, token}" do

@@ -6,13 +6,13 @@ require "../proxy/tls/ffi"
 # EC certs (src/gori/proxy/tls/ffi.cr + key_pair.cr).
 #
 # `lib LibCrypto` is declared at top level in ffi.cr; we REOPEN it here to append the RSA
-# funs. We must NOT re-declare shared type aliases (EVP_PKEY from ffi.cr; Bio/BioMethod/
-# EVP_MD/SizeT + BIO_new/BIO_free/evp_sha256 from stdlib) — that would collide. Only the
-# funs stdlib/ffi.cr don't already bind are added below.
+# funs. We must NOT re-declare shared type aliases (EVP_PKEY / EVP_PKEY_CTX and the memory-BIO
+# + EVP_PKEY_CTX funs from ffi.cr; Bio/BioMethod/EVP_MD/SizeT + BIO_new/BIO_free/evp_sha256
+# from stdlib) — that would collide. Only the RSA-specific funs are added below; anything a
+# second subsystem would also want lives in ffi.cr (see its header).
 lib LibCrypto
   type RSA = Void*
   type BIGNUM = Void*
-  type EVP_PKEY_CTX = Void*
 
   # RSA-2048 keygen (legacy path — mirrors ffi.cr's EC_KEY route, needs no EVP_PKEY_CTX_ctrl,
   # so the version-sensitive ctrl macros only bite on decrypt below).
@@ -23,20 +23,8 @@ lib LibCrypto
   fun bn_set_word = BN_set_word(bn : BIGNUM, w : ULong) : Int
   fun rsa_generate_key_ex = RSA_generate_key_ex(rsa : RSA, bits : Int, e : BIGNUM, cb : Void*) : Int
 
-  # SPKI public-key PEM export + reading our own private-key PEM back (manual resume) via
-  # memory BIOs. BIO_new / BIO_free / EVP_sha256 come from stdlib; BIO_s_mem / BIO_read /
-  # BIO_new_mem_buf / PEM_write_bio_PUBKEY do not.
-  fun bio_s_mem = BIO_s_mem : BioMethod*
-  fun bio_read = BIO_read(b : Bio*, data : UInt8*, dlen : Int) : Int
-  fun bio_new_mem_buf = BIO_new_mem_buf(buf : UInt8*, len : Int) : Bio*
-  fun pem_write_bio_pubkey = PEM_write_bio_PUBKEY(bio : Bio*, pkey : EVP_PKEY) : Int
-
-  # RSA-OAEP-SHA256 decrypt.
-  fun evp_pkey_ctx_new = EVP_PKEY_CTX_new(pkey : EVP_PKEY, e : Void*) : EVP_PKEY_CTX
-  fun evp_pkey_ctx_free = EVP_PKEY_CTX_free(ctx : EVP_PKEY_CTX)
+  # RSA-OAEP-SHA256 decrypt (EVP_PKEY_CTX_new/free/ctrl are in ffi.cr).
   fun evp_pkey_decrypt_init = EVP_PKEY_decrypt_init(ctx : EVP_PKEY_CTX) : Int
-  fun evp_pkey_ctx_ctrl = EVP_PKEY_CTX_ctrl(ctx : EVP_PKEY_CTX, keytype : Int, optype : Int,
-                                            cmd : Int, p1 : Int, p2 : Void*) : Int
   fun evp_pkey_decrypt = EVP_PKEY_decrypt(ctx : EVP_PKEY_CTX, outbuf : UInt8*, outlen : SizeT*,
                                           inbuf : UInt8*, inlen : SizeT) : Int
 end
