@@ -259,6 +259,33 @@ describe "TabController#subtab_search_rows" do
     end
   end
 
+  it "keeps the decoder's OUTPUT searchable however long the input is, within one budget" do
+    with_session do |host|
+      cap = Gori::Tui::TabController::SEARCH_EXTRA_MAX
+      # The decoded half is why this override exists — the memorable word is as often what
+      # came OUT as what was pasted. Capping the JOINED string let a long input eat the whole
+      # budget: a 4 KB base64 blob's decoded claims were unreachable by the picker that goes
+      # past the 200-column filter precisely to reach them.
+      long = DecoderController.new(host)
+      long.decoder_from_text(Base64.strict_encode("A" * (cap * 2)))
+      long.load_chain("b64", "base64-decode")
+      row = long.subtab_search_rows.last
+      row.extra.size.should be <= cap
+      row.extra.should contain("QUFB") # the pasted input is still findable ...
+      row.extra.should contain("AAAA") # ... and so is the decode behind it
+
+      # And a SHORT input must not cost the decode its room: a fixed half each would have cut
+      # this one at 1 KB with nearly 2 KB going spare, which is the same mistake pointing the
+      # other way. `typo` turns 100 characters into 30 KB of variants, so the budget is the
+      # only thing deciding how much of the decode is searchable.
+      short = DecoderController.new(host)
+      short.decoder_from_text("a" * 100)
+      short.load_chain("t", "typo")
+      extra = short.subtab_search_rows.last.extra
+      extra.size.should eq cap # ... the whole budget, not 100 + 1 + half
+    end
+  end
+
   it "searches the JWT's decoded header and payload, not its opaque token" do
     with_session do |host|
       jc = JwtController.new(host)

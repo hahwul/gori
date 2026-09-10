@@ -80,13 +80,18 @@ module Gori
       trailing = p.ok? && p.pos < data.size
       BinaryDocument::Rendering.new(json, p.ok? && p.pos == data.size, p.pos,
         trailing ? "trailing" : p.stop, p.decoded?)
-    rescue JSON::Error | IO::Error
-      # `JSON.build` can only fail on a builder misuse, which would be a bug here rather than
-      # bad input. Report it as an incomplete parse rather than unwinding into a TUI draw (P7).
+    rescue
+      # EVERY exception, not the `JSON::Error | IO::Error` pair this used to name. `JSON.build`
+      # can only fail on a builder misuse, which would be a bug here rather than bad input, and
       # `IO::Error` is caught for that reason and not for a reachable case: `String::Builder`
       # answers a document past 2 GiB with `IO::EOFError`, which is how the unbounded-output
       # defect surfaced, and `MAX_JSON_BYTES` is what actually stops it. The belief that the
-      # ceiling holds is not the contract.
+      # ceiling holds is not the contract — and neither is the belief that those two are the
+      # only ways a walk over hostile bytes can end. `BinaryDocument.render` is reached from
+      # `DecodedView#emit_binary_documents`, which has NO rescue of its own, so an unguarded
+      # checked conversion here would leave as a backtrace out of `gori run show --format
+      # json` and MCP `get_flow` — exactly how `OverflowError` escaped the Java reader
+      # (`Serialized::Java#desc_reference`), whose net named the same two classes.
       BinaryDocument::Rendering.new("{\"$partial\":\"internal\"}", false, 0, "internal", false)
     end
 

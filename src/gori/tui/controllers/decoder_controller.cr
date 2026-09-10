@@ -146,9 +146,28 @@ module Gori::Tui
     # is as often what came OUT (`admin` in a decoded JWT) as what the operator pasted in.
     # The 200-column filter detail carries only chain + a slice of input; this goes further.
     def subtab_search_extras : Array(String)
+      half = SEARCH_EXTRA_MAX // 2
       @sessions.map do |s|
+        # The INPUT is capped at half the budget; the OUTPUT gets everything left over. Two
+        # things were wrong with capping the JOINED string instead.
+        #
+        # The decode is why this override exists at all, and an input longer than the whole
+        # budget crowded it out completely: paste a 4 KB base64 blob, chain `base64-decode`,
+        # and the `admin` in the decoded claims — the exact thing the operator remembers — was
+        # unreachable by the very picker that goes past the 200-column filter to find it. A
+        # fixed half each would have been the same mistake pointing the other way: a 200-char
+        # token would have had its decode cut at 1 KB when 1.8 KB was going spare.
+        #
+        # And a chain step may produce up to `Decoder::MAX_OUT` (32 MiB), so interpolating
+        # first copied every open conversion's whole decode into a fresh String on the UI
+        # fiber just to keep the first 2 KB of it — the shape `search_extra(Bytes)` exists to
+        # avoid, and the picker builds one of these per open sub-tab.
+        text = s.input.text
+        text = text[0, half] if text.size > half
         bytes = s.result.output
-        search_extra(bytes ? "#{s.input.text} #{String.new(bytes)}" : s.input.text)
+        next text unless bytes
+        room = {SEARCH_EXTRA_MAX - text.size - 1, 0}.max # ...less the space between them
+        "#{text} #{String.new(bytes[0, {bytes.size, room}.min])}"
       end
     end
 

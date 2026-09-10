@@ -543,7 +543,20 @@ module Gori::Tui
     # it never paints past the body. Selected row lights ACCENT_BG (palette style).
     def render(screen : Screen, chain_rect : Rect, inner : Rect) : Nil
       return if !@open || @matches.empty?
-      w = ({@matches.max_of(&.size) + 2, 18}.max).clamp(1, chain_rect.w)
+      # The dropdown starts two cells in, past the "› " prompt, but was clamped to the FIELD's
+      # full width — so a match as long as the card (`quoted-printable-encode` on a narrow
+      # body, or any saved chain the operator named at length) ran two cells past the field
+      # and painted outside the body rect altogether. Clamped to the room left from `x`, and
+      # to the FIELD rather than the body: this floats under the chain field, so its right
+      # edge is the field's, which also leaves the CHAIN card's corner standing.
+      #
+      # NOT `{…, 1}.max`: flooring the room at one cell does not bound anything, it just moves
+      # the same overflow to a narrower body (measured: still outside the pane at widths 2-4).
+      # A body with no room for the dropdown gets no dropdown.
+      x = chain_rect.x + 2
+      room = chain_rect.right - x
+      return if room <= 0
+      w = ({@matches.max_of(&.size) + 2, 18}.max).clamp(1, room)
       max_h = {inner.bottom - (chain_rect.y + 1), 1}.max
       h = {@matches.size, 8, max_h}.min
       return if h <= 0
@@ -551,7 +564,6 @@ module Gori::Tui
       # taller than the 8-row fold; move() clamps @selected against the full list, which is
       # `@matches` — the same list the loop below indexes).
       @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @matches.size)
-      x = chain_rect.x + 2
       y = chain_rect.y + 1
       (0...h).each do |i|
         idx = @scroll + i

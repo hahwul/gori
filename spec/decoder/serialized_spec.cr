@@ -69,4 +69,45 @@ describe Gori::Decoder::Serialized do
     name.should eq("aspnet-viewstate")
     r.json.should contain(%("algorithm":"SHA1 / HMACSHA1"))
   end
+
+  it "answers a hostile body rather than raising, whatever the reader does inside" do
+    # `sniff` is reached from `DecodedView#emit_json`, which has NO rescue of its own — so
+    # `gori run show --format json`, MCP `get_flow` and the flow detail pane all inherit the
+    # readers' "never raise" contract directly. `Serialized.build` used to catch only
+    # `JSON::Error | IO::Error`, which is the set of exceptions the AUTHOR expected, not the
+    # set a walk over attacker-written bytes can produce: a checked `to_i32` inside the Java
+    # reader raised `OverflowError` straight through it (see `Java#desc_reference`).
+    hostile = {
+      "java handle past Int32"  => Bytes[0xac, 0xed, 0x00, 0x05, 0x73, 0x71, 0xff, 0xff, 0xff, 0xff],
+      "java array of that desc" => Bytes[0xac, 0xed, 0x00, 0x05, 0x75, 0x71, 0x80, 0x00, 0x00, 0x00],
+      "java enum of that desc"  => Bytes[0xac, 0xed, 0x00, 0x05, 0x7e, 0x71, 0xff, 0xff, 0xff, 0xfe],
+    }
+    hostile.each do |label, body|
+      r = Gori::Decoder::Serialized::Java.render(body)
+      r.json.should contain(%("$partial":"malformed")), label
+      r.decoded.should be_false, label
+      S.sniff(body).should be_nil, label
+    end
+  end
+
+  it "renders a document even when a reader raises something nobody listed" do
+    # The net itself, driven directly — every case above is now handled at SOURCE by the
+    # `desc_reference` guard, so none of them reaches the rescue any more. Narrowing
+    # `Serialized.build` back to `JSON::Error | IO::Error` (the natural thing a later reviewer
+    # does to a bare rescue) would leave the whole suite green while re-opening the crash path
+    # into `DecodedView#emit_json`. This is what fails then.
+    r = S.build(Bytes[1, 2, 3]) { |sink| RaisingReader.new(Bytes[1, 2, 3], sink) }
+    r.json.should eq(%({"$partial":"internal"}))
+    r.complete.should be_false
+    r.decoded.should be_false
+    r.stop.should eq("internal")
+  end
+end
+
+# A reader whose walk ends in an exception the rescue was never told about — the shape a
+# checked conversion over hostile bytes takes (`OverflowError` is an `ArithmeticError`).
+private class RaisingReader < Gori::Decoder::Serialized::Reader
+  def document(j : JSON::Builder) : Nil
+    raise OverflowError.new
+  end
 end

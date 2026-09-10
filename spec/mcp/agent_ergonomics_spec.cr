@@ -120,6 +120,54 @@ describe "MCP agent ergonomics" do
     end
   end
 
+  # `-encode` is only ONE of the three spellings the catalog gives that direction, and the
+  # note used to know just that one — so `gzip` COMPRESSED, `deflate` COMPRESSED and `html`
+  # ESCAPED with `isError:false` and nothing said, which is the same trap one family over.
+  it "decode says so for the compress and escape families too, naming the real counterpart" do
+    with_store do |store|
+      tools = tools_for(store)
+
+      {
+        %({"spec":"gzip","input":"hello"})    => {"gzip -> gzip-compress ENCODED", "gzip-decompress"},
+        %({"spec":"deflate","input":"hello"}) => {"deflate -> zlib-compress ENCODED", "zlib-decompress"},
+        %({"spec":"html","input":"<a>"})      => {"html -> html-escape ENCODED", "html-unescape"},
+        %({"spec":"xml","input":"<a>"})       => {"xml -> xml-escape ENCODED", "xml-unescape"},
+      }.each do |args, (went, instead)|
+        note = erg_json(tools, "decode", args)["note"].as_s
+        note.should contain(went), args
+        note.should contain(instead), args
+      end
+
+      # Silent where there is nothing to point at: a direction the caller spelled — in any of
+      # the three spellings, and wherever in the token it sits — and a ONE-WAY transform,
+      # whose "counterpart" would be a name that was never in the catalog.
+      [
+        %({"spec":"gzip-compress","input":"hi"}),
+        %({"spec":"html-escape","input":"<a>"}),
+        %({"spec":"url-encode-all","input":"ab"}),
+        %({"spec":"shell-escape","input":"a b"}),
+        %({"spec":"homoglyph","input":"ab"}),
+      ].each { |args| erg_json(tools, "decode", args).as_h.has_key?("note").should be_false, args }
+    end
+  end
+
+  # An agent reads the note and builds the spec it names, so the names have to be in the
+  # order that spec runs. A chain undoes back to front.
+  it "decode's note names the inverse chain in the order that actually undoes it" do
+    with_store do |store|
+      tools = tools_for(store)
+      note = erg_json(tools, "decode", %({"spec":"gzip > base64","input":"hello"}))["note"].as_s
+      note.should contain("gzip -> gzip-compress, base64 -> base64-encode ENCODED") # step order
+      note.should contain("base64-decode > gzip-decompress")                        # UNDO order
+      # And it is a chain the tool will actually run: listing them forwards handed the agent
+      # `gzip-decompress > base64-decode`, which fails at step 1 on base64 TEXT.
+      round = erg_json(tools, "decode", %({"spec":"gzip > base64","input":"hello"}))["output"].as_s
+      back = erg_json(tools, "decode", %({"spec":"base64-decode > gzip-decompress","input":#{round.to_json}}))
+      back["output"].as_s.should eq("hello")
+      back.as_h.has_key?("note").should be_false
+    end
+  end
+
   # The provider CRUD tools exist so an operator configures a private collaborator ONCE.
   # oast_start could not consume one: the agent had to re-supply host and token inline, and
   # tokens read back [REDACTED], so a token-bearing provider was unreachable from MCP.

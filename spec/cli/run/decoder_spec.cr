@@ -125,10 +125,33 @@ end
 describe "gori run decoder list" do
   # `quoted-printable-encode` is 23 chars; a fixed `ljust(22)` put its row's columns one cell
   # off the rest (and a long saved-chain name many more).
-  it "aligns the category column for every converter, measured rather than fixed" do
+  #
+  # EVERY boundary, not just the category's start. The old spec found where the CATEGORY
+  # begins — which is the column the measured NAME already lined up — and so said nothing
+  # about the two hard-coded widths behind it: `Category::Serialization`'s label is 13 and
+  # its column was `ljust(11)`, so all six serialization rows pushed DIRECTION and
+  # DESCRIPTION two cells right while this spec passed.
+  it "aligns every column for every converter, measured rather than fixed" do
     lines = Gori::CLI::Run.decoder_list_lines(Gori::Decoder.shared_registry)
-    cols = lines.map { |l| l.index(/  (encoding|compression|serialization|hash|token|escape|text|saved)  /).not_nil! }
-    cols.uniq.size.should eq 1
+    lines.size.should be > 60
+    cat = /  (encoding|compression|serialization|hash|token|escape|text|saved)  /
+    dir = /  (encode|decode|hash|transform)  +/
+    # Each row's three column starts, from two MatchData rather than four scans. The DIRECTION
+    # is searched from the END of the category so a description word like "hash" cannot be
+    # mistaken for the column, and the DESCRIPTION is where the direction's own padding runs
+    # out — which is where a value LONGER than its `ljust` shows up, and the only place the
+    # old spec could not look.
+    columns = lines.map do |l|
+      cm = l.match(cat)
+      cm.should_not be_nil, "no category column in: #{l}"
+      dm = l.match(dir, cm.not_nil!.end - 2)
+      dm.should_not be_nil, "no direction column in: #{l}"
+      {cm.not_nil!.begin(1), dm.not_nil!.begin(1), dm.not_nil!.end}
+    end
+    # Named per column, so a failure says WHICH one drifted rather than "expected 1, got 3".
+    {"category", "direction", "description"}.each_with_index do |name, i|
+      columns.map { |c| c[i] }.uniq!.size.should eq(1), "#{name} column is not aligned"
+    end
   end
 end
 
