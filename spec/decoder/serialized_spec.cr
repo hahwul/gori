@@ -89,4 +89,25 @@ describe Gori::Decoder::Serialized do
       S.sniff(body).should be_nil, label
     end
   end
+
+  it "renders a document even when a reader raises something nobody listed" do
+    # The net itself, driven directly — every case above is now handled at SOURCE by the
+    # `desc_reference` guard, so none of them reaches the rescue any more. Narrowing
+    # `Serialized.build` back to `JSON::Error | IO::Error` (the natural thing a later reviewer
+    # does to a bare rescue) would leave the whole suite green while re-opening the crash path
+    # into `DecodedView#emit_json`. This is what fails then.
+    r = S.build(Bytes[1, 2, 3]) { |sink| RaisingReader.new(Bytes[1, 2, 3], sink) }
+    r.json.should eq(%({"$partial":"internal"}))
+    r.complete.should be_false
+    r.decoded.should be_false
+    r.stop.should eq("internal")
+  end
+end
+
+# A reader whose walk ends in an exception the rescue was never told about — the shape a
+# checked conversion over hostile bytes takes (`OverflowError` is an `ArithmeticError`).
+private class RaisingReader < Gori::Decoder::Serialized::Reader
+  def document(j : JSON::Builder) : Nil
+    raise OverflowError.new
+  end
 end

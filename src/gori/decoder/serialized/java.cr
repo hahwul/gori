@@ -490,17 +490,18 @@ module Gori::Decoder::Serialized
           bail(j, "truncated")
           return nil
         end
-        # `be` hands back a `UInt64` and `to_i32` is Crystal's CHECKED conversion, so a handle
-        # with the top bit set — `73 71 FF FF FF FF`, ten bytes of a hostile cookie — raised
-        # `OverflowError` instead of resolving to nothing. That is neither of the two exceptions
-        # `Serialized.build` catches, so it left the reader's never-raise contract through the
-        # one caller that has no net of its own (`DecodedView#sniff_serialized`, and so `gori
-        # run show --format json` and MCP `get_flow`). No stream can hold such a handle:
-        # `new_handle` counts up from `BASE_WIRE_HANDLE` in an `Int32`, so one past that range
-        # names no descriptor and is refused exactly as an unrecorded one is. The sibling
-        # `DotnetViewState#event_validation` guards its own arithmetic for the same reason.
-        h = be(raw)
-        d = h > Int32::MAX.to_u64 ? nil : @descs[h.to_i32]?
+        # A handle is a SIGNED int, read the way this reader reads every other four-byte field
+        # (`array`, `block_data`, `proxy_class_desc`). It used to be `be(raw).to_i32`, and
+        # `be` hands back a `UInt64` while `to_i32` is Crystal's CHECKED conversion — so a
+        # handle with the top bit set (`73 71 FF FF FF FF`, ten bytes of a hostile cookie)
+        # raised `OverflowError` instead of resolving to nothing. That is neither of the two
+        # exceptions `Serialized.build` used to catch, so it left the reader's never-raise
+        # contract through the one caller with no net of its own (`DecodedView#sniff_
+        # serialized`, and so `gori run show --format json` and MCP `get_flow`).
+        # `sign_extend` is always in `Int32` range, and a negative handle simply misses:
+        # `new_handle` counts up from `BASE_WIRE_HANDLE`, so it is refused exactly as any
+        # other unrecorded handle is.
+        d = @descs[sign_extend(be(raw), 32).to_i32]?
         unless d
           bail(j, "malformed")
           return nil

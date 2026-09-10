@@ -138,15 +138,33 @@ describe "MCP agent ergonomics" do
         note.should contain(instead), args
       end
 
-      # Silent where there is nothing to point at: a direction the caller spelled, and a
-      # ONE-WAY transform, whose "counterpart" would be a name that was never in the catalog.
+      # Silent where there is nothing to point at: a direction the caller spelled — in any of
+      # the three spellings, and wherever in the token it sits — and a ONE-WAY transform,
+      # whose "counterpart" would be a name that was never in the catalog.
       [
         %({"spec":"gzip-compress","input":"hi"}),
         %({"spec":"html-escape","input":"<a>"}),
-        %({"spec":"shell-escape","input":"a b"}),
         %({"spec":"url-encode-all","input":"ab"}),
+        %({"spec":"shell-escape","input":"a b"}),
         %({"spec":"homoglyph","input":"ab"}),
       ].each { |args| erg_json(tools, "decode", args).as_h.has_key?("note").should be_false, args }
+    end
+  end
+
+  # An agent reads the note and builds the spec it names, so the names have to be in the
+  # order that spec runs. A chain undoes back to front.
+  it "decode's note names the inverse chain in the order that actually undoes it" do
+    with_store do |store|
+      tools = tools_for(store)
+      note = erg_json(tools, "decode", %({"spec":"gzip > base64","input":"hello"}))["note"].as_s
+      note.should contain("gzip -> gzip-compress, base64 -> base64-encode ENCODED") # step order
+      note.should contain("base64-decode > gzip-decompress")                        # UNDO order
+      # And it is a chain the tool will actually run: listing them forwards handed the agent
+      # `gzip-decompress > base64-decode`, which fails at step 1 on base64 TEXT.
+      round = erg_json(tools, "decode", %({"spec":"gzip > base64","input":"hello"}))["output"].as_s
+      back = erg_json(tools, "decode", %({"spec":"base64-decode > gzip-decompress","input":#{round.to_json}}))
+      back["output"].as_s.should eq("hello")
+      back.as_h.has_key?("note").should be_false
     end
   end
 

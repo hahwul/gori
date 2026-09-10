@@ -198,12 +198,15 @@ module Gori
       # cells right of the other seventy. `ljust(n)` is only a separator while the value is
       # SHORTER than n — measuring is what makes that true for a table whose contents grow.
       def self.decoder_list_lines(registry : Decoder::Registry) : Array(String)
-        name_w = registry.max_of(&.name.size)
-        cat_w = registry.max_of(&.category.label.size)
-        dir_w = registry.max_of(&.direction.to_s.size)
-        registry.map do |c|
-          line = "#{c.name.ljust(name_w)}  #{c.category.label.ljust(cat_w)}  #{c.direction.to_s.downcase.ljust(dir_w)}  #{c.description}"
-          (u = c.unusable) && (line += "  [unusable: #{u}]")
+        # The cells are built first and the widths measured off THEM, so what is measured is
+        # what is printed. Measuring `direction.to_s` while padding `direction.to_s.downcase`
+        # agrees only for as long as every spelling stays ASCII — the same latent mismatch
+        # that broke the category column, one enum over.
+        rows = registry.map { |c| {c.name, c.category.label, c.direction.to_s.downcase, c.description, c.unusable} }
+        widths = {0, 1, 2}.map { |i| rows.max_of { |r| r[i].as(String).size } }
+        rows.map do |(name, cat, dir, desc, unusable)|
+          line = "#{name.ljust(widths[0])}  #{cat.ljust(widths[1])}  #{dir.ljust(widths[2])}  #{desc}"
+          (u = unusable) && (line += "  [unusable: #{u}]")
           line
         end
       end

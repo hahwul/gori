@@ -148,13 +148,15 @@ module Gori::Tui
     def subtab_search_extras : Array(String)
       half = SEARCH_EXTRA_MAX // 2
       @sessions.map do |s|
-        # HALF the budget each, and each half cut BEFORE the two are joined. Capping the
-        # JOINED string was wrong twice over.
+        # The INPUT is capped at half the budget; the OUTPUT gets everything left over. Two
+        # things were wrong with capping the JOINED string instead.
         #
-        # The output is why this override exists at all, and an input longer than the whole
+        # The decode is why this override exists at all, and an input longer than the whole
         # budget crowded it out completely: paste a 4 KB base64 blob, chain `base64-decode`,
         # and the `admin` in the decoded claims — the exact thing the operator remembers — was
-        # unreachable by the very picker that goes past the 200-column filter to find it.
+        # unreachable by the very picker that goes past the 200-column filter to find it. A
+        # fixed half each would have been the same mistake pointing the other way: a 200-char
+        # token would have had its decode cut at 1 KB when 1.8 KB was going spare.
         #
         # And a chain step may produce up to `Decoder::MAX_OUT` (32 MiB), so interpolating
         # first copied every open conversion's whole decode into a fresh String on the UI
@@ -163,7 +165,9 @@ module Gori::Tui
         text = s.input.text
         text = text[0, half] if text.size > half
         bytes = s.result.output
-        bytes ? "#{text} #{String.new(bytes[0, {bytes.size, half}.min])}" : text
+        next text unless bytes
+        room = {SEARCH_EXTRA_MAX - text.size - 1, 0}.max # ...less the space between them
+        "#{text} #{String.new(bytes[0, {bytes.size, room}.min])}"
       end
     end
 

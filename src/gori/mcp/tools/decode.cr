@@ -126,10 +126,23 @@ module Gori
       # three families wide.
       INVERSE_SUFFIX = {"-encode" => "-decode", "-compress" => "-decompress", "-escape" => "-unescape"}
 
+      # The two encoders in the catalog named for what they DO rather than for which half of
+      # a pair they are, so no suffix rule can reach them. Named here rather than given a
+      # field on `Converter` that the other seventeen pairs would leave nil — and swept by a
+      # spec (`spec/mcp/decode_tool_spec.cr`) that walks every Encode converter in the
+      # registry, so an encoder added later with an inverse and no rule for it fails there
+      # instead of going quiet in the note.
+      INVERSE_NAME = {"raw-deflate" => "raw-inflate", "url-encode-all" => "url-decode"}
+
+      # A token that spells one of these named a DIRECTION, whatever else it says, so what it
+      # did is not a surprise. Substring and not a suffix: `url-encode-all` and `gzip-compress`
+      # both say which way they go without ending in the word.
+      DIRECTION_WORDS = %w[encode decode compress decompress escape unescape]
+
       # The warning for a spec whose direction-less tokens ENCODED. nil when there is nothing
       # to say: the caller spelled a direction (`base64-encode`, `gzip-compress`), the step
-      # decodes or hashes, or the converter is genuinely ONE-WAY (`shell-escape`,
-      # `url-encode-all`, `homoglyph`) and there is no other way to point them at.
+      # decodes or hashes, or the converter is genuinely ONE-WAY (`shell-escape`, `homoglyph`)
+      # and there is no other way to point them at.
       private def encode_surprise(result : Decoder::ChainResult) : String?
         reg = Decoder.shared_registry
         bare = [] of {String, String, String}
@@ -139,13 +152,17 @@ module Gori
           # The token AS TYPED — an alias that already names its direction is not a surprise,
           # and neither is a canonical name the caller spelled in full.
           token = step.token.split(':', 2).first.strip.downcase
-          next if INVERSE_SUFFIX.each_key.any? { |s| token.ends_with?(s) }
-          next unless inverse = inverse_of(reg, conv.name)
+          next if DIRECTION_WORDS.any? { |w| token.includes?(w) }
+          next unless inverse = Tools.inverse_of(reg, conv.name)
           bare << {token, conv.name, inverse}
         end
         return nil if bare.empty?
         went = bare.map { |(tok, name, _)| "#{tok} -> #{name}" }.join(", ")
-        instead = bare.map(&.[2]).uniq!.join(", ")
+        # REVERSED: a chain undoes back to front, so `gzip > base64` is undone by
+        # `base64-decode > gzip-decompress`. Listing the inverses in step order handed an
+        # agent a spec that fails at step 1 — a new trap in the one message whose whole job
+        # is to keep an agent out of one.
+        instead = bare.map(&.[2]).reverse!.uniq!.join(" > ")
         "this tool is named `decode`, but #{went} ENCODED — a bare converter name is the " \
         "encode direction. Pass #{instead} to go the other way."
       end
@@ -153,12 +170,23 @@ module Gori
       # The converter that undoes `name`, or nil when this build has none. Asked of the
       # REGISTRY rather than derived from the name alone: the note tells the caller to spell a
       # converter, so that converter has to exist and has to decode. A one-way transform has
-      # no counterpart and therefore gets no note — telling someone to pass
-      # `shell-unescape` would send them after a name that was never in the catalog.
-      private def inverse_of(reg : Decoder::Registry, name : String) : String?
+      # no counterpart and therefore gets no note — telling someone to pass `shell-unescape`
+      # would send them after a name that was never in the catalog.
+      #
+      # A CLASS method, using no instance state: it is what the registry sweep in
+      # `spec/mcp/decode_tool_spec.cr` walks the whole catalog through, and building a `Tools`
+      # (and so a store) to ask a question about two strings would only make that spec harder
+      # to keep.
+      def self.inverse_of(reg : Decoder::Registry, name : String) : String?
+        candidates = [] of String
+        if named = INVERSE_NAME[name]?
+          candidates << named
+        end
         INVERSE_SUFFIX.each do |enc, dec|
-          next unless name.ends_with?(enc)
-          other = reg["#{name[0...-enc.size]}#{dec}"]?
+          candidates << "#{name[0...-enc.size]}#{dec}" if name.ends_with?(enc)
+        end
+        candidates.each do |c|
+          other = reg[c]?
           return other.name if other && other.direction.decode?
         end
         nil

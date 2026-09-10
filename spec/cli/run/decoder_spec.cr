@@ -135,23 +135,23 @@ describe "gori run decoder list" do
     lines = Gori::CLI::Run.decoder_list_lines(Gori::Decoder.shared_registry)
     lines.size.should be > 60
     cat = /  (encoding|compression|serialization|hash|token|escape|text|saved)  /
-    dir = /  (encode|decode|hash|transform)  /
-    # Each row's three column starts. The DIRECTION is searched from the end of the category
-    # so a description word like "hash" cannot be mistaken for the column, and the
-    # DESCRIPTION is the first non-space past the direction word — which is where a value
-    # LONGER than its `ljust` shows up, and the only place the old spec could not look.
+    dir = /  (encode|decode|hash|transform)  +/
+    # Each row's three column starts, from two MatchData rather than four scans. The DIRECTION
+    # is searched from the END of the category so a description word like "hash" cannot be
+    # mistaken for the column, and the DESCRIPTION is where the direction's own padding runs
+    # out — which is where a value LONGER than its `ljust` shows up, and the only place the
+    # old spec could not look.
     columns = lines.map do |l|
-      ci = l.index(cat).not_nil!
-      di = l.index(dir, ci + l.match(cat).not_nil![0].size - 2).not_nil! + 2
-      after = di + l.match(dir, di - 2).not_nil![1].size
-      while l[after]?.try(&.whitespace?)
-        after += 1
-      end
-      {ci, di, after}
+      cm = l.match(cat)
+      cm.should_not be_nil, "no category column in: #{l}"
+      dm = l.match(dir, cm.not_nil!.end - 2)
+      dm.should_not be_nil, "no direction column in: #{l}"
+      {cm.not_nil!.begin(1), dm.not_nil!.begin(1), dm.not_nil!.end}
     end
-    columns.map(&.[0]).uniq!.size.should eq 1
-    columns.map(&.[1]).uniq!.size.should eq 1
-    columns.map(&.[2]).uniq!.size.should eq 1
+    # Named per column, so a failure says WHICH one drifted rather than "expected 1, got 3".
+    {"category", "direction", "description"}.each_with_index do |name, i|
+      columns.map { |c| c[i] }.uniq!.size.should eq(1), "#{name} column is not aligned"
+    end
   end
 end
 

@@ -543,14 +543,20 @@ module Gori::Tui
     # it never paints past the body. Selected row lights ACCENT_BG (palette style).
     def render(screen : Screen, chain_rect : Rect, inner : Rect) : Nil
       return if !@open || @matches.empty?
+      # The dropdown starts two cells in, past the "› " prompt, but was clamped to the FIELD's
+      # full width — so a match as long as the card (`quoted-printable-encode` on a narrow
+      # body, or any saved chain the operator named at length) ran two cells past the field
+      # and painted outside the body rect altogether. Clamped to the room left from `x`, and
+      # to the FIELD rather than the body: this floats under the chain field, so its right
+      # edge is the field's, which also leaves the CHAIN card's corner standing.
+      #
+      # NOT `{…, 1}.max`: flooring the room at one cell does not bound anything, it just moves
+      # the same overflow to a narrower body (measured: still outside the pane at widths 2-4).
+      # A body with no room for the dropdown gets no dropdown.
       x = chain_rect.x + 2
-      # Clamped against the room LEFT OF `inner.right` from `x`, not against `chain_rect.w`:
-      # the dropdown starts two cells in (past the "› " prompt) but was being given the whole
-      # field's width, so a match as long as the card — `quoted-printable-encode` on a narrow
-      # body, or any saved chain the operator named at length — overwrote the CHAIN card's
-      # right border and painted one cell outside the body rect entirely.
-      room = {inner.right - x, 1}.max
-      w = ({@matches.max_of(&.size) + 2, 18}.max).clamp(1, {chain_rect.w, room}.min)
+      room = chain_rect.right - x
+      return if room <= 0
+      w = ({@matches.max_of(&.size) + 2, 18}.max).clamp(1, room)
       max_h = {inner.bottom - (chain_rect.y + 1), 1}.max
       h = {@matches.size, 8, max_h}.min
       return if h <= 0

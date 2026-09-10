@@ -68,8 +68,8 @@ describe Gori::Tui::DecoderView do
   it "keeps the dropdown inside the body when a match is as wide as the card" do
     # The dropdown starts two cells in (past the "› " prompt) but was clamped to the FIELD's
     # full width, so a match as long as the card — `quoted-printable-encode` on a narrow body,
-    # or any saved chain the operator named at length — ate the CHAIN card's right border and
-    # painted a cell outside the body rect altogether.
+    # or any saved chain the operator named at length — ran past the field and painted outside
+    # the body rect altogether.
     body_w = 26
     popup = ChainComplete.new
     popup.set(["quoted-printable-encode"], 0, 0)
@@ -82,7 +82,10 @@ describe Gori::Tui::DecoderView do
     (0...20).each do |y|
       backend.row(y)[body_w..].strip.should be_empty, "row #{y} painted past the body"
     end
-    backend.contains?("quoted-printable-enco").should be_true # ...and it is still readable
+    backend.contains?("quoted-printable-enc").should be_true # ...and it is still readable
+    # The CHAIN card stays closed: the dropdown is clamped to the FIELD, so the card's own
+    # bottom-right corner is the one cell on that row it does not take.
+    backend.row(7).should end_with("╯#{" " * 8}")
   end
 
   # The save/load mini-prompt this view used to draw over the OUTPUT region is gone: naming

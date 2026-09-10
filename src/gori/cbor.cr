@@ -99,7 +99,10 @@ module Gori
       reader.note_trailing
       BinaryDocument::Rendering.new(sink.to_s, reader.complete?, reader.pos, reader.stop,
         reader.decoded?)
-    rescue JSON::Error | IO::Error
+    rescue
+      # EVERY exception — see the same net in `Msgpack.render`, and the `OverflowError` that
+      # escaped the Java reader through a rescue that named only these two classes. This
+      # reader is reached from `DecodedView#emit_binary_documents`, which has none of its own.
       internal_rendering
     end
 
