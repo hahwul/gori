@@ -113,7 +113,9 @@ module Gori
       def pem_for(key_spec : String) : String
         return key_spec if key_spec.includes?("-----BEGIN")
         path = key_spec.strip
-        raise ForgeError.new("no key given (#{ALGS.join('/')} need a PEM key: inline, or a path to a .pem file)") if path.empty?
+        # Short on purpose: this is what the TUI's live OUTPUT pane shows the moment `^A`
+        # cycles onto an asymmetric alg with the KEY card still empty, and the pane is narrow.
+        raise ForgeError.new("no key given — RS/PS/ES/EdDSA need a PEM key (inline, or a path to a .pem file)") if path.empty?
         unless File.file?(path)
           raise ForgeError.new("key is neither an inline PEM block nor a readable file path")
         end

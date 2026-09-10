@@ -87,7 +87,7 @@ module Gori::Tui
         @dec_lines = lines.size
         @dec_h, @dec_scroll = draw_text_card(screen, dec_c, "DECODED", lines, @dec_scroll, focused && pane == :decoded)
       end
-      render_attacks(screen, atk_c, attacks, focused && pane == :attacks) unless atk_c.empty?
+      render_attacks(screen, atk_c, attacks, focused && pane == :attacks, input.text) unless atk_c.empty?
     end
 
     # ===================== ENCODE lens =====================
@@ -218,13 +218,17 @@ module Gori::Tui
     end
 
     # ---- ATTACKS list (one selectable row per generated payload) ----
-    private def render_attacks(screen : Screen, card : Rect, attacks : Array(Jwt::Attack), focused : Bool) : Nil
+    private def render_attacks(screen : Screen, card : Rect, attacks : Array(Jwt::Attack),
+                               focused : Bool, token : String) : Nil
       Frame.card(screen, card, "ATTACKS", bg: Theme.bg, border: Frame.pane_border(focused))
       Frame.border_meta(screen, card, "ATTACKS", attacks.size.to_s)
       body = card.inset(1, 1)
       return if body.h <= 0
       if attacks.empty?
-        screen.text(body.x, body.y, "(paste a JWT into INPUT to generate testing payloads)", Theme.muted, Theme.bg, width: body.w)
+        # An encrypted token reaches here with a perfectly good JWT in INPUT and no payloads,
+        # so "paste a JWT" would be wrong twice: they did, and there is nothing to generate.
+        # The token is only parsed on the empty branch, which is where the question arises.
+        screen.text(body.x, body.y, empty_attacks_hint(token), Theme.muted, Theme.bg, width: body.w)
         return
       end
       @atk_h = body.h
@@ -331,6 +335,14 @@ module Gori::Tui
 
     def select_attack_row(idx : Int32, count : Int32) : Nil
       @atk_sel = idx.clamp(0, {count - 1, 0}.max)
+    end
+
+    private def empty_attacks_hint(token : String) : String
+      if Jwt::Jwe.jwe?(token)
+        "(encrypted JWE — no claims to tamper with, no signature to strip)"
+      else
+        "(paste a JWT into INPUT to generate testing payloads)"
+      end
     end
 
     # Hit-test the SECRET card's ` ^A:<alg> ` badge. Geometry mirrors render_secret. The

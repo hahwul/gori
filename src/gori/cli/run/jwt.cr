@@ -44,7 +44,13 @@ module Gori
         parser.parse(args)
 
         jwt_refuse_conflicts(action, payload_override, sets, secret, key)
-        key_material = key.presence || secret
+        # `--key` names a PEM, so resolve it to the PEM text before the engine sees it — an
+        # HS algorithm would otherwise HMAC-sign the PATH (see Jwt.key_material).
+        key_material = begin
+          Jwt.key_material(secret, key)
+        rescue ex : Jwt::ForgeError
+          abort "gori run jwt: --key: #{ex.message}"
+        end
 
         token = jwt_token_input(positional)
         abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty?

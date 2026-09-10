@@ -64,6 +64,24 @@ module Gori
       "#{signing_input}.#{sign(signing_input, alg, key)}"
     end
 
+    # The single key string the engine takes, resolved from the two spellings every surface
+    # offers. `--secret` / `secret` is a LITERAL (an HMAC key is arbitrary bytes and may look
+    # like anything); `--key` / `key` NAMES a PEM, so it is resolved to the PEM text here.
+    #
+    # Resolving matters most where it is least expected — an HS algorithm. `sign` reaches
+    # HMAC_DIGEST before it reaches Asym, so an unresolved `--alg HS256 --key ./server.pub`
+    # HMAC-signed the fourteen bytes of the PATH and reported a token signed with a filename,
+    # with nothing to say otherwise. Resolved, that spelling means what it looks like: an
+    # algorithm-confusion token keyed with the public key's own bytes.
+    #
+    # A `--key` that is neither a PEM block nor a readable file raises (via `Asym.pem_for`),
+    # which is the point: `--key` means PEM, and a secret typed there is a mistake worth a
+    # message rather than a silently different signature.
+    def key_material(secret : String, key : String?) : String
+      return secret unless spec = key.try(&.presence)
+      Asym.pem_for(spec)
+    end
+
     # --- verify -------------------------------------------------------------
 
     # The answer to "does this token's own signature check out under this key". `reason` is

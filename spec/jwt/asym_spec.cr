@@ -150,6 +150,31 @@ describe Gori::Jwt::Asym do
       end
     end
 
+    it "resolves a --key PATH to its PEM text even for an HMAC alg" do
+      # `sign` reaches HMAC_DIGEST before it reaches Asym, so an unresolved key path would
+      # HMAC-sign the PATH STRING and report a token signed with a filename — the silent
+      # wrong result. Resolved, `HS256` + a public key IS the algorithm-confusion token.
+      dir = File.tempname("gori-spec-jose")
+      Dir.mkdir_p(dir)
+      begin
+        path = JoseKeys.write(dir, "rsa.pub.pem", JoseKeys::RSA_PUB)
+        material = Gori::Jwt.key_material("", path)
+        material.should eq(JoseKeys::RSA_PUB)
+        token = Gori::Jwt.encode("{}", %({"s":1}), "HS256", material)
+        Gori::Jwt.verify(token, JoseKeys::RSA_PUB).verified.should be_true
+        # ...and NOT with the path, which is what the bug produced.
+        Gori::Jwt.verify(token, path).verified.should be_false
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "key_material leaves a --secret literal alone and refuses a --key that is not a PEM" do
+      Gori::Jwt.key_material("./looks/like/a/path", nil).should eq("./looks/like/a/path")
+      Gori::Jwt.key_material("s3cret", "").should eq("s3cret")
+      expect_raises(Gori::Jwt::ForgeError) { Gori::Jwt.key_material("", "s3cret") }
+    end
+
     it "never echoes the key spec back in an error" do
       # Org rule and plain sense: an operator who passes an HMAC secret to an asymmetric alg
       # must not read their own key material out of the message (or out of a captured log).

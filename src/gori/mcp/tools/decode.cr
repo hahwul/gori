@@ -175,7 +175,11 @@ module Gori
         if pem && !secret.empty?
           return Result.new("'secret' and 'key' are two names for the same key — pass one", is_error: true)
         end
-        secret = pem || secret
+        begin
+          secret = Jwt.key_material(secret, pem)
+        rescue ex : Jwt::ForgeError
+          return Result.new("key: #{ex.message}", is_error: true)
+        end
         # `set` patches individual claims (`role=admin`), the same knob as `gori run jwt --set`.
         # `payload` replaces the claims wholesale, so the two are mutually exclusive — a `set` on
         # top of a wholesale `payload` would depend on order.
@@ -221,7 +225,7 @@ module Gori
           return Result.new("'secret' and 'key' are two names for the same key — pass one", is_error: true)
         end
         begin
-          Result.new(Jwt.verify_json(Jwt.verify(token.strip, pem || secret)))
+          Result.new(Jwt.verify_json(Jwt.verify(token.strip, Jwt.key_material(secret, pem))))
         rescue ex : Jwt::ForgeError
           Result.new(ex.message || "invalid key", is_error: true)
         end
