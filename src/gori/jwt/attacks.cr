@@ -1,5 +1,6 @@
 require "base64"
 require "json"
+require "./jwe"
 
 module Gori
   # Testing-payload generator: given a JWT, produce the family of tampered tokens a tester
@@ -215,10 +216,14 @@ module Gori
     # writeup and every server-side denylist is phrased against.
     private def alg_confusion_family(list, header, payload_seg : String, public_key : String?) : Nil
       return unless spec = public_key
-      declared = header["alg"]?.try(&.as_s?).try(&.upcase)
-      return unless declared && {"RS", "PS", "ES"}.includes?(declared[0, 2])
+      # The key is loaded BEFORE the alg gate on purpose. Gating first meant a typo'd
+      # `public_key` raised for an RS256 token and was swallowed in silence for an HS256 one —
+      # two answers to one mistake, and the MCP surface (which has no other key resolution)
+      # got the silent half. The docstring's promise is that the operator sees their typo.
       canonical = Asym.public_spki_pem(spec)
       given = Asym.pem_for(spec)
+      declared = header["alg"]?.try(&.as_s?).try(&.upcase)
+      return unless declared && {"RS", "PS", "ES"}.includes?(declared[0, 2])
       seen = Set(String).new
       {
         {"canonical SPKI PEM", canonical},

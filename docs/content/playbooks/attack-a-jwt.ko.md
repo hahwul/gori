@@ -66,7 +66,7 @@ gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...algorithm co
 
 공개키는 대상이 공개하는 것이면 무엇이든 됩니다 — JWKS의 `x5c` 인증서도 순수 `PUBLIC KEY` 블록과 똑같이 동작하며, gori가 어느 쪽이든 서버가 들고 있을 SPKI PEM으로 환원합니다.
 
-MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 동일한 목록을 반환합니다(`jwt_decode` / `jwt_verify` / `jwt_encode`가 1·2단계를 담당). 모두 네트워크를 건드리지 않으므로 `--read-only`에서도 쓸 수 있는 읽기 도구입니다.
+MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 동일한 목록을 반환합니다(`jwt_decode` / `jwt_verify` / `jwt_encode`가 1·2단계를 담당). 모두 `--read-only`에서도 쓸 수 있는 읽기 도구로, 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. 다만 `key` / `public_key`를 경로로 주면 디스크에서 파일을 읽습니다.
 
 세그먼트가 셋이 아니라 다섯인 **암호화된** 토큰은 JWE이며, 위 내용은 하나도 적용되지 않습니다. gori는 무엇을 보고 있는지 알 수 있도록 보호 헤더(`alg`, `enc`, `kid`)를 보여주고, 페이로드는 생성하지 않습니다 — 조작할 클레임 세그먼트도, 제거할 서명도 없기 때문입니다.
 

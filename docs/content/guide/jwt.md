@@ -77,7 +77,7 @@ cat token.txt | gori run jwt --attacks         # token from stdin
 
 The token comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--format` is `text` or `json`. On `--encode`, `--set KEY=VALUE` patches one claim (repeatable; the value is JSON when it parses, so `admin=true` is a boolean and `role=admin` a string) and `--payload JSON` replaces the whole claims object; the two are mutually exclusive. `--secret` and `--key` fill the same slot, so pass one. `--verify` prints `verified: yes|no` and exits 0 either way — a "no" is an answer, so scripts read the field, not the exit code. See the [CLI Reference](/reference/cli/#run-jwt).
 
-Over MCP, `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`, since they touch no network or state. `jwt_encode` takes the same `set` / `payload` claim edits and the same `key`; `jwt_attacks` takes `public_key`.
+Over MCP, `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`: they touch no network and write nothing. `jwt_encode` takes the same `set` / `payload` claim edits and the same `key`; `jwt_attacks` takes `public_key`. Note that `key` / `public_key` accept a **path**, so those two arguments read a file the caller names — pass the PEM inline if the client should not reach the filesystem.
 
 ## Next Steps
 

@@ -44,22 +44,25 @@ module Gori
         parser.parse(args)
 
         jwt_refuse_conflicts(action, payload_override, sets, secret, key)
-        # `--key` names a PEM, so resolve it to the PEM text before the engine sees it — an
-        # HS algorithm would otherwise HMAC-sign the PATH (see Jwt.key_material).
-        key_material = begin
-          Jwt.key_material(secret, key)
-        rescue ex : Jwt::ForgeError
-          abort "gori run jwt: --key: #{ex.message}"
-        end
-
         token = jwt_token_input(positional)
         abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty?
+        # `--key` names a PEM, so it is resolved to the PEM text before the engine sees it — an
+        # HS algorithm would otherwise HMAC-sign the PATH (see Jwt.key_material). Resolved ONCE,
+        # inside the actions that use a key: `--decode` has no use for one (and used to abort
+        # over a typo in a flag it ignores), and `--attacks` fed the raw spec to a generator
+        # that opened the file twice more.
         case action
-        when :encode  then emit_jwt_encode(token, alg, key_material, payload_override, sets, format)
-        when :verify  then emit_jwt_verify(token, key_material, format)
-        when :attacks then emit_jwt_attacks(token, key.presence, format)
+        when :encode  then emit_jwt_encode(token, alg, jwt_key(secret, key), payload_override, sets, format)
+        when :verify  then emit_jwt_verify(token, jwt_key(secret, key), format)
+        when :attacks then emit_jwt_attacks(token, key.presence && jwt_key("", key), format)
         else               emit_jwt_decode(token, format)
         end
+      end
+
+      private def self.jwt_key(secret : String, key : String) : String
+        Jwt.key_material(secret, key)
+      rescue ex : Jwt::ForgeError
+        abort "gori run jwt: --key: #{ex.message}"
       end
 
       # The flag combinations that would otherwise resolve silently, and wrongly.
@@ -110,14 +113,23 @@ module Gori
         if format == :json
           puts Jwt.verify_json(v)
         else
-          puts "verified: #{v.verified ? "yes" : "no"}#{v.alg.empty? ? "" : " (alg #{v.alg})"}"
-          # The reason quotes the token's own alg, which is captured (hostile) text.
-          if reason = v.reason
-            puts "reason: #{CLI::Output.term_safe(reason)}"
-          end
+          jwt_verify_lines(v).each { |line| puts line }
         end
       rescue ex : Jwt::ForgeError
         abort "gori run jwt: #{ex.message}"
+      end
+
+      # The text form of a Verification, as the lines to print. Split out so it is assertable:
+      # BOTH lines carry the token's own `alg`, which is captured — attacker-chosen — text, and
+      # a header of {"alg":"<ESC>[2J<ESC>]0;pwn<BEL>"} cleared the operator's screen and rewrote
+      # its title from the `verified:` line, the one line here that was not neutralized.
+      def self.jwt_verify_lines(v : Jwt::Verification) : Array(String)
+        alg = v.alg.empty? ? "" : " (alg #{CLI::Output.term_safe(v.alg)})"
+        lines = ["verified: #{v.verified ? "yes" : "no"}#{alg}"]
+        if reason = v.reason
+          lines << "reason: #{CLI::Output.term_safe(reason)}"
+        end
+        lines
       end
 
       private def self.emit_jwt_encode(token : String, alg : String, secret : String,

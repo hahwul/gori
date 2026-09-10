@@ -15,6 +15,12 @@ lib LibCrypto
   fun pem_read_bio_pubkey = PEM_read_bio_PUBKEY(bio : Bio*, pkey : EVP_PKEY*, cb : Void*, u : Void*) : EVP_PKEY
   fun x509_get_pubkey = X509_get_pubkey(x : X509) : EVP_PKEY
 
+  # `verification_key` tries three PEM readers in sequence, so one or two of them FAIL on the
+  # success path and push onto OpenSSL's per-thread error queue. gori never reads that detail,
+  # but Crystal's `OpenSSL::Error` does (`ERR_get_error`), so a stale PEM parse error would be
+  # reported later as the reason a proxy TLS handshake failed. Clear it on every BIO teardown.
+  fun err_clear_error = ERR_clear_error
+
   # Key introspection, to refuse an alg/key mismatch by name rather than emit a signature
   # nothing can verify. OpenSSL 3.0 renamed both to `EVP_PKEY_get_*` and left the old
   # spellings as MACROS, which do not link — so the name is chosen at compile time.
@@ -116,6 +122,11 @@ module Gori
         # Short on purpose: this is what the TUI's live OUTPUT pane shows the moment `^A`
         # cycles onto an asymmetric alg with the KEY card still empty, and the pane is narrow.
         raise ForgeError.new("no key given — RS/PS/ES/EdDSA need a PEM key (inline, or a path to a .pem file)") if path.empty?
+        # `File.file?` raises ArgumentError — NOT an IO::Error — on a path carrying a NUL, and
+        # that escapes every caller's `rescue ForgeError`: an MCP `key` of "a\0b" reached the
+        # server's blanket rescue and was coded INTERNAL ("gori is broken") for a mistake in
+        # the agent's own call, and the same value in the TUI's KEY card crashed the tab.
+        raise ForgeError.new("key path contains a NUL byte") if path.includes?('\0')
         unless File.file?(path)
           raise ForgeError.new("key is neither an inline PEM block nor a readable file path")
         end
@@ -123,7 +134,7 @@ module Gori
           raise ForgeError.new("key file is larger than #{MAX_KEY_BYTES // 1024} KiB — not a PEM key")
         end
         File.read(path)
-      rescue IO::Error # File::Error included — a race, a directory, a permission denial
+      rescue IO::Error | ArgumentError # a race, a directory, a permission denial, a bad path
         raise ForgeError.new("cannot read the key file")
       end
 
@@ -213,6 +224,9 @@ module Gori
           yield bio
         ensure
           LibCrypto.BIO_free(bio)
+          # A failed PEM read is EXPECTED here (the reader chain tries three), so its error
+          # queue entries are noise that must not outlive the call — see `err_clear_error`.
+          LibCrypto.err_clear_error
         end
       end
 
@@ -228,10 +242,15 @@ module Gori
           end
         when "ES"
           raise ForgeError.new("#{alg} needs an EC key (this key is #{key_kind(id)})") unless id == NID_EC
+          # Size, not curve NAME: `EVP_PKEY_get_group_name` is 3.0-only and the 1.1.1 route to
+          # the NID goes through EC_KEY accessors 3.0 deprecates, so there is no portable
+          # spelling. The gap that leaves is a same-width non-NIST curve — a secp256k1 key
+          # passes as ES256 and emits a signature no RFC 7518 verifier accepts. So the message
+          # reports the WIDTH it measured and does not claim the key is a P-curve.
           want = ec_bits(alg)
           got = LibCrypto.evp_pkey_bits(key.handle)
           if got != want
-            raise ForgeError.new("#{alg} needs a P-#{want} curve (this key is P-#{got})")
+            raise ForgeError.new("#{alg} needs a P-#{want} curve (this key is a #{got}-bit curve)")
           end
         else # EdDSA
           unless id == NID_ED25519

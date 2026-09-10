@@ -77,6 +77,7 @@ module Gori::Tui
     # ===================== DECODE lens =====================
     def render_decode(screen : Screen, rect : Rect, *, input : TextArea, input_mode : InputMode,
                       input_read : TextReadState, decoded : String, attacks : Array(Jwt::Attack),
+                      input_jwe : Bool = false,
                       pane : Symbol, focused : Bool, lens_chord : String) : Nil
       return if rect.empty?
       input_c, dec_c, atk_c = decode_layout(rect)
@@ -87,7 +88,7 @@ module Gori::Tui
         @dec_lines = lines.size
         @dec_h, @dec_scroll = draw_text_card(screen, dec_c, "DECODED", lines, @dec_scroll, focused && pane == :decoded)
       end
-      render_attacks(screen, atk_c, attacks, focused && pane == :attacks, input.text) unless atk_c.empty?
+      render_attacks(screen, atk_c, attacks, focused && pane == :attacks, input_jwe) unless atk_c.empty?
     end
 
     # ===================== ENCODE lens =====================
@@ -219,7 +220,7 @@ module Gori::Tui
 
     # ---- ATTACKS list (one selectable row per generated payload) ----
     private def render_attacks(screen : Screen, card : Rect, attacks : Array(Jwt::Attack),
-                               focused : Bool, token : String) : Nil
+                               focused : Bool, input_jwe : Bool) : Nil
       Frame.card(screen, card, "ATTACKS", bg: Theme.bg, border: Frame.pane_border(focused))
       Frame.border_meta(screen, card, "ATTACKS", attacks.size.to_s)
       body = card.inset(1, 1)
@@ -227,8 +228,9 @@ module Gori::Tui
       if attacks.empty?
         # An encrypted token reaches here with a perfectly good JWT in INPUT and no payloads,
         # so "paste a JWT" would be wrong twice: they did, and there is nothing to generate.
-        # The token is only parsed on the empty branch, which is where the question arises.
-        screen.text(body.x, body.y, empty_attacks_hint(token), Theme.muted, Theme.bg, width: body.w)
+        # `input_jwe` is computed once per EDIT beside `attacks` — this pane is empty for the
+        # whole time a token is being typed, so deciding it here would parse on every frame.
+        screen.text(body.x, body.y, empty_attacks_hint(input_jwe), Theme.muted, Theme.bg, width: body.w)
         return
       end
       @atk_h = body.h
@@ -337,8 +339,8 @@ module Gori::Tui
       @atk_sel = idx.clamp(0, {count - 1, 0}.max)
     end
 
-    private def empty_attacks_hint(token : String) : String
-      if Jwt::Jwe.jwe?(token)
+    private def empty_attacks_hint(input_jwe : Bool) : String
+      if input_jwe
         "(encrypted JWE — no claims to tamper with, no signature to strip)"
       else
         "(paste a JWT into INPUT to generate testing payloads)"

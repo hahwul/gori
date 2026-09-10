@@ -49,6 +49,21 @@ describe "gori run jwt" do
     j["reason"].as_s.should contain("UNSIGNED")
   end
 
+  it "neutralizes the token's alg on BOTH verify lines, not just the reason" do
+    # `alg` is read straight off a captured header, so it is attacker-chosen text on its way
+    # to a terminal. The `verified:` line interpolated it raw: a header of
+    # {"alg":"<ESC>[2J<ESC>]0;pwn<BEL>"} cleared the screen and rewrote the window title.
+    esc = 27.chr
+    hostile = "#{esc}[2J#{esc}]0;pwn#{7.chr}HS256"
+    token = "#{Gori::Jwt.b64url({"alg" => hostile}.to_json)}.#{Gori::Jwt.b64url("{}")}.AAAA"
+    lines = Gori::CLI::Run.jwt_verify_lines(Gori::Jwt.verify(token, "k"))
+    lines.first.should contain("verified: no")
+    lines.each do |line|
+      line.should_not contain(esc)
+      line.should_not contain(7.chr)
+    end
+  end
+
   it "attacks_json carries the alg-confusion rows when a public key is supplied" do
     rs = Gori::Jwt.encode("{}", %({"sub":"a"}), "RS256", JoseKeys::RSA)
     arr = JSON.parse(Gori::Jwt.attacks_json(Gori::Jwt.attacks(rs, JoseKeys::RSA_PUB))).as_a

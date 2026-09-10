@@ -3,6 +3,7 @@ require "json"
 require "crypto/subtle"
 require "openssl/hmac"
 require "./asym"
+require "./jwe"
 
 module Gori
   # Encode / re-sign side of the JWT workbench. The scanner in `../jwt.cr` is decode-only
@@ -110,6 +111,14 @@ module Gori
         return Verification.new(alg, false,
           "this is a JWE (encrypted), not a signed JWS — it carries an AEAD authentication tag, " \
           "not a signature, and gori does not decrypt")
+      end
+      # A token with a fourth segment is not a JWS, and verifying its first three answers a
+      # question nobody asked: `header.payload.sig.SMUGGLED` came back `verified: true`,
+      # because the HMAC over parts[0..1] matches parts[2] and the rest was dropped on the
+      # floor. `Codecs.jwt_decode` and `attacks` both refuse or surface extra segments.
+      if parts.size > 3
+        return Verification.new(alg, false,
+          "#{parts.size} dot-separated segments — a JWS has 3 and a JWE 5, so nothing verifies this")
       end
       return Verification.new(alg, false, "the header declares no alg") if alg.empty?
       sig_seg = parts[2]?

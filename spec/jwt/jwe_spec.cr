@@ -114,7 +114,7 @@ describe "JWE across the derived projections" do
     token = [b64(%({"alg":"HS256"})), b64(%({"s":1})), "sig", "extra", "more"].join('.')
     out = Gori::Decoder::Codecs.jwt_decode(token.to_slice)
     out.should contain("extra segment")
-    out.should contain("declares no `enc`")
+    out.should contain("not a decodable JWE")
   end
 
   it "Pretty renders a JWE body as its header, labelled as encrypted" do
@@ -136,6 +136,24 @@ describe "JWE across the derived projections" do
     body = %({"id_token":"#{jwe_token}"})
     found = Gori::Jwt.from_flow("/", nil, nil, nil, body.to_slice)
     found.map(&.token).should contain(jwe_token)
+  end
+end
+
+describe "the JWE shape's own edges" do
+  it "accepts an empty ciphertext (an empty plaintext) and refuses an empty tag" do
+    # RFC 7516: the AEAD tag is always present; the ciphertext is empty when the plaintext is.
+    # The first cut had those two quantifiers the other way round.
+    hdr = b64(%({"alg":"dir","enc":"A256GCM"}))
+    Gori::Jwt::Jwe.parse([hdr, "", "aXYtMTIz", "", "dGFn"].join('.')).should_not be_nil
+    Gori::Jwt::Jwe.parse([hdr, "", "aXYtMTIz", "Y2lwaGVy", ""].join('.')).should be_nil
+  end
+
+  it "does not blame `enc` for a token whose header plainly declares it" do
+    # An empty-ciphertext JWE fell out of the shape and was then reported as "declares no
+    # `enc`", which was simply false — the message asserted a reason nothing had checked.
+    hdr = b64(%({"alg":"dir","enc":"A256GCM"}))
+    out = Gori::Decoder::Codecs.jwt_decode([hdr, "", "aXYtMTIz", "", "dGFn"].join('.').to_slice)
+    out.should contain("JWE (encrypted JWT)")
   end
 end
 
@@ -172,6 +190,19 @@ describe "the passive JWT rule and a JWE" do
         req_headers: "Authorization: Bearer #{jwe_token}\r\n")
       probe_codes_of(dets).should_not contain("jwt_weak_alg")
       probe_codes_of(dets).should_not contain("jwt_no_expiry")
+    end
+  end
+
+  it "is not evaded by an `enc` header parameter on a three-segment JWS" do
+    # `enc` alone was the gate, and `enc` is a header parameter anyone can add: one field on
+    # an otherwise ordinary alg:none token suppressed every check here, the High
+    # `jwt_alg_none` included. The gate is the full JWE predicate — five segments AND `enc`.
+    with_store do |store|
+      evade = "#{b64(%({"alg":"none","enc":"A256GCM"}))}.#{b64(%({"sub":"1"}))}."
+      Gori::Jwt::Jwe.jwe?(evade).should be_false # it is a JWS, whatever its header says
+      dets = probe_analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        req_headers: "Authorization: Bearer #{evade}\r\n")
+      probe_codes_of(dets).should contain("jwt_alg_none")
     end
   end
 

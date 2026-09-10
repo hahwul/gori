@@ -175,6 +175,16 @@ describe Gori::Jwt::Asym do
       expect_raises(Gori::Jwt::ForgeError) { Gori::Jwt.key_material("", "s3cret") }
     end
 
+    it "refuses a key path carrying a NUL byte instead of leaking an ArgumentError" do
+      # `File.file?` raises ArgumentError, which is NOT an IO::Error, so it escaped every
+      # caller's `rescue ForgeError` — reaching MCP's blanket rescue as INTERNAL ("gori is
+      # broken") for a mistake in the caller's own argument, and crashing the TUI's JWT tab.
+      ex = expect_raises(Gori::Jwt::ForgeError, /NUL byte/) do
+        Gori::Jwt::Asym.pem_for("a#{0_u8.unsafe_chr}b")
+      end
+      ex.message.not_nil!.should_not contain("ArgumentError")
+    end
+
     it "never echoes the key spec back in an error" do
       # Org rule and plain sense: an operator who passes an HMAC secret to an asymmetric alg
       # must not read their own key material out of the message (or out of a captured log).
@@ -199,7 +209,9 @@ describe Gori::Jwt::Asym do
     it "names the curve when the family is right but the size is not" do
       # An ES256 signature over a P-384 key would be 96 bytes wide under a header claiming
       # 64 — structurally a token, verifiable by nothing.
-      expect_raises(Gori::Jwt::ForgeError, /ES256 needs a P-256 curve \(this key is P-384\)/) do
+      # "a 384-bit curve", not "P-384": the check measures the WIDTH, so naming a NIST curve
+      # would be a claim it never made (a brainpoolP384r1 key is not P-384).
+      expect_raises(Gori::Jwt::ForgeError, /ES256 needs a P-256 curve \(this key is a 384-bit curve\)/) do
         Gori::Jwt.sign("a.b", "ES256", JoseKeys::EC384)
       end
     end
@@ -243,6 +255,16 @@ describe Gori::Jwt::Asym do
       v.reason.not_nil!.should contain("cannot verify")
     end
 
+    it "refuses a token that carries segments past the signature" do
+      # `header.payload.sig.SMUGGLED` verified TRUE: the HMAC over parts[0..1] matches
+      # parts[2] and the fourth segment was dropped on the floor, so gori vouched for a token
+      # no server would accept.
+      token = Gori::Jwt.encode("{}", %({"s":1}), "HS256", "k")
+      v = Gori::Jwt.verify("#{token}.SMUGGLED", "k")
+      v.verified.should be_false
+      v.reason.not_nil!.should contain("4 dot-separated segments")
+    end
+
     it "does not treat a garbage signature segment as an error" do
       token = Gori::Jwt.encode("{}", %({"s":1}), "HS256", "k")
       h, p, _ = token.split('.')
@@ -281,6 +303,16 @@ describe Gori::Jwt::Asym do
     it "raises on a key that will not load rather than dropping the family in silence" do
       rs = Gori::Jwt.encode("{}", %({"sub":"a"}), "RS256", JoseKeys::RSA)
       expect_raises(Gori::Jwt::ForgeError) { Gori::Jwt.attacks(rs, "/nonexistent/key.pem") }
+    end
+
+    it "raises for a bad key whatever the token's alg is" do
+      # The alg gate used to come first, so one typo raised for an RS256 token and was
+      # swallowed in silence for an HS256 one — and MCP, which has no other key resolution,
+      # got the silent half. The docstring promises the operator sees their typo.
+      hs = Gori::Jwt.encode("{}", %({"sub":"a"}), "HS256", "k")
+      expect_raises(Gori::Jwt::ForgeError) { Gori::Jwt.attacks(hs, "/nonexistent/key.pem") }
+      # ...and a GOOD key on a token with no asymmetric alg to confuse still adds nothing.
+      Gori::Jwt.attacks(hs, JoseKeys::RSA_PUB).map(&.category).should_not contain("alg-confusion")
     end
   end
 end

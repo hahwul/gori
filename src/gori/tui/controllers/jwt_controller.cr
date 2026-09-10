@@ -20,6 +20,10 @@ module Gori::Tui
     property input_read : TextReadState = TextReadState.new
     property header : TextArea
     property payload : TextArea
+    # Cached beside `attacks` (which is empty for a JWE) so the ATTACKS empty-state can say
+    # WHY without the view parsing the token on every frame — the pane is empty for the whole
+    # time an operator is typing one in, which is exactly when a per-frame parse costs most.
+    property? input_jwe : Bool = false
     property secret : String = ""
     property secret_cx : Int32 = 0
     property secret_pre : String = ""
@@ -77,6 +81,9 @@ module Gori::Tui
     ENCODE_PANES = [:header, :payload, :secret, :output]
 
     @sessions : Array(JwtSession)
+    # Whether the last `set_alg` dropped the key field, so the status line can say so — a
+    # silent clear would be its own surprise.
+    @alg_cleared_key = false
 
     def initialize(host : Host)
       super(host)
@@ -303,8 +310,8 @@ module Gori::Tui
           if s.mode == :decode
             s.view.render_decode(screen, body,
               input: s.input, input_mode: s.input_mode, input_read: s.input_read,
-              decoded: s.decoded, attacks: s.attacks, pane: s.pane, focused: body_focused,
-              lens_chord: lens_chord)
+              decoded: s.decoded, attacks: s.attacks, input_jwe: s.input_jwe?,
+              pane: s.pane, focused: body_focused, lens_chord: lens_chord)
           else
             s.view.render_encode(screen, body,
               header: s.header, payload: s.payload, secret: s.secret, secret_cx: s.secret_cx,
@@ -783,9 +790,25 @@ module Gori::Tui
     def cycle_alg : Nil
       s = cur
       i = Jwt::ALGS.index(s.alg) || 0
-      s.alg = Jwt::ALGS[(i + 1) % Jwt::ALGS.size]
+      set_alg(s, Jwt::ALGS[(i + 1) % Jwt::ALGS.size])
       recompute_encode(s)
-      @host.status("alg = #{s.alg}")
+      @host.status("alg = #{s.alg}#{@alg_cleared_key ? " · key cleared" : ""}")
+    end
+
+    # Set the algorithm, and DROP the key field when the change crosses the HMAC/asymmetric
+    # boundary. That one field holds two different things — a literal HMAC secret, or a PEM
+    # key gori resolves — and which one it is comes from the alg alone. Carried across the
+    # boundary in silence, a typed `./private.pem` became the fourteen-byte HMAC secret
+    # `./private.pem` and OUTPUT showed a token signed with a filename, with no error: the
+    # same class the CLI avoids by having `--secret` and `--key` be separate flags. There is
+    # only one field here, so the boundary is where its content stops being meaningful.
+    private def set_alg(s : JwtSession, alg : String) : Nil
+      @alg_cleared_key = Jwt::Asym.alg?(s.alg) != Jwt::Asym.alg?(alg) && !s.secret.empty?
+      s.alg = alg
+      return unless @alg_cleared_key
+      s.secret = ""
+      s.secret_cx = 0
+      s.secret_pre = ""
     end
 
     # Seed the ENCODE editors from the INPUT token's decoded claims + switch to ENCODE.
@@ -804,8 +827,11 @@ module Gori::Tui
       end
       s.header.set_text(h)
       s.payload.set_text(p)
+      # Adopting the token's alg can cross the same boundary `cycle_alg` guards — and here the
+      # operator did not even press a key for it, so a carried-over key would be reinterpreted
+      # by a token they merely loaded.
       if (a = Jwt.token_alg(token)) && Jwt::ALGS.includes?(a)
-        s.alg = a
+        set_alg(s, a)
       end
       s.mode = :encode
       s.pane = :header
@@ -1032,6 +1058,7 @@ module Gori::Tui
       token = s.input.text.strip
       s.decoded = decode_text(token)
       s.attacks = Jwt.attacks(token)
+      s.input_jwe = Jwt::Jwe.jwe?(token)
       s.view.reset_decoded_scroll
     end
 

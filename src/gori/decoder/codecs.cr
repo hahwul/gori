@@ -494,7 +494,7 @@ module Gori::Decoder
         # extra segments rather than dropping them.
         if parts.size > 3
           extra = parts[3..]
-          shape = parts.size == 5 ? "JWE-shaped (5 parts) but the header declares no `enc` — not a JWE" : "not a standard JWT"
+          shape = parts.size == 5 ? "JWE-shaped (5 parts) but not a decodable JWE — no `enc` in the header, or a segment is not base64url" : "not a standard JWT"
           io << "\n\n// WARNING: #{parts.size} dot-separated parts (#{shape}); #{extra.size} extra segment(s) beyond header.payload.signature, shown raw:\n"
           extra.each_with_index(3) { |seg, i| io << "//   [#{i}] #{seg}\n" }
         end

@@ -20,12 +20,15 @@ module Gori
     module Jwe
       extend self
 
-      # Five base64url segments. The encrypted-key segment is EMPTY for `alg=dir` (there is
-      # no wrapped key to carry), so segments are allowed to be empty — the shape is the
-      # count of dots, and `parse` does the real discrimination. There is no separate scan
+      # Five base64url segments. Only the header and the AUTHENTICATION TAG are required to be
+      # non-empty: the encrypted key is empty for `alg=dir` (nothing is wrapped) and the
+      # CIPHERTEXT is empty for an empty plaintext, while an AEAD tag is always present. The
+      # first cut had those two quantifiers the other way round, so a JWE over an empty
+      # payload failed the shape and was then reported as "declares no `enc`" — which its
+      # header plainly did. Everything else is `parse`'s job. There is no separate scan
       # regex: `Jwt::SCAN_RE` already matches up to five segments, so one scan finds both
       # JOSE shapes and `Jwt.narrow` decides which one a match actually is.
-      JWE_RE = /\A[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\z/
+      JWE_RE = /\A[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\z/
 
       # One parsed JWE. `header` is the protected header as decoded; the four remaining
       # segments are kept as the base64url text they arrived as — raw bytes are the truth,
