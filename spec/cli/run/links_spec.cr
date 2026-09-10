@@ -1,5 +1,32 @@
 require "../../spec_helper"
 
+private def cli_run_method_source(path : String, method : String) : String
+  source = File.read(File.join(__DIR__, "../../../src/gori/cli/run", path))
+  tail = source[source.index!("private def self.#{method}")..]
+  next_method = tail.index("\n      private def self.", 1) || tail.size
+  tail[0, next_method]
+end
+
+describe "gori run evidence-link help" do
+  it "keeps the shared example copy-pasteable" do
+    Gori::CLI::Run::EVIDENCE_LINK_HELP.should eq(
+      "See also — attach flow/repeater/fuzz/miner evidence to an issue:\n" \
+      "  gori run links add --owner=issue --id=ISSUE_ID --ref=repeater --ref-id=REPEATER_ID")
+  end
+
+  {
+    {"issues.cr", "cmd_issues_list"},
+    {"issues.cr", "cmd_issues_create"},
+    {"issues.cr", "cmd_issues_update"},
+    {"repeater.cr", "cmd_repeater_create"},
+    {"repeater.cr", "cmd_repeater_single"},
+  }.each do |path, method|
+    it "points #{method} at the shared links example" do
+      cli_run_method_source(path, method).should contain("EVIDENCE_LINK_HELP")
+    end
+  end
+end
+
 # `gori run links` — the evidence pointers an Issue or Note carries. Both ENDS are
 # validated before a link is filed: without that, `links add` would write an orphan row
 # pointing at nothing and still report success, and `links list` on a typo'd id would

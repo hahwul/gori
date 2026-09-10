@@ -37,7 +37,8 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run issues create [options]\n" \
                      "  gori run issues update <issue-id> [options]\n" \
-                     "  gori run issues delete <issue-id>"
+                     "  gori run issues delete <issue-id>\n\n" \
+                     "#{EVIDENCE_LINK_HELP}\n"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json | markdown | sarif") { |v| format = parse_format(v, [:text, :json, :markdown, :sarif]) }
@@ -105,7 +106,7 @@ module Gori
         flow_id : Int64? = nil
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run issues create [options]"
+          p.banner = "Usage: gori run issues create [options]\n\n#{EVIDENCE_LINK_HELP}\n"
           p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-tTITLE", "--title=TITLE", "Issue title (required)") { |v| title = v }
@@ -217,7 +218,7 @@ module Gori
         clear_cvss = false
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run issues update <issue-id> [options]"
+          p.banner = "Usage: gori run issues update <issue-id> [options]\n\n#{EVIDENCE_LINK_HELP}\n"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-tTITLE", "--title=TITLE", "New issue title") { |v| title = v }

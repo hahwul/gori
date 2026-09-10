@@ -547,7 +547,7 @@ module Gori
         tls_preset : String? = nil
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run repeater create [options]"
+          p.banner = "Usage: gori run repeater create [options]\n\n#{EVIDENCE_LINK_HELP}\n"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-tURL", "--target=URL", "Target URL (scheme://host[:port])") { |v| target = v }
@@ -1655,6 +1655,7 @@ module Gori
                      "  gori run repeater create [options]    Create a repeater session (--flow/--request-file/--request-raw/--request-stdin)\n" \
                      "  gori run repeater send <id> [opts]    Replay a saved repeater SESSION (not a flow id)\n" \
                      "  gori run repeater h2 [options]        Send a field-native HTTP/2 request (--target/--fields)\n\n" \
+                     "#{EVIDENCE_LINK_HELP}\n\n" \
                      "Options (single-flow replay):"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
