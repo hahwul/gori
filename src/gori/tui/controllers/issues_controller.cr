@@ -134,23 +134,47 @@ module Gori::Tui
       # focused" and left the card that actually owns the keyboard with nothing to distinguish
       # it. The LIST page is the other case — neither the list nor its preview draws a card of
       # its own, so the shell outline IS the list's border and keeps the gold.
-      shell = BodyChrome.shell_focused(focus, multi_pane: @issues.detail_open?)
+      shell = BodyChrome.shell_focused(focus, multi_pane: @issues.detail_open? && detail_card_lit?(rect))
       BodyChrome.framed(screen, rect, shell) { |inner| @issues.render(screen, inner, focused: focused) }
     end
 
+    # Is the card that OWNS the keyboard actually on screen to light? Handing the shell frame
+    # over assumes one of the two always is, and under nine interior rows that is false:
+    # `detail_split` drops RELATED entirely there (`rel_h = 0`) and the detail OPENS on
+    # RELATED, so a body of 8 rows — `Layout.usable?` admits a 16-row terminal — would have
+    # shown the shell grey, RELATED undrawn and NOTES resting, with nothing gold anywhere
+    # while the body held the keyboard. Worse than the whole-tab gild it replaces, and it
+    # healed on the first ⇥, which reads as "the tab was dead until I moved".
+    #
+    # Measured with `Frame.card`'s own refusal (`render_related_card` / `render_notes_card`
+    # return on the same test), so this cannot drift from what was painted.
+    private def detail_card_lit?(rect : Rect) : Bool
+      inner = BodyChrome.frame_inner(rect)
+      card = @issues.notes_focused? ? @issues.notes_card_rect(inner) : @issues.links_card_rect(inner)
+      card.h >= 2 && card.w >= 2
+    end
+
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
+    # Which pane the last press inside an open detail landed on. `supports_drag?` is asked with
+    # NO coordinates — `drag_press_target?` runs it immediately after the click — and the drag
+    # cannot be resolved from the CURRENT pointer either, since extending a notes selection
+    # means dragging past the card's edge. So the click records where it began.
+    #
+    # Not the focus flag, which was the first spelling of this guard and does not cover the
+    # state it was written for: a press on RELATED that asks to leave the editor and is REFUSED
+    # (a peer rewrote the notes) leaves focus and INS on NOTES, so the motion after it would
+    # extend the editor's selection from rows the pointer never touched — in the one state
+    # where the operator has just been told their text is at risk.
+    @detail_press = :none
+
     # The NOTES pane of an open issue only: the issue LIST selects rows. No focus/save side
     # effects — the press that began the gesture already ran them.
     def supports_drag? : Bool
-      @issues.detail_open?
+      @issues.detail_open? && @detail_press == :notes
     end
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless @issues.detail_open?
-      # NOTES only. A press on the RELATED card arms `@dragging` too (`supports_drag?` has no
-      # coordinates to answer with), and without this the motion after it extended a notes
-      # selection from rows the pointer never touched.
-      return unless @issues.notes_focused?
+      return unless supports_drag?
       @issues.notes_drag_to_cursor(rect.inset(1, 1), mx, my)
     end
 
@@ -182,12 +206,20 @@ module Gori::Tui
         @issues.focus_links!
         @issues.select_link(row)
         @host.issue_open_link
+      elsif row = @issues.links_gauge_row_at(inner, mx, my)
+        # The gauge is a SCROLLBAR, not a row. A second press on it means what the first meant
+        # — jump the cursor — and never "open", which is not a gesture a scrollbar has; without
+        # this arm the pair simply died on the bare `true` below, indistinguishable from a row
+        # that failed to open.
+        @issues.focus_links!
+        @issues.select_link(row)
       end
       true
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = rect.inset(1, 1)
+      @detail_press = :none
       return handle_detail_click(inner, mx, my) if @issues.detail_open?
       @host.focus_body
       if @issues.preview_enabled? && @issues.preview_at?(inner, mx, my)
@@ -226,7 +258,11 @@ module Gori::Tui
       # tab bar focused, a click placed the notes caret and then sent the typing to the bar.
       @host.focus_body
       card = @issues.notes_card_rect(inner)
-      # NOR/INS chip on the NOTES card border toggles insert (same as ↵ / esc).
+      # NOR/INS chip on the NOTES card border toggles insert. `↵` on the way IN, and on the way
+      # out the `^W`-less half of `esc`: it drops to READ without saving, which is what makes
+      # re-entry the ordinary way back into an edit in progress (see `enter_notes_insert!`,
+      # which skips its re-seed over unsaved text for exactly this). Deliberately NOT
+      # `leave_notes_editor` — that is `esc`, and this chip is the other gesture.
       if !card.empty? && Frame.mode_badge_hit(mx, my, card.y, card.right - 1, card.x + 7,
            @issues.notes_insert_mode?)
         if @issues.notes_insert_mode?
@@ -238,7 +274,10 @@ module Gori::Tui
       end
       return true if click_related(inner, mx, my)
       notes_rect = @issues.notes_body_rect(inner)
-      @issues.notes_click_to_cursor(inner, mx, my) if notes_rect.contains?(mx, my)
+      if notes_rect.contains?(mx, my)
+        @detail_press = :notes # the motion that continues this press belongs to the editor
+        @issues.notes_click_to_cursor(inner, mx, my)
+      end
       true
     end
 

@@ -148,6 +148,18 @@ describe "clicking the Issues detail" do
     end
   end
 
+  it "re-jumps rather than dies on a double-click on the RELATED gauge" do
+    with_session do |host, session|
+      detail_controller(host, session.store, links: 20) do |ctl|
+        body = related_body(ctl.view)
+        # A scrollbar has no "open" gesture, so the second press means what the first meant.
+        ctl.handle_double_click(AREA, body.right, body.bottom - 1).should be_true
+        host.issue_link_opens.should eq(0)
+        ctl.view.selected_resolved_link.not_nil!.link.ref_id.should eq(919_i64)
+      end
+    end
+  end
+
   it "opens the linked item on a double-click, and only then" do
     with_session do |host, session|
       detail_controller(host, session.store) do |ctl|
@@ -223,6 +235,38 @@ describe "the Issues detail's wheel" do
   end
 end
 
+describe "dragging out of the Issues detail" do
+  it "arms a drag only for a press that landed on the NOTES body" do
+    with_session do |host, session|
+      detail_controller(host, session.store) do |ctl|
+        notes = ctl.view.notes_body_rect(AREA.inset(1, 1))
+        ctl.handle_click(AREA, notes.x + 1, notes.y)
+        ctl.supports_drag?.should be_true
+
+        ctl.handle_click(AREA, related_body(ctl.view).x + 1, related_body(ctl.view).y)
+        ctl.supports_drag?.should be_false
+      end
+    end
+  end
+
+  it "keeps the drag off the editor when a press on RELATED was refused its save" do
+    with_session do |host, session|
+      store = session.store
+      detail_controller(host, store) do |ctl, id|
+        ctl.view.enter_notes_insert!
+        ctl.view.notes_insert('Z')
+        # A peer rewrites the notes: `save_notes_or_report` arms and stays in INS, so focus and
+        # insert mode are both still on NOTES — which is why the guard cannot read them.
+        store.update_issue(id, notes: "written by someone else").should be_true
+        ctl.handle_click(AREA, related_body(ctl.view).x + 1, related_body(ctl.view).y).should be_true
+        ctl.view.notes_insert_mode?.should be_true # refused, as designed
+        ctl.view.notes_focused?.should be_true
+        ctl.supports_drag?.should be_false
+      end
+    end
+  end
+end
+
 describe "the Issues detail's shell frame" do
   it "stands down while a detail is open, so only the focused card is gold" do
     with_session do |host, session|
@@ -239,6 +283,28 @@ describe "the Issues detail's shell frame" do
         on_notes = render(ctl)
         on_notes.fg_at(0, 1).should eq(Theme.border)
         on_notes.fg_at(notes.x, notes.y + 1).should eq(Theme.focus_gold)
+      end
+    end
+  end
+
+  it "keeps the gold when the focused card is too short to be drawn at all" do
+    with_session do |host, session|
+      detail_controller(host, session.store) do |ctl|
+        # Under nine interior rows `detail_split` drops RELATED entirely — and the detail opens
+        # on RELATED. Handing the frame over there would leave NOTHING gold while the body
+        # holds the keyboard, and it would heal on the first ⇥, which reads as a dead tab.
+        short = Rect.new(0, 0, 80, 10)
+        rel, _ = ctl.view.detail_split(short.inset(1, 1))
+        rel.h.should eq(0)
+        backend = MemoryBackend.new(short.w, short.h)
+        ctl.render_body(Screen.new(backend), short, :body)
+        backend.fg_at(0, 1).should eq(Theme.focus_gold)
+
+        # With focus on the card that IS drawn, the shell stands down again.
+        ctl.view.focus_notes!
+        lit = MemoryBackend.new(short.w, short.h)
+        ctl.render_body(Screen.new(lit), short, :body)
+        lit.fg_at(0, 1).should eq(Theme.border)
       end
     end
   end
