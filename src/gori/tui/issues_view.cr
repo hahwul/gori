@@ -251,14 +251,24 @@ module Gori::Tui
     # The drill-in as a whole: the list rail (when it fits) over the issue detail. ONE entry
     # point — see HistoryView#render_drill, which this mirrors. The crumb needs no
     # rail-awareness: it rides `body.y - 1`, the rail's divider or the card's top border.
+    # The effective labels for the item-step chords, pushed down each frame by the controller
+    # — the side that can read the keymap. Literal defaults so a registry-less render (every
+    # view spec) still prints something, which is the fallback convention every such render
+    # in this codebase keeps.
+    property step_keys : {String, String} = {DrillIn::NEXT_KEY, DrillIn::PREV_KEY}
+
     private def render_drill(screen : Screen, rect : Rect, focused : Bool) : Nil
       rows, cur = rail_window
       rail, body = DrillIn.rail_split(rect, rows.size)
       if rail
-        DrillIn.render_rail(screen, rail, rows, cur, focused: focused)
+        DrillIn.render_rail(screen, rail, rows, cur, focused: focused,
+          next_key: @step_keys[0], prev_key: @step_keys[1])
         Frame.inner_divider(screen, rect, rail.bottom)
       end
-      render_detail(screen, body, focused)
+      # See HistoryView#render_drill: the chip is the no-rail fallback, and a single-row list
+      # gets neither (there is nowhere to step).
+      meta = rail || rows.size <= 1 ? nil : "#{@step_keys[0]}/#{@step_keys[1]}"
+      render_detail(screen, body, focused, step_meta: meta)
     end
 
     # The DETAIL's rect inside the drill-in — what every detail hit-test measures against
@@ -1307,12 +1317,13 @@ module Gori::Tui
       hidden > 0 ? "#{@marks.size} marked ·#{hidden} hidden" : "#{@marks.size} marked"
     end
 
-    private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
+    private def render_detail(screen : Screen, rect : Rect, focused : Bool,
+                              step_meta : String? = nil) : Nil
       issue = @detail.not_nil!
       # Back-to-list breadcrumb on the top border: which list, which row of it, and what is
       # open. See Frame::Crumb — the `‹` is a button, hit-tested off the same rect.
       if c = detail_crumb
-        Frame.crumb(screen, rect, c)
+        Frame.crumb(screen, rect, c, meta: step_meta)
       end
       w = {rect.w - 2, 0}.max
 

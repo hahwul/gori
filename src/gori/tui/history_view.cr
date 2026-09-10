@@ -1103,14 +1103,25 @@ module Gori::Tui
     # point, so the controller cannot draw the rail and then hit-test as though it were not
     # there. The crumb needs no rail-awareness — it rides `body.y - 1`, which IS the rail's
     # divider when there is one and the card's own top border when there is not.
+    # The effective labels for the item-step chords, pushed down each frame by the controller
+    # — the side that can read the keymap. Literal defaults so a registry-less render (every
+    # view spec) still prints something, which is the fallback convention every such render
+    # in this codebase keeps.
+    property step_keys : {String, String} = {DrillIn::NEXT_KEY, DrillIn::PREV_KEY}
+
     def render_drill(screen : Screen, inner : Rect, focused : Bool, strip_focused : Bool) : Nil
       rows, cur = rail_window
       rail, body = DrillIn.rail_split(inner, rows.size)
       if rail
-        DrillIn.render_rail(screen, rail, rows, cur, focused: focused || strip_focused)
+        DrillIn.render_rail(screen, rail, rows, cur, focused: focused || strip_focused,
+          next_key: @step_keys[0], prev_key: @step_keys[1])
         Frame.inner_divider(screen, inner, rail.bottom, border: Frame.pane_border(focused))
       end
-      render_detail(screen, body, focused: focused, strip_focused: strip_focused)
+      # The keys go on the crumb's row only when there is no rail to hang them off — with one
+      # up, the gutter already names them BESIDE the row each lands on, which says more than
+      # a chip can. Suppressed on a single-row list, where neither key has anywhere to go.
+      meta = rail || rows.size <= 1 ? nil : "#{@step_keys[0]}/#{@step_keys[1]}"
+      render_detail(screen, body, focused: focused, strip_focused: strip_focused, step_meta: meta)
     end
 
     # The DETAIL's rect inside the drill-in. `inset` alone stopped being the answer once the
@@ -3241,7 +3252,8 @@ module Gori::Tui
       end
     end
 
-    def render_detail(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false) : Nil
+    def render_detail(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false,
+                      step_meta : String? = nil) : Nil
       return if rect.empty?
       detail = @detail
       unless detail
@@ -3251,7 +3263,7 @@ module Gori::Tui
       # Back-to-list breadcrumb on the top border: which list, which row of it, and what is
       # open. See Frame::Crumb — the `‹` is a button, hit-tested off the same rect.
       if c = detail_crumb
-        Frame.crumb(screen, rect, c)
+        Frame.crumb(screen, rect, c, meta: step_meta)
       end
       # Pane strip: show ALL panes as chips with the active one highlighted, so it's
       # obvious there's more behind (←/→ walk `detail_panes`, in that order).

@@ -101,6 +101,7 @@ module Gori::Tui
         # while the active chip lights a gold pill (strip_focused).
         strip_here = body_focused && @history.detail_strip_focus?
         body_here = body_focused && !@history.detail_strip_focus?
+        @history.step_keys = step_key_labels
         BodyChrome.framed(screen, rect, body_here) { |inner| @history.render_drill(screen, inner, body_here, strip_here) }
       else
         # The list's user-defined columns (#819) read flow bytes for the rows they are about to
@@ -113,6 +114,15 @@ module Gori::Tui
             listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
         end
       end
+    end
+
+    # The effective chords for the item step, read from the keymap so the rail's gutter and
+    # the crumb's chip move when they are rebound. Each half comes from its OWN verb: a
+    # derived label (⇧ + whatever `next` is bound to) lies the moment only one is rebound.
+    private def step_key_labels : {String, String}
+      reg = @host.session.registry
+      {Hotkeys.binding_label(reg, "detail.next-item", DrillIn::NEXT_KEY),
+       Hotkeys.binding_label(reg, "detail.prev-item", DrillIn::PREV_KEY)}
     end
 
     # Called after settings:layout save so the preview cache matches the new pref.
@@ -489,12 +499,13 @@ module Gori::Tui
         # does not from the body, where the caret owns it — so the body's line says `esc`
         # alone. Naming a key that does nothing from where you are is the defect the old
         # ` ‹ list ` border chip had.
+        nx, pv = step_key_labels
         if @history.detail_strip_focus?
-          return "←/→ panes · ↓/↵ enter · ⇧N/⇧P flow · ↑/← list · ↹ pane · space cmds · esc back"
+          return "←/→ panes · ↓/↵ enter · #{nx}/#{pv} flow · ↑/← list · ↹ pane · space cmds · esc back"
         end
         nav = @history.detail_navigable? ? "↑/↓ move · ←/→ caret" : "↑/↓ scroll"
         dy = Hotkeys.binding_label(reg, "detail.copy", "y")
-        return "#{nav} · ⇧arrows select · #{dy} copy · ⇧N/⇧P flow · ↑ strip · ↹ pane · space cmds · esc back"
+        return "#{nav} · ⇧arrows select · #{dy} copy · #{nx}/#{pv} flow · ↑ strip · ↹ pane · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:

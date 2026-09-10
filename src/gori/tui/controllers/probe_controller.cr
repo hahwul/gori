@@ -159,12 +159,12 @@ module Gori::Tui
         # rather than URLs, so naming "↑/↓ URL" over it would be the confident lie this line
         # exists to avoid.
         if @probe.desc_focused?
-          keys("↑/↓ read · ⇧arrows select · {probe.copy} copy · ⇧N/⇧P finding · ↹ urls · space cmds · ←/esc back")
+          keys("↑/↓ read · ⇧arrows select · {probe.copy} copy · {probe.next-item}/{probe.prev-item} finding · ↹ urls · space cmds · ←/esc back")
         else
           # `↵ open` and `o flow` are two different destinations and both belong here — the
           # caret's own affected URL, and the issue's sample evidence. The Issues detail names
           # the same pair for the same reason (`↵ open` over its related links, `o flow`).
-          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · ⇧N/⇧P finding · {probe.open-flow} flow · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
+          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · {probe.next-item}/{probe.prev-item} finding · {probe.open-flow} flow · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
         end
       elsif @probe.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -181,6 +181,7 @@ module Gori::Tui
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       focused = focus == :body
+      @probe.step_keys = step_key_labels if @probe.detail_open?
       shell = BodyChrome.shell_focused(focus, multi_pane: false)
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, SUBTABS, @sub_idx, @subtab_start,
         find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
@@ -192,6 +193,14 @@ module Gori::Tui
             listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
         end
       end
+    end
+
+    # The effective chords for the item step — see HistoryController#step_key_labels for why
+    # each half is read from its own verb rather than derived from the other.
+    private def step_key_labels : {String, String}
+      reg = @host.session.registry
+      {Hotkeys.binding_label(reg, "probe.next-item", DrillIn::NEXT_KEY),
+       Hotkeys.binding_label(reg, "probe.prev-item", DrillIn::PREV_KEY)}
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool

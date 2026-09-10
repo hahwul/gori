@@ -94,14 +94,24 @@ module Gori::Tui
     # `crumb_rect`, the very rect this draws into); the tab name is bright so the eye lands
     # on "which list is behind this"; the rest stays muted so the subject does not compete
     # with the content underneath.
+    # `meta` rides the same row, right-aligned: the keys that CHANGE the position the crumb
+    # just printed. It is what the drill-in shows when there is no list rail to hang those
+    # keys off (the rail prints them in its own gutter, beside the row each one lands on), so
+    # the affordance does not depend on the terminal being tall enough for a rail. Dropped
+    # whole when it would collide with the crumb, like every other border decoration here.
     def self.crumb(screen : Screen, inner : Rect, crumb : Crumb, row : Int32? = nil,
-                   bg : Color = Theme.bg) : Nil
+                   bg : Color = Theme.bg, meta : String? = nil) : Nil
       r = crumb_rect(inner, crumb, row) || return
       screen.text(r.x, r.y, crumb.text, Theme.muted, bg, width: r.w)
-      return if r.w < 5
-      screen.text(r.x + 1, r.y, "‹", Theme.accent, bg, Attribute::Bold)
-      screen.text(r.x + 3, r.y, crumb.tab, Theme.text_bright, bg, Attribute::Bold,
-        width: {r.w - 3, 0}.max)
+      if r.w >= 5
+        screen.text(r.x + 1, r.y, "‹", Theme.accent, bg, Attribute::Bold)
+        screen.text(r.x + 3, r.y, crumb.tab, Theme.text_bright, bg, Attribute::Bold,
+          width: {r.w - 3, 0}.max)
+      end
+      return unless meta && !meta.empty?
+      mx = inner.right - 1 - Screen.draw_width(meta) - 2
+      return if mx <= r.right
+      screen.text(mx, r.y, " #{meta} ", Theme.muted, bg)
     end
 
     # A short right-aligned annotation riding a card's TOP border, right of the title —

@@ -104,12 +104,12 @@ module Gori::Tui
         if @issues.notes_insert_mode?
           "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
         elsif @issues.notes_focused?
-          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · ⇧N/⇧P issue · space cmds · ↹/←/esc related"
+          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · #{step_key_labels.join("/")} issue · space cmds · ↹/←/esc related"
         else
           # `↹/↓ notes`, and `i edit` rather than the old `i/↵ notes`: ↵ in this pane opens
           # the selected RELATED item (`issue.open-link`), so naming it as the way into the
           # notes editor was wrong about one of the two keys it listed.
-          keys("↑/↓ links · ↵ open · ↹/↓ notes · i edit · ⇧N/⇧P issue · {issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+          keys("↑/↓ links · ↵ open · ↹/↓ notes · i edit · {issue.next-item}/{issue.prev-item} issue · {issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -138,8 +138,17 @@ module Gori::Tui
       # focused" and left the card that actually owns the keyboard with nothing to distinguish
       # it. The LIST page is the other case — neither the list nor its preview draws a card of
       # its own, so the shell outline IS the list's border and keeps the gold.
+      @issues.step_keys = step_key_labels if @issues.detail_open?
       shell = BodyChrome.shell_focused(focus, multi_pane: @issues.detail_open? && detail_card_lit?(rect))
       BodyChrome.framed(screen, rect, shell) { |inner| @issues.render(screen, inner, focused: focused) }
+    end
+
+    # The effective chords for the item step — see HistoryController#step_key_labels for why
+    # each half is read from its own verb rather than derived from the other.
+    private def step_key_labels : {String, String}
+      reg = @host.session.registry
+      {Hotkeys.binding_label(reg, "issue.next-item", DrillIn::NEXT_KEY),
+       Hotkeys.binding_label(reg, "issue.prev-item", DrillIn::PREV_KEY)}
     end
 
     # Is the card that OWNS the keyboard actually on screen to light? Handing the shell frame

@@ -43,6 +43,14 @@ module Gori::Tui
     # rail: on a short terminal the crumb is the ONLY thing saying where you are.
     MIN_DETAIL_H = 12
 
+    # Default labels for the two chords that step the drill-in through the list. Literals,
+    # because the rail renders with no registry in reach — the fallback every registry-less
+    # render in this codebase keeps. A controller that HAS the registry pushes the effective
+    # labels down instead (see the `step_keys` setter on each view), so a rebind moves what
+    # the gutter prints.
+    NEXT_KEY = "⇧N"
+    PREV_KEY = "⇧P"
+
     # One rail row, in the three parts every one of these lists happens to have: a short
     # coloured lead (status code / severity), the identity, and a muted tail (host, type).
     # A view maps its own row onto this; nothing else about its list renderer is involved.
@@ -84,7 +92,8 @@ module Gori::Tui
     # holds focus — the rail is a readout, not a pane you can move into, so it never takes
     # the gold border, only the band.
     def self.render_rail(screen : Screen, rect : Rect, rows : Array(RailRow), cursor : Int32,
-                         focused : Bool = true) : Nil
+                         focused : Bool = true, next_key : String = NEXT_KEY,
+                         prev_key : String = PREV_KEY) : Nil
       return if rect.empty? || rows.empty?
       # Leads share one column so the identities start at the same x — an unaligned status
       # code reads as three ragged rows rather than as a list.
@@ -92,7 +101,14 @@ module Gori::Tui
       rows.each_with_index do |row, i|
         y = rect.y + i
         break if y >= rect.bottom
-        draw_row(screen, rect, y, row, lead_w, here: i == cursor, focused: focused)
+        # Only the IMMEDIATE neighbours carry a key: the label says "one press lands here",
+        # and a row two steps away wearing the same label would be a lie. At the ends of the
+        # list the window slides and the cursor is not centred, so one side simply has none.
+        step = case i - cursor
+               when -1 then prev_key
+               when  1 then next_key
+               end
+        draw_row(screen, rect, y, row, lead_w, step: step, here: i == cursor, focused: focused)
       end
     end
 
@@ -100,13 +116,22 @@ module Gori::Tui
     # this codebase splits its row draw: the loop is about WHICH rows, the row is about what
     # a row looks like, and only the second one grows.
     private def self.draw_row(screen : Screen, rect : Rect, y : Int32, row : RailRow,
-                              lead_w : Int32, *, here : Bool, focused : Bool) : Nil
+                              lead_w : Int32, *, step : String?, here : Bool, focused : Bool) : Nil
       bg = here ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       if here
         screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
         screen.cell(rect.x, y, '▎', Theme.accent, bg)
+      elsif step
+        # The step key rides the CURSOR'S OWN COLUMN, so the key and the row it moves to line
+        # up instead of being two facts the operator has to connect — the position readout in
+        # the crumb says a next one exists, this says which press gets there. Muted, because
+        # the cursor bar has to stay the brightest thing in the gutter.
+        screen.text(rect.x, y, step, Theme.muted, bg, width: 2)
       end
-      x = rect.x + 2
+      # 3, not 2: the gutter holds either the cursor bar (1 cell) or a step key (2), and a
+      # 2-cell gutter left `⇧P` flush against the status code — `⇧P200`, the same fusing the
+      # History list's METHOD/PROTO columns buy a blank column to avoid.
+      x = rect.x + 3
       if lead_w > 0
         screen.text(x, y, row.lead, row.lead_color || Theme.muted, bg, width: lead_w)
         x += lead_w + 1

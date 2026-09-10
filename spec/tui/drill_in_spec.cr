@@ -72,6 +72,36 @@ describe Gori::Tui::DrillIn do
       backend.row(2).includes?("GET api.test/v1/item/2").should be_true
     end
 
+    it "labels the immediate neighbours with the key that lands on them" do
+      backend = MemoryBackend.new(80, 5)
+      screen = Screen.new(backend)
+      DrillIn.render_rail(screen, Rect.new(0, 0, 80, 3), rail_rows(3), 1)
+      # The key rides the cursor bar's own column, so "press this, land here" is one fact
+      # rather than two the operator has to connect.
+      backend.row(0).starts_with?("⇧P").should be_true
+      backend.row(1).starts_with?("▎").should be_true
+      backend.row(2).starts_with?("⇧N").should be_true
+    end
+
+    it "labels only rows ONE press away, at either end of the list" do
+      backend = MemoryBackend.new(80, 5)
+      screen = Screen.new(backend)
+      # Cursor at the top of the list: the window cannot slide, so there is no previous row
+      # and the row two below must NOT wear ⇧N — one press does not reach it.
+      DrillIn.render_rail(screen, Rect.new(0, 0, 80, 3), rail_rows(3), 0)
+      backend.row(0).starts_with?("▎").should be_true
+      backend.row(1).starts_with?("⇧N").should be_true
+      backend.row(2).strip.starts_with?("⇧").should be_false
+    end
+
+    it "prints the labels it is given, so a rebind moves what the gutter says" do
+      backend = MemoryBackend.new(80, 5)
+      screen = Screen.new(backend)
+      DrillIn.render_rail(screen, Rect.new(0, 0, 80, 3), rail_rows(3), 1, next_key: "^J", prev_key: "^K")
+      backend.row(0).starts_with?("^K").should be_true
+      backend.row(2).starts_with?("^J").should be_true
+    end
+
     it "never draws past its rect, however many rows it is handed" do
       backend = MemoryBackend.new(80, 6)
       screen = Screen.new(backend)
@@ -121,6 +151,27 @@ describe Gori::Tui::Frame::Crumb do
 
     it "declines when the border row would be off-screen" do
       Frame.crumb_rect(Rect.new(0, 0, 40, 5), Frame::Crumb.new("PROBE", "x")).should be_nil
+    end
+
+    it "hangs the step keys off the same row, right-aligned" do
+      backend = MemoryBackend.new(80, 6)
+      screen = Screen.new(backend)
+      inner = Rect.new(1, 1, 78, 4)
+      Frame.crumb(screen, inner, Frame::Crumb.new("HISTORY", "GET /a", "4/120"), meta: "⇧N/⇧P")
+      row = backend.row(0)
+      row.includes?("‹ HISTORY").should be_true
+      row.includes?("⇧N/⇧P").should be_true
+      # Right-aligned, clear of the frame's top-right corner.
+      row.rstrip.ends_with?("⇧N/⇧P").should be_true
+    end
+
+    it "drops the step keys rather than colliding with the crumb" do
+      backend = MemoryBackend.new(40, 6)
+      screen = Screen.new(backend)
+      inner = Rect.new(1, 1, 38, 4)
+      long = Frame::Crumb.new("HISTORY", "GET a-very-long-host.example/deep/path/here", "9/99")
+      Frame.crumb(screen, inner, long, meta: "⇧N/⇧P")
+      backend.row(0).includes?("⇧N/⇧P").should be_false
     end
 
     it "rides an explicit row — the rail's divider — when given one" do
