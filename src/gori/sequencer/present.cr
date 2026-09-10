@@ -144,16 +144,26 @@ module Gori::Sequencer
     # A pipe inside a cell would split it into two columns and silently drop the rest of the
     # row. Reachable from a real descriptor: `regex /a|b/` is an ordinary token location.
     #
+    # A newline ENDS the row, which is worse — every remaining cell of that row and the table
+    # structure below it are gone, and Markdown has no escape for one inside a cell, so it is
+    # folded to a space. Also reachable from a real descriptor: `gori run sequence --tokens`
+    # names the FILE in the subject and a Unix path may hold a newline, and `--regex` takes
+    # whatever the shell hands it.
+    #
     # Byte-wise, not `gsub`: a one-byte needle makes Crystal's gsub walk the subject as CHARS,
     # and a descriptor built from a response header name is not guaranteed valid UTF-8 — every
     # invalid byte would come back U+FFFD. This report can be written to a file and stored as
     # an Issue's notes, so it must not be the thing that rewrites bytes.
     private def self.cell(s : String) : String
-      return s unless s.to_slice.includes?(0x7c_u8) # '|'
+      slice = s.to_slice
+      return s unless slice.any? { |b| b == 0x7c_u8 || b == 0x0a_u8 || b == 0x0d_u8 }
       String.build do |io|
-        s.to_slice.each do |b|
-          io.write_byte(0x5c_u8) if b == 0x7c_u8 # '\'
-          io.write_byte(b)
+        slice.each do |b|
+          case b
+          when 0x0a_u8, 0x0d_u8 then io.write_byte(0x20_u8)                   # newline → space; a row is one line
+          when 0x7c_u8          then io.write_byte(0x5c_u8); io.write_byte(b) # '|' → '\|'
+          else                       io.write_byte(b)
+          end
         end
       end
     end

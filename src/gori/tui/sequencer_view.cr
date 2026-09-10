@@ -476,13 +476,26 @@ module Gori::Tui
       @engine.try(&.stop)
     end
 
+    # The progress denominator this session reports against — `Engine#total`'s answer,
+    # spelled here because the view has to be able to ask it without an engine.
+    #
+    # `@config.goal` is only ever the LIVE-replay denominator. A manual session counts its
+    # non-blank pasted tokens, and `Config#goal` sits at its 500 default there because the
+    # config overlay's samples cycler never applies to a paste. `ProgressEvent` carries the
+    # right number and `DoneEvent` does not, so the terminal apply had to re-derive it and
+    # read `config.goal` instead: analysing 30 pasted tokens finished at "30/500 collected"
+    # over a 6%-full progress bar, a run that had in fact completed every sample it had.
+    def progress_goal : Int32
+      @config.mode.manual? ? @config.manual_tokens.count { |t| !t.empty? } : @config.goal
+    end
+
     def begin_run : Nil
       @running = true
       @stop_requested = false
       @collected = 0
       @sent = 0
       @errors = 0
-      @goal_display = @config.mode.manual? ? @config.manual_tokens.count { |t| !t.empty? } : @config.goal
+      @goal_display = progress_goal
       @samples.clear
       @samples_rev += 1
       @report = nil
@@ -603,6 +616,8 @@ module Gori::Tui
         "invalid target — use scheme://host[:port]/path"
       in Sequencer::PlanError::Reason::NoTokenLoc
         "set a token location first"
+      in Sequencer::PlanError::Reason::BadPosition
+        "set a byte range as A:B (B greater than A)"
       in Sequencer::PlanError::Reason::UnresolvedEnv
         "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       end

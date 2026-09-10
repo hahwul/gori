@@ -466,6 +466,23 @@ describe Gori::Sequencer::Plan do
       plan.origin!.host.should eq("t.test")
     end
 
+    # `TokenExtract.position` answers nil whenever `hi <= lo`, so this descriptor misses EVERY
+    # response by construction. Only the TUI overlay refused it (it pre-parses the field);
+    # `gori run sequence --position 40:8` and MCP's `position: "40:8"` both parsed two
+    # integers, asked nothing about their order, and started a real collection that spent its
+    # whole max-sends budget and reported `CRITICAL · 0 usable / N total · no usable tokens` —
+    # a verdict about the origin's entropy from a descriptor that read none of it.
+    it "reports BadPosition for a byte range that can never match" do
+      [{40, 8}, {8, 8}, {0, 0}].each do |(lo, hi)|
+        ex = expect_raises(Q::PlanError) do
+          Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "http://t.test",
+            config: live_config(Q::TokenLoc.new(Q::ExtractKind::Position, "", lo, hi), 5)), ungated_outbound)
+        end
+        ex.reason.should eq(Q::PlanError::Reason::BadPosition)
+        ex.detail.should eq("#{lo}:#{hi}")
+      end
+    end
+
     it "reports NoTokens for a manual plan with nothing to analyze" do
       # Empty and all-empty, matching what the engine counts as collectable. A
       # whitespace-only entry is a real token here — all three surfaces strip and reject

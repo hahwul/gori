@@ -20,7 +20,10 @@ module Gori::Tui
     mode : Sequencer::Mode,
     suggested_loc : Sequencer::TokenLoc?,
     candidate_cookies : Array(String),
-    candidate_headers : Array(String)
+    candidate_headers : Array(String),
+    # The session's CURRENT knobs, when this seed reconfigures an open session rather than
+    # opening a new one. nil for a new session, which starts from the defaults below.
+    config : Sequencer::Config? = nil
 
   # The config popup shown before a live collection: a token-descriptor kind cycler + an
   # editable selector field, then goal / concurrency / notification cyclers and a Start
@@ -46,6 +49,9 @@ module Gori::Tui
     # `gori run` and MCP both had the knob. A cycler, not a text field, because this
     # overlay deliberately has none (no IME plumbing).
     MAX_REQ_CHOICES = [nil, 100, 250, 500, 1000, 2500, 5000, 10000] of Int32?
+    # The same list without the "uncapped" head, so a persisted budget can be matched against
+    # the real choices without the nil having to be reasoned about at every comparison.
+    CAPPED_CHOICES = MAX_REQ_CHOICES.compact
 
     KIND_ROW     = 0
     SELECTOR_ROW = 1
@@ -58,16 +64,46 @@ module Gori::Tui
 
     getter seed : SequenceSeed
 
+    # Declared, because `initialize` fills the four cycler positions through `nearest_index`
+    # (defined below it) and Crystal will not infer an ivar type across that.
+    @kind_idx : Int32
+    @goal_idx : Int32
+    @maxreq_idx : Int32
+    @conc_idx : Int32
+    @notify_idx : Int32
+
+    # `seed.config` is the OPEN session's live knobs on a reconfigure, and nil on a new
+    # session. Without reading it, `c` (Configure) on a session an operator had set to 2000
+    # samples / concurrency 5 / a 5000-request cap re-opened the card on 500 / 1 / uncapped
+    # and Start silently applied those: this overlay writes the WHOLE `Config`, so every
+    # cycler it does not carry over is a knob the reconfigure resets. The descriptor was
+    # carried from the first day; its four neighbours were not.
     def initialize(@seed : SequenceSeed)
       loc = @seed.suggested_loc
       @kind_idx = loc ? (KINDS.index(loc.kind) || 0) : 0
       init = loc ? (loc.kind.position? ? "#{loc.pos_start}:#{loc.pos_end}" : loc.selector) : ""
       @selector = TextField.new(init)
-      @goal_idx = GOAL_CHOICES.index(500) || 2
-      @maxreq_idx = 0
-      @conc_idx = 0
-      @notify_idx = NOTIFY_CHOICES.index(Sequencer::NotifyMode::WhenDone) || 0
+      cfg = @seed.config
+      @goal_idx = nearest_index(GOAL_CHOICES, cfg.try(&.goal) || 500)
+      # Index 0 IS "uncapped", so a nil budget is an exact answer rather than a nearest one.
+      @maxreq_idx = cfg.try(&.max_requests).try { |c| 1 + nearest_index(CAPPED_CHOICES, c.clamp(0_i64, Int32::MAX.to_i64).to_i) } || 0
+      @conc_idx = nearest_index(CONC_CHOICES, cfg.try(&.concurrency) || 1)
+      @notify_idx = NOTIFY_CHOICES.index(cfg.try(&.notify) || Sequencer::NotifyMode::WhenDone) || 0
       @selected = SELECTOR_ROW
+    end
+
+    # The cycler position for a persisted value. A cycler can only offer what it lists, and a
+    # value off the list (an older row, a config another surface wrote) has to land SOMEWHERE
+    # — on its nearest neighbour, which the operator then reads on the card before pressing
+    # Start, rather than on the default, which silently discards what the session had.
+    private def nearest_index(choices : Array(Int32), value : Int32) : Int32
+      idx = choices.index(value)
+      return idx if idx
+      best = 0
+      choices.each_with_index do |c, i|
+        best = i if (c - value).abs < (choices[best] - value).abs
+      end
+      best
     end
 
     def kind : Sequencer::ExtractKind

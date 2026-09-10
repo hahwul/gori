@@ -333,8 +333,18 @@ module Gori::Sequencer
 
     # Requests actually put on the wire, retries included — see `ProgressEvent#requests`.
     # 0 on an analyse-only plan, which has no backend and opens no socket.
+    #
+    # `+ extra_requests`, as `Fuzz::Engine` reports it: `CappedBackend#sent` counts CALLS, and
+    # a `ConnPool` stale re-send is a whole request that left the machine INSIDE one call
+    # (`Fuzz::Backend#extra_requests`). The Sequencer is the run most exposed to it — every
+    # sample is the same request re-sent down a reused connection, which is exactly what
+    # `keep_alive` buys — so against an origin that reaps idle sockets this number was short
+    # by one re-send per reap while claiming to be "the load the run put on the target".
+    #
+    # The BUDGET is untouched: `max_requests` is enforced against `CappedBackend#sent` alone,
+    # deliberately, and this is the reported figure only — same split Fuzz makes.
     private def wire_requests : Int64
-      @backend.try(&.sent) || 0_i64
+      @backend.try { |b| b.sent + b.extra_requests } || 0_i64
     end
 
     private def emit_progress : Nil

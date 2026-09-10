@@ -96,6 +96,16 @@ describe Gori::Tui::SequencerView do
         engine.should be_nil
         err.should eq("set a token location first")
 
+        # BadPosition — a range typo is not a missing location, and saying it is sends the
+        # operator to the wrong row (the overlay's `invalid_hint` says the same sentence).
+        view = Gori::Tui::SequencerView.new
+        view.load("http://t.test", req.to_slice, false, nil,
+          Q::Config.new(mode: Q::Mode::LiveReplay,
+            token_loc: Q::TokenLoc.new(Gori::ExtractKind::Position, "", 40, 8)))
+        engine, err = view.build_engine(true, scope, nil)
+        engine.should be_nil
+        err.should eq("set a byte range as A:B (B greater than A)")
+
         # NoTokens — the manual-paste wording.
         view = Gori::Tui::SequencerView.new
         view.load("", Bytes.empty, false, nil,
@@ -104,6 +114,27 @@ describe Gori::Tui::SequencerView do
         engine.should be_nil
         err.should eq("no tokens to analyze — paste some first")
       end
+    end
+  end
+
+  # The progress denominator. `Config#goal` is the LIVE-replay half only — a manual session
+  # leaves it at its 500 default because the overlay's samples cycler never applies to a
+  # paste — so the terminal `DoneEvent` apply, which has no goal of its own to read, used to
+  # relabel a finished 30-token analysis "30/500" over a 6%-full bar.
+  describe "#progress_goal" do
+    it "counts the non-blank pasted tokens in manual mode, not the live goal" do
+      view = Gori::Tui::SequencerView.new
+      cfg = Q::Config.new(mode: Q::Mode::Manual, manual_tokens: ["aa", "", "bb", "cc"])
+      cfg.goal.should eq(500) # the untouched live-replay default this used to report
+      view.load("", Bytes.empty, false, nil, cfg)
+      view.progress_goal.should eq(3)
+    end
+
+    it "is the collection goal in live replay" do
+      view = Gori::Tui::SequencerView.new
+      view.load("http://t.test", "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, false, nil,
+        Q::Config.new(mode: Q::Mode::LiveReplay, token_loc: Q::TokenLoc.cookie("SID"), goal: 250))
+      view.progress_goal.should eq(250)
     end
   end
 

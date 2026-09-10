@@ -219,6 +219,8 @@ module Gori
           "could not determine a target host"
         in Sequencer::PlanError::Reason::NoTokenLoc
           "token location selector is empty"
+        in Sequencer::PlanError::Reason::BadPosition
+          "--position #{ex.detail} extracts nothing — B must be greater than A"
         in Sequencer::PlanError::Reason::NoTokens
           # Unreachable here: --tokens is handled above and never builds a plan.
           "no tokens to analyze"

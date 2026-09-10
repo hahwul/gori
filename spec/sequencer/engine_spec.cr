@@ -109,6 +109,44 @@ private class RefusedBackend < F::Backend
   end
 end
 
+# Raises out of `send` — the shape `Engine#run_job`'s rescue exists for. A raised sample is
+# counted in `@errors` and produces NO event at all (`process_one` never returns, so neither
+# `SampleEvent` nor `emit_progress` runs), which is why a consumer must read the engine's own
+# counter rather than the last `ProgressEvent` it happened to receive.
+private class RaisingBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    raise IO::Error.new("socket exploded")
+  end
+end
+
+# Reports one `extra_requests` per call — a keep-alive `ConnPool` stale re-send, which is a
+# whole request on the wire INSIDE one `send` call (`Fuzz::Backend#extra_requests`).
+private class PoolRetryBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def extra_requests : Int64
+    @sent.to_i64
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    head = "HTTP/1.1 200 OK\r\nSet-Cookie: SID=#{"%08x" % (@sent &* 7919)}; Path=/\r\nContent-Length: 2\r\n\r\n"
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice)
+    Gori::Repeater::Result.new(head.to_slice, "ok".to_slice, resp, 100_i64)
+  end
+end
+
 private def collect_done(engine : Q::Engine) : Q::DoneEvent
   done = nil.as(Q::DoneEvent?)
   engine.run { |ev| done = ev if ev.is_a?(Q::DoneEvent) }
@@ -236,6 +274,45 @@ describe Gori::Sequencer::Engine do
     d = run_blocked(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
     d.sent.should be > 0
     d.requests.should eq(d.sent.to_i64)
+  end
+
+  # `requests` is "what the run put on the wire", and `CappedBackend#sent` counts CALLS — a
+  # pool stale re-send is a whole request that left the machine inside one of them. `Fuzz::
+  # Engine` has always added `extra_requests`; this engine reported the call count alone, and
+  # the Sequencer is the run most exposed to it (every sample is the same request re-sent down
+  # a connection `keep_alive` deliberately reuses). The BUDGET stays on the call count: that is
+  # what `max_requests` is enforced against, in both engines.
+  it "counts a pool stale re-send in requests, which the call count alone misses" do
+    backend = PoolRetryBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 3, concurrency: 1, retries: 0)
+    d = collect_done(Q::Engine.new("GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice,
+      http2: false, backend: backend, config: config))
+    d.collected.should eq(3)
+    d.sent.should eq(3)
+    d.requests.should eq(6_i64) # 3 calls + one re-send each
+  end
+
+  # A raised sample is counted and SILENT. `run_job`'s rescue bumps `@errors` and emits
+  # nothing — no SampleEvent, no ProgressEvent — so a consumer that reads its error count off
+  # the progress stream reports "0 failures" next to a first_error naming one. The engine's
+  # own counter is the one that is exact once `run` has returned, and that is what
+  # `sequence_status` publishes.
+  it "counts a raising sample in errors while emitting no event for it" do
+    backend = RaisingBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 3, concurrency: 1, retries: 0)
+    progress = [] of Q::ProgressEvent
+    samples = [] of Q::Sample
+    engine = Q::Engine.new("GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice,
+      http2: false, backend: backend, config: config)
+    engine.run do |ev|
+      progress << ev if ev.is_a?(Q::ProgressEvent)
+      samples << ev.sample if ev.is_a?(Q::SampleEvent)
+    end
+    engine.errors.should be > 0
+    engine.first_error.should eq("socket exploded")
+    backend.sent.should be > 0 # guard: the sends really happened
+    samples.should be_empty
+    progress.should be_empty # nothing on the stream a consumer could have counted them from
   end
 
   # A run that collects nothing because every replay was REFUSED is a failure, not a clean

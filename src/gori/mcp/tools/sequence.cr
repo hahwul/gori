@@ -61,7 +61,51 @@ module Gori
         Log.error(exception: ex) { "sequence job #{sjob.id} crashed" }
         sjob.error_msg ||= ex.message || "internal sequence job error"
       ensure
+        # `errors` reaches this job ONLY on a `ProgressEvent`, which `Engine#emit_progress`
+        # publishes through a non-blocking `select ... else` and drops when the buffer is
+        # full — and a sample that RAISES out of `process_one` bumps the engine's counter from
+        # `run_job`'s rescue and emits no event at all. So the last delivered progress can say
+        # `errors: 0` beside `error: "every replay failed — connection refused"`, and
+        # `note_all_refused` below would read that 0 and take the wrong branch. `DoneEvent`
+        # carries no error count; the engine's own counter is exact once `run` has returned,
+        # which is where this stands.
+        sjob.errors = engine.errors
+        note_all_refused(sjob, engine)
         finalize_job(sjob)
+      end
+
+      # A collection that got NOTHING because every replay failed is not a clean "0 collected".
+      #
+      # This tool's output is a VERDICT: with no token to analyze, `sequence_results` renders
+      # `rating: "CRITICAL", rationale: "no usable tokens"` — and with `error: null` beside it,
+      # an agent reads a sentence about the ORIGIN'S entropy over traffic that never reached
+      # the origin, and files it. Nothing else on the MCP side could tell the two apart: the
+      # samples carry the per-send reason and are never returned (they are secrets), so the
+      # engine's `first_error` was the only surviving copy and it was read by no one here.
+      #
+      # `first_error` deliberately excludes a max-requests cap (a budget, not a failure), so a
+      # capped run still lands `done`/`budget_exhausted`. A run the caller STOPPED keeps
+      # `:stopped` — it did not fail, it was ended — but still gets the reason, because the
+      # question "why did the samples I did get come back empty" is the same one.
+      #
+      # Two states reach an empty sample and only ONE of them is a failed run: nothing got
+      # through, or the responses arrived and the descriptor matched none of them while a
+      # send or two also failed along the way. One flaky timeout in 500 replays is common,
+      # and calling that "every replay failed" — and relabelling the job :error for it —
+      # points an agent at the target when the answer is the cookie name. So the counts
+      # decide: only a run where no attempt succeeded changes status. (`gori run sequence`'s
+      # #410 backstop is deliberately coarser — it owns an EXIT CODE, and "this run produced
+      # nothing and something failed" is the right thing for CI to fail on.)
+      private def note_all_refused(sjob : SequenceJob, engine : Sequencer::Engine) : Nil
+        return unless sjob.tokens.empty?
+        return unless reason = engine.first_error
+        if sjob.errors >= sjob.sent
+          sjob.error_msg ||= "every replay failed — #{reason}"
+          sjob.status = :error if sjob.status == :done || sjob.status == :budget_exhausted
+        else
+          sjob.error_msg ||= "no response matched the token location; " \
+                             "#{sjob.errors} of #{sjob.sent} replays also failed — #{reason}"
+        end
       end
 
       private def drain_sequence_event(sjob : SequenceJob, ev : Sequencer::Event) : Nil
@@ -77,14 +121,21 @@ module Gori
         when Sequencer::ProgressEvent
           sjob.collected = ev.collected
           sjob.sent = ev.sent
+          sjob.requests = ev.requests
           sjob.errors = ev.errors
         when Sequencer::DoneEvent
           sjob.collected = ev.collected
           sjob.sent = ev.sent
-          # A prior ErrorEvent (e.g. an invalid token regex) already set :error; the engine
-          # still emits a trailing DoneEvent, so preserve :error rather than reverting to :done
-          # (mirrors Fuzz/Miner terminal_status's `return :error if current == :error`).
-          sjob.status = ev.stopped ? :stopped : :done unless sjob.status == :error
+          sjob.requests = ev.requests
+          # Through the SHARED `terminal_status`, like fuzz/mine/discover — it preserves a
+          # prior :error (an invalid token regex sets one and the engine still emits a
+          # trailing DoneEvent), reports :stopped for a stop, and — the half this drain was
+          # missing — :budget_exhausted when a run that was NOT stopped ended under its goal.
+          # That state is reachable from every capped collection: the dispatcher stops at
+          # `max_sends`, so a wrong descriptor or a lossy one lands `collected: 137 / goal:
+          # 500` and used to read `status: "done"`, which is how an agent decides a WEAK
+          # verdict over a third of a sample is the final answer.
+          sjob.status = terminal_status(sjob.status, ev.stopped, ev.collected.to_i64, sjob.goal.to_i64)
           sjob.ended_at_ms = Time.utc.to_unix_ms
         when Sequencer::ErrorEvent
           sjob.status = :error
@@ -108,6 +159,8 @@ module Gori
             j.field "goal", sjob.goal
             j.field "collected", sjob.collected
             j.field "sent", sjob.sent
+            # Attempts vs the WIRE — see `SequenceJob#requests`. A retried run diverges here.
+            j.field "requests", sjob.requests
             j.field "errors", sjob.errors
             j.field "tokens_stored", sjob.tokens.size
             j.field "results_truncated", sjob.truncated?
@@ -129,6 +182,13 @@ module Gori
             j.field "job_complete", sjob.status != :running
             j.field "status", sjob.status.to_s
             j.field "tokens_analyzed", sjob.tokens.size
+            # The report is a VERDICT and these two decide how much it is worth: a run whose
+            # every replay failed grades "CRITICAL · no usable tokens" over nothing, and a
+            # :budget_exhausted one grades a sample that stopped short of `goal`. Both were
+            # only readable by also calling sequence_status, so the results payload alone
+            # could not be told apart from a finished, fully-sampled run.
+            j.field "goal", sjob.goal
+            j.field "error", sjob.error_msg
             j.field("report") { Sequencer::Present.report_object(j, sjob.report) }
           end
         end)
@@ -158,6 +218,7 @@ module Gori
           token_loc: sequence_token_loc(h), goal: clamp(optional_int_arg(h, "count"), 500, SEQUENCE_MAX_GOAL),
           concurrency: clamp(optional_int_arg(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY))
         config.rps = optional_float_arg(h, "rate")
+        config.keep_alive = bool_arg(h, "keep_alive", true)
         config.timeout = fuzz_timeout(h)
         config.retries = (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i
         cap = optional_int_arg(h, "max_requests")
@@ -200,6 +261,8 @@ module Gori
           "could not parse a host from '#{ex.detail}'"
         in Sequencer::PlanError::Reason::NoTokenLoc
           "provide exactly one token location: cookie|header|regex|position|jsonpath"
+        in Sequencer::PlanError::Reason::BadPosition
+          "'position' #{(ex.detail || "").inspect} extracts nothing — B must be greater than A"
         in Sequencer::PlanError::Reason::NoTokens
           # Unreachable here: a pasted token list goes to sequence_analyze, which builds no plan.
           "provide a non-empty 'tokens' array"
@@ -295,6 +358,12 @@ module Gori
           s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
           s.field "retries", intprop("retries per request on a network error")
           s.field "http2", boolprop("use real HTTP/2 (default false)")
+          # The escape hatch matters more here than anywhere else in gori: this tool's output
+          # is a statistical claim about how an origin GENERATES tokens, so an origin whose
+          # session issuance is connection-bound has its verdict shaped by socket reuse. `gori
+          # run sequence --no-keep-alive` has always been able to re-take the sample over fresh
+          # connections and compare; an agent had no way to ask for the second reading at all.
+          s.field "keep_alive", boolprop("reuse ONE connection across the collection (default true) — set false to re-take the sample over fresh connections, for an origin whose token issuance may be connection-bound")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "throttle_ms", intprop("fixed delay between requests in ms — an alternative to 'rate' for a target that rate-limits on inter-request gap rather than throughput (mirrors CLI --throttle)")
           s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni)")
@@ -302,15 +371,21 @@ module Gori
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
         end
 
-        tool j, "sequence_status", "Counts + state of a sequence job (running|done|stopped|error): " \
-                                   "goal, collected, sent, errors, tokens_stored." do |s|
+        tool j, "sequence_status", "Counts + state of a sequence job " \
+                                   "(running|done|budget_exhausted|stopped|error): goal, collected, " \
+                                   "sent (collection attempts), requests (what actually went on the " \
+                                   "wire — retries charge this and not 'sent'), errors, tokens_stored. " \
+                                   "budget_exhausted means the run ended UNDER its goal because the " \
+                                   "request budget ran out, so the report rests on a short sample." do |s|
           s.field "job_id", strprop("id from sequence_start"), required: true
         end
 
         tool j, "sequence_results",
           "The randomness REPORT over a sequence job's collected tokens (rating, effective + " \
           "Shannon entropy, character-set, uniqueness/sequential, per-test verdicts). The raw " \
-          "tokens are never returned (they are secrets)." do |s|
+          "tokens are never returned (they are secrets). Read `error` and `status` before the " \
+          "rating: a run whose every replay failed still grades CRITICAL / 'no usable tokens', " \
+          "which is a verdict about nothing, not about the target." do |s|
           s.field "job_id", strprop("id from sequence_start"), required: true
         end
 

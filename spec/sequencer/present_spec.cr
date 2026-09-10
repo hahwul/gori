@@ -277,6 +277,16 @@ describe Gori::Sequencer::Present do
       md.should contain("| Token | regex /a\\|b/ |")
     end
 
+    it "folds a newline in a descriptor to a space so the row cannot end early" do
+      # Markdown has no escape for a newline inside a cell, and one ends the ROW: every
+      # remaining cell and the table structure below it go with it. Reachable — `gori run
+      # sequence --tokens` names the FILE in the subject and a Unix path may hold a newline.
+      md = P.report_markdown(S.analyze(random_hex(30, 16)),
+        P::Subject.new(descriptor: "token list we\nird.txt", mode: "manual"))
+      md.should contain("| Token | token list we ird.txt |")
+      md.should contain("| Mode | manual |") # the row after it still exists
+    end
+
     it "keeps invalid UTF-8 in a descriptor byte-exact" do
       # Byte-wise escaping, not gsub: a one-byte needle walks the subject as chars and would
       # turn every invalid byte into U+FFFD on a report that gets stored as an Issue's notes.
