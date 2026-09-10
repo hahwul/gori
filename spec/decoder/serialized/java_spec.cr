@@ -152,6 +152,19 @@ describe Gori::Decoder::Serialized::Java do
     shown[first..].should eq(Array.new(shown.size - first, true))
   end
 
+  it "refuses a descriptor handle no stream could ever assign" do
+    # `71 FF FF FF FF` in the `classDesc` slot. `new_handle` counts up from `BASE_WIRE_HANDLE`
+    # in an `Int32`, so a handle with the top bit set names nothing — but the lookup went
+    # through `be(raw).to_i32`, Crystal's CHECKED conversion, and RAISED `OverflowError`
+    # instead of answering. Ten bytes of a cookie were enough, and the exception escaped
+    # `Serialized.build`'s old `JSON::Error | IO::Error` net.
+    r = J.render(stream(Bytes[0x73, 0x71, 0xff, 0xff, 0xff, 0xff]))
+    r.json.should eq(%({"$format":"java-serialized","version":5,"contents":[{"$partial":"malformed"}]}))
+    r.decoded.should be_false
+    # ...and it is the SAME answer an in-range handle that names no descriptor already gave.
+    J.render(stream(Bytes[0x73, 0x71, 0x00, 0x7e, 0x00, 0x00])).json.should eq(r.json)
+  end
+
   it "reads a bare stream header as the empty stream the grammar says it is" do
     header = Bytes[0xac, 0xed, 0x00, 0x05]
     r = J.render(header)

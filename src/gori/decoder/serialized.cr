@@ -291,7 +291,14 @@ module Gori::Decoder
       trailing = r.ok? && r.pos < data.size
       BinaryDocument::Rendering.new(json, r.ok? && r.pos == data.size, r.pos,
         trailing ? "trailing" : r.stop, r.decoded?)
-    rescue JSON::Error | IO::Error
+    rescue
+      # EVERY exception, not the `JSON::Error | IO::Error` pair this used to name. "NEVER
+      # RAISE" is the contract the four readers inherit (see `Reader`), and a net that only
+      # catches what the AUTHOR expected is not a net for a walk whose input is hostile by
+      # definition: an unguarded checked conversion raised `OverflowError` out of the Java
+      # reader (`desc_reference`), straight through this and into `DecodedView#emit_json`,
+      # which has no rescue of its own. `Pretty#try_serialized` already carries the same
+      # last-resort net one layer up, for the same reason.
       BinaryDocument::Rendering.new(%({"$partial":"internal"}), false, 0, "internal", false)
     end
 

@@ -69,4 +69,24 @@ describe Gori::Decoder::Serialized do
     name.should eq("aspnet-viewstate")
     r.json.should contain(%("algorithm":"SHA1 / HMACSHA1"))
   end
+
+  it "answers a hostile body rather than raising, whatever the reader does inside" do
+    # `sniff` is reached from `DecodedView#emit_json`, which has NO rescue of its own — so
+    # `gori run show --format json`, MCP `get_flow` and the flow detail pane all inherit the
+    # readers' "never raise" contract directly. `Serialized.build` used to catch only
+    # `JSON::Error | IO::Error`, which is the set of exceptions the AUTHOR expected, not the
+    # set a walk over attacker-written bytes can produce: a checked `to_i32` inside the Java
+    # reader raised `OverflowError` straight through it (see `Java#desc_reference`).
+    hostile = {
+      "java handle past Int32"  => Bytes[0xac, 0xed, 0x00, 0x05, 0x73, 0x71, 0xff, 0xff, 0xff, 0xff],
+      "java array of that desc" => Bytes[0xac, 0xed, 0x00, 0x05, 0x75, 0x71, 0x80, 0x00, 0x00, 0x00],
+      "java enum of that desc"  => Bytes[0xac, 0xed, 0x00, 0x05, 0x7e, 0x71, 0xff, 0xff, 0xff, 0xfe],
+    }
+    hostile.each do |label, body|
+      r = Gori::Decoder::Serialized::Java.render(body)
+      r.json.should contain(%("$partial":"malformed")), label
+      r.decoded.should be_false, label
+      S.sniff(body).should be_nil, label
+    end
+  end
 end

@@ -116,24 +116,52 @@ module Gori
         end)
       end
 
-      # The warning for a spec whose bare tokens ENCODED. nil when there is nothing to say:
-      # the caller spelled a direction (`base64-encode`), or the step decodes, or it is a
-      # hash/compress step where "encode" is the only direction there is.
+      # The three spellings the catalog gives ONE direction, each mapped to the spelling that
+      # undoes it. The note used to know only the first, and the comment that stood here
+      # excused the rest as "a hash/compress step where encode is the only direction there
+      # is" — which is not true of either of the other two: `gunzip` sits beside `gzip` in
+      # the catalog and `html-unescape` beside `html-escape`. So `decode{spec:"gzip"}`
+      # COMPRESSED, `decode{spec:"deflate"}` COMPRESSED, and `decode{spec:"html"}` ESCAPED,
+      # each with `isError:false` and nothing said — the very shape this note exists for,
+      # three families wide.
+      INVERSE_SUFFIX = {"-encode" => "-decode", "-compress" => "-decompress", "-escape" => "-unescape"}
+
+      # The warning for a spec whose direction-less tokens ENCODED. nil when there is nothing
+      # to say: the caller spelled a direction (`base64-encode`, `gzip-compress`), the step
+      # decodes or hashes, or the converter is genuinely ONE-WAY (`shell-escape`,
+      # `url-encode-all`, `homoglyph`) and there is no other way to point them at.
       private def encode_surprise(result : Decoder::ChainResult) : String?
-        bare = [] of String
+        reg = Decoder.shared_registry
+        bare = [] of {String, String, String}
         result.steps.each do |step|
           next unless conv = step.converter
+          next unless conv.direction.encode?
           # The token AS TYPED — an alias that already names its direction is not a surprise,
           # and neither is a canonical name the caller spelled in full.
           token = step.token.split(':', 2).first.strip.downcase
-          next if token.ends_with?("-encode") || token.ends_with?("-decode")
-          next unless conv.direction.encode? && conv.name.ends_with?("-encode")
-          bare << "#{token} -> #{conv.name}"
+          next if INVERSE_SUFFIX.each_key.any? { |s| token.ends_with?(s) }
+          next unless inverse = inverse_of(reg, conv.name)
+          bare << {token, conv.name, inverse}
         end
         return nil if bare.empty?
-        "this tool is named `decode`, but #{bare.join(", ")} ENCODED — a bare converter name " \
-        "is the encode direction. Pass the -decode name (e.g. base64-decode, hex-decode, " \
-        "url-decode) to go the other way."
+        went = bare.map { |(tok, name, _)| "#{tok} -> #{name}" }.join(", ")
+        instead = bare.map(&.[2]).uniq!.join(", ")
+        "this tool is named `decode`, but #{went} ENCODED — a bare converter name is the " \
+        "encode direction. Pass #{instead} to go the other way."
+      end
+
+      # The converter that undoes `name`, or nil when this build has none. Asked of the
+      # REGISTRY rather than derived from the name alone: the note tells the caller to spell a
+      # converter, so that converter has to exist and has to decode. A one-way transform has
+      # no counterpart and therefore gets no note — telling someone to pass
+      # `shell-unescape` would send them after a name that was never in the catalog.
+      private def inverse_of(reg : Decoder::Registry, name : String) : String?
+        INVERSE_SUFFIX.each do |enc, dec|
+          next unless name.ends_with?(enc)
+          other = reg["#{name[0...-enc.size]}#{dec}"]?
+          return other.name if other && other.direction.decode?
+        end
+        nil
       end
 
       # --- jwt workbench tools (pure compute; always exposed, not action-gated) ---
@@ -242,8 +270,9 @@ module Gori
           "`spec` is converter tokens separated by '>', '|' or ',' applied left-to-right, e.g. " \
           "'base64-decode > gunzip', 'url-encode', 'sha256'. DIRECTION IS PART OF THE NAME, and " \
           "a bare one is the ENCODE half: `base64` is base64-ENCODE, `hex` is hex-encode, `url` " \
-          "is url-encode — despite this tool being called decode. To DECODE, spell it: " \
-          "base64-decode, hex-decode, url-decode. Common converters: base64-encode, " \
+          "is url-encode, `gzip`/`deflate` COMPRESS and `html`/`xml` ESCAPE — despite this tool " \
+          "being called decode. To DECODE, spell it: base64-decode, hex-decode, url-decode, " \
+          "gunzip, inflate, html-unescape. Common converters: base64-encode, " \
           "base64-decode, url-encode, url-encode-all, url-decode, hex-encode, hex-decode, gzip, gunzip, " \
           "deflate, inflate, raw-deflate, raw-inflate, brotli, zstd (both decompress-only), " \
           "msgpack-decode, cbor-decode (binary document -> JSON), " \

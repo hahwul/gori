@@ -259,6 +259,26 @@ describe "TabController#subtab_search_rows" do
     end
   end
 
+  it "gives the decoder's OUTPUT its own half of the budget, so a long input can't crowd it out" do
+    with_session do |host|
+      dc = DecoderController.new(host)
+      cap = Gori::Tui::TabController::SEARCH_EXTRA_MAX
+      # The decoded half is why this override exists — the memorable word is as often what
+      # came OUT as what was pasted. Capping the JOINED string let a long input eat the whole
+      # budget: a 4 KB base64 blob's `admin` was unreachable by the picker that goes past the
+      # 200-column filter precisely to reach it.
+      claims = %({"role":"admin","iss":"gori"})
+      blob = Base64.strict_encode(("A" * (cap * 2)) + claims)
+      blob.size.should be > cap # the input alone is already past the whole budget
+      dc.decoder_from_text(blob)
+      dc.load_chain("b64", "base64-decode")
+      row = dc.subtab_search_rows.last
+      row.extra.size.should be <= cap + 1   # the two halves plus the space between them
+      row.extra.should contain(blob[0, 64]) # the pasted input is still findable ...
+      row.extra.should contain("AAAA")      # ... and so is the decode behind it
+    end
+  end
+
   it "searches the JWT's decoded header and payload, not its opaque token" do
     with_session do |host|
       jc = JwtController.new(host)

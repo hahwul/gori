@@ -65,6 +65,26 @@ describe Gori::Tui::DecoderView do
     b.contains?("base64url-encode").should be_true
   end
 
+  it "keeps the dropdown inside the body when a match is as wide as the card" do
+    # The dropdown starts two cells in (past the "› " prompt) but was clamped to the FIELD's
+    # full width, so a match as long as the card — `quoted-printable-encode` on a narrow body,
+    # or any saved chain the operator named at length — ate the CHAIN card's right border and
+    # painted a cell outside the body rect altogether.
+    body_w = 26
+    popup = ChainComplete.new
+    popup.set(["quoted-printable-encode"], 0, 0)
+    view = DecoderView.new
+    reg = Gori::Decoder.default_registry
+    backend = MemoryBackend.new(body_w + 8, 20) # a screen wider than the body, to see a spill
+    view.render(Screen.new(backend), Rect.new(0, 0, body_w, 20),
+      input: TextArea.new("x"), chain: "", chain_cx: 0, chain_pre: "",
+      result: Gori::Decoder.run(reg, "x".to_slice, ""), pane: :chain, focused: true, popup: popup)
+    (0...20).each do |y|
+      backend.row(y)[body_w..].strip.should be_empty, "row #{y} painted past the body"
+    end
+    backend.contains?("quoted-printable-enco").should be_true # ...and it is still readable
+  end
+
   # The save/load mini-prompt this view used to draw over the OUTPUT region is gone: naming
   # and recalling a chain are centered modals now (NamePromptOverlay / LibraryPicker), so
   # the coverage moved to spec/tui/library_overlays_spec.cr.

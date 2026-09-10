@@ -125,10 +125,33 @@ end
 describe "gori run decoder list" do
   # `quoted-printable-encode` is 23 chars; a fixed `ljust(22)` put its row's columns one cell
   # off the rest (and a long saved-chain name many more).
-  it "aligns the category column for every converter, measured rather than fixed" do
+  #
+  # EVERY boundary, not just the category's start. The old spec found where the CATEGORY
+  # begins — which is the column the measured NAME already lined up — and so said nothing
+  # about the two hard-coded widths behind it: `Category::Serialization`'s label is 13 and
+  # its column was `ljust(11)`, so all six serialization rows pushed DIRECTION and
+  # DESCRIPTION two cells right while this spec passed.
+  it "aligns every column for every converter, measured rather than fixed" do
     lines = Gori::CLI::Run.decoder_list_lines(Gori::Decoder.shared_registry)
-    cols = lines.map { |l| l.index(/  (encoding|compression|serialization|hash|token|escape|text|saved)  /).not_nil! }
-    cols.uniq.size.should eq 1
+    lines.size.should be > 60
+    cat = /  (encoding|compression|serialization|hash|token|escape|text|saved)  /
+    dir = /  (encode|decode|hash|transform)  /
+    # Each row's three column starts. The DIRECTION is searched from the end of the category
+    # so a description word like "hash" cannot be mistaken for the column, and the
+    # DESCRIPTION is the first non-space past the direction word — which is where a value
+    # LONGER than its `ljust` shows up, and the only place the old spec could not look.
+    columns = lines.map do |l|
+      ci = l.index(cat).not_nil!
+      di = l.index(dir, ci + l.match(cat).not_nil![0].size - 2).not_nil! + 2
+      after = di + l.match(dir, di - 2).not_nil![1].size
+      while l[after]?.try(&.whitespace?)
+        after += 1
+      end
+      {ci, di, after}
+    end
+    columns.map(&.[0]).uniq!.size.should eq 1
+    columns.map(&.[1]).uniq!.size.should eq 1
+    columns.map(&.[2]).uniq!.size.should eq 1
   end
 end
 

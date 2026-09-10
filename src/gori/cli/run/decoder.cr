@@ -188,13 +188,21 @@ module Gori
         end
       end
 
-      # The text listing, one row per converter. The name column is MEASURED, not fixed:
-      # `quoted-printable-encode` is 23 chars and a saved chain's name is whatever the
-      # operator typed, and a fixed 22 put those rows' columns one (or many) cells off the rest.
+      # The text listing, one row per converter. EVERY column is MEASURED, not fixed:
+      # `quoted-printable-encode` is 23 chars and a saved chain's name is whatever the operator
+      # typed, and a fixed 22 put those rows' columns one (or many) cells off the rest.
+      #
+      # The two columns behind it were left hard-coded when the name was measured, and the
+      # category then outgrew its 11: `Category::Serialization`'s label is 13, so every
+      # msgpack/cbor/java/viewstate/php/pickle row pushed its DIRECTION and DESCRIPTION two
+      # cells right of the other seventy. `ljust(n)` is only a separator while the value is
+      # SHORTER than n — measuring is what makes that true for a table whose contents grow.
       def self.decoder_list_lines(registry : Decoder::Registry) : Array(String)
         name_w = registry.max_of(&.name.size)
+        cat_w = registry.max_of(&.category.label.size)
+        dir_w = registry.max_of(&.direction.to_s.size)
         registry.map do |c|
-          line = "#{c.name.ljust(name_w)}  #{c.category.label.ljust(11)}  #{c.direction.to_s.downcase.ljust(9)}  #{c.description}"
+          line = "#{c.name.ljust(name_w)}  #{c.category.label.ljust(cat_w)}  #{c.direction.to_s.downcase.ljust(dir_w)}  #{c.description}"
           (u = c.unusable) && (line += "  [unusable: #{u}]")
           line
         end
