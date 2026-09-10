@@ -1070,20 +1070,7 @@ module Gori::Tui
     # choice both fall straight through to the stored value; an undetectable cookie keeps it too.
     private def effective_algorithm(s : CookieSession) : String
       return s.algorithm if s.algorithm_pinned? || effective_format(s) != "django"
-      detect_django_algo(s.input.text.strip) || s.algorithm
-    end
-
-    # sha1 / sha256 read off the byte length of a Django cookie's signature segment, or nil when
-    # the cookie is not a parseable 3-part Django token or the signature is some other length.
-    private def detect_django_algo(token : String) : String?
-      parts = token.split(':')
-      return nil unless parts.size == 3
-      case Cookie.b64decode(parts[2]).size
-      when 20 then "sha1"
-      when 32 then "sha256"
-      end
-    rescue Cookie::CookieError
-      nil
+      Cookie.detect_django_algo(s.input.text) || s.algorithm
     end
 
     private def recompute_all(s : CookieSession) : Nil

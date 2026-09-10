@@ -47,7 +47,7 @@ gori run cookie 'eyJ1c2VyIjoi...' --crack --wordlist secrets.txt
 gori run cookie 'eyJ1c2VyIjoi...' --crack --secrets 'dev,changeme,secret'
 ```
 
-Over MCP this is `cookie_crack`. It is the same primitive as verify, run across a list, so the quality of the wordlist is the whole game.
+Over MCP this is `cookie_crack`. It is the same primitive as verify, run across a list, so the quality of the wordlist is the whole game. For a Django cookie you need not know whether the app signs with SHA-256 or the older SHA-1: with no `--algorithm`, verify and crack read it off the signature's byte length, so the correct secret is not missed just because the app is on SHA-1.
 
 **Checkpoint.** The recovered secret is printed, or the run reports that the secret was not in the list.
 
