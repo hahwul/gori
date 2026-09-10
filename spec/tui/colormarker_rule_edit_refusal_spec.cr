@@ -352,3 +352,46 @@ describe "Gori::Tui::ColormarkerController#apply_color_rule" do
     end
   end
 end
+
+# Duplicating a rule is the one action that CREATES one from a rule already on the list, so it
+# is the one place a default can quietly contradict what the operator is looking at.
+describe "Gori::Tui::ColormarkerController#colormarker_duplicate" do
+  it "copies a DISABLED project rule disabled, and says so" do
+    with_globals do
+      with_colormarker_controller do |ctl, host, session|
+        with_own_settings do
+          session.store.insert_color_rule("host:a", "red", Gori::Store::MarkerStyle::Full, "a", false)
+          ctl.on_enter
+          ctl.colormarker_duplicate
+          rules = session.colormarker.rules
+          rules.map(&.name).should eq(["a", "a copy"])
+          # `add` defaults to enabled: without the state carried across, a rule the operator had
+          # deliberately switched off came back armed and started painting on the next frame.
+          rules.last.enabled?.should be_false
+          host.statuses.last.should eq("colour rule duplicated (disabled, like the original)")
+          # And the highlight follows the copy, which is appended to the end of the block.
+          ctl.selected_rule.try(&.name).should eq("a copy")
+        end
+      end
+    end
+  end
+
+  it "copies a global rule this project switched off as disabled EVERYWHERE" do
+    with_globals do
+      with_colormarker_controller do |ctl, _host, _session|
+        with_own_settings do
+          Gori::Settings.add_colormarker_rule("host:g", "red", "full", "g", true).should_not eq(0_i64)
+          ctl.on_enter
+          # The project disagrees with the library's default, so `enabled?` here is false while
+          # the library still says true. The copy's state is the LIBRARY's default, so a copy
+          # made from an armed default would have come back on in every other project too.
+          ctl.colormarker_toggle
+          ctl.selected_rule.try(&.enabled?).should be_false
+          ctl.colormarker_duplicate
+          Gori::Settings.colormarker_rules.map { |r| {r.name, r.enabled} }
+            .should eq([{"g", true}, {"g copy", false}])
+        end
+      end
+    end
+  end
+end

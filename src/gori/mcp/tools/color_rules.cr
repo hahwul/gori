@@ -284,6 +284,12 @@ module Gori
         if reason = Gori::Colormarker.unusable_reason(filter)
           return err(reason, "INVALID_ARGUMENT", field: "when")
         end
+        # WHICH store the rule would be created in, because that decides which existing rules
+        # can claim a row from it: every global rule resolves before every project one, so a
+        # project rule is never ahead of a global candidate. Previewing everything as a project
+        # rule reported `would_paint: 0` for a global rule that in fact paints every row.
+        scope = color_rule_scope(h)
+        return scope if scope.is_a?(Result)
         # Clamp in Int64, THEN narrow: `.to_i` is checked, so clamping after it meant
         # `{"limit": 10000000000}` — the "no limit" number an LLM reaches for — OverflowError'd
         # past the INVALID_ARGUMENT arm at `Tools#call` and came back INTERNAL, telling the
@@ -292,10 +298,11 @@ module Gori
         # the other spelling of "no limit" an agent reaches for — turning that into a hard
         # INVALID_ARGUMENT would be a second, opposite way to fail the same call.
         limit = (optional_int_arg(h, "limit") || Gori::Colormarker::PREVIEW_SCAN.to_i64).clamp(1_i64, 5000_i64).to_i
-        existing = Gori::Colormarker.merged(store)
-        pv = Gori::Colormarker.preview(store, filter, existing, limit)
+        ahead = Gori::Colormarker.rules_ahead(Gori::Colormarker.merged(store), 0_i64, scope)
+        pv = Gori::Colormarker.preview(store, filter, ahead, limit)
         Result.new(JSON.build do |j|
           j.object do
+            j.field "scope", scope.label
             j.field "would_match", pv.matched
             j.field "would_paint", pv.painted
             j.field "scanned", pv.scanned
@@ -423,6 +430,9 @@ module Gori
           "(an earlier enabled rule may claim the row first), WITHOUT creating anything. " \
           "Display only — nothing here modifies traffic." do |s|
           s.field "when", strprop("the condition to test (see create_color_rule)"), required: true
+          s.field "scope", enumprop("preview as a rule in this store (default project). It changes " \
+                                    "`would_paint`: every global rule resolves before every project one, " \
+                                    "so no project rule can claim a row from a global candidate", RULE_SCOPES)
           s.field "limit", intprop("recent flows to scan (default 500)")
         end
 

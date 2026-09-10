@@ -87,7 +87,7 @@ gori run <subcommand> [verb] [options]
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `rewriter preset list` · `add` | 응답 수정 프리셋 목록, 그리고 하나를 평범한 Match & Replace 규칙으로 설치 |
 | `rewriter extract` · `bindings` | 세션 바인딩 추출 규칙 관리, 그 규칙이 선언한 `$NAME` 목록 |
-| `colormarker` · `add` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | History 행 색상 규칙 관리 |
+| `colormarker` · `add` · `update` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | History 행 색상 규칙 관리 |
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | 저장된 History 뷰 관리: 목록을 좁히는 이름 붙은 QL 쿼리를 렌즈로 적용 |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | 세션 슬롯: 전송이나 Authorize 실행이 그 이름으로 나가는 신원 |
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
@@ -965,8 +965,10 @@ gori run grpc forget --all
 gori run colormarker                                        # 우선순위 순으로 규칙 목록
 gori run colormarker add --when 'status:>=500' --color red --style full --name 'prod 5xx'
 gori run colormarker add --when 'host:cdn' --color blue --style strip --scope global
+gori run colormarker update 2 --color orange                # 우선순위를 지키며 제자리 수정
 gori run colormarker move 2 --up                            # 우선순위 올리기
 gori run colormarker preview --when 'method:DELETE'
+gori run colormarker preview --when 'resp.body:secret' --scope global
 gori run colormarker disable 1 --scope global               # 이 프로젝트에서만 끄기
 gori run colormarker disable 1 --scope global --everywhere  # 모든 프로젝트의 기본값을 끄기
 gori run colormarker rm 3
@@ -975,7 +977,7 @@ gori run colormarker rm 3
 | 옵션 | 설명 |
 |--------|-------------|
 | `-w`, `--when=FILTER` | 필수. 플로우가 만족해야 할 조건 (아래 참고) |
-| `--color=NAME` | `red`, `orange`, `yellow`(기본), `green`, `blue`, `purple`. 활성 테마 팔레트로 해석되므로 밝은 테마와 어두운 테마 양쪽에서 제대로 읽힙니다 |
+| `--color=NAME` | `red`, `orange`, `yellow`(기본), `green`, `blue`, `purple`. 활성 테마 팔레트로 해석되므로 밝은 테마와 어두운 테마 양쪽에서 제대로 읽힙니다. **또는** 사용자 색상의 이름(아래 참고)이며, 이쪽은 절대 hex 값을 그대로 지닙니다 |
 | `--style=STYLE` | `full`(기본)은 행 전체 배경을 칠하고, `strip`은 `TIME` 앞 좁은 컬럼에 색 셀 하나를 칠합니다 |
 | `--name=NAME` | 규칙 목록에 표시할 라벨 |
 | `--disabled` | 비활성 상태로 생성 |
@@ -984,17 +986,20 @@ gori run colormarker rm 3
 | `--up` / `--down` | `move` 시: 우선순위를 올리거나 내림 |
 | `--limit=N` | `preview` 시: 스캔할 최근 플로우 수(기본 500) |
 
+`update`에서는 모든 필드가 선택이며 규칙의 현재 값이 기본입니다. `--color`만 주면 색만 바꾸고 `--when`만 주면 조건만 바꿉니다. 삭제 후 재생성 대신 이 명령을 쓰세요. 색상 규칙은 **위치가 곧 의미**이고(첫 번째로 매칭되는 활성 규칙이 행을 칠합니다) 다시 추가한 규칙은 자기 스코프 블록 맨 끝에 놓여, 전에 앞서던 규칙들보다 뒤로 밀립니다. `enable` / `disable`은 따로 두었습니다. 전역 규칙에서 그 둘은 라이브러리가 아니라 *이 프로젝트*에 대한 진술이기 때문입니다.
+
 **우선순위가 곧 규칙 집합의 의미입니다.** Match & Replace 규칙은 *합성*되어 활성화된 모든 규칙이 순서대로 실행되지만, 색상 규칙은 *해석*됩니다. **첫 번째로 매칭되는 활성 규칙이 행을 칠하고 나머지는 조회조차 되지 않습니다.** `move`가 `rewriter`에는 없고 여기에만 있는 이유입니다. 전역 규칙이 프로젝트 규칙보다 먼저 해석되므로, 상시 정책이 로컬 레이어보다 우선합니다.
 
-`--when`은 조건부 인터셉트 바가 쓰는 것과 같은 불리언 문법입니다. `host:` `path:` `method:` `scheme:` `status:` `proto:`에 `AND` / `OR` / `NOT`, `-부정`, `(그룹)`을 더한 형태이며 캡처된 플로우 행에 대해 평가됩니다. 그냥 두면 조용히 실패할 세 가지가 있어, gori는 거부하거나 경고합니다.
+`--when`은 **History QL** 조건입니다. 자기가 칠하는 목록 위의 필터 바와 문법도, 필드 집합도, 답도 같으며 `~정규식`과 `AND` / `OR` / `NOT`, `-부정`, `(그룹)`을 모두 포함합니다. 캡처된 행이 스스로 답할 수 있는 항(`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`)은 쿼리 없이 메모리에서 매칭되고, 나머지(`body:` `header:` `size:` `dur:` `stub:` `src:` `scope:`)는 다시 그릴 때마다 규칙당 한 번의 배치 쿼리로 프로젝트 DB에 대해 해석됩니다. 그냥 두면 조용히 실패할 네 가지가 있어, gori는 거부하거나 경고합니다.
 
-- **`body:`는 여기서 절대 매칭되지 않습니다.** History 행에는 payload가 없습니다. (거부가 아니라 경고입니다. 문법상 적법한 항이기 때문입니다.)
+- **`body:`는 여기서 텍스트 인덱스가 아니라 저장된 바이트를 *스캔*합니다.** 그래서 필터 바의 `body:`가 건너뛰는 바이너리 바디까지 닿지만, **각 방향 앞 64 KiB**까지만이고 바이트는 *캡처된 그대로*입니다. 그 경계를 넘어선 매치나 압축된 바디 안의 매치는 칠해지지 않습니다. (경고)
 - **`host:`는 DNS 레이블 글롭이 아니라 부분문자열입니다.** `host:alpha.test`는 `xalpha.test`도 매칭합니다. (경고)
-- **`header:` / `size:` / `dur:` / `url:` / `stub:`는 없습니다.** 이들은 쿼리가 필요한 History QL 필드이고, 여기는 렌더 경로에서 평가됩니다. 모르는 필드는 **거부**됩니다. 그냥 두면 조용히 자유 텍스트 검색이 되어 규칙이 영원히 발동하지 않습니다.
+- **아직 응답이 없는 플로우에는 status가 없습니다.** `status:` 규칙은 응답이 도착한 뒤에 그 행을 칠합니다. (경고)
+- **`scope:`는 `s` 표시 렌즈와 무관하게 프로젝트의 스코프 규칙을 따릅니다.** 스코프 규칙이 하나도 없으면 *아무것도* 스코프 안에 있지 않으므로 `scope:in`과 `scope:out` 둘 다 아무것도 칠하지 않고, 반대로 부정형(`-scope:in`)은 **모든** 행을 칠합니다. (경고)
 
-모든 플로우에 매칭되는 조건(빈 값이나 입력 중인 `host:`)도 거부됩니다.
+경고가 아니라 **거부**되는 것들: 모르는 필드(`hsot:` — 그냥 두면 자유 텍스트 검색이 되어 규칙이 영원히 발동하지 않습니다), 컴파일되지 않는 `~` 패턴, 그 필드가 받지 않는 값(`size:>bogus` — 항이 *버려져* 규칙이 말한 것보다 더 많이 칠하게 됩니다), 그리고 모든 플로우에 매칭되는 조건(빈 값이나 입력 중인 `host:`).
 
-`preview`는 조건이 최근 플로우 중 몇 개에 **매칭**되는지와, 실제로 몇 개를 **칠하게** 되는지를 함께 보고합니다. 앞선 활성 규칙이 이미 그 행을 차지했다면 두 숫자가 달라집니다. `rm`(`delete`), `enable`, `disable`, `move`는 목록의 규칙 id와 `--scope`를 받습니다. 두 저장소가 서로 독립적으로 번호를 매기므로 id만으로는 서로 다른 두 규칙을 가리키기 때문입니다. 목록은 스코프를 `G`/`P` 접두사로 출력합니다(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻).
+`preview`는 조건이 최근 플로우 중 몇 개에 **매칭**되는지와, 실제로 몇 개를 **칠하게** 되는지를 함께 보고합니다. 앞선 활성 규칙이 이미 그 행을 차지했다면 두 숫자가 달라집니다. `preview`가 `--scope`도 받는 이유가 이것입니다. 전역 규칙은 모든 프로젝트 규칙보다 먼저 해석되므로, `--scope=global` 후보에게서 행을 뺏을 수 있는 프로젝트 규칙은 하나도 없습니다. `update`, `rm`(`delete`), `enable`, `disable`, `move`는 목록의 규칙 id와 `--scope`를 받습니다. 두 저장소가 서로 독립적으로 번호를 매기므로 id만으로는 서로 다른 두 규칙을 가리키기 때문입니다. 목록은 스코프를 `G`/`P` 접두사로 출력합니다(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻).
 
 탭은 **기본적으로 숨겨져 있습니다.** `settings:tabs`에서 Rewriter 옆에 표시할 수 있습니다. 대화형 편집기는 [프록시 & History](/ko/guide/proxy/)를 참고하세요.
 

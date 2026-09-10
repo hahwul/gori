@@ -599,7 +599,7 @@ Content-Type: application/json
 
 규칙 폼은 입력하는 동안 미리보기를 보여줍니다. 조건이 최근 플로우 중 몇 개에 **매칭**되는지와 실제로 몇 개를 **칠하게** 되는지를 함께 알려주며, 앞선 규칙이 이미 그 행을 차지했다면 두 숫자가 달라집니다.
 
-헤드리스에서도 스크립트로 다룰 수 있습니다. `gori run colormarker` (list / add / rm / enable / disable / move / preview)와 MCP `create_color_rule` / `list_color_rules` / `move_color_rule` / `preview_color_rule` 도구를 쓰면 됩니다.
+헤드리스에서도 스크립트로 다룰 수 있습니다. `gori run colormarker` (list / add / update / rm / enable / disable / move / preview)와 MCP `create_color_rule` / `list_color_rules` / `move_color_rule` / `preview_color_rule` 도구를 쓰면 됩니다.
 
 ## 세션 바인딩 {#session-bindings}
 

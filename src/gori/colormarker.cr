@@ -273,6 +273,20 @@ module Gori
       @cache_mutex.synchronize { @sql_hits.delete(id) }
     end
 
+    # Forget every flow, because the ROWS THEMSELVES are gone. History calls this after a
+    # `clear`, where `forget` per id cannot be called at all — the ids are not enumerated and
+    # the wipe RESTARTS SQLite's rowid numbering, so the very next capture is handed the id a
+    # deleted flow held. Without this the new flow reads the deleted one's answer out of the
+    # memo and is painted by a rule it does not match: `flows.id` is a reusable rowid, and a
+    # cache keyed by it is only correct for as long as the row behind the key is.
+    #
+    # Wholesale rather than per id, and cheap for the same reason `trim_sql_cache` is: the rows
+    # worth remembering are the ones on screen, and the next frame re-resolves them in one
+    # `prefetch`.
+    def forget_all : Nil
+      @cache_mutex.synchronize { @sql_hits.clear }
+    end
+
     # Is any enabled rule in the STORE tier? Read per frame by History (to decide whether to
     # `prefetch`) and by `forget`, so it is a cached flag rather than a scan.
     def needs_store? : Bool
@@ -656,6 +670,29 @@ module Gori
     # `Rules#preview`, which must pull bodies). A preview of `body:secret` against 500 scanned
     # rows is one query, not 500.
     record Preview, matched : Int32, painted : Int32, scanned : Int32, total : Int64
+
+    # The rules that would resolve AHEAD of a candidate at `{id, scope}` — i.e. `preview`'s
+    # `existing` argument, computed the one way so the TUI form, `gori run colormarker preview`
+    # and MCP `preview_color_rule` cannot disagree about what "would actually paint" means.
+    #
+    # `merged` is in precedence order, so an EXISTING rule's answer is the prefix before it.
+    # The interesting case is the one every surface got wrong: a rule that is not in the list
+    # yet. It will be APPENDED to the end of its OWN scope block, and every global rule resolves
+    # before every project one — so a new GLOBAL rule can be claimed only by the global block,
+    # never by a project rule sitting below it. Handing it the whole list instead made the form
+    # report `0 would be painted · N claimed by an earlier rule` for a global rule that in fact
+    # paints every one of those rows, which is the silent direction: it argues an operator out
+    # of a rule that works.
+    def self.rules_ahead(list : Array(Store::ColorRule), id : Int64,
+                         scope : Store::RuleScope) : Array(Store::ColorRule)
+      if i = list.index { |r| r.id == id && r.scope == scope }
+        list[0, i]
+      elsif scope.global?
+        list.select(&.global?)
+      else
+        list
+      end
+    end
 
     def self.preview(store : Store, match_filter : String,
                      existing : Array(Store::ColorRule) = [] of Store::ColorRule,

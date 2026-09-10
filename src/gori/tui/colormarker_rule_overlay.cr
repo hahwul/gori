@@ -63,6 +63,12 @@ module Gori::Tui
     @preview : String = ""
     # Last previewed field set; gates the rescan to real changes.
     @preview_sig : String = ""
+    # `Colormarker.advise`'s non-fatal caveats about the condition — the CLI prints these on
+    # STDERR after an `add` and MCP returns them in `notes`, and this form was the surface that
+    # never showed them at all, though `advise`'s own contract says all three do. Cached with the
+    # preview and behind the same gate: `advise` tokenizes the condition (`QL.uses_scope?`), and
+    # the band it feeds is drawn every frame.
+    @notes : Array(String) = [] of String
 
     def initialize(*, name : String = "", match_filter : String = "", color : String = "yellow",
                    style : String = "full", scope : String = "project",
@@ -158,7 +164,9 @@ module Gori::Tui
     # re-homes it, and the pair is load-bearing: the two stores number independently and both
     # count from 1, so cycling scope on project rule #1 made the lookup find GLOBAL rule #1 and
     # count the wrong rules as ahead of it. Adding a rule has no `edit_scope`, and there the
-    # cycler's value is all there is (nothing to find, so `ahead` is the whole list either way).
+    # cycler's value is all there is — and it MATTERS: `Colormarker.rules_ahead` reads it to
+    # decide what a rule that does not exist yet would sit behind, which for a global one is
+    # the global block alone rather than the whole list.
     def candidate_rule : Store::ColorRule
       Store::ColorRule.new(@edit_id || 0_i64, true, condition, color, style, name,
         scope: @edit_scope || scope)
@@ -307,11 +315,39 @@ module Gori::Tui
 
     # Rescan only when a MATCH-relevant field changed, so typing a name stays responsive. The
     # colour and style are not in the signature: neither changes which flows match.
+    #
+    # Called from `render` as well as from `handle_key`, and that is not belt and braces: the
+    # signature starts EMPTY while a form opened on an existing rule starts with that rule's
+    # condition, so until this ran from somewhere other than a keystroke the editor showed a
+    # blank band for the rule it was already editing — no match count and no caveats — until the
+    # operator typed something. The gate makes the render-path call a no-op on every frame after
+    # the first.
     private def refresh_preview : Nil
       sig = condition
       return if sig == @preview_sig
       @preview_sig = sig
-      @preview = valid? ? (@on_preview.try(&.call(candidate_rule)) || "") : ""
+      ok = valid?
+      @preview = ok ? (@on_preview.try(&.call(candidate_rule)) || "") : ""
+      # Caveats about an UNUSABLE condition would be noise: the Save row is already showing why
+      # it cannot be saved, which is the more urgent sentence.
+      @notes = ok ? Colormarker.advise(sig) : [] of String
+    end
+
+    # The caveat line drawn between the last field and the band, in `advise`'s own words: they
+    # are written once precisely so an operator who reads a caveat in `gori run colormarker` and
+    # then opens this form does not have to reconcile two accounts of the same thing.
+    #
+    # ONE line, and clipped by the draw when the sentence is longer than the card. The card
+    # cannot simply grow to fit: `shared_chrome_spec` holds all six add/edit-one-rule forms to
+    # `Overlay.rule_form_box(area, ROW_COUNT, preview: true)` so that opening two of them in a
+    # row — the Rewriter's sits one tab over and answers the same `a`/`e` — does not resize the
+    # card under the operator. So the count leads rather than trailing: `(+1 more)` at the end
+    # is the first thing an ellipsis eats, and "there is another caveat" must not be the part
+    # that goes missing.
+    private def caveat_line : String
+      first = @notes.first?
+      return "" unless first
+      @notes.size > 1 ? "⚠ #{@notes.size} caveats · #{first}" : "⚠ #{first}"
     end
 
     def overlay_box(area : Rect) : Rect?
@@ -324,12 +360,22 @@ module Gori::Tui
         Overlay.too_small(screen, area, "colormarker-rule form needs a larger window")
         return
       end
+      refresh_preview # see there: a form opened on an existing rule has never had a keystroke
       Frame.card(screen, box, editing? ? "EDIT COLOUR RULE" : "ADD COLOUR RULE", border: Theme.border_focus)
       first = box.y + 2
       ROW_COUNT.times do |i|
         py = first + i
         break if py >= box.bottom - 2
         draw_row(screen, box, i, py)
+      end
+
+      # The caveat, on the row the form leaves between the last field and the band. Whether that
+      # row EXISTS is measured rather than assumed: on a terminal too short for the natural card
+      # height the box shrinks and it is a field, which this must yield to rather than overwrite.
+      cv_y = first + ROW_COUNT
+      if cv_y < box.bottom - 2 && !(line = caveat_line).empty?
+        screen.fill(Rect.new(box.x + 1, cv_y, box.w - 2, 1), Theme.panel)
+        screen.text(box.x + 2, cv_y, line, Theme.orange, Theme.panel, width: box.w - 4)
       end
 
       # The bottom band is dual-purpose: on the condition row it advertises what ↹ would

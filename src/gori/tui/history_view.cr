@@ -549,6 +549,18 @@ module Gori::Tui
       @col_values.clear
     end
 
+    # Drop what is remembered about the COLOUR of `ids` — this view's per-row memo and the
+    # engine's store-tier answers, which are two caches of the same question keyed the same way.
+    # Called where flows are destroyed, never where they merely change (`:updated` has its own,
+    # narrower pair). See `delete_ids` for why a reusable rowid makes this load-bearing.
+    private def forget_row_colors(ids : Array(Int64)) : Nil
+      cm = @colormarker
+      ids.each do |id|
+        @color_memo.delete(id)
+        cm.try(&.forget(id))
+      end
+    end
+
     # Where the row loop reads flow bytes from. Nil until the controller sets it, in which case
     # every user column draws blank — the same answer a descriptor that matches nothing gives,
     # and the list itself never opens a store.
@@ -1265,6 +1277,11 @@ module Gori::Tui
       # that collision require a shared capture microsecond; dropping the memo here removes it
       # outright for every deletion gori itself performs.
       forget_column_values
+      # The colour memo and the engine's store-tier cache are keyed by the BARE id, so they had
+      # no such near-miss to rely on: delete the only flow, capture one more, and SQLite hands
+      # the new flow the same rowid — which then read the deleted flow's answer and was painted
+      # by a rule it does not match. Both are dropped for exactly the ids that went.
+      forget_row_colors(ids)
       remove_deleted_rows(ids)
       reload(store)
       true
@@ -1296,6 +1313,11 @@ module Gori::Tui
       clear_preview
       clear_marks
       forget_column_values # see delete_ids: a clear RESTARTS rowid numbering
+      # And the colour caches, for the same reason one line up — with the collision no longer
+      # hypothetical: after a wipe the next capture is rowid 1, which is the id whose colour
+      # the memo is most likely to still be holding.
+      @color_memo.clear
+      @colormarker.try(&.forget_all)
       @rows.clear
       @selected = 0
       @scroll = 0
