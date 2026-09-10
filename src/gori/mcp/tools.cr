@@ -639,9 +639,22 @@ module Gori
       class SequenceJob
         getter id : String
         getter goal : Int32
-        property status : Symbol = :running # :running | :done | :stopped | :error
+        # :running | :done | :budget_exhausted | :stopped | :error (see FuzzJob). Here
+        # :budget_exhausted means the collection ended UNDER `goal`, so the randomness report
+        # rests on a shorter sample than the caller asked for — which is not a fact a verdict
+        # of WEAK or CRITICAL carries on its own face.
+        property status : Symbol = :running
         property collected = 0
         property sent = 0
+        # Requests actually put on the wire — `Sequencer::Engine#wire_requests`, the same
+        # `backend.sent + extra_requests` sum `FuzzJob#requests` carries. `sent` above counts
+        # collection ATTEMPTS, and a retry or a pool re-send charges only this one, so with
+        # `retries` (up to 1000 here) the two diverge by a wide margin and only this one
+        # answers "how much load did the run put on the target". (The BUDGET is a third
+        # number: `max_requests` and SEQUENCE_MAX_REQUESTS are enforced against
+        # `CappedBackend#sent`, which counts calls.) It was collected by the engine, carried
+        # on every event, and dropped at the drain.
+        property requests = 0_i64
         property errors = 0
         property error_msg : String? = nil
         getter tokens = [] of String

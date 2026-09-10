@@ -4575,6 +4575,9 @@ module Gori::Tui
     # the same overlay; Start applies to the OPEN session — that "apply to current" is the
     # injected commit, so no shell flag distinguishes it from a new-session open.
     def reconfigure_sequence : Nil
+      if why = sequencer_controller.reconfigure_blocked_reason
+        return (@toast = why)
+      end
       seed = sequencer_controller.build_seed_from_current
       return (@toast = "manual sessions have no token descriptor to configure") unless seed
       ov = SequenceConfigOverlay.new(seed)

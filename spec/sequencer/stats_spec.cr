@@ -159,6 +159,41 @@ describe Gori::Sequencer::Stats do
     S.analyze(random_ints).sequential.should be_false
   end
 
+  # The same fix, on the HEX path — the encoding session ids are actually spelled in, and the
+  # one the decimal path's shuffle guard did not cover. Correlation with ARRIVAL order is 1.00
+  # when a `%08x` counter is collected serially and ~0.02 once concurrency lets two replays
+  # complete swapped, so the row read "Sequential: none" for a textbook counter.
+  it "detects a shuffled-order hex counter, which arrival-order correlation cannot see" do
+    ordered = (2..301).map { |i| "%08x" % i }
+    shuffled = ordered.shuffle(Random.new(42_u64))
+    S.analyze(shuffled).sequential.should be_true
+    seq_detail(shuffled).should eq("constant step 1 (sorted — arrival order was shuffled)")
+    # …and the in-order sample still reports the correlation it actually measured.
+    seq_detail(ordered).should start_with("corr=")
+  end
+
+  it "detects a shuffled hex counter behind a zero-padded constant head, and uppercase" do
+    # 32 hex digits: everything but the last three is a shared prefix, so the varying span the
+    # exact-value check reads is narrow — which is what makes a zero-padded counter tractable
+    # where a 32-digit-wide magnitude would not be.
+    wide = (1000..1299).map { |i| "%032x" % i }.shuffle!(Random.new(7_u64))
+    S.analyze(wide).sequential.should be_true
+    upper = (2..301).map { |i| "%08X" % i }.shuffle!(Random.new(7_u64))
+    S.analyze(upper).sequential.should be_true
+  end
+
+  it "does not flag a shuffled sample of genuinely random hex tokens as sequential" do
+    # The control the check has to survive: same path, same shuffle, no counter.
+    S.analyze(random_hex(300, 8, 555_u64)).sequential.should be_false
+    S.analyze(random_hex(300, 32, 556_u64)).sequential.should be_false
+  end
+
+  it "leaves a small shuffled hex sample alone, where an even sort is coincidence" do
+    # Below SMALL_SAMPLE the sorted-step trick is noise — the same gate the numeric path uses.
+    tiny = ["00000002", "0000000a", "00000006"] # sorts to an even step 4; arrival order is not
+    S.analyze(tiny).sequential.should be_false
+  end
+
   it "does not claim shuffling for a large sample that truly arrived in ascending order" do
     # Regression: the sorted-order check must only run once the arrival-order (inc/dec)
     # check has already failed, or it falsely claims "arrival order was shuffled" for a

@@ -25,6 +25,10 @@ module Gori::Sequencer
       # A token location whose kind needs a selector (cookie / header / regex / jsonpath)
       # was left blank, so every response would miss and the run would only burn requests.
       NoTokenLoc
+      # A `position` descriptor whose byte range is empty or reversed (`40:8`), which
+      # `TokenExtract.position` answers nil for on EVERY response (`detail` = the range as
+      # `A:B`, for surfaces that quote it back).
+      BadPosition
       # Manual mode with nothing to analyze: no pasted token, or all of them blank.
       NoTokens
       # The request or the target still names an env var that resolves to nothing, so
@@ -153,10 +157,7 @@ module Gori::Sequencer
       # position|jsonpath" rule while parsing the args hash, so a blank descriptor cannot
       # reach the check below from there and its precedence is decided before this point.)
       origin = resolve_origin(options)
-      loc = config.token_loc
-      if !loc.kind.position? && loc.selector.strip.empty?
-        raise PlanError.new(PlanError::Reason::NoTokenLoc, "no token location selector")
-      end
+      check_token_loc(config.token_loc)
 
       # ONE `Env.expand_wire` over the request, before anything reads it. The TUI never ran
       # it at all, so a `$TOKEN` in a sequenced request went out literally there while
@@ -207,6 +208,31 @@ module Gori::Sequencer
       new(engine: Engine.new(request, options.http2?, sender, config), config: config,
         origin: origin, request: request,
         request_target: Gori::Outbound.request_target(request), http2: options.http2?)
+    end
+
+    # Refuse a descriptor that cannot match a response, before a single request is sent.
+    #
+    # The blank-selector half was always here. The RANGE half was not, and the Sequencer tab's
+    # own `position_range` claims it was: `gori run sequence --position 40:8` and MCP's
+    # `position: "40:8"` both parse two integers, ask nothing about their order, and start a
+    # real collection in which `TokenExtract.position` — whose rule is `nil if hi <= lo` —
+    # misses every sample. The run then spends its whole `max_sends` budget and reports
+    # `rating: CRITICAL · 0 usable / N total · no usable tokens`: a verdict about the ORIGIN'S
+    # entropy, produced by a descriptor that never read a byte of it. Only the TUI overlay
+    # refused it, and only because it does its own pre-parse.
+    #
+    # Here rather than in each surface's argument parser, for the reason the builder exists:
+    # this is the one seam all three sequence surfaces run through, so they refuse the same
+    # descriptors by construction instead of by three copies agreeing.
+    private def self.check_token_loc(loc : TokenLoc) : Nil
+      if loc.kind.position?
+        return if loc.pos_end > loc.pos_start
+        range = "#{loc.pos_start}:#{loc.pos_end}"
+        raise PlanError.new(PlanError::Reason::BadPosition,
+          "token byte range #{range} is empty", range)
+      end
+      return unless loc.selector.strip.empty?
+      raise PlanError.new(PlanError::Reason::NoTokenLoc, "no token location selector")
     end
 
     # Re-frame the head when `Env.expand_wire` changed the BODY's byte length.
@@ -297,14 +323,18 @@ module Gori::Sequencer
       Fuzz::Origin.new(scheme, host, port)
     end
 
-    # Refuse a collection whose request or target still carries a token that resolves to
-    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for
-    # a display path, wrong here, because the seven characters `$SESSION` then go out as
-    # a header value, the origin answers 401, and the sampled tokens describe a rejected
-    # session rather than the one the operator meant to measure (#519). This builder is
-    # the surface-independent chokepoint every sequence surface expands through, so the
-    # check lives here once instead of in each of the three. The manual (analyse-only)
-    # path returns before this and needs none — it opens no socket.
+    # Refuse a collection whose TARGET still carries a token that resolves to nothing.
+    # `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for a display
+    # path, wrong for a dial tuple, because `$SESSION` then ships as the hostname: every send
+    # fails DNS and `Outbound.scope_url` is asked about `https://$SESSION/a`, a URL no rule
+    # can match, so the run is refused as out-of-scope and names the wrong gate (#519).
+    #
+    # The REQUEST half deliberately does NOT come through here — see `build`, where the
+    # head-only refusal it used to run was dropped: a `$NAME` with no value is a literal
+    # string on the wire (`Env::Escape`), which a request may legitimately carry. This
+    # builder is the surface-independent chokepoint every sequence surface expands through,
+    # so the target check lives here once instead of in each of the three. The manual
+    # (analyse-only) path returns before this and needs none — it opens no socket.
     private def self.refuse_unresolved(names : Array(String)) : Nil
       return if names.empty?
       detail = Env.token_list(names)

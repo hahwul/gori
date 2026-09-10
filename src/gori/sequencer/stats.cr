@@ -806,7 +806,23 @@ module Gori::Sequencer
         xs = Array(Float64).new(n, &.to_f)
         ys = tokens.map { |t| hex_leading_value(t, skip) }
         r = pearson(xs, ys)
-        return {r.abs > 0.9, "corr=#{fmt(r)}"}
+        return {true, "corr=#{fmt(r)}"} if r.abs > 0.9
+        # Order-independent second look, the SAME one the decimal fast path above already
+        # takes and for the same reason: collection order is not issuance order once
+        # concurrency > 1, so two in-flight replays can complete swapped and a textbook
+        # incrementing counter arrives shuffled. Correlation with arrival order then falls to
+        # ~0 and the row reads "none" — a clean bill of health for the exact token shape this
+        # test exists to catch. Measured on `2..301` as `%08x`: corr 1.00 in order, 0.02
+        # shuffled. Hex is where this matters most, because it is what session ids are
+        # actually spelled in; decimal got the fix and hex did not.
+        #
+        # The general path below cannot reuse it — see its own comment — but this one can,
+        # because a hex token's varying region IS a number, so the sorted values either form
+        # an even arithmetic progression or they do not.
+        if n >= SMALL_SAMPLE && (vals = hex_span_values(tokens, skip)) && (step = constant_step(vals.sort!))
+          return {true, "constant step #{step} (sorted — arrival order was shuffled)"}
+        end
+        return {false, "corr=#{fmt(r)}"}
       end
       # General path — correlation of arrival order with a leading-byte magnitude. Shares
       # the same order-dependency the numeric fast path had above (arrival order can be
@@ -856,6 +872,43 @@ module Gori::Sequencer
       start = {skip, slice.size}.min
       slice[start, {8, slice.size - start}.min].each { |b| v = v * 256.0 + b }
       v
+    end
+
+    # The exact integer value of each token's VARYING hex region (everything past the shared
+    # prefix), or nil when one of them is too wide to hold — the sorted-step check needs exact
+    # arithmetic, where `hex_leading_value`'s Float64 magnitude would round.
+    #
+    # 15 digits = 60 bits, so the product always fits an Int64. A wider varying region is
+    # declined rather than truncated: the high digits of a counter are not themselves an even
+    # progression once the low ones are dropped, so a truncated read could only ever turn a
+    # real answer into a wrong one. A counter is normally zero-padded, which puts its constant
+    # head into `skip` and leaves a narrow tail here.
+    # Over the token's own bytes rather than a `byte_slice` per token: `analyze` runs on a UI
+    # throttle over a sample that reaches 50,000, and the width guard below then declines on
+    # the FIRST token of a wide corpus — so a full random-hex sample pays one bounds check
+    # here, not 50,000 String allocations.
+    private def self.hex_span_values(tokens : Array(String), skip : Int32) : Array(Int64)?
+      vals = Array(Int64).new(tokens.size)
+      tokens.each do |t|
+        sl = t.to_slice
+        start = skip.clamp(0, sl.size)
+        return nil if sl.size - start <= 0 || sl.size - start > 15
+        v = 0_i64
+        i = start
+        while i < sl.size
+          b = sl.unsafe_fetch(i)
+          nibble = case b
+                   when 0x30_u8..0x39_u8 then (b - 0x30_u8).to_i32
+                   when 0x61_u8..0x66_u8 then (b - 0x61_u8).to_i32 + 10
+                   when 0x41_u8..0x46_u8 then (b - 0x41_u8).to_i32 + 10
+                   else                       return nil
+                   end
+          v = v * 16 + nibble
+          i += 1
+        end
+        vals << v
+      end
+      vals
     end
 
     # Like `leading_value`, but for hex text: decodes each character to its NIBBLE value

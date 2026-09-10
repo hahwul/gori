@@ -589,11 +589,17 @@ module Gori::Tui
     end
 
     # A seed describing the CURRENT session, for reconfiguring its descriptor in place.
+    #
+    # `config:` is what makes this a RECONFIGURE rather than a fresh card wearing the old
+    # descriptor: `SequenceConfigOverlay#build_config` returns a whole `Config`, so every
+    # cycler the card opens on is applied on Start — and opening them all on their defaults
+    # reset a session's samples / max requests / concurrency / notify behind the operator.
     def build_seed_from_current : SequenceSeed?
       return nil unless v = current_view
       return nil if v.config.mode.manual? # manual sessions have no descriptor to configure
       SequenceSeed.new(v.target, v.request_bytes, v.http2?, v.sni_override, nil,
-        v.summary, v.config.mode, v.config.token_loc, [] of String, [] of String)
+        v.summary, v.config.mode, v.config.token_loc, [] of String, [] of String,
+        config: v.config)
     end
 
     private def flow_response(detail : Store::FlowDetail) : Repeater::Result?
@@ -678,12 +684,21 @@ module Gori::Tui
       start_run(view)
     end
 
+    # Why a reconfigure cannot proceed, or nil when it can. Asked at the OPEN as well as at
+    # Start, so the operator is not invited to fill in a whole card — which now arrives
+    # carrying the session's own knobs — only to be refused by the commit.
+    def reconfigure_blocked_reason : String?
+      return nil unless (v = current_view) && v.running?
+      "stop the collection first (^X) to reconfigure"
+    end
+
     def reconfigure_current(config : Sequencer::Config) : Nil
       return unless v = current_view
       # Restarting under a live collection would spawn a second engine fiber feeding the same
-      # view (interleaved samples → corrupted randomness stats, orphaned job). Require a stop first.
-      if v.running?
-        @host.status("stop the collection first (^X) to reconfigure")
+      # view (interleaved samples → corrupted randomness stats, orphaned job). The open-time
+      # check above is the courtesy; this one is what actually guards the engine.
+      if why = reconfigure_blocked_reason
+        @host.status(why)
         return
       end
       v.set_config(config)
@@ -807,9 +822,10 @@ module Gori::Tui
       when Sequencer::DoneEvent
         # The terminal event carries the run's FINAL counts and ProgressEvent is droppable,
         # so without this the pane could keep showing a mid-run snapshot. `goal` is not on
-        # DoneEvent — the config's is the one the run was given, and it is what
-        # `budget_exhausted?` compares against.
-        v.apply_progress(ev.collected, ev.sent, v.config.goal, v.errors_count, ev.requests)
+        # DoneEvent — `progress_goal` is the denominator the run was given, and it is what
+        # `budget_exhausted?` compares against. NOT `config.goal`: that is the live-replay
+        # half only, and reading it here relabelled a finished manual paste "30/500".
+        v.apply_progress(ev.collected, ev.sent, v.progress_goal, v.errors_count, ev.requests)
         v.finish_run
         finish_job(v, ev)
       when Sequencer::ErrorEvent
