@@ -611,6 +611,38 @@ module Gori::Decoder
       document(Gori::Cbor.render(data), "cbor", "CBOR")
     end
 
+    # ---- native serialization: Java / .NET ViewState / PHP / Python pickle ----
+    #
+    # All four take BYTES rather than text, `Php` included: a PHP `s:` payload is a byte count
+    # and the bytes behind it are whatever the application put there, so a `text` converter's
+    # UTF-8 gate would refuse a perfectly ordinary serialized blob carrying binary.
+
+    def java_to_json(data : Bytes) : Bytes
+      serialized(Gori::Decoder::Serialized::Java.render(data), "java-deserialize", "Java serialized stream")
+    end
+
+    def viewstate_to_json(data : Bytes) : Bytes
+      serialized(Gori::Decoder::Serialized::DotnetViewState.render(data), "dotnet-viewstate", "ViewState")
+    end
+
+    def php_to_json(data : Bytes) : Bytes
+      serialized(Gori::Decoder::Serialized::Php.render(data), "php-unserialize", "PHP serialize() value")
+    end
+
+    def pickle_to_json(data : Bytes) : Bytes
+      serialized(Gori::Decoder::Serialized::Pickle.render(data), "pickle-disasm", "pickle stream")
+    end
+
+    # As permissive as `document` and refused on a different test. Three of the four readers
+    # write an ENVELOPE (`{"$format": …}`) before they read the first value, so "the whole
+    # rendering is one `$partial` marker" — the test `document` makes — can never be true for
+    # them. `decoded` is the same question asked where it still has an answer: did the reader
+    # make anything at all of these bytes, or only of the header it wrote itself?
+    private def serialized(r : Gori::BinaryDocument::Rendering, label : String, name : String) : Bytes
+      raise DecoderError.new("#{label} decode failed: not a #{name}") unless r.decoded
+      r.json.to_slice
+    end
+
     private def document(r : Gori::BinaryDocument::Rendering, label : String, name : String) : Bytes
       # A converter is the one place the operator has ALREADY decided what the bytes are — they
       # typed the name — so this is far more permissive than the content-type-driven panes: it

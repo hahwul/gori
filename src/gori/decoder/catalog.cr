@@ -158,6 +158,24 @@ module Gori::Decoder
       category: Category::Serialization, direction: Direction::Decode,
       description: "CBOR → JSON (RFC 8949, schema-less; $bin / $tag / $bignum are named)") { |b| Codecs.cbor_to_json(b) }
 
+    # Native serialization: an object graph somebody's runtime wrote. Read-only for a second
+    # reason on top of the one above — a faithful Java/.NET serializer is not worth writing
+    # here, and an edited graph is not what the operator came for. `pickle-disasm` DISASSEMBLES
+    # and never executes; the reason a pickle is dangerous is exactly that reading it normally
+    # means running it (#1011).
+    r.register bytes("java-deserialize", "java", "java-serialized", "rO0",
+      category: Category::Serialization, direction: Direction::Decode,
+      description: "Java serialized stream → JSON (class descriptors, fields, $ref handles)") { |b| Codecs.java_to_json(b) }
+    r.register bytes("dotnet-viewstate", "viewstate", "losformatter", "aspnet-viewstate",
+      category: Category::Serialization, direction: Direction::Decode,
+      description: "ASP.NET ViewState → JSON (ObjectStateFormatter tokens; flags MAC present/absent)") { |b| Codecs.viewstate_to_json(b) }
+    r.register bytes("php-unserialize", "php", "unserialize", "php-serialized",
+      category: Category::Serialization, direction: Direction::Decode,
+      description: "PHP serialize() → JSON ($class, demangled private/protected props, $ref)") { |b| Codecs.php_to_json(b) }
+    r.register bytes("pickle-disasm", "pickle", "python-pickle", "pickletools",
+      category: Category::Serialization, direction: Direction::Decode,
+      description: "Python pickle → opcode disassembly (never executed; names every GLOBAL/REDUCE)") { |b| Codecs.pickle_to_json(b) }
+
     # ---------------- TOKEN ----------------
     r.register encode("jwt-decode", "jwt",
       category: Category::Token, direction: Direction::Decode,

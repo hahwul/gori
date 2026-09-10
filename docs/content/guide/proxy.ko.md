@@ -201,7 +201,26 @@ protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
 
 투영이기 때문에, 곧 보낼 무언가를 덮어쓰는 일은 없습니다. Repeater 에디터에서 msgpack 요청 본문을 정렬하려 하면, 다시 되돌릴 수 없는 것으로 바이트를 바꿔치기하는 대신 거절합니다. 값 도중에 끝난 문서는 읽은 데까지 렌더하고 패널 노트에 그렇다고 밝힙니다. 캡처 상한에 잘린 본문에서 흔한 경우입니다. 그동안에도 바이트는 `^X` 한 번 거리에 있고, 같은 렌더링이 `gori run show --format json`과 MCP `get_flow`에 `binary_documents[]`로 들어갑니다.
 
-디스패치는 오직 content type으로만 하며, 스니핑은 하지 않습니다. `application/octet-stream`으로 표시된 본문은 어느 리더에도 넘기지 않습니다. 스키마 없는 리더는 어떤 바이트로도 *무언가*를 만들어 내고, 틀린 렌더링은 맞는 hex 덤프보다 나쁘기 때문입니다. 라벨 없는 본문이 갈 곳은 Decoder 탭(`msgpack-decode`, `cbor-decode`)입니다. 거기서는 그게 무엇인지 정한 사람이 오퍼레이터 자신이니까요.
+**이 두 형식에 한해서는** 디스패치를 오직 content type으로만 하며, 스니핑은 하지 않습니다. `application/octet-stream`으로 표시된 본문은 어느 리더에도 넘기지 않습니다. 스키마 없는 리더는 어떤 바이트로도 *무언가*를 만들어 내고, 틀린 렌더링은 맞는 hex 덤프보다 나쁘기 때문입니다. 라벨 없는 본문이 갈 곳은 Decoder 탭(`msgpack-decode`, `cbor-decode`)입니다. 거기서는 그게 무엇인지 정한 사람이 오퍼레이터 자신이니까요. 바로 아래 네 리더는 마커로 디스패치하는데, 왜 그것이 다른 문제인지도 거기서 설명합니다.
+
+### 네이티브 직렬화: Java, ViewState, PHP, pickle {#serialized-objects}
+
+쿠키 속의 `AC ED 00 05`, 히든 필드 속의 `/wE…`, 파라미터 속의 `O:8:"stdClass":…`. gori는 지금까지 이것들을 *찾아내기만* 했습니다. 패시브 `serialized_object` 규칙이 역직렬화 공격면을 정확히 가리켜 주지만, 그다음 질문은 늘 "그래서 **안에** 뭐가 들었나"였습니다. 이제 네 개의 리더가 답합니다. MessagePack·CBOR과 똑같은, 이름 붙은 트리 투영으로요.
+
+| 형식 | 마커 | 투영이 보여주는 것 |
+|---|---|---|
+| Java serialized | `AC ED 00 05`(base64 `rO0AB…`) | 인스턴스마다 `{"$object": …}`와 선언된 필드, 컬렉션이 원소를 담아 두는 `writeObject` annotation, 그리고 가젯 체인의 끝에 오는 동적 프록시 `$Proxy(…)` |
+| ASP.NET ViewState | `FF 01`(base64 `/wE…`) | `ObjectStateFormatter` 토큰 트리, 그리고 MAC이 있는지 여부 — `"mac": false`는 발견이 없는 게 아니라 그 자체가 발견입니다 |
+| PHP `serialize()` | `O:<len>:"Class":…` / `a:<n>:{…}` | `{"$class": …}`, private·protected 프로퍼티 이름은 망글링을 풀고 가시성은 `$private` / `$protected`로 옆에 남깁니다 |
+| Python pickle | `\x80` `PROTO` | `pickletools` 방식의 opcode 디스어셈블리와, 스트림이 이름을 대는 모든 호출 대상 |
+
+**pickle은 디스어셈블할 뿐, 실행하지 않습니다.** 적대적인 바이트를 unpickle하는 것은 설계상 원격 코드 실행입니다. `GLOBAL`이 호출 대상을 지목하고 `REDUCE`가 그것을 호출하니까요. 그래서 리더는 opcode 스트림을 걸어가며 보고만 합니다. 디스어셈블리 끝의 `globals`가 스트림이 언급한 모든 호출 대상을 모으고 `reduce`가 호출 횟수를 셉니다. 대개 이 둘이 발견의 전부입니다.
+
+**역참조는 펼치지 않고 그대로 내보냅니다.** Java의 `TC_REFERENCE`와 PHP의 `r:` / `R:`는 스트림에 이미 있는 값을 가리키며, 각각 `{"$ref": n}`으로 돌아옵니다. 하나를 펼치면 작은 blob이 지수적으로 부풀고, 공유되고 있다는 사실 자체가 그래프에 대한 정보이기 때문입니다. pickle의 memo도 같은 개념이지만 이 마커를 달지 않습니다. 그 리더는 트리를 세우는 대신 디스어셈블하기 때문에, `BINGET`은 memo 키를 인자로 가진 opcode 레코드로 남습니다.
+
+**읽기 전용이고, 형식이 닿는 데까지만입니다.** 어떤 것도 다시 인코딩하지 않습니다. 편집한 Java·.NET 그래프를 gori가 되써 주는 일은 없고, 가젯 체인 *생성*은 여전히 `ysoserial` 같은 도구 밖의 단계입니다. ViewState의 `Token_BinarySerialized` 페이로드는 또 다른 형식인 `BinaryFormatter` 그래프라서, 어설프게 반쯤 읽는 대신 레코드 헤더만 식별해 바이트에 이름을 붙여 돌려줍니다. 그리고 암호화된 ViewState(`/wE`로 시작하지 않는 base64)는 패시브 규칙이 그러듯 건드리지 않습니다. 암호화가 곧 해법이고, 그것을 지적하면 안전한 설정을 벌주는 셈이니까요.
+
+여기서는 디스패치가 **바이트 자신의 마커**입니다. 네 형식 어느 것도 고유한 content type이 없기 때문입니다. Java 스트림은 `application/octet-stream`으로, 직렬화된 PHP 값은 `text/plain`으로 도착합니다. 모든 마커는 키워드가 아니라 구조적인 접두사이고, 그러고도 렌더링이 본문 끝까지 닿아야 패널에 나옵니다. 스니핑이 거절하는 하나는 protocol 0 pickle입니다. 헤더가 아예 없고 opcode가 출력 가능한 ASCII라서 평범한 산문도 그럴듯한 쓰레기로 디스어셈블되기 때문입니다. Decoder 탭의 `pickle-disasm`은 그것도 읽습니다. 거기서는 바이트가 무엇인지 정한 사람이 오퍼레이터니까요. ViewState도 대개 Decoder 탭에서 보게 됩니다. 본문이 아니라 `<input value=…>` 안에 살기 때문입니다.
 
 와이어 프로토콜 위에서, gori는 흔히 쓰이는 페이로드를 인라인으로 디코드합니다.
 

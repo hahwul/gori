@@ -18,7 +18,7 @@ module Gori
     enum Category
       Encoding      # base64, url, hex, base32, ascii85, base58
       Compression   # gzip, zlib, brotli, zstd
-      Serialization # msgpack, cbor — a binary document rendered as JSON text
+      Serialization # msgpack, cbor, java/viewstate/php/pickle — a serialized document as JSON text
       Hash          # md5, sha1, sha224, sha256, sha384, sha512
       Token         # jwt-decode
       Escape        # html, json-string, unicode

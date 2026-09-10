@@ -210,6 +210,8 @@ module Gori
           "base64-decode, url-encode, url-encode-all, url-decode, hex-encode, hex-decode, gzip, gunzip, " \
           "deflate, inflate, raw-deflate, raw-inflate, brotli, zstd (both decompress-only), " \
           "msgpack-decode, cbor-decode (binary document -> JSON), " \
+          "java-deserialize, dotnet-viewstate, php-unserialize, pickle-disasm " \
+          "(native serialization -> JSON; pickle is disassembled, never executed), " \
           "jwt-decode, html-encode, md5, sha256, crc32, " \
           "decimal, binary, rot47, quoted-printable, punycode-encode, punycode-decode, base36, " \
           "base62, xml-escape, shell-escape, powershell-escape, c-string-escape, homoglyph, typo. " \

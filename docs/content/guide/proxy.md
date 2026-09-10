@@ -201,7 +201,26 @@ One ambiguity is accepted rather than papered over: a document whose own map key
 
 Because it is a projection, it is never written back over anything you are about to send: formatting a msgpack request body in the Repeater editor is refused rather than replacing your bytes with something that cannot become them again. A document that ends mid-value renders what it read and says so in the pane's note, the ordinary case for a body cut short by the capture cap. The bytes stay one `^X` away throughout, and the same rendering is in `gori run show --format json` and MCP `get_flow` as `binary_documents[]`.
 
-The dispatch is on the content type alone, never a sniff. A body labelled `application/octet-stream` is not offered to either reader, because a reader with no schema will make *something* of any bytes, and a rendering that is wrong is worse than a hex dump that is right. The Decoder tab (`msgpack-decode`, `cbor-decode`) is where an unlabelled body goes, because there the operator is the one who decided what it is.
+For **these two** formats the dispatch is on the content type alone, never a sniff. A body labelled `application/octet-stream` is not offered to either reader, because a reader with no schema will make *something* of any bytes, and a rendering that is wrong is worse than a hex dump that is right. The Decoder tab (`msgpack-decode`, `cbor-decode`) is where an unlabelled body goes, because there the operator is the one who decided what it is. The four readers in the next section do dispatch on a marker, and it says why that is a different question.
+
+### Native serialization: Java, ViewState, PHP, pickle {#serialized-objects}
+
+`AC ED 00 05` in a cookie. `/wE…` in a hidden field. `O:8:"stdClass":…` in a parameter. gori has always *flagged* these — the passive `serialized_object` rule points straight at the insecure-deserialization surface — and the next question was always "what is **in** it?". Four readers now answer it, with the same labelled-tree projection MessagePack and CBOR get.
+
+| Format | Marker | What the projection shows |
+|---|---|---|
+| Java serialized | `AC ED 00 05` (base64 `rO0AB…`) | `{"$object": …}` per instance with its declared fields, the `writeObject` annotation a collection keeps its entries in, and `$Proxy(…)` for the dynamic proxy a gadget chain ends in |
+| ASP.NET ViewState | `FF 01` (base64 `/wE…`) | the `ObjectStateFormatter` token tree, and whether a MAC is there — `"mac": false` is the finding, not the absence of one |
+| PHP `serialize()` | `O:<len>:"Class":…` / `a:<n>:{…}` | `{"$class": …}`, with private and protected property names demangled and their visibility kept beside them in `$private` / `$protected` |
+| Python pickle | `\x80` `PROTO` | the opcode disassembly, `pickletools`-style, plus every callable the stream names |
+
+**A pickle is disassembled, never run.** Unpickling hostile bytes is remote code execution by design — `GLOBAL` names a callable and `REDUCE` calls it — so the reader walks the opcode stream and reports it. `globals` at the end of the disassembly lists every callable the stream mentions and `reduce` counts the calls; that pair is usually the whole finding.
+
+**A back-reference is emitted, never expanded.** Java's `TC_REFERENCE` and PHP's `r:` / `R:` both name a value already in the stream, and each comes back as `{"$ref": n}`. Expanding one turns a small blob into exponential output, and the sharing is itself a fact about the graph. Pickle's memo is the same idea without the marker, because that reader disassembles rather than builds a tree: a `BINGET` is an opcode record whose argument is the memo key.
+
+**Read-only, and only as far as the format goes.** Nothing is re-encoded: an edited Java or .NET graph is not something gori writes back, and gadget-chain *generation* stays an out-of-tool `ysoserial` step. A ViewState's `Token_BinarySerialized` payload is a `BinaryFormatter` graph — a different format again — so its bytes come back named with the record header identified, rather than half-read. And an encrypted ViewState (base64 that does not begin `/wE`) is left alone exactly as the passive rule leaves it: encryption is the fix, and flagging it would punish the secure configuration.
+
+Here the dispatch **is** the bytes' own marker, because none of these four formats has a content type: a Java stream arrives as `application/octet-stream`, a serialized PHP value as `text/plain`. Every marker is structural rather than a keyword, and the rendering still has to reach the end of the body before the pane will show it. Protocol-0 pickle is the one the sniff refuses — it has no header at all and its opcodes are printable ASCII, so ordinary prose disassembles into plausible garbage; the Decoder tab's `pickle-disasm` reads it, because there the operator is the one who decided what the bytes are. A ViewState usually reaches the Decoder tab too, since it lives in an `<input value=…>` rather than as a body.
 
 On top of the wire protocols, gori decodes common payloads inline:
 
