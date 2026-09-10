@@ -238,6 +238,25 @@ module Gori
       "unix #{unix}"
     end
 
+    # The Django HMAC algorithm read off a cookie's signature byte length — HMAC-SHA1 is
+    # 20 raw bytes, HMAC-SHA256 is 32, an unambiguous tell that needs no secret. nil when the
+    # cookie is not a parseable 3-part Django token or the signature is some other length, so a
+    # caller can fall back to its default. The three surfaces use this to spare the operator the
+    # "correct secret reads as ✗ bad key because the app is still on SHA-1" trap without a flag:
+    # the Cookie tab's algorithm badge, and `gori run cookie` / the MCP cookie_verify+cookie_crack
+    # tools when no algorithm is pinned. Django ≥3.1 defaults to SHA-256, so a 32-byte signature
+    # is the common case; a 20-byte one is the older app the default would otherwise mis-verify.
+    def detect_django_algo(cookie : String) : String?
+      parts = cookie.strip.split(':')
+      return nil unless parts.size == 3
+      case b64decode(parts[2]).size
+      when 20 then "sha1"
+      when 32 then "sha256"
+      end
+    rescue CookieError
+      nil
+    end
+
     # --- internals ----------------------------------------------------------
 
     # The format name to dispatch on: the explicit `format` (validated) or the detected

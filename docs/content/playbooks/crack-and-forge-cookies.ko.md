@@ -47,7 +47,7 @@ gori run cookie 'eyJ1c2VyIjoi...' --crack --wordlist secrets.txt
 gori run cookie 'eyJ1c2VyIjoi...' --crack --secrets 'dev,changeme,secret'
 ```
 
-MCP에서는 `cookie_crack`입니다. 검증과 같은 원리를 목록 전체에 걸쳐 돌리는 것이라, 워드리스트의 질이 승부의 전부입니다.
+MCP에서는 `cookie_crack`입니다. 검증과 같은 원리를 목록 전체에 걸쳐 돌리는 것이라, 워드리스트의 질이 승부의 전부입니다. Django 쿠키라면 앱이 SHA-256과 구형 SHA-1 중 무엇으로 서명하는지 몰라도 됩니다. `--algorithm`을 비워 두면 검증과 크랙이 서명의 바이트 길이로 알고리즘을 판별하므로, 앱이 SHA-1이라는 이유만으로 올바른 비밀키를 놓치지 않습니다.
 
 **체크포인트.** 복구된 비밀키가 출력되거나, 그 비밀키가 목록에 없었다고 보고됩니다.
 

@@ -21,6 +21,7 @@ module Gori
         value = nil.as(String?)
         salt = nil.as(String?)
         algorithm = "sha256"
+        algorithm_pinned = false
         timestamp = nil.as(Int64?)
         format = :text
         positional = [] of String
@@ -40,7 +41,10 @@ module Gori
           p.on("--payload=JSON", "Session JSON to sign (Flask/Django --forge)") { |v| payload = v }
           p.on("--value=B64", "Base64 Marshal cookie value (Rack --forge, opaque)") { |v| value = v }
           p.on("--salt=SALT", "Flask/Django signing salt") { |v| salt = v }
-          p.on("--algorithm=ALG", "Django HMAC algorithm: sha256 (default) | sha1") { |v| algorithm = v.downcase }
+          p.on("--algorithm=ALG", "Django HMAC algorithm: sha256 (default) | sha1 (auto-detected for --verify/--crack when unset)") do |v|
+            algorithm = v.downcase
+            algorithm_pinned = true
+          end
           p.on("--timestamp=UNIX", "Unix second to stamp (--forge; default: now)") do |v|
             timestamp = parse_forge_timestamp(v)
           rescue ex : ArgumentError
@@ -60,14 +64,39 @@ module Gori
 
         begin
           case action
-          when :verify then emit_cookie_verify(cookie_input(positional), type, secret, salt, algorithm, format)
-          when :crack  then emit_cookie_crack(cookie_input(positional), type, secrets, wordlist, salt, algorithm, format)
-          when :forge  then emit_cookie_forge(type, secret, payload, value, timestamp, salt, algorithm, format)
-          else              emit_cookie_decode(cookie_input(positional), type, format)
+          when :verify, :crack
+            cookie = cookie_input(positional)
+            # Resolve the format ONCE (the explicit --type or a single auto-detect) and thread it
+            # down as `type`: `emit_*` and the dispatch helpers each fall back to `Cookie.detect`
+            # only when it is nil, so a concrete value here spares the same cookie being re-detected
+            # three times per run. `nil` (unrecognized) still flows through to the clean refusal.
+            fmt = type || Cookie.detect(cookie)
+            algo = cookie_effective_algo(cookie, fmt, algorithm, algorithm_pinned)
+            if action == :verify
+              emit_cookie_verify(cookie, fmt, secret, salt, algo, format)
+            else
+              emit_cookie_crack(cookie, fmt, secrets, wordlist, salt, algo, format)
+            end
+          when :forge then emit_cookie_forge(type, secret, payload, value, timestamp, salt, algorithm, format)
+          else             emit_cookie_decode(cookie_input(positional), type, format)
           end
         rescue ex : Cookie::CookieError
           abort "gori run cookie: #{ex.message}"
         end
+      end
+
+      # The Django HMAC algorithm to verify/crack under. An explicit `--algorithm` is honored;
+      # otherwise, for a Django cookie, it is read off the cookie's own signature length (sha1 =
+      # 20 bytes, sha256 = 32) so a real SHA-1 `sessionid` does not read as "invalid" under the
+      # sha256 default even with the correct secret — the same "auto until you pin it" contract
+      # the Cookie tab's algorithm badge gives. The dispatch passes the already-resolved format
+      # as `type`, so the `||` short-circuits without a second `Cookie.detect`; the fallback is
+      # kept for a nil `type` (an unrecognized cookie, or a direct caller). Non-Django and a
+      # pinned choice fall straight through; a cookie whose algorithm can't be told keeps the
+      # default too. --forge has no input cookie, so it always uses the stated `algorithm`.
+      private def self.cookie_effective_algo(cookie : String, type : String?, algorithm : String, pinned : Bool) : String
+        return algorithm if pinned || (type || Cookie.detect(cookie)) != "django"
+        Cookie.detect_django_algo(cookie) || algorithm
       end
 
       # Parse a `--forge --timestamp` value. A nil from `to_i64?` (unparseable or

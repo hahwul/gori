@@ -108,6 +108,19 @@ describe Gori::Cookie do
       Gori::Cookie.secure_compare("abc", "abd").should be_false
       Gori::Cookie.secure_compare("abc", "ab").should be_false
     end
+
+    it "detect_django_algo reads sha1/sha256 off the signature byte length" do
+      # HMAC-SHA1 is 20 raw bytes, HMAC-SHA256 is 32 — an unambiguous tell with no secret,
+      # so a surface can pick the right algorithm for a black-box Django cookie without a
+      # flag (the "correct secret reads as ✗ bad key on a SHA-1 app" trap). nil when the
+      # cookie is not a 3-part Django token (Flask/Rack have no colons) or the signature is
+      # some other length, so the caller falls back to its default.
+      Gori::Cookie.detect_django_algo(DJANGO_SHA1).should eq("sha1")
+      Gori::Cookie.detect_django_algo(DJANGO).should eq("sha256")
+      Gori::Cookie.detect_django_algo(FLASK).should be_nil
+      Gori::Cookie.detect_django_algo(RACK).should be_nil
+      Gori::Cookie.detect_django_algo("a:b:@@@").should be_nil # non-base64 signature segment
+    end
   end
 
   describe "Flask" do

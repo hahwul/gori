@@ -53,7 +53,7 @@ gori run cookie --forge --type flask --payload '{"admin":true}' --secret s3cret
 cat cookie.txt | gori run cookie                             # stdin에서 쿠키
 ```
 
-쿠키는 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수 로컬 연산). `--type`은 포맷을 고정하고(기본: 자동 감지), `--salt`는 Flask/Django 서명 salt를, `--algorithm`은 Django HMAC 알고리즘(기본 `sha256`, 또는 `sha1`)을 지정하며, `--format`은 `text` 또는 `json`입니다. Flask/Django `--forge`는 `--payload` JSON을, Rack은 불투명한 `--value`를 받고, `--timestamp UNIX`는 위조한 쿠키에 현재 시각 대신 그 초를 찍습니다. [CLI 레퍼런스](/ko/reference/cli/#run-cookie)를 참고하세요.
+쿠키는 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수 로컬 연산). `--type`은 포맷을 고정하고(기본: 자동 감지), `--salt`는 Flask/Django 서명 salt를, `--algorithm`은 Django HMAC 알고리즘(`sha256` 또는 `sha1`)을 지정하며, `--format`은 `text` 또는 `json`입니다. `--verify`/`--crack`에서는 이 값을 비워 두면 쿠키의 서명 길이로 알고리즘을 자동 판별하므로, SHA-1을 쓰는 구형 앱이 잘못된 키로 오인되지 않습니다(`--forge`는 `sha256` 기본). Flask/Django `--forge`는 `--payload` JSON을, Rack은 불투명한 `--value`를 받고, `--timestamp UNIX`는 위조한 쿠키에 현재 시각 대신 그 초를 찍습니다. [CLI 레퍼런스](/ko/reference/cli/#run-cookie)를 참고하세요.
 
 MCP에서는 `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge`가 네트워크나 상태를 건드리지 않는 읽기 도구라, `--read-only`에서도 사용할 수 있습니다.
 
