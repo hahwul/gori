@@ -65,6 +65,93 @@ describe "gori run issues create --flow" do
   end
 end
 
+describe "gori run issues create/update — notes input" do
+  create = "gori run issues create"
+  update = "gori run issues update"
+
+  describe ".issue_notes_sources" do
+    it "names each selected source in option order" do
+      Gori::CLI::Run.issue_notes_sources(notes: nil, file: nil, stdin: false).should be_empty
+      Gori::CLI::Run.issue_notes_sources(notes: "inline", file: nil, stdin: false)
+        .should eq(["--notes"])
+      Gori::CLI::Run.issue_notes_sources(notes: nil, file: "notes.md", stdin: false)
+        .should eq(["--notes-file"])
+      Gori::CLI::Run.issue_notes_sources(notes: nil, file: nil, stdin: true)
+        .should eq(["--notes-stdin"])
+      Gori::CLI::Run.issue_notes_sources(notes: "inline", file: "notes.md", stdin: true)
+        .should eq(["--notes", "--notes-file", "--notes-stdin"])
+    end
+  end
+
+  describe ".issue_notes_source_error" do
+    it "accepts zero or one notes source" do
+      Gori::CLI::Run.issue_notes_source_error([] of String, create).should be_nil
+      Gori::CLI::Run.issue_notes_source_error(["--notes"], create).should be_nil
+      Gori::CLI::Run.issue_notes_source_error(["--notes-file"], create).should be_nil
+      Gori::CLI::Run.issue_notes_source_error(["--notes-stdin"], update).should be_nil
+    end
+
+    it "refuses every conflicting combination and names the command" do
+      Gori::CLI::Run.issue_notes_source_error(["--notes", "--notes-file"], create)
+        .should eq("gori run issues create: --notes, --notes-file cannot be combined — pick one notes source")
+      Gori::CLI::Run.issue_notes_source_error(["--notes", "--notes-stdin"], update)
+        .should eq("gori run issues update: --notes, --notes-stdin cannot be combined — pick one notes source")
+      Gori::CLI::Run.issue_notes_source_error(["--notes-file", "--notes-stdin"], create)
+        .should eq("gori run issues create: --notes-file, --notes-stdin cannot be combined — pick one notes source")
+      all = ["--notes", "--notes-file", "--notes-stdin"]
+      Gori::CLI::Run.issue_notes_source_error(all, update)
+        .should eq("gori run issues update: --notes, --notes-file, --notes-stdin cannot be combined — pick one notes source")
+    end
+  end
+
+  describe ".issue_notes_content" do
+    it "preserves multiline UTF-8 and line endings through stdin and a file" do
+      raw = "첫 줄\r\nsecond line 🔐\n마지막 줄\n"
+      path = File.tempname("gori-issue-notes", ".md")
+      begin
+        File.write(path, raw)
+        from_file = Gori::CLI::Run.issue_notes_content(notes: nil, file: path, stdin: false,
+          io: IO::Memory.new, what: create)
+        from_stdin = Gori::CLI::Run.issue_notes_content(notes: nil, file: nil, stdin: true,
+          io: IO::Memory.new(raw), what: update)
+        from_file.not_nil!.to_slice.should eq(raw.to_slice)
+        from_stdin.not_nil!.to_slice.should eq(raw.to_slice)
+      ensure
+        File.delete?(path)
+      end
+    end
+
+    it "distinguishes no source from an explicitly empty source" do
+      Gori::CLI::Run.issue_notes_content(notes: nil, file: nil, stdin: false,
+        io: IO::Memory.new("ignored"), what: create).should be_nil
+      Gori::CLI::Run.issue_notes_content(notes: "", file: nil, stdin: false,
+        io: IO::Memory.new("ignored"), what: update).should eq("")
+      Gori::CLI::Run.issue_notes_content(notes: nil, file: nil, stdin: true,
+        io: IO::Memory.new, what: update).should eq("")
+    end
+
+    it "does not read stdin unless --notes-stdin selected it" do
+      io = IO::Memory.new("pipe")
+      Gori::CLI::Run.issue_notes_content(notes: "inline", file: nil, stdin: false,
+        io: io, what: update).should eq("inline")
+      io.pos.should eq(0)
+    end
+  end
+
+  it "rejects argv conflicts before reading stdin or opening the store" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run",
+      "issues.cr"))
+    {"cmd_issues_create", "cmd_issues_update"}.each do |name|
+      body = src[src.index!("def self.#{name}")..]
+      body = body[..body.index!("\n      private def self.")]
+      gate_at = body.index!("issue_notes_source_error(")
+      read_at = body.index!("issue_notes_content(")
+      gate_at.should be < read_at
+      read_at.should be < body.index!("open_store(")
+    end
+  end
+end
+
 describe "gori run issues — the text listing" do
   it "leads with the id, then the [severity/status] pair, title, host and flow" do
     # Every triage subcommand addresses an issue BY ID, so the id has to be the first

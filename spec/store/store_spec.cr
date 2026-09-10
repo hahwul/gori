@@ -64,6 +64,17 @@ describe Gori::Store do
     end
   end
 
+  it "inserts issue notes in the issue's atomic writer task without changing their bytes" do
+    with_store do |store|
+      notes = "첫 줄\r\nsecond line 🔐\n마지막 줄\n"
+      id = store.insert_issue("finding", Gori::Store::Severity::High, "api.test", nil,
+        notes: notes)
+
+      stored = store.get_issue(id).not_nil!.notes
+      stored.to_slice.should eq(notes.to_slice)
+    end
+  end
+
   it "appends events and tails them with a forward id cursor (list_events backing)" do
     with_store do |store|
       a = store.insert_event("miner", "job_done", "success", "found 3", goto_tab: "miner", goto_session_id: 7_i64)

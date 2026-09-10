@@ -2152,7 +2152,8 @@ module Gori::Tui
         issues_controller.view.resync(@session.store)
         @toast = "issue updated"
       else
-        new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id, cvss: cvss_val)
+        new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id,
+          cvss: cvss_val, notes: form.notes)
         # `insert_issue` returns 0 — NOT nil — when the write never committed, and 0 is TRUTHY
         # in Crystal: the same trap `Probe::Triage.promote` and `sequencer_promote` both name.
         # Everything below takes `new_id` as an owner id, so swallowing it filed entity_links
@@ -2163,12 +2164,6 @@ module Gori::Tui
           @toast = "could not file the issue (store busy) — nothing was written, ↵ to retry"
           return false
         end
-        # `insert_issue` writes notes '' — it has no notes parameter, and giving it one would
-        # touch every caller. A second write is fine here: this is a one-off create, not the
-        # data path, and it is skipped entirely unless the open-site supplied evidence.
-        # The issue itself is already filed, so a failure here is a HALF landing, not a
-        # rollback — name which half, like `sequencer_promote` does, rather than claim both.
-        notes_lost = !form.notes.empty? && !@session.store.update_issue(new_id, notes: form.notes)
         # History's marked set beyond the primary evidence flow (#442) — one issue, N flows.
         # insert_issue already linked form.flow_id, so exclude it and never re-link. A flow the
         # store can't resolve (a stale mark) is dropped rather than filing an orphan link row, and
@@ -2190,7 +2185,7 @@ module Gori::Tui
           # which is exactly where a marked set arrives, so reporting only the picker's own ref
           # would leave the N flows just attached unmentioned.
           msg = attached > 1 ? "issue ##{new_id} created and linked · #{attached} flows attached" : "issue ##{new_id} created and linked"
-          @toast = notes_lost ? "#{msg} — but its notes did not save (store busy)" : msg
+          @toast = msg
           # Ask open-vs-stay (default stay). FALSE, not true: offer_open_created has just
           # put a confirm up, and "close the overlay" would be asking the shell to close a
           # form it is no longer holding. close_active_overlay's identity check would make
@@ -2205,14 +2200,14 @@ module Gori::Tui
           # row, and one modal per row is one modal too many.
           issues_controller.view.reload(@session.store)
           msg = attached > 0 ? "issue ##{new_id} filed with its capture attached" : "issue ##{new_id} filed"
-          @toast = notes_lost ? "#{msg} — but its notes did not save (store busy)" : msg
+          @toast = msg
         else
           history_controller.cancel_searches if @active_tab == :history
           @active_tab = :issues
           @focus = :body
           issues_controller.view.reload(@session.store)
           msg = attached > 1 ? "issue created with #{attached} flows attached" : "issue created"
-          @toast = notes_lost ? "#{msg} — but its notes did not save (store busy)" : msg
+          @toast = msg
         end
       end
       true

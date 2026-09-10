@@ -104,6 +104,9 @@ module Gori
         cvss : String? = nil
         host : String? = nil
         flow_id : Int64? = nil
+        notes : String? = nil
+        notes_file : String? = nil
+        notes_stdin = false
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run issues create [options]\n\n#{EVIDENCE_LINK_HELP}\n"
@@ -114,6 +117,9 @@ module Gori
           p.on("--cvss=CVSS", "CVSS vector string or numeric score (e.g. 9.8 or CVSS:3.1/...)") { |v| cvss = v }
           p.on("--host=HOST", "Host concerning the issue") { |v| host = v }
           p.on("--flow=ID", "Associated flow ID") { |v| flow_id = parse_flow_id(v, "gori run issues create") }
+          p.on("-nNOTES", "--notes=NOTES", "Free-form notes") { |v| notes = v }
+          p.on("--notes-file=PATH", "Read notes from PATH") { |v| notes_file = v }
+          p.on("--notes-stdin", "Read notes from stdin") { notes_stdin = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run issues create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run issues create: missing value for #{f}" }
@@ -121,6 +127,11 @@ module Gori
         parse_no_positionals(parser, args, "gori run issues create",
           "pass the title as --title TEXT — quote it, a title with spaces is one argument")
 
+        what = "gori run issues create"
+        note_sources = issue_notes_sources(notes: notes, file: notes_file, stdin: notes_stdin)
+        if err = issue_notes_source_error(note_sources, what)
+          abort err
+        end
         abort "gori run issues create: --title is required" if (t = title).nil? || t.empty?
 
         # Refuse a cvss nothing can score, BEFORE the insert. Stored as-is it would sit in a
@@ -141,6 +152,9 @@ module Gori
                      Store::Severity::Info
                    end
 
+        notes = issue_notes_content(notes: notes, file: notes_file, stdin: notes_stdin,
+          io: STDIN, what: what)
+
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
@@ -149,7 +163,9 @@ module Gori
           end
           masked_title = Env.mask_secrets(t)
           masked_host = host.try { |h| Env.mask_secrets(h) }
-          id = store.insert_issue(masked_title, severity, masked_host, flow_id, cvss: cvss)
+          masked_notes = notes.try { |n| Env.mask_secrets(n) }
+          id = store.insert_issue(masked_title, severity, masked_host, flow_id, cvss: cvss,
+            notes: masked_notes || "")
           abort "gori run issues create: failed to persist issue (store busy or unwritable)" if id == 0
           puts "Issue ##{id} created successfully."
         ensure
@@ -170,6 +186,47 @@ module Gori
         return nil unless fid = flow_id
         return "invalid --flow #{fid} (expected a positive flow id)" if fid <= 0
         store.flow_row(fid) ? nil : "no flow with id #{fid}"
+      end
+
+      # One list, shared by the conflict gate and the content selector, so adding a fourth
+      # source cannot make one accept what the other silently resolves by branch order.
+      # Empty `--notes=` is still a selected source: on update it deliberately clears notes.
+      def self.issue_notes_sources(*, notes : String?, file : String?, stdin : Bool) : Array(String)
+        sources = [] of String
+        sources << "--notes" unless notes.nil?
+        sources << "--notes-file" unless file.nil?
+        sources << "--notes-stdin" if stdin
+        sources
+      end
+
+      # The argv-only refusal is evaluated before reading stdin or opening the project. A
+      # command that named two note bodies must not block for EOF before reporting the choice.
+      def self.issue_notes_source_error(sources : Array(String), what : String) : String?
+        return nil if sources.size <= 1
+        "#{what}: #{sources.join(", ")} cannot be combined — pick one notes source"
+      end
+
+      # nil means no notes option was supplied; an empty String means the selected source was
+      # empty and is significant on update. File.read / gets_to_end keep UTF-8, CRLF and a
+      # trailing newline exactly as supplied instead of applying line-oriented normalization.
+      def self.issue_notes_content(*, notes : String?, file : String?, stdin : Bool,
+                                   io : IO, what : String) : String?
+        if f = file
+          read_input_file(f, "#{what}: --notes-file")
+        elsif stdin
+          read_issue_notes_stdin(io, what)
+        else
+          notes
+        end
+      end
+
+      def self.read_issue_notes_stdin(io : IO, what : String) : String
+        if io.is_a?(IO::FileDescriptor) && io.tty?
+          STDERR.puts "#{what}: reading notes from stdin — press ^D to finish"
+        end
+        io.gets_to_end
+      rescue ex : IO::Error
+        abort "#{what}: cannot read notes from stdin: #{ex.message}"
       end
 
       # Remove an issue outright. Distinct from `update --status=resolved|false-positive`,
@@ -213,6 +270,8 @@ module Gori
         title : String? = nil
         sev_s : String? = nil
         notes : String? = nil
+        notes_file : String? = nil
+        notes_stdin = false
         stat_s : String? = nil
         cvss : String? = nil
         clear_cvss = false
@@ -231,6 +290,8 @@ module Gori
             end
           end
           p.on("-nNOTES", "--notes=NOTES", "Free-form notes") { |v| notes = v }
+          p.on("--notes-file=PATH", "Read notes from PATH") { |v| notes_file = v }
+          p.on("--notes-stdin", "Read notes from stdin") { notes_stdin = true }
           p.on("--status=STATUS", "Status: open|confirmed|false-positive|resolved") { |v| stat_s = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run issues update: unknown option: #{f}\n#{p}" }
@@ -244,6 +305,11 @@ module Gori
         abort "gori run issues update: missing <issue-id>" if positional.empty?
         abort "gori run issues update: too many arguments (expected one <issue-id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run issues update: invalid issue id '#{positional[0]}'")
+        what = "gori run issues update"
+        note_sources = issue_notes_sources(notes: notes, file: notes_file, stdin: notes_stdin)
+        if err = issue_notes_source_error(note_sources, what)
+          abort err
+        end
 
         cvss.try do |c|
           abort "gori run issues update: invalid --cvss '#{c}' (a vector like CVSS:3.1/AV:N/... or a score 0.0-10.0)" unless Gori::Cvss.valid?(c)
@@ -262,6 +328,9 @@ module Gori
           else                                                          abort("gori run issues update: invalid status '#{s}' (open|confirmed|false-positive|resolved)")
           end
         end
+
+        notes = issue_notes_content(notes: notes, file: notes_file, stdin: notes_stdin,
+          io: STDIN, what: what)
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)

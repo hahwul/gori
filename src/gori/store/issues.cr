@@ -12,13 +12,14 @@ module Gori
     # id there handed out the rowid of an issue that does not exist, and because
     # `issues.id` is INTEGER PRIMARY KEY without AUTOINCREMENT the next issue created is
     # handed that same id and silently adopts any entity_links written against it.
-    def insert_issue(title : String, severity : Severity, host : String?, flow_id : Int64?, cvss : String? = nil) : Int64
+    def insert_issue(title : String, severity : Severity, host : String?, flow_id : Int64?,
+                     cvss : String? = nil, *, notes : String = "") : Int64
       ts = now_us
       issue_id = 0_i64
       cvss = canonical_cvss(cvss)
       ok = exec_task_ok ->(c : DB::Connection) {
-        c.exec("INSERT INTO issues (created_at, updated_at, title, severity, host, flow_id, notes, cvss) VALUES (?,?,?,?,?,?,'',?)",
-          ts, ts, title, severity.value, host, flow_id, cvss)
+        c.exec("INSERT INTO issues (created_at, updated_at, title, severity, host, flow_id, notes, cvss) VALUES (?,?,?,?,?,?,?,?)",
+          ts, ts, title, severity.value, host, flow_id, notes, cvss)
         # Capture the issue's own id BEFORE the entity_links insert below overwrites
         # last_insert_rowid: exec_task's generic reply reads it AFTER the closure, so with
         # a flow_id it would otherwise return the link row's id, not the issue's.
