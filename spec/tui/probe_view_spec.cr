@@ -100,7 +100,7 @@ describe Gori::Tui::ProbeView do
     end
   end
 
-  it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
+  it "renders the breadcrumb on the detail's top frame border (framed path)" do
     view_store do |store|
       seed(store, "missing_hsts", "a.test")
       view = Gori::Tui::ProbeView.new
@@ -112,7 +112,9 @@ describe Gori::Tui::ProbeView do
       Gori::Tui::BodyChrome.framed(screen, Gori::Tui::Rect.new(0, 0, 80, 16), true) do |inner|
         view.render(screen, inner)
       end
-      backend.row(0).includes?("‹ list").should be_true
+      row = backend.row(0)
+      row.includes?("‹ PROBE").should be_true
+      row.includes?("1/1").should be_true
     end
   end
 

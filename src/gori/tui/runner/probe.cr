@@ -13,6 +13,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     probe_controller.probe_close
   end
 
+  # `n`/`⇧N` in the drill-in — the next/previous finding, in place.
+  def probe_step_item(delta : Int32) : Nil
+    probe_controller.probe_step_item(delta)
+  end
+
   def probe_query : Nil
     probe_controller.view.start_query
   end

@@ -165,6 +165,19 @@ module Gori
         "issue.close", "Back to list", "Return to the issues list", Verb::Scope::IssuesDetail,
         [Verb::Chord.new("escape"), Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.issue_close; nil }
 
+      # n/⇧N: the next/previous ISSUE, without leaving the drill-in. Same spelling as
+      # History's and Probe's pair — one control, three tabs (see verbs/history.cr for why
+      # it is not ⇧J/⇧K).
+      r.register Verb::Definition.new(
+        "issue.next-item", "Next issue", "Open the next issue in the list without leaving the detail",
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("n")],
+        hidden: true) { |ctx| ctx.issue_step_item(1); nil }
+
+      r.register Verb::Definition.new(
+        "issue.prev-item", "Previous issue", "Open the previous issue in the list without leaving the detail",
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("n", shift: true)],
+        hidden: true) { |ctx| ctx.issue_step_item(-1); nil }
+
       # Severity/status edits live on the Space menu (a colour picker) so arrows
       # never change them by accident. The bracket/brace chords stay as hidden
       # power-shortcuts (one-step cycling); the pickers are the discoverable path.

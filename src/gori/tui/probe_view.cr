@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./drill_in"
 require "./read_pane"
 require "./traffic_empty_state"
 require "../settings"
@@ -28,6 +29,7 @@ module Gori::Tui
     include PreviewSplit
     include PreviewPane
     include IssuePresentation
+    include DrillIn::Host # the rail/detail split, its render, and the step-key labels
 
     # See `IssuesView::QUERY_PREFIX` / `FILTER_HINT` / `QUERY_HINT` — the sibling bar over the
     # sibling backend, and the same two reasons: the dropdown anchors to the column the query
@@ -243,6 +245,61 @@ module Gori::Tui
 
     def detail_open? : Bool
       !@detail.nil?
+    end
+
+    # The drill-in's breadcrumb — the twin of IssuesView#detail_crumb, and read the same two
+    # ways (render + the `‹` hit-test). `pos` counts the FILTERED list behind.
+    # The row the drill-in actually has OPEN, as an index into the filtered list — not the
+    # cursor. The two are the same at open time and a reload re-anchors the cursor by id, but
+    # keying the rail off the OPEN item is the only spelling that cannot band a row the detail
+    # is not showing (see HistoryView#detail_row_index, where live capture makes them diverge
+    # every few seconds).
+    def detail_row_index : Int32?
+      d = @detail || return nil
+      @issues.index { |i| i.id == d.id }
+    end
+
+    # See DrillIn::Host.
+    def rail_count : Int32
+      detail_row_index ? {DrillIn::RAIL_ROWS, @issues.size}.min : 0
+    end
+
+    # First index of the window the rail shows. Private: everything outside reads
+    # `rail_rows`/`rail_cursor`, which are derived from it.
+    private def rail_start : Int32
+      here = detail_row_index || return 0
+      DrillIn.window_start(@issues.size, here)
+    end
+
+    # See DrillIn::Host.
+    def rail_cursor : Int32
+      (detail_row_index || 0) - rail_start
+    end
+
+    # The rail's window of list context around the open item — see DrillIn.
+    def rail_rows : Array(DrillIn::RailRow)
+      n = rail_count
+      return [] of DrillIn::RailRow if n == 0
+      @issues[rail_start, n].map do |i|
+        DrillIn::RailRow.new(severity_badge(i.severity), i.title, i.host.presence,
+          severity_color(i.severity))
+      end
+    end
+
+    # The drill-in as a whole: the list rail (when it fits) over the item detail. ONE entry
+    # point — see HistoryView#render_drill, which this mirrors.
+    private def render_drill(screen : Screen, rect : Rect, focused : Bool) : Nil
+      body, meta = render_rail_chrome(screen, rect, focused)
+      render_detail(screen, body, focused, step_meta: meta)
+    end
+
+    # The drill-in's breadcrumb. ONE derivation, read by `render_detail` AND by the
+    # controller's click hit-test — the `‹` is a control, and a control drawn from one rect
+    # and hit-tested against another is a dead button (which is what ` ‹ list ` was).
+    def detail_crumb : Frame::Crumb?
+      issue = @detail || return nil
+      pos = detail_row_index.try { |i| "#{i + 1}/#{@issues.size}" }
+      Frame::Crumb.new("PROBE", issue.title, pos)
     end
 
     # No issues at all (the raw list) — gates "clear all".
@@ -800,7 +857,7 @@ module Gori::Tui
                listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       if @detail
-        render_detail(screen, rect, focused)
+        render_drill(screen, rect, focused)
       else
         list_rect, preview_rect = list_split(rect)
         # No preview pane at this size (or after a resize down) ⇒ snap focus back to the list,
@@ -1101,10 +1158,14 @@ module Gori::Tui
         Probe::Filter::FIELD_HELP_PROC)
     end
 
-    private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
+    private def render_detail(screen : Screen, rect : Rect, focused : Bool,
+                              step_meta : String? = nil) : Nil
       issue = @detail || return
-      # Back-to-list affordance on the top border (←/esc → the issue list).
-      Frame.list_back_hint(screen, rect)
+      # Back-to-list breadcrumb on the top border: which list, which row of it, and what is
+      # open. See Frame::Crumb — the `‹` is a button, hit-tested off the same rect.
+      if c = detail_crumb
+        Frame.crumb(screen, rect, c, meta: step_meta)
+      end
       w = {rect.w - 2, 0}.max
       code_label = "##{issue.code}"
       screen.text(rect.right - code_label.size - 1, rect.y, code_label, Theme.muted)

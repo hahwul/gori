@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./drill_in"
 require "./query_suggest"
 require "./suggest_popup"
 require "./traffic_empty_state"
@@ -34,7 +35,8 @@ module Gori::Tui
   # (no queue/ranking, P8). A QL bar (`/`) filters the list; analysis is by query
   # (pull), with field/value suggestions while typing. Also owns the detail view.
   class HistoryView
-    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
+    include QueryBarEdit  # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
+    include DrillIn::Host # the rail/detail split, its render, and the step-key labels
 
     # After a `LineEdit` edit: the dropdown follows the token now under the caret.
     def query_edited : Nil
@@ -1081,6 +1083,78 @@ module Gori::Tui
     # The flow id currently open in the detail overlay (nil when the list is showing).
     def detail_flow_id : Int64?
       @detail.try(&.row.id)
+    end
+
+    # The row the drill-in actually has OPEN, as an index into the filtered list — not the
+    # cursor. Live capture advances the cursor (`@selected = 0` under follow, which is the
+    # default) while the detail stays on its own flow, and `history_target_flow_id` already
+    # carries that warning for every detail verb: a rail keyed off `@selected` would band a
+    # row that is not open, print someone else's position, and step from the tail.
+    #
+    # nil when the open flow is not in the list at all — a deep link from Issues, Sitemap,
+    # Discover or a link jump can open a flow the current filter excludes — and then there is
+    # no rail, no position and nothing to step through.
+    def detail_row_index : Int32?
+      id = detail_flow_id || return nil
+      @rows.index { |r| r.id == id }
+    end
+
+    # Rows in the filtered list — the bound the item step clamps against.
+    def row_count : Int32
+      @rows.size
+    end
+
+    # See DrillIn::Host.
+    def rail_count : Int32
+      detail_row_index ? {DrillIn::RAIL_ROWS, @rows.size}.min : 0
+    end
+
+    # First index of the window the rail shows. Private: everything outside reads
+    # `rail_rows`/`rail_cursor`, which are derived from it.
+    private def rail_start : Int32
+      here = detail_row_index || return 0
+      DrillIn.window_start(@rows.size, here)
+    end
+
+    # See DrillIn::Host.
+    def rail_cursor : Int32
+      (detail_row_index || 0) - rail_start
+    end
+
+    # The rail's window of list context around the open flow — see DrillIn. Maps the list row
+    # onto the shared three-part shape; nothing of the list RENDERER is involved, which is
+    # what keeps a 200-line column layout out of a three-row readout.
+    def rail_rows : Array(DrillIn::RailRow)
+      n = rail_count
+      return [] of DrillIn::RailRow if n == 0
+      start = rail_start
+      @rows[start, n].map do |r|
+        status, scolor = FlowStatus.cell(r)
+        DrillIn::RailRow.new(status, "#{r.method} #{r.host}#{origin_path_memo(r)}",
+          fmt_time_memo(r.created_at), scolor)
+      end
+    end
+
+    # The drill-in as a whole: the list rail (when it fits) over the flow detail. ONE entry
+    # point, so the controller cannot draw the rail and then hit-test as though it were not
+    # there.
+    def render_drill(screen : Screen, inner : Rect, focused : Bool, strip_focused : Bool) : Nil
+      body, meta = render_rail_chrome(screen, inner, focused, active: focused || strip_focused)
+      render_detail(screen, body, focused: focused, strip_focused: strip_focused, step_meta: meta)
+    end
+
+    # The drill-in's breadcrumb. ONE derivation, read by `render_detail` AND by
+    # HistoryController's click hit-test — the `‹` is a control, and a control drawn from
+    # one rect and hit-tested against another is a dead button (which is what the old
+    # ` ‹ list ` was in all three tabs).
+    #
+    # `pos` counts the FILTERED list and names the OPEN flow's place in it, which is what
+    # the step chords move through.
+    def detail_crumb : Frame::Crumb?
+      d = @detail || return nil
+      row = d.row
+      pos = detail_row_index.try { |i| "#{i + 1}/#{@rows.size}" }
+      Frame::Crumb.new("HISTORY", "#{row.method} #{row.host}#{origin_path_memo(row)}", pos)
     end
 
     def selected_id : Int64?
@@ -2455,6 +2529,15 @@ module Gori::Tui
       set_detail_pane(pane) if detail_panes.includes?(pane)
     end
 
+    # Which pane is on screen. Read by the item step so it can carry the pane you are
+    # reading into the next flow — comparing one pane across rows is what stepping is FOR,
+    # and `open_detail_id` resets to `initial_detail_pane` on every open. `set_detail_pane_public`
+    # is the other half: it declines a pane the new flow does not offer, so a step off a JWT
+    # request onto one without a token lands on that flow's opening pane rather than nothing.
+    def detail_pane : Symbol
+      @detail_pane
+    end
+
     # Two-level detail focus: the chip row (:strip) vs the caret/text body (:body).
     # ←/→ switch panes at the strip level and move the caret at the body level; the
     # split is invisible to the verb layer (current_scope keys off @overlay only).
@@ -3176,15 +3259,19 @@ module Gori::Tui
       end
     end
 
-    def render_detail(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false) : Nil
+    def render_detail(screen : Screen, rect : Rect, focused : Bool = true, strip_focused : Bool = false,
+                      step_meta : String? = nil) : Nil
       return if rect.empty?
       detail = @detail
       unless detail
         screen.text(rect.x + 1, rect.y, "no flow selected", Theme.muted)
         return
       end
-      # Back-to-list affordance on the top border (← past REQUEST / esc → the list).
-      Frame.list_back_hint(screen, rect)
+      # Back-to-list breadcrumb on the top border: which list, which row of it, and what is
+      # open. See Frame::Crumb — the `‹` is a button, hit-tested off the same rect.
+      if c = detail_crumb
+        Frame.crumb(screen, rect, c, meta: step_meta)
+      end
       # Pane strip: show ALL panes as chips with the active one highlighted, so it's
       # obvious there's more behind (←/→ walk `detail_panes`, in that order).
       x = render_detail_chips(screen, rect, strip_focused)

@@ -8,6 +8,8 @@ abstract class Gori::Verb::ExecContext
   abstract def issues_move(delta : Int32) : Nil
   abstract def issues_open : Nil
   abstract def issue_close : Nil
+  # `n`/`⇧N` inside the drill-in — open the next/previous issue without returning to the list.
+  abstract def issue_step_item(delta : Int32) : Nil
   abstract def issues_delete : Nil
   # ⇧X — delete EVERY issue in the project (after a confirm). The whole-tab wipe the
   # clear-all family shares (#899); `issues_delete` is the selection-delete beside it.

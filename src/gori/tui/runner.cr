@@ -2657,7 +2657,15 @@ module Gori::Tui
         case @focus
         when :menu    then "TABS"
         when :subtabs then "SUBTABS"
-        else               body_editor? ? "EDITOR" : "BODY"
+        else
+          # The controller names its own body state (TabController#body_badge) — the same
+          # answer `body_editor?` reads, asked one level wider so a view-owned drill-in can
+          # say DETAIL too. History's arrives above, off `@overlay`.
+          case @tabs[@active_tab]?.try(&.body_badge)
+          when :editor then "EDITOR"
+          when :detail then "DETAIL"
+          else              "BODY"
+          end
         end
       end
     end

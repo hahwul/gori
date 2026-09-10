@@ -10,8 +10,10 @@ abstract class Gori::Verb::ExecContext
 
   # probe (passive/active scan issues — grouped by code+host)
   abstract def probe_move(delta : Int32) : Nil
-  abstract def probe_open : Nil          # open the selected issue's detail
-  abstract def probe_close : Nil         # back to the list
+  abstract def probe_open : Nil  # open the selected issue's detail
+  abstract def probe_close : Nil # back to the list
+  # `n`/`⇧N` inside the drill-in — open the next/previous finding without returning to the list.
+  abstract def probe_step_item(delta : Int32) : Nil
   abstract def probe_query : Nil         # focus the `/` filter bar
   abstract def probe_set_mode : Nil      # open the OFF/Passive/Active picker
   abstract def probe_clear : Nil         # delete all issues (after a confirm)
