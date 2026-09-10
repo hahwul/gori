@@ -41,7 +41,10 @@ class FakeHost
   def request_focus(pane : Symbol) : Nil
   end
 
+  getter focus_body_calls = 0
+
   def focus_body : Nil
+    @focus_body_calls += 1
   end
 
   def resolve_subtab_focus : Nil
@@ -88,6 +91,14 @@ class FakeHost
 
   def diff_to_comparer : Nil
     @diff_comparer_sends += 1
+  end
+
+  # The Issues detail's RELATED row ↵ — same shape, same reason: a double-click on a link row
+  # has to be shown reaching the seam, and the navigation itself is the Runner's.
+  getter issue_link_opens = 0
+
+  def issue_open_link : Nil
+    @issue_link_opens += 1
   end
 
   def open_space_menu : Nil

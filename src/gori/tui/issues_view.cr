@@ -1432,6 +1432,51 @@ module Gori::Tui
       notes_card_rect(rect).inset(1, 1)
     end
 
+    # Outer RELATED card geometry (full width of the detail pane, over NOTES) — the twin of
+    # `notes_card_rect`, read off the same `detail_split` so the four RELATED hit-tests below
+    # can never disagree with `render_related_card` about which row a click landed on.
+    def links_card_rect(rect : Rect) : Rect
+      detail_split(rect)[0]
+    end
+
+    # Interior of the RELATED card (where the link rows draw) — matches Frame.card's inset.
+    # `Rect#inset` clamps at zero, so a card too short to draw one answers an empty rect and
+    # every caller below refuses on `empty?`.
+    def links_body_rect(rect : Rect) : Rect
+      links_card_rect(rect).inset(1, 1)
+    end
+
+    # Inverts `render_related_card`'s row layout: maps a click to a link index, or nil past
+    # the last populated row / outside the card. `list_row_at`'s twin, windowed from
+    # `@links_scroll` the same way the draw loop is.
+    def links_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      body = links_body_rect(rect)
+      return nil if body.empty?
+      return nil if mx < body.x || mx >= body.right
+      i = my - body.y
+      return nil if i < 0 || i >= body.h
+      idx = @links_scroll + i
+      idx < @detail_resolved.size ? idx : nil
+    end
+
+    # The row a click on the RELATED scroll gauge asks for. The gauge rides the card's right
+    # border column — one OUTSIDE `links_body_rect`, which is why `links_row_at` cannot answer
+    # it — and `@links_scroll` is DERIVED from the selection by `ensure_links_visible`, so the
+    # answer is a selection and not an offset (see `gauge_row_at`).
+    def links_gauge_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      body = links_body_rect(rect)
+      return nil if body.empty?
+      Frame.scroll_gauge_row(body, @detail_resolved.size, mx, my)
+    end
+
+    # Put the RELATED cursor on `idx` (clamped) and scroll it into view — the pointer's
+    # `move_links`, which is relative and cannot express "this row".
+    def select_link(idx : Int32) : Nil
+      return if @detail_resolved.empty?
+      @selected_link = idx.clamp(0, @detail_resolved.size - 1)
+      ensure_links_visible
+    end
+
     # The shared over-paint — see `TextReadState#paint_chrome`. This pane's own copy also
     # skipped the `sync_from` its four siblings carry, so an MCP `update_issue` shrinking the
     # notes under a stale read cursor could index off the end of the buffer mid-render.
