@@ -270,6 +270,27 @@ describe "History — Colormarker row marks" do
     end
   end
 
+  # The colour memo is not the only thing keyed by the bare id: `@path_memo` is too, so the same
+  # delete leaves the new flow drawn under the DELETED one's path. One drop covers both.
+  it "does not draw a reused flow id under the deleted flow's path" do
+    with_store do |store|
+      id = add_flow(store, target: "/deleted-secret")
+      view = HistoryView.new
+      view.reload(store)
+      first = MemoryBackend.new(120, 12)
+      view.render_list(Screen.new(first), Rect.new(0, 0, 120, 12))
+      first.contains?("/deleted-secret").should be_true # the premise: it is drawn and memoised
+
+      view.delete_ids(store, [id]).should be_true
+      add_flow(store, target: "/brand-new").should eq(id)
+      view.reload(store)
+      after = MemoryBackend.new(120, 12)
+      view.render_list(Screen.new(after), Rect.new(0, 0, 120, 12))
+      after.contains?("/brand-new").should be_true
+      after.contains?("/deleted-secret").should be_false
+    end
+  end
+
   # `clear` is the sharper case: it RESTARTS rowid numbering, so the next capture is id 1 —
   # which is the id the memo is most likely to still be holding an answer for.
   it "does not paint the first flow after a clear with the wiped flow's colour" do
@@ -284,11 +305,12 @@ describe "History — Colormarker row marks" do
         view.render_list(Screen.new(MemoryBackend.new(80, 12)), Rect.new(0, 0, 80, 12))
 
         view.clear(store).should be_true
-        add_flow(store, host: "good.test").should eq(1_i64)
+        add_flow(store, host: "good.test", target: "/brand-new").should eq(1_i64)
         view.reload(store)
-        after = MemoryBackend.new(80, 12)
-        view.render_list(Screen.new(after), Rect.new(0, 0, 80, 12))
+        after = MemoryBackend.new(120, 12)
+        view.render_list(Screen.new(after), Rect.new(0, 0, 120, 12))
         after.grid[3][1].should eq(' ')
+        after.contains?("/brand-new").should be_true # the path memo goes with it
       end
     end
   end

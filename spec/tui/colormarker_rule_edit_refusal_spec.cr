@@ -376,6 +376,27 @@ describe "Gori::Tui::ColormarkerController#colormarker_duplicate" do
     end
   end
 
+  # The mirror of the example below, pinned so the trade-off stays a CHOICE: `enabled?` on a
+  # merged global rule is this project's effective answer, so a rule this project overrode ON is
+  # copied with its default ON — armed in every other project. Taking the library default
+  # instead would un-fix the case below, where an operator watches a rule they just switched off
+  # come back armed in front of them. See the comment on `colormarker_duplicate`.
+  it "copies a global rule this project switched ON as enabled everywhere" do
+    with_globals do
+      with_colormarker_controller do |ctl, _host, _session|
+        with_own_settings do
+          Gori::Settings.add_colormarker_rule("host:g", "red", "full", "g", false).should_not eq(0_i64)
+          ctl.on_enter
+          ctl.colormarker_toggle # this project disagrees: on here, off in the library
+          ctl.selected_rule.try(&.enabled?).should be_true
+          ctl.colormarker_duplicate
+          Gori::Settings.colormarker_rules.map { |r| {r.name, r.enabled} }
+            .should eq([{"g", false}, {"g copy", true}])
+        end
+      end
+    end
+  end
+
   it "copies a global rule this project switched off as disabled EVERYWHERE" do
     with_globals do
       with_colormarker_controller do |ctl, _host, _session|

@@ -747,7 +747,11 @@ module Gori
             more = pv.total > pv.scanned ? " (of #{pv.total} total; scan capped)" : ""
             claimed = pv.matched - pv.painted
             tail = claimed > 0 ? "; #{pv.painted} would actually be painted (#{claimed} claimed by an earlier rule)" : ""
-            puts "Would match #{pv.matched} of #{pv.scanned} recent flows#{more}#{tail}."
+            # The scope LEADS, and it is printed even at the default: `would be painted` depends
+            # on it, so a transcript of `preview --scope=global` that looked identical to the
+            # project answer would be a number nobody could interpret afterwards. The JSON branch
+            # above carries the same field for the same reason.
+            puts "As a #{scope.label} rule: would match #{pv.matched} of #{pv.scanned} recent flows#{more}#{tail}."
             notes.each { |n| STDERR.puts "note: #{n}" }
           end
         ensure

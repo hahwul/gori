@@ -249,6 +249,28 @@ describe ColormarkerRuleOverlay do
       noisy.contains?("⚠ `host:` is a substring here").should be_true
     end
 
+    it "re-previews when the SCOPE row is cycled, not only the condition" do
+      # `candidate_rule` feeds the scope to `Colormarker.rules_ahead`, which answers a different
+      # set of rules-ahead for a global candidate than for a project one. Gated on the condition
+      # alone, `→` on the scope row left the band showing the other scope's number — the exact
+      # stale answer `rules_ahead` exists to remove, arriving by the back door.
+      seen = [] of Gori::Store::RuleScope
+      ov = ColormarkerRuleOverlay.new(match_filter: "host:a")
+      ov.on_preview = ->(r : Gori::Store::ColorRule) { seen << r.scope; "matched 1 of 1 recent flows" }
+      area = Rect.new(0, 0, 100, 24)
+      ov.render(Screen.new(MemoryBackend.new(100, 24)), area)
+      seen.map(&.label).should eq(["project"])
+
+      ov.set_selected(ColormarkerRuleOverlay::ROW_SCOPE)
+      ov.handle_key(key(Termisu::Input::Key::Right))
+      ov.render(Screen.new(MemoryBackend.new(100, 24)), area)
+      seen.map(&.label).should eq(["project", "global"])
+
+      # …and still only on a real change: a redraw at the same scope and condition re-scans nothing.
+      ov.render(Screen.new(MemoryBackend.new(100, 24)), area)
+      seen.size.should eq(2)
+    end
+
     it "leads with the count, which an ellipsis would otherwise eat" do
       # The card is capped at RULE_FORM_W and these sentences are longer, so a trailing
       # "(+1 more)" is the first thing clipped — and "there is another caveat" is exactly the

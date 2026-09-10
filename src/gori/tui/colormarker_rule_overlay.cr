@@ -323,14 +323,22 @@ module Gori::Tui
     # operator typed something. The gate makes the render-path call a no-op on every frame after
     # the first.
     private def refresh_preview : Nil
-      sig = condition
+      cond = condition
+      # The SCOPE is in the signature, not the condition alone. `candidate_rule` hands it to
+      # `Colormarker.rules_ahead`, which answers a DIFFERENT set of rules-ahead for a global
+      # candidate than for a project one — so gated on the condition, cycling the scope row left
+      # the band showing the other scope's number until the operator happened to touch the
+      # condition again. That is the very stale answer `rules_ahead` exists to remove, arriving
+      # by the back door. (An EDIT pins `@edit_scope`, so its cycler legitimately changes
+      # nothing here: the rule is still where it was opened until the commit re-homes it.)
+      sig = "#{(@edit_scope || scope).label}\u0000#{cond}"
       return if sig == @preview_sig
       @preview_sig = sig
       ok = valid?
       @preview = ok ? (@on_preview.try(&.call(candidate_rule)) || "") : ""
       # Caveats about an UNUSABLE condition would be noise: the Save row is already showing why
       # it cannot be saved, which is the more urgent sentence.
-      @notes = ok ? Colormarker.advise(sig) : [] of String
+      @notes = ok ? Colormarker.advise(cond) : [] of String
     end
 
     # The caveat line drawn between the last field and the band, in `advise`'s own words: they

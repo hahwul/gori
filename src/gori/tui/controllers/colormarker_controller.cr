@@ -413,6 +413,16 @@ module Gori::Tui
     # the operator had deliberately switched off produced an ARMED copy that started painting
     # rows on the next frame. For a global rule it was worse still, since the copy's state is
     # the LIBRARY DEFAULT: a rule switched off in this project came back on in every other one.
+    #
+    # For a global rule `enabled?` is this project's EFFECTIVE answer, which may be an override
+    # rather than the library's default, and that is the deliberate reading — the same one
+    # `set_scope` already applies when it promotes a rule across the boundary. The row the
+    # operator is duplicating shows THIS project's answer, so the copy reproducing that row is
+    # the least surprising thing in the surface where the gesture happens. The price, stated so
+    # it is a choice rather than an accident: a global rule this project overrode ON is copied
+    # with its default ON, which arms the copy in every other project too. Taking the library
+    # default instead would trade that for the worse half — it would un-fix the case above,
+    # where an operator watches a rule they just switched off come back armed in front of them.
     def colormarker_duplicate : Nil
       rule = selected_rule || return @host.status("no colour rule selected")
       name = rule.name.empty? ? "" : "#{rule.name} copy"
