@@ -1161,7 +1161,13 @@ module Gori::Proxy
     # came back", which is also exactly what an accept-then-close proxy produces. `TlsVerify` is
     # deliberately excluded: a certificate WAS exchanged and rejected, so real bytes crossed the
     # tunnel and the origin — not the proxy — earned that verdict.
-    private def self.tls_dial_error(ex : Exception, io_timeout : Time::Span, host : String) : DialError
+    #
+    # Public because `Gori::HttpTransport` wraps its own TLS by hand (gori's service traffic
+    # skips host overrides and the outbound-TLS policy, so it cannot go through
+    # `dial_tls_result`) and must reach the SAME six verdicts — the alternative is a second
+    # classifier that drifts, which is how OAST registration came to report every TLS failure
+    # as one unexplained sentence (#1020).
+    def self.tls_dial_error(ex : Exception, io_timeout : Time::Span, host : String) : DialError
       # A read timeout is not a TLS verdict — nothing came back to judge. Naming the layer
       # TLS here is precisely what produced the certificate advice for a black hole, so it
       # gets its own kind and carries how long gori actually waited (the stall was otherwise

@@ -1600,7 +1600,16 @@ module Gori::Tui
       @registering.delete(reg.provider_key) # registration resolved (ok or err) — clear the in-flight guard
       case reg
       when RegErr
+        # BOTH, and the notification is the one that matters. The failure message now names the
+        # stage that broke and the remedy that fits it (a CA bundle for a rejected chain, a
+        # resolver for a name that never resolved — see `HttpTransport`), and that sentence is
+        # longer than a status line, which truncates exactly the half worth reading. The status
+        # line stays for the operator watching the screen this second; the notification is where
+        # the remedy survives being pushed off by the next status write (#1020).
         @host.status("OAST register failed (#{reg.provider_label}): #{reg.message}")
+        @host.notifications.push(:warn,
+          "OAST register failed (#{reg.provider_label}): #{reg.message}",
+          Jobs::Goto.new(:oast), source: "oast")
       when RegOk
         unless @providers.any? { |p| p.key == reg.provider_key }
           # The provider was deleted or scope-migrated while the round trip was in flight — its
