@@ -2341,13 +2341,19 @@ spellings that work (P4). `Run.stdin_terminal_error` is the one verdict and
 PATH that resolves to a terminal (`--request-file /dev/stdin` under a tty), which
 `read_input_file` checks on the open it was already making.
 
+A WORDLIST path is covered too, through `Gori::TtyPath.terminal?` — one predicate for the
+three loaders (`Fuzz::Payload::WordlistFile`, `Miner::Wordlist`, `Discover::Wordlist`), each
+raising what its own error funnel already catches. The predicate stats before it opens:
+`character_device?` is true for every terminal and false for a FIFO, so the probe never opens
+the named pipe whose open would BLOCK until a writer arrives — the one source the lazy
+wordlist reader exists to serve. That pre-check is why the predicate has one home rather than
+three copies.
+
 **What it does not:** the IMPLICIT stdin roads (`fuzz`/`mine`/`sequence` sources, `decoder`,
 `jwt`, `cookie`, `notes`) keep their own `unless STDIN.tty?` fallback — there a terminal means
-"no source was given", not "the operator asked for this one" — and a wordlist
-(`Fuzz::Payload::WordlistFile`, which documents `-w /dev/stdin` as a supported source) still
-blocks on one. That road is streamed rather than read as a document, and its readability check
-only stats the path; opening it to test `tty?` would block on the FIFO wordlist the same check
-exists to serve, so it is left for its own change.
+"no source was given", not "the operator asked for this one". They do share the explicit
+doors' `IO::Error` rescue now (`Run.read_stdin_fallback`): fd 0 closed by a cron or systemd
+unit used to reach the operator as a Crystal backtrace on all seven.
 
 A pipe and a `< file` redirect are non-tty file descriptors and are unchanged, byte-for-byte,
 so no script or CI job moves. A pty-backed but non-interactive fd 0 — `ssh -t`, `docker -t`,

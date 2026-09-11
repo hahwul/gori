@@ -331,11 +331,14 @@ generate-request | gori run repeater create --target https://api.example.com --r
 같은 규칙은 operator가 **플래그로 지정한** 모든 stdin 경로에 적용됩니다 — `issues --notes-stdin`,
 그리고 stdin을 `-`로 쓰는 네 가지(`sequence --tokens -`, `authorize --identities=-`,
 `rewriter --response-file=-`, 그리고 `--…-file` 계열 플래그의 `-`) — 여기에 터미널로 해석되는
-**경로**(tty에서의 `--request-file /dev/stdin` 등)까지 포함됩니다. 반대로 플래그 없이 gori가
-fallback으로 읽는 stdin 경로(`fuzz`, `mine`, `sequence`, `decoder`, `jwt`, `cookie`, `notes`)는
-해당하지 않습니다. 거기서 터미널은 "소스를 주지 않았다"는 뜻이고, 각 명령이 자체 usage를 출력합니다.
-**워드리스트**(`fuzz -w /dev/stdin` 및 `mine` / `discover` 대응)도 아직 해당하지 않으며, 터미널에서는
-여전히 블록됩니다.
+**경로**(tty에서의 `--request-file /dev/stdin` 등)까지 포함됩니다. **워드리스트** 경로도 포함됩니다 — `fuzz -w`, `mine --wordlist`,
+`discover --wordlist`는 `/dev/tty`(그리고 tty 상태의 `/dev/stdin`)를 무한 대기 대신
+`wordlist error: … is a terminal, not a file`로 거부합니다.
+
+반대로 플래그 없이 gori가 fallback으로 읽는 stdin 경로(`fuzz`, `mine`, `sequence`, `decoder`,
+`jwt`, `cookie`, `notes`)는 해당하지 않습니다. 거기서 터미널은 "소스를 주지 않았다"는 뜻이고, 각
+명령이 자체 usage를 출력합니다. 다만 이 경로들도 이제 읽을 수 없는 stdin(cron/systemd가 fd 0을 닫은
+경우)을 backtrace가 아니라 한 문장으로 보고합니다 — 플래그 도어가 이미 그랬던 것처럼.
 
 | Option | Description |
 |--------|-------------|

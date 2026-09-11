@@ -509,6 +509,20 @@ module Gori
         abort "#{what}: cannot read the #{noun} from stdin: #{ex.message}"
       end
 
+      # The IMPLICIT stdin road's read: no terminal guard — a terminal there means "no source
+      # was given", and each caller already answers that with its own usage line — but the
+      # same `IO::Error` rescue the explicit doors get. `Run.dispatch` re-raises any non-EPIPE
+      # `IO::Error` and `CLI.run` rescues only `Gori::Error`, so fd 0 closed by a cron or
+      # systemd unit (`gori run notes create 0<&-`) reached the operator as a Crystal
+      # backtrace on all seven of these while the five flag doors printed a sentence.
+      #
+      # `noun` names what was being read, so the refusal reads like the command that spoke.
+      def self.read_stdin_fallback(io : IO, what : String, noun : String) : String
+        io.gets_to_end
+      rescue ex : IO::Error
+        abort "#{what}: cannot read the #{noun} from stdin: #{ex.message}"
+      end
+
       # nil when `io` is the pipe/redirect an explicit stdin flag (or a `-` path) asks for;
       # the sentence to `abort` with when it is a TERMINAL instead. Public so a spec can pin
       # both arms — the `abort` above cannot be driven in-process.

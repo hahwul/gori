@@ -1,3 +1,5 @@
+require "../tty_path"
+
 module Gori::Discover
   # The candidate directory/path names for the brute-forcer. The built-in list is baked
   # into the binary at compile time (gori ships no runtime asset dir); an optional user
@@ -39,6 +41,13 @@ module Gori::Discover
     # entries instead of being silently trimmed and then DEDUPED away against the
     # trimmed twin (round 7, h1-seams.md FINDING 4).
     private def self.merge_user_file(path : String, & : String ->) : Nil
+      # `IO::Error`, so it rides the same funnel a missing or unreadable path does and reaches
+      # every surface as `wordlist error: …` rather than as a backtrace. A terminal never ends
+      # and echoes every byte typed into the scrollback, so `--wordlist /dev/tty` hung (#1034).
+      if Gori::TtyPath.terminal?(path)
+        raise IO::Error.new("wordlist is a terminal, not a file: #{path} — pipe the list in " \
+                            "(`generator | gori run discover … --wordlist /dev/stdin`) or name a real path")
+      end
       File.each_line(path, chomp: true) do |line|
         trimmed = line.strip
         next if trimmed.empty? || trimmed.starts_with?('#')

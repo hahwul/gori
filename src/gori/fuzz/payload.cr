@@ -1,3 +1,4 @@
+require "../tty_path"
 require "uri"
 require "base64"
 require "digest/md5"
@@ -149,6 +150,12 @@ module Gori::Fuzz
       raise Gori::Error.new("wordlist not found: #{@path}") unless File.exists?(@path)
       raise Gori::Error.new("wordlist is a directory, not a file: #{@path}") if File.directory?(@path)
       raise Gori::Error.new("wordlist not readable: #{@path}") unless File::Info.readable?(@path)
+      # A terminal is a character device that never ends: the count pass below would block on
+      # it forever, and every byte typed would be echoed into the scrollback first (#1034).
+      if Gori::TtyPath.terminal?(@path)
+        raise Gori::Error.new("wordlist is a terminal, not a file: #{@path} — pipe the list in " \
+                              "(`generator | gori run fuzz … -w /dev/stdin`) or name a real path")
+      end
     end
 
     private class LineIterator < SetIterator

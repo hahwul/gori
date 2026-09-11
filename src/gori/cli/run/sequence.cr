@@ -278,7 +278,7 @@ module Gori
             "replay it with `gori run repeater #{id} --keep-request-line` to keep it")
           {built.bytes, built.target, built.http2, true}
         elsif !STDIN.tty?
-          {STDIN.gets_to_end.to_slice, nil, false, false}
+          {read_stdin_fallback(STDIN, "gori run sequence", "request").to_slice, nil, false, false}
         else
           abort "gori run sequence: no source — give a <flow-id>, --request FILE, or pipe a request on stdin"
         end

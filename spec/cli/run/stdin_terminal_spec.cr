@@ -222,6 +222,48 @@ describe "gori run — stdin doors refuse a terminal" do
       cli_source("run", "authorize.cr").should contain("flag: \"--identities=-\"")
     end
 
+    # The IMPLICIT roads read through `read_stdin_fallback`, not a bare `io.gets_to_end`. They
+    # take no terminal guard — a terminal there means "no source was given", and each command
+    # answers that with its own usage line — but they do take the same `IO::Error` rescue, or
+    # fd 0 closed by a cron/systemd unit (`gori run notes create 0<&-`) reaches the operator as
+    # a Crystal backtrace while the five flag doors print a sentence.
+    it "routes every implicit stdin road through the rescued fallback reader" do
+      {
+        {"notes.cr", "gori run notes"}, {"decoder.cr", "gori run decoder"},
+        {"jwt.cr", "gori run jwt"}, {"cookie.cr", "gori run cookie"},
+        {"mine.cr", "gori run mine"}, {"fuzz.cr", "gori run fuzz"},
+        {"sequence.cr", "gori run sequence"},
+      }.each do |file, what|
+        src = cli_source("run", file)
+        src.should contain("read_stdin_fallback(STDIN, \"#{what}\"")
+        # …and no bare read left beside it.
+        src.should_not contain("STDIN.gets_to_end")
+      end
+      method_body(cli_source("run.cr"), "read_stdin_fallback")
+        .should contain("rescue ex : IO::Error")
+    end
+
+    # A PATH that names a terminal is refused by the three wordlist loaders too, each raising
+    # what its own error funnel already catches — `Gori::Error` for fuzz, `IO::Error` for the
+    # miner/discover pair, whose `PlanError::Reason::Wordlist` arm reports it as
+    # `wordlist error: …`. The predicate itself has ONE home.
+    it "refuses a terminal wordlist in all three loaders, through one predicate" do
+      root = File.join(__DIR__, "..", "..", "..", "src", "gori")
+      {
+        {"fuzz/payload.cr", "Gori::Error.new"},
+        {"miner/wordlist.cr", "IO::Error.new"},
+        {"discover/wordlist.cr", "IO::Error.new"},
+      }.each do |file, raises|
+        src = File.read(File.join(root, file))
+        src.should contain("Gori::TtyPath.terminal?")
+        src.should contain("is a terminal, not a file")
+        src.should contain(raises)
+      end
+      # No second copy of the predicate anywhere: the `character_device?` pre-check is what
+      # keeps it from blocking on a FIFO, and a re-derivation next to a caller loses it.
+      File.read(File.join(root, "tty_path.cr")).should contain("character_device?")
+    end
+
     # The sweep, and the point of the whole file: a NEW stdin road cannot be added without
     # either the explicit guard or the implicit road's own `STDIN.tty?` fallback check. Both
     # spellings are legitimate — an implicit source treats a terminal as "no source was
@@ -236,7 +278,7 @@ describe "gori run — stdin doors refuse a terminal" do
     # It cannot see an aliased handle (`io = STDIN` then `io.gets_to_end`), and it deliberately
     # does not reach `src/gori/mcp/server.cr`, whose stdio transport IS stdin by design.
     it "leaves no unguarded STDIN read anywhere under src/gori/cli" do
-      read = /STDIN\.(gets|read|each_line|peek)|IO\.copy\(\s*STDIN/
+      read = /STDIN\.(gets|read|each_line|peek)|IO\.copy\(\s*STDIN|read_stdin_fallback\(\s*STDIN/
       negative_guard = /(unless\s+.*STDIN\.tty\?)|(!\s*STDIN\.tty\?)/
       unguarded = [] of String
       Dir.glob(File.join(CLI_DIR, "**", "*.cr")).sort.each do |path|

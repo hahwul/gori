@@ -46,7 +46,7 @@ module Gori
 
         (msg = decoder_input_twice_error(input_flag, positional[1]?)) && abort(msg)
         input_str = input_flag || positional[1]?
-        input_str ||= STDIN.gets_to_end unless STDIN.tty?
+        input_str ||= read_stdin_fallback(STDIN, "gori run decoder", "input") unless STDIN.tty?
         abort "gori run decoder: no input (pass it as an argument, --input, or via STDIN)" if input_str.nil?
 
         result = Decoder.run(Decoder.shared_registry, input_str.to_slice, chain)

@@ -331,11 +331,15 @@ newline needs two of them and a PTY-driven harness that sends one waits forever.
 The same rule covers every stdin road an operator names by **flag** — `issues --notes-stdin`,
 and the four that spell stdin `-` (`sequence --tokens -`, `authorize --identities=-`,
 `rewriter --response-file=-`, and `-` on any of the `--…-file` flags) — plus a *path* that
-resolves to a terminal, such as `--request-file /dev/stdin` under a tty. It does **not** cover
-the stdin sources gori falls back to when no flag was given (`fuzz`, `mine`, `sequence`,
-`decoder`, `jwt`, `cookie`, `notes`): there a terminal means "no source was given", and those
-commands print their own usage line instead. It also does not yet cover a **wordlist**
-(`fuzz -w /dev/stdin` and its `mine` / `discover` twins), which still blocks on a terminal.
+resolves to a terminal, such as `--request-file /dev/stdin` under a tty. A **wordlist** path is covered too — `fuzz -w`, `mine --wordlist`
+and `discover --wordlist` each refuse `/dev/tty` (and `/dev/stdin` under one) with
+`wordlist error: … is a terminal, not a file` instead of blocking forever.
+
+It does **not** cover the stdin sources gori falls back to when no flag was given (`fuzz`,
+`mine`, `sequence`, `decoder`, `jwt`, `cookie`, `notes`): there a terminal means "no source was
+given", and those commands print their own usage line instead. Those roads do now report an
+unreadable stdin (fd 0 closed by a cron or systemd unit) as a sentence rather than a
+backtrace, as the flag doors already did.
 
 | Option | Description |
 | -------- | ------------- |
