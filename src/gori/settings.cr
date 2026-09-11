@@ -22,6 +22,7 @@ require "./settings/probe"
 require "./settings/discover"
 require "./settings/update"
 require "./settings/fuzzer"
+require "./settings/redaction"
 
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
@@ -275,6 +276,7 @@ module Gori
         pr["active_notify"]?.try(&.as_s?).try { |s| self.probe_active_notify = s }
       end
       parse_discover_prefs(root["discover"]?)
+      parse_redaction(root["redaction"]?)
       parse_layout(root["layout"]?)
       parse_statusline(root["statusline"]?)
       parse_display(root["display"]?)
@@ -949,7 +951,7 @@ module Gori
       theme mouse mouse_drag pretty_bodies layout statusline display companion notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
-      hooks colormarker saved_views
+      hooks colormarker saved_views redaction
     ]
 
     # Every top-level key the current settings would write — i.e. which sections this install
@@ -1322,6 +1324,7 @@ module Gori
       reset_hooks
       reset_colormarker
       reset_saved_views
+      reset_redaction
       # `$KEY` highlighting is cached against this revision, exactly as apply_sections does
       # after a load — the env block just changed underneath every editor showing it.
       Env.bump_highlight_rev
@@ -1365,6 +1368,7 @@ module Gori
           serialize_hooks(j)
           serialize_colormarker(j)
           serialize_saved_views(j)
+          serialize_redaction(j)
         end
       end
     end

@@ -156,6 +156,9 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--no-columns` | 이 프로젝트에 설정된 History 컬럼을 그리지 않습니다 |
 | `--format=FMT` | `text`, `json` / `jsonl` (둘 다 JSON-Lines), 또는 `har` |
 | `--include-sensitive` | `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API 키 값을 `[REDACTED]` 대신 그대로 냅니다. `json`의 행별 `headers`와 `header:`/`cookie:` 컬럼에 적용됩니다. 다른 형식에서는 아무 효과가 없으며, 그 사실을 STDERR로 알립니다 |
+| `--redact [PROFILE]` | [리댁션 프로파일](#run-redact)로 요청/응답 **본문**을 정제한 뒤 씁니다. 본문을 싣는 목록 형식은 `--format har` 하나뿐이므로 그 형식에서만 동작하고, 나머지에서는 무시하지 않고 거부합니다 |
+| `--no-redact` | 리댁션이 기본으로 설정돼 있어도 캡처한 본문을 그대로 씁니다 |
+| `--redact-preview` | `--redact`가 무엇을 바꿀지 값마다 한 줄씩 나열하고 HAR은 쓰지 않습니다 |
 
 서브커맨드: `history show <id>` (`run show`와 동일), `history delete <id>`, `history delete -q QL --yes`, `history clear --yes`.
 
@@ -180,6 +183,23 @@ gori run show <flow-id> --format raw
 ```
 
 `--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space → Y` **Copy as…**에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. 요청을 코드로 내는 형식은 모두 요청 그 자체이므로 `--response-only`는 거부됩니다. 두 가지 주의사항은 STDOUT의 스니펫이 아니라 STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 **짧은 채로** 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않습니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+
+#### 안전한 증거 내보내기 {#safe-evidence-export}
+
+`--redact [PROFILE]`는 캡처한 바이트 대신 플로우의 **정제된 파생본**을 씁니다. [리댁션 프로파일](#run-redact)이 지목한 값이 키가 붙은 자리표시자 `[REDACTED:3f1c9ab4]`로 바뀝니다. 같은 값은 같은 태그를 받으므로, 읽는 사람은 둘 중 어느 것도 보지 않은 채로 "요청의 토큰이 응답의 토큰과 같다"는 사실만 확인할 수 있습니다. 태그는 값의 해시가 아니라 설치마다 한 번 만들어지는 비밀 키로 계산한 HMAC입니다. 네 자리 PIN이나 워드리스트에 있는 비밀번호의 잘린 해시는 몇 밀리초면 복원되고, 그러면 자리표시자 자체가 유출이 되기 때문입니다.
+
+플로우를 렌더링 전에 한 번만 정제하므로 **모든** `--format`에 적용됩니다. `raw`, `text`, `json`, `har`, 그리고 요청을 코드로 내는 여섯 형식 전부입니다. `--no-redact`는 이 프로젝트나 이 설치에서 리댁션이 기본이더라도 캡처한 바이트를 그대로 씁니다. `--redact-preview`는 무엇이 바뀔지를 — 요청/응답, JSON 포인터 또는 폼 키, 발동한 규칙, 자리표시자 — 나열하고 문서는 출력하지 않습니다.
+
+무엇을 덮고 무엇을 덮지 않는지:
+
+- **본문만 다룹니다.** 헤드, URL, 쿼리 스트링은 건드리지 않으며 STDERR의 문장이 매번 그 사실을 말합니다. `Cookie` 헤더나 `?token=` 쿼리 스트링 속 크리덴셜은 소비자(HAR의 `url`, curl의 인자, 행의 `target`)가 함께 움직여야 하는 다른 축이고, 프로파일의 대상이 아닙니다.
+- **저장된 바이트는 바뀌지 않습니다.** History, Repeater, Comparer, `get_response_body_chunk`는 캡처 그대로를 계속 읽습니다. 정제는 나가는 길에서만 일어나므로, 내보내기 전후의 재전송은 바이트 단위로 동일합니다.
+- **JSON 본문은 다시 직렬화됩니다.** 따라서 정제된 JSON은 원본이 아니라 gori의 공백과 키 순서를 갖습니다. 정확한 프레이밍 자체가 증거라면 `--no-redact`를 쓰세요.
+- **헤드는 정제된 본문을 설명하도록 고쳐집니다.** `Content-Length`가 다시 쓰이고, 읽기 위해 압축을 풀거나 청크를 해제해야 했던 본문은 `Content-Encoding` / `Transfer-Encoding`을 잃습니다(STDERR로 알립니다).
+- **gori가 읽을 수 없는 본문은 통째로 보류됩니다.** 일부만 정제하지 않습니다. 유효한 UTF-8이 아닌 본문과 모든 `multipart/*`가 여기에 해당합니다(gori는 아직 파트를 분해하지 않으므로 업로드된 파일과 폼 필드를 구분할 수 없습니다). 자리표시자가 몇 바이트가 빠졌고 왜 그랬는지 말해 줍니다.
+- **파싱되지 않는 본문은 보수적인 텍스트 패스로 물러납니다.** 프로파일 자신의 패턴, 필드 이름을 `"name": "value"` / `name=value` 텍스트 규칙으로 다시 표현한 것(잘린 값도 허용), 그리고 어디에 나타나든 모호하지 않은 두 가지 내장 형태 — JWS/JWE 컴팩트 직렬화와 PEM `PRIVATE KEY` 블록입니다.
+
+모든 주의사항과 개수는 STDERR로 나가고 STDOUT은 문서로 남습니다. 그래서 `gori run show 42 --format har --redact > evidence.har`는 여전히 순수한 HAR입니다.
 
 #### HAR 내보내기 {#har-export}
 
@@ -1203,6 +1223,42 @@ gori run project host-override delete 1
 | `add` | `--host=…` + `--ip=…`, 또는 positional `IP HOST` |
 | `update <id>` | `--host=…` + `--ip=…` (둘 다 필수) |
 | `delete <id>` | id로 오버라이드 제거 |
+
+### run redact {#run-redact}
+
+[안전한 증거 내보내기](#safe-evidence-export)가 적용하는 **리댁션 프로파일**과 그 적용 범위를 관리합니다.
+
+```bash
+gori run redact profiles
+gori run redact set pci --json-field card_number --json-field cvv --json-pointer /data/acct
+gori run redact use pci
+gori run redact default on
+```
+
+| 서브커맨드 | 설명 |
+| ---------- | ---- |
+| `profiles` (기본) | 여기서 쓸 수 있는 모든 프로파일 — 프로젝트, `settings.json`, 내장 순 — 을 범위, 규칙 개수, 안전한 내보내기가 실제로 쓸 하나에 붙는 `*`, 기본 적용 여부와 함께 보여 줍니다. 전체 규칙 목록은 `--format json` |
+| `use <name>` \| `use --none` | 안전한 내보내기가 쓸 프로파일을 고릅니다. `--global`이 없으면 **프로젝트**에 씁니다 |
+| `default on\|off` \| `default --none` | `--redact` 없이도 공유용 출력을 정제할지. `--global`이 없으면 프로젝트 범위이고, `--none`은 프로젝트의 답을 지워 전역 설정을 따르게 합니다 |
+| `set <name>` | 반복 가능한 규칙 플래그로 프로파일을 만들거나 **통째로 교체**합니다. `--global`이 없으면 프로젝트 범위 |
+| `rm <name>` | 프로파일을 지웁니다. 내장 프로파일은 지울 수 없고, 같은 이름으로 정의해 덮어쓰면 됩니다 |
+
+`set`은 네 종류의 규칙(각각 반복 가능)과 `--description`을 받습니다.
+
+| 플래그 | 매칭 대상 |
+| ------ | --------- |
+| `--json-field NAME` | JSON 객체의 멤버 이름을 대소문자 구분 없이 **모든 깊이에서** 찾습니다. 주력 규칙입니다. "어디에 중첩돼 있든 `password`라는 멤버는 이 기기를 떠나지 않는다" |
+| `--json-pointer PTR` | [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) 포인터로 정확히 한 위치만(`/data/user/ssn`) 지목합니다. 이름이 너무 흔해서 통째로 걸 수 없는 필드용입니다. RFC가 "마지막 다음 원소"로 예약해 둬서 실제 원소를 가리킬 수 없는 `-` 토큰은 여기서 **아무 인덱스**로 읽습니다. `/users/-/token`은 배열 전체를 덮습니다 |
+| `--form-key KEY` | `application/x-www-form-urlencoded` 키를 대소문자 구분 없이 찾습니다. 키는 퍼센트 디코딩한 뒤 비교하고, 본문의 나머지 세그먼트는 바이트 그대로 남습니다 |
+| `--pattern REGEX` | 본문 텍스트(그리고 JSON 문자열 리프와 디코드된 폼 값)에 대한 정규식입니다. 캡처 그룹이 있으면 **그룹 1**만 교체되고 나머지는 매칭에 쓴 문맥으로 남습니다 — `account=(\d+)`는 `account=`를 남기고 숫자만 가져갑니다. 그룹이 없으면 매치 전체가 사라집니다. 위의 세 이름 목록과 마찬가지로 **대소문자를 구분하지 않고** 컴파일합니다. 컴파일되지 않는 패턴은 이후 모든 내보내기마다 알리는 대신 여기서 거부합니다 |
+
+**범위.** 프로파일은 프로젝트 데이터베이스나 `settings.json` 중 한 곳에 살고, 어느 쪽인지가 그 프로파일의 정체의 일부입니다. "`password` 필드는 절대 내보내지 않는다"는 운영자 본인의 정책이므로 전역이 맞고, "이 타깃은 그걸 `pwd_hash`라 부르고 계좌번호는 `/data/acct`에 있다"는 다음 engagement로 따라가서는 안 되는 engagement 데이터입니다. 해석은 구체적인 쪽 우선 — 프로젝트, 전역, 내장 — 이고 이름이 같으면 먼저 나온 것이 이깁니다. 그래서 프로젝트 프로파일이 전역을, 전역이 같은 이름의 내장을 가립니다.
+
+**내장 `default`** 는 크리덴셜, 토큰, 흔한 정부/금융 식별자를 필드 이름으로 덮고(`password`, `client_secret`, `access_token`, `api_key`, `session_id`, `otp`, `pin`, `ssn`, `card_number`, `cvv`, `iban` 등) 정규식은 하나도 싣지 않습니다. 기본 제공 패턴이 엉뚱한 것에 걸리면 경고 없이 망가진 보고서가 남지만, 기본 제공 *이름*이 엉뚱하게 걸리면 잃는 건 어차피 잃는 편이 나았을 값 하나이기 때문입니다. 예컨대 `email`에 대해서는 일부러 아무 말도 하지 않습니다. 주소 자체가 발견 내용인 종류의 취약점에서는 그런 기본값이 증거를 망칩니다. 원하는 것은 직접 만든 프로파일에, 눈에 보이는 곳에 넣으세요.
+
+**`default on`은 한 번만 하는 옵트인입니다.** 이미 `gori run show --format raw`를 읽는 스크립트가 있는 설치에서 기본값을 뒤집으면 그 스크립트가 받는 내용이 조용히 달라지므로, gori는 꺼진 채로 출시합니다. 켠 뒤로는 호출마다 `--no-redact`가 캡처한 바이트로 돌아가는 명시적인 길입니다. 켜져 있으면 **TUI의 `Space → Y` 복사 메뉴**와 **MCP `get_flow`**도 정제합니다. 복사 제목은 `COPY REQUEST AS · SANITIZED (3)`로 보이고, `get_flow`는 프로파일 이름과 개수, 그리고 무엇을 보지 않았는지를 담은 `body_redaction` 객체를 돌려줍니다. MCP의 `include_sensitive: true`는 헤더 리댁션과 함께 본문 리댁션도 끕니다. 플래그 하나로 두 축을 함께 다룹니다.
+
+**자리표시자 태그**는 `[REDACTED:<16진수 8자리>]`이며, 설치마다 한 번 만들어져 `settings.json`에 보관되는 비밀 키로 값을 HMAC한 결과입니다. 같은 값은 같은 태그를 공유해 보고서 안에서 상관관계를 유지할 수 있고, 태그에서 값을 복원할 수는 없으며, 이 설치 밖에서는 아무 의미가 없습니다. 공장 초기화는 salt를 남깁니다. 버리면 이미 쓴 모든 산출물의 자리표시자가 깨지기 때문입니다. `gori settings export --sections redaction`은 규칙과 함께 salt도 가져가므로, 규칙만 건네려면 `gori run redact profiles --format json`을 쓰세요.
 
 ## gori mcp {#gori-mcp}
 

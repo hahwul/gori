@@ -17,6 +17,7 @@ require "./read_cursor"
 require "./wrap"
 require "./viewport"
 require "./copy_menu"
+require "../redact/policy"
 require "./preview_split"
 require "./line_edit"
 require "../store"
@@ -1992,10 +1993,16 @@ module Gori::Tui
     # the set-shaped formats, since "copy the URLs" is what marking 12 rows is for.
     def list_copy_as_menu(store : Store, ids : Array(Int64)) : {String, Array(CopyMenu::Option)}
       return {"COPY AS", [] of CopyMenu::Option} if ids.empty?
+      # Resolved ONCE per copy action, here, where the store is already in hand. A copy is a
+      # keystroke, so this is one indexed read of the project's settings row plus a profile
+      # compile — and resolving it here keeps the view free of the policy, which is what lets
+      # the whole menu below stay written against an ordinary `FlowDetail`.
+      redactor = Redact::Policy.ambient(store)
       if ids.size == 1
         # Resolved through the store, not @rows: a mark can outlive the visible window.
         d = store.get_flow(ids.first)
         return {"COPY AS", [] of CopyMenu::Option} unless d
+        d, redacted_count = redacted(d, redactor)
         req = request_wire(d)
         opts = CopyMenu.request_options(req, copy_target(d))
         # …plus the response, on the same 's' key the multi-flow set uses. Without it, marking a
@@ -2008,7 +2015,7 @@ module Gori::Tui
         if pair = pair_option(d, req)
           opts << pair
         end
-        return {"COPY REQUEST AS", opts}
+        return {CopyMenu.sanitized_title("COPY REQUEST AS", redactor && redacted_count), opts}
       end
       # URLs and the host list need only the ROW, so read flow_row here — get_flow pulls the
       # full request+response bodies (2 MiB each), and ⇧T can hand this a full PAGE of marks.
@@ -2021,14 +2028,39 @@ module Gori::Tui
       opts << CopyMenu::Option.new("URLs", 'u', urls.join('\n')) unless urls.empty?
       hosts = rows.map(&.host).reject(&.empty?).uniq!
       opts << CopyMenu::Option.new("Host list", 'h', hosts.join('\n')) unless hosts.empty?
-      opts.concat(byte_copy_options(store, ids)) if rows.size <= COPY_BYTES_CAP
-      {"COPY #{rows.size} FLOWS AS", opts}
+      # Only the byte-carrying rows can carry a body, so only they can be sanitized — and when
+      # the set is over the cap there are none, which is why the heading is marked off `bytes`
+      # and not off `redactor`: a URL list that says SANITIZED would be claiming a profile ran
+      # over something it never saw.
+      bytes = rows.size <= COPY_BYTES_CAP ? byte_copy_options(store, ids, redactor) : nil
+      bytes.try { |(rows_opts, _)| opts.concat(rows_opts) }
+      {CopyMenu.sanitized_title("COPY #{rows.size} FLOWS AS",
+        redactor && bytes.try(&.[1])), opts}
+    end
+
+    # The detail a COPY works from: the captured one, or the sanitized derivative when this
+    # project redacts by default (#1035), plus how many values went. Sanitizing the DETAIL and
+    # not each option is what keeps every row below honest at once — url/headers/body/cookies,
+    # the five client-code snippets, the raw message and the req+res pair are all derived from
+    # these bytes, so there is no row that can be forgotten.
+    private def redacted(d : Store::FlowDetail,
+                         redactor : Redact::Matcher?) : {Store::FlowDetail, Int32}
+      m = redactor || return {d, 0}
+      clean, report = Redact::Wire.flow(d, m)
+      {clean, report.count}
     end
 
     # curl / raw-request / raw-response across the set. Only called within COPY_BYTES_CAP, so
     # this is the one place that loads N full details.
-    private def byte_copy_options(store : Store, ids : Array(Int64)) : Array(CopyMenu::Option)
-      details = ids.compact_map { |id| store.get_flow(id) }
+    private def byte_copy_options(store : Store, ids : Array(Int64),
+                                  redactor : Redact::Matcher?) : {Array(CopyMenu::Option), Int32}
+      redacted_count = 0
+      details = ids.compact_map do |id|
+        d = store.get_flow(id) || next nil
+        clean, n = redacted(d, redactor)
+        redacted_count += n
+        clean
+      end
       opts = [] of CopyMenu::Option
       # cURL comes from the SAME serialiser the single-flow path uses, via the narrow entry point
       # — request_options would allocate the headers/body/raw variants per flow too, several extra
@@ -2055,7 +2087,7 @@ module Gori::Tui
         "#{copy_separator(d.row)}\n#{body}"
       end
       opts << CopyMenu::Option.new("Req + Res pairs", 'p', pairs.join("\n\n")) unless pairs.empty?
-      opts
+      {opts, redacted_count}
     end
 
     # The whole exchange — request, one blank line, response — both messages verbatim (P7).
@@ -2084,9 +2116,12 @@ module Gori::Tui
       "===== flow ##{row.id} #{row.method} #{row.url} ====="
     end
 
-    def detail_copy_as_menu : {String, Array(CopyMenu::Option)}
+    def detail_copy_as_menu(redactor : Redact::Matcher? = nil) : {String, Array(CopyMenu::Option)}
       detail = @detail
       return {"COPY AS", [] of CopyMenu::Option} unless detail
+      detail, count = redacted(detail, redactor)
+      # nil when no profile ran, which is what the heading needs to tell them apart.
+      marked = redactor ? count : nil
       case @detail_pane
       when :request
         wire = String.new(combine_bytes(detail.request_head, detail.request_body) || Bytes.empty)
@@ -2096,7 +2131,7 @@ module Gori::Tui
         if pair = pair_option(detail, wire)
           opts << pair
         end
-        {"COPY REQUEST AS", opts}
+        {CopyMenu.sanitized_title("COPY REQUEST AS", marked), opts}
       when :response
         head = detail.response_head
         opts = if head
@@ -2110,7 +2145,7 @@ module Gori::Tui
         if pair = pair_option(detail)
           opts << pair
         end
-        {"COPY RESPONSE AS", opts}
+        {CopyMenu.sanitized_title("COPY RESPONSE AS", marked), opts}
       else
         {"COPY AS", [] of CopyMenu::Option}
       end

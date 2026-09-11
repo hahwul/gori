@@ -32,6 +32,15 @@ module Gori
     # row would orphan every one of them on upgrade while reporting a clean open.
     SESSION_SLOTS_KEY = AUTHORIZE_IDENTITIES_KEY
 
+    # The project's own redaction config (#1035), as a JSON object:
+    # `{"active": "<profile name>", "default": true, "profiles": [ … ]}`. Per PROJECT because
+    # the half of a profile that names a TARGET's fields ("this API spells it `pwd_hash`, and
+    # the account number lives at `/data/acct`") is engagement data: it is useless in the next
+    # engagement and carrying it there would quietly widen what a default export replaces.
+    # The half that is the operator's own policy stays in settings.json. `Redact::Policy` folds
+    # the two.
+    REDACTION_KEY = "redaction"
+
     def setting(key : String) : String?
       @db.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String)
     end

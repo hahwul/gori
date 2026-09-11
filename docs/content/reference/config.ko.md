@@ -781,6 +781,43 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 
 워드리스트를 적용하거나 별표를 달기 전까지는 기록되지 않습니다.
 
+### redaction {#redaction}
+
+[안전한 증거 내보내기](/ko/reference/cli/#safe-evidence-export) 프로파일, 어떤 것이 활성인지, 요청 없이도 적용할지, 그리고 설치마다 하나씩 갖는 자리표시자 비밀 키입니다.
+
+```json
+{
+  "redaction": {
+    "active": "pci",
+    "default": true,
+    "salt": "…16진수 64자…",
+    "profiles": [
+      {
+        "name": "pci",
+        "description": "이 engagement의 카드 소유자 데이터",
+        "json_fields": ["card_number", "cvv"],
+        "json_pointers": ["/data/acct", "/users/-/token"],
+        "form_keys": ["cc"],
+        "patterns": ["account=(\\d+)"]
+      }
+    ]
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `active` | string | `""` | 호출에서 프로파일을 지정하지 않았을 때 안전한 내보내기가 쓰는 프로파일. 비어 있으면 내장 `default` |
+| `default` | bool | `false` | `--redact` 없이도 공유용 출력을 정제합니다. 켜 두면 `--no-redact`가 캡처한 바이트로 돌아가는 명시적인 길이 됩니다 |
+| `salt` | string | 자동 생성 | 모든 `[REDACTED:<tag>]` 뒤의 HMAC 키. 처음 쓸 때 한 번 기록되며 어떤 UI에도 표시되지 않습니다 |
+| `profiles` | array | `[]` | 이름 붙은 규칙 묶음. `name`이 내장 프로파일과 같으면 그것을 대체합니다 |
+
+각 프로파일은 `name`과 함께 `description`, `json_fields`, `json_pointers`, `form_keys`, `patterns` 중 필요한 것을 담습니다. 각 종류가 무엇을 매칭하는지는 [run redact](/ko/reference/cli/#run-redact)를 보세요. 파싱은 관대합니다. 쓸 수 있는 `name`이 없는 항목은 버려지고, 비어 있지 않은 문자열이 아닌 규칙 항목은 로드를 실패시키는 대신 건너뜁니다.
+
+salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩니다(디렉터리는 `0700`, 파일은 `0600`). 공장 초기화는 salt를 남깁니다. 버리면 이미 쓴 모든 산출물의 자리표시자가 조용히 깨지기 때문입니다. `gori settings export --sections redaction`은 salt까지 가져가므로, 규칙만 건네려면 `gori run redact profiles --format json`을 쓰세요.
+
+프로젝트 범위 프로파일은 여기가 아니라 프로젝트 데이터베이스에 있습니다. [프로젝트별 오버라이드](#per-project-overrides)를 보세요.
+
 ### 그 외 섹션 {#other-sections}
 
 | Section | Description |
@@ -803,9 +840,12 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 | `companion` | 마스코트 Miss Ring: `enabled`(기본 off), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
 | `layout` | History / Probe / Issues 미리보기, Sitemap 펼침 깊이, 탭 바 번호. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
+| `redaction` | 안전한 내보내기 프로파일, 활성 프로파일, 기본 적용 스위치, 자리표시자 salt. 위의 [redaction](#redaction) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, `wrap_lines`(긴 줄 접기, 기본 켜짐), 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |
 
 ## 프로젝트별 오버라이드 {#per-project-overrides}
+
+프로젝트는 `redaction` 키 아래에 자체 **리댁션** 설정도 가질 수 있습니다. 자체 프로파일, 어떤 것이 활성인지, 그리고 "기본으로 정제할지"에 대한 자체 답(전역 기본값을 이 engagement에서만 끄는 명시적 `false` 포함)입니다. [`gori run redact`](/ko/reference/cli/#run-redact)가 기록하며, 해석 순서는 프로젝트 → 전역 → 내장이고 이름이 같으면 먼저 나온 것이 이깁니다.
 
 프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **Project settings** 서브탭에서 편집합니다.
 

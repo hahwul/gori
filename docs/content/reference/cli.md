@@ -156,6 +156,9 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--no-columns` | Don't draw this project's configured History columns |
 | `--format=FMT` | `text`, `json` / `jsonl` (both JSON-Lines), or `har` |
 | `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values — in `json`'s per-row `headers` and in a `header:`/`cookie:` column — instead of `[REDACTED]`. Inert in the other formats, which say so on STDERR |
+| `--redact [PROFILE]` | Sanitize request/response **bodies** before writing them, using a [redaction profile](#run-redact). `--format har` only — it is the one listing format that carries a body — and refused on the others rather than ignored |
+| `--no-redact` | Write the captured bodies even where redaction is the configured default |
+| `--redact-preview` | List what `--redact` would replace, one row per value, and write no HAR |
 
 Subcommands: `history show <id>` (same as `run show`), `history delete <id>`, `history delete -q QL --yes`, `history clear --yes`.
 
@@ -180,6 +183,23 @@ gori run show <flow-id> --format raw
 ```
 
 `--format` is `text`, `json`, `raw` (exact bytes), `har` (a one-entry HAR log), or one of the **request-as-code** serializers: `curl`, `python` (requests), `fetch` (JavaScript), `go` (net/http), `httpie`, and `csrf` (a self-submitting HTML CSRF PoC). Each emits byte-identical text to the TUI's `Space → Y` **Copy as…** row of the same name. `--request-only` / `--response-only` limit the output and do not apply to `har`; every request-as-code format *is* the request, so `--response-only` is refused for all of them. Two caveats go to STDERR rather than into the snippet on STDOUT: a request body cut at the capture cap is carried **short**, and a WebSocket flow serializes as the upgrade handshake with none of its frames. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
+
+#### Safe evidence export
+
+`--redact [PROFILE]` writes the **sanitized derivative** of the flow instead of the captured bytes: values a [redaction profile](#run-redact) names are replaced by a keyed placeholder, `[REDACTED:3f1c9ab4]`. Equal values get equal tags, so a reader can still see that the token in the request is the token in the response without seeing either. The tag is an HMAC under a secret minted once per install, not a digest of the value — a truncated hash of a 4-digit PIN or a wordlist password is recovered in milliseconds, which would make the placeholder itself the disclosure.
+
+It applies to **every** `--format`, because the flow is sanitized once before anything renders it: `raw`, `text`, `json`, `har`, and all six request-as-code serializers. `--no-redact` writes the captured bytes even when redaction is this project's or this install's default; `--redact-preview` lists what would go — side, JSON Pointer or form key, the rule that fired, the placeholder — and prints no document.
+
+What it covers and what it does not:
+
+- **Bodies only.** Heads, URLs and query strings are untouched, and the sentence on STDERR says so every time. A credential in a `Cookie` header or a `?token=` query string is a different axis with its own consumers (the `url` in a HAR, curl's argument, the row's `target`) and is not part of a profile.
+- **The stored bytes never change.** History, the Repeater, the Comparer and `get_response_body_chunk` keep reading the capture exactly. Sanitizing happens on the way out; replay after an export is byte-identical to replay before it.
+- **A JSON body is re-serialized**, so a sanitized one carries gori's whitespace and key order rather than the origin's. When the exact framing is the evidence, use `--no-redact`.
+- **The head is repaired to describe the sanitized body**: `Content-Length` is rewritten, and a body gori had to decompress or de-chunk to read loses its `Content-Encoding` / `Transfer-Encoding` (reported on STDERR).
+- **A body gori cannot read is withheld whole**, not partially sanitized: anything that is not valid UTF-8, and any `multipart/*` (gori does not split its parts yet, so it cannot tell an uploaded file from a form field). The placeholder says how many bytes went and why.
+- **A body that does not parse falls back to a conservative text pass** — the profile's own patterns, its field names re-expressed as `"name": "value"` / `name=value` text rules (truncation tolerated), and two built-in shapes that are unambiguous wherever they appear: a JWS/JWE compact serialization and a PEM `PRIVATE KEY` block.
+
+Every caveat, and the count, go to STDERR — STDOUT stays the document, so `gori run show 42 --format har --redact > evidence.har` is still a pure HAR.
 
 #### HAR export
 
@@ -1204,6 +1224,42 @@ gori run project host-override delete 1
 | `add` | `--host=…` + `--ip=…`, or positional `IP HOST` |
 | `update <id>` | `--host=…` + `--ip=…` (both required) |
 | `delete <id>` | Remove an override by id |
+
+### run redact
+
+Manage the **redaction profiles** that [safe evidence export](#safe-evidence-export) applies, and where they apply.
+
+```bash
+gori run redact profiles
+gori run redact set pci --json-field card_number --json-field cvv --json-pointer /data/acct
+gori run redact use pci
+gori run redact default on
+```
+
+| Subcommand | Description |
+| ---------- | ----------- |
+| `profiles` (default) | Every profile available here — the project's first, then `settings.json`'s, then the built-ins — with its scope, its rule counts, a `*` on the one a safe export would use, and whether redaction is on by default. `--format json` for the full rule lists |
+| `use <name>` \| `use --none` | Pick the profile a safe export uses. Writes this **project** unless `--global` |
+| `default on\|off` \| `default --none` | Whether shareable output is sanitized *without* `--redact`. Project scope unless `--global`; `--none` clears the project's answer so it inherits the global one |
+| `set <name>` | Create or **replace** a profile from repeatable rule flags. Project scope unless `--global` |
+| `rm <name>` | Delete a profile. A built-in cannot be deleted — define one of the same name to replace it |
+
+`set` takes four kinds of rule, each repeatable, plus `--description`:
+
+| Flag | Matches |
+| ---- | ------- |
+| `--json-field NAME` | A JSON object member name, case-insensitively, **at any depth**. The workhorse: "whatever it is nested in, a member called `password` does not leave this machine" |
+| `--json-pointer PTR` | An [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) pointer, at exactly one location (`/data/user/ssn`) — for the field name too generic to blanket. The array token `-`, which the RFC reserves for "past the last element" and which can never name an element that exists, is read here as **any index**: `/users/-/token` covers the whole array |
+| `--form-key KEY` | An `application/x-www-form-urlencoded` key, case-insensitively. The key is percent-decoded before it is matched, and every other segment of the body survives byte-for-byte |
+| `--pattern REGEX` | A regex over body text (also over each JSON string leaf and each decoded form value). With a capture group, **group 1** is what is replaced and the rest is the context you matched on — `account=(\d+)` keeps `account=` and takes the digits; with no group, the whole match goes. Compiled **case-insensitively**, like the three name lists above. A pattern that does not compile is refused here rather than reported on every later export |
+
+**Scopes.** A profile lives in the project database or in `settings.json`, and which one is part of what it is. "Never export a `password` field" is the operator's own policy and belongs global; "this target calls it `pwd_hash`, and the account number is at `/data/acct`" is engagement data that must not follow you into the next engagement. Resolution is most-specific-first — project, then global, then built-in — and the first match by name wins, so a project profile shadows a global one and a global one shadows a built-in of the same name.
+
+**The built-in `default`** covers credentials, tokens and the common government/financial identifiers by field name (`password`, `client_secret`, `access_token`, `api_key`, `session_id`, `otp`, `pin`, `ssn`, `card_number`, `cvv`, `iban`, …) and carries no regexes: a shipped pattern that fires on the wrong thing costs a mangled report with no warning, while a shipped *name* that does costs one value that was probably worth losing. It deliberately says nothing about, say, `email` — a default that redacted those would wreck the evidence for the class of finding where the address *is* the finding. Add what you want to a profile of your own, where you can see it.
+
+**`default on` is opt-in, once.** Flipping it under an install that already has scripts reading `gori run show --format raw` would silently change what they get, so gori ships it off; from then on `--no-redact` is the explicit path back to the captured bytes, per invocation. With it on, the **TUI's `Space → Y` copy menu** and **MCP `get_flow`** sanitize too — a copy heading reads `COPY REQUEST AS · SANITIZED (3)`, and `get_flow` returns a `body_redaction` object naming the profile, the counts and what it did not look at. MCP's `include_sensitive: true` turns body redaction off along with the header redaction: one flag, both axes.
+
+**Placeholder tags** are `[REDACTED:<8 hex>]`, an HMAC of the value under a secret minted once per install and kept in `settings.json`. Equal values share a tag so a report can still correlate them; nothing can be recovered from one, and a tag means nothing outside this install. A factory reset keeps the salt — discarding it would break every placeholder in every artifact already written. `gori settings export --sections redaction` carries the salt as well as the rules; hand somebody `gori run redact profiles --format json` instead when you mean to share only the rules.
 
 ## gori mcp
 

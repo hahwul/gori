@@ -71,7 +71,8 @@ private MAXIMAL_PROFILE = <<-JSON
     "hooks": { "timeout_secs": 30 },
     "rewriter": { "next_rule_id": 2, "rules": [] },
     "colormarker": { "next_rule_id": 2, "rules": [] },
-    "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] }
+    "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
+    "redaction": { "active": "p1", "default": true, "profiles": [ { "name": "p1", "json_fields": ["password"] } ] }
   }
   JSON
 
@@ -120,6 +121,9 @@ private def with_every_section_populated(&)
   # to prevent, and one no other reset in this file covers.
   mine_keep_alive = Gori::Settings.mine_keep_alive?
   discover_keep_alive = Gori::Settings.discover_keep_alive?
+  redaction_profiles = Gori::Settings.redaction_profiles
+  redaction_active = Gori::Settings.redaction_active
+  redaction_default = Gori::Settings.redaction_default?
   begin
     yield
   ensure
@@ -160,6 +164,9 @@ private def with_every_section_populated(&)
     Gori::Settings.saved_views_next_id = views_next_id
     Gori::Settings.mine_keep_alive = mine_keep_alive
     Gori::Settings.discover_keep_alive = discover_keep_alive
+    Gori::Settings.redaction_profiles = redaction_profiles
+    Gori::Settings.redaction_active = redaction_active
+    Gori::Settings.redaction_default = redaction_default
   end
 end
 

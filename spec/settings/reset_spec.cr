@@ -37,7 +37,8 @@ private RESET_FIXTURE = <<-JSON
     "hooks": { "timeout_secs": 30 },
     "rewriter": { "next_rule_id": 7, "rules": [] },
     "colormarker": { "next_rule_id": 7, "rules": [], "colors": [ { "name": "mine", "hex": "#ff0000" } ] },
-    "saved_views": { "next_view_id": 7, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] }
+    "saved_views": { "next_view_id": 7, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
+    "redaction": { "active": "p1", "default": true, "salt": "abcd", "profiles": [ { "name": "p1", "json_fields": ["password"] } ] }
   }
   JSON
 
@@ -107,8 +108,11 @@ describe "Settings.reset_to_factory" do
       # one omits itself at its default, which is how the key disappears — plus `rewriter`,
       # `colormarker` and `saved_views`, which stay only to carry their id counters (see
       # reset_rewriter: those are what stop a project's surviving overrides — or, for views, its
-      # `history_view` pointer — from latching onto a reused id).
-      left = %w[theme mouse mouse_drag pretty_bodies network editor probe rewriter colormarker saved_views]
+      # `history_view` pointer — from latching onto a reused id), and `redaction`, which stays
+      # only to carry its placeholder SALT: every profile and switch is cleared, but discarding
+      # the key would silently break the `[REDACTED:tag]` in every artifact already exported
+      # (#1035), which is not something "put it back the way it shipped" should be able to do.
+      left = %w[theme mouse mouse_drag pretty_bodies network editor probe rewriter colormarker saved_views redaction]
       Gori::Settings.document_keys.sort.should eq(left.sort)
       JSON.parse(File.read(path)).as_h.keys.sort.should eq(left.sort)
 
@@ -142,6 +146,10 @@ describe "Settings.reset_to_factory" do
       Gori::Settings.fuzz_recent_wordlists.should be_empty
       Gori::Settings.probe_active_notify.should eq(Gori::Settings::DEFAULT_PROBE_ACTIVE_NOTIFY)
       Gori::Settings.retention_max_flows.should eq(Gori::Settings::DEFAULT_RETENTION_FLOWS)
+      Gori::Settings.redaction_profiles.should be_empty
+      Gori::Settings.redaction_active.should eq("")
+      Gori::Settings.redaction_default?.should be_false
+      JSON.parse(File.read(path))["redaction"].as_h.keys.should eq(["salt"])
     end
   end
 
