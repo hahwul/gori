@@ -2308,3 +2308,33 @@ and capture throughput on 10k/100k/500k fixtures. With 500k 1KB bodies, an absen
 held the scheduler for 2.7–3.0 seconds synchronously versus 9–11 ms with query controls;
 allocations and total query time were comparable. This is cooperative scheduling, not a
 hard deadline: a single regex callback or filesystem operation cannot be preempted.
+
+### 2026-09-11 — a named stdin flag reads a pipe, and a terminal is refused
+
+`--request-stdin` shipped on the rule that a flag the operator NAMED makes blocking until EOF
+the answer to what they asked for: a `^D` notice on a tty, then the read. That treated a
+terminal as a quiet pipe with a human on the far end. It is not one, and each difference lands
+on exactly this door (#1034):
+
+- The line discipline **echoes**. The raw request the flag exists to keep out of the process
+  listing and the shell history — `Cookie`, `Authorization`, a PII body — goes into the
+  scrollback instead, and under a PTY-driven harness into the captured transcript. The flag
+  closed one copy of the secret and opened another.
+- **`^D` is not EOF.** In canonical mode it flushes the pending line, so a request with no
+  trailing newline takes two — one to deliver the last line, one on the now-empty line — and a
+  driver that sends one hangs.
+- **`MAX_CANON`** truncates a line at 1024/4096 bytes before gori is handed an octet.
+
+None of it is reachable from the read side short of driving termios, and the echo has already
+happened by the first byte. So the terminal is refused, with the working spellings named:
+`Run.stdin_terminal_error` is the one verdict and `Run.read_stdin_text` the one door, which
+every explicit stdin road now goes through — `--request-stdin`, `--notes-stdin`, and the three
+flags that spell stdin `-` (`sequence --tokens`, `authorize --identities`,
+`rewriter --response-file`). A pipe and a `< file` redirect are non-tty file descriptors and
+are unchanged, byte-for-byte, so no script or CI job moves.
+
+The IMPLICIT stdin roads (`fuzz`/`mine`/`sequence` sources, `decoder`, `jwt`, `cookie`,
+`notes`) keep their own `unless STDIN.tty?` fallback: there a terminal means "no source was
+given", not "the operator asked for this one". `spec/cli/run/stdin_terminal_spec.cr` sweeps
+`src/gori/cli/` for a `STDIN.gets_to_end` that is neither, so a third shape cannot be added
+by accident.

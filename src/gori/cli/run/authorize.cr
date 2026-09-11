@@ -65,7 +65,7 @@ module Gori
 
         # Read the identity file BEFORE opening anything: an unreadable path is the operator's
         # typo, and it should not cost a project open (or a scope load) to hear about it.
-        identities_json = identities_file.try { |f| read_input_file(f, "gori run authorize", stdin: true) }
+        identities_json = identities_file.try { |f| read_input_file(f, "gori run authorize", stdin: true, noun: "identity set") }
 
         store = open_store(resolve_read_project(project_name, db_path))
         # Authorize ALWAYS has a project in play (the flows and the identities both come out of

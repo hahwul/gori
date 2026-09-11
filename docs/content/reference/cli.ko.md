@@ -321,12 +321,21 @@ generate-request | gori run repeater create --target https://api.example.com --r
 없는 세션을 만드는 대신 거부됩니다. `--flow`는 이 셋 중 하나가 아니며 — 출처 역할도 하므로 —
 셋 중 어느 하나와도 함께 쓸 수 있습니다.
 
+`--request-stdin`은 파이프나 리다이렉트(`--request-stdin < req.http`)를 읽으며, 터미널은
+거부합니다. 터미널은 입력한 바이트를 그대로 되돌려 출력하므로 — `Cookie`와 `Authorization`을
+포함한 원시 요청 전체가 스크롤백에, 그리고 PTY로 캡처한 로그에 남습니다. 이는 이 플래그가
+프로세스 목록과 셸 히스토리에서 막으려던 바로 그 노출입니다. 또한 `^D`는 EOF가 아니라 대기 중인
+줄을 내보내기만 하므로, 끝에 개행이 없는 요청은 `^D`가 두 번 필요하고 한 번만 보내는 PTY 자동화는
+무한히 대기합니다. `gori run`의 모든 stdin 경로가 같은 규칙을 따릅니다. stdin을 `-`로 쓰는
+플래그들(`sequence --tokens -`, `authorize --identities=-`, `rewriter --response-file=-`)도
+마찬가지입니다.
+
 | Option | Description |
 |--------|-------------|
 | `-t`, `--target=URL` | 대상 URL (`--flow`로 복제하는 경우가 아니면 필수) |
 | `-f`, `--request-file=FILE` | FILE에서 원시 HTTP 요청을 읽음 (`--request-raw` / `--request-stdin`과 함께 쓸 수 없음) |
 | `-r`, `--request-raw=RAW` | 원시 HTTP 요청 문자열 그대로 (`--request-file` / `--request-stdin`과 함께 쓸 수 없음) |
-| `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 요청을 인자 벡터 밖에 둡니다 (`--request-file` / `--request-raw`과 함께 쓸 수 없음) |
+| `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 요청을 인자 벡터 밖에 둡니다. 파이프나 리다이렉트가 필요하며 터미널은 거부됩니다 (`--request-file` / `--request-raw`과 함께 쓸 수 없음) |
 | `--flow=ID` | 캡처한 플로우에서 요청 / 대상 / HTTP/2 복제 |
 | `--name=NAME`, `--tags=TAGS` | 사용자 지정 탭 이름, 그리고 TUI 하위 탭 라벨이 되는 자유 텍스트 태그 |
 | `--http2` / `--http1` (`--no-http2`) | 프로토콜 선택. `--http1`은 h2로 캡처된 `--flow`를 덮어씁니다 |
@@ -817,7 +826,7 @@ gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-
 report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
 
-`--notes`, `--notes-file`, `--notes-stdin`은 함께 쓸 수 없고, 본문은 바이트 그대로 읽힙니다 — 여러 줄 UTF-8도 CRLF도 보존됩니다(프로젝트 env var로 바인딩된 값은 다른 이슈 필드와 마찬가지로 `$NAME`으로 마스킹됩니다). 파일이나 파이프로 넘긴 긴 작성물은 프로세스 목록과 셸 히스토리에 남지 않습니다. `create`에서는 이슈와 한 트랜잭션에 기록되므로 스크립트가 create 후 update를 이어 붙일 필요가 없습니다. 노트를 비울 때는 `update`에 `--notes ''`를 쓰고, 아무 바이트도 주지 않은 파일이나 파이프는 거부됩니다 — 리포트 생성기가 죽었다고 해서 기존 작성물이 조용히 지워지면 안 되기 때문입니다.
+`--notes`, `--notes-file`, `--notes-stdin`은 함께 쓸 수 없고, 본문은 바이트 그대로 읽힙니다 — 여러 줄 UTF-8도 CRLF도 보존됩니다(프로젝트 env var로 바인딩된 값은 다른 이슈 필드와 마찬가지로 `$NAME`으로 마스킹됩니다). 파일이나 파이프로 넘긴 긴 작성물은 프로세스 목록과 셸 히스토리에 남지 않습니다. `create`에서는 이슈와 한 트랜잭션에 기록되므로 스크립트가 create 후 update를 이어 붙일 필요가 없습니다. 노트를 비울 때는 `update`에 `--notes ''`를 쓰고, 아무 바이트도 주지 않은 파일이나 파이프는 거부됩니다 — 리포트 생성기가 죽었다고 해서 기존 작성물이 조용히 지워지면 안 되기 때문입니다. `--notes-stdin`도 `--request-stdin`과 같은 이유로 파이프나 리다이렉트(`--notes-stdin < notes.md`)를 요구하고 터미널은 거부합니다.
 
 | Option | Description |
 |--------|-------------|

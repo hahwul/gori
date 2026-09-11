@@ -321,12 +321,21 @@ resolved by flag order — and a request that arrives empty (an empty file, `--r
 or a pipe that produced nothing) is refused instead of creating a session that cannot be sent.
 `--flow` is not one of the three: it doubles as provenance, so it pairs with any one of them.
 
+`--request-stdin` reads a pipe or a redirect (`--request-stdin < req.http`), and refuses a
+terminal. A terminal echoes every byte back — the whole raw request, `Cookie` and
+`Authorization` with it, into the scrollback and into any captured PTY transcript, which is
+the exposure the flag exists to close for the process listing and the shell history. `^D` also
+flushes the pending line rather than ending the read there, so a request with no trailing
+newline needs two of them and a PTY-driven harness that sends one waits forever. Every stdin
+road in `gori run` follows the same rule, including the flags that spell stdin `-`
+(`sequence --tokens -`, `authorize --identities=-`, `rewriter --response-file=-`).
+
 | Option | Description |
 | -------- | ------------- |
 | `-t`, `--target=URL` | Target URL (required unless cloned from `--flow`) |
 | `-f`, `--request-file=FILE` | Read the raw HTTP request from FILE (mutually exclusive with `--request-raw` / `--request-stdin`) |
 | `-r`, `--request-raw=RAW` | Verbatim raw HTTP request string (mutually exclusive with `--request-file` / `--request-stdin`) |
-| `--request-stdin` | Read the raw HTTP request from stdin, byte-for-byte as `--request-file` reads a file, keeping it out of the argument vector (mutually exclusive with `--request-file` / `--request-raw`) |
+| `--request-stdin` | Read the raw HTTP request from stdin, byte-for-byte as `--request-file` reads a file, keeping it out of the argument vector. Needs a pipe or a redirect; a terminal is refused (mutually exclusive with `--request-file` / `--request-raw`) |
 | `--flow=ID` | Clone request / target / HTTP/2 from a captured flow |
 | `--name=NAME`, `--tags=TAGS` | Custom tab name, and free-text tags that become the TUI subtab label |
 | `--http2` / `--http1` (`--no-http2`) | Pick a protocol; `--http1` overrides an h2-captured `--flow` |
@@ -817,7 +826,7 @@ gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-
 report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
 
-`--notes`, `--notes-file` and `--notes-stdin` are mutually exclusive, and the body is read byte-for-byte — multiline UTF-8, CRLF and all (the value of a bound project env var is still masked to `$NAME` on the way in, as it is for every issue field). A long write-up piped in or read from a file stays out of the process listing and the shell history; on `create` it is written with the issue in one transaction, so a script no longer needs a create-then-update pair. `--notes ''` clears the notes on `update`; a file or a pipe that yields nothing is refused instead, so a report generator that dies cannot silently erase a write-up.
+`--notes`, `--notes-file` and `--notes-stdin` are mutually exclusive, and the body is read byte-for-byte — multiline UTF-8, CRLF and all (the value of a bound project env var is still masked to `$NAME` on the way in, as it is for every issue field). A long write-up piped in or read from a file stays out of the process listing and the shell history; on `create` it is written with the issue in one transaction, so a script no longer needs a create-then-update pair. `--notes ''` clears the notes on `update`; a file or a pipe that yields nothing is refused instead, so a report generator that dies cannot silently erase a write-up. `--notes-stdin` needs a pipe or a redirect (`--notes-stdin < notes.md`) and refuses a terminal, for the same reason `--request-stdin` does.
 
 | Option | Description |
 | -------- | ------------- |

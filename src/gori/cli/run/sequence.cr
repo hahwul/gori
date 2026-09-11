@@ -230,7 +230,7 @@ module Gori
       end
 
       private def self.read_token_list(file : String) : Array(String)
-        raw = read_input_file(file, "gori run sequence", stdin: true)
+        raw = read_input_file(file, "gori run sequence", stdin: true, noun: "token list")
         # Token lists are usually text, but a stray non-UTF-8 byte (0xff/0xfe) makes the
         # PCRE2 regex split raise "Regex match error: UTF-8 error" and kill the run. Scrub
         # to valid UTF-8 first (bad bytes → U+FFFD) so a lone junk byte doesn't abort the

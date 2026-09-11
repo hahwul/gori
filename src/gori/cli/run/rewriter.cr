@@ -521,8 +521,16 @@ module Gori
       # (`-` reads stdin), so `gori run rewriter add --op=short_circuit --find=/admin
       # --response-file=stub.http` is the natural spelling. Distinct from `--body-file`, which
       # points at the BODY the live proxy reads per request; this one is read ONCE, now.
+      #
+      # `-` reads stdin through the shared reader, not a bare `STDIN.gets_to_end`: a canned
+      # response is raw HTTP, so a terminal would echo it and then not end on one ^D (#1034).
       private def self.read_stub_response(path : String) : String
-        path == "-" ? STDIN.gets_to_end : File.read(path)
+        if path == "-"
+          return read_stdin_text(STDIN, "gori run rewriter", "canned response",
+            "Pipe it in (`cat stub.http | gori run rewriter add … --response-file=-`), or " \
+            "pass the file's path instead of `-`.")
+        end
+        File.read(path)
       rescue ex : File::Error
         abort "gori run rewriter: cannot read --response-file '#{path}': #{ex.message}"
       end

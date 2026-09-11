@@ -155,7 +155,9 @@ module Gori
         elsif f = file
           read_input_file(f, "#{what}: --notes-file")
         elsif stdin
-          read_stdin_text(io, what, "notes")
+          read_stdin_text(io, what, "notes",
+            stdin_pipe_hint(what, flag: "--notes-stdin", file_flag: "--notes-file",
+              producer: "report-generator"))
         end
       end
 
@@ -205,7 +207,7 @@ module Gori
           p.on("--flow=ID", "Associated flow ID") { |v| flow_id = parse_flow_id(v, "gori run issues create") }
           p.on("-nNOTES", "--notes=NOTES", "Free-form notes (the issue's body)") { |v| notes = v }
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
-          p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues create -t … --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit") { notes_stdin = true }
+          p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues create -t … --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run issues create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run issues create: missing value for #{f}" }
@@ -357,7 +359,7 @@ module Gori
           end
           p.on("-nNOTES", "--notes=NOTES", "Free-form notes (empty to clear)") { |v| notes = v }
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
-          p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues update 7 --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit") { notes_stdin = true }
+          p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues update 7 --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
           p.on("--status=STATUS", "Status: open|confirmed|false-positive|resolved") { |v| stat_s = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run issues update: unknown option: #{f}\n#{p}" }
