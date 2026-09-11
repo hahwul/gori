@@ -156,7 +156,7 @@ Two more tools round out analysis:
   | Key | Action |
   |-----|--------|
   | `←` / `→` | Diff the requests or the responses |
-  | `n` / `⇧N` | Jump to the next / previous **changed** row (wraps; the footer shows `3/8`) |
+  | `⇧N` / `⇧P` | Jump to the next / previous **changed** row (wraps; the footer shows `3/8`) |
   | `f` | Fold the unchanged runs to `⋯ N unchanged lines ⋯`, keeping 3 lines of context |
   | `↑` / `↓`, `⇧↑` / `⇧↓` | Move the row cursor · grow a whole-row selection |
   | `y` | Copy the selection, or the whole diff, as unified text |

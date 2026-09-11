@@ -252,11 +252,6 @@ module Gori::Tui
       @issues.size
     end
 
-    # See DrillIn::Host.
-    def rail_count : Int32
-      detail_row_index ? {DrillIn::RAIL_ROWS, @issues.size}.min : 0
-    end
-
     # First index of the window the rail shows. Private: everything outside reads
     # `rail_rows`/`rail_cursor`, which are derived from it.
     private def rail_start : Int32

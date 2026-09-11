@@ -100,15 +100,17 @@ module Gori::Tui
       # advertises, in the three states an operator actually triages from.
       clear = Hotkeys.binding_label(reg, "issues.clear", "⇧X")
       if @issues.detail_open?
+        # Dropped whole when there is nowhere to step — see DrillIn::Host's `step_available?`.
+        step = @issues.step_available? ? "{issue.next-item}/{issue.prev-item} issue · " : ""
         if @issues.notes_insert_mode?
           "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
         elsif @issues.notes_focused?
-          keys("↑/↓ move · ⇧arrows select · {issue.copy} copy · i/↵ edit · {issue.next-item}/{issue.prev-item} issue · space cmds · ↹/←/esc related")
+          keys("↑/↓ move · ⇧arrows select · {issue.copy} copy · i/↵ edit · #{step}space cmds · ↹/←/esc related")
         else
           # `↹/↓ notes`, and `i edit` rather than the old `i/↵ notes`: ↵ in this pane opens
           # the selected RELATED item (`issue.open-link`), so naming it as the way into the
           # notes editor was wrong about one of the two keys it listed.
-          keys("↑/↓ links · ↵ open · ↹/↓ notes · i edit · {issue.next-item}/{issue.prev-item} issue · {issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+          keys("↑/↓ links · ↵ open · ↹/↓ notes · i edit · #{step}{issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -720,7 +722,7 @@ module Gori::Tui
       @issues.close_detail
     end
 
-    # `n`/`⇧N` inside the drill-in: open the next/previous issue WITHOUT going back to the list.
+    # `⇧N`/`⇧P` inside the drill-in: open the next/previous issue WITHOUT going back to the list.
     # See HistoryController#detail_step_item for why the step exists at all.
     #
     # Saves the notes buffer first, exactly as leaving by pointer or `esc` does, and ABORTS

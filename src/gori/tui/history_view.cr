@@ -1094,19 +1094,17 @@ module Gori::Tui
     # nil when the open flow is not in the list at all — a deep link from Issues, Sitemap,
     # Discover or a link jump can open a flow the current filter excludes — and then there is
     # no rail, no position and nothing to step through.
+    # `row_index`, not an `@rows.index { }` scan: this is on the per-frame path (the rail,
+    # the crumb, the step hint) and @rows runs to MAX_ROWS, while `index_of` behind it is an
+    # O(log n) binary search over the same id-ordered list every other lookup here uses.
     def detail_row_index : Int32?
       id = detail_flow_id || return nil
-      @rows.index { |r| r.id == id }
+      row_index(id)
     end
 
     # Rows in the filtered list — the bound the item step clamps against.
     def row_count : Int32
       @rows.size
-    end
-
-    # See DrillIn::Host.
-    def rail_count : Int32
-      detail_row_index ? {DrillIn::RAIL_ROWS, @rows.size}.min : 0
     end
 
     # First index of the window the rail shows. Private: everything outside reads
