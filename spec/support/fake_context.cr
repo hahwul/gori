@@ -407,6 +407,10 @@ class FakeExecContext < Gori::Verb::ExecContext
   property? issue_related_freezable : Bool = false
   property? issue_related_frozen : Bool = false
 
+  # Does the open issue have a retest card to open (#1036)? Settable so both sides of
+  # `issue.retest`'s gate can be exercised.
+  property? issue_retest_available : Bool = false
+
   property selected_evidence : Int64? = nil
   property? evidence_has_links : Bool = false
   property? evidence_source_available : Bool = false

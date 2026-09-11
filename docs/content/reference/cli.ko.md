@@ -931,6 +931,60 @@ gori run evidence delete 12
 
 한 번도 보내지 않은 Repeater 탭은 요청만 동결하지 않고 거부하며, 응답이 아직 도착하지 않은 플로우도 거부합니다. Repeater 복사본은 탭에 저장된 요청(바인딩은 펼치지 않은 상태)과 저장소의 마지막 응답(성공한 전송의 것)을 짝지으므로, 취약점을 확인해 준 전송 직후에 동결하세요. WebSocket 복사본은 핸드셰이크이며 프레임 기록은 복사되지 않습니다. 프로젝트의 동결 증거 총량은 256 MB로 제한되며, 넘으면 사본을 삭제할 때까지 `freeze`가 거부합니다. `show`는 본문을 디코딩해 텍스트 형식에서는 64 KB에서 자르고(저장된 사본은 온전합니다), JSON 형식은 `get_flow`와 같은 모양입니다.
 
+### run retest {#run-retest}
+
+Issue의 **리테스트**: 결함을 재현하는 Repeater 전송을 순서대로 나열하고, 각 단계에 역할과 기대 결과 하나를 붙인 것, 그리고 최근 실행 기록입니다. `links`는 무엇이 관련되어 있는지를, `evidence`는 결함을 증명한 바이트를 남기지만, 둘 다 *실행*할 수는 없습니다. "먼저 #4로 로그인하고, 그다음 #5가 403을 주어야 한다"는 서술을 CI가 실행할 수 있는 형태로 바꾸는 표면입니다.
+
+```bash
+gori run retest add --issue=7 --repeater=4 --role=setup                        # 먼저 로그인
+gori run retest add --issue=7 --repeater=5 --role=baseline --assert=status:200
+gori run retest add --issue=7 --repeater=6 --role=variant  --assert=status:403
+gori run retest --issue=7                                                      # 각 단계가 무엇을 보낼지 포함한 계획
+gori run retest move 9 --to=1                                                  # 순서 변경(id는 --format=json)
+gori run retest update 9 --role=control --assert=body:same
+gori run retest run --issue=7                                                  # `pass`일 때만 종료 코드 0
+gori run retest runs --issue=7                                                 # 보존된 실행 기록
+gori run retest show 3                                                         # 한 실행의 결과 표
+gori run retest forget 3                                                       # 기록에서 실행 하나를 지움
+```
+
+| Option | Description |
+|--------|-------------|
+| `--issue=N` | 대상 Issue. `steps`, `add`, `clear`, `run`, `runs`에서 필수 |
+| `--repeater=M` | `add`: 이 단계가 보낼 Repeater 세션(id는 `gori run repeater list`) |
+| `--role=ROLE` | `setup` \| `baseline` \| `variant`(기본값) \| `control` \| `cleanup` |
+| `--assert=EXPR` | 기대 결과 하나(아래). 생략하면(또는 `update`에서 빈 값) 결과만 기록하고 아무것도 단언하지 않습니다 |
+| `--to=POS` | `move`: 새 위치(1부터, 목록 범위로 클램프) |
+| `-y`, `--yes` | `run`: 상태를 바꾸는 메서드가 포함된 배치를 확인. `clear`: 삭제를 확인 |
+| `--allow-cleanup` | `run`: gori가 전송을 거부한 뒤에도 cleanup 단계를 보냅니다 |
+| `--allow-unscoped` | `run`: 프로젝트 스코프 밖으로도 전송. Sandbox와 명시적 exclude는 그대로 적용됩니다 |
+| `--no-record-history` | `run`: 각 전송을 History에 기록하지 않습니다(기본값은 기록 — 리테스트도 증거입니다) |
+| `--slot=NAME` | `run`: 모든 단계를 이 세션 슬롯으로 전송(헤더 오버레이와 `$NAME` 테이블) |
+| `--timeout=SEC` | `run`: 단계별 연결 + 유휴 타임아웃(기본 20) |
+| `--limit=N` | `runs`: 출력할 실행 개수 |
+| `--format=FMT` | `text`(기본값) 또는 `json` |
+
+`forget RUN`은 실행 요약과 결과 행을 지웁니다. 그 실행을 만든 단계도, 각 전송이 기록한 History 플로우도 그대로 남습니다 — 지우는 것은 보고이지 증거가 아닙니다. 기록은 최근 20개로 알아서 정리되므로, 이 명령은 애초에 기록에 남으면 안 되는 실행(잘못된 대상으로 보냈거나, 이후 수정된 스코프에서 돈 배치)을 위한 것입니다.
+
+단언 — 단계당 하나:
+
+| 표현식 | 통과 조건 |
+|--------|-------------|
+| `status:200` | 응답 상태가 정확히 200 |
+| `status:2xx` | 상태가 그 클래스 안 |
+| `status:200-299` | 상태가 그 범위(양끝 포함) 안 |
+| `json:data.user.id` | JSON 필드가 존재(값이 `null`이어도 "있는" 것으로 셉니다) |
+| `json:data.role=admin` | JSON 필드가 리터럴과 같음. 리터럴은 타입 없는 텍스트라 `n=3`은 숫자 `3`과 문자열 `"3"` 모두에 일치 |
+| `json-absent:data.token` | JSON 필드가 없음 |
+| `body:same` | 디코딩된 본문이 직전 `baseline` 단계와 동일 |
+| `body:diff` | 그것과 다름 |
+
+각 단계는 실행 시점에 Repeater 탭이 들고 있는 요청을 그대로 보냅니다. 그래서 리테스트는 고쳐지는 요청을 따라가고, `gori run evidence`는 당시 모습 그대로를 얼립니다. 모든 전송은 프로젝트 스코프와 Sandbox 게이트를 통과하며 History에 `src:retest`로, 이슈와 단계 번호를 달고 기록됩니다. 그래서 탭이 한참 뒤에 바뀌어도 결과 행은 자기가 보고한 바로 그 응답을 열 수 있습니다. 탭에 저장된 응답은 덮어쓰지 않습니다.
+
+`setup` 단계가 실패하면 측정 단계는 중단되지만(그 전제 위에서 이후가 측정되므로) cleanup은 실행됩니다. gori가 전송을 **거부**하면(스코프, Sandbox, exclude 규칙) 그 뒤는 모두 건너뛰며, cleanup도 `--allow-cleanup` 없이는 보내지 않습니다. 건너뛴 단계도 이유가 적힌 행을 남기므로 부분 실행이 통과처럼 읽히지 않습니다. `body:` 단언은 기준이 없을 때는 물론, 직전 `baseline` 단계가 **자기 기대 결과를 못 맞췄을 때**도 통과가 아니라 `inconclusive`입니다. 읽기를 확립하지 못한 기준은 아무것도 고정하지 못하므로, 그렇지 않으면 `status:200` 기준이 받은 403 오류 페이지와 변형을 비교해 "본문이 그대로다"라고 — 둘 다 오류 페이지인데 — 보고하게 됩니다.
+
+판정이 `pass`가 되려면 모든 단계가 실행되고 모든 단언이 결정되어야 합니다. `blocked`는 `fail`보다 우선합니다 — gori가 끝내기를 거부한 실행은 대상이 아니라 스코프 설정에 대한 사실이기 때문입니다. `run`은 `pass`에서 `0`, 그 외에는 `1`로 종료합니다. Issue당 최근 20개 실행이 보존됩니다.
+
 ### run rewriter {#run-rewriter}
 
 스크립트에서 Match & Replace 규칙을 관리합니다. [Rewriter 탭](/ko/guide/proxy/)이 편집하는 것과 같은 규칙이며, 실시간 프록시 트래픽에 적용됩니다:

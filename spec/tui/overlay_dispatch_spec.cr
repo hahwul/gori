@@ -34,7 +34,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :oast_provider_pick, :oast_session,
   :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :authorize_identities, :authorize_identity, :ca_import, :import, :export, :scope_rule, :sequence_config,
   :mine_config, :name_prompt, :columns, :column, :library_pick, :cvss_calculator, :copy_as, :send_to,
-  :evidence,
+  :evidence, :retest, :retest_assert,
 }
 
 # The migration ledger — THE one line a Phase 1 batch edits in this file. Each batch
@@ -124,6 +124,11 @@ private MIGRATED_KINDS = [
   # Evidence (#1038) — the frozen-evidence viewer, born on the seam (↵ on a FROZEN row of
   # the Issues detail), so likewise never in MODAL_OVERLAYS.
   OverlayKind::Evidence,
+  # Retest (#1036) — the per-Issue RETEST card, born on the seam (space → Retest… / ⇧R on
+  # the Issues detail), so likewise never in MODAL_OVERLAYS.
+  OverlayKind::Retest,
+  # …and the one-field card its assertion is typed into, born on the seam too.
+  OverlayKind::RetestAssert,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and

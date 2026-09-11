@@ -47,6 +47,7 @@ require "./tools/issues"
 require "./tools/jobs"
 require "./tools/links"
 require "./tools/evidence"
+require "./tools/retest"
 require "./tools/mine"
 require "./tools/minimize"
 require "./tools/notes"
@@ -864,6 +865,7 @@ module Gori
           list_oast_sessions_tools j
           list_links_tools j
           list_evidence_tools j
+          list_retest_tools j
           list_context_tools j
           list_env_tools j
           list_host_overrides_tools j

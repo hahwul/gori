@@ -338,6 +338,15 @@ migrations in `src/gori/store/schema.cr`.
   many-to-many (`evidence_issue_links`); the bytes and hashes are neither. A snapshot whose
   last Issue link is removed is KEPT as an orphan, findable in the project-wide archive, and
   only its own explicit delete removes it.
+- **Retest**: an Issue's REPRODUCIBLE check — ordered `issue_retest_steps` (each a Repeater
+  session, a role, and at most one assertion) plus a bounded `issue_retest_runs` history and
+  its per-step rows. Kept OUT of `entity_links`, deliberately: a link answers what material
+  is related, a step additionally carries order, role, assertion and execution state, and
+  folding the two would make unlinking a piece of evidence delete a test step. Unlike frozen
+  evidence it CASCADES with the Issue — a run summary is a statement about one issue's check
+  and means nothing detached from it. A step references its Repeater session live (it sends
+  what the tab holds at run time); a result row COPIES what it sent, because a run is read
+  weeks later and a row that re-resolved would describe a request that never ran.
 - **Note**: the running scratchpad and report.
 - **Sessions**: persisted Repeater / Fuzzer / Miner / Sequencer / OAST workbench state.
 

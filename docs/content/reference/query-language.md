@@ -67,6 +67,7 @@ capture read out of somebody else's file.
 | `repeater` | A Repeater send (the TUI, `gori run repeater send --record-history`, MCP `send_request`) |
 | `fuzzer` | A fuzz result recorded with `--record-history` / `record_history` |
 | `discover` | A crawl fetch (Discover persists by default) |
+| `retest` | One step of an Issue's retest (`gori run retest run`, MCP `run_retest`, the TUI's RETEST card). Its own value, not `repeater`: a request an operator drove by hand and a step of a check gori ran are different facts about the same bytes |
 | `miner`, `sequencer`, `authorize`, `probe` | Reserved. Those tools do not record flows yet |
 | `import` | Read in from a HAR, Burp export, `--urls`, an OpenAPI document |
 | `gori` | Every source gori SENT. The union of the middle rows, and **not** `import` |

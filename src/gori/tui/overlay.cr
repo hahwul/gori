@@ -99,6 +99,15 @@ module Gori::Tui
     # (delete, link, probe) and a snapshot has none — and because closing a modal lands the
     # operator back on the RELATED row they came from, tab and cursor intact.
     Evidence
+    # An Issue's retest (#1036): the ordered Repeater steps and the last run's result table,
+    # in one card over the Issues detail. A modal for the reason `RetestOverlay` gives — the
+    # detail's row budget is already clamped, and a retest is a thing you open, not a pane
+    # every issue pays for.
+    Retest
+    # The one expected result a retest step carries. Its own card rather than
+    # `NamePromptOverlay` because the accepted forms have to be readable WHILE it is typed —
+    # see `RetestAssertOverlay`.
+    RetestAssert
 
     def to_sym : Symbol
       {% begin %}

@@ -65,6 +65,8 @@ require "./subtab_picker"
 require "./library_picker"
 require "./name_prompt_overlay"
 require "./links_overlay"
+require "./retest_overlay"
+require "./retest_assert_overlay"
 require "./link_picker"
 require "./evidence_viewer"
 require "./evidence_view"
@@ -128,6 +130,7 @@ require "./runner/jwt"
 require "./runner/cookie"
 require "./runner/links"
 require "./runner/evidence"
+require "./runner/retest"
 require "./runner/miner"
 require "./runner/mouse"
 require "./runner/notes"
@@ -571,6 +574,7 @@ module Gori::Tui
             dirty = true if sequencer_controller.drain_events
             dirty = true if discover_controller.drain_events
             dirty = true if authorize_controller.drain_events
+            dirty = true if drain_retest_run
             # A finished gRPC reflection fetch (#827): applied on THIS fiber because
             # `Schemas.adopt` writes to the store, which the send fiber must never wait on.
             dirty = true if history_controller.drain_reflection
@@ -2982,6 +2986,9 @@ module Gori::Tui
       repeater_controller.stop_all
       oast_controller.stop_all
       authorize_controller.stop_all
+      # A retest run is the Issues tab's one background sender (#1036). Cooperative like the
+      # rest: the fiber owns its sockets and checks the flag between steps.
+      issues_controller.halt_retest
     end
 
     private def quit_message : String

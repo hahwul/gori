@@ -73,8 +73,12 @@ describe "MCP tool registry" do
     # `decode` is a pure tool and so needs no project.
     Gori::MCP::Tools::AGENT_ACTION_TOOLS.should contain("send_request")
     Gori::MCP::Tools::AGENT_ACTION_TOOLS.should_not contain("list_history")
+    # `run_retest` joins the senders for the same reason they are here: a retest step replays
+    # a Repeater session whose bytes may carry a `$KEY`, so the project's env has to be
+    # re-read before the run rather than at whatever point this server last looked.
     Gori::MCP::Tools::ENV_REFRESH_TOOLS.should eq(Set{"send_request", "send_websocket", "fuzz_start", "mine_start",
-                                                      "sequence_start", "discover_start", "list_env", "set_env_var", "delete_env_var"})
+                                                      "sequence_start", "discover_start", "run_retest",
+                                                      "list_env", "set_env_var", "delete_env_var"})
     Gori::MCP::Tools::UNBOUND_SAFE.should contain("decode")
     Gori::MCP::Tools::UNBOUND_SAFE.should_not contain("list_history")
     Gori::MCP::Tools::GATED_TOOLS.should contain("send_request")

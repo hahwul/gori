@@ -65,6 +65,7 @@ NOT (req.body:token OR resp.body:token)
 | `repeater` | Repeater 전송(TUI, `gori run repeater send --record-history`, MCP `send_request`) |
 | `fuzzer` | `--record-history` / `record_history`로 기록된 퍼즈 결과 |
 | `discover` | 크롤러가 가져온 것(Discover는 기본으로 저장합니다) |
+| `retest` | Issue 리테스트의 한 단계(`gori run retest run`, MCP `run_retest`, TUI의 RETEST 카드). `repeater`가 아니라 별도 값입니다 — 사람이 직접 보낸 요청과 gori가 실행한 검사의 한 단계는 같은 바이트에 대한 다른 사실이기 때문입니다 |
 | `miner`, `sequencer`, `authorize`, `probe` | 예약됨. 아직 플로우를 기록하지 않는 도구들 |
 | `import` | HAR, Burp export, `--urls`, OpenAPI 문서에서 읽어 들인 것 |
 | `gori` | gori가 **보낸** 모든 출처. 가운데 행들의 합집합이며 `import`는 **포함하지 않습니다** |
