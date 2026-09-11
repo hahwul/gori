@@ -749,13 +749,13 @@ module Gori
         # The per-flow reports, kept so the ONE line at the end can total them. Reports, not
         # whole flows: a report is a handful of `Hit`s, and holding the sanitized bodies of a
         # 5000-flow export in memory is what `details` streams to avoid.
-        reports = [] of {Int64, Redact::Report}
+        reports = [] of {Int64?, Redact::Report}
         details = rows.reverse.each.compact_map do |r|
           d = store.get_flow(r.id)
           next nil if d.nil?
           next d unless m = matcher
           clean, report = Redact::Wire.flow(d, m)
-          reports << {r.id, report}
+          reports << {r.id.as(Int64?), report}
           clean
         end
         # The transcript lookup. `Export::Har.log` calls this for EVERY flow, including the
@@ -779,12 +779,12 @@ module Gori
           # A preview writes rows, not a HAR, so the document is never built: `details` is a
           # lazy iterator and forcing it here is what fills `reports`.
           details.each { }
-          emit_har_redact_preview(reports, choice)
+          print_redact_preview(reports, choice, "history")
           return
         end
         report = Export::Har.log(STDOUT, details, ws: ->(id : Int64) { store.ws_messages(id) })
         STDOUT.puts
-        emit_har_redact_notes(reports, choice)
+        redact_notes(reports, choice, "history")
         report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
         if report.written == 0
           STDERR.puts "gori run history: #{empty_har_note(query, view)}"
@@ -865,7 +865,7 @@ module Gori
         show_format(format, detail, show_request, show_response, ws_msgs)
         # After the document, like every other caveat this command reports, and on STDERR so
         # `--format har > evidence.har` still writes a pure HAR.
-        redact_notes(redact_report, "show", choice.salt_persisted)
+        redact_notes(redact_one(redact_report), choice, "show")
       end
 
       # `--format` to the writer for it. Split out of `cmd_show` so the command body stays
@@ -906,7 +906,7 @@ module Gori
         return {detail, nil, false} unless matcher
         clean, report = Redact::Wire.flow(detail, matcher)
         return {clean, report, false} unless flags.preview?
-        print_redact_preview(report, "show")
+        print_redact_preview(redact_one(report), choice, "show")
         {clean, report, true}
       end
 

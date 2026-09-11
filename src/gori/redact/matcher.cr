@@ -63,11 +63,6 @@ module Gori
       # `gsub` per shape rather than one per configured name.
       @text_rules : Array({Regex, String})
 
-      # Nothing this matcher could ever replace.
-      def empty? : Bool
-        @fields.empty? && @form.empty? && @pointers.empty? && @profile.patterns.empty?
-      end
-
       # --- the engine --------------------------------------------------------
 
       # Sanitize one entity body. `content_type` is the message's Content-Type value (nil when
@@ -77,6 +72,10 @@ module Gori
       # unsanitizable one is withheld whole, and either way the caller gets a `Result` it can
       # print. The one exception it CAN propagate is `Redact::SaltMissing`, which is a
       # configuration fault, not a property of these bytes.
+      #
+      # The UTF-8 gate below is load-bearing, not tidiness: PCRE2 RAISES on the first illegal
+      # byte rather than declining to match, and that exception out of a copy action or an
+      # export is the exact crash shape this tree keeps finding.
       def body(bytes : Bytes?, content_type : String? = nil) : Result
         return Result.new(text: "", hits: [] of Hit, shape: Shape::Empty) if bytes.nil? || bytes.empty?
         if MediaType.multipart?(content_type)
@@ -86,9 +85,11 @@ module Gori
         end
         text = String.new(bytes)
         unless text.valid_encoding?
+          # Worded for a WebSocket frame payload as much as for an entity body: `value` is this
+          # same gate (see below), so one sentence has to cover both.
           return withheld(bytes.size, Shape::Binary,
-            "a body that is not valid UTF-8 is withheld whole: there is no text to inspect, " \
-            "so nothing here can say what it holds")
+            "not valid UTF-8, so it is withheld whole: there is no text to inspect, and " \
+            "nothing here can say what it holds")
         end
         if json_shaped?(text, content_type)
           json(text)
@@ -100,21 +101,16 @@ module Gori
       end
 
       # The same engine over a string that is not an entity body — a WebSocket frame payload, a
-      # rendered transcript, a note. Always the text/JSON path; there is no Content-Type to
-      # consult.
+      # rendered transcript, a note.
       #
-      # A frame payload is arbitrary bytes, so the UTF-8 gate `body` applies is applied here
-      # too: a binary frame is withheld whole rather than run past a regex engine that RAISES
-      # on the first illegal byte (PCRE2 does), which out of a copy action is the exact crash
-      # shape this tree keeps finding.
+      # Deliberately `body` and not a second gate of its own: with no Content-Type there is no
+      # multipart and no form to detect, so "sanitize this string" and "sanitize this body
+      # whose type nothing declared" are the same question — and two entry points that answer
+      # it separately is how `Wire.ws_messages` and the Repeater's copy menu ended up
+      # sanitizing the identical kind of payload down two paths. A size cap or a new sniff
+      # added to the gate now applies to both by construction.
       def value(text : String) : Result
-        return Result.new(text: "", hits: [] of Hit, shape: Shape::Empty) if text.empty?
-        unless text.valid_encoding?
-          return withheld(text.bytesize, Shape::Binary,
-            "a value that is not valid UTF-8 is withheld whole: there is no text to inspect, " \
-            "so nothing here can say what it holds")
-        end
-        json_shaped?(text, nil) ? json(text) : plain(text)
+        body(text.to_slice, nil)
       end
 
       # --- shapes ------------------------------------------------------------
@@ -168,8 +164,7 @@ module Gori
         # One hit, because the count a surface reports is "how many values did not travel" and
         # a withheld body is the whole of them. `path` is the body itself; there is no finer
         # location to give, which is the point.
-        Result.new(text: note, hits: [Hit.new("body", "withheld", note)], shape: shape,
-          withheld: true)
+        Result.new(text: note, hits: [Hit.new("body", "withheld", note)], shape: shape)
       end
 
       # --- the JSON walk -----------------------------------------------------
@@ -393,9 +388,14 @@ module Gori
       # `/a/b~1c` → `["a", "b/c"]`. A pointer that does not start with `/` is taken as if it
       # did, because that is what an operator means by `data/token` and refusing it would be a
       # silent no-op rule.
+      #
+      # `""` is the whole document (RFC 6901 §5) and `"/"` is the member whose key is the empty
+      # string — NOT the document. Both spellings reach here only from a hand-written profile,
+      # and reading the second as the first would replace an entire body for a rule that names
+      # one oddly-keyed field.
       def self.pointer_tokens(pointer : String) : Array(String)
+        return [] of String if pointer.empty?
         s = pointer.starts_with?('/') ? pointer[1..] : pointer
-        return [] of String if pointer == "" || pointer == "/"
         s.split('/').map(&.gsub("~1", "/").gsub("~0", "~"))
       end
 

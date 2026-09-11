@@ -64,23 +64,6 @@ module Gori::Settings
     save
   end
 
-  # A named profile, or nil when no such name exists. User profiles are searched FIRST so one
-  # named `default` replaces the built-in of that name.
-  def self.redaction_profile(name : String) : Redact::Profile?
-    wanted = name.strip
-    return nil if wanted.empty?
-    redaction_profiles.find { |p| p.name == wanted } ||
-      Redact::BUILTIN_PROFILES.find { |p| p.name == wanted }
-  end
-
-  # Every name that resolves, user profiles first, without duplicates — what a picker lists and
-  # what an "unknown profile" message suggests.
-  def self.redaction_profile_names : Array(String)
-    names = redaction_profiles.map(&.name)
-    Redact::BUILTIN_PROFILES.each { |p| names << p.name unless names.includes?(p.name) }
-    names
-  end
-
   # Tolerant parse, like every other list section: a non-object node keeps the current values,
   # an entry with no usable name is dropped, and a field of the wrong JSON type is skipped
   # rather than raising — a hand-edited file must not be able to take the whole load down (see
@@ -90,28 +73,7 @@ module Gori::Settings
     h["active"]?.try(&.as_s?).try { |v| self.redaction_active = v.strip }
     self.redaction_default = load_bool_h(h, "default", redaction_default?)
     h["salt"]?.try(&.as_s?).try(&.strip).try { |v| Redact.salt = v unless v.empty? }
-    if arr = h["profiles"]?.try(&.as_a?)
-      profiles = [] of Redact::Profile
-      arr.each do |e|
-        o = e.as_h? || next
-        name = o["name"]?.try(&.as_s?).try(&.strip)
-        next if name.nil? || name.empty?
-        profiles << Redact::Profile.new(
-          name: name,
-          description: o["description"]?.try(&.as_s?) || "",
-          json_fields: string_list(o["json_fields"]?),
-          json_pointers: string_list(o["json_pointers"]?),
-          form_keys: string_list(o["form_keys"]?),
-          patterns: string_list(o["patterns"]?))
-      end
-      self.redaction_profiles = profiles
-    end
-  end
-
-  # A JSON array of strings, with anything that is not a non-empty string dropped.
-  private def self.string_list(node : JSON::Any?) : Array(String)
-    arr = node.try(&.as_a?) || return [] of String
-    arr.compact_map(&.as_s?.try(&.strip).presence)
+    h["profiles"]?.try(&.as_a?).try { self.redaction_profiles = Redact::Profile.list_from_json(h["profiles"]) }
   end
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory).
@@ -140,36 +102,10 @@ module Gori::Settings
         j.field "salt", Redact.salt unless Redact.salt.empty?
         unless redaction_profiles.empty?
           j.field "profiles" do
-            j.array do
-              redaction_profiles.each do |p|
-                j.object do
-                  j.field "name", p.name
-                  j.field "description", p.description unless p.description.empty?
-                  serialize_string_list(j, "json_fields", p.json_fields)
-                  serialize_string_list(j, "json_pointers", p.json_pointers)
-                  serialize_string_list(j, "form_keys", p.form_keys)
-                  serialize_string_list(j, "patterns", p.patterns)
-                end
-              end
-            end
+            j.array { redaction_profiles.each(&.build_json(j)) }
           end
         end
       end
     end
-  end
-
-  private def self.serialize_string_list(j : JSON::Builder, name : String,
-                                         values : Array(String)) : Nil
-    return if values.empty?
-    j.field name do
-      j.array { values.each { |v| j.string v } }
-    end
-  end
-
-  # nil if `name` is a profile this install has, a sentence naming the alternatives otherwise.
-  # The one place the "unknown profile" wording lives, so every surface refuses the same way.
-  def self.redaction_profile_error(name : String) : String?
-    return nil if redaction_profile(name)
-    "no redaction profile named #{name.inspect} (have: #{redaction_profile_names.join(", ")})"
   end
 end

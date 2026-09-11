@@ -27,14 +27,18 @@ module Gori::Tui
     record Option, label : String, key : Char, text : String
 
     # The picker heading for a menu whose bytes went through a redaction profile (#1035), or
-    # `title` unchanged when they did not.
+    # `title` unchanged when they did not — which `count` says by being nil.
     #
-    # The COUNT is in the heading and not only in the toast that follows the copy, because the
-    # picker is the last thing an operator sees BEFORE the clipboard. "SANITIZED" on its own
+    # ONE argument rather than a count beside a Bool, because the two would have to agree: a
+    # count passed with the flag off is thrown away, and a `0` passed with it on is a heading
+    # that lies in the last place an operator looks before pasting.
+    #
+    # The count is in the heading and not only in the toast that follows the copy, for the same
+    # reason: the picker is the last thing seen BEFORE the clipboard. "SANITIZED" on its own
     # reads the same whether the profile replaced four values or none, and "none" is exactly
     # when an operator needs to stop and look at the profile rather than paste.
-    def self.sanitized_title(title : String, count : Int32, on : Bool) : String
-      on ? "#{title} · SANITIZED (#{count})" : title
+    def self.sanitized_title(title : String, count : Int32?) : String
+      count ? "#{title} · SANITIZED (#{count})" : title
     end
 
     # Options for a REQUEST pane. `wire` is the request as it'd be sent (CRLF-framed,

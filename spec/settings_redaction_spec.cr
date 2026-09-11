@@ -134,11 +134,14 @@ describe "Settings redaction section" do
     end
   end
 
-  it "names the alternatives when a profile does not exist" do
+  it "is visible to the one resolver, which is what names the alternatives" do
+    # `Redact::Policy` with no store is how a --global CRUD verb looks a profile up, so there is
+    # one lookup and one "no such profile" sentence rather than a near-copy per scope.
     with_settings_home do
       Gori::Settings.redaction_profiles = [Gori::Redact::Profile.new("mine", json_fields: ["a"])]
-      Gori::Settings.redaction_profile_error("mine").should be_nil
-      err = Gori::Settings.redaction_profile_error("nope").not_nil!
+      Gori::Redact::Policy.profile(nil, "mine").not_nil!.json_fields.should eq ["a"]
+      Gori::Redact::Policy.profile(nil, "nope").should be_nil
+      err = Gori::Redact::Policy.unknown(nil, "nope")
       err.should contain "mine"
       err.should contain "default"
     end

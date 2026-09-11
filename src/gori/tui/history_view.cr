@@ -2015,7 +2015,7 @@ module Gori::Tui
         if pair = pair_option(d, req)
           opts << pair
         end
-        return {CopyMenu.sanitized_title("COPY REQUEST AS", redacted_count, !redactor.nil?), opts}
+        return {CopyMenu.sanitized_title("COPY REQUEST AS", redactor && redacted_count), opts}
       end
       # URLs and the host list need only the ROW, so read flow_row here — get_flow pulls the
       # full request+response bodies (2 MiB each), and ⇧T can hand this a full PAGE of marks.
@@ -2034,8 +2034,8 @@ module Gori::Tui
       # over something it never saw.
       bytes = rows.size <= COPY_BYTES_CAP ? byte_copy_options(store, ids, redactor) : nil
       bytes.try { |(rows_opts, _)| opts.concat(rows_opts) }
-      {CopyMenu.sanitized_title("COPY #{rows.size} FLOWS AS", bytes.try(&.[1]) || 0,
-        !redactor.nil? && !bytes.nil?), opts}
+      {CopyMenu.sanitized_title("COPY #{rows.size} FLOWS AS",
+        redactor && bytes.try(&.[1])), opts}
     end
 
     # The detail a COPY works from: the captured one, or the sanitized derivative when this
@@ -2119,8 +2119,9 @@ module Gori::Tui
     def detail_copy_as_menu(redactor : Redact::Matcher? = nil) : {String, Array(CopyMenu::Option)}
       detail = @detail
       return {"COPY AS", [] of CopyMenu::Option} unless detail
-      detail, redacted_count = redacted(detail, redactor)
-      marked = !redactor.nil?
+      detail, count = redacted(detail, redactor)
+      # nil when no profile ran, which is what the heading needs to tell them apart.
+      marked = redactor ? count : nil
       case @detail_pane
       when :request
         wire = String.new(combine_bytes(detail.request_head, detail.request_body) || Bytes.empty)
@@ -2130,7 +2131,7 @@ module Gori::Tui
         if pair = pair_option(detail, wire)
           opts << pair
         end
-        {CopyMenu.sanitized_title("COPY REQUEST AS", redacted_count, marked), opts}
+        {CopyMenu.sanitized_title("COPY REQUEST AS", marked), opts}
       when :response
         head = detail.response_head
         opts = if head
@@ -2144,7 +2145,7 @@ module Gori::Tui
         if pair = pair_option(detail)
           opts << pair
         end
-        {CopyMenu.sanitized_title("COPY RESPONSE AS", redacted_count, marked), opts}
+        {CopyMenu.sanitized_title("COPY RESPONSE AS", marked), opts}
       else
         {"COPY AS", [] of CopyMenu::Option}
       end

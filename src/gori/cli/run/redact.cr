@@ -45,65 +45,54 @@ module Gori
         Redact::Policy.resolve(store, flags.profile, flags.mode)
       end
 
+      # One flow's report in the shape the reporters below take. `nil` for the id: there is no
+      # flow COLUMN to draw and no flow count to state when the export is one flow.
+      private def self.redact_one(report : Redact::Report?) : Array({Int64?, Redact::Report})
+        report ? [{nil.as(Int64?), report}] : [] of {Int64?, Redact::Report}
+      end
+
       # Everything a sanitized artifact has to SAY, on STDERR — never mixed into the document on
       # STDOUT, the rule this file already holds for every other caveat.
-      # Nil-tolerant: the caller is a command that may or may not have redacted, and pushing
-      # that question in here keeps the branch out of every call site.
-      private def self.redact_notes(report : Redact::Report?, command : String,
-                                    salt_persisted : Bool = true, io : IO = STDERR) : Nil
-        return unless report
-        io.puts "gori run #{command}: #{report.summary}"
-        if report.decoded?
+      #
+      # ONE reporter for one flow and for five thousand. The pair this replaced restated all
+      # four of these sentences at each other, and had already drifted in the way two copies
+      # do: the single-flow preview called its notes without `salt_persisted`, so
+      # `gori run show --redact-preview` silently dropped the "these tags will NOT match
+      # another session's" warning that every other path printed. Taking the whole `Choice`
+      # rather than a bare Bool is what makes that omission unspellable.
+      #
+      # An empty `reports` with a profile in hand cannot happen — a report and a matcher are
+      # produced together — and the early return covers the no-profile case, so there is no
+      # "0 of 0 flows" sentence to write.
+      private def self.redact_notes(reports : Array({Int64?, Redact::Report}),
+                                    choice : Redact::Policy::Choice, command : String,
+                                    io : IO = STDERR) : Nil
+        profile = choice.matcher.try(&.profile) || return
+        return if reports.empty?
+        total = reports.sum { |(_, r)| r.count }
+        # The flow-count clause earns its place only across a SET: on one flow "across 1 of 1
+        # flow" is noise, and on 5000 it is the difference between "nothing matched anywhere"
+        # and "nothing matched in the twelve I was looking at".
+        across = if reports.size == 1
+                   ""
+                 else
+                   touched = reports.count { |(_, r)| r.redacted? }
+                   " across #{touched} of #{reports.size} flows"
+                 end
+        io.puts "gori run #{command}: sanitized with profile #{profile.name.inspect}: " \
+                "#{total} value#{total == 1 ? "" : "s"} redacted from request/response " \
+                "bodies#{across} (heads, URLs and query strings are NOT redacted)"
+        if reports.any? { |(_, r)| r.decoded? }
           io.puts "gori run #{command}: a body was content-decoded to be read, so the sanitized " \
                   "head drops Content-Encoding/Transfer-Encoding and carries the new Content-Length"
         end
-        report.pattern_errors.each do |err|
-          io.puts "gori run #{command}: redaction pattern skipped, it does not compile — #{err}"
-        end
-        unless salt_persisted
-          io.puts "gori run #{command}: the placeholder salt could not be saved to #{Settings.path}, " \
-                  "so these tags are consistent within this export and will NOT match another session's"
-        end
-      end
-
-      # `--redact-preview`: the replacements, one per line, as `side  path  rule`. The
-      # PLACEHOLDER is printed too — it is not a secret and it is what an operator greps the
-      # finished artifact for to confirm a value really went.
-      private def self.print_redact_preview(report : Redact::Report, command : String,
-                                            io : IO = STDOUT, notes_io : IO = STDERR) : Nil
-        rows = report.replacements
-        if rows.empty?
-          io.puts "no body values match profile #{report.profile.name.inspect} in this flow"
-        else
-          side_w = rows.max_of { |(side, _)| side.size }
-          path_w = rows.max_of { |(_, hit)| Output.cell_width(Output.term_safe(hit.path)) }
-          rule_w = rows.max_of { |(_, hit)| Output.cell_width(Output.term_safe(hit.rule)) }
-          rows.each do |(side, hit)|
-            io.puts "#{Output.pad(side, side_w)}  #{Output.pad(Output.term_safe(hit.path), path_w)}  " \
-                    "#{Output.pad(Output.term_safe(hit.rule), rule_w)}  #{hit.placeholder}"
-          end
-        end
-        # On STDERR, like every caveat this file reports, so `--redact-preview > rows.txt`
-        # captures the rows and nothing else.
-        redact_notes(report, command, io: notes_io)
-      end
-
-      # The same two reports for a MULTI-flow export (`gori run history --format har`), where
-      # the count is a total and the flow id is part of every row's address.
-      private def self.emit_har_redact_notes(reports : Array({Int64, Redact::Report}),
-                                             choice : Redact::Policy::Choice,
-                                             command : String = "history",
-                                             io : IO = STDERR) : Nil
-        profile = choice.matcher.try(&.profile) || return
-        total = reports.sum { |(_, r)| r.count }
-        touched = reports.count { |(_, r)| r.redacted? }
-        io.puts "gori run #{command}: sanitized with profile #{profile.name.inspect}: " \
-                "#{total} value#{total == 1 ? "" : "s"} redacted from request/response bodies " \
-                "across #{touched} of #{reports.size} flow#{reports.size == 1 ? "" : "s"} " \
-                "(heads, URLs and query strings are NOT redacted)"
-        if reports.any? { |(_, r)| r.decoded? }
-          io.puts "gori run #{command}: a body was content-decoded to be read, so its entry's " \
-                  "head drops Content-Encoding/Transfer-Encoding and carries the new Content-Length"
+        # A body that did not PARSE was sanitized by the conservative text pass alone, which
+        # cannot see structure — a JSON Pointer rule never fired on it. That changes what the
+        # artifact is worth, so it is said rather than left in a field nobody reads.
+        if reports.any? { |(_, r)| r.fell_back? }
+          io.puts "gori run #{command}: a body did not parse as the structure its Content-Type " \
+                  "declared, so only the conservative text pass ran over it — a json_pointer " \
+                  "rule cannot match there"
         end
         # Every report carries the SAME matcher's errors, so report them once.
         reports.first?.try(&.[1].pattern_errors).try &.each do |err|
@@ -115,27 +104,63 @@ module Gori
         end
       end
 
-      private def self.emit_har_redact_preview(reports : Array({Int64, Redact::Report}),
-                                               choice : Redact::Policy::Choice,
-                                               command : String = "history",
-                                               io : IO = STDOUT,
-                                               notes_io : IO = STDERR) : Nil
-        rows = [] of {Int64, String, Redact::Hit}
-        reports.each { |(id, report)| report.replacements.each { |(side, hit)| rows << {id, side, hit} } }
+      # `--redact-preview`: the replacements, one per line, as `[#id]  side  path  rule`. The
+      # PLACEHOLDER is printed too — it is not a secret, and it is what an operator greps the
+      # finished artifact for to confirm a value really went.
+      private def self.print_redact_preview(reports : Array({Int64?, Redact::Report}),
+                                            choice : Redact::Policy::Choice, command : String,
+                                            io : IO = STDOUT, notes_io : IO = STDERR) : Nil
+        rows = [] of {Int64?, String, Redact::Hit}
+        reports.each { |(id, r)| r.replacements.each { |(side, hit)| rows << {id, side, hit} } }
         if rows.empty?
-          io.puts "no body values match in these flows"
+          profile = choice.matcher.try(&.profile.name.inspect) || "the active profile"
+          io.puts "no body values match profile #{profile} in " \
+                  "#{reports.size == 1 ? "this flow" : "these flows"}"
         else
-          id_w = rows.max_of { |(id, _, _)| id.to_s.size }
+          id_w = rows.max_of { |(id, _, _)| id.try(&.to_s.size) || 0 }
           side_w = rows.max_of { |(_, side, _)| side.size }
           path_w = rows.max_of { |(_, _, hit)| Output.cell_width(Output.term_safe(hit.path)) }
           rule_w = rows.max_of { |(_, _, hit)| Output.cell_width(Output.term_safe(hit.rule)) }
           rows.each do |(id, side, hit)|
-            io.puts "##{Output.pad(id.to_s, id_w)}  #{Output.pad(side, side_w)}  " \
+            # The id column drops out entirely for a single flow rather than printing a blank
+            # one: the row is then `side  path  rule  placeholder`, which is what it is about.
+            prefix = id ? "##{Output.pad(id.to_s, id_w)}  " : ""
+            io.puts "#{prefix}#{Output.pad(side, side_w)}  " \
                     "#{Output.pad(Output.term_safe(hit.path), path_w)}  " \
                     "#{Output.pad(Output.term_safe(hit.rule), rule_w)}  #{hit.placeholder}"
           end
         end
-        emit_har_redact_notes(reports, choice, command, notes_io)
+        # On STDERR, like every caveat this file reports, so `--redact-preview > rows.txt`
+        # captures the rows and nothing else.
+        redact_notes(reports, choice, command, notes_io)
+      end
+
+      # Read this project's redaction scope, hand it to the block, and write back what the block
+      # returns — under one store open, one `ensure` close and one "the project is busy" refusal.
+      #
+      # Four verbs wrote this block out longhand, and each built `ProjectScope` POSITIONALLY out
+      # of two fields it was not changing: adding or reordering a field would have silently
+      # mis-assigned at all four sites, where `copy_with` names what actually moves. Each also
+      # had to remember on its own that `abort` skips `ensure`, so a refusal must travel back out
+      # rather than fire in place — which is exactly the leak this now gets right once.
+      #
+      # The block answers with the scope to write, or with a String to refuse by.
+      private def self.update_project_scope(project_name : String?, db_path : String?,
+                                            command : String,
+                                            &) : Nil
+        store = open_store(resolve_read_project(project_name, db_path))
+        ok, refusal = begin
+          answer = yield store, Redact::Policy.project_scope(store)
+          if answer.is_a?(String)
+            {false, answer}
+          else
+            {Redact::Policy.write_project_scope(store, answer), nil}
+          end
+        ensure
+          store.close
+        end
+        abort "gori run #{command}: #{refusal}" if refusal
+        abort "gori run #{command}: the project is busy — nothing was saved" unless ok
       end
 
       # --- the subcommand ------------------------------------------------------
@@ -287,8 +312,10 @@ module Gori
       end
 
       private def self.redact_use_global(name : String, none : Bool) : Nil
-        if !none && (err = Settings.redaction_profile_error(name))
-          abort "gori run redact use: #{err}"
+        # `Policy` with no store — the same lookup and the same sentence the project branch
+        # below uses, so "no such profile" cannot be worded two ways for one refusal.
+        if !none && Redact::Policy.profile(nil, name).nil?
+          abort "gori run redact use: #{Redact::Policy.unknown(nil, name)}"
         end
         Settings.redaction_active = none ? "" : name
         abort "gori run redact use: could not write #{Settings.path}" unless Settings.save
@@ -297,22 +324,13 @@ module Gori
 
       private def self.redact_use_project(project_name : String?, db_path : String?,
                                           name : String, none : Bool) : Nil
-        store = open_store(resolve_read_project(project_name, db_path))
-        # The refusal travels back rather than aborting in place: `abort` skips `ensure`, so a
-        # typo'd profile name would leave the project handle open.
-        ok, refusal = begin
+        update_project_scope(project_name, db_path, "redact use") do |store, scope|
           if !none && Redact::Policy.profile(store, name).nil?
-            {false, Redact::Policy.unknown(store, name)}
+            Redact::Policy.unknown(store, name)
           else
-            scope = Redact::Policy.project_scope(store)
-            {Redact::Policy.write_project_scope(store,
-              Redact::Policy::ProjectScope.new(none ? "" : name, scope.default, scope.profiles)), nil}
+            scope.copy_with(active: none ? "" : name)
           end
-        ensure
-          store.close
         end
-        abort "gori run redact use: #{refusal}" if refusal
-        abort "gori run redact use: the project is busy — the choice was not saved" unless ok
         puts none ? "cleared this project's redaction profile" : "this project's redaction profile: #{name}"
       end
 
@@ -360,15 +378,9 @@ module Gori
 
       private def self.redact_default_project(project_name : String?, db_path : String?,
                                               value : Bool?) : Nil
-        store = open_store(resolve_read_project(project_name, db_path))
-        ok = begin
-          scope = Redact::Policy.project_scope(store)
-          Redact::Policy.write_project_scope(store,
-            Redact::Policy::ProjectScope.new(scope.active, value, scope.profiles))
-        ensure
-          store.close
+        update_project_scope(project_name, db_path, "redact default") do |_, scope|
+          scope.copy_with(default: value)
         end
-        abort "gori run redact default: the project is busy — nothing was saved" unless ok
         if value.nil?
           puts "this project now inherits the global default"
         else
@@ -424,15 +436,9 @@ module Gori
           puts "global profile #{name.inspect}: #{redact_rule_counts(profile)}"
           return
         end
-        store = open_store(resolve_read_project(project_name, db_path))
-        ok = begin
-          scope = Redact::Policy.project_scope(store)
-          Redact::Policy.write_project_scope(store, Redact::Policy::ProjectScope.new(
-            scope.active, scope.default, scope.profiles.reject(&.name.==(name)) << profile))
-        ensure
-          store.close
+        update_project_scope(project_name, db_path, "redact set") do |_, scope|
+          scope.copy_with(profiles: scope.profiles.reject(&.name.==(name)) << profile)
         end
-        abort "gori run redact set: the project is busy — nothing was saved" unless ok
         puts "project profile #{name.inspect}: #{redact_rule_counts(profile)}"
       end
 
@@ -465,21 +471,14 @@ module Gori
           puts "removed global profile #{name.inspect}"
           return
         end
-        store = open_store(resolve_read_project(project_name, db_path))
-        ok, missing = begin
-          scope = Redact::Policy.project_scope(store)
+        update_project_scope(project_name, db_path, "redact rm") do |_, scope|
           kept = scope.profiles.reject(&.name.==(name))
           if kept.size == scope.profiles.size
-            {false, true}
+            "no profile named #{name.inspect} in this project"
           else
-            {Redact::Policy.write_project_scope(store,
-              Redact::Policy::ProjectScope.new(scope.active, scope.default, kept)), false}
+            scope.copy_with(profiles: kept)
           end
-        ensure
-          store.close
         end
-        abort "gori run redact rm: no profile named #{name.inspect} in this project" if missing
-        abort "gori run redact rm: the project is busy — nothing was saved" unless ok
         puts "removed project profile #{name.inspect}"
       end
     end

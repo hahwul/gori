@@ -12,15 +12,39 @@ module Gori::CLI::Run
     flags
   end
 
+  # `choice` carries the salt verdict, so a caller cannot report one path's notes without it —
+  # which is how `--redact-preview` used to lose the salt warning.
+  def self.spec_choice(report : Redact::Report, salt_persisted = true) : Redact::Policy::Choice
+    Redact::Policy::Choice.new(matcher: Redact::Matcher.new(report.profile),
+      salt_persisted: salt_persisted)
+  end
+
   def self.redact_notes_for_spec(report : Redact::Report, salt_persisted = true) : String
     io = IO::Memory.new
-    redact_notes(report, "show", salt_persisted, io)
+    redact_notes(redact_one(report), spec_choice(report, salt_persisted), "show", io)
     io.to_s
+  end
+
+  def self.redact_notes_for_spec(reports : Array({Int64?, Redact::Report})) : String
+    io = IO::Memory.new
+    redact_notes(reports, spec_choice(reports.first[1]), "history", io)
+    io.to_s
+  end
+
+  def self.print_redact_preview_for_spec(report : Redact::Report, salt_persisted : Bool,
+                                         io : IO) : Nil
+    print_redact_preview(redact_one(report), spec_choice(report, salt_persisted), "show", io, io)
   end
 
   def self.redact_preview_for_spec(report : Redact::Report) : String
     io = IO::Memory.new
-    print_redact_preview(report, "show", io, io)
+    print_redact_preview(redact_one(report), spec_choice(report), "show", io, io)
+    io.to_s
+  end
+
+  def self.redact_preview_for_spec(reports : Array({Int64?, Redact::Report})) : String
+    io = IO::Memory.new
+    print_redact_preview(reports, spec_choice(reports.first[1]), "history", io, io)
     io.to_s
   end
 
@@ -103,6 +127,38 @@ describe "the sanitized-artifact notes" do
   it "warns when the placeholder salt is only in memory" do
     Gori::CLI::Run.redact_notes_for_spec(report_for, salt_persisted: false)
       .should contain "will NOT match another session's"
+  end
+
+  it "carries that warning into the PREVIEW too" do
+    # It did not: the preview called the notes without the salt verdict, so the one path whose
+    # whole job is to show the tags before they are written was the one that never said they
+    # might not correlate. The reporters take the `Choice` now, which makes it unspellable.
+    io = IO::Memory.new
+    Gori::CLI::Run.print_redact_preview_for_spec(report_for, salt_persisted: false, io: io)
+    io.to_s.should contain "will NOT match another session's"
+  end
+
+  it "says when a body fell back to the text pass, since a pointer rule cannot fire there" do
+    Gori::CLI::Run.redact_notes_for_spec(
+      report_for(request_body: %({"password":"pw"), response_body: %({"a":1})))
+      .should contain "only the conservative text pass ran"
+  end
+
+  describe "across a SET of flows" do
+    it "states the flow count, which is noise on a single flow" do
+      one = Gori::CLI::Run.redact_notes_for_spec(report_for)
+      one.should_not contain "across"
+      many = Gori::CLI::Run.redact_notes_for_spec(
+        [{7_i64.as(Int64?), report_for}, {9_i64.as(Int64?), report_for(request_body: %({"a":1}), response_body: %({"b":2}))}])
+      many.should contain "2 values redacted"
+      many.should contain "across 1 of 2 flows"
+    end
+
+    it "draws the flow-id column only when there is more than one flow to address" do
+      Gori::CLI::Run.redact_preview_for_spec(report_for).lines.first.should start_with "request"
+      Gori::CLI::Run.redact_preview_for_spec([{7_i64.as(Int64?), report_for}])
+        .lines.first.should start_with "#7  request"
+    end
   end
 end
 

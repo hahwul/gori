@@ -32,7 +32,7 @@ module Gori
         ProjectScope.new(
           active: h["active"]?.try(&.as_s?).try(&.strip) || "",
           default: h["default"]?.try(&.as_bool?),
-          profiles: parse_profiles(h["profiles"]?))
+          profiles: Profile.list_from_json(h["profiles"]?))
       end
 
       # Persist the project half. The whole object is rewritten, so a caller changing one field
@@ -48,7 +48,7 @@ module Gori
             scope.default.try { |d| j.field "default", d }
             unless scope.profiles.empty?
               j.field "profiles" do
-                j.array { scope.profiles.each { |p| write_profile(j, p) } }
+                j.array { scope.profiles.each(&.build_json(j)) }
               end
             end
           end
@@ -136,41 +136,6 @@ module Gori
 
       def self.unknown(store : Store?, name : String) : String
         "no redaction profile named #{name.inspect} (have: #{names(store).join(", ")})"
-      end
-
-      private def self.parse_profiles(node : JSON::Any?) : Array(Profile)
-        arr = node.try(&.as_a?) || return [] of Profile
-        arr.compact_map do |e|
-          o = e.as_h? || next
-          name = o["name"]?.try(&.as_s?).try(&.strip)
-          next if name.nil? || name.empty?
-          Profile.new(
-            name: name,
-            description: o["description"]?.try(&.as_s?) || "",
-            json_fields: strings(o["json_fields"]?),
-            json_pointers: strings(o["json_pointers"]?),
-            form_keys: strings(o["form_keys"]?),
-            patterns: strings(o["patterns"]?))
-        end
-      end
-
-      private def self.strings(node : JSON::Any?) : Array(String)
-        arr = node.try(&.as_a?) || return [] of String
-        arr.compact_map(&.as_s?.try(&.strip).presence)
-      end
-
-      private def self.write_profile(j : JSON::Builder, p : Profile) : Nil
-        j.object do
-          j.field "name", p.name
-          j.field "description", p.description unless p.description.empty?
-          {"json_fields" => p.json_fields, "json_pointers" => p.json_pointers,
-           "form_keys" => p.form_keys, "patterns" => p.patterns}.each do |key, values|
-            next if values.empty?
-            j.field key do
-              j.array { values.each { |v| j.string v } }
-            end
-          end
-        end
       end
     end
   end

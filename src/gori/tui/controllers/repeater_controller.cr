@@ -1014,10 +1014,10 @@ module Gori::Tui
       redactor = Redact::Policy.ambient(@host.session.store)
       if v.focus == :response
         opts, n = repeater_response_options(v, redactor)
-        {CopyMenu.sanitized_title("COPY RESPONSE AS", n, !redactor.nil?), opts}
+        {CopyMenu.sanitized_title("COPY RESPONSE AS", redactor && n), opts}
       else
         opts, n = repeater_request_options(v, redactor)
-        {CopyMenu.sanitized_title("COPY REQUEST AS", n, !redactor.nil?), opts}
+        {CopyMenu.sanitized_title("COPY REQUEST AS", redactor && n), opts}
       end
     end
 

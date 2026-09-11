@@ -91,6 +91,58 @@ module Gori
       def empty? : Bool
         json_fields.empty? && json_pointers.empty? && form_keys.empty? && patterns.empty?
       end
+
+      # --- the one JSON codec ------------------------------------------------
+      #
+      # A profile is persisted in TWO places (settings.json and a project's settings row —
+      # `Settings.parse_redaction` and `Redact::Policy`), and a second hand-written reader or
+      # writer is a second answer to "what is a profile" that has to agree with the first
+      # forever. It would not: adding a fifth rule kind means editing every copy, and a profile
+      # `redact set --global` wrote would then round-trip differently from one `redact set`
+      # wrote. Both scopes call these.
+
+      # nil when the object carries no usable `name` — the tolerant-parse contract every list
+      # section in settings.json has: a junk entry is dropped, never raised over.
+      def self.from_json_object(node : JSON::Any?) : Profile?
+        o = node.try(&.as_h?) || return nil
+        name = o["name"]?.try(&.as_s?).try(&.strip)
+        return nil if name.nil? || name.empty?
+        Profile.new(
+          name: name,
+          description: o["description"]?.try(&.as_s?) || "",
+          json_fields: string_list(o["json_fields"]?),
+          json_pointers: string_list(o["json_pointers"]?),
+          form_keys: string_list(o["form_keys"]?),
+          patterns: string_list(o["patterns"]?))
+      end
+
+      # Every profile of a JSON array, junk entries dropped.
+      def self.list_from_json(node : JSON::Any?) : Array(Profile)
+        arr = node.try(&.as_a?) || return [] of Profile
+        arr.compact_map { |e| from_json_object(e) }
+      end
+
+      # A JSON array of strings, with anything that is not a non-empty string dropped.
+      def self.string_list(node : JSON::Any?) : Array(String)
+        arr = node.try(&.as_a?) || return [] of String
+        arr.compact_map(&.as_s?.try(&.strip).presence)
+      end
+
+      # The inverse. Empty lists are omitted, so a round trip through either scope is a fixed
+      # point and an untouched rule kind leaves nothing behind in the file.
+      def build_json(j : JSON::Builder) : Nil
+        j.object do
+          j.field "name", name
+          j.field "description", description unless description.empty?
+          {"json_fields" => json_fields, "json_pointers" => json_pointers,
+           "form_keys" => form_keys, "patterns" => patterns}.each do |key, values|
+            next if values.empty?
+            j.field key do
+              j.array { values.each { |v| j.string v } }
+            end
+          end
+        end
+      end
     end
 
     # One replacement that happened. `path` locates it the way the shape does — a JSON
@@ -117,8 +169,7 @@ module Gori
       text : String,
       hits : Array(Hit),
       shape : Shape,
-      fell_back : Bool = false,
-      withheld : Bool = false do
+      fell_back : Bool = false do
       def count : Int32
         hits.size
       end
@@ -127,8 +178,13 @@ module Gori
         !hits.empty?
       end
 
+      # Derived from `shape` rather than carried beside it. A flag AND a shape is two fields
+      # that have to be kept in sync by hand on the record every surface reads to decide
+      # whether a body was suppressed — and a suppressed body reporting `withheld? == false`
+      # is the export claiming it sanitized bytes it never looked at. There is one shape test,
+      # so a new withheld shape cannot be added with the wrong flag.
       def withheld? : Bool
-        withheld
+        shape.multipart? || shape.binary?
       end
 
       # The sanitized body as bytes, which is what every caller that rebuilds a message wants.

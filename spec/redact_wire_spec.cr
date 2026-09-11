@@ -119,8 +119,10 @@ describe Gori::Redact::Wire do
         clean, report = Gori::Redact::Wire.flow(detail, matcher)
         report.count.should eq 2
         report.redacted?.should be_true
-        report.summary.should contain "2 values redacted"
-        report.summary.should contain "profile \"default\""
+        report.profile.name.should eq "default"
+        report.fell_back?.should be_false
+        # The SENTENCE these feed is `CLI::Run.redact_notes`, pinned in spec/cli/run/redact_spec.cr
+        # — there is one wording and it lives with the command that prints it.
         report.replacements.map(&.[0]).should eq ["request", "response"]
         String.new(clean.request_body.not_nil!).should_not contain "\"pw\""
         String.new(clean.response_body.not_nil!).should_not contain "\"t\""
@@ -140,7 +142,7 @@ describe Gori::Redact::Wire do
         clean, report = Gori::Redact::Wire.flow(detail, matcher)
         clean.response_head.should be_nil
         report.count.should eq 0
-        report.summary.should contain "0 values redacted"
+        report.redacted?.should be_false
       end
     end
   end

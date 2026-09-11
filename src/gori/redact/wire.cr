@@ -77,9 +77,17 @@ module Gori
       # Repeater and the TUI's copy menu carry a message, as opposed to the head/body pair a
       # store row keeps. Splits, sanitizes, and rejoins.
       #
-      # A buffer with no blank line in it is all head: returned untouched, with an `Empty`
-      # result, because there is no entity to inspect and inventing one out of the last line
-      # would corrupt a request the operator is about to copy.
+      # A buffer with no CRLF-framed blank line in it is all head by the only view of a header
+      # block this module has (see `reframe`): returned untouched, with an `Empty` result,
+      # because there is no entity to inspect and inventing one out of the last line would
+      # corrupt a request the operator is about to copy.
+      #
+      # The one shape that reaches here that way is a Repeater request typed in HEX mode, which
+      # is byte-exact by design and may frame its head however the operator chose; every other
+      # caller is CRLF (`RepeaterView#expand_wire` normalizes the head, and a capture cannot end
+      # a head on anything else). The count a surface then reports is 0 — nothing was examined,
+      # as opposed to nothing matching — which is the honest reading of a buffer gori could not
+      # split, and `--no-redact` / a non-hex edit is the way to have it looked at.
       def self.wire(text : String, matcher : Matcher) : {String, Result}
         bytes = text.to_slice
         at = header_block_end(bytes)
@@ -197,24 +205,17 @@ module Gori
         count > 0
       end
 
+      # Did either body have to fall back to the conservative text pass because it did not
+      # parse? A json_pointer rule cannot fire there, so it changes what the artifact is worth
+      # and the reporter says so.
+      def fell_back? : Bool
+        request.result.fell_back || response.result.fell_back
+      end
+
       # Did reading either body require undoing its transfer — so the exported heads no longer
       # carry the `Content-Encoding` / `Transfer-Encoding` the capture did?
       def decoded? : Bool
         request.decoded? || response.decoded?
-      end
-
-      # The one sentence a surface prints beside a sanitized artifact.
-      #
-      # It says BODIES, and it says it even when the count is zero. Both halves are the point:
-      # the profile covers body structure and nothing else (see the `Wire` header), and an
-      # export that matched nothing still went through a profile, which is a different claim
-      # from an export that was never sanitized at all — a reader who cannot tell those apart
-      # will read "0 redacted" as "clean".
-      def summary : String
-        n = count
-        "sanitized with profile #{profile.name.inspect}: " \
-        "#{n} value#{n == 1 ? "" : "s"} redacted from request/response bodies " \
-        "(heads, URLs and query strings are NOT redacted)"
       end
 
       # `{side, hit}` for every replacement, request side first — the preview's rows, and the

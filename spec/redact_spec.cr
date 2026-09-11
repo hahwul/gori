@@ -110,6 +110,20 @@ describe Gori::Redact do
       end
     end
 
+    it "reads `/` as the empty-key member, not as the whole document" do
+      # RFC 6901 §5: `""` is the document and `"/"` is the member whose key is the empty string.
+      # Reading the second as the first would replace an entire body for a rule that names one
+      # oddly-keyed field.
+      with_salt do
+        prof = Gori::Redact::Profile.new("p", json_pointers: ["/"])
+        r = body(prof, %({"":"secret","keep":1}), "application/json")
+        r.count.should eq 1
+        parsed = JSON.parse(r.text)
+        parsed[""].as_s.should start_with "[REDACTED:"
+        parsed["keep"].as_i.should eq 1
+      end
+    end
+
     it "unescapes ~1 and ~0 in a pointer" do
       with_salt do
         prof = Gori::Redact::Profile.new("p", json_pointers: ["/a~1b/c~0d"])
