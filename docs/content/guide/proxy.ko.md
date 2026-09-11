@@ -379,6 +379,7 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 | 형식 지정 복사 | `Space` `Y` | urls / host 목록 / cURL / 원본 요청 / 원본 응답 / 요청+응답 쌍 |
 | 삭제 | `d` 또는 `Space` `D` | 전체를 확인 한 번으로(`⇧X`는 다른 동작입니다. 프로젝트의 History 전체를 비웁니다) |
 | 연결(Link…) | `Space` `k` | 한 카드에 모든 이슈와 노트(그리고 `+ New issue…` / `+ New note…`)가 함께 뜹니다. 대상은 한 번만 고르거나 새로 만들고, 전체를 첨부 |
+| 연결+동결(Link & freeze…) | `Space` `Z` | 같은 카드를 이슈만으로. 모든 플로우를 링크하면서 교환을 변경 불가 증거로 동결 (최대 20) |
 | 이슈 추가 | `Shift-F` | 표시된 전체를 근거로 가진 이슈 하나 |
 | Repeater / Fuzzer | `Ctrl-R` / `Shift-I` | 플로우마다 서브탭 하나(최대 20) |
 | 파라미터 마이닝 | `Space` `m` | 설정 팝업 한 번, 플로우마다 세션 하나(최대 20) |

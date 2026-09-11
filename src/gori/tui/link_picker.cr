@@ -41,13 +41,16 @@ module Gori::Tui
     # The labels are DERIVED from the kinds rather than kept in a second tuple beside them:
     # two positionally-correlated lists, one read by the draw and one by the action, drift
     # into a row that says "New issue" and creates a note.
-    CREATE_KINDS  = {Store::LinkOwnerKind::Issue, Store::LinkOwnerKind::Note}
-    CREATE_ROWS   = CREATE_KINDS.size
-    CREATE_LABELS = CREATE_KINDS.map { |k| "+ New #{k.label}…" }
+    CREATE_KINDS = {Store::LinkOwnerKind::Issue, Store::LinkOwnerKind::Note}
+    # Freezing (#1038) writes an `issue_evidence` row, and a note owns no evidence — so the
+    # freeze picker pins ONE create row and is handed issue rows only (`Runner#link_picker_rows`).
+    FREEZE_CREATE_KINDS = {Store::LinkOwnerKind::Issue}
 
     IDLE_HINT = "type to filter · ↑/↓ select · ↵ link · esc cancel"
     # The card's own hint row names the create rows too; the shell's bottom row does not.
-    CARD_HINT = "type to filter · ↑/↓ select · ↵ link / create · esc cancel"
+    CARD_HINT        = "type to filter · ↑/↓ select · ↵ link / create · esc cancel"
+    FREEZE_IDLE_HINT = "type to filter · ↑/↓ select · ↵ link & freeze · esc cancel"
+    FREEZE_CARD_HINT = "type to filter · ↑/↓ select · ↵ link & freeze / create · esc cancel"
 
     # Gutter for the kind badge, so labels line up down both kinds.
     BADGE_W = 6
@@ -56,26 +59,47 @@ module Gori::Tui
 
     @indexed : Array({Row, String})
 
-    def initialize(@rows : Array(Row))
+    # "Attach and freeze" (#1038): ↵ on an issue links the ref AND writes an immutable copy
+    # of its current exchange in the same transaction. A MODE of this card rather than a
+    # setting, so the title and the hint say what ↵ will do before it does it.
+    getter? freeze : Bool
+
+    def initialize(@rows : Array(Row), *, @freeze : Bool = false)
       @indexed = @rows.map { |r| {r, haystack(r)} }
       @filtered = @rows
       # Prefer the first existing owner when there is one (create is always at the top),
       # so a reflexive ↵ links rather than opening a form.
-      @selected = @rows.empty? ? 0 : CREATE_ROWS
+      @selected = @rows.empty? ? 0 : create_rows
     end
 
-    # Total navigable rows: the two create actions + the filtered owners.
+    # The pinned create rows — both kinds, or the issue alone while freezing. The labels are
+    # DERIVED from these rather than kept in a second tuple beside them: two positionally-
+    # correlated lists, one read by the draw and one by the action, drift into a row that
+    # says "New issue" and creates a note.
+    def create_kinds : Tuple(Store::LinkOwnerKind) | Tuple(Store::LinkOwnerKind, Store::LinkOwnerKind)
+      @freeze ? FREEZE_CREATE_KINDS : CREATE_KINDS
+    end
+
+    def create_rows : Int32
+      create_kinds.size
+    end
+
+    private def create_label(idx : Int32) : String
+      "+ New #{create_kinds[idx].label}…"
+    end
+
+    # Total navigable rows: the create actions + the filtered owners.
     def entry_count : Int32
-      CREATE_ROWS + @filtered.size
+      create_rows + @filtered.size
     end
 
     # The create row under the cursor, or nil when the cursor is on an existing owner.
     def selected_create : Store::LinkOwnerKind?
-      CREATE_KINDS[@selected]?
+      create_kinds[@selected]?
     end
 
     def selected_row : Row?
-      i = @selected - CREATE_ROWS
+      i = @selected - create_rows
       # Guard the negative: Array#[]? counts backwards from the end, so a cursor parked on
       # a create row would otherwise resolve to the LAST owner and link to the wrong thing.
       return nil if i < 0
@@ -88,11 +112,11 @@ module Gori::Tui
     end
 
     def title : String
-      "LINK TO"
+      @freeze ? "LINK & FREEZE TO" : "LINK TO"
     end
 
     def hint : String
-      IDLE_HINT
+      @freeze ? FREEZE_IDLE_HINT : IDLE_HINT
     end
 
     protected def refilter : Nil
@@ -100,7 +124,7 @@ module Gori::Tui
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
       # Keep the create rows at the top; land on the first match when any, else on
       # `+ New issue…` — a query with no hits is the create case.
-      @selected = @filtered.empty? ? 0 : CREATE_ROWS
+      @selected = @filtered.empty? ? 0 : create_rows
       @scroll = 0
     end
 
@@ -130,16 +154,16 @@ module Gori::Tui
       box = overlay_box(area)
       return render_too_small(screen, area, "the link picker needs a larger window") unless box
       Frame.card(screen, box, title, border: Theme.border_focus)
-      list_top = render_filter(screen, box, CARD_HINT)
+      list_top = render_filter(screen, box, @freeze ? FREEZE_CARD_HINT : CARD_HINT)
       list_h = list_height(box)
       ensure_visible(list_h)
       (0...list_h).each do |i|
         ri = @scroll + i
         break if ri >= entry_count
-        if ri < CREATE_ROWS
+        if ri < create_rows
           draw_create(screen, box, list_top + i, ri, ri == @selected)
         else
-          draw_row(screen, box, list_top + i, @filtered[ri - CREATE_ROWS], ri == @selected)
+          draw_row(screen, box, list_top + i, @filtered[ri - create_rows], ri == @selected)
         end
       end
     end
@@ -149,7 +173,7 @@ module Gori::Tui
       fg = active ? Theme.text_bright : Theme.accent
       screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
       screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
-      screen.text(box.x + 3, ry, CREATE_LABELS[idx], fg, bg, width: box.w - 5)
+      screen.text(box.x + 3, ry, create_label(idx), fg, bg, width: box.w - 5)
     end
 
     # badge │ label │ detail, in RESERVED columns like SubtabPicker — not label-then-

@@ -93,6 +93,12 @@ module Gori::Tui
     # must answer it honestly rather than borrow `None`.
     CopyAs
     SendTo
+    # The read-only viewer for one frozen issue-evidence row (#1038): the request and
+    # response as they were copied, over the Issues detail they were opened from. A modal
+    # rather than the History drill-in, because the drill-in's verbs act on a LIVE flow id
+    # (delete, link, probe) and a snapshot has none — and because closing a modal lands the
+    # operator back on the RELATED row they came from, tab and cursor intact.
+    Evidence
 
     def to_sym : Symbol
       {% begin %}

@@ -1066,6 +1066,12 @@ module Gori
           j.field "links" do
             j.array { Issues::Export.append_links_json(j, f, store) if store }
           end
+          # Frozen copies (#1038): provenance and hashes only, like the export — an agent that
+          # wants the bytes reads the flow it names while it still exists; the copy itself is
+          # not served over MCP.
+          j.field "evidence" do
+            j.array { Issues::Export.append_evidence_json(j, f, store) if store }
+          end
         end
       end
 

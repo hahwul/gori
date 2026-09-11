@@ -110,7 +110,7 @@ module Gori::Tui
           # `↹/↓ notes`, and `i edit` rather than the old `i/↵ notes`: ↵ in this pane opens
           # the selected RELATED item (`issue.open-link`), so naming it as the way into the
           # notes editor was wrong about one of the two keys it listed.
-          keys("↑/↓ links · ↵ open · ↹/↓ notes · i edit · #{step}{issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+          keys("↑/↓ links · ↵ open · {issue.freeze-link} freeze · ↹/↓ notes · i edit · #{step}{issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"

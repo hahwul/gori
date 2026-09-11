@@ -3,6 +3,7 @@ require "./line_edit"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "../evidence"
 require "../store"
 
 module Gori::Tui
@@ -65,6 +66,11 @@ module Gori::Tui
     getter preedit : String
     getter extra_flow_ids : Array(Int64)
     getter notes : String
+    # "+ New issue…" from the LINK & FREEZE picker (#1038): the copies taken at the pick,
+    # written once the issue exists. Carried on the form for the reason `link_ref` is —
+    # dropping the form drops them with it — and taken BEFORE the form rather than after,
+    # so the byte-cost confirm has already been answered by the time ↵ files the issue.
+    getter snapshots : Array(Evidence::Snapshot)
 
     # Where the shell lands after a SUCCESSFUL create. False (the default) is History's
     # ⇧F: you file the issue and the shell takes you to it. True is a create raised in the
@@ -91,7 +97,8 @@ module Gori::Tui
                    @extra_flow_ids : Array(Int64) = [] of Int64,
                    @notes : String = "",
                    @cvss : String = "",
-                   @stay_on_create : Bool = false)
+                   @stay_on_create : Bool = false,
+                   @snapshots : Array(Evidence::Snapshot) = [] of Evidence::Snapshot)
       @cx = @issue_title.size
       @preedit = ""
       @sel = ROW_TITLE

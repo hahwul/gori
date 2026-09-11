@@ -264,6 +264,24 @@ module Gori
         "issue.open-link", "Open linked item", "Open the selected related URL in its tab",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("enter")], hidden: true) { |ctx| ctx.issue_open_link; nil }
 
+      # Frozen evidence (#1038). `f` on a LIVE History/Repeater row of RELATED copies its
+      # current exchange into an immutable `issue_evidence` row — the answer to "what exact
+      # bytes proved this", which a link (a pointer the next send or the retention sweep can
+      # hollow out) cannot give. Gated on the row under the cursor being freezable: a fuzz or
+      # miner session has no single exchange, and a stale row has no bytes left to copy.
+      r.register Verb::Definition.new(
+        "issue.freeze-link", "Freeze as evidence", "Copy the selected related flow/repeater exchange into immutable issue evidence",
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("f")],
+        available: ->(ctx : Verb::ExecContext) { ctx.issue_related_freezable? }, mnemonic: 'f') { |ctx| ctx.issue_freeze_link; nil }
+
+      # The frozen copy's ONLY way out — a confirm, then the row goes. Danger band like the
+      # issue delete beside it: the bytes are not recoverable from the source, which is the
+      # whole point of having frozen them.
+      r.register Verb::Definition.new(
+        "issue.evidence-delete", "Delete frozen evidence", "Delete the selected frozen evidence copy (asks first)",
+        Verb::Scope::IssuesDetail, [] of Verb::Chord,
+        available: ->(ctx : Verb::ExecContext) { ctx.issue_related_frozen? }, mnemonic: 'D', group: :danger) { |ctx| ctx.issue_evidence_delete; nil }
+
       r.register Verb::Definition.new(
         "issue.link-down", "Next related link", "Select the next related item",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("down"), Verb::Chord.new("j")], hidden: true) { |ctx| ctx.issue_link_move(1); nil }

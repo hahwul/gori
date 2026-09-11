@@ -31,7 +31,7 @@ describe Gori::Tui::LinksOverlay do
     lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Issue, 7_i64)
     OverlayHarness.new(lo).assert_chrome(OverlayKind::Links, "LINKS — ISSUE #7")
     LinksOverlay.new(Gori::Store::LinkOwnerKind::Note, 3_i64).title.should eq("LINKS — NOTE #3")
-    lo.hint.should eq("↑/↓ · ↵/o open · a add · d remove · esc close")
+    lo.hint.should eq("↑/↓ · ↵/o open · a add · f freeze · d remove · esc close")
   end
 
   it "swaps the hint when `a` arms adding (was a ternary in the Runner's ladder)" do
@@ -85,8 +85,8 @@ describe Gori::Tui::LinksOverlay do
     # onto the terse bottom-row pair silently drops the only z=fuzz / m=miner legend.
     lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Issue, 1_i64)
     h = OverlayHarness.new(lo)
-    h.rendered?("↑/↓ select · ↵/o open · a add · d remove · esc close").should be_true
-    lo.hint.should eq("↑/↓ · ↵/o open · a add · d remove · esc close")
+    h.rendered?("↑/↓ select · ↵/o open · a add · f freeze · d remove · esc close").should be_true
+    lo.hint.should eq("↑/↓ · ↵/o open · a add · f freeze · d remove · esc close")
 
     h.press(Termisu::Input::Key::LowerA, 'a')
     h.rendered?("add: f flow · r repeater · z fuzz · m miner · esc back").should be_true
@@ -303,5 +303,35 @@ describe "LinksOverlay — the add hand-off (Overlay#on_close nested-modal seam)
     h.press(Termisu::Input::Key::LowerZ, 'z').should eq(:closed)
     lo.pending_add.should eq('z')
     opened.should be_empty # the add path must not also trigger the open path
+  end
+
+  # `f` (#1038) freezes the highlighted link's current exchange as issue evidence. The
+  # freeze may raise a byte-cost confirm, so like the add hand-off it cannot run from inside
+  # this card's key handler: the key arms `pending_freeze` and drops the card, and the
+  # Runner's on_close does the work and puts the card back.
+  it "arms a freeze on `f` and hands off through on_close — but only with a row to freeze" do
+    with_store do |store|
+      id = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      # Empty card: `f` is inert, the card stays, nothing is armed.
+      empty = links_for(store, id)
+      h = OverlayHarness.new(empty)
+      h.press(Termisu::Input::Key::LowerF, 'f').should eq(:open)
+      empty.pending_freeze?.should be_false
+
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, id, Gori::Store::LinkRefKind::Flow, 5_i64)
+      lo = links_for(store, id)
+      h = OverlayHarness.new(lo)
+      h.press(Termisu::Input::Key::LowerF, 'f').should eq(:closed)
+      lo.pending_freeze?.should be_true
+      lo.pending_add.should be_nil
+      h.closes.should eq(1)
+      h.commits.should eq(0)
+
+      # ^F is not `f` — the same guard `d` has, so a chord cannot arm a write.
+      lo2 = links_for(store, id)
+      h2 = OverlayHarness.new(lo2)
+      h2.press(Termisu::Input::Key::LowerF, 'f', ctrl: true).should eq(:open)
+      lo2.pending_freeze?.should be_false
+    end
   end
 end

@@ -26,9 +26,9 @@ module Gori::Tui
     # not. Collapsing them onto the terse pair loses the only place that tells the user
     # z is fuzz and m is miner.
     CARD_ADD_HINT    = "add: f flow · r repeater · z fuzz · m miner · esc back"
-    CARD_BROWSE_HINT = "↑/↓ select · ↵/o open · a add · d remove · esc close"
+    CARD_BROWSE_HINT = "↑/↓ select · ↵/o open · a add · f freeze · d remove · esc close"
     ADD_HINT         = "f/r/z/m pick type · esc back"
-    BROWSE_HINT      = "↑/↓ · ↵/o open · a add · d remove · esc close"
+    BROWSE_HINT      = "↑/↓ · ↵/o open · a add · f freeze · d remove · esc close"
     # The link sources, as the keys the adding-mode hint advertises.
     ADD_KEYS = "frzm"
 
@@ -39,6 +39,11 @@ module Gori::Tui
     # this card. nil for every other exit, which is what keeps `on_close` inert when the
     # user merely opened a link or pressed esc.
     getter pending_add : Char?
+    # `f` in browse mode (#1038): freeze the highlighted link's current exchange as issue
+    # evidence. Read by `on_close` like `pending_add`, and for the same reason — the
+    # freeze may raise a confirm (a large copy shows its byte cost first), and a modal
+    # opened from inside this card's key handler would be torn straight back down.
+    getter? pending_freeze : Bool
 
     # Deletes the highlighted link and reloads. Stays open — removing is a repeatable
     # edit, not a dismissal.
@@ -48,6 +53,7 @@ module Gori::Tui
       @resolved = [] of Links::Resolved
       @adding = false
       @pending_add = nil
+      @pending_freeze = false
     end
 
     def reload(store : Store) : Nil
@@ -103,7 +109,7 @@ module Gori::Tui
       adding? ? ADD_HINT : BROWSE_HINT
     end
 
-    # Browse: ↑/↓ (or k/j) select · ↵/o open · a arms add · d removes · esc closes.
+    # Browse: ↑/↓ (or k/j) select · ↵/o open · a arms add · f freezes · d removes · esc closes.
     # Adding: f/r/z/m choose the source, which hands off through on_close.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
@@ -116,12 +122,20 @@ module Gori::Tui
       when key.escape?             then return :cancel
       when key.up?, key.lower_k?   then move(-1)
       when key.down?, key.lower_j? then move(1)
-      when key.enter?              then return :commit
-      when ch == 'o'               then return :commit
+      when key.enter?, ch == 'o'   then return :commit
       when ch == 'd'               then on_remove.try(&.call)
       when ch == 'a'               then start_add
+      when ch == 'f'               then return arm_freeze
       end
       :stay
+    end
+
+    # `f`: arm the freeze and drop the card so `on_close` can do the work (#1038) — only
+    # with a row to freeze, so an empty card does not close itself on a stray key.
+    private def arm_freeze : Symbol
+      return :stay if @resolved.empty?
+      @pending_freeze = true
+      :cancel
     end
 
     # Adding is a MODE, and the mouse has to respect it. `handle_key` forks to

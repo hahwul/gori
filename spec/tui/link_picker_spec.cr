@@ -213,4 +213,33 @@ describe "LinkPicker — Overlay contract" do
     away = OverlayHarness.new(sample_picker)
     away.overlay.handle_click(away.area, 0, 0).should eq(:cancel)
   end
+
+  # The LINK & FREEZE mode (#1038): the same card, said out loud. Only an issue can own
+  # frozen evidence, so the note create row is gone and the caller hands it issue rows only.
+  it "pins a single create row and says what ↵ does in freeze mode" do
+    p = LinkPicker.new([issue_row(1_i64, "Reflected XSS")], freeze: true)
+    p.freeze?.should be_true
+    p.title.should eq("LINK & FREEZE TO")
+    p.hint.should eq("type to filter · ↑/↓ select · ↵ link & freeze · esc cancel")
+    p.create_rows.should eq(1)
+    p.entry_count.should eq(2)
+    p.selected.should eq(1)
+    p.selected_row.try(&.id).should eq(1_i64)
+    p.move(-1)
+    p.selected_create.should eq(Gori::Store::LinkOwnerKind::Issue)
+    p.selected_row.should be_nil
+    p.move(-1)
+    p.selected_create.should eq(Gori::Store::LinkOwnerKind::Issue) # no note row above it
+
+    h = OverlayHarness.new(p)
+    h.rendered?("+ New issue…").should be_true
+    h.rendered?("+ New note…").should be_false
+    h.rendered?("↵ link & freeze / create").should be_true
+
+    # The default mode is untouched.
+    plain = sample_picker
+    plain.freeze?.should be_false
+    plain.create_rows.should eq(2)
+    plain.title.should eq("LINK TO")
+  end
 end

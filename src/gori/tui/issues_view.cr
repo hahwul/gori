@@ -12,6 +12,8 @@ require "../settings"
 require "../store"
 require "../issues_query"
 require "../links"
+require "../evidence"
+require "./fmt"
 require "./preview_split"
 require "./line_edit"
 require "./query_suggest"
@@ -63,7 +65,7 @@ module Gori::Tui
       @detail = nil.as(Store::Issue?)
       @detail_flow = nil.as(Store::FlowRow?)
       @detail_links = [] of Store::EntityLink
-      @detail_resolved = [] of Links::Resolved
+      @detail_related = [] of RelatedRow
       @links_scroll = 0
       @selected_link = 0
       @detail_focus = :links # :links | :notes — which detail region owns plain arrows
@@ -336,7 +338,7 @@ module Gori::Tui
     # true, so `↓` reaches NOTES on an issue with no links at all: that is the shape `n`
     # creates, and it was the one where a focus move had no visible effect whatsoever.
     def links_at_bottom? : Bool
-      @detail_resolved.empty? || @selected_link >= @detail_resolved.size - 1
+      @detail_related.empty? || @selected_link >= @detail_related.size - 1
     end
 
     # The NOTES read caret has no row above it — the edge `↑` crosses back to RELATED on.
@@ -576,22 +578,38 @@ module Gori::Tui
     def close_detail : Nil
       @detail = nil
       @detail_links = [] of Store::EntityLink
-      @detail_resolved = [] of Links::Resolved
+      @detail_related = [] of RelatedRow
       @detail_focus = :links
       @notes_mode = InputMode::Read
     end
 
+    # One row of the RELATED card: a LIVE link (resolved, possibly stale) or a FROZEN
+    # evidence copy (#1038). Exactly one of the two is set. The card lists them together
+    # because they answer the same question — "what backs this issue" — but they are
+    # different kinds of answer: a live row is a pointer that can go stale, a frozen row is
+    # the bytes and cannot. The badge in front of each says which.
+    record RelatedRow, live : Links::Resolved? = nil, frozen : Store::IssueEvidenceMeta? = nil do
+      def frozen? : Bool
+        !@frozen.nil?
+      end
+    end
+
+    # Rebuild the RELATED rows: the live links first, in link order, then the frozen
+    # copies, oldest first. Live first so an issue's rows keep the order they have always
+    # had; a freeze appends rather than reshuffling what the operator was reading.
     def reload_detail_links(store : Store) : Nil
       return unless issue = @detail
       @detail_links = store.list_links(Store::LinkOwnerKind::Issue, issue.id)
       @detail_links = Links.dedupe_issue_flow(@detail_links, issue.flow_id)
-      @detail_resolved = Links.resolve_all(store, @detail_links)
-      @selected_link = @selected_link.clamp(0, {@detail_resolved.size - 1, 0}.max)
+      rows = Links.resolve_all(store, @detail_links).map { |res| RelatedRow.new(live: res) }
+      store.issue_evidence(issue.id).each { |m| rows << RelatedRow.new(frozen: m) }
+      @detail_related = rows
+      @selected_link = @selected_link.clamp(0, {@detail_related.size - 1, 0}.max)
     end
 
     def move_links(delta : Int32) : Nil
-      return if @detail_resolved.empty?
-      @selected_link = (@selected_link + delta).clamp(0, @detail_resolved.size - 1)
+      return if @detail_related.empty?
+      @selected_link = (@selected_link + delta).clamp(0, @detail_related.size - 1)
       ensure_links_visible
     end
 
@@ -599,14 +617,36 @@ module Gori::Tui
       move_links(delta)
     end
 
-    # `@detail_resolved` is the RELATED list the detail pane windows from `@links_scroll`.
+    # `@detail_related` is the RELATED list the detail pane windows from `@links_scroll`.
     private def ensure_links_visible : Nil
       @links_scroll = Viewport.scroll_to_show(@selected_link, @links_scroll,
-        links_visible_rows, @detail_resolved.size)
+        links_visible_rows, @detail_related.size)
     end
 
+    def related_rows : Array(RelatedRow)
+      @detail_related
+    end
+
+    def selected_related : RelatedRow?
+      @detail_related[@selected_link]?
+    end
+
+    # The LIVE link under the RELATED cursor — nil on a frozen row as well as on none.
     def selected_resolved_link : Links::Resolved?
-      @detail_resolved[@selected_link]?
+      selected_related.try(&.live)
+    end
+
+    # The FROZEN copy under the RELATED cursor — nil on a live row as well as on none.
+    def selected_evidence : Store::IssueEvidenceMeta?
+      selected_related.try(&.frozen)
+    end
+
+    # Put the RELATED cursor on the row holding evidence `id` — where a freeze lands the
+    # cursor so the toast and the band agree about what just happened.
+    def select_evidence(id : Int64) : Nil
+      if idx = @detail_related.index { |r| r.frozen.try(&.id) == id }
+        select_link(idx)
+      end
     end
 
     # Max link rows shown in the detail pane (the rest scroll).
@@ -1398,7 +1438,7 @@ module Gori::Tui
       # so is a count inside a card title — it makes the title's width a moving target, which
       # is what a badge's `min_x` is derived from. The hint half drops while INS owns the
       # keyboard, exactly as the old inline hint did; the count never does.
-      n = @detail_resolved.size
+      n = @detail_related.size
       Frame.border_meta(screen, card, "RELATED", notes_insert_mode? ? n.to_s : "#{n} · space l")
       body = card.inset(1, 1)
       # The scroll window the NEXT `move_links` measures against — the `@list_last_h`
@@ -1407,28 +1447,60 @@ module Gori::Tui
       # would scroll the selection to a row nothing paints.
       @links_last_h = {body.h, 0}.max
       return if body.empty?
-      @links_scroll = Viewport.clamp_scroll(@links_scroll, body.h, @detail_resolved.size)
-      if @detail_resolved.empty?
+      @links_scroll = Viewport.clamp_scroll(@links_scroll, body.h, @detail_related.size)
+      if @detail_related.empty?
         screen.text(body.x, body.y, "(none — space l to link History/Repeater/…)",
           Theme.muted, width: body.w)
         return
       end
       (0...body.h).each do |i|
         idx = @links_scroll + i
-        break if idx >= @detail_resolved.size
-        res = @detail_resolved[idx]
+        break if idx >= @detail_related.size
+        row = @detail_related[idx]
         y = body.y + i
         sel = idx == @selected_link
-        fg = res.stale? ? Theme.muted : (sel ? Theme.text_bright : Theme.text)
         # Dim band when the pane is not focused, accent when it is — `render_list`'s own
         # `row_bg` rule. The cursor row used to keep the accent band in both states, which
         # is the other half of why a focus move in and out of this pane was invisible.
         bg = sel ? (active ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
         screen.fill(Rect.new(body.x, y, body.w, 1), bg) if sel
         screen.cell(body.x, y, sel ? '▎' : ' ', Theme.accent, bg)
-        screen.text(body.x + 1, y, res.line, fg, bg, width: {body.w - 1, 1}.max)
+        draw_related_row(screen, body, y, row, sel, bg)
       end
-      Frame.scroll_gauge(screen, body, @detail_resolved.size, @links_scroll, active)
+      Frame.scroll_gauge(screen, body, @detail_related.size, @links_scroll, active)
+    end
+
+    # Gutter for the LIVE/FROZEN badge, so the two kinds' identities line up down the card.
+    RELATED_BADGE_W = 7
+
+    # `LIVE    [hist] GET a.test/x` / `FROZEN  GET a.test/x · hist #12 · 09-11 14:02 · 200 · 34KB`.
+    #
+    # The badge is what tells the two apart, and FROZEN is the one that is coloured: a live
+    # row is the default kind of row and reads as it always did; a frozen row is the thing
+    # that survives, and it says so before it says what it is. The frozen row's tail is its
+    # PROVENANCE — where it came from, and when the copy was taken — because that, not the
+    # URL, is what distinguishes two snapshots of one endpoint.
+    private def draw_related_row(screen : Screen, body : Rect, y : Int32, row : RelatedRow,
+                                 sel : Bool, bg : Color) : Nil
+      x = body.x + 1
+      text_x = x + RELATED_BADGE_W
+      text_w = {body.right - text_x, 1}.max
+      if m = row.frozen
+        screen.text(x, y, "FROZEN", Theme.syn_header, bg, attr: Attribute::Bold, width: RELATED_BADGE_W)
+        fg = sel ? Theme.text_bright : Theme.text
+        line = "#{Evidence.label(m)} · #{m.source_label} · #{fmt_ts(m.created_at)}"
+        if st = m.status
+          line += " · #{st}"
+        elsif m.error
+          line += " · ERR"
+        end
+        line += " · #{Fmt.size(m.bytes)}"
+        screen.text(text_x, y, line, fg, bg, width: text_w)
+      elsif res = row.live
+        screen.text(x, y, "LIVE", Theme.muted, bg, width: RELATED_BADGE_W)
+        fg = res.stale? ? Theme.muted : (sel ? Theme.text_bright : Theme.text)
+        screen.text(text_x, y, res.line, fg, bg, width: text_w)
+      end
     end
 
     # NOTES — a real Frame.card (like Decoder INPUT) so INS/READ borders are rounded
@@ -1519,7 +1591,7 @@ module Gori::Tui
       i = my - body.y
       return nil if i < 0 || i >= body.h
       idx = @links_scroll + i
-      idx < @detail_resolved.size ? idx : nil
+      idx < @detail_related.size ? idx : nil
     end
 
     # The row a click on the RELATED scroll gauge asks for. The gauge rides the card's right
@@ -1529,14 +1601,14 @@ module Gori::Tui
     def links_gauge_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       body = links_body_rect(rect)
       return nil if body.empty?
-      Frame.scroll_gauge_row(body, @detail_resolved.size, mx, my)
+      Frame.scroll_gauge_row(body, @detail_related.size, mx, my)
     end
 
     # Put the RELATED cursor on `idx` (clamped) and scroll it into view — the pointer's
     # `move_links`, which is relative and cannot express "this row".
     def select_link(idx : Int32) : Nil
-      return if @detail_resolved.empty?
-      @selected_link = idx.clamp(0, @detail_resolved.size - 1)
+      return if @detail_related.empty?
+      @selected_link = idx.clamp(0, @detail_related.size - 1)
       ensure_links_visible
     end
 

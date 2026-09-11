@@ -19,7 +19,8 @@ module Gori
           io << "# Issues — " << project_name << "\n\n"
           io << "_" << issues.size << " issues · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
           issues.each do |f|
-            append_issue(io, f, f.flow_id.try { |fid| store.get_flow(fid) }, resolve_issue_links(f, store))
+            append_issue(io, f, f.flow_id.try { |fid| store.get_flow(fid) }, resolve_issue_links(f, store),
+              frozen: store.issue_evidence(f.id))
           end
         end
       end
@@ -38,8 +39,14 @@ module Gori
       # because those same bytes already ride structurally in `webRequest`/`webResponse`, and
       # embedding them twice roughly DOUBLED the document — enough to push an engagement past
       # the size limit on a `gh api .../code-scanning/sarifs` upload.
+      #
+      # `frozen` (#1038) arrives pre-fetched for the same reason — one store read per issue,
+      # paid by the caller that has the store. The SARIF writer leaves it empty: its result
+      # already carries the exchange as webRequest/webResponse, and a provenance block about
+      # copies it does not include would be a list of hashes with nothing to check them against.
       private def self.append_issue(io : String::Builder, f : Store::Issue, flow : Store::FlowDetail?,
-                                    resolved_links : Array(Links::Resolved), evidence : Bool = true) : Nil
+                                    resolved_links : Array(Links::Resolved), evidence : Bool = true,
+                                    frozen : Array(Store::IssueEvidenceMeta) = [] of Store::IssueEvidenceMeta) : Nil
         io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
         io << "- **Severity:** " << f.severity.label << "\n"
         if cvss = f.cvss
@@ -68,6 +75,7 @@ module Gori
           end
         end
         append_related_links(io, resolved_links)
+        append_frozen_evidence(io, frozen)
         # notes is multi-line by design (free text) — scrub_controls fixes invalid UTF-8
         # AND strips terminal escape sequences (ESC/BEL/OSC/CSI) so a notes value carrying
         # an OSC "set window title" can't drive a TTY when the report is printed/`cat`d,
@@ -111,6 +119,9 @@ module Gori
                 j.field "notes", scrub_only(f.notes)
                 j.field "links" do
                   j.array { append_links_json(j, f, store) }
+                end
+                j.field "evidence" do
+                  j.array { append_evidence_json(j, f, store) }
                 end
               end
             end
@@ -160,6 +171,51 @@ module Gori
           io << " — " << one_line(res.label)
           io << " (stale)" if res.stale?
           io << "\n"
+        end
+      end
+
+      # The issue's frozen copies (#1038) as PROVENANCE — source, moment, shape, hashes — and
+      # never the bytes. A report says what the evidence was and how to verify a raw export
+      # of it against the hash; the bytes themselves leave the project only by an explicit
+      # raw export, which is what "raw export remains explicit" means.
+      private def self.append_frozen_evidence(io : String::Builder, metas : Array(Store::IssueEvidenceMeta)) : Nil
+        return if metas.empty?
+        io << "\n### Frozen evidence\n\n"
+        metas.each do |m|
+          io << "- **frozen** " << one_line(m.method) << " " << one_line(m.url)
+          io << " — " << m.source_label << " · " << Time.unix(m.created_at // 1_000_000).to_utc.to_s("%Y-%m-%d %H:%M:%S UTC")
+          io << " · " << (m.status || (m.error ? "error" : "no response"))
+          io << " · " << m.bytes << " bytes"
+          io << " · sha256 req " << m.request_sha256
+          io << " res " << (m.response_sha256 || "—")
+          io << " (truncated at capture)" if m.request_truncated? || m.response_truncated?
+          io << "\n"
+        end
+      end
+
+      # The JSON twin of `append_frozen_evidence`: one object per copy, provenance and hashes,
+      # no bytes. `error` and `url` are captured text and go through `one_line` like every
+      # other captured string in this array's parent object.
+      def self.append_evidence_json(j : JSON::Builder, f : Store::Issue, store : Store?) : Nil
+        return unless store
+        store.issue_evidence(f.id).each do |m|
+          j.object do
+            j.field "id", m.id
+            j.field "source_kind", m.source_kind.label
+            j.field "source_id", m.source_id
+            j.field "frozen_at", m.created_at
+            j.field "method", one_line(m.method)
+            j.field "url", one_line(m.url)
+            j.field "protocol", m.protocol.try { |p| one_line(p) }
+            j.field "status", m.status
+            j.field "duration_us", m.duration_us
+            j.field "error", m.error.try { |e| one_line(e) }
+            j.field "request_truncated", m.request_truncated?
+            j.field "response_truncated", m.response_truncated?
+            j.field "request_sha256", m.request_sha256
+            j.field "response_sha256", m.response_sha256
+            j.field "bytes", m.bytes
+          end
         end
       end
 

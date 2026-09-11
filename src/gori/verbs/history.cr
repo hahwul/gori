@@ -907,6 +907,13 @@ module Gori
       r.register Verb::Definition.new(
         "link.repeater.attach", "Link…", "Attach this repeater session to an issue or note — or create one",
         Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
+      # The Repeater's "Link & freeze…" (#1038) — see register_links for the History pair.
+      # Registered here beside its sibling so the two land together in the COMMON group.
+      # The tab stays editable and sendable; what freezes is a COPY of the request and its
+      # current last response, and a never-sent tab is refused at the pick.
+      r.register Verb::Definition.new(
+        "link.repeater.freeze", "Link & freeze…", "Attach this repeater session to an issue and freeze its request + last response as evidence",
+        Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'Z') { |ctx| ctx.link_attach_freeze; nil }
       r.register Verb::Definition.new(
         "link.fuzzer.attach", "Link…", "Attach this fuzz session to an issue or note — or create one",
         Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }

@@ -206,13 +206,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_links_overlay(Store::LinkOwnerKind::Issue, f.id)
   end
 
-  def issue_open_link : Nil
-    if res = issues_controller.view.selected_resolved_link
-      navigate_link_ref(res.link.ref_kind, res.link.ref_id)
-    else
-      @toast = "no related link selected"
-    end
-  end
+  # `issue_open_link` lives in runner/evidence.cr: ↵ on a RELATED row opens a LIVE link in
+  # its tab and a FROZEN copy in the read-only viewer, and the two halves belong together.
 
   def issue_link_move(delta : Int32) : Nil
     issues_controller.issue_link_move(delta)

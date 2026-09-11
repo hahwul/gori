@@ -682,6 +682,56 @@ module Gori
       end
     end
 
+    # One frozen exchange's PROVENANCE and shape — everything the Issues detail's RELATED
+    # list, an export and a marker need, and none of the bytes (V26, #1038). The list is
+    # read on every detail open, so it must stay as light as `FlowRow` does for History.
+    #
+    # `source_kind` reuses `LinkRefKind` because a snapshot is taken FROM a linkable thing
+    # and the two vocabularies must not drift; only Flow and Repeater are ever written (a
+    # fuzz or miner session has no single exchange to freeze), and `Evidence.freezable?`
+    # is the one place that says so.
+    struct IssueEvidenceMeta
+      getter id : Int64
+      getter issue_id : Int64
+      getter created_at : Int64 # unix micros — when the copy was TAKEN, not when the source ran
+      getter source_kind : LinkRefKind
+      getter source_id : Int64
+      getter method : String
+      getter url : String
+      getter protocol : String?
+      getter status : Int32?
+      getter duration_us : Int64?
+      getter error : String?
+      getter? request_truncated : Bool
+      getter? response_truncated : Bool
+      getter request_sha256 : String
+      getter response_sha256 : String? # nil = no response was stored (an errored send)
+      getter bytes : Int64             # what the row costs against the evidence quota
+
+      def initialize(@id, @issue_id, @created_at, @source_kind, @source_id, @method, @url,
+                     @protocol, @status, @duration_us, @error, @request_truncated,
+                     @response_truncated, @request_sha256, @response_sha256, @bytes)
+      end
+
+      # `hist #12` / `repeater #3` — the source as the RELATED row and the toasts name it.
+      def source_label : String
+        "#{@source_kind.tag} ##{@source_id}"
+      end
+    end
+
+    # The frozen exchange itself: its meta plus the stored bytes, for the read-only viewer and
+    # the raw export. Mirrors `FlowDetail` over `FlowRow`.
+    struct IssueEvidence
+      getter meta : IssueEvidenceMeta
+      getter request_head : Bytes
+      getter request_body : Bytes?
+      getter response_head : Bytes?
+      getter response_body : Bytes?
+
+      def initialize(@meta, @request_head, @request_body, @response_head, @response_body)
+      end
+    end
+
     # A human-confirmed issue (DESIGN.md §6: the final output). Optionally linked
     # to a captured flow. One per project DB.
     struct Issue

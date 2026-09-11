@@ -65,6 +65,7 @@ require "./library_picker"
 require "./name_prompt_overlay"
 require "./links_overlay"
 require "./link_picker"
+require "./evidence_viewer"
 require "../links"
 require "../notes"
 require "./settings_view"
@@ -124,6 +125,7 @@ require "./runner/issues"
 require "./runner/jwt"
 require "./runner/cookie"
 require "./runner/links"
+require "./runner/evidence"
 require "./runner/miner"
 require "./runner/mouse"
 require "./runner/notes"
@@ -2190,6 +2192,14 @@ module Gori::Tui
           # which is exactly where a marked set arrives, so reporting only the picker's own ref
           # would leave the N flows just attached unmentioned.
           msg = attached > 1 ? "issue ##{new_id} created and linked · #{attached} flows attached" : "issue ##{new_id} created and linked"
+          # The LINK & FREEZE picker's create row (#1038): the copies were taken when the form
+          # opened (the byte cost was asked about then), and are written now that there is an
+          # issue to own them. The links above already exist, so no second link is filed.
+          unless form.snapshots.empty?
+            frozen = freeze_form_snapshots(new_id, form.snapshots)
+            msg += frozen.size == 1 ? " · frozen as evidence ##{frozen[0]}" : " · #{frozen.size} frozen" unless frozen.empty?
+            history_controller.view.refresh_evidence_marker(@session.store)
+          end
           @toast = msg
           # Ask open-vs-stay (default stay). FALSE, not true: offer_open_created has just
           # put a confirm up, and "close the overlay" would be asking the shell to close a
@@ -4263,13 +4273,17 @@ module Gori::Tui
     #
     # Batch-capable from the History list (#442): the picker is shown ONCE and every marked
     # flow is attached to whatever it lands on. refs is 1-element everywhere else.
-    def link_attach : Nil
+    #
+    # `freeze:` (#1038) opens the same card in its LINK & FREEZE mode — issues only, and ↵
+    # copies each ref's current exchange into immutable evidence in the same transaction as
+    # the link. See runner/evidence.cr for where the pick lands.
+    def link_attach(freeze : Bool = false) : Nil
       refs = current_link_refs
       return (@toast = "nothing to link") if refs.empty?
       # Persist the notes buffer before listing it: the rows are read off the store, so an
       # unsaved in-progress note would otherwise be missing or stale in the card.
       notes_controller.save_notes
-      lp = LinkPicker.new(link_picker_rows)
+      lp = LinkPicker.new(link_picker_rows(issues_only: freeze), freeze: freeze)
       # Put the History drill-in back on the way out. `open_overlay` overwrites @overlay and
       # closing clears it to None, which would tear down the flow detail the operator is
       # linking FROM — the same restore `confirm(return_to: :detail)` performs for the delete

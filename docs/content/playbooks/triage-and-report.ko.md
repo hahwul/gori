@@ -78,7 +78,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 
 모든 것이 이슈는 아닙니다. **Notes**는 자유 형식의 프로젝트별 Markdown 문서입니다(프로젝트당 여러 개). 시도한 것, 통한 페이로드, 나중에 다시 볼 단서를 적는 기록장이죠. **Notes** 탭에서 만들고 편집합니다.
 
-흩어진 증거를 하나로 묶으려면 History, Repeater, Fuzzer, Miner에서 `Space` → **Link…**를 누르세요. 하나의 카드에 모든 이슈 *와* 모든 노트가 나열되고, 위에 `+ New issue…` / `+ New note…`가 고정됩니다. 지금 보고 있는 것을 기존 이슈에 붙이는 것과, 이미 링크된 새 이슈를 파일링하는 것이 같은 키 입력입니다. 입력한 글자는 제목·호스트·상태로 필터링하고, 생성 행에 닿으면 새 이슈의 제목이 됩니다.
+흩어진 증거를 하나로 묶으려면 History, Repeater, Fuzzer, Miner에서 `Space` → **Link…**를 누르세요. 하나의 카드에 모든 이슈 *와* 모든 노트가 나열되고, 위에 `+ New issue…` / `+ New note…`가 고정됩니다. 지금 보고 있는 것을 기존 이슈에 붙이는 것과, 이미 링크된 새 이슈를 파일링하는 것이 같은 키 입력입니다. 입력한 글자는 제목·호스트·상태로 필터링하고, 생성 행에 닿으면 새 이슈의 제목이 됩니다. *바이트 자체*가 증거일 때, 즉 다음 Repeater 전송이나 보존 정리가 가져가 버릴 그 응답이 취약점을 확인해 준 것이라면 `Space` → **Link & freeze…**를 쓰세요. 선택과 동시에 교환을 링크하고 변경 불가 복사본을 이슈에 동결하며, 이슈의 RELATED 카드에 **FROZEN** 행으로 표시되고 모든 내보내기에 SHA-256과 함께 실립니다.
 
 ```bash
 gori run notes create --text "SSRF candidate on /fetch, needs OAST to confirm"
