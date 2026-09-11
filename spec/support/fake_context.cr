@@ -403,6 +403,10 @@ class FakeExecContext < Gori::Verb::ExecContext
   # Settable so the issue-notes read verbs can be exercised.
   property? issues_notes_read_mode : Bool = false
 
+  # The Issues detail's RELATED cursor, as the two evidence gates (#1038) read it.
+  property? issue_related_freezable : Bool = false
+  property? issue_related_frozen : Bool = false
+
   # The four linkable-entity ids, settable so both sides of the link.* gates can be
   # exercised (a verb is offered only once the entity has a persisted row to point at).
   property link_flow : Int64? = nil

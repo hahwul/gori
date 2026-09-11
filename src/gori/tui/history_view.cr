@@ -220,6 +220,10 @@ module Gori::Tui
       @path_memo = {} of Int64 => String
       @color_rev = 0_u64
       @detail = nil.as(Store::FlowDetail?)
+      # How many FROZEN copies of the open flow exist (#1038) — the detail's marker, which
+      # says "a frozen copy exists", never that this flow is immutable. Read on open and
+      # after a freeze made from this detail; a peer's freeze shows on the next open.
+      @detail_frozen = 0
       @detail_ws = nil.as(Array(Store::WsMessage)?)
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_ws_total = 0 # full message count (≥ loaded; drives the "older not loaded" note)
@@ -1569,6 +1573,7 @@ module Gori::Tui
     def open_detail_id(id : Int64, store : Store) : Bool
       @detail = store.get_flow(id)
       return false if @detail.nil?
+      @detail_frozen = store.evidence_count_for(Store::LinkRefKind::Flow, id)
       if idx = @rows.index { |r| r.id == id }
         @selected = idx
         # A deep-linked OLDER flow must survive a live reload — otherwise follow mode snaps
@@ -3423,7 +3428,25 @@ module Gori::Tui
         line << sep << Highlight::Span.new(essence, Theme.muted)
       end
       line << sep << Highlight::Span.new(fmt_time(row.created_at), Theme.muted)
+      if @detail_frozen > 0
+        # The same colour the Issues detail badges a FROZEN row with, so the two read as one
+        # fact. `×N` because an issue can hold several copies of one flow (before and after
+        # a retest), and "frozen" alone would undersell the second.
+        line << sep << Highlight::Span.new("frozen ×#{@detail_frozen}", Theme.syn_header)
+      end
       line
+    end
+
+    # Frozen copies of the open flow (see `@detail_frozen`), for the spec and the crumb.
+    def detail_frozen_count : Int32
+      @detail_frozen
+    end
+
+    # Re-count after a freeze made FROM this detail (#1038), so the marker appears without
+    # closing and re-opening the flow. A no-op with no detail open.
+    def refresh_evidence_marker(store : Store) : Nil
+      d = @detail || return
+      @detail_frozen = store.evidence_count_for(Store::LinkRefKind::Flow, d.row.id)
     end
 
     # "sent by gori — repeater (tui), session #42", or nil for a proxy capture and for a row

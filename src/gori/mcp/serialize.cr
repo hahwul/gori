@@ -1056,6 +1056,42 @@ module Gori
         end
       end
 
+      # --- frozen evidence (#1038) --------------------------------------------
+
+      # One frozen copy's provenance — `Issues::Export.evidence_fields`, the object every
+      # surface emits, plus the ISO spelling of the freeze time that every MCP timestamp gets.
+      def self.evidence_meta(j : JSON::Builder, m : Store::IssueEvidenceMeta) : Nil
+        Issues::Export.evidence_fields(j, m)
+        j.field "frozen_at_iso", unix_micros_iso(m.created_at)
+      end
+
+      # The copy with its bytes, shaped like `flow_detail`: heads redacted unless
+      # `include_sensitive` (and flagged so, as `flow_detail` flags them), bodies through
+      # `emit_body` (decoded, capped, base64 for binary). The hashes are over the STORED
+      # bytes — the wire form for a flow, the tab's saved request for a Repeater — so a reader
+      # that wants to verify them asks for `include_sensitive` and the raw head; a redacted
+      # head cannot hash to them, and the field says so rather than leaving the reader to
+      # discover it.
+      def self.evidence_json(ev : Store::IssueEvidence, include_sensitive : Bool,
+                             body_cap : Int32 = MAX_TEXT, body_omit : Bool = false) : String
+        m = ev.meta
+        JSON.build do |j|
+          j.object do
+            evidence_meta(j, m)
+            j.field "hashes_cover", "the stored bytes (head + body) — a flow's wire form, a Repeater tab's saved request; a redacted head does not reproduce them"
+            j.field "sensitive_headers_redacted", true unless include_sensitive
+            j.field "request_head", redact_head_opt(head_text(ev.request_head), include_sensitive)
+            emit_head_base64(j, "request_head", ev.request_head, include_sensitive)
+            emit_body(j, "request_body", ev.request_head, ev.request_body, m.request_truncated?,
+              body_cap, body_omit, include_sensitive)
+            j.field "response_head", redact_head_opt(head_text(ev.response_head), include_sensitive)
+            emit_head_base64(j, "response_head", ev.response_head, include_sensitive)
+            emit_body(j, "response_body", ev.response_head, ev.response_body, m.response_truncated?,
+              body_cap, body_omit, include_sensitive)
+          end
+        end
+      end
+
       # --- issues -----------------------------------------------------------
       def self.issue(j : JSON::Builder, f : Store::Issue, store : Store? = nil) : Nil
         j.object do
@@ -1079,6 +1115,12 @@ module Gori
           j.field "notes", Issues::Export.scrub_only(f.notes)
           j.field "links" do
             j.array { Issues::Export.append_links_json(j, f, store) if store }
+          end
+          # Frozen copies (#1038): provenance and hashes only, like the export — an agent that
+          # wants the bytes reads the flow it names while it still exists; the copy itself is
+          # not served over MCP.
+          j.field "evidence" do
+            j.array { Issues::Export.append_evidence_json(j, f, store) if store }
           end
         end
       end

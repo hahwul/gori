@@ -215,14 +215,16 @@ describe "Gori::Verbs.register_issues" do
     end
 
     it "routes the detail actions to their own intents" do
-      {"issue.close"         => :issue_close,
-       "issue.edit-notes"    => :issue_edit_notes,
-       "issue.edit-title"    => :issue_edit_title,
-       "issue.open-flow"     => :issue_open_flow,
-       "issue.repeater-flow" => :issue_repeater_flow,
-       "issue.delete"        => :issues_delete,
-       "issue.links"         => :issue_links,
-       "issue.open-link"     => :issue_open_link,
+      {"issue.close"           => :issue_close,
+       "issue.edit-notes"      => :issue_edit_notes,
+       "issue.edit-title"      => :issue_edit_title,
+       "issue.open-flow"       => :issue_open_flow,
+       "issue.repeater-flow"   => :issue_repeater_flow,
+       "issue.delete"          => :issues_delete,
+       "issue.links"           => :issue_links,
+       "issue.open-link"       => :issue_open_link,
+       "issue.freeze-link"     => :issue_freeze_link,
+       "issue.evidence-delete" => :issue_evidence_delete,
       }.each { |id, intent| verb_intents(r, id).should eq([intent]) }
 
       ctx = FakeExecContext.new
@@ -231,6 +233,30 @@ describe "Gori::Verbs.register_issues" do
       ctx = FakeExecContext.new
       r["issue.link-up"].call(ctx)
       ctx.args_for(:issue_link_move).should eq(["-1"])
+    end
+
+    # Frozen evidence (#1038): `f` copies the selected LIVE History/Repeater row's exchange;
+    # the delete is menu-only, danger-banded, and offered only on a FROZEN row. Each gates
+    # on the row under the RELATED cursor, so neither can fire against the wrong kind.
+    it "gates freeze on a freezable live row and delete on a frozen one" do
+      ctx = FakeExecContext.new
+      ctx.current_tab = :issues
+      r["issue.freeze-link"].available?(ctx).should be_false
+      r["issue.evidence-delete"].available?(ctx).should be_false
+      ctx.issue_related_freezable = true
+      r["issue.freeze-link"].available?(ctx).should be_true
+      r["issue.evidence-delete"].available?(ctx).should be_false
+      ctx.issue_related_freezable = false
+      ctx.issue_related_frozen = true
+      r["issue.evidence-delete"].available?(ctx).should be_true
+      r["issue.freeze-link"].available?(ctx).should be_false
+
+      keymap = Gori::Verb::Keymap.build(r)
+      keymap.lookup(typed_chord("f"), Gori::Verb::Scope::IssuesDetail).should eq("issue.freeze-link")
+      r["issue.freeze-link"].menu_key.should eq('f')
+      r["issue.evidence-delete"].chords.should be_empty
+      r["issue.evidence-delete"].menu_key.should eq('D')
+      r["issue.evidence-delete"].group.should eq(:danger)
     end
   end
 

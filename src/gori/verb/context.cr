@@ -125,6 +125,9 @@ module Gori
       # ONE attach intent, not one per owner kind: the picker it opens holds issues and
       # notes on the same list, plus a create row for each (see Tui::LinkPicker).
       abstract def link_attach : Nil
+      # `link_attach` with the picker in its LINK & FREEZE mode (#1038): the pick links the
+      # ref AND writes an immutable copy of its current exchange, in one transaction.
+      abstract def link_attach_freeze : Nil
       abstract def link_flow_id : Int64?
       abstract def link_repeater_id : Int64?
       abstract def link_fuzz_id : Int64?

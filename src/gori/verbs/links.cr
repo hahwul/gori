@@ -44,6 +44,20 @@ module Gori
       r.register Verb::Definition.new(
         "link.miner.attach", "Link…", "Attach this miner session to an issue or note — or create one",
         Verb::Scope::Miner, available: miner_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
+
+      # "Link & freeze…" (#1038) — the same picker in its freeze mode: the pick links the
+      # flow to an issue AND copies its current request/response into immutable evidence,
+      # in one transaction. A SIBLING verb rather than a key inside the picker, so the menu
+      # says what ↵ will do before the card opens. `Z` — freeZe — is free in all three
+      # scopes that offer it; `F` is not (HistoryDetail's copy, Repeater's gRPC reframe).
+      # Not offered from the Miner: a mining session has no single exchange to freeze.
+      r.register Verb::Definition.new(
+        "link.history.freeze", "Link & freeze…", "Attach the selected/marked flows to an issue and freeze their exchanges as evidence",
+        Verb::Scope::Body, available: flow_targets, mnemonic: 'Z') { |ctx| ctx.link_attach_freeze; nil }
+
+      r.register Verb::Definition.new(
+        "link.history-detail.freeze", "Link & freeze…", "Attach this flow to an issue and freeze its exchange as evidence",
+        Verb::Scope::HistoryDetail, available: flow_available, mnemonic: 'Z') { |ctx| ctx.link_attach_freeze; nil }
     end
   end
 end

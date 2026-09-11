@@ -138,6 +138,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `list_probe_rules` | Every scan rule (passive, active, custom), which are enabled, and the project's scan mode |
 | `list_scope` | Current scope include/exclude rules |
 | `list_links` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
+| `list_evidence` / `get_evidence` | An issue's frozen evidence — immutable copies of an exchange with provenance and SHA-256s — and one copy's bytes (heads redacted unless `include_sensitive`, bodies capped like `get_flow`) |
 | `compare_flows` | Line diff of two flows' request or response, with each side's status/size/time and the A→B delta; `context:N` folds the unchanged runs into `{kind:fold,hidden}` markers |
 | `diff_projects` | Retest diff: two PROJECTS at endpoint scale: what is new, gone, or answering differently since the last engagement. Endpoints are keyed by the Sitemap's folded template, and `removed` (never requested in the newer capture) is a separate verdict from `gone` (asked, got 404/410) |
 | `intercept_list` / `intercept_get` | Inspect the live intercept queue and one held item in full |
@@ -179,6 +180,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `minimize_repeater` | Shrink a Repeater request to the smallest form that still reproduces the response |
 | `create_issue` / `update_issue` / `delete_issue` | Record, update, and remove issues |
 | `add_link` / `remove_link` | Attach or detach an issue's / note's evidence pointer |
+| `freeze_evidence` / `delete_evidence` | Copy a flow's or a Repeater tab's *current* exchange into immutable evidence on an issue (the next send and retention cannot touch it; `link:true` by default files the live link in the same transaction), and delete one copy. Freeze when a response proves a finding, and again after the retest |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body). Each takes `scope`: `project` (default) or `global`, which applies in every project |
 | `create_rule_from_preset` | Install a preset (see `list_rule_presets`) as ordinary Match & Replace rules, the same result as calling `create_rule` once per rule, so they stay visible, editable and disable-able afterwards. Returns the ids created |

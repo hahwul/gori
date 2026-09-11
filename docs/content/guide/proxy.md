@@ -381,6 +381,7 @@ So `/ status:5xx` → `Shift-T` → `Space` → `D` deletes every error in one c
 | Copy as… | `Space` `Y` | urls / host list / cURL / raw requests / raw responses / req+res pairs |
 | Delete | `d` or `Space` `D` | One confirm for the whole set (`⇧X` is a different verb: it wipes the project's whole History) |
 | Link… | `Space` `k` | One card lists every issue and note (plus `+ New issue…` / `+ New note…`); pick or create once, attach every flow |
+| Link & freeze… | `Space` `Z` | The same card, issues only: link every flow and freeze its exchange as immutable evidence (max 20) |
 | Add issue | `Shift-F` | One issue with every flow as evidence |
 | Repeater / Fuzzer | `Ctrl-R` / `Shift-I` | One sub-tab per flow (max 20) |
 | Mine parameters | `Space` `m` | One config popup, one session per flow (max 20) |

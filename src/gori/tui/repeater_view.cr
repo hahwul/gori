@@ -83,6 +83,11 @@ module Gori::Tui
     end
 
     property name : String? # custom sub-tab chip label (nil = derive from the request); set separately from restore()
+    # How many FROZEN copies exist of this tab's exchange (#1038) — the RESPONSE border's
+    # marker. It says a copy exists, never that the tab is locked: the request stays
+    # editable and the next send still replaces the response, which is exactly why the
+    # copy was taken. Set by the controller (open, tab switch, reconcile, after a freeze).
+    property frozen_count : Int32 = 0
     # Flat multi-label tags (V31) for organizing/filtering the sub-tab strip. Set
     # separately from restore() — like @name, the reconcile clobber never touches it.
     property tags : Array(String) = [] of String

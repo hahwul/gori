@@ -34,6 +34,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :oast_provider_pick, :oast_session,
   :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :authorize_identities, :authorize_identity, :ca_import, :import, :export, :scope_rule, :sequence_config,
   :mine_config, :name_prompt, :columns, :column, :library_pick, :cvss_calculator, :copy_as, :send_to,
+  :evidence,
 }
 
 # The migration ledger — THE one line a Phase 1 batch edits in this file. Each batch
@@ -120,6 +121,9 @@ private MIGRATED_KINDS = [
   # born on the seam, so likewise never in MODAL_OVERLAYS.
   OverlayKind::Columns,
   OverlayKind::Column,
+  # Evidence (#1038) — the frozen-evidence viewer, born on the seam (↵ on a FROZEN row of
+  # the Issues detail), so likewise never in MODAL_OVERLAYS.
+  OverlayKind::Evidence,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and

@@ -24,8 +24,32 @@ describe "Gori::Verbs.register_links" do
     ids = [] of String
     r.each { |d| ids << d.id if d.id.starts_with?("link.") }
     ids.sort.should eq(
-      ["link.fuzzer.attach", "link.history-detail.attach", "link.history.attach",
-       "link.miner.attach", "link.repeater.attach"])
+      ["link.fuzzer.attach", "link.history-detail.attach", "link.history-detail.freeze",
+       "link.history.attach", "link.history.freeze",
+       "link.miner.attach", "link.repeater.attach", "link.repeater.freeze"])
+  end
+
+  it "offers Link & freeze beside Link on the same gate, and only where one exchange exists" do
+    # A freeze copies ONE request/response pair (#1038). A flow and a Repeater tab have one;
+    # a fuzz or miner session is a template plus a run, so neither gets the verb.
+    {"link.history.freeze"        => Gori::Verb::Scope::Body,
+     "link.history-detail.freeze" => Gori::Verb::Scope::HistoryDetail,
+     "link.repeater.freeze"       => Gori::Verb::Scope::Repeater,
+    }.each do |id, scope|
+      r[id].scope.should eq(scope)
+      r[id].menu_key.should eq('Z')
+      r[id].title.should eq("Link & freeze…")
+      verb_intents(r, id).should eq([:link_attach_freeze])
+    end
+    ctx = FakeExecContext.new
+    ctx.current_tab = :history
+    r["link.history.freeze"].available?(ctx).should be_false
+    ctx.link_flow = 9_i64
+    r["link.history.freeze"].available?(ctx).should be_true
+    ctx.current_tab = :repeater
+    r["link.repeater.freeze"].available?(ctx).should be_false
+    ctx.link_repeater = 3_i64
+    r["link.repeater.freeze"].available?(ctx).should be_true
   end
 
   it "gates on the LINK id, not the selection — a flow with no row cannot be linked" do

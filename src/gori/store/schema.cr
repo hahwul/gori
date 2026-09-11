@@ -1224,8 +1224,62 @@ module Gori
         "UPDATE fuzz_runs SET snapshot_version = 1 WHERE surface IN ('tui', 'cli', 'mcp')",
       ]
 
+      # Frozen issue evidence (#1038): an IMMUTABLE copy of one exchange at the moment it proved
+      # a finding, owned by the issue it proves.
+      #
+      # A copy, not a "protect this flow from retention" flag on `flows`, because the product
+      # contract is that ordinary workbench activity must never change what the evidence says
+      # — and both live sources are mutable in ways a flag cannot stop. A Repeater tab holds
+      # exactly ONE response, and the next send REPLACES it (`update_repeater_response`); the
+      # working tab must stay editable and sendable, so the only way to keep the response that
+      # confirmed the finding is to keep a copy that the tab's next send cannot reach. A flow
+      # is only ever DELETED, but a flag would then have to be honoured by three prune paths,
+      # `delete_flows`, `clear_flows` and every export's "no longer captured" branch. The
+      # bytes are already capture-capped per flow, and `bytes` is summed against
+      # `Evidence::QUOTA_BYTES` on every freeze so the table stays bounded.
+      #
+      # `source_kind`/`source_id` are PROVENANCE, not a reference: the live row may be pruned
+      # or re-sent tomorrow and this row must read exactly as it does today, so nothing here
+      # is resolved back through the source. `request_sha256`/`response_sha256` are the hashes
+      # of the stored bytes (head + body), written at freeze time so a later reader — an export,
+      # a report — can state what it was handed.
+      #
+      # Ordinary `INTEGER PRIMARY KEY` (rowid reuse possible) is fine here, unlike the V10
+      # rebuild: nothing points AT an evidence row by id — `entity_links` never references
+      # one — so a reused id can re-bind nothing.
+      V26 = [
+        <<-SQL,
+          CREATE TABLE issue_evidence (
+            id                 INTEGER PRIMARY KEY,
+            issue_id           INTEGER NOT NULL,
+            created_at         INTEGER NOT NULL,
+            source_kind        TEXT    NOT NULL,
+            source_id          INTEGER NOT NULL,
+            method             TEXT    NOT NULL,
+            url                TEXT    NOT NULL,
+            protocol           TEXT,
+            status             INTEGER,
+            duration_us        INTEGER,
+            error              TEXT,
+            request_head       BLOB    NOT NULL,
+            request_body       BLOB,
+            response_head      BLOB,
+            response_body      BLOB,
+            request_truncated  INTEGER NOT NULL DEFAULT 0,
+            response_truncated INTEGER NOT NULL DEFAULT 0,
+            request_sha256     TEXT    NOT NULL,
+            response_sha256    TEXT,
+            bytes              INTEGER NOT NULL
+          )
+          SQL
+        # The Issues detail lists an issue's snapshots in freeze order on every open.
+        "CREATE INDEX idx_issue_evidence_issue ON issue_evidence (issue_id, created_at)",
+        # The History detail and the Repeater ask "does a frozen copy of THIS exist" per open.
+        "CREATE INDEX idx_issue_evidence_source ON issue_evidence (source_kind, source_id)",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

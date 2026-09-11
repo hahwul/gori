@@ -961,6 +961,22 @@ private class FakeContext < ExecContext
     @calls << :issue_open_link
   end
 
+  def issue_freeze_link : Nil
+    @calls << :issue_freeze_link
+  end
+
+  def issue_evidence_delete : Nil
+    @calls << :issue_evidence_delete
+  end
+
+  def issue_related_freezable? : Bool
+    false
+  end
+
+  def issue_related_frozen? : Bool
+    false
+  end
+
   def issue_link_move(delta : Int32) : Nil
     @calls << :issue_link_move
   end
@@ -979,6 +995,10 @@ private class FakeContext < ExecContext
 
   def link_attach : Nil
     @calls << :link_attach
+  end
+
+  def link_attach_freeze : Nil
+    @calls << :link_attach_freeze
   end
 
   def link_flow_id : Int64?

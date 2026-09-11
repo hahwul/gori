@@ -22,20 +22,61 @@ class Gori::Tui::RepeaterView
       break if chips_end + Screen.draw_width(label) > limit
       chips_end = Frame.chip(screen, chips_end, rect.y, label, lit) + 1
     end
-    if result = @result
-      meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}" : Fmt.dur(result.duration_us)
-      # `min_x:` because this border's left stop is the CHIP cluster, not the title.
-      meta_x = Frame.border_meta(screen, rect, "", meta, min_x: chips_end + 1)
-      # A persistent amber marker when the response was cut short (the body the
-      # origin sent is incomplete) — the transient send toast scrolls away. Chained off
-      # where the meta actually landed; when the meta did not fit there is nothing to
-      # hang it on, and the row is already too tight to carry it.
-      if result.incomplete? && meta_x
-        warn = "⚠ incomplete"
-        warn_x = meta_x - warn.size - 2
-        screen.text(warn_x, rect.y, warn, Theme.yellow, Theme.bg) if warn_x > chips_end + 1
-      end
-    end
+    # The right-anchored read-outs chain leftwards from the corner: latency·size, then the
+    # ⚠ for a cut-short body, then the frozen-copy marker.
+    right = (result = @result) ? draw_response_meta(screen, rect, result, chips_end) : rect.right - 1
+    draw_frozen_marker(screen, rect, right, chips_end)
+  end
+
+  # The latency·size read-out and the ⚠ beside it; answers where the next read-out to the
+  # left must END. `min_x:` because this border's left stop is the CHIP cluster, not the
+  # title.
+  #
+  # The ⚠ is a persistent amber marker for a response that was cut short (the body the
+  # origin sent is incomplete) — the transient send toast scrolls away. Chained off where
+  # the meta actually landed; when the meta did not fit there is nothing to hang it on, and
+  # the row is already too tight to carry it.
+  private def draw_response_meta(screen : Screen, rect : Rect, result : Repeater::Result, chips_end : Int32) : Int32
+    meta_x = Frame.border_meta(screen, rect, "", result_meta(result), min_x: chips_end + 1)
+    return rect.right - 1 unless meta_x
+    return meta_x unless result.incomplete?
+    warn = "⚠ incomplete"
+    warn_x = meta_x - warn.size - 2
+    # No room for the ⚠: nothing shorter may take its place — a marker about a copy must
+    # not outrank the warning that the body in front of the operator is cut short.
+    return chips_end unless warn_x > chips_end + 1
+    screen.text(warn_x, rect.y, warn, Theme.yellow, Theme.bg)
+    warn_x
+  end
+
+  # `1.0ms · 23B`, or the latency alone for a send that got no response.
+  private def result_meta(result : Repeater::Result) : String
+    return Fmt.dur(result.duration_us) unless result.ok?
+    "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}"
+  end
+
+  # `frozen ×N` (#1038), in the hue the Issues detail badges a FROZEN row with, ending at
+  # `right`. Drawn even with no result on the pane — a tab reopened after a restart has its
+  # response restored, but a copy taken from it is a fact about the tab, not about the
+  # current response. Dropped whole when it would run into the chips, like the ⚠.
+  private def draw_frozen_marker(screen : Screen, rect : Rect, right : Int32, chips_end : Int32) : Nil
+    mark = frozen_marker || return
+    mark_x = right - Screen.draw_width(mark) - 2
+    screen.text(mark_x, rect.y, mark, Theme.syn_header, Theme.bg) if mark_x > chips_end + 1
+  end
+
+  private def frozen_marker : String?
+    @frozen_count > 0 ? "frozen ×#{@frozen_count}" : nil
+  end
+
+  # The HANDSHAKE RESPONSE card's one read-out row: the frozen-copy marker (#1038) and the
+  # latency share it, because a WebSocket tab's frozen exchange IS this handshake. nil when
+  # there is neither, so the border stays clean.
+  private def handshake_meta : String?
+    parts = [] of String
+    frozen_marker.try { |m| parts << m }
+    @result.try { |r| parts << result_meta(r) }
+    parts.empty? ? nil : parts.join(" · ")
   end
 
   # The GRPC RESPONSE transcript's title, and where a chip cluster may start on its border:
@@ -98,8 +139,7 @@ class Gori::Tui::RepeaterView
   private def render_ws_handshake(screen : Screen, rect : Rect, focused : Bool, active : Bool) : Nil
     return if rect.w < 2 || rect.h < 2
     Frame.card(screen, rect, "HANDSHAKE RESPONSE", bg: Theme.bg, border: Frame.pane_border(focused && active))
-    if result = @result
-      meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}" : Fmt.dur(result.duration_us)
+    if meta = handshake_meta
       # `rect.x + 22` used to stand in for "HANDSHAKE RESPONSE" — the title's width, copied
       # by hand into a guard that would not follow it if the title ever changed.
       Frame.border_meta(screen, rect, "HANDSHAKE RESPONSE", meta)
@@ -194,10 +234,13 @@ class Gori::Tui::RepeaterView
                                 active : Bool = true) : Nil
     lit = focused && active
     Frame.card(screen, rect, title, bg: Theme.bg, border: Frame.pane_border(lit))
-    if d = dur_us
-      meta = Fmt.dur(d)
-      Frame.border_meta(screen, rect, title, meta)
-    end
+    # The frozen-copy marker (#1038) shares the one read-out row with the latency, as it does
+    # on the handshake card: a gRPC or group tab can be frozen too, and the branch that draws
+    # it must say so.
+    parts = [] of String
+    frozen_marker.try { |m| parts << m }
+    dur_us.try { |d| parts << Fmt.dur(d) }
+    Frame.border_meta(screen, rect, title, parts.join(" · ")) unless parts.empty?
     body = rect.inset(1, 1)
     return if body.h <= 0
     if lines.empty?
