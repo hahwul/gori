@@ -417,7 +417,7 @@ describe "ComparerView row cursor" do
 end
 
 # A long response whose diff is one line put that line hundreds of ↓ presses from the top,
-# with nothing that could ask for it directly. `n`/`⇧N` cross the distance; `f` removes it.
+# with nothing that could ask for it directly. `⇧N`/`⇧P` cross the distance; `f` removes it.
 describe "ComparerView change navigation and folding" do
   # 60 identical lines with a single edit in the middle — the shape both features exist for.
   private_long = ->(marker : String) {

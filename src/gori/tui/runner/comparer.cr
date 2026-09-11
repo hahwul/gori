@@ -45,7 +45,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @toast = "comparer: comparing #{view.pane}s"
   end
 
-  # `n` / `N`: walk the diff by CHANGE rather than by row. A 900-line response whose diff is
+  # `⇧N` / `⇧P`: walk the diff by CHANGE rather than by row. A 900-line response whose diff is
   # one line put that line 400 ↓ presses from the top, with nothing to ask for it directly.
   def comparer_jump_change(dir : Int32) : Nil
     view = comparer_controller.view

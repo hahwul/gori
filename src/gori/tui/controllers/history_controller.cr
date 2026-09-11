@@ -499,13 +499,17 @@ module Gori::Tui
         # does not from the body, where the caret owns it — so the body's line says `esc`
         # alone. Naming a key that does nothing from where you are is the defect the old
         # ` ‹ list ` border chip had.
+        # Dropped whole, not greyed, when there is nowhere to step — see DrillIn::Host's
+        # `step_available?`. A hint that names every key a scope COULD have is how the old
+        # ` ‹ list ` chip came to point at a key that did nothing.
         nx, pv = step_key_labels
+        step = @history.step_available? ? "#{nx}/#{pv} flow · " : ""
         if @history.detail_strip_focus?
-          return "←/→ panes · ↓/↵ enter · #{nx}/#{pv} flow · ↑/← list · ↹ pane · space cmds · esc back"
+          return "←/→ panes · ↓/↵ enter · #{step}↑/← list · ↹ pane · space cmds · esc back"
         end
         nav = @history.detail_navigable? ? "↑/↓ move · ←/→ caret" : "↑/↓ scroll"
         dy = Hotkeys.binding_label(reg, "detail.copy", "y")
-        return "#{nav} · ⇧arrows select · #{dy} copy · #{nx}/#{pv} flow · ↑ strip · ↹ pane · space cmds · esc back"
+        return "#{nav} · ⇧arrows select · #{dy} copy · #{step}↑ strip · ↹ pane · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:
@@ -717,7 +721,7 @@ module Gori::Tui
       @history.close_detail
     end
 
-    # `n`/`⇧N` inside the drill-in: open the next/previous flow of the list behind WITHOUT
+    # `⇧N`/`⇧P` inside the drill-in: open the next/previous flow of the list behind WITHOUT
     # going back to it.
     #
     # The drill-in had no way to step, so reading twenty rows meant `esc ↓ ↵` twenty times.

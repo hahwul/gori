@@ -88,7 +88,11 @@ module Gori::Tui
         Item.new("d", "delete selected/marked flows (asks first)", "history.delete"),
         Item.new("⇧X", "clear all History flows (asks first)", "history.clear"),
         Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
-        Item.new("detail", "↑/↓ move · {detail.select-line} line · ⇧arrows select · {detail.copy} copy · space cmds"),
+        # The drill-in STEP is named on all four tabs that have one (Issues and Probe below,
+        # Comparer further down): this page is the surface whose whole job is "look a key up",
+        # and it named the pair on none of them while ⇧N meant one thing here and the opposite
+        # one tab over. Through `{verb.id}` like every other row, so a rebind moves it.
+        Item.new("detail", "↑/↓ move · {detail.next-item}/{detail.prev-item} step flow · {detail.select-line} line · ⇧arrows select · {detail.copy} copy · space cmds"),
         Item.new("{detail.toggle-hex} · {detail.toggle-ws} · {detail.toggle-pretty}", "in detail: hex · whitespace · pretty bodies"),
       ]},
       {"REPEATER", [
@@ -221,6 +225,8 @@ module Gori::Tui
       {"COMPARER", [
         Item.new("{comparer.pick-a} · {comparer.pick-b}", "pick flow A · flow B"),
         Item.new("←/→", "compare requests ⟷ responses"),
+        Item.new("{comparer.next-change} · {comparer.prev-change}", "next · previous CHANGED row (the same pair the drill-ins step with)"),
+        Item.new("{comparer.toggle-fold}", "fold the unchanged runs, keeping context"),
         Item.new("⇧←/→", "h-scroll both columns (long lines)"),
         Item.new("s", "swap A ⇄ B", "comparer.swap"),
         Item.new("^N / ^W · r", "new / close / rename comparison sub-tab"),
@@ -241,6 +247,12 @@ module Gori::Tui
         # since `d` acts on the marked set and this one does not.
         Item.new("Issues", "list: {issues.mark-toggle} mark · {issues.mark-all} all · ⇧arrows range · {issues.clear} clear · notes: i/↵ edit · {issue.select-line} line · {issue.copy} copy · space cmds"),
         Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {scope.toggle-lens} scope · {probe.clear} clear issues · space cmds"),
+        # The drill-in STEP, keyed by the chord like the Comparer's pair rather than folded into
+        # the two tab rows above — both sit within a few columns of the popup's width cap
+        # (help_popup_overlay_spec), and a row that trails off into `…` is worse than no row.
+        # One row for three tabs because it is one contract; History's own `detail` row above
+        # names it too, where an operator reading about History will already be looking.
+        Item.new("{issue.next-item} · {issue.prev-item}", "in an Issues · Probe · History detail: next · previous item, in place"),
         # Authorize had no row at all while `TAB_SECTION` pointed its Shortcuts popup here — so
         # the one tab whose keys are `^R`/`⇧R`/`^X` and nothing an operator can guess opened on
         # a section that never named it.

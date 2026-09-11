@@ -5,7 +5,7 @@ abstract class Gori::Verb::ExecContext
   abstract def move_selection(delta : Int32) : Nil
   abstract def open_detail : Nil
   abstract def close_detail : Nil
-  # `n`/`⇧N` inside the drill-in — open the next/previous flow without returning to the list.
+  # `⇧N`/`⇧P` inside the drill-in — open the next/previous flow without returning to the list.
   abstract def detail_step_item(delta : Int32) : Nil
   abstract def toggle_follow : Nil
   abstract def selected_flow_id : Int64?

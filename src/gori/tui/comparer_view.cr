@@ -796,7 +796,7 @@ module Gori::Tui
       return if y <= rect.y + 1 # no room: header + divider already fill the frame
       changed = @change_count
       note = changed == 0 ? "identical" : "#{changed} changed line#{changed == 1 ? "" : "s"}"
-      # Which change the cursor is on, so n/N reads as progress through the diff rather than
+      # Which change the cursor is on, so ⇧N/⇧P reads as progress through the diff rather than
       # as an unanchored jump.
       if changed > 0 && (pos = change_position)
         note += " · #{pos}/#{changed}"

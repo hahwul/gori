@@ -158,13 +158,15 @@ module Gori::Tui
         # answers nil there, which is what gates the verb) and its rows are wrapped prose
         # rather than URLs, so naming "↑/↓ URL" over it would be the confident lie this line
         # exists to avoid.
+        # Dropped whole when there is nowhere to step — see DrillIn::Host's `step_available?`.
+        step = @probe.step_available? ? "{probe.next-item}/{probe.prev-item} finding · " : ""
         if @probe.desc_focused?
-          keys("↑/↓ read · ⇧arrows select · {probe.copy} copy · {probe.next-item}/{probe.prev-item} finding · ↹ urls · space cmds · ←/esc back")
+          keys("↑/↓ read · ⇧arrows select · {probe.copy} copy · #{step}↹ urls · space cmds · ←/esc back")
         else
           # `↵ open` and `o flow` are two different destinations and both belong here — the
           # caret's own affected URL, and the issue's sample evidence. The Issues detail names
           # the same pair for the same reason (`↵ open` over its related links, `o flow`).
-          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · {probe.next-item}/{probe.prev-item} finding · {probe.open-flow} flow · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
+          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · #{step}{probe.open-flow} flow · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
         end
       elsif @probe.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -518,7 +520,7 @@ module Gori::Tui
       @probe.close_detail
     end
 
-    # `n`/`⇧N` inside the drill-in: open the next/previous finding WITHOUT going back to the
+    # `⇧N`/`⇧P` inside the drill-in: open the next/previous finding WITHOUT going back to the
     # list. See HistoryController#detail_step_item for why the step exists at all. Nothing to
     # persist here — this detail is read-only.
     def probe_step_item(delta : Int32) : Nil

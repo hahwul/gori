@@ -480,29 +480,49 @@ module Gori
         "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("tab")], hidden: true) { |ctx| ctx.toggle_detail_pane; nil }
 
-      # `n` / `⇧N`: the next/previous FLOW, without leaving the drill-in. Hidden like the
+      # `⇧N` / `⇧P`: the next/previous FLOW, without leaving the drill-in. Hidden like the
       # other nav verbs here (←/→/⇥) — the rail's gutter names them beside the row each one
       # lands on, and the status hint names them too.
       #
-      # This pair, and not ⇧J/⇧K or ⇧N/⇧P. ⇧J/⇧K is claimed a level below: the detail body's
+      # ⇧N/⇧P is ONE pair across all four steppers — the three drill-ins and the Comparer's
+      # next/prev-change (verbs/comparer.cr), which is the only other place in gori where a
+      # key walks a cursor through a sequence in place. It shipped first as `n` forward /
+      # `⇧N` back, on the vim/less reading of a bare `n`: that made ⇧N mean FORWARD here and
+      # BACKWARD in the Comparer, a collision `validate_chords!` cannot see (its seen-set is
+      # per Scope) and the operator meets only by pressing it.
+      #
+      # ONE chord each, and deliberately no bare-letter alias beside them. Keeping `n` on
+      # NEXT was tried and is worse on three counts, each of which bites a different surface:
+      #   • vim spells `n`/`N` as OPPOSITES, and `Keybind.from_event` normalises a typed
+      #     capital to shift + lowercase — so `n` + `⇧N` on one verb makes `N` step FORWARD.
+      #     The alias would invert the very reflex it was kept for.
+      #   • a second chord flips `Hotkeys.rebindable?` to false, and that predicate does not
+      #     just hide the editor row: `build_keymap` and `HotkeysOverlay#load_overrides` both
+      #     filter persisted overrides through it, and `Hotkeys.apply` then rewrites
+      #     settings from the working copy — so an alias on a NON-hidden verb (the Comparer's)
+      #     drops a user's existing rebind out of dispatch and erases it on the next save.
+      #   • `n` one scope up is `issues.new` (verbs/issues.cr), which CREATES a blank issue —
+      #     one `esc` away from a key that meant "next" a frame earlier.
+      # A key that is bound nowhere at least says so: `Runner.unbound_key_hint` answers a
+      # bare printable with "nothing bound here · space menu · ? help".
+      #
+      # There is no bare `p` either: it is `detail.toggle-pretty` in this scope.
+      #
+      # NOT ⇧J/⇧K, which is claimed a level below: the detail body's
       # `handle_detail_body_select` takes every ⇧ + h/j/k/l for its text selection, and a
       # controller claim runs BEFORE this keymap, so those two would be dead in the body and
       # live on the chip strip — the position-dependent trap the ← fix exists to remove.
-      # ⇧N/⇧P collided in meaning instead of in scope: `comparer.prev-change` is ⇧N one tab
-      # over, so ⇧N would have moved forward here and backward there, and `validate_chords!`
-      # cannot see it (its seen-set is per Scope). `n` forward / `⇧N` back is what the
-      # Comparer, vim and less all already mean.
       #
       # Spelled `Chord.new("n", shift: true)`, never `Chord.new("N")`: `Keybind.from_event`
-      # normalises a capital to shift + lowercase, so the latter never fires.
+      # normalises a capital to shift + lowercase, so the latter never fires. Same for ⇧P.
       r.register Verb::Definition.new(
         "detail.next-item", "Next flow", "Open the next flow in the list without leaving the detail",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("n")],
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("n", shift: true)],
         hidden: true) { |ctx| ctx.detail_step_item(1); nil }
 
       r.register Verb::Definition.new(
         "detail.prev-item", "Previous flow", "Open the previous flow in the list without leaving the detail",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("n", shift: true)],
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("p", shift: true)],
         hidden: true) { |ctx| ctx.detail_step_item(-1); nil }
 
       # The view-toggles are NON-hidden so they front the detail's "space" action menu

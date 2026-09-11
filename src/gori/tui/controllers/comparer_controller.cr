@@ -305,7 +305,7 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      # prev-change is its OWN verb (⇧N), not "shift + whatever next-change is bound to": the
+      # prev-change is its OWN verb (⇧P), not "shift + whatever next-change is bound to": the
       # old `⇧#{n}` spelling followed a rebind of `n` to a key ⇧ never reached.
       keys("←/→ req|res · ↑/↓ row · {comparer.next-change}/{comparer.prev-change} change · {comparer.toggle-fold} fold · {comparer.copy} copy · ⇧←/→ h-scroll · {comparer.pick-a}/{comparer.pick-b} pick · {comparer.swap} swap · space cmds")
     end

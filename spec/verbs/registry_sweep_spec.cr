@@ -97,4 +97,69 @@ describe "Gori::Verbs.registry (every verb)" do
       r[id].group.should eq(:wipe)
     end
   end
+
+  # gori's in-place STEPPERS: a key that walks a cursor through a sequence without leaving
+  # what is open. The three drill-ins and the Comparer's jump-by-change, named here because
+  # nothing in the type system marks them as one family.
+  steppers = [
+    {"detail.next-item", "detail.prev-item"},
+    {"issue.next-item", "issue.prev-item"},
+    {"probe.next-item", "probe.prev-item"},
+    {"comparer.next-change", "comparer.prev-change"},
+  ]
+
+  # ONE pair for all of them. It drifted once already — `n` forward / `⇧N` back in the
+  # drill-ins while the Comparer kept `⇧N` for BACKWARD — and neither gate could see it:
+  # `Registry#validate_chords!` builds its seen-set per Scope, so a chord meaning opposite
+  # things in two scopes is structurally invisible to it. An operator met it by pressing the
+  # key. This is the guard that sees it.
+  #
+  # Through `effective_chords` on EVERY profile, not raw `.chords`: `OsProfile::OVERRIDES`
+  # SUBSTITUTES a verb's chords per OS (registry.cr loops the same way for the same reason).
+  # The table ships empty, so reading the declaration would pass today and go on passing the
+  # first time someone remaps one of these for the Windows profile alone.
+  #
+  # `shift_chord`, never `Verb::Chord.new("N")` — see the note on `typed_chord` in
+  # spec_helper.cr: a hand-spelled twin asserts a declaration against itself and cannot see
+  # the one defect class that matters here, a chord no keypress ever produces.
+  it "steps every in-place stepper with the same ⇧N / ⇧P pair, on every OS profile" do
+    Gori::Verb::OsProfile::Os.each do |os|
+      steppers.each do |nxt, prv|
+        Gori::Verb::Keymap.effective_chords(r[nxt], os).should eq([shift_chord('N')])
+        Gori::Verb::Keymap.effective_chords(r[prv], os).should eq([shift_chord('P')])
+      end
+    end
+  end
+
+  it "flags a stepper whose pair has drifted (proves the guard bites)" do
+    reg = Gori::Verb::Registry.new
+    reg.register(Gori::Verb::Definition.new(
+      "demo.next-item", "Next", "x", Gori::Verb::Scope::Body,
+      [typed_chord("n")], hidden: true) { |_| nil }) # the old spelling: bare `n` forward
+    Gori::Verb::Keymap.effective_chords(reg["demo.next-item"], Gori::Verb::OsProfile::Os::Linux)
+      .should_not eq([shift_chord('N')])
+  end
+
+  # No bare-letter alias beside the pair, on any of the four. Keeping `n` on NEXT makes `N`
+  # step FORWARD (the event path folds a typed capital onto shift+lowercase, so `n` + `⇧N`
+  # on one verb collapses vim's opposites into one verb); it flips `Hotkeys.rebindable?`,
+  # which also filters persisted overrides out of dispatch AND out of the editor's working
+  # copy, so an alias on the Comparer's rebindable pair erases a user's rebind on their next
+  # save; and on Issues `n` one scope up is `issues.new`, which creates a blank issue.
+  it "binds no bare letter beside the step pair" do
+    steppers.each do |nxt, prv|
+      {nxt, prv}.each do |id|
+        r[id].chords.each do |c|
+          (c.shift || c.ctrl || c.alt).should be_true
+        end
+      end
+    end
+    # And the one letter that used to be here is free in all four scopes, so a press lands on
+    # `Runner.unbound_key_hint` rather than on whatever else happens to own it.
+    km = Gori::Verb::Keymap.build(r, Gori::Verb::OsProfile::Os::Linux)
+    {Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::ProbeDetail,
+     Gori::Verb::Scope::IssuesDetail}.each do |scope|
+      km.lookup(typed_chord("n"), scope).should be_nil
+    end
+  end
 end

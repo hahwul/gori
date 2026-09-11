@@ -27,20 +27,35 @@ module Gori
 
       # Navigating BY CHANGE and hiding what didn't change. Both gate on a shown diff —
       # there is nothing to jump between, or fold around, on a half-filled comparison.
-      # `⇧N`, spelled Chord.new("n", shift: true): Chord.new("N") never fires.
+      # Spelled Chord.new("n", shift: true) / Chord.new("p", shift: true), never
+      # Chord.new("N") / Chord.new("P"): `Keybind.from_event` normalises a typed capital to
+      # shift + lowercase, so the bare-capital form never fires.
       in_diff = ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.comparer_diff_shown? }
 
-      # Explicit menu mnemonics: the derived ones would be 'n' / 'p' / 'f', and 'n' is
-      # comparer.new's — the KEYS here are n / ⇧N / f, so the menu letters carry no meaning
-      # worth defending and just have to be free.
+      # ⇧N forward / ⇧P back — the SAME pair the three drill-ins step with (verbs/history.cr
+      # states it once). This is the other in-place stepper in gori, and it used to spell the
+      # pair n / ⇧N, which made ⇧N mean backward here and forward there.
+      #
+      # Bare `n` was this tab's original next-change key and is deliberately NOT kept beside
+      # ⇧N. A second chord flips `Hotkeys.rebindable?` to false, and these two — unlike the
+      # drill-ins' hidden pair — ARE rebindable: `build_keymap` and
+      # `HotkeysOverlay#load_overrides` both filter persisted overrides through that
+      # predicate, and `Hotkeys.apply` rewrites settings from the working copy, so an alias
+      # here would drop an operator's existing rebind out of dispatch, hide the row that
+      # could restore it, and erase the entry on their next save. It would also leave the
+      # pair half-rebindable, which is how a `⇧N/b change` footer gets built from the UI.
+      #
+      # Explicit menu mnemonics: the derived ones would be 'n' / 'p' / 'f' — and the KEYS
+      # here are ⇧N / ⇧P / f, so a derived letter would name a chord nobody presses. They
+      # just have to be free of comparer.new's own 'n'.
       r.register Verb::Definition.new(
         "comparer.next-change", "Next change", "Jump the row cursor to the next changed row",
-        Verb::Scope::Comparer, [Verb::Chord.new("n")],
+        Verb::Scope::Comparer, [Verb::Chord.new("n", shift: true)],
         available: in_diff, mnemonic: 'g') { |ctx| ctx.comparer_jump_change(1); nil }
 
       r.register Verb::Definition.new(
         "comparer.prev-change", "Previous change", "Jump the row cursor to the previous changed row",
-        Verb::Scope::Comparer, [Verb::Chord.new("n", shift: true)],
+        Verb::Scope::Comparer, [Verb::Chord.new("p", shift: true)],
         available: in_diff, mnemonic: 'G') { |ctx| ctx.comparer_jump_change(-1); nil }
 
       r.register Verb::Definition.new(

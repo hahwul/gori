@@ -44,7 +44,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issue_close
   end
 
-  # `n`/`⇧N` in the drill-in — the next/previous issue, in place.
+  # `⇧N`/`⇧P` in the drill-in — the next/previous issue, in place.
   def issue_step_item(delta : Int32) : Nil
     issues_controller.issue_step_item(delta)
   end
