@@ -58,6 +58,9 @@ module Gori::Tui
         view.name = r.name                       # custom sub-tab label survives reopen
         view.tags = Repeater::Tags.parse(r.tags) # flat tags survive reopen (V31)
         seed_repeater_original(view, r.flow_id)
+        # One count per tab at open — the marker has to be right on the first frame of every
+        # tab the operator can land on, and a project open is the one time that is cheap.
+        view.frozen_count = @host.session.store.evidence_count_for(Store::LinkRefKind::Repeater, r.id)
         @repeaters << RepeaterTab.new(view, r.flow_id, r.id)
       end
       @current_repeater_idx = @repeaters.empty? ? -1 : 0
@@ -1207,6 +1210,15 @@ module Gori::Tui
       return if idx == @current_repeater_idx
       save_current_repeater
       @current_repeater_idx = idx
+      refresh_evidence_marker
+    end
+
+    # Re-count the CURRENT tab's frozen copies (#1038) — after a freeze made from this tab,
+    # on a tab switch, and on the data_version poll so a peer's or an agent's freeze shows
+    # without a switch. Current tab only: one indexed COUNT per call, never one per tab.
+    def refresh_evidence_marker : Nil
+      tab = current_repeater_tab || return
+      tab.view.frozen_count = (id = tab.db_id) ? @host.session.store.evidence_count_for(Store::LinkRefKind::Repeater, id) : 0
     end
 
     # --- rename (the shell's orthogonal rename prompt drives these by VIEW identity) ---
@@ -1466,6 +1478,7 @@ module Gori::Tui
     # peer-deleted ones — but NEVER touch a locked tab (actively edited / inflight /
     # locally dirty).
     def reconcile : Nil
+      refresh_evidence_marker
       # Metadata only (no response BLOBs): converge the request side. Responses are
       # restored only at project-open (full restore with BLOBs) and otherwise live
       # only in the session's RepeaterView — apply_peer_request never wipes them.

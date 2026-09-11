@@ -38,6 +38,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     snap = evidence_snapshot(res.link.ref_kind, res.link.ref_id) || return
     freeze_into_issue(issue.id, [snap], link: false) do |ids|
       refresh_issue_evidence(issue.id, ids.last?)
+      refresh_evidence_markers
       @toast = "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) — the live #{res.tag} row stays live"
     end
   end
@@ -70,6 +71,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       confirm_label: "delete") do
       if @session.store.delete_evidence(m.id)
         refresh_issue_evidence(issue.id, nil)
+        refresh_evidence_markers
         # No bytes, no url: the feed must not carry what the copy held.
         log_evidence_event("issue ##{issue.id}: deleted frozen evidence ##{m.id} (#{m.source_label})")
         @toast = "frozen evidence ##{m.id} deleted"
@@ -129,6 +131,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
     freeze_into_issue(owner_id, [snap], link: false, after: back) do |ids|
       refresh_issue_evidence(owner_id, ids.last?)
+      refresh_evidence_markers
       @toast = "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) on issue ##{owner_id}"
     end
   end
@@ -153,7 +156,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     skipped = refs.size - snaps.size
     freeze_into_issue(issue_id, snaps, link: true, after: back) do |ids|
       refresh_issue_evidence(issue_id, nil)
-      history_controller.view.refresh_evidence_marker(@session.store)
+      refresh_evidence_markers
       @toast = if ids.size == 1 && skipped == 0
                  "linked to issue ##{issue_id} and frozen as evidence ##{ids[0]} (#{Fmt.size(snaps[0].bytes)})"
                else
@@ -317,6 +320,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def log_evidence_event(message : String) : Nil
     @session.store.insert_event("issues", "evidence", "info", message, goto_tab: "issues",
       actor: FlowSource::Surface::Tui.token)
+  end
+
+  # The two "a frozen copy exists" markers — the History detail's stats line and the
+  # Repeater's RESPONSE border — re-counted after any write that changes the answer. Both
+  # are no-ops with nothing open, and both are one indexed COUNT.
+  private def refresh_evidence_markers : Nil
+    history_controller.view.refresh_evidence_marker(@session.store)
+    repeater_controller.refresh_evidence_marker
   end
 
   # Re-read the open detail's RELATED rows if it is this issue, and land the cursor on the

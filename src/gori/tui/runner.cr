@@ -2198,7 +2198,7 @@ module Gori::Tui
           unless form.snapshots.empty?
             frozen = freeze_form_snapshots(new_id, form.snapshots)
             msg += frozen.size == 1 ? " · frozen as evidence ##{frozen[0]}" : " · #{frozen.size} frozen" unless frozen.empty?
-            history_controller.view.refresh_evidence_marker(@session.store)
+            refresh_evidence_markers
           end
           @toast = msg
           # Ask open-vs-stay (default stay). FALSE, not true: offer_open_created has just
