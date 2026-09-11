@@ -1072,7 +1072,9 @@ module Gori::Tui
 
     # The focus-aware "copy as X" menu for the open detail pane ({title, options}).
     def detail_copy_as_menu : {String, Array(CopyMenu::Option)}
-      @history.detail_copy_as_menu
+      # The store, for the same reason `list_copy_as_menu` hands one over: the redaction policy
+      # is half settings.json and half this project's own row, and the view holds neither.
+      @history.detail_copy_as_menu(Redact::Policy.ambient(@host.session.store))
     end
 
     # "Copy as…" over the list's effective target set (#442) — the Runner passes the ids so

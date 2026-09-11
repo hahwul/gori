@@ -9,6 +9,7 @@ require "../fuzz"
 require "../proxy/codec/content_decode"
 require "../proxy/h2/grpc"
 require "../protobuf"
+require "../redact/wire"
 
 module Gori
   module MCP
@@ -745,18 +746,30 @@ module Gori
         end
       end
 
+      # What a SANITIZED projection has to say for itself (#1035): which profile ran, how much
+      # it replaced, and — stated rather than implied — what it did not look at. An agent
+      # quoting these bytes into a ticket has to be able to tell a body gori sanitized from one
+      # nobody has been through, and "0 replaced" is not the same claim as "not sanitized".
+      record RedactionNote,
+        profile : String,
+        bodies : Int32,
+        ws_frames : Int32,
+        decoded : Bool
+
       # --- full detail incl. heads + decoded bodies ---------------------------
       def self.flow_detail_json(detail : Store::FlowDetail,
                                 ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
                                 include_sensitive : Bool = false,
-                                body_cap : Int32 = MAX_TEXT, body_omit : Bool = false) : String
-        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit) }
+                                body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
+                                redaction : RedactionNote? = nil) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction) }
       end
 
       def self.flow_detail(j : JSON::Builder, detail : Store::FlowDetail,
                            ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
                            include_sensitive : Bool = false,
-                           body_cap : Int32 = MAX_TEXT, body_omit : Bool = false) : Nil
+                           body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
+                           redaction : RedactionNote? = nil) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -808,6 +821,7 @@ module Gori
           j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
           emit_head_base64(j, "response_head", detail.response_head, include_sensitive)
           j.field "sensitive_headers_redacted", true unless include_sensitive
+          emit_redaction_note(j, redaction)
           emit_body(j, "response_body", detail.response_head, detail.response_body,
             detail.response_body_truncated?, body_cap, body_omit, include_sensitive,
             source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil)
@@ -1135,6 +1149,25 @@ module Gori
         j.field "#{field_name}_lossy", true
         return unless include_sensitive
         j.field "#{field_name}_base64", Base64.strict_encode(head)
+      end
+
+      # The `body_redaction` field, present only on a projection that actually went through a
+      # profile. Its absence is the signal that these are the captured bytes.
+      def self.emit_redaction_note(j : JSON::Builder, note : RedactionNote?) : Nil
+        n = note || return
+        j.field "body_redaction" do
+          j.object do
+            j.field "profile", n.profile
+            j.field "bodies_redacted", n.bodies
+            j.field "websocket_frames_redacted", n.ws_frames
+            j.field "transfer_decoded", true if n.decoded
+            j.field "applies_to", "request/response BODIES and WebSocket frame payloads. " \
+                                  "Heads, URLs and query strings are NOT redacted, and neither " \
+                                  "is any body this flow's other fields restate. A body that is " \
+                                  "not valid UTF-8, or is multipart, is withheld whole rather " \
+                                  "than sanitized."
+          end
+        end
       end
 
       # RFC3339 UTC for store timestamps (unix microseconds). Helps LLM clients

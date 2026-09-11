@@ -783,6 +783,43 @@ Wordlist paths remembered by the Fuzzer's Payload overlay. Scratch state, not pr
 
 Omitted until you apply or star a wordlist.
 
+### redaction
+
+The [safe evidence export](/reference/cli/#safe-evidence-export) profiles, which one is active, whether it applies without being asked, and the per-install placeholder secret.
+
+```json
+{
+  "redaction": {
+    "active": "pci",
+    "default": true,
+    "salt": "…64 hex…",
+    "profiles": [
+      {
+        "name": "pci",
+        "description": "cardholder data for this engagement",
+        "json_fields": ["card_number", "cvv"],
+        "json_pointers": ["/data/acct", "/users/-/token"],
+        "form_keys": ["cc"],
+        "patterns": ["account=(\\d+)"]
+      }
+    ]
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `active` | string | `""` | Profile a safe export uses when the invocation names none. Empty = the built-in `default` |
+| `default` | bool | `false` | Sanitize shareable output *without* `--redact`. With it on, `--no-redact` is the explicit path back to the captured bytes |
+| `salt` | string | minted | HMAC key behind every `[REDACTED:<tag>]`. Written once, on first use, and never shown in any UI |
+| `profiles` | array | `[]` | Named rule sets. A profile whose `name` matches a built-in replaces it |
+
+Each profile carries `name` plus any of `description`, `json_fields`, `json_pointers`, `form_keys` and `patterns` — see [run redact](/reference/cli/#run-redact) for what each kind matches. Parsing is tolerant: an entry with no usable `name` is dropped, and a rule entry that is not a non-empty string is skipped rather than failing the load.
+
+The salt is a **secret**, kept beside `env`'s token values on the same terms (the tree is `0700`, the file `0600`). A factory reset keeps it — discarding it would silently break every placeholder in every artifact already written — and `gori settings export --sections redaction` carries it, so share `gori run redact profiles --format json` instead when you mean to hand over only the rules.
+
+Project-scoped profiles live in the project database rather than here; see [Per-Project Overrides](#per-project-overrides).
+
 ### Other sections
 
 | Section | Description |
@@ -805,9 +842,12 @@ Omitted until you apply or star a wordlist.
 | `companion` | Miss Ring, the mascot: `enabled` (off by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`) and `notices`. See the [Settings guide](/guide/settings/) |
 | `layout` | History / Probe / Issues previews, Sitemap expand depth, tab-bar numbers. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
+| `redaction` | Safe-export profiles, the active one, the on-by-default switch and the placeholder salt. See [redaction](#redaction) above |
 | `display` | Default detail pane, list time format, line-number gutter, `wrap_lines` (soft-wrap long lines, on by default), preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |
 
 ## Per-Project Overrides
+
+A project can also carry its own **redaction** config under the `redaction` key — its own profiles, which one is active, and its own answer to "sanitize by default" (including an explicit `false` that turns a global default off for one engagement). Written by [`gori run redact`](/reference/cli/#run-redact); resolution is project, then global, then built-in, first match by name.
 
 A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **Project settings** sub-tab.
 

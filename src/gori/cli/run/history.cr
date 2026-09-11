@@ -365,6 +365,7 @@ module Gori
         column_specs = [] of String
         no_columns = false
         positional = [] of String
+        redaction = RedactFlags.new
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)\n\n" \
@@ -383,6 +384,7 @@ module Gori
             format = :json if format == :jsonl # this listing's json IS JSON-Lines; accept the standard name too
           end
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
+          redact_options(p, redaction)
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
@@ -429,6 +431,14 @@ module Gori
         # be replayable), but that is a paragraph for the docs, not a claim to make here.
         if include_sensitive && format != :json
           STDERR.puts "gori run history: --include-sensitive only changes --format json"
+        end
+        # Refused rather than ignored. A profile redacts BODIES, and `--format har` is the only
+        # listing format that carries one — so `--redact` on the text/json listing would hand
+        # back a document that is identical to the unredacted one while saying it was sanitized,
+        # which is the single most dangerous thing this feature could do.
+        if !redaction.mode.nil? && format != :har
+          abort "gori run history: --redact/--no-redact apply to bodies, which only --format har " \
+                "carries — pass --format har, or use `gori run show <id> --redact` for one flow"
         end
 
         # `body:` drains FTS, which is a write. Everything else is a read (#752).
@@ -581,7 +591,7 @@ module Gori
             # `--format har` run in any project that has a column, which is stderr noise in a
             # script rather than a warning about anything they did.
             STDERR.puts "gori run history: --column is not carried by --format har (the values are in each entry's headers/content)" unless column_specs.empty?
-            emit_har(store, rows, query, view_label, limit, truncated)
+            emit_har(store, rows, query, view_label, limit, truncated, redaction)
           elsif format == :json
             # Said on STDERR in the streaming formats too, for the reason the empty note below
             # gives: STDOUT is a pipe, and the consumer reading it cannot see the flags the
@@ -726,8 +736,28 @@ module Gori
       # skipped, bodies capped — goes to STDERR, because a silently short export is exactly
       # the failure this file keeps having to fix.
       private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
-                                view : String?, limit : Int32, truncated : Bool) : Nil
-        details = rows.reverse.each.compact_map { |r| store.get_flow(r.id) }
+                                view : String?, limit : Int32, truncated : Bool,
+                                redaction : RedactFlags = RedactFlags.new) : Nil
+        # Resolved (and refused) while the store is still open, exactly as `cmd_show` does: the
+        # project's own profiles live on a settings row in this database.
+        choice = redact_choice(store, redaction)
+        if err = choice.error
+          store.close
+          abort "gori run history: #{err}"
+        end
+        matcher = choice.matcher
+        # The per-flow reports, kept so the ONE line at the end can total them. Reports, not
+        # whole flows: a report is a handful of `Hit`s, and holding the sanitized bodies of a
+        # 5000-flow export in memory is what `details` streams to avoid.
+        reports = [] of {Int64?, Redact::Report}
+        details = rows.reverse.each.compact_map do |r|
+          d = store.get_flow(r.id)
+          next nil if d.nil?
+          next d unless m = matcher
+          clean, report = Redact::Wire.flow(d, m)
+          reports << {r.id.as(Int64?), report}
+          clean
+        end
         # The transcript lookup. `Export::Har.log` calls this for EVERY flow, including the
         # ones that are plainly HTTP — deliberately, and it is the point of #742: "does this
         # flow have a transcript" is a question only the rows can answer, and the status test
@@ -745,8 +775,16 @@ module Gori
         # it back, and it does not pay: the count is the same index read, 3.6 ms of that 32 ms
         # on 20k flows, and it costs a SECOND query for every flow that IS a socket. One
         # unconditional query is both cheaper overall and the shape with no predicate in it.
+        if matcher && redaction.preview?
+          # A preview writes rows, not a HAR, so the document is never built: `details` is a
+          # lazy iterator and forcing it here is what fills `reports`.
+          details.each { }
+          print_redact_preview(reports, choice, "history")
+          return
+        end
         report = Export::Har.log(STDOUT, details, ws: ->(id : Int64) { store.ws_messages(id) })
         STDOUT.puts
+        redact_notes(reports, choice, "history")
         report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
         if report.written == 0
           STDERR.puts "gori run history: #{empty_har_note(query, view)}"
@@ -783,6 +821,7 @@ module Gori
         req_only = false
         resp_only = false
         positional = [] of String
+        redaction = RedactFlags.new
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run show <flow-id> [options]"
@@ -791,6 +830,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |v| format = parse_format(v, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf]) }
           p.on("--request-only", "Only the request side") { req_only = true }
           p.on("--response-only", "Only the response side") { resp_only = true }
+          redact_options(p, redaction)
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run show: unknown option: #{f}\n#{p}" }
@@ -805,17 +845,35 @@ module Gori
         # Close the store before any abort (abort/exit skip ensure blocks); get_flow
         # has already loaded the BLOBs we need. A WebSocket flow also carries a ws_messages
         # log — fetch it now while the store is open (`show_ws_messages`).
+        #
+        # The redaction choice is resolved in here too, and for the same reason: it reads this
+        # project's own profiles off the settings row, and its refusal ("no profile named …")
+        # has to be reported AFTER the close.
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        detail, ws_msgs = begin
+        detail, ws_msgs, choice = begin
           d = store.get_flow(id)
-          {d, show_ws_messages(store, d)}
+          {d, show_ws_messages(store, d), redact_choice(store, redaction)}
         ensure
           store.close
         end
         abort "gori run show: no flow ##{id}" unless detail
+        detail, redact_report, previewed = show_redaction(detail, choice, redaction)
+        return if previewed
 
         show_request = !resp_only
         show_response = !req_only
+        show_format(format, detail, show_request, show_response, ws_msgs)
+        # After the document, like every other caveat this command reports, and on STDERR so
+        # `--format har > evidence.har` still writes a pure HAR.
+        redact_notes(redact_one(redact_report), choice, "show")
+      end
+
+      # `--format` to the writer for it. Split out of `cmd_show` so the command body stays
+      # argument handling, and so every writer below is reached from exactly one place — which
+      # is what makes sanitizing the detail ONCE, before this call, cover all ten of them.
+      private def self.show_format(format : Symbol, detail : Store::FlowDetail,
+                                   show_request : Bool, show_response : Bool,
+                                   ws_msgs : Array(Store::WsMessage)) : Nil
         case format
         when :raw    then show_raw(detail, show_request, show_response)
         when :har    then show_har(detail, ws_msgs)
@@ -828,6 +886,28 @@ module Gori
         when :json   then puts show_json(detail, show_request, show_response, ws_msgs)
         else              show_text(detail, show_request, show_response, ws_msgs)
         end
+      end
+
+      # Apply the invocation's redaction choice to the flow that is about to be printed.
+      #
+      # Sanitizing happens ONCE, here, and every format below renders from the result. The
+      # alternative — a redaction step inside each of the nine `show_*` writers — is nine
+      # chances to forget, on the one feature where forgetting means printing the secret.
+      #
+      # Returns the detail to render, the report to report (nil when this invocation is not
+      # redacting), and whether the command is DONE: `--redact-preview` prints its rows from
+      # here, because there is no document left to build.
+      private def self.show_redaction(detail : Store::FlowDetail, choice : Redact::Policy::Choice,
+                                      flags : RedactFlags) : {Store::FlowDetail, Redact::Report?, Bool}
+        # After the store closed (`abort` skips `ensure`), which is why the resolve above hands
+        # its refusal back rather than aborting where it is made.
+        abort "gori run show: #{choice.error}" if choice.error
+        matcher = choice.matcher
+        return {detail, nil, false} unless matcher
+        clean, report = Redact::Wire.flow(detail, matcher)
+        return {clean, report, false} unless flags.preview?
+        print_redact_preview(redact_one(report), choice, "show")
+        {clean, report, true}
       end
 
       # The flow's REQUEST as a runnable `curl` command — headless "Copy as → cURL".
