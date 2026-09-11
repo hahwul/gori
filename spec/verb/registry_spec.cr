@@ -965,8 +965,16 @@ private class FakeContext < ExecContext
     @calls << :issue_freeze_link
   end
 
+  def issue_retest : Nil
+    @calls << :issue_retest
+  end
+
   def issue_evidence_delete : Nil
     @calls << :issue_evidence_delete
+  end
+
+  def issue_retest_available? : Bool
+    false
   end
 
   def issue_related_freezable? : Bool

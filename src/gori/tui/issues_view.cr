@@ -13,6 +13,7 @@ require "../store"
 require "../issues_query"
 require "../links"
 require "../evidence"
+require "../retest"
 require "./fmt"
 require "./preview_split"
 require "./line_edit"
@@ -547,6 +548,7 @@ module Gori::Tui
       @detail = issue
       @detail_flow = issue.flow_id.try { |fid| store.flow_row(fid) }
       reload_detail_links(store)
+      refresh_retest_summary(store)
       @links_scroll = 0
       @selected_link = 0
       @detail_focus = :links
@@ -595,6 +597,7 @@ module Gori::Tui
       @detail = nil
       @detail_links = [] of Store::EntityLink
       @detail_related = [] of RelatedRow
+      @retest_summary = nil
       @detail_focus = :links
       @notes_mode = InputMode::Read
     end
@@ -608,6 +611,40 @@ module Gori::Tui
       def frozen? : Bool
         !@frozen.nil?
       end
+    end
+
+    # The open issue's RETEST state as one line, or nil when it has none (#1036).
+    #
+    # Drawn only when there IS one, which is what makes the feature free for the issues that
+    # do not use it: `detail_split` already clamps RELATED to nothing on a short terminal to
+    # keep NOTES a text row, so a permanently-drawn row would take rows from the pane an
+    # operator reads and types in. Same shape as `Evidence`'s tab, which stays hidden until
+    # the project holds its first snapshot.
+    #
+    # Recomputed on a WRITE (a step added/edited/removed, a run finished), never per
+    # repaint — the hoist `Issue#cvss_score` makes for the same reason.
+    getter retest_summary : String? = nil
+
+    def refresh_retest_summary(store : Store) : Nil
+      issue = @detail
+      unless issue
+        @retest_summary = nil
+        return
+      end
+      n = store.count_retest_steps(issue.id)
+      if n == 0
+        @retest_summary = nil
+        return
+      end
+      line = "retest    #{n} step#{n == 1 ? "" : "s"}"
+      if r = store.last_retest_run(issue.id)
+        t = Retest::Tally.new(r.total, r.passed, r.failed, r.inconclusive, r.errored, r.blocked, r.skipped)
+        line += " · last #{r.verdict.label.upcase} (#{Retest.summary_line(t)}) #{fmt_ts(r.started_at)}"
+      else
+        line += " · never run"
+      end
+      line += " · space R"
+      @retest_summary = line
     end
 
     # Rebuild the RELATED rows: the live links first, in link order, then the frozen
@@ -1427,7 +1464,12 @@ module Gori::Tui
                  end
       screen.text(rect.x + 1, rect.y + 3, evidence, Theme.muted, width: w)
 
-      # y4+ — RELATED and NOTES, two CLOSED sibling cards.
+      # y4 — the RETEST line, and ONLY when this issue has one (#1036). See
+      # `refresh_retest_summary`: an issue with no retest pays no row, so the two cards below
+      # keep the height they have always had.
+      render_retest_row(screen, rect, w)
+
+      # y4/y5+ — RELATED and NOTES, two CLOSED sibling cards.
       #
       # RELATED used to be an OPEN region — an `inner_divider`, a text heading, then the link
       # rows — with the closed NOTES card directly beneath it, and an open-ended block above a
@@ -1441,6 +1483,19 @@ module Gori::Tui
       rel_card, notes_card = detail_split(rect)
       render_related_card(screen, rel_card, focused && @detail_focus == :links)
       render_notes_card(screen, notes_card, focused)
+    end
+
+    # y4 — the RETEST line, drawn only when this issue HAS one (see `refresh_retest_summary`).
+    #
+    # BOUNDED, like every other conditional element in this pane: `render_drill` hands over
+    # whatever the rail chrome left, with no minimum-height floor, and rows y0-y3 already fill
+    # a 4-row interior exactly. An unguarded fifth row paints outside `rect` on any issue that
+    # has a retest — the overspill `render_related_card` refuses with `card.h < 2`, and the
+    # CVSS chip refuses by measuring `room`.
+    private def render_retest_row(screen : Screen, rect : Rect, w : Int32) : Nil
+      line = @retest_summary || return
+      return if rect.y + 4 >= rect.bottom
+      screen.text(rect.x + 1, rect.y + 4, line, Theme.muted, width: w)
     end
 
     # The RELATED card. Costs exactly the six rows the divider + heading + `LINKS_VISIBLE`
@@ -1541,8 +1596,17 @@ module Gori::Tui
     end
 
     # Rows the detail's meta block owns before the two cards: title, chips, timestamps,
-    # evidence.
+    # evidence — plus the RETEST line when this issue has one, which is what
+    # `detail_head_rows` adds. A CONSTANT would have to be the worst case and would charge
+    # every issue for a feature most never configure.
     DETAIL_HEAD_ROWS = 4
+
+    # What the meta block actually costs on THIS issue. Read by `detail_split`, so the four
+    # RELATED/NOTES hit-tests in `IssuesController` invert the same arithmetic `render_detail`
+    # drew with — the property `detail_split`'s own comment exists to keep.
+    def detail_head_rows : Int32
+      @retest_summary ? DETAIL_HEAD_ROWS + 1 : DETAIL_HEAD_ROWS
+    end
 
     # The RELATED and NOTES rects for a detail interior — ONE derivation, so `render_detail`
     # and the four hit-tests in `IssuesController` (the NOR/INS chip, click-to-cursor, drag,
@@ -1561,7 +1625,7 @@ module Gori::Tui
     # and type in — and both rects stay inside `rect`, which every view owes
     # `pane_overspill_spec`.
     def detail_split(rect : Rect) : {Rect, Rect}
-      top = rect.y + DETAIL_HEAD_ROWS
+      top = rect.y + detail_head_rows
       avail = {rect.bottom - top, 0}.max
       # Leave NOTES a frame plus one text row wherever the height allows one at all.
       rel_h = {LINKS_VISIBLE + 2, {avail - 3, 0}.max}.min
@@ -1663,6 +1727,13 @@ module Gori::Tui
         @detail = store.get_issue(issue.id)
         @detail_flow = @detail.try { |f| f.flow_id.try { |fid| store.flow_row(fid) } }
         reload_detail_links(store)
+        # Beside `reload_detail_links`, and for the same reason this method exists: a peer
+        # session — an agent's MCP `add_retest_step`, another gori's `gori run retest` — can
+        # change an issue's retest while this detail is open. Without it the summary line
+        # stays as it was at open time AND `detail_head_rows` disagrees with what
+        # `render_detail` draws, so the two cards below are laid out against a row that is or
+        # is not there. Nil-safe: it re-reads `@detail` itself and clears on a deleted issue.
+        refresh_retest_summary(store)
         # get_issue returns nil when the row was deleted by a peer session (supported
         # cross-session scenario) — guard the deref, mirroring ProbeView#refresh_detail.
         # When @detail is nil the render path already falls back to the list view.

@@ -33,7 +33,7 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         f = store.get_issue(id)
         return not_found("no issue with id #{id}") unless f
-        Result.new(JSON.build { |j| Serialize.issue(j, f, store) })
+        Result.new(JSON.build { |j| Serialize.issue(j, f, store, retest: true) })
       end
 
       @[Tool("create_issue", gated: true, agent_action: true)]

@@ -1288,8 +1288,88 @@ module Gori
         "CREATE INDEX idx_issue_evidence_source ON issue_evidence (source_kind, source_id)",
       ]
 
+      # Issue-linked retest (#1036): an ordered, role-tagged list of Repeater sends with one
+      # assertion each, plus a bounded record of what happened the last few times it ran.
+      #
+      # SEPARATE from `entity_links`, deliberately, and the issue says why: an evidence link
+      # answers "what material is related", while a retest step additionally carries order,
+      # role, an assertion and execution state. Folding the two would make unlinking a piece
+      # of evidence silently delete a test step, and adding a link silently add one.
+      #
+      # `issue_retest_steps.ref_kind`/`ref_id` reuse the `entity_links` vocabulary so both
+      # name a workbench object the same way; only `repeater` is written today (`Retest.plan`
+      # refuses the rest), and the column is TEXT rather than a constant so a later kind does
+      # not need a migration to be nameable.
+      #
+      # Runs are a CHILD of the issue and cascade with it (`delete_issue`), unlike frozen
+      # evidence: a run summary is a statement about one issue's check and means nothing
+      # detached from it, where a frozen exchange is bytes that outlive any filing. The
+      # newest `Retest::RUN_HISTORY` runs per issue are kept; `record_retest_run` prunes.
+      #
+      # AUTOINCREMENT on both parents, for the reason V26 gives: `issue_retest_run_steps`
+      # points AT a run id, and a reused id would silently re-parent an orphaned result row.
+      V27 = [
+        <<-SQL,
+          CREATE TABLE issue_retest_steps (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_id   INTEGER NOT NULL,
+            position   INTEGER NOT NULL,
+            role       TEXT    NOT NULL,
+            ref_kind   TEXT    NOT NULL,
+            ref_id     INTEGER NOT NULL,
+            assertion  TEXT    NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          )
+          SQL
+        "CREATE INDEX idx_issue_retest_steps_issue ON issue_retest_steps (issue_id, position, id)",
+        <<-SQL,
+          CREATE TABLE issue_retest_runs (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_id     INTEGER NOT NULL,
+            started_at   INTEGER NOT NULL,
+            finished_at  INTEGER NOT NULL,
+            surface      TEXT,
+            verdict      TEXT    NOT NULL,
+            total        INTEGER NOT NULL,
+            passed       INTEGER NOT NULL,
+            failed       INTEGER NOT NULL,
+            inconclusive INTEGER NOT NULL,
+            errored      INTEGER NOT NULL,
+            blocked      INTEGER NOT NULL,
+            skipped      INTEGER NOT NULL,
+            note         TEXT
+          )
+          SQL
+        "CREATE INDEX idx_issue_retest_runs_issue ON issue_retest_runs (issue_id, started_at, id)",
+        # `label`/`method`/`url`/`assertion` are COPIES taken at run time, not references: a
+        # run is read after the Repeater tab has been renamed, edited or closed, and a row
+        # that re-resolved would describe a request that never ran.
+        <<-SQL,
+          CREATE TABLE issue_retest_run_steps (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id      INTEGER NOT NULL,
+            position    INTEGER NOT NULL,
+            role        TEXT    NOT NULL,
+            ref_kind    TEXT    NOT NULL,
+            ref_id      INTEGER NOT NULL,
+            label       TEXT    NOT NULL,
+            method      TEXT    NOT NULL,
+            url         TEXT    NOT NULL,
+            assertion   TEXT    NOT NULL,
+            outcome     TEXT    NOT NULL,
+            detail      TEXT    NOT NULL,
+            status      INTEGER,
+            duration_us INTEGER,
+            bytes       INTEGER NOT NULL DEFAULT 0,
+            flow_id     INTEGER
+          )
+          SQL
+        "CREATE INDEX idx_issue_retest_run_steps_run ON issue_retest_run_steps (run_id, position, id)",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

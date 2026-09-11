@@ -138,6 +138,7 @@ module Gori
       exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue'")
         c.exec("DELETE FROM evidence_issue_links")
+        clear_issue_retest(c)
         c.exec("DELETE FROM issues")
         nil
       }
@@ -148,6 +149,10 @@ module Gori
     private def delete_issue_one(c : DB::Connection, id : Int64) : Nil
       c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue' AND owner_id = ?", id)
       c.exec("DELETE FROM evidence_issue_links WHERE issue_id = ?", id)
+      # Retest steps and runs DO cascade (#1036), where frozen evidence does not: a run
+      # summary is a statement about one issue's check and means nothing detached from it,
+      # while a frozen exchange is bytes that outlive any filing.
+      delete_issue_retest(c, id)
       c.exec("DELETE FROM issues WHERE id = ?", id)
     end
 

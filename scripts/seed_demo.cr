@@ -2621,6 +2621,28 @@ store.link_evidence(frozen_ids[2], f4) if frozen_ids.size > 2   # one copy, two 
 store.unlink_evidence(frozen_ids[3], f3) if frozen_ids.size > 3 # …and one kept without any
 puts "• froze #{frozen_ids.size} evidence snapshots (1 shared by two issues, 1 orphaned)"
 
+# --- Issue retest (#1036) — the check a finding carries ----------------------
+# The Issue detail's retest line and the RETEST card are both drawn only once an issue HAS
+# one, so a demo without a retest cannot show either. The IDOR issue gets the canonical
+# shape the feature exists for: log in, anchor on the victim's own record, then ask for
+# somebody else's and expect to be refused — plus a control that should come back byte-for-
+# byte identical to the anchor. The XSS issue gets a single unasserted step, which is what
+# "record the outcome and assert nothing" looks like in the list.
+retest_steps = [
+  {f2, S::RetestRole::Setup, ids[:repeater_token]?, ""},
+  {f2, S::RetestRole::Baseline, ids[:repeater_idor]?, "status:200"},
+  {f2, S::RetestRole::Variant, ids[:repeater_idor]?, "json-absent:email"},
+  {f2, S::RetestRole::Control, ids[:repeater_idor]?, "body:same"},
+  {f1, S::RetestRole::Variant, ids[:repeater_xss]?, ""},
+]
+retest_added = 0
+retest_steps.each do |(issue, role, rid, assertion)|
+  next unless rid
+  _, status = store.add_retest_step(issue, role, S::LinkRefKind::Repeater, rid, assertion)
+  retest_added += 1 if status.ok?
+end
+puts "• added #{retest_added} retest steps (a 4-step IDOR check, plus one unasserted step)"
+
 # --- Act six: the lists beside History, and the tabs that opened empty -------
 # Act five stressed History's columns. Every OTHER tab draws the same kind of row — a
 # fixed strip of user-supplied text, laid out by hand — and until now the demo handed

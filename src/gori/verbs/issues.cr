@@ -282,6 +282,23 @@ module Gori
         Verb::Scope::IssuesDetail, [] of Verb::Chord,
         available: ->(ctx : Verb::ExecContext) { ctx.issue_related_frozen? }, mnemonic: 'D', group: :danger) { |ctx| ctx.issue_evidence_delete; nil }
 
+      # An Issue's RETEST (#1036) — the ordered Repeater steps that reproduce the finding and
+      # the last run's result table, in one card.
+      #
+      # MENU-ONLY plus a shifted chord, and both halves of that are deliberate. Every bare
+      # letter this scope has left means something else one keystroke away (`r` is Repeater
+      # evidence right here, `t` edits the title, `e` edits the notes), and a retest RUN
+      # sends real requests — so it may not ride a letter a slip can reach. `⇧R` is spelled
+      # `Chord.new("r", shift: true)`, never `Chord.new("R")`: `Keybind.from_event`
+      # normalises a typed capital to shift + lowercase, so an "R" chord could never fire and
+      # `validate_chords!` raises on one at boot (#902). `menu_key` skips shift chords, hence
+      # the explicit mnemonic — the pairing `issues.export-key` uses.
+      r.register Verb::Definition.new(
+        "issue.retest", "Retest…", "Open this issue's retest: ordered Repeater steps, their assertions, and the last run",
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("r", shift: true)],
+        available: ->(ctx : Verb::ExecContext) { ctx.issue_retest_available? },
+        mnemonic: 'R', group: :triage) { |ctx| ctx.issue_retest; nil }
+
       r.register Verb::Definition.new(
         "issue.link-down", "Next related link", "Select the next related item",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("down"), Verb::Chord.new("j")], hidden: true) { |ctx| ctx.issue_link_move(1); nil }

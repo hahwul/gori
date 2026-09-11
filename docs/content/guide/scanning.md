@@ -199,6 +199,20 @@ After the first snapshot exists, you can enable the optional **Evidence** tab in
 
 Each snapshot has a SHA-256 of its stored request and response. It is never pruned or replaced, and only its explicit delete removes it. A Repeater tab that has never been sent is refused rather than frozen request-only, as is a flow whose response has not landed yet. A copy over 1 MB shows its byte cost first, and a project's evidence is bounded at 256 MB. A Repeater copy pairs the tab's *saved* request (bindings unexpanded) with the last response the store holds. Freeze right after the send that proved the finding, when those two agree. A WebSocket copy contains its handshake, not its frame transcript. The History detail's stats line and the Repeater's RESPONSE border read `frozen ×N`; the source remains editable and its next send can still replace its response.
 
+### Retest: the check a finding carries
+
+Frozen evidence keeps what proved a finding; a **retest** is what runs it again. It is a small ordered list of Repeater sends on the Issue, each with a role and at most one expected result — the thing an issue's write-up is trying to say when it reads "send #4 first to log in, then #5 should answer 403, and #6 is the control".
+
+Link the Repeater sessions to the Issue as usual, then open `Space` → **Retest…** (`⇧R`) on the Issue detail. `a` picks a session, its **role** (`setup` establishes the precondition, `baseline` is the anchor a body comparison is made against, `variant` is the case under test, `control` the negative case, `cleanup` the undo), and the one result you expect: a status (`status:403`, `status:2xx`, `status:200-299`), a JSON field (`json:data.role=admin`, `json-absent:data.token`), or a comparison with the baseline (`body:same`, `body:diff`). Leave it empty to record the outcome and assert nothing — which is what a login step or a cleanup wants. `⇧J` / `⇧K` reorder, `e` edits, `d` removes, `r` runs, and `⇧R` runs while permitting the cleanup steps after a refused send.
+
+`↹` swaps the card between the plan and the last run's result table: role, session, what was expected, what actually happened, and pass or fail per step. `↵` on a result row opens the History flow **that step's own send** recorded — the exact response the row reports, which stays openable long after the Repeater tab has moved on, because a retest never overwrites the tab's stored response. The Issue detail carries a one-line summary (`retest 3 steps · last FAIL …`) once an issue has one, and nothing at all when it does not.
+
+A step sends whatever its Repeater tab holds at the moment of the run. That is the difference from freezing: evidence is the request as it *was*, a retest tracks the request as it is fixed.
+
+Every send goes through the project's scope and Sandbox gates and is recorded in History as `src:retest`, carrying the issue and step number. Before a batch that contains a state-changing method, gori names the exact request count and asks — each of those re-runs its side effect on the target. Once gori **refuses** a send, the rest of the run is skipped, cleanup steps included, unless the operator permitted them (`⇧R` here, `--allow-cleanup` / `allow_cleanup` headless): skipped rows say why, so a partial run cannot read as a pass. A `setup` step that fails halts the measurement steps but still lets cleanup run, and a `body:` comparison is `inconclusive` rather than a pass both when no baseline is behind it and when the last `baseline` step missed its own expected result — a baseline that did not establish its reading anchors nothing. The verdict is `pass` only when every step ran and every assertion was decided; the newest 20 runs per Issue are kept.
+
+Headless it is [`gori run retest`](/reference/cli/#run-retest) — `run` exits `0` only on `pass`, so a fix's CI job can gate on it — and over MCP `list_retest_steps` / `add_retest_step` / `run_retest` / `list_retest_runs` / `get_retest_run`.
+
 ## Next Steps
 
 - [MCP Server](/guide/mcp/): let an agent run scans and read issues

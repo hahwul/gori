@@ -932,6 +932,60 @@ gori run evidence delete 12
 
 A Repeater tab that has never been sent is refused rather than frozen request-only, and so is a flow whose response has not landed. A Repeater copy pairs the tab's saved request (bindings unexpanded) with the last response the store holds for it — a successful send's; freeze right after the send that proved the finding. A WebSocket copy is the handshake; the frame transcript is not copied. A project's frozen evidence is bounded at 256 MB; past that `freeze` refuses until a copy is deleted. `show` decodes bodies and cuts the text form at 64 KB (the stored copy is complete); the JSON form takes the same shape `get_flow` returns.
 
+### run retest
+
+An Issue's **retest**: the ordered Repeater sends that reproduce the finding, each with a role and at most one assertion, plus the bounded record of what happened the last few times it ran. `links` says what is related and `evidence` keeps the bytes that proved it; neither can be *run*. This is what turns "send #4 to log in, then #5 should answer 403" out of an issue's write-up into something CI can execute.
+
+```bash
+gori run retest add --issue=7 --repeater=4 --role=setup                        # log in first
+gori run retest add --issue=7 --repeater=5 --role=baseline --assert=status:200
+gori run retest add --issue=7 --repeater=6 --role=variant  --assert=status:403
+gori run retest --issue=7                                                      # the plan, with what each step will send
+gori run retest move 9 --to=1                                                  # reorder (ids from --format=json)
+gori run retest update 9 --role=control --assert=body:same
+gori run retest run --issue=7                                                  # exit 0 only on `pass`
+gori run retest runs --issue=7                                                 # the bounded run history
+gori run retest show 3                                                         # one run's result table
+gori run retest forget 3                                                       # drop one run from the record
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--issue=N` | The Issue. Required on `steps`, `add`, `clear`, `run` and `runs` |
+| `--repeater=M` | `add`: the Repeater session this step sends (ids from `gori run repeater list`) |
+| `--role=ROLE` | `setup` \| `baseline` \| `variant` (default) \| `control` \| `cleanup` |
+| `--assert=EXPR` | The one expected result (below). Omit — or pass an empty value on `update` — to record the outcome and assert nothing |
+| `--to=POS` | `move`: the new 1-based position, clamped to the list |
+| `-y`, `--yes` | `run`: confirm a batch that contains a state-changing method. `clear`: confirm the deletion |
+| `--allow-cleanup` | `run`: send the cleanup steps even after gori refused a send |
+| `--allow-unscoped` | `run`: send outside the project scope. Sandbox and explicit excludes still apply |
+| `--no-record-history` | `run`: do not write each send to History (default: record — a retest is evidence) |
+| `--slot=NAME` | `run`: send every step as this session slot — its header overlay and its `$NAME` table |
+| `--timeout=SEC` | `run`: per-step connect + idle timeout (default 20) |
+| `--limit=N` | `runs`: how many runs to print |
+| `--format=FMT` | `text` (default) or `json` |
+
+`forget RUN` drops one run summary and its result rows. The steps that produced it stay, and so do the History flows each send recorded — it removes the report, not the evidence. The history prunes itself to the newest 20, so this is for the run that should not be *on* the record (a batch sent at the wrong target, or under a scope since fixed).
+
+Assertions — one per step:
+
+| Expression | Passes when |
+| -------- | ------------- |
+| `status:200` | The response status is exactly 200 |
+| `status:2xx` | The status is in that class |
+| `status:200-299` | The status is in that inclusive range |
+| `json:data.user.id` | The JSON field exists (a field whose value is `null` counts — it is there) |
+| `json:data.role=admin` | The JSON field equals the literal. The literal is untyped text, so `n=3` matches the number `3` and the string `"3"` |
+| `json-absent:data.token` | The JSON field is not there |
+| `body:same` | The decoded body is identical to the last `baseline` step's |
+| `body:diff` | It differs from it |
+
+A step sends whatever its Repeater tab holds when the run happens — that is what makes a retest track a request as it is fixed, where `gori run evidence` freezes one as it was. Each send goes out under the project's scope and Sandbox gates and is recorded in History as `src:retest` with the issue and step on the row, so a result row still opens the exact response it reported long after the tab moved on. The tab's own stored response is never overwritten.
+
+A `setup` step that fails halts the measurement steps (its precondition is what everything after it measures against) but cleanup still runs. Once gori **refuses** a send — scope, Sandbox, an exclude rule — the rest of the run is skipped, cleanup included, unless `--allow-cleanup` says otherwise; every skipped step still gets a row saying why, so a partial run can never read as a pass. A `body:` assertion is `inconclusive`, never a pass, when there is no baseline behind it — and equally when the last `baseline` step **missed its own expected result**: a baseline that did not establish its reading anchors nothing, so comparing a variant against the 403 error page a `status:200` baseline was handed would otherwise report "the body is unchanged" about two error pages.
+
+The verdict is `pass` only when every step ran and every assertion was decided; `blocked` outranks `fail`, because a run gori refused to finish is a fact about the scope configuration and not about the target. `run` exits `0` on `pass` and `1` otherwise. The newest 20 runs per Issue are kept.
+
 ### run rewriter
 
 Manage Match & Replace rules from scripts. The same rules the [Rewriter tab](/guide/proxy/) edits, applied to live proxy traffic:

@@ -139,6 +139,8 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_scope` | 현재 스코프 include/exclude 규칙 |
 | `list_links` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `list_evidence` / `get_evidence` | 동결된 증거 목록(교환의 변경 불가 사본, 출처·연결된 이슈·SHA-256 포함. `issue_id`를 주면 한 이슈의 사본, 생략하면 고아까지 포함한 프로젝트 전체 보관함)과, 사본 하나의 바이트(`include_sensitive`가 아니면 헤드의 자격 증명은 가려지고, 본문은 `get_flow`처럼 상한 적용) |
+| `list_retest_steps` / `list_retest_runs` / `get_retest_run` | Issue의 **리테스트**: 결함을 재현하는 Repeater 전송 목록(각 단계를 현재 프로젝트 기준으로 해석하므로 응답에 무엇을 보낼지와 어떤 단계가 상태를 바꾸는지가 이미 담겨 있습니다), 보존된 실행 기록(최신순), 그리고 한 실행의 결과 표(각 행이 자기 전송의 History flow id를 보관) |
+| `get_issue`의 retest 필드 | 리테스트가 있는 이슈는 `links`, `evidence` 옆에 `retest` 객체(단계 수와 마지막 실행 판정)를 함께 싣습니다. 결함을 읽는 것만으로 재현 가능한 검사가 있는지, 지난번에 뭐라고 했는지 알 수 있습니다. 리테스트가 없는 이슈에는 아예 나오지 않습니다 |
 | `compare_flows` | 두 플로우의 요청 또는 응답 줄 단위 diff. 양쪽의 status/size/time과 A→B 델타 포함. `context:N`은 동일 구간을 `{kind:fold,hidden}` 마커로 접음 |
 | `diff_projects` | 리테스트 diff: **프로젝트 두 개**를 엔드포인트 단위로 비교. 지난 엔게이지먼트 이후 무엇이 새로 생겼고, 사라졌고, 다르게 응답하는지. 엔드포인트 키는 Sitemap의 폴딩된 템플릿을 그대로 쓰고, `removed`(새 캡처가 아예 요청한 적 없음)와 `gone`(요청했고 404/410을 받음)은 별개의 판정 |
 | `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
@@ -181,6 +183,9 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `create_issue` / `update_issue` / `delete_issue` | 이슈 기록, 갱신, 삭제 |
 | `add_link` / `remove_link` | 이슈나 노트의 증거 포인터 연결 / 해제 |
 | `freeze_evidence` / `link_evidence` / `unlink_evidence` / `delete_evidence` | 플로우나 Repeater 탭의 *현재* 교환을 이슈의 변경 불가 증거로 복사(다음 전송과 보존 정리가 건드리지 못함. 기본값 `link:true`는 live 링크도 같은 트랜잭션에 기록)하고, 스냅샷을 바꾸지 않은 채 이슈 연결을 변경하거나 사본 하나를 삭제. 응답이 취약점을 확인해 줄 때 동결하고 재테스트 뒤에 다시 동결하세요 |
+| `add_retest_step` / `update_retest_step` / `move_retest_step` / `remove_retest_step` | 리테스트 구성: Repeater 세션, 역할(`setup` / `baseline` / `variant` / `control` / `cleanup`), 그리고 기대 결과 하나(`status:2xx`, `json:data.role=admin`, `json-absent:…`, `body:same` / `body:diff`). 세션은 복사되지 않으며, 단계는 실행 시점에 탭이 들고 있는 요청을 그대로 보냅니다 |
+| `run_retest` | 프로젝트 스코프와 Sandbox 게이트를 거쳐 실행하고 `pass` / `fail` / `inconclusive` / `blocked` 판정과 단계별 행을 반환합니다(`pass`가 아니면 `isError`). 상태를 바꾸는 메서드가 포함된 배치는 정확한 요청 수와 함께 거부되며 `confirm:true`가 필요합니다. gori가 전송을 거부하면 그 뒤는 모두 건너뛰고 cleanup도 `allow_cleanup:true` 없이는 보내지 않습니다. 모든 전송은 History에 `src:retest`로 기록됩니다 |
+| `clear_retest_steps` / `delete_retest_run` | Issue 리테스트의 모든 단계를 지우거나(실행 기록은 유지 — 검사를 다시 짠다고 실행이 없던 일이 되지는 않습니다), 실행 요약과 결과 행 하나를 지웁니다. 단계와 각 전송이 기록한 History 플로우는 그대로 남습니다: `delete_retest_run`이 지우는 것은 보고이지 증거가 아닙니다 |
 | `create_note` / `update_note` / `delete_note` | 프로젝트 노트 관리 |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다: `project`(기본값) 또는 모든 프로젝트에 적용되는 `global` |
 | `create_rule_from_preset` | 프리셋(`list_rule_presets` 참고)을 평범한 Match & Replace 규칙으로 설치. 규칙마다 `create_rule`을 한 번씩 부른 것과 같은 결과라, 설치 후에도 보이고 편집·비활성화됩니다. 생성된 id를 반환 |

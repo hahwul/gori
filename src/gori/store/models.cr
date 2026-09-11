@@ -682,6 +682,174 @@ module Gori
       end
     end
 
+    # --- issue retest (V27, #1036) -------------------------------------------
+    #
+    # The three enums a retest PERSISTS. They live here beside `LinkRefKind` and `Severity`
+    # rather than in `Gori::Retest` for the reason every stored vocabulary does: the store is
+    # what reads them back off disk, and a spec that opens a project must not have to pull in
+    # the send engine to name a row's role. `Gori::Retest` aliases them, so there is one
+    # spelling in the source as well as one on disk.
+
+    # What a retest step is FOR. Ordering is `position`, never this: a role is a claim about
+    # MEANING, and deriving the run order from it would make "move this step up" silently
+    # re-label the step.
+    enum RetestRole
+      Setup
+      Baseline
+      Variant
+      Control
+      Cleanup
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.parse?(s : String) : RetestRole?
+        v = s.strip.downcase
+        values.find { |r| r.label == v }
+      end
+
+      # Does a failure here invalidate the steps after it? A `Setup` establishes the
+      # precondition everything downstream measures against; a failed variant or control IS
+      # the result and stops nothing.
+      def precondition? : Bool
+        setup?
+      end
+    end
+
+    # What one step's result says. Six, not a bool: the four ways a step can fail to produce
+    # an answer are acted on differently, and folding them into `fail` reports a finding the
+    # run does not have — the split `Authorize::Target#unanswered?` exists to keep.
+    enum RetestOutcome
+      Pass
+      Fail
+      Inconclusive # sent, but the assertion could not be decided
+      Error        # the send failed at the network
+      Blocked      # gori REFUSED to send (scope, Sandbox, an exclude rule)
+      Skipped      # never attempted
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.parse?(s : String) : RetestOutcome?
+        v = s.strip.downcase
+        values.find { |o| o.label == v }
+      end
+
+      # Did this step put a request on the wire?
+      def sent? : Bool
+        pass? || fail? || inconclusive? || error?
+      end
+    end
+
+    # A run folded into one word — what a regression check exits on.
+    enum RetestVerdict
+      Pass
+      Fail
+      Inconclusive
+      Blocked
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.parse?(s : String) : RetestVerdict?
+        v = s.strip.downcase
+        values.find { |x| x.label == v }
+      end
+    end
+
+    # One configured step of an issue's retest. `ref_kind`/`ref_id` reuse `LinkRefKind` so a
+    # step and an entity link name the same workbench object the same way; only `Repeater` is
+    # ever written today, and `Retest.plan` is the one place that says so.
+    #
+    # `assertion` is the TYPED spelling (`status:2xx`, `json:data.role=admin`, …), stored
+    # verbatim and parsed by `Retest::Assertion`. Empty means "record the outcome, assert
+    # nothing" — a legitimate step (a login, a cleanup) rather than a missing value.
+    struct RetestStep
+      getter id : Int64
+      getter issue_id : Int64
+      getter position : Int32
+      getter role : RetestRole
+      getter ref_kind : LinkRefKind
+      getter ref_id : Int64
+      getter assertion : String
+      getter created_at : Int64
+      getter updated_at : Int64
+
+      def initialize(@id, @issue_id, @position, @role, @ref_kind, @ref_id, @assertion,
+                     @created_at, @updated_at)
+      end
+
+      # `repeater #3` — how a step names its target before anything resolves it.
+      def ref_label : String
+        "#{@ref_kind.label} ##{@ref_id}"
+      end
+    end
+
+    # One bounded record of a retest having been run. The counts are stored rather than
+    # re-derived from the step rows so a summary listing costs one query, and so a run whose
+    # steps were pruned still says what it found.
+    struct RetestRun
+      getter id : Int64
+      getter issue_id : Int64
+      getter started_at : Int64
+      getter finished_at : Int64
+      getter surface : String? # FlowSource::Surface token, or nil when none was set
+      getter verdict : RetestVerdict
+      getter total : Int32
+      getter passed : Int32
+      getter failed : Int32
+      getter inconclusive : Int32
+      getter errored : Int32
+      getter blocked : Int32
+      getter skipped : Int32
+      getter note : String?
+
+      def initialize(@id, @issue_id, @started_at, @finished_at, @surface, @verdict, @total,
+                     @passed, @failed, @inconclusive, @errored, @blocked, @skipped, @note = nil)
+      end
+
+      def duration_us : Int64
+        {@finished_at - @started_at, 0_i64}.max
+      end
+    end
+
+    # One row of a run's result table.
+    #
+    # `label`/`method`/`url`/`assertion` are COPIES taken at run time, never a reference: a
+    # run summary is read weeks later, by which time the Repeater tab may have been renamed,
+    # edited or closed, and a row that re-resolved would describe a request that never ran.
+    # Same argument `IssueEvidenceMeta` makes for its provenance fields.
+    struct RetestRunStep
+      getter id : Int64
+      getter run_id : Int64
+      getter position : Int32
+      getter role : RetestRole
+      getter ref_kind : LinkRefKind
+      getter ref_id : Int64
+      getter label : String
+      getter method : String
+      getter url : String
+      getter assertion : String
+      getter outcome : RetestOutcome
+      getter detail : String
+      getter status : Int32?
+      getter duration_us : Int64?
+      getter bytes : Int64
+      getter flow_id : Int64? # the History row this send recorded, when it recorded one
+
+      def initialize(@id, @run_id, @position, @role, @ref_kind, @ref_id, @label, @method,
+                     @url, @assertion, @outcome, @detail, @status, @duration_us, @bytes,
+                     @flow_id)
+      end
+
+      def ref_label : String
+        "#{@ref_kind.label} ##{@ref_id}"
+      end
+    end
+
     # One frozen exchange's PROVENANCE, Issue membership and shape — everything the Issues
     # detail, the project-wide Evidence tab, exports and markers need, and none of the bytes
     # (V26, #1038/#1039). Issue links are mutable and many-to-many; the snapshot fields and

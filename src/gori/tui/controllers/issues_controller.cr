@@ -5,6 +5,11 @@ require "../../store"
 require "../../issues_export"
 require "../../hotkeys"
 require "../../evidence"
+require "../../retest"
+require "../../retest/live_backend"
+require "../../host_overrides"
+require "../../outbound"
+require "../../settings"
 
 module Gori::Tui
   # The Issues tab: the triage list + an issue's detail (with an inline notes
@@ -43,6 +48,200 @@ module Gori::Tui
 
     def view : IssuesView
       @issues
+    end
+
+    # --- retest (#1036) ------------------------------------------------------
+    #
+    # A run is a background fiber whose rows arrive through `@retest_events` and are drained
+    # on the MAIN fiber by `drain_retest` — the shape `AuthorizeController` uses, and for the
+    # same reason: the sends are seconds long and the render loop must not block on them.
+    #
+    # The state lives on the CONTROLLER and not on the card, because the card is a modal the
+    # operator can close (its own hint says the run continues). A run parked on the overlay
+    # would be unreachable the moment they pressed esc — and its `finish` would then never
+    # clear the job in the bottom bar.
+
+    # One message from the run fiber. `gen` stamps the BATCH it belongs to, so a row from a
+    # superseded run cannot land in the next one's table. `done` is the terminal marker the
+    # fiber always sends last (from an `ensure`), and it — not a row count — is what says the
+    # fiber has exited.
+    record RetestEvent,
+      gen : Int32,
+      result : Retest::StepResult? = nil,
+      report : Retest::RunReport? = nil,
+      error : String? = nil,
+      done : Bool = false
+
+    @retest_events = Channel(RetestEvent).new(64)
+    @retest_gen = 0
+    @retest_active_gen = nil.as(Int32?)
+    @retest_issue_id = nil.as(Int64?)
+    @retest_rows = [] of Retest::StepResult
+    @retest_planned = 0
+    @retest_stop = false
+    @retest_job_id = nil.as(Int32?)
+    # Set by the drain when a run ENDS, read once by the shell so the open card can reload
+    # the persisted rows. A flag rather than a callback: the drain runs on the render loop
+    # and must not reach into overlay state itself.
+    @retest_finished = nil.as(Int64?)
+
+    def retest_running? : Bool
+      !@retest_active_gen.nil?
+    end
+
+    # Which issue's retest is in flight — the card refuses to edit or re-run while its own
+    # issue is running, and says so for someone else's.
+    def retest_running_issue : Int64?
+      @retest_issue_id if retest_running?
+    end
+
+    # The rows the live run has produced so far, for the card's RESULTS half while it fills.
+    def retest_live_rows : Array(Retest::StepResult)
+      @retest_rows
+    end
+
+    def retest_progress_line : String
+      return "" unless retest_running?
+      "sending step #{{@retest_rows.size + 1, @retest_planned}.min} of #{@retest_planned}…"
+    end
+
+    # The issue whose run just ended, consumed once.
+    def take_retest_finished : Int64?
+      id = @retest_finished
+      @retest_finished = nil
+      id
+    end
+
+    def stop_retest : Nil
+      return unless retest_running?
+      @retest_stop = true
+      @host.status("retest: stopping after the current step…")
+    end
+
+    # Start a run on a background fiber. Returns false when one is already in flight — a
+    # second run against the same target while the first is mid-sequence would interleave
+    # two states on the origin and report both.
+    #
+    # Everything the fiber needs is read HERE, on the main fiber: the scope (`Outbound`), the
+    # project's live `HostOverrides` (the one mutex-guarded instance the Project tab edits in
+    # place, so an override fixed a moment ago is honoured — the distinction
+    # `Authorize::Engine.live` documents), and the plan itself. The fiber must not touch a
+    # view.
+    def start_retest(issue_id : Int64, planned : Array(Retest::Planned),
+                     allow_cleanup : Bool = false) : Bool
+      if retest_running?
+        @host.status("a retest is already running")
+        return false
+      end
+      if planned.empty?
+        @host.status("this issue has no retest steps")
+        return false
+      end
+      session = @host.session
+      outbound = Gori::Outbound.interactive(session.scope)
+      overrides = session.host_overrides
+      verify = Settings.verify_upstream?
+      @retest_stop = false
+      @retest_rows = [] of Retest::StepResult
+      @retest_planned = planned.size
+      @retest_issue_id = issue_id
+      gen = (@retest_gen += 1)
+      @retest_active_gen = gen
+      noun = "#{planned.size} step#{planned.size == 1 ? "" : "s"}"
+      @retest_job_id = @host.jobs.start(:retest, "issue ##{issue_id} · #{noun}",
+        Jobs::Goto.new(:issues))
+      @host.status("retest: running #{noun} for issue ##{issue_id}…")
+      store = session.store
+      events = @retest_events
+      stop = -> { @retest_stop }
+      spawn(name: "retest-run") do
+        backend = Retest::LiveBackend.new(store, outbound,
+          issue_id: issue_id, surface: Gori::FlowSource::Surface::Tui,
+          overrides: overrides, verify: verify)
+        report = Retest.execute(store, planned, backend,
+          issue_id: issue_id, surface: Gori::FlowSource::Surface::Tui,
+          allow_cleanup: allow_cleanup, stop: stop,
+          on_step: ->(r : Retest::StepResult) { events.send(RetestEvent.new(gen, result: r)); nil })
+        events.send(RetestEvent.new(gen, report: report))
+      rescue ex
+        # Anything the engine's own per-step handling cannot see — building the backend, a
+        # store that closed under us. Without this the fiber would die before its marker and
+        # leave the tab wedged as "running".
+        events.send(RetestEvent.new(gen, error: ex.message || "retest run failed"))
+      ensure
+        # ALWAYS last, and there is exactly one sender, so the channel's FIFO order puts it
+        # after every row it follows.
+        events.send(RetestEvent.new(gen, done: true))
+      end
+      true
+    end
+
+    # How many rows one drain applies. A retest is a handful of steps, so this is only a
+    # ceiling against a pathological plan holding the render loop.
+    RETEST_DRAIN_CAP = 64
+
+    # Main-fiber drain; true when anything arrived (the render loop redraws on it).
+    def drain_retest : Bool
+      drained = false
+      RETEST_DRAIN_CAP.times do
+        break unless ev = next_retest_event
+        drained = true
+        next unless ev.gen == @retest_active_gen # a superseded run's trailing rows
+        apply_retest_event(ev)
+      end
+      drained
+    end
+
+    # One queued event if any, else nil — the non-blocking channel poll
+    # `AuthorizeController#next_outcome` uses.
+    private def next_retest_event : RetestEvent?
+      select
+      when ev = @retest_events.receive
+        ev
+      else
+        nil
+      end
+    end
+
+    private def apply_retest_event(ev : RetestEvent) : Nil
+      if r = ev.result
+        @retest_rows << r
+        return
+      end
+      if msg = ev.error
+        @host.status("retest: #{msg}")
+        @retest_job_id.try { |id| @host.jobs.finish(id, :error, msg) }
+        return
+      end
+      if report = ev.report
+        finish_retest(report)
+        return
+      end
+      return unless ev.done
+      # The marker with no report before it: the fiber died on the rescue path, which
+      # already reported. Clear the run so the tab is not wedged.
+      @retest_active_gen = nil
+      @retest_finished = @retest_issue_id
+      @retest_job_id.try { |id| @host.jobs.finish(id, :error, "retest did not finish") unless @host.jobs.errored?(id) }
+      @retest_job_id = nil
+    end
+
+    private def finish_retest(report : Retest::RunReport) : Nil
+      @retest_active_gen = nil
+      @retest_finished = @retest_issue_id
+      line = "retest: #{report.verdict.label.upcase} — #{Retest.summary_line(report.tally)}"
+      line += " (the summary was NOT saved)" unless report.stored.ok?
+      @host.status(line)
+      @retest_job_id.try do |id|
+        @host.jobs.finish(id, report.verdict.pass? ? :done : :error, Retest.summary_line(report.tally))
+      end
+      @retest_job_id = nil
+    end
+
+    # `Runner#stop_all_jobs` — the project-level halt. The fiber owns its own sockets and
+    # checks the flag between steps, so this is the same cooperative stop the card's `s` is.
+    def halt_retest : Nil
+      @retest_stop = true if retest_running?
     end
 
     def tab : Symbol

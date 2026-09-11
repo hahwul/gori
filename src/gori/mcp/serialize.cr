@@ -1092,8 +1092,116 @@ module Gori
         end
       end
 
+      # --- issue retest (#1036) -----------------------------------------------
+      #
+      # Four shapes, shared by MCP and `gori run retest --format=json` so the two cannot
+      # drift: a CONFIGURED step (resolved against the project as it is now), a RUN summary,
+      # one stored RESULT row, and one just-produced result. Every captured string goes
+      # through `Issues::Export.one_line` for the reason `issue` below states — an unscrubbed
+      # wire byte breaks the whole JSON-RPC line's UTF-8 validity, not merely its display.
+
+      # One configured step plus what it WILL send: the method and URL resolved from its
+      # Repeater session, and `missing` when it cannot run at all. The resolved half is the
+      # point — a caller that only saw `{role, ref_id}` could not tell a step that will POST
+      # from one that will GET, which is exactly what it has to confirm before a run.
+      def self.retest_planned(j : JSON::Builder, pl : Retest::Planned) : Nil
+        s = pl.step
+        j.field "id", s.id
+        j.field "issue_id", s.issue_id
+        j.field "position", s.position
+        j.field "role", s.role.label
+        j.field "ref_kind", s.ref_kind.label
+        j.field "ref_id", s.ref_id
+        j.field "label", Issues::Export.one_line(pl.label)
+        j.field "method", pl.method
+        j.field "url", Issues::Export.one_line(pl.url)
+        j.field "assertion", s.assertion
+        j.field "expected", pl.assertion.describe
+        j.field "state_changing", pl.runnable? && pl.state_changing?
+        j.field "runnable", pl.runnable?
+        pl.missing.try { |m| j.field "unrunnable_reason", Issues::Export.one_line(m) }
+        j.field "created_at", s.created_at
+        j.field "created_at_iso", unix_micros_iso(s.created_at)
+        j.field "updated_at", s.updated_at
+      end
+
+      def self.retest_tally(j : JSON::Builder, t : Retest::Tally) : Nil
+        j.field "total", t.total
+        j.field "passed", t.passed
+        j.field "failed", t.failed
+        j.field "inconclusive", t.inconclusive
+        j.field "errored", t.errored
+        j.field "blocked", t.blocked
+        j.field "skipped", t.skipped
+      end
+
+      def self.retest_run(j : JSON::Builder, r : Store::RetestRun) : Nil
+        j.field "run_id", r.id
+        j.field "issue_id", r.issue_id
+        j.field "verdict", r.verdict.label
+        j.field "surface", r.surface
+        j.field "started_at", r.started_at
+        j.field "started_at_iso", unix_micros_iso(r.started_at)
+        j.field "finished_at", r.finished_at
+        j.field "duration_us", r.duration_us
+        retest_tally(j, Retest::Tally.new(r.total, r.passed, r.failed, r.inconclusive,
+          r.errored, r.blocked, r.skipped))
+        r.note.try { |n| j.field "note", Issues::Export.one_line(n) }
+      end
+
+      # A STORED result row. `label`/`method`/`url` are the copies taken at run time, never
+      # re-resolved — see `Store::RetestRunStep`.
+      def self.retest_run_step(j : JSON::Builder, s : Store::RetestRunStep) : Nil
+        j.field "position", s.position
+        j.field "role", s.role.label
+        j.field "ref_kind", s.ref_kind.label
+        j.field "ref_id", s.ref_id
+        j.field "label", Issues::Export.one_line(s.label)
+        j.field "method", s.method
+        j.field "url", Issues::Export.one_line(s.url)
+        j.field "assertion", s.assertion
+        j.field "outcome", s.outcome.label
+        j.field "detail", Issues::Export.one_line(s.detail)
+        j.field "status", s.status
+        j.field "duration_us", s.duration_us
+        j.field "bytes", s.bytes
+        # The History row THIS send wrote (`src:retest`). It is how a result row opens the
+        # exact response it reported, months after the Repeater tab moved on.
+        j.field "flow_id", s.flow_id
+      end
+
+      # A result the run just produced — the same fields, off the in-memory shape, so a
+      # `run_retest` reply and a later `get_retest_run` read alike.
+      def self.retest_step_result(j : JSON::Builder, r : Retest::StepResult) : Nil
+        pl = r.planned
+        s = pl.step
+        j.field "step_id", s.id
+        j.field "position", s.position
+        j.field "role", s.role.label
+        j.field "ref_kind", s.ref_kind.label
+        j.field "ref_id", s.ref_id
+        j.field "label", Issues::Export.one_line(pl.label)
+        j.field "method", pl.method
+        j.field "url", Issues::Export.one_line(pl.url)
+        j.field "assertion", s.assertion
+        j.field "expected", pl.assertion.describe
+        j.field "outcome", r.outcome.label
+        j.field "detail", Issues::Export.one_line(r.detail)
+        j.field "status", r.observation.status
+        j.field "duration_us", r.observation.duration_us
+        j.field "bytes", r.observation.bytes
+        j.field "flow_id", r.observation.flow_id
+      end
+
       # --- issues -----------------------------------------------------------
-      def self.issue(j : JSON::Builder, f : Store::Issue, store : Store? = nil) : Nil
+      # `retest` is OPT-IN and off by default, because it costs two more per-row store reads
+      # and `list_issues` serializes a page of up to 500 issues through here. `get_issue` —
+      # the "read one finding" call the field's own argument is about — passes true; the
+      # listing does not, and an agent that wants the check for a row calls
+      # `list_retest_steps` for it. Same split `body_mode` makes between a listing and a
+      # detail: a per-row read belongs on the call that asked for one row.
+      def self.issue(j : JSON::Builder, f : Store::Issue, store : Store? = nil, *,
+                     retest : Bool = false) : Nil
         j.object do
           j.field "id", f.id
           j.field "created_at", f.created_at
@@ -1121,6 +1229,26 @@ module Gori
           # not served over MCP.
           j.field "evidence" do
             j.array { Issues::Export.append_evidence_json(j, f, store) if store }
+          end
+          # The RETEST (#1036), and only when the issue has one — the state an agent needs to
+          # decide what to do next with a finding it just read: is there a reproducible check,
+          # and what did it say last time. Without it the only way to learn a check exists is
+          # `list_retest_steps` per issue, which nobody calls speculatively.
+          #
+          # Omitted entirely when there is none, the same rule the Issue detail's one-line
+          # summary follows: an issue with no retest says nothing rather than saying "0". Two
+          # indexed reads, beside the two `links`/`evidence` already make here.
+          emit_issue_retest(j, f, store) if retest && store
+        end
+      end
+
+      private def self.emit_issue_retest(j : JSON::Builder, f : Store::Issue, store : Store) : Nil
+        steps = store.count_retest_steps(f.id)
+        return if steps == 0
+        j.field("retest") do
+          j.object do
+            j.field "steps", steps
+            store.last_retest_run(f.id).try { |r| j.field("last_run") { j.object { retest_run(j, r) } } }
           end
         end
       end

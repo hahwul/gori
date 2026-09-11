@@ -246,6 +246,11 @@ module Gori::Tui
         # it can be read before it is pressed. Marks make that sharper here than anywhere else,
         # since `d` acts on the marked set and this one does not.
         Item.new("Issues", "list: {issues.mark-toggle} mark · {issues.mark-all} all · ⇧arrows range · {issues.clear} clear · notes: i/↵ edit · {issue.select-line} line · {issue.copy} copy · space cmds"),
+        # The retest (#1036) is menu-reachable but its chord is shifted, so this row is where
+        # an operator learns it — the same argument the wipes above make for being named where
+        # they can be read before they are pressed. Its card is also the one place that SENDS
+        # from the Issues tab.
+        Item.new("{issue.retest}", "in an Issue: open its RETEST card — ordered Repeater steps, their assertions, and the last run"),
         Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {scope.toggle-lens} scope · {probe.clear} clear issues · space cmds"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
