@@ -1,6 +1,6 @@
 require "../spec_helper"
 
-# Frozen issue evidence (V26, #1038): an immutable copy of one exchange, owned by an issue,
+# Frozen issue evidence (V26, #1038/#1039): an immutable copy of one exchange, linked to Issues,
 # that ordinary workbench activity — a Repeater re-send, a retention sweep, a tab close —
 # can neither change nor prune. These examples pin the product contract at the store: the
 # copy and its live link commit together, the copy outlives its source, and the two
@@ -59,7 +59,7 @@ describe "Store#freeze_evidence (V26)" do
       metas.size.should eq(1)
       m = metas[0]
       m.id.should eq(id)
-      m.issue_id.should eq(issue)
+      m.issue_ids.should eq([issue])
       m.source_kind.should eq(Gori::Store::LinkRefKind::Flow)
       m.source_id.should eq(fid)
       m.source_label.should eq("hist ##{fid}")
@@ -185,7 +185,7 @@ describe "Store#freeze_evidence (V26)" do
     end
   end
 
-  it "cascades with its issue on delete and on clear, and deletes one copy on request" do
+  it "keeps orphaned and shared copies across Issue deletion, and deletes only on request" do
     with_store do |store|
       fid = store.insert_flow(captured("/c"))
       respond(store, fid)
@@ -194,17 +194,27 @@ describe "Store#freeze_evidence (V26)" do
       ea, _ = store.freeze_evidence(a, flow_snapshot(store, fid))
       eb1, _ = store.freeze_evidence(b, flow_snapshot(store, fid))
       eb2, _ = store.freeze_evidence(b, flow_snapshot(store, fid))
+      store.link_evidence(ea, b).should be_true
+      store.get_evidence_meta(ea).not_nil!.issue_ids.should eq([a, b])
 
       store.delete_evidence(eb1).should be_true
-      store.issue_evidence(b).map(&.id).should eq([eb2])
+      store.issue_evidence(b).map(&.id).should eq([ea, eb2])
 
       store.delete_issue(a).should be_true
-      store.get_evidence(ea).should be_nil
-      store.count_evidence.should eq(1)
+      store.get_evidence(ea).not_nil!.meta.issue_ids.should eq([b])
+      store.count_evidence.should eq(2)
+
+      store.unlink_evidence(ea, b).should be_true
+      store.get_evidence_meta(ea).not_nil!.orphaned?.should be_true
+      store.evidence.map(&.id).should contain(ea)
 
       store.clear_issues.should be_true
+      store.count_evidence.should eq(2)
+      store.get_evidence(eb2).not_nil!.meta.orphaned?.should be_true
+
+      store.delete_evidence(ea).should be_true
+      store.delete_evidence(eb2).should be_true
       store.count_evidence.should eq(0)
-      store.get_evidence(eb2).should be_nil
     end
   end
 

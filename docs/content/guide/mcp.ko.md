@@ -138,7 +138,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_probe_rules` | 모든 스캔 규칙(패시브, 액티브, 커스텀)과 활성화 여부, 프로젝트의 스캔 모드 |
 | `list_scope` | 현재 스코프 include/exclude 규칙 |
 | `list_links` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
-| `list_evidence` / `get_evidence` | 이슈의 동결된 증거(교환의 변경 불가 사본, 출처와 SHA-256 포함) 목록과, 사본 하나의 바이트(`include_sensitive`가 아니면 헤드의 자격 증명은 가려지고, 본문은 `get_flow`처럼 상한 적용) |
+| `list_evidence` / `get_evidence` | 동결된 증거 목록(교환의 변경 불가 사본, 출처·연결된 이슈·SHA-256 포함. `issue_id`를 주면 한 이슈의 사본, 생략하면 고아까지 포함한 프로젝트 전체 보관함)과, 사본 하나의 바이트(`include_sensitive`가 아니면 헤드의 자격 증명은 가려지고, 본문은 `get_flow`처럼 상한 적용) |
 | `compare_flows` | 두 플로우의 요청 또는 응답 줄 단위 diff. 양쪽의 status/size/time과 A→B 델타 포함. `context:N`은 동일 구간을 `{kind:fold,hidden}` 마커로 접음 |
 | `diff_projects` | 리테스트 diff: **프로젝트 두 개**를 엔드포인트 단위로 비교. 지난 엔게이지먼트 이후 무엇이 새로 생겼고, 사라졌고, 다르게 응답하는지. 엔드포인트 키는 Sitemap의 폴딩된 템플릿을 그대로 쓰고, `removed`(새 캡처가 아예 요청한 적 없음)와 `gone`(요청했고 404/410을 받음)은 별개의 판정 |
 | `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
@@ -180,7 +180,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `minimize_repeater` | Repeater 요청을 같은 응답이 재현되는 최소 형태로 줄임 |
 | `create_issue` / `update_issue` / `delete_issue` | 이슈 기록, 갱신, 삭제 |
 | `add_link` / `remove_link` | 이슈나 노트의 증거 포인터 연결 / 해제 |
-| `freeze_evidence` / `delete_evidence` | 플로우나 Repeater 탭의 *현재* 교환을 이슈의 변경 불가 증거로 복사(다음 전송과 보존 정리가 건드리지 못함. 기본값 `link:true`는 live 링크도 같은 트랜잭션에 기록)하고, 사본 하나를 삭제. 응답이 취약점을 확인해 줄 때 동결하고 재테스트 뒤에 다시 동결하세요 |
+| `freeze_evidence` / `link_evidence` / `unlink_evidence` / `delete_evidence` | 플로우나 Repeater 탭의 *현재* 교환을 이슈의 변경 불가 증거로 복사(다음 전송과 보존 정리가 건드리지 못함. 기본값 `link:true`는 live 링크도 같은 트랜잭션에 기록)하고, 스냅샷을 바꾸지 않은 채 이슈 연결을 변경하거나 사본 하나를 삭제. 응답이 취약점을 확인해 줄 때 동결하고 재테스트 뒤에 다시 동결하세요 |
 | `create_note` / `update_note` / `delete_note` | 프로젝트 노트 관리 |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다: `project`(기본값) 또는 모든 프로젝트에 적용되는 `global` |
 | `create_rule_from_preset` | 프리셋(`list_rule_presets` 참고)을 평범한 Match & Replace 규칙으로 설치. 규칙마다 `create_rule`을 한 번씩 부른 것과 같은 결과라, 설치 후에도 보이고 편집·비활성화됩니다. 생성된 id를 반환 |

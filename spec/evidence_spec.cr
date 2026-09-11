@@ -10,6 +10,13 @@ private def repeater(request : String, *, http2 = false, head : String? = nil,
     head.try(&.to_slice), body.try(&.to_slice), error, error ? nil : 12_i64)
 end
 
+private def evidence_filter_meta(id : Int64, issues : Array(Int64), method : String, url : String,
+                                 status : Int32?, source = Gori::Store::LinkRefKind::Flow,
+                                 at = Time.local(2026, 9, 11).to_unix * 1_000_000) : Gori::Store::IssueEvidenceMeta
+  Gori::Store::IssueEvidenceMeta.new(id, issues, at, source, id + 10, method, url,
+    "HTTP/1.1", status, 10_i64, nil, false, false, "req", "res", 42_i64)
+end
+
 describe Gori::Evidence do
   describe ".from_repeater" do
     it "splits the wire request at the blank line and reads the start line leniently" do
@@ -113,9 +120,28 @@ describe Gori::Evidence do
 
   describe ".label" do
     it "drops the scheme so a frozen row reads beside the live row it was taken from" do
-      meta = Gori::Store::IssueEvidenceMeta.new(1_i64, 1_i64, 0_i64, Gori::Store::LinkRefKind::Flow, 3_i64,
+      meta = Gori::Store::IssueEvidenceMeta.new(1_i64, [1_i64], 0_i64, Gori::Store::LinkRefKind::Flow, 3_i64,
         "GET", "https://acme.test/login?x=1", nil, nil, nil, nil, false, false, "", nil, 0_i64)
       Gori::Evidence.label(meta).should eq("GET acme.test/login?x=1")
+    end
+  end
+
+  describe Gori::Evidence::Filter do
+    it "filters the archive across provenance, request, response and mutable Issue state" do
+      rows = [
+        evidence_filter_meta(1_i64, [7_i64], "GET", "https://api.test/users?q=1", 200),
+        evidence_filter_meta(2_i64, [] of Int64, "POST", "https://admin.test/login", 403,
+          Gori::Store::LinkRefKind::Repeater),
+      ]
+      statuses = {7_i64 => Gori::Store::Status::Confirmed}
+
+      Gori::Evidence::Filter.parse("issue:7 confirmation:confirmed").apply(rows, statuses).map(&.id).should eq([1_i64])
+      Gori::Evidence::Filter.parse("host:admin.test method:post status:4xx src:repeater").apply(rows, statuses).map(&.id).should eq([2_i64])
+      Gori::Evidence::Filter.parse("issue:orphaned date:2026-09-11").apply(rows, statuses).map(&.id).should eq([2_i64])
+      Gori::Evidence::Filter.parse("(users OR login) -status:403").apply(rows, statuses).map(&.id).should eq([1_i64])
+
+      malformed = evidence_filter_meta(3_i64, [] of Int64, String.new(Bytes[0xff]), String.new(Bytes[0xfe]), nil)
+      Gori::Evidence::Filter.parse("method:x").apply([malformed], statuses).should be_empty
     end
   end
 end

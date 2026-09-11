@@ -24,7 +24,7 @@ module Gori::Tui
 
     getter selected : Int32
 
-    def initialize
+    def initialize(@evidence_available : Bool = true)
       @items = [] of {Symbol, String, Bool}
       @selected = 0
       reset
@@ -115,6 +115,7 @@ module Gori::Tui
     # so any uncommitted edits from a prior esc-cancelled session are discarded.
     def reset : Nil
       @items = Chrome.reconcile(Settings.tab_prefs)
+      remove_unavailable_evidence
       @selected = 0
     end
 
@@ -123,7 +124,17 @@ module Gori::Tui
     # working copy only (like every other key here); the live bar reverts on ↵.
     def reset_to_defaults : Nil
       @items = Chrome.reconcile([] of {String, Bool})
+      remove_unavailable_evidence
       @selected = @selected.clamp(0, {@items.size - 1, 0}.max)
+    end
+
+    private def remove_unavailable_evidence : Nil
+      return if @evidence_available
+      @items.reject! { |(sym, _, _)| sym == :evidence }
+      if @items.none? { |(_, _, visible)| visible }
+        sym, label, _ = @items.first
+        @items[0] = {sym, label, true}
+      end
     end
 
     def select_move(d : Int32) : Nil

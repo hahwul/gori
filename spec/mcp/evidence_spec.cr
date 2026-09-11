@@ -103,13 +103,63 @@ describe "MCP frozen evidence" do
     end
   end
 
-  it "gates the two writes under --read-only and leaves the two reads open" do
+  it "links one snapshot to many Issues and keeps it as an orphan after the last unlink" do
+    with_store do |store|
+      rid = sent_repeater(store)
+      a = store.insert_issue("a", Gori::Store::Severity::Low, nil, nil)
+      b = store.insert_issue("b", Gori::Store::Severity::Low, nil, nil)
+      tools = tools_for(store)
+      id = mcp_ok_json(tools, "freeze_evidence",
+        %({"issue_id":#{a},"ref_kind":"repeater","ref_id":#{rid}}))["evidence"]["id"].as_i64
+
+      mcp_ok_json(tools, "link_evidence", %({"id":#{id},"issue_id":#{b}}))["linked"].as_bool.should be_true
+      store.get_evidence_meta(id).not_nil!.issue_ids.should eq([a, b])
+      mcp_ok_json(tools, "unlink_evidence", %({"id":#{id},"issue_id":#{a}}))["orphaned"].as_bool.should be_false
+      mcp_ok_json(tools, "unlink_evidence", %({"id":#{id},"issue_id":#{b}}))["orphaned"].as_bool.should be_true
+      store.get_evidence(id).should_not be_nil
+    end
+  end
+
+  it "lists the whole project archive, orphans included, when no issue is named" do
+    with_store do |store|
+      rid = sent_repeater(store)
+      iid = store.insert_issue("a", Gori::Store::Severity::Low, nil, nil)
+      tools = tools_for(store)
+      kept = mcp_ok_json(tools, "freeze_evidence",
+        %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))["evidence"]["id"].as_i64
+      orphan = mcp_ok_json(tools, "freeze_evidence",
+        %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}}))["evidence"]["id"].as_i64
+      mcp_ok_json(tools, "unlink_evidence", %({"id":#{orphan},"issue_id":#{iid}}))["orphaned"].as_bool.should be_true
+
+      # The per-issue listing can no longer reach the orphan — which is why the archive
+      # listing exists, rather than leaving that copy findable by id alone.
+      scoped = mcp_ok_json(tools, "list_evidence", %({"issue_id":#{iid}}))
+      scoped["scope"].as_s.should eq("issue")
+      scoped["evidence"].as_a.map(&.["id"].as_i64).should eq([kept])
+
+      all = mcp_ok_json(tools, "list_evidence", "{}")
+      all["scope"].as_s.should eq("project")
+      all["issue_id"].raw.should be_nil
+      all["evidence"].as_a.map(&.["id"].as_i64).should eq([orphan, kept]) # newest first
+      all["evidence"][0]["issue_ids"].as_a.should be_empty
+      all["evidence"][1]["issue_ids"].as_a.map(&.as_i64).should eq([iid])
+      all["total"].as_i.should eq(2)
+
+      # A typo'd issue_id is still refused — optional is not "ignored when unreadable".
+      tools.call("list_evidence", JSON.parse(%({"issue_id":"nope"}))).is_error.should be_true
+      tools.call("list_evidence", JSON.parse(%({"issue_id":4242}))).error_code.should eq("NOT_FOUND")
+    end
+  end
+
+  it "gates every write under --read-only and leaves the two reads open" do
     with_store do |store|
       iid = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
       fid = mcp_seed_flow(store)
       ro = tools_for(store, allow_actions: false)
       ro.call("freeze_evidence", JSON.parse(%({"issue_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))).error_code.should eq("TOOL_DISABLED")
       ro.call("delete_evidence", JSON.parse(%({"id":1}))).error_code.should eq("TOOL_DISABLED")
+      ro.call("link_evidence", JSON.parse(%({"id":1,"issue_id":#{iid}}))).error_code.should eq("TOOL_DISABLED")
+      ro.call("unlink_evidence", JSON.parse(%({"id":1,"issue_id":#{iid}}))).error_code.should eq("TOOL_DISABLED")
       mcp_ok_json(ro, "list_evidence", %({"issue_id":#{iid}}))["total"].as_i.should eq(0)
       store.count_evidence.should eq(0)
     end

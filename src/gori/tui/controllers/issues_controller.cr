@@ -836,10 +836,11 @@ module Gori::Tui
           "#{ids.size} issues#{hidden > 0 ? " (#{hidden} not visible)" : ""}"
         end
       label = ids.size == 1 ? "“#{name}”" : name
-      # Frozen evidence (#1038) goes with its issue and cannot be recovered from the source
-      # — that is why it was frozen — so a delete that takes some says so, by count.
+      # Frozen evidence is project-wide (#1039): deleting an Issue removes only these
+      # memberships. Say that explicitly so the operator never reads the confirm as a byte
+      # deletion, especially when a snapshot is shared with another Issue.
       frozen = ids.sum { |id| @host.session.store.issue_evidence(id).size }
-      frozen_note = frozen > 0 ? "\n#{frozen} frozen evidence cop#{frozen == 1 ? "y goes" : "ies go"} too." : ""
+      frozen_note = frozen > 0 ? "\n#{frozen} frozen evidence link#{frozen == 1 ? " is" : "s are"} removed; the archived cop#{frozen == 1 ? "y stays" : "ies stay"}." : ""
       @host.confirm(ids.size == 1 ? "DELETE ISSUE" : "DELETE ISSUES",
         "Delete #{label}?#{frozen_note}\nThis can't be undone.", confirm_label: "delete", danger: true) do
         # A rolled-back write (cross-process SQLite busy/lock) leaves the issues AND the marks

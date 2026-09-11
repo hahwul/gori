@@ -332,6 +332,12 @@ migrations in `src/gori/store/schema.cr`.
 - **Sitemap node**: one node per distinct URL segment (P3), with operator path tags.
 - **Issue**: the final output, a human-confirmed finding, triaged, optionally linked to the
   flow, note, or session that evidences it.
+- **Frozen evidence**: an immutable copy of ONE exchange — request, response, provenance and
+  a SHA-256 of each — taken from a Flow or a Repeater tab at the moment it proved a finding,
+  so retention and the next send cannot reach it. Issue membership is mutable and
+  many-to-many (`evidence_issue_links`); the bytes and hashes are neither. A snapshot whose
+  last Issue link is removed is KEPT as an orphan, findable in the project-wide archive, and
+  only its own explicit delete removes it.
 - **Note**: the running scratchpad and report.
 - **Sessions**: persisted Repeater / Fuzzer / Miner / Sequencer / OAST workbench state.
 

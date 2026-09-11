@@ -12,7 +12,11 @@ module Gori::Tui
   # `on_commit` closure each open-site injects. Each row is fronted by a mnemonic key
   # (helix feel) and the value currently set is marked "● current".
   class ChoicePicker < Overlay
-    record Choice, label : String, key : Char, color : Color, value : Int32
+    # `key` is optional: a picker built over an unbounded list (every Issue in the project)
+    # runs out of mnemonics long before it runs out of rows, and reusing one letter would
+    # make it COMMIT THE WRONG ROW — `index_for` is a first-match find. A keyless row is
+    # reached with ↑/↓ and ↵ instead.
+    record Choice, label : String, key : Char?, color : Color, value : Int32
 
     getter selected : Int32
     # :severity | :status | :probe_mode. The severity/status open-sites share ONE apply

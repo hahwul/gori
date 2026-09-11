@@ -31,6 +31,7 @@ module Gori
       Diff            # the Diff sub-tab (under Target) has focus — the retest report
       Issues          # the Issues list has focus
       IssuesDetail    # an issue's detail is open
+      Evidence        # project-wide immutable snapshot archive
       Probe           # the Probe scan-issue list has focus
       ProbeDetail     # a Probe issue's detail is open
       ProbeRules      # the Probe tab's Rules sub-tab has focus (built-in + custom rule list)

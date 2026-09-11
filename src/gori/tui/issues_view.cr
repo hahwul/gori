@@ -528,6 +528,22 @@ module Gori::Tui
     def open_detail(store : Store) : Bool
       issue = @issues[@selected]?
       return false unless issue
+      open_detail_issue(issue, store)
+    end
+
+    # Cross-tab navigation from Evidence must open the linked Issue even when the current
+    # Issues filter hides it. The list selection is re-anchored when the row is visible; the
+    # detail itself remains usable when it is not.
+    def open_detail_id(id : Int64, store : Store) : Bool
+      issue = store.get_issue(id)
+      return false unless issue
+      if idx = @issues.index { |row| row.id == id }
+        @selected = idx
+      end
+      open_detail_issue(issue, store)
+    end
+
+    private def open_detail_issue(issue : Store::Issue, store : Store) : Bool
       @detail = issue
       @detail_flow = issue.flow_id.try { |fid| store.flow_row(fid) }
       reload_detail_links(store)

@@ -83,6 +83,20 @@ module Gori::Tui
         response_head: response_head, response_body: response_body, error: error)
     end
 
+    # An immutable Evidence snapshot. Unlike a live source, every byte needed by the diff
+    # survives independently of History pruning or Repeater deletion.
+    def self.from_evidence(ev : Store::IssueEvidence) : ComparerSlot
+      m = ev.meta
+      response_size = if ev.response_head || ev.response_body
+                        (ev.response_head.try(&.size) || 0).to_i64 +
+                          (ev.response_body.try(&.size) || 0).to_i64
+                      end
+      from_exchange("evidence", m.method, m.url,
+        ev.request_head, ev.request_body, ev.response_head, ev.response_body,
+        status: m.status, duration_us: m.duration_us, error: m.error,
+        size: response_size, label: "##{m.id}")
+    end
+
     # Raw text with no HTTP shape at all — a paste, a decoder output. It has no request
     # half and no response half, so the SAME lines answer for both: a text slot is a
     # constant under the REQ ⇄ RES toggle rather than going blank on one of them.

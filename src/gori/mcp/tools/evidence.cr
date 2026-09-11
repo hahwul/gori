@@ -11,9 +11,10 @@ module Gori
       # proved it, send again, freeze that too, and the issue holds both.
       #
       # `freeze_evidence` is the write; `list_evidence` / `get_evidence` read what
-      # `get_issue` only summarises (provenance and hashes); `delete_evidence` is the copy's
-      # only way out. Bytes come back the way `get_flow` returns them — heads redacted unless
-      # `include_sensitive`, bodies decoded and capped — never through the activity feed.
+      # `get_issue` only summarises (provenance and hashes); link/unlink only change Issue
+      # membership; `delete_evidence` is the copy's only way out. Bytes come back the way
+      # `get_flow` returns them — heads redacted unless `include_sensitive`, bodies decoded
+      # and capped — never through the activity feed.
 
       FREEZE_SOURCES = [Store::LinkRefKind::Flow, Store::LinkRefKind::Repeater].map(&.label)
 
@@ -59,15 +60,22 @@ module Gori
         end)
       end
 
+      # `issue_id` is OPTIONAL: without it this is the project-wide archive the TUI's
+      # Evidence tab shows, newest first — which is the only listing that can name an
+      # ORPHAN (a snapshot whose last issue link was removed, or whose issue was deleted).
+      # Scoping the only listing to an issue would make those copies unfindable by id alone.
       @[Tool("list_evidence")]
       private def list_evidence(h) : Result
         issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
-        return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
-        metas = store.issue_evidence(issue_id)
+        return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
+        if issue_id
+          return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
+        end
+        metas = issue_id ? store.issue_evidence(issue_id) : store.evidence
         Result.new(JSON.build do |j|
           j.object do
             j.field "issue_id", issue_id
+            j.field "scope", issue_id ? "issue" : "project"
             j.field("evidence") { j.array { metas.each { |m| j.object { Serialize.evidence_meta(j, m) } } } }
             j.field "total", metas.size
             j.field "bytes", metas.sum(&.bytes)
@@ -95,16 +103,44 @@ module Gori
         meta = store.get_evidence_meta(id)
         return not_found("no frozen evidence with id #{id}") unless meta
         return busy("frozen evidence NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_evidence(id)
-        Result.new({"deleted" => true, "id" => id, "issue_id" => meta.issue_id}.to_json)
+        Result.new({"deleted" => true, "id" => id, "issue_ids" => meta.issue_ids}.to_json)
+      end
+
+      @[Tool("link_evidence", gated: true, agent_action: true)]
+      private def link_evidence(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        issue_id = int(h, "issue_id")
+        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        return not_found("no frozen evidence with id #{id}") unless store.get_evidence_meta(id)
+        return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
+        return busy("evidence link NOT written (store busy or either row disappeared)") unless store.link_evidence(id, issue_id)
+        Result.new({"linked" => true, "id" => id, "issue_id" => issue_id}.to_json)
+      end
+
+      @[Tool("unlink_evidence", gated: true, agent_action: true)]
+      private def unlink_evidence(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        issue_id = int(h, "issue_id")
+        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        meta = store.get_evidence_meta(id)
+        return not_found("no frozen evidence with id #{id}") unless meta
+        return not_found("evidence #{id} is not linked to issue #{issue_id}") unless meta.issue_ids.includes?(issue_id)
+        return busy("evidence link NOT removed (store busy or link disappeared)") unless store.unlink_evidence(id, issue_id)
+        Result.new({"unlinked" => true, "id" => id, "issue_id" => issue_id,
+                    "orphaned" => store.get_evidence_meta(id).try(&.orphaned?) || false}.to_json)
       end
 
       private def list_evidence_tools(j : JSON::Builder) : Nil
         tool j, "list_evidence",
-          "List an issue's FROZEN evidence: immutable copies of a flow's or a Repeater tab's " \
-          "exchange, taken at the moment they proved the finding, with provenance (source, " \
-          "time, status, size) and SHA-256 of the stored request and response. A copy survives " \
-          "the Repeater's next send and History retention; use get_evidence for its bytes." do |s|
-          s.field "issue_id", intprop("the issue id"), required: true
+          "List FROZEN evidence: immutable copies of a flow's or a Repeater tab's exchange, " \
+          "taken at the moment they proved the finding, with provenance (source, time, status, " \
+          "size), the issues each is linked to, and SHA-256 of the stored request and response. " \
+          "Without issue_id this is the whole project archive, newest first, including orphans " \
+          "(no issue link left). A copy survives the Repeater's next send and History " \
+          "retention; use get_evidence for its bytes." do |s|
+          s.field "issue_id", intprop("one issue's copies only (omit for the whole project archive)")
         end
 
         tool j, "get_evidence",
@@ -131,6 +167,19 @@ module Gori
           s.field "ref_kind", enumprop("what to copy from", FREEZE_SOURCES), required: true
           s.field "ref_id", intprop("the flow or repeater id"), required: true
           s.field "link", boolprop("also attach the live link (default true)")
+        end
+        tool j, "link_evidence",
+          "Link an existing frozen snapshot to another issue without changing its bytes, " \
+          "hashes or provenance. Evidence can belong to multiple issues." do |s|
+          s.field "id", intprop("the frozen evidence id"), required: true
+          s.field "issue_id", intprop("the issue to link"), required: true
+        end
+
+        tool j, "unlink_evidence",
+          "Remove one issue link without deleting the frozen snapshot. Removing its last " \
+          "link leaves an orphan that can be linked again or deleted explicitly." do |s|
+          s.field "id", intprop("the frozen evidence id"), required: true
+          s.field "issue_id", intprop("the issue link to remove"), required: true
         end
 
         tool j, "delete_evidence",

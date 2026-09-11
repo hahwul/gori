@@ -132,24 +132,22 @@ module Gori
     # `owner_kind = 'issue'` is the complete link cascade: `LinkOwnerKind` is Issue|Note and
     # an issue is never a `ref_kind`, so no row in the table points AT what this drops.
     #
-    # `issue_evidence` goes with them (#1038): a snapshot is OWNED by its issue and is
-    # reachable from nowhere else, so an issue wipe that left the bytes behind would keep
-    # request/response material in the project that no surface can show or delete.
+    # Evidence membership goes with the Issues, but the immutable copies do not (#1039):
+    # the project-wide Evidence tab keeps orphaned snapshots visible and deletable.
     def clear_issues : Bool
       exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue'")
-        c.exec("DELETE FROM issue_evidence")
+        c.exec("DELETE FROM evidence_issue_links")
         c.exec("DELETE FROM issues")
         nil
       }
     end
 
     # One issue's cascade, on an OPEN connection (no transaction of its own) — the shared
-    # body of the singular and batch deletes. Frozen evidence cascades for `clear_issues`'s
-    # reason; the TUI's delete confirms say so when there is any.
+    # body of the singular and batch deletes. Frozen evidence is unlinked, not deleted.
     private def delete_issue_one(c : DB::Connection, id : Int64) : Nil
       c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue' AND owner_id = ?", id)
-      c.exec("DELETE FROM issue_evidence WHERE issue_id = ?", id)
+      c.exec("DELETE FROM evidence_issue_links WHERE issue_id = ?", id)
       c.exec("DELETE FROM issues WHERE id = ?", id)
     end
 

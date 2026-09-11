@@ -1,3 +1,4 @@
+require "compress/gzip"
 require "../spec_helper"
 require "../support/memory_backend"
 require "../support/overlay_harness"
@@ -11,7 +12,7 @@ include Gori::Tui
 
 private def meta(*, status : Int32? = 200, error : String? = nil, resp_sha : String? = "b" * 64,
                  bytes : Int64 = 120_i64, req_trunc = false) : Gori::Store::IssueEvidenceMeta
-  Gori::Store::IssueEvidenceMeta.new(42_i64, 7_i64, 1_757_600_000_000_000_i64,
+  Gori::Store::IssueEvidenceMeta.new(42_i64, [7_i64], 1_757_600_000_000_000_i64,
     Gori::Store::LinkRefKind::Flow, 12_i64, "POST", "https://acme.test/login", "HTTP/1.1",
     status, 4_200_i64, error, req_trunc, false, "a" * 64, resp_sha, bytes)
 end
@@ -32,7 +33,7 @@ describe Gori::Tui::EvidenceViewer do
     v = EvidenceViewer.new(evidence)
     h = OverlayHarness.new(v)
     h.assert_chrome(OverlayKind::Evidence, "FROZEN EVIDENCE #42")
-    h.rendered?("issue #7").should be_true
+    h.rendered?("issues #7").should be_true
     h.press(Termisu::Input::Key::Enter).should eq(:open)
     h.commits.should eq(0)
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
@@ -90,6 +91,23 @@ describe Gori::Tui::EvidenceViewer do
     v.show(:response)
     h.press(Termisu::Input::Key::LowerY, 'y')
     copied[1].should end_with("welcome")
+  end
+
+  # The Runner's clipboard write does NOT hand `pane_text` its own evidence: it builds the
+  # text from the body-redaction policy's copy (#1035), which is why that shape has to live
+  # here as a class method. A copy taken off the STORED body instead of the entity would be
+  # gzip where the card showed text — the one way this action can lie about what it copied.
+  it "copies the ENTITY, not the stored coding, from the Runner's redacted twin too" do
+    zipped = IO::Memory.new
+    Compress::Gzip::Writer.open(zipped, &.print("welcome"))
+    body = zipped.to_slice
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\n\r\n".to_slice
+
+    v = EvidenceViewer.new(evidence(body: body, resp_head: head))
+    v.show(:response)
+    v.pane_text.should end_with("welcome")
+    EvidenceViewer.pane_text(head, body).should eq(v.pane_text)
+    EvidenceViewer.pane_text(nil, body).should eq("")
   end
 
   it "scrolls the body with the arrows, the wheel and the page keys, clamped at the ends" do

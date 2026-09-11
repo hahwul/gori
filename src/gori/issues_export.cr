@@ -207,7 +207,11 @@ module Gori
       # on the four captured strings, like the title/host fields beside them.
       def self.evidence_fields(j : JSON::Builder, m : Store::IssueEvidenceMeta) : Nil
         j.field "id", m.id
-        j.field "issue_id", m.issue_id
+        # `issue_ids`, never a singular `issue_id`: membership is many-to-many (#1039), and
+        # a "the" issue picked out of N would read as this copy's owner even inside
+        # `get_issue`'s own array, where it may name a DIFFERENT issue. An empty array is a
+        # snapshot deliberately kept without a finding.
+        j.field "issue_ids", m.issue_ids
         j.field "source_kind", m.source_kind.label
         j.field "source_id", m.source_id
         j.field "frozen_at", m.created_at

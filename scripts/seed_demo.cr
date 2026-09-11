@@ -2606,6 +2606,21 @@ store.add_link(S::LinkOwnerKind::Note, NOTE_LINKS, S::LinkRefKind::Repeater, ids
 
 puts "• inserted entity links on issues + notes"
 
+# --- Frozen evidence (#1038/#1039) — what the Evidence tab archives ----------
+# The tab stays hidden until a project holds a snapshot, so a demo without one cannot show
+# it at all. Three states, because they read differently: a CONFIRMED issue with two copies
+# (the before/after pair `c` compares), one snapshot shared by two issues, and an ORPHAN —
+# the copy whose last Issue link was removed, which only the project-wide archive can find.
+frozen_ids = [] of Int64
+{ {f1, :xss}, {f1, :login}, {f2, :idor}, {f3, :err500} }.each do |(issue, key)|
+  next unless detail = store.get_flow(ids[key])
+  id, status = store.freeze_evidence(issue, Gori::Evidence.from_flow(detail))
+  frozen_ids << id if status.ok?
+end
+store.link_evidence(frozen_ids[2], f4) if frozen_ids.size > 2   # one copy, two findings
+store.unlink_evidence(frozen_ids[3], f3) if frozen_ids.size > 3 # …and one kept without any
+puts "• froze #{frozen_ids.size} evidence snapshots (1 shared by two issues, 1 orphaned)"
+
 # --- Act six: the lists beside History, and the tabs that opened empty -------
 # Act five stressed History's columns. Every OTHER tab draws the same kind of row — a
 # fixed strip of user-supplied text, laid out by hand — and until now the demo handed

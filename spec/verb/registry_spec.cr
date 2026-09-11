@@ -977,6 +977,24 @@ private class FakeContext < ExecContext
     false
   end
 
+  def selected_evidence_id : Int64?
+    nil
+  end
+
+  def evidence_has_links? : Bool
+    false
+  end
+
+  def evidence_source_available? : Bool
+    false
+  end
+
+  {% for name in %w[evidence_open evidence_filter evidence_compare evidence_open_issue evidence_open_source evidence_export evidence_duplicate_repeater evidence_link_issue evidence_unlink_issue evidence_delete] %}
+    def {{ name.id }} : Nil
+      @calls << :{{ name.id }}
+    end
+  {% end %}
+
   def issue_link_move(delta : Int32) : Nil
     @calls << :issue_link_move
   end
