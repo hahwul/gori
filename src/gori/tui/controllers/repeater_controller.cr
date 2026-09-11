@@ -3,6 +3,7 @@ require "../traffic_empty_state"
 require "../repeater_view"
 require "../clipboard"
 require "../copy_menu"
+require "../../redact/policy"
 require "../subtab_picker"
 require "../../env"
 require "../../store"
@@ -1006,14 +1007,22 @@ module Gori::Tui
     def copy_as_menu : {String, Array(CopyMenu::Option)}
       v = current_view
       return {"COPY AS", [] of CopyMenu::Option} unless v
+      # Resolved once per action, off the open project — see `HistoryView#list_copy_as_menu`.
+      # A Repeater request is AUTHORED rather than captured, and it is sanitized all the same:
+      # the credential in it came from the traffic, and the pane it is copied into (an issue, a
+      # report) cannot tell the two apart.
+      redactor = Redact::Policy.ambient(@host.session.store)
       if v.focus == :response
-        {"COPY RESPONSE AS", repeater_response_options(v)}
+        opts, n = repeater_response_options(v, redactor)
+        {CopyMenu.sanitized_title("COPY RESPONSE AS", n, !redactor.nil?), opts}
       else
-        {"COPY REQUEST AS", repeater_request_options(v)}
+        opts, n = repeater_request_options(v, redactor)
+        {CopyMenu.sanitized_title("COPY REQUEST AS", n, !redactor.nil?), opts}
       end
     end
 
-    private def repeater_request_options(v : RepeaterView) : Array(CopyMenu::Option)
+    private def repeater_request_options(v : RepeaterView,
+                                         redactor : Redact::Matcher?) : {Array(CopyMenu::Option), Int32}
       # Same §…§ `¦chain` refusal as the send path: copying an untransformable request would
       # hand the operator a curl/raw command that sends the raw value — refuse it too.
       #
@@ -1025,7 +1034,7 @@ module Gori::Tui
         String.new(v.request_bytes)
       rescue ex : Fuzz::ChainError
         @host.status("repeater: #{ex.message}")
-        return [] of CopyMenu::Option
+        return {[] of CopyMenu::Option, 0}
       end
       target = Env.expand(v.target)
       ws_messages = if v.ws_mode?
@@ -1036,16 +1045,47 @@ module Gori::Tui
                       # fixer closed for "Copy as cURL"'s `--data-raw`.
                       v.ws_out_messages.map { |message| String.new(message.payload) }
                     end
-      CopyMenu.request_options(wire, target, websocket_messages: ws_messages)
+      count = 0
+      if m = redactor
+        wire, result = Redact::Wire.wire(wire, m)
+        count += result.count
+        # A frame payload is an entity with no head of its own, so it goes through the body
+        # engine directly (`Matcher#value`): a WebSocket login frame carries the same
+        # credential the HTTP one did, and the wscat row would otherwise put it on the
+        # clipboard untouched.
+        ws_messages = ws_messages.try &.map do |message|
+          out = m.value(message)
+          count += out.count
+          out.text
+        end
+      end
+      {CopyMenu.request_options(wire, target, websocket_messages: ws_messages), count}
     end
 
-    private def repeater_response_options(v : RepeaterView) : Array(CopyMenu::Option)
+    private def repeater_response_options(v : RepeaterView,
+                                          redactor : Redact::Matcher?) : {Array(CopyMenu::Option), Int32}
       if parts = v.response_parts
-        CopyMenu.response_options(parts[0], parts[1])
+        head, body = parts
+        count = 0
+        if m = redactor
+          clean = Redact::Wire.message(head.to_slice, body.to_slice, m)
+          head = String.new(clean.head)
+          body = String.new(clean.body || Bytes.empty)
+          count = clean.count
+        end
+        {CopyMenu.response_options(head, body), count}
       else
-        # WS/gRPC transcript (or no HTTP head+body to split) — offer the rendered pane.
+        # WS/gRPC transcript (or no HTTP head+body to split) — offer the rendered pane. The
+        # transcript is gori's own rendering rather than one entity, so it goes through the
+        # text pass whole; there is no head here to say what any of it is.
         text = v.resp_copy_all_text
-        text.empty? ? [] of CopyMenu::Option : [CopyMenu::Option.new("Raw response", 'r', text)]
+        count = 0
+        if (m = redactor) && !text.empty?
+          out = m.value(text)
+          text = out.text
+          count = out.count
+        end
+        {text.empty? ? [] of CopyMenu::Option : [CopyMenu::Option.new("Raw response", 'r', text)], count}
       end
     end
 

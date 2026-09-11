@@ -4,6 +4,7 @@ require "../export/js_fetch"
 require "../export/go_http"
 require "../export/httpie"
 require "../export/csrf_poc"
+require "../redact/wire"
 
 module Gori::Tui
   # Pure helpers that turn an HTTP message into the "copy as X" option set the
@@ -24,6 +25,17 @@ module Gori::Tui
     # single option list — the picker dispatches on it), and the `text` placed on
     # the clipboard when chosen.
     record Option, label : String, key : Char, text : String
+
+    # The picker heading for a menu whose bytes went through a redaction profile (#1035), or
+    # `title` unchanged when they did not.
+    #
+    # The COUNT is in the heading and not only in the toast that follows the copy, because the
+    # picker is the last thing an operator sees BEFORE the clipboard. "SANITIZED" on its own
+    # reads the same whether the profile replaced four values or none, and "none" is exactly
+    # when an operator needs to stop and look at the profile rather than paste.
+    def self.sanitized_title(title : String, count : Int32, on : Bool) : String
+      on ? "#{title} · SANITIZED (#{count})" : title
+    end
 
     # Options for a REQUEST pane. `wire` is the request as it'd be sent (CRLF-framed,
     # env-expanded — the bytes repeater uses), `target` the "scheme://host[:port]" base

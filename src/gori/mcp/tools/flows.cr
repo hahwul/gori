@@ -2,6 +2,7 @@ require "json"
 require "base64"
 require "../../store"
 require "../serialize"
+require "../../redact/policy"
 
 module Gori
   module MCP
@@ -200,7 +201,30 @@ module Gori
         opts = body_return_opts(h)
         return opts if opts.is_a?(Result)
         cap, omit = opts
-        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit))
+        detail, ws_msgs, redaction = redact_flow(detail, ws_msgs, include_sensitive)
+        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction))
+      end
+
+      # Safe evidence export applied to the projection an AGENT reads (#1035).
+      #
+      # An agent transcript is the case the issue names first, and it is the one gori has least
+      # control over once the bytes leave: a model quotes a flow into a ticket, a summary, a
+      # commit message. So when this project redacts by default, `get_flow` hands back the
+      # sanitized derivative and says so (`body_redaction`) — the store keeps the captured
+      # octets, and `get_response_body_chunk` still pages them exactly.
+      #
+      # `include_sensitive` turns this OFF along with header redaction. One flag, both axes: an
+      # agent that has been granted the Authorization header is not served half the credentials,
+      # and an operator revoking that grant does not have to remember two switches.
+      private def redact_flow(detail : Store::FlowDetail, ws_msgs : Array(Store::WsMessage),
+                              include_sensitive : Bool) : {Store::FlowDetail, Array(Store::WsMessage), Serialize::RedactionNote?}
+        return {detail, ws_msgs, nil} if include_sensitive
+        matcher = Redact::Policy.ambient(store)
+        return {detail, ws_msgs, nil} unless matcher
+        clean, report = Redact::Wire.flow(detail, matcher)
+        frames, ws_count = Redact::Wire.ws_messages(ws_msgs, matcher)
+        {clean, frames, Serialize::RedactionNote.new(matcher.profile.name, report.count,
+          ws_count, report.decoded?)}
       end
 
       # What `load_chunk_source` hands the pager: the head (nil where the source has none),
@@ -453,9 +477,14 @@ module Gori
           "UTF-8 (capped 64KB), else a base64 sample. Use get_response_body_chunk " \
           "with the same flow id to retrieve exact continuation bytes. " \
           "Authorization/Cookie/Set-Cookie/API-key header values are [REDACTED] " \
-          "unless include_sensitive=true." do |s|
+          "unless include_sensitive=true. When the project or the install has a redaction " \
+          "profile on by default, BODIES come back sanitized too — matched values replaced by " \
+          "a keyed [REDACTED:tag] placeholder (equal values share a tag, so you can still " \
+          "correlate them) — and a `body_redaction` field says which profile ran, how much it " \
+          "replaced and what it did not look at. Absent field = these are the captured bytes. " \
+          "include_sensitive=true turns body redaction off along with the header redaction." do |s|
           s.field "id", intprop("flow id from list_history"), required: true
-          s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")
+          s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED], and the captured bodies instead of the redaction profile's sanitized copy (default false)")
           s.field "body_mode", enumprop("how much response body to inline (default full). none returns body shape only (encoding/size, omitted:true); preview inlines a small head; page more with get_response_body_chunk", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined body bytes (clamped to 65536; page the rest with get_response_body_chunk)")
         end
