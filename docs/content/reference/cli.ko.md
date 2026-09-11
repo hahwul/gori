@@ -884,6 +884,30 @@ gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
 
 대상이 정리(prune)된 포인터는 사라지지 않고 `(stale)`로 표시되므로, "증거가 없음"과 "증거가 사라짐"을 구분할 수 있습니다. `add`는 멱등이며, 양쪽 대상이 모두 존재해야 합니다.
 
+### run evidence {#run-evidence}
+
+이슈의 **동결된** 증거입니다. 캡처된 플로우나 Repeater 탭의 교환 하나를, 그것이 취약점을 확인해 준 순간에 그대로 복사한 변경 불가 사본입니다. `links`가 포인터라면 이것은 바이트입니다. Repeater의 다음 전송이나 History 보존 정리는 사본에 닿지 못하므로, 응답이 취약점을 확인해 줄 때 한 번, 재테스트 뒤에 한 번 더 동결하면 이슈가 둘 다 보관합니다.
+
+```bash
+gori run evidence freeze --issue=7 --ref=repeater --ref-id=3       # 사본 + live 링크
+gori run evidence freeze --issue=7 --ref=flow --ref-id=42 --no-link
+gori run evidence --issue=7                                        # 목록: 출처, 시각, 상태, 크기, SHA-256
+gori run evidence show 12                                          # 사본 출력, 자격 증명은 가려짐
+gori run evidence show 12 --include-sensitive --format=json
+gori run evidence delete 12
+```
+
+| Option | Description |
+|--------|-------------|
+| `--issue=N` | 사본을 소유하는 이슈. `freeze`와 `list`에서 필수 |
+| `--ref=KIND` | `freeze`의 출처 종류: `flow` 또는 `repeater`. fuzz / miner 세션은 교환이 하나가 아니라 대상이 아닙니다 |
+| `--ref-id=M` | `freeze`의 출처 id |
+| `--no-link` | `freeze`가 사본만 만듭니다. 기본값은 `links add`가 만들 live 링크도 같은 트랜잭션에 함께 기록 |
+| `--include-sensitive` | `show`가 Authorization / Cookie / Set-Cookie / API-key 값을 `[REDACTED]` 대신 그대로 출력. SHA-256은 저장된 원본 바이트를 대상으로 하므로 검증에는 이 옵션이 필요합니다 |
+| `--format=FMT` | `freeze`, `list`, `show`에서 `text` (기본값) 또는 `json` |
+
+한 번도 보내지 않은 Repeater 탭은 요청만 동결하지 않고 거부합니다. 프로젝트의 동결 증거 총량은 256 MB로 제한되며, 넘으면 사본을 삭제할 때까지 `freeze`가 거부합니다. `show`는 본문을 디코딩해 텍스트 형식에서는 64 KB에서 자르고(저장된 사본은 온전합니다), JSON 형식은 `get_flow`와 같은 모양입니다.
+
 ### run rewriter {#run-rewriter}
 
 스크립트에서 Match & Replace 규칙을 관리합니다. [Rewriter 탭](/ko/guide/proxy/)이 편집하는 것과 같은 규칙이며, 실시간 프록시 트래픽에 적용됩니다:

@@ -163,6 +163,25 @@ module Gori
       )
     end
 
+    # The snapshot for a live ref, or the sentence that says why there is none — the shared
+    # answer for the headless surfaces (`gori run evidence freeze`, MCP `freeze_evidence`),
+    # which refuse by name where the TUI toasts. A String, not a raise: none of these is an
+    # error in the program, each is a fact about the project.
+    def self.snapshot_for(store : Store, kind : Store::LinkRefKind, id : Int64) : Snapshot | String
+      case kind
+      when .flow?
+        d = store.get_flow(id)
+        return "no flow with id #{id} — it may have been pruned" unless d
+        from_flow(d)
+      when .repeater?
+        rec = store.get_repeater_full(id)
+        return "no repeater with id #{id}" unless rec
+        from_repeater(rec) || "repeater ##{id} has never been sent — send it first, then freeze the exchange"
+      else
+        "only a flow or a repeater exchange can be frozen (#{kind.label} sessions have no single exchange)"
+      end
+    end
+
     # `https://a.test/login` from a tab's origin and its request-line target. An
     # absolute-form target already IS the URL; an origin-form one is appended to the origin;
     # anything else (`*`, an authority-form CONNECT) is shown beside it rather than glued on.

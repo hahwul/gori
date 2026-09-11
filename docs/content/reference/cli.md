@@ -885,6 +885,30 @@ gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
 
 A pointer whose target was pruned lists as `(stale)` rather than disappearing, so "no evidence" and "evidence that is gone" stay distinguishable. `add` is idempotent, and both ends must exist.
 
+### run evidence
+
+An issue's **frozen** evidence: the immutable copy of one exchange, taken from a captured Flow or a Repeater tab at the moment it proved the finding. `links` is the pointer; this is the bytes. The Repeater's next send and History retention cannot reach a copy, so freeze once when a response confirms a finding and again after the retest — the issue keeps both.
+
+```bash
+gori run evidence freeze --issue=7 --ref=repeater --ref-id=3       # copy + the live link
+gori run evidence freeze --issue=7 --ref=flow --ref-id=42 --no-link
+gori run evidence --issue=7                                        # list: source, time, status, size, SHA-256
+gori run evidence show 12                                          # the copy, credentials redacted
+gori run evidence show 12 --include-sensitive --format=json
+gori run evidence delete 12
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--issue=N` | The issue that owns the copy. Required on `freeze` and `list` |
+| `--ref=KIND` | Source kind for `freeze`: `flow` or `repeater` — a fuzz or miner session has no single exchange |
+| `--ref-id=M` | Source id for `freeze` |
+| `--no-link` | `freeze` only copies; by default it also files the live link `links add` would, in the same transaction |
+| `--include-sensitive` | `show` prints Authorization / Cookie / Set-Cookie / API-key values verbatim instead of `[REDACTED]`. The SHA-256s cover the stored wire bytes, so verifying them needs this |
+| `--format=FMT` | `text` (default) or `json`, on `freeze`, `list` and `show` |
+
+A Repeater tab that has never been sent is refused rather than frozen request-only. A project's frozen evidence is bounded at 256 MB; past that `freeze` refuses until a copy is deleted. `show` decodes bodies and cuts the text form at 64 KB (the stored copy is complete); the JSON form takes the same shape `get_flow` returns.
+
 ### run rewriter
 
 Manage Match & Replace rules from scripts. The same rules the [Rewriter tab](/guide/proxy/) edits, applied to live proxy traffic:
