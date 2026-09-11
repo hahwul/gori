@@ -4,6 +4,7 @@ require "../clipboard"
 require "../../store"
 require "../../issues_export"
 require "../../hotkeys"
+require "../../evidence"
 
 module Gori::Tui
   # The Issues tab: the triage list + an issue's detail (with an inline notes
@@ -110,7 +111,12 @@ module Gori::Tui
           # `↹/↓ notes`, and `i edit` rather than the old `i/↵ notes`: ↵ in this pane opens
           # the selected RELATED item (`issue.open-link`), so naming it as the way into the
           # notes editor was wrong about one of the two keys it listed.
-          keys("↑/↓ links · ↵ open · {issue.freeze-link} freeze · ↹/↓ notes · i edit · #{step}{issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+          #
+          # `f freeze` is named only when the verb is offered — a FROZEN, stale, fuzz or miner
+          # row has nothing to freeze, and `Hotkeys.expand` never consults a gate — the same
+          # drop-the-token rule `step` follows a line up.
+          freeze = related_freezable? ? "{issue.freeze-link} freeze · " : ""
+          keys("↑/↓ links · ↵ open · #{freeze}↹/↓ notes · i edit · #{step}{issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -130,6 +136,14 @@ module Gori::Tui
       else
         "↑/↓ move · ↵ open · #{filt} filter · #{nnew} new · #{clear} clear · space cmds · esc tabs"
       end
+    end
+
+    # The RELATED cursor sits on a live flow/repeater row that still resolves — the gate
+    # `issue.freeze-link` is registered with (`Runner#issue_related_freezable?`), read here
+    # for the hint so the strip cannot promise a key the verb refuses.
+    private def related_freezable? : Bool
+      res = @issues.selected_resolved_link || return false
+      !res.stale? && Evidence.freezable?(res.link.ref_kind)
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
@@ -822,8 +836,12 @@ module Gori::Tui
           "#{ids.size} issues#{hidden > 0 ? " (#{hidden} not visible)" : ""}"
         end
       label = ids.size == 1 ? "“#{name}”" : name
+      # Frozen evidence (#1038) goes with its issue and cannot be recovered from the source
+      # — that is why it was frozen — so a delete that takes some says so, by count.
+      frozen = ids.sum { |id| @host.session.store.issue_evidence(id).size }
+      frozen_note = frozen > 0 ? "\n#{frozen} frozen evidence cop#{frozen == 1 ? "y goes" : "ies go"} too." : ""
       @host.confirm(ids.size == 1 ? "DELETE ISSUE" : "DELETE ISSUES",
-        "Delete #{label}?\nThis can't be undone.", confirm_label: "delete", danger: true) do
+        "Delete #{label}?#{frozen_note}\nThis can't be undone.", confirm_label: "delete", danger: true) do
         # A rolled-back write (cross-process SQLite busy/lock) leaves the issues AND the marks
         # in place — say so instead of reporting a delete that didn't happen, so the set is
         # still there to retry.
@@ -857,7 +875,7 @@ module Gori::Tui
       return @host.status("issues: nothing to clear") if n <= 0
       @host.confirm("CLEAR ISSUES",
         "Delete ALL #{n} issue#{n == 1 ? "" : "s"} for this project?\n" \
-        "Their notes, CVSS scores and evidence links go too.\nThis can't be undone.",
+        "Their notes, CVSS scores, evidence links and frozen evidence go too.\nThis can't be undone.",
         confirm_label: "clear", danger: true) do
         ok = @issues.clear(@host.session.store)
         @host.status(ok ? "issues cleared" : "issues NOT cleared (project busy) — every issue is still there")

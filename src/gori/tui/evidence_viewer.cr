@@ -91,7 +91,7 @@ module Gori::Tui
       when k.page_up?                then move(-page_step)
       when k.page_down?              then move(page_step)
       when k.home?, ch == 'g'        then @scroll = 0
-      when k.end?, ch == 'G'         then @scroll = Int32::MAX
+      when k.end?, ch == 'G'         then @scroll = lines.size # the render clamps it to the last page
       when ch == 'y'                 then on_copy.try(&.call(pane_text))
       end
       :stay

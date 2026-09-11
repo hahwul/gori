@@ -334,4 +334,19 @@ describe "LinksOverlay — the add hand-off (Overlay#on_close nested-modal seam)
       lo2.pending_freeze?.should be_false
     end
   end
+
+  it "neither advertises nor arms `f` on a NOTE's card — a note owns no frozen evidence" do
+    with_store do |store|
+      lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Note, 3_i64)
+      lo.hint.should eq("↑/↓ · ↵/o open · a add · d remove · esc close")
+      h = OverlayHarness.new(lo)
+      h.rendered?("↑/↓ select · ↵/o open · a add · d remove · esc close").should be_true
+      h.rendered?("f freeze").should be_false
+      # Even with a row under the cursor the key is inert: the card stays, nothing is armed.
+      store.add_link(Gori::Store::LinkOwnerKind::Note, 3_i64, Gori::Store::LinkRefKind::Flow, 5_i64)
+      lo.reload(store)
+      h.press(Termisu::Input::Key::LowerF, 'f').should eq(:open)
+      lo.pending_freeze?.should be_false
+    end
+  end
 end

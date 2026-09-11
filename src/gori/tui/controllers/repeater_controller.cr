@@ -1198,6 +1198,7 @@ module Gori::Tui
       return if target == @current_repeater_idx
       save_current_repeater
       @current_repeater_idx = target
+      refresh_evidence_marker
     end
 
     # Jump to an absolute sub-tab index (^1-9 on the strip, a strip click, or a picked

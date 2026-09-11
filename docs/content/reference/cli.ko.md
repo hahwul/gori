@@ -906,7 +906,7 @@ gori run evidence delete 12
 | `--include-sensitive` | `show`가 Authorization / Cookie / Set-Cookie / API-key 값을 `[REDACTED]` 대신 그대로 출력. SHA-256은 저장된 원본 바이트를 대상으로 하므로 검증에는 이 옵션이 필요합니다 |
 | `--format=FMT` | `freeze`, `list`, `show`에서 `text` (기본값) 또는 `json` |
 
-한 번도 보내지 않은 Repeater 탭은 요청만 동결하지 않고 거부합니다. 프로젝트의 동결 증거 총량은 256 MB로 제한되며, 넘으면 사본을 삭제할 때까지 `freeze`가 거부합니다. `show`는 본문을 디코딩해 텍스트 형식에서는 64 KB에서 자르고(저장된 사본은 온전합니다), JSON 형식은 `get_flow`와 같은 모양입니다.
+한 번도 보내지 않은 Repeater 탭은 요청만 동결하지 않고 거부하며, 응답이 아직 도착하지 않은 플로우도 거부합니다. Repeater 복사본은 탭에 저장된 요청(바인딩은 펼치지 않은 상태)과 저장소의 마지막 응답(성공한 전송의 것)을 짝지으므로, 취약점을 확인해 준 전송 직후에 동결하세요. WebSocket 복사본은 핸드셰이크이며 프레임 기록은 복사되지 않습니다. 프로젝트의 동결 증거 총량은 256 MB로 제한되며, 넘으면 사본을 삭제할 때까지 `freeze`가 거부합니다. `show`는 본문을 디코딩해 텍스트 형식에서는 64 KB에서 자르고(저장된 사본은 온전합니다), JSON 형식은 `get_flow`와 같은 모양입니다.
 
 ### run rewriter {#run-rewriter}
 

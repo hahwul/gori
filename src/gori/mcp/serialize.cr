@@ -1044,40 +1044,28 @@ module Gori
 
       # --- frozen evidence (#1038) --------------------------------------------
 
-      # One frozen copy's provenance — the same object `Issues::Export.append_evidence_json`
-      # puts on an issue, plus ISO time, so the CLI and MCP list one shape.
+      # One frozen copy's provenance — `Issues::Export.evidence_fields`, the object every
+      # surface emits, plus the ISO spelling of the freeze time that every MCP timestamp gets.
       def self.evidence_meta(j : JSON::Builder, m : Store::IssueEvidenceMeta) : Nil
-        j.field "id", m.id
-        j.field "issue_id", m.issue_id
-        j.field "source_kind", m.source_kind.label
-        j.field "source_id", m.source_id
-        j.field "frozen_at", m.created_at
+        Issues::Export.evidence_fields(j, m)
         j.field "frozen_at_iso", unix_micros_iso(m.created_at)
-        j.field "method", text(m.method)
-        j.field "url", text(m.url)
-        j.field "protocol", text(m.protocol)
-        j.field "status", m.status
-        j.field "duration_us", m.duration_us
-        j.field "error", text(m.error)
-        j.field "request_truncated", m.request_truncated?
-        j.field "response_truncated", m.response_truncated?
-        j.field "request_sha256", m.request_sha256
-        j.field "response_sha256", m.response_sha256
-        j.field "bytes", m.bytes
       end
 
       # The copy with its bytes, shaped like `flow_detail`: heads redacted unless
-      # `include_sensitive`, bodies through `emit_body` (decoded, capped, base64 for binary).
-      # The hashes are over the STORED wire bytes, so a reader that wants to verify them asks
-      # for `include_sensitive` and the raw head — a redacted head cannot hash to them, and
-      # the field says so rather than leaving the reader to discover it.
+      # `include_sensitive` (and flagged so, as `flow_detail` flags them), bodies through
+      # `emit_body` (decoded, capped, base64 for binary). The hashes are over the STORED
+      # bytes — the wire form for a flow, the tab's saved request for a Repeater — so a reader
+      # that wants to verify them asks for `include_sensitive` and the raw head; a redacted
+      # head cannot hash to them, and the field says so rather than leaving the reader to
+      # discover it.
       def self.evidence_json(ev : Store::IssueEvidence, include_sensitive : Bool,
                              body_cap : Int32 = MAX_TEXT, body_omit : Bool = false) : String
         m = ev.meta
         JSON.build do |j|
           j.object do
             evidence_meta(j, m)
-            j.field "hashes_cover", "the stored wire bytes (head + body); a redacted head does not reproduce them"
+            j.field "hashes_cover", "the stored bytes (head + body) — a flow's wire form, a Repeater tab's saved request; a redacted head does not reproduce them"
+            j.field "sensitive_headers_redacted", true unless include_sensitive
             j.field "request_head", redact_head_opt(head_text(ev.request_head), include_sensitive)
             emit_head_base64(j, "request_head", ev.request_head, include_sensitive)
             emit_body(j, "request_body", ev.request_head, ev.request_body, m.request_truncated?,

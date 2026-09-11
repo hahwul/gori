@@ -55,16 +55,21 @@ module Gori
     # overwrite last_insert_rowid — the trap `insert_issue` names.
     private def write_evidence(c : DB::Connection, issue_id : Int64, ts : Int64,
                                snap : Evidence::Snapshot, link : Bool) : Int64
+      # An EMPTY head binds SQL NULL under crystal-sqlite3 (a null-pointer slice) and the
+      # column is NOT NULL — see `insert_ws_one`, which stores `X''` for the same reason. A
+      # raise here would roll back a neighbour's write in the shared batch.
+      head_empty = snap.request_head.empty?
+      args = [issue_id, ts, snap.source_kind.label, snap.source_id, snap.method, snap.url,
+              snap.protocol, snap.status, snap.duration_us, snap.error] of DB::Any
+      args << snap.request_head unless head_empty
+      args.concat([snap.request_body, snap.response_head, snap.response_body,
+                   snap.request_truncated? ? 1 : 0, snap.response_truncated? ? 1 : 0,
+                   snap.request_sha256, snap.response_sha256, snap.bytes] of DB::Any)
       c.exec(
         "INSERT INTO issue_evidence (issue_id, created_at, source_kind, source_id, method, url, " \
         "protocol, status, duration_us, error, request_head, request_body, response_head, " \
         "response_body, request_truncated, response_truncated, request_sha256, response_sha256, bytes) " \
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        issue_id, ts, snap.source_kind.label, snap.source_id, snap.method, snap.url,
-        snap.protocol, snap.status, snap.duration_us, snap.error,
-        snap.request_head, snap.request_body, snap.response_head, snap.response_body,
-        snap.request_truncated? ? 1 : 0, snap.response_truncated? ? 1 : 0,
-        snap.request_sha256, snap.response_sha256, snap.bytes)
+        "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_empty ? "X''" : "?"},?,?,?,?,?,?,?,?)", args: args)
       id = c.scalar("SELECT last_insert_rowid()").as(Int64)
       if link
         c.exec(
@@ -114,7 +119,21 @@ module Gori
 
     # How many frozen copies exist of one live source — the History detail's and the
     # Repeater's marker, which says "a frozen copy exists", never "this is immutable".
+    #
+    # A Repeater id is REUSED: `repeaters.id` has no AUTOINCREMENT and the newest tab is the
+    # one closed most often, so a fresh tab can inherit the id of a closed one whose copies
+    # deliberately outlive it (`delete_repeater` leaves `issue_evidence` alone). Counting by
+    # id alone would badge that new tab with an exchange it never had. A copy is taken from
+    # a tab that already exists, so only copies frozen AT OR AFTER the current row's
+    # `created_at` can be this tab's; the rest belong to a predecessor. Flow ids never
+    # return (both prune paths delete from the bottom), so the flow count needs no such guard.
     def evidence_count_for(kind : LinkRefKind, source_id : Int64) : Int32
+      if kind.repeater?
+        return @db.scalar(
+          "SELECT COUNT(*) FROM issue_evidence e WHERE e.source_kind = 'repeater' AND e.source_id = ? " \
+          "AND e.created_at >= (SELECT created_at FROM repeaters WHERE id = ?)",
+          source_id, source_id).as(Int64).to_i
+      end
       @db.scalar("SELECT COUNT(*) FROM issue_evidence WHERE source_kind = ? AND source_id = ?",
         kind.label, source_id).as(Int64).to_i
     end

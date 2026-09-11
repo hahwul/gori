@@ -286,13 +286,16 @@ module Gori
         io << "\n" unless head_text.ends_with?("\n")
         shown = Entity.bytes(head, body)
         return if shown.nil? || shown.empty?
-        cut = shown.size > Issues::Export::EVIDENCE_CAP
-        shown = shown[0, Issues::Export::EVIDENCE_CAP] if cut
+        decoded_size = shown.size
+        cut = decoded_size > Issues::Export::EVIDENCE_CAP
+        # Back the cut off to a codepoint boundary first — the Markdown report's own rule —
+        # or a multibyte character split at exactly the cap reads the whole page as binary.
+        shown = Issues::Export.trim_to_codepoint_boundary(shown[0, Issues::Export::EVIDENCE_CAP]) if cut
         text = String.new(shown)
         if text.valid_encoding?
           io << Issues::Export.scrub_controls(text) << "\n"
         else
-          io << "[binary body omitted, " << (body.try(&.size) || 0) << " bytes stored]\n"
+          io << "[binary body omitted, " << decoded_size << " decoded bytes]\n"
         end
         io << "[… body display cut at " << Issues::Export::EVIDENCE_CAP << " bytes; the stored copy is complete]\n" if cut
       end

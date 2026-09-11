@@ -141,13 +141,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # create row for the reason above, and an existing issue because the freeze may raise a
   # byte-cost confirm. The picker's own on_close (put the History drill-in back) is folded
   # into the hand-off as `back`, so the operator still lands where they linked from.
-  private def link_picked(lp : LinkPicker, refs : Array({Store::LinkRefKind, Int64})) : Bool
+  private def link_picked(lp : LinkPicker, refs : Array({Store::LinkRefKind, Int64}),
+                          snaps : Array(Evidence::Snapshot) = [] of Evidence::Snapshot) : Bool
     back = lp.on_close || -> { }
     if kind = lp.selected_create
       # The filter doubles as the new issue's title: type it, ↵, and the form is filled.
       typed = lp.query.strip
       lp.on_close = if lp.freeze?
-                      -> { open_issue_form_for_freeze(refs, typed) }
+                      -> { open_issue_form_for_freeze(refs, snaps, typed, back) }
                     elsif kind.issue?
                       -> { open_issue_form_for_link(refs, typed) }
                     else
@@ -159,7 +160,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       if lp.freeze?
         # `link_picker_rows(issues_only: true)` built this list, so `row.kind` is Issue.
         issue_id = row.id
-        lp.on_close = -> { link_and_freeze(issue_id, refs, back) }
+        lp.on_close = -> { link_and_freeze(issue_id, snaps, back) }
       elsif commit_links_to_owner(row.kind, row.id, refs) && refs.size == 1
         # commit_links_to_owner already reported the counts for a batch; the single case
         # names WHICH owner took the link. One list now holds both kinds, so a bare

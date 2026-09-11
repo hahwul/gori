@@ -42,7 +42,9 @@ class Gori::Tui::RepeaterView
     return meta_x unless result.incomplete?
     warn = "⚠ incomplete"
     warn_x = meta_x - warn.size - 2
-    return meta_x unless warn_x > chips_end + 1
+    # No room for the ⚠: nothing shorter may take its place — a marker about a copy must
+    # not outrank the warning that the body in front of the operator is cut short.
+    return chips_end unless warn_x > chips_end + 1
     screen.text(warn_x, rect.y, warn, Theme.yellow, Theme.bg)
     warn_x
   end
@@ -232,10 +234,13 @@ class Gori::Tui::RepeaterView
                                 active : Bool = true) : Nil
     lit = focused && active
     Frame.card(screen, rect, title, bg: Theme.bg, border: Frame.pane_border(lit))
-    if d = dur_us
-      meta = Fmt.dur(d)
-      Frame.border_meta(screen, rect, title, meta)
-    end
+    # The frozen-copy marker (#1038) shares the one read-out row with the latency, as it does
+    # on the handshake card: a gRPC or group tab can be frozen too, and the branch that draws
+    # it must say so.
+    parts = [] of String
+    frozen_marker.try { |m| parts << m }
+    dur_us.try { |d| parts << Fmt.dur(d) }
+    Frame.border_meta(screen, rect, title, parts.join(" · ")) unless parts.empty?
     body = rect.inset(1, 1)
     return if body.h <= 0
     if lines.empty?

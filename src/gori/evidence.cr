@@ -3,6 +3,7 @@ require "./store"
 require "./env"
 require "./url"
 require "./proxy/codec/http1"
+require "./repeater/flow_request"
 
 module Gori
   # Frozen issue evidence (#1038): the exact bytes that proved a finding at a point in time,
@@ -34,10 +35,12 @@ module Gori
     # What a freeze writes — every fact the row keeps, computed ONCE here so the store, the
     # confirm dialog ("this will cost 3.2MB") and the toast all describe the same copy.
     #
-    # `request_head`/`response_head` are the WIRE heads as the source held them, bodies the
-    # wire bodies (still chunked/compressed, P7): a snapshot is evidence, and evidence is
-    # what went over the wire, not a display projection of it. The viewer decodes for
-    # display the way every other pane does.
+    # `request_head`/`response_head` are the heads AS THE SOURCE HOLDS THEM, bodies likewise
+    # (still chunked/compressed, P7); the viewer decodes for display the way every other pane
+    # does. For a captured flow that is the wire form. For a Repeater tab it is the tab's
+    # SAVED request — `$KEY` bindings unexpanded, no Authorize-slot overlay, exactly what
+    # `repeaters.request` holds, because the tab keeps no request-as-sent — beside the last
+    # response the store holds for it. The hashes cover these stored bytes.
     record Snapshot,
       source_kind : Store::LinkRefKind,
       source_id : Int64,
@@ -82,11 +85,6 @@ module Gori
           (@response_head.try(&.size) || 0) + (@response_body.try(&.size) || 0)
       end
 
-      # Worth a confirm before writing (see LARGE_BYTES).
-      def large? : Bool
-        bytes >= LARGE_BYTES
-      end
-
       # Has the source ever produced a response? A request-only copy is refused at the
       # surface for a Repeater (see `from_repeater`), but a captured flow that errored is
       # still evidence of the error and freezes with `error` set.
@@ -124,10 +122,17 @@ module Gori
       )
     end
 
-    # A Repeater tab's request and its CURRENT last response. nil when the tab has never
-    # been sent — there is no exchange to freeze, and a request-only row labelled as
-    # evidence of a response that never happened is exactly the misleading artefact this
-    # feature exists to prevent. The caller says so and leaves the tab alone.
+    # A Repeater tab's saved request and the last response the STORE holds for it. nil when
+    # the tab has never been sent — there is no exchange to freeze, and a request-only row
+    # labelled as evidence of a response that never happened is exactly the misleading
+    # artefact this feature exists to prevent. The caller says so and leaves the tab alone.
+    #
+    # Two facts about that pairing, both consequences of the `repeaters` row's shape and
+    # named in the docs: the TUI and CLI persist a response only for a SUCCESSFUL send, so
+    # after a failed re-send the copy carries the last good response (the pane shows the
+    # error, the row does not); and the request is the tab's CURRENT saved text, so a request
+    # edited since that send freezes beside the response of the earlier one. Freeze right
+    # after the send that proved the finding, which is when the two agree.
     #
     # The request is one wire blob (`repeaters.request`, head and body together); it is
     # split at the blank line the way MCP's `split_wire_request` splits it, tolerating a
@@ -142,8 +147,8 @@ module Gori
       body_size = rec.request.size - boundary
       req_body = body_size > 0 ? rec.request[boundary, body_size] : nil
       method, target, version = Proxy::Codec::Http1.authored_start_line(req_head)
-      # An errored send persists an EMPTY head (`update_repeater_response`'s contract), and
-      # an empty head is "no response", not a response of zero bytes.
+      # MCP's save-as-repeater path persists an errored send as an EMPTY head, and an empty
+      # head is "no response", not a response of zero bytes.
       resp_head = nil if resp_head && resp_head.empty?
       status = resp_head.try { |h| Proxy::Codec::Http1.parse_response_head(h).status }
       status = nil if status == 0
@@ -172,6 +177,12 @@ module Gori
       when .flow?
         d = store.get_flow(id)
         return "no flow with id #{id} — it may have been pruned" unless d
+        # A Pending flow has no exchange yet: the response is still in flight and will land
+        # on this same row a moment later, so a copy taken now would say "no response" about
+        # a request that got one — the Repeater's never-sent refusal, one source over.
+        if d.row.state.pending?
+          return "flow ##{id} has no response yet — wait for it to complete, then freeze the exchange"
+        end
         from_flow(d)
       when .repeater?
         rec = store.get_repeater_full(id)
@@ -182,11 +193,16 @@ module Gori
       end
     end
 
-    # `https://a.test/login` from a tab's origin and its request-line target. An
-    # absolute-form target already IS the URL; an origin-form one is appended to the origin;
+    # `https://a.test/login` from a tab's target and its request-line target. An
+    # absolute-form request target already IS the URL; an origin-form one is appended to the
+    # ORIGIN the tab dials — `{scheme, host, port}` as `FlowRequest.parse_target` reads them,
+    # not the target string verbatim, because the sender ignores any path typed there and a
+    # tab whose target reads `https://a.test/api` still sends `GET /login` to `/login`;
     # anything else (`*`, an authority-form CONNECT) is shown beside it rather than glued on.
-    def self.repeater_url(origin : String, target : String) : String
+    def self.repeater_url(target_field : String, target : String) : String
       return target if Url.absolute_form?(target)
+      scheme, host, port = Repeater::FlowRequest.parse_target(target_field)
+      origin = host.empty? ? target_field : Repeater::FlowRequest.build_target(scheme, host, port)
       return "#{origin}#{target}" if target.starts_with?('/')
       target.empty? ? origin : "#{origin} #{target}"
     end
@@ -198,8 +214,10 @@ module Gori
       d.hexfinal
     end
 
-    # `GET a.test/login` — the RELATED row's identity, spelled like `Links.resolve_flow`'s
-    # so a frozen row reads beside the live row it was taken from.
+    # `GET a.test/login` — the RELATED row's identity: the copy's url without its scheme.
+    # Close to `Links.resolve_flow`'s `method host+target`, not identical: the url keeps a
+    # non-default port (`a.test:8443/x`) where the live row's label never carries one, and
+    # for a copy that is the right side to err on — a report reads the port off it.
     #
     # `.scrub`, because the url is display text built from captured wire bytes and the TUI
     # funnels display text through `Hotkeys.retag`, whose regex raises on non-UTF-8.

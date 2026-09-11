@@ -106,8 +106,12 @@ describe Gori::Tui::EvidenceViewer do
     h.wheel(3)
     v.scroll.should eq(5)
     h.press(Termisu::Input::Key::End)
+    # End parks on the row count, not a sentinel: a `j` before the next render used to add
+    # to Int32::MAX and raise, and a too-small window never reaches the render's clamp.
+    v.scroll.should eq(v.lines.size)
+    h.press(Termisu::Input::Key::LowerJ, 'j')
     h.render
-    (v.scroll < 90).should be_true # clamped to the body by the render
+    (v.scroll < 90).should be_true # clamped to the last page by the render
     h.rendered?("line 80").should be_true
     h.press(Termisu::Input::Key::Home)
     v.scroll.should eq(0)

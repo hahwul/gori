@@ -146,7 +146,7 @@ module Gori
 
     # One issue's cascade, on an OPEN connection (no transaction of its own) — the shared
     # body of the singular and batch deletes. Frozen evidence cascades for `clear_issues`'s
-    # reason; the confirm the delete verbs already put up names it.
+    # reason; the TUI's delete confirms say so when there is any.
     private def delete_issue_one(c : DB::Connection, id : Int64) : Nil
       c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue' AND owner_id = ?", id)
       c.exec("DELETE FROM issue_evidence WHERE issue_id = ?", id)

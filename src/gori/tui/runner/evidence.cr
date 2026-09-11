@@ -18,28 +18,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # --- Issues detail: RELATED row ------------------------------------------
 
-  # `f` / space → Freeze as evidence on the open issue's selected RELATED row. The row is
+  # `f` / space → Freeze as evidence on the open issue's selected RELATED row. The verb is
+  # gated on `issue_related_freezable?`, so the row is a live flow/repeater; the row is
   # already linked, so the copy is written WITHOUT a second link.
   def issue_freeze_link : Nil
     issue = issues_controller.view.detail_issue || return
-    if issues_controller.view.selected_evidence
-      @toast = "this row already is the frozen copy"
-      return
-    end
-    res = issues_controller.view.selected_resolved_link
-    unless res
-      @toast = "select a related History flow or Repeater row to freeze"
-      return
-    end
-    if res.stale?
-      @toast = "#{res.label} — nothing left to freeze"
-      return
-    end
+    res = issues_controller.view.selected_resolved_link || return
     snap = evidence_snapshot(res.link.ref_kind, res.link.ref_id) || return
-    freeze_into_issue(issue.id, [snap], link: false) do |ids|
+    freeze_into_issue(issue.id, [snap], link: false) do |ids, refusal|
       refresh_issue_evidence(issue.id, ids.last?)
       refresh_evidence_markers
-      @toast = "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) — the live #{res.tag} row stays live"
+      @toast = refusal || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) — the live #{res.tag} row stays live"
     end
   end
 
@@ -105,34 +94,24 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Runs from the card's `on_close` once the shell has dropped it (see LinksOverlay#pending_freeze).
   # Whatever happens — a refusal, a confirm declined, a copy written — the card comes back
   # on the row the operator was on, so `f` reads as an action inside the card rather than
-  # a way out of it. A note owner has no evidence to hold; the refusal says so.
+  # a way out of it. The card arms `f` for an ISSUE owner only (a note holds no evidence),
+  # so `owner_id` here is an issue.
   private def freeze_from_links_card(lo : LinksOverlay) : Nil
     owner_kind, owner_id, cursor = lo.owner_kind, lo.owner_id, lo.selected
     back = -> { open_links_overlay(owner_kind, owner_id, cursor: cursor) }
     res = lo.selected_link
-    unless res
-      back.call
-      return
-    end
-    unless owner_kind.issue?
-      @toast = "frozen evidence belongs to an issue — link this to an issue to freeze it"
-      back.call
-      return
-    end
-    if res.stale?
+    snap = res && !res.stale? ? evidence_snapshot(res.link.ref_kind, res.link.ref_id) : nil
+    if res && res.stale?
       @toast = "#{res.label} — nothing left to freeze"
-      back.call
-      return
     end
-    snap = evidence_snapshot(res.link.ref_kind, res.link.ref_id)
     unless snap
       back.call
       return
     end
-    freeze_into_issue(owner_id, [snap], link: false, after: back) do |ids|
+    freeze_into_issue(owner_id, [snap], link: false, after: back) do |ids, refusal|
       refresh_issue_evidence(owner_id, ids.last?)
       refresh_evidence_markers
-      @toast = "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) on issue ##{owner_id}"
+      @toast = refusal || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) on issue ##{owner_id}"
     end
   end
 
@@ -145,90 +124,56 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # ↵ on an existing issue in the picker's freeze mode. Runs from the picker's `on_close`
   # (a large copy raises a confirm, and the shell would tear down a modal opened from
   # inside the picker's own commit), so `back` restores the History drill-in the pick was
-  # made from, exactly as the picker's own `on_close` did before it was replaced.
-  private def link_and_freeze(issue_id : Int64, refs : Array({Store::LinkRefKind, Int64}),
-                              back : Proc(Nil)) : Nil
-    snaps = evidence_snapshots(refs)
-    if snaps.empty?
-      back.call
-      return
-    end
-    skipped = refs.size - snaps.size
-    freeze_into_issue(issue_id, snaps, link: true, after: back) do |ids|
+  # made from, exactly as the picker's own `on_close` did before it was replaced. The
+  # snapshots were taken BEFORE the picker opened (`link_attach`), so nothing the operator
+  # picked can be discarded here for want of an exchange.
+  private def link_and_freeze(issue_id : Int64, snaps : Array(Evidence::Snapshot), back : Proc(Nil)) : Nil
+    freeze_into_issue(issue_id, snaps, link: true, after: back) do |ids, refusal|
       refresh_issue_evidence(issue_id, nil)
       refresh_evidence_markers
-      @toast = if ids.size == 1 && skipped == 0
-                 "linked to issue ##{issue_id} and frozen as evidence ##{ids[0]} (#{Fmt.size(snaps[0].bytes)})"
-               else
-                 parts = ["linked & frozen #{ids.size} on issue ##{issue_id}"]
-                 parts << "#{skipped} skipped" if skipped > 0
-                 parts.join(" · ")
-               end
+      done = if ids.size == 1 && snaps.size == 1
+               "linked to issue ##{issue_id} and frozen as evidence ##{ids[0]} (#{Fmt.size(snaps[0].bytes)})"
+             else
+               "linked & frozen #{ids.size} of #{snaps.size} on issue ##{issue_id}"
+             end
+      @toast = refusal ? "#{done} · #{refusal}" : done
     end
   end
 
   # "+ New issue…" in freeze mode: the byte cost is asked about BEFORE the form opens, so
   # the form's commit — which already chains the open-vs-stay confirm — never has to raise a
-  # second one. The snapshots are taken now and handed to the form; an exchange that changes
-  # while the operator types the title is exactly the race a freeze exists to close.
-  private def open_issue_form_for_freeze(refs : Array({Store::LinkRefKind, Int64}), typed : String) : Nil
-    snaps = evidence_snapshots(refs)
-    return if snaps.empty?
+  # second one. The snapshots were taken when the picker opened and are handed to the form;
+  # an exchange that changes while the operator types the title is exactly the race a
+  # freeze exists to close. A declined confirm runs `back`, so the History drill-in the pick
+  # came from is put back rather than left torn down with nothing on screen.
+  private def open_issue_form_for_freeze(refs : Array({Store::LinkRefKind, Int64}), snaps : Array(Evidence::Snapshot),
+                                         typed : String, back : Proc(Nil)) : Nil
+    open_form = -> { open_issue_form_for_link(refs, typed, snapshots: snaps) }
     total = snaps.sum(&.bytes)
     if total >= Evidence::LARGE_BYTES
-      confirm_freeze_cost(total, snaps.size, "a new issue", -> { open_issue_form_for_link(refs, typed, snapshots: snaps) })
+      confirm_freeze_cost(total, snaps.size, "a new issue", open_form, declined: back)
     else
-      open_issue_form_for_link(refs, typed, snapshots: snaps)
+      open_form.call
     end
-  end
-
-  # After the form has filed the issue and linked its refs: write the copies. No confirm
-  # here (see above); a refusal is reported, the issue stays filed. Returns the ids.
-  private def freeze_form_snapshots(issue_id : Int64, snaps : Array(Evidence::Snapshot)) : Array(Int64)
-    ids = [] of Int64
-    snaps.each do |snap|
-      id, status = @session.store.freeze_evidence(issue_id, snap, link: false)
-      if status.ok?
-        ids << id
-        log_evidence_frozen(issue_id, id, snap)
-      else
-        status(freeze_refusal(issue_id, status))
-        break
-      end
-    end
-    ids
   end
 
   # --- shared core ----------------------------------------------------------
 
-  # The snapshot for one ref, or nil with the reason toasted. A Repeater tab that was never
-  # sent is refused rather than frozen request-only: a row badged FROZEN that holds no
-  # response would be evidence of a response that never happened.
+  # The snapshot for one ref, or nil with the reason toasted — `Evidence.snapshot_for`'s
+  # sentences, the same ones the CLI and MCP print.
   private def evidence_snapshot(kind : Store::LinkRefKind, id : Int64) : Evidence::Snapshot?
-    case kind
-    when .flow?
-      if d = @session.store.get_flow(id)
-        return Evidence.from_flow(d)
-      end
-      @toast = "flow ##{id} is no longer captured — nothing to freeze"
-    when .repeater?
-      rec = @session.store.get_repeater_full(id)
-      unless rec
-        @toast = "repeater ##{id} is gone — nothing to freeze"
-        return nil
-      end
-      snap = Evidence.from_repeater(rec)
-      return snap if snap
-      @toast = "repeater ##{id} has never been sent — send it, then freeze the exchange"
-    else
-      @toast = "only a History flow or a Repeater exchange can be frozen"
+    snap = Evidence.snapshot_for(@session.store, kind, id)
+    if snap.is_a?(String)
+      @toast = snap
+      return nil
     end
-    nil
+    snap
   end
 
   # The batch form, for the History list's marked set: refs that cannot be frozen are
-  # skipped and counted rather than aborting the rest (#442's rule). Capped like every
-  # other per-flow batch verb — each copy is a blocking write on the render loop.
+  # skipped and counted rather than aborting the rest (#442's rule) — the last refusal is
+  # the toast, and the caller's summary names the count. Capped like every other per-flow
+  # batch verb — each copy is a blocking write on the render loop.
   private def evidence_snapshots(refs : Array({Store::LinkRefKind, Int64})) : Array(Evidence::Snapshot)
     snaps = [] of Evidence::Snapshot
     if refs.size > 1
@@ -243,20 +188,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     snaps
   end
 
-  # Confirm-if-large, then write every snapshot, then `yield` the ids written (never
-  # called when none was). `after` runs on EVERY exit — declined confirm included — and is
-  # where a caller puts the modal back where it was.
+  # Confirm-if-large, then write every snapshot, then `yield` the ids written and the
+  # refusal that stopped the batch, if one did (never called when nothing was written and
+  # nothing refused). `after` runs on EVERY exit — declined confirm included — and is where
+  # a caller puts the modal back where it was.
   private def freeze_into_issue(issue_id : Int64, snaps : Array(Evidence::Snapshot), *,
                                 link : Bool, after : Proc(Nil)? = nil,
-                                &done : Array(Int64) -> Nil) : Nil
+                                &done : Array(Int64), String? -> Nil) : Nil
     total = snaps.sum(&.bytes)
     write = -> {
-      ids = write_frozen(issue_id, snaps, link)
-      done.call(ids) unless ids.empty?
+      ids, refusal = write_frozen(issue_id, snaps, link)
+      done.call(ids, refusal) unless ids.empty? && refusal.nil?
       nil
     }
     if total >= Evidence::LARGE_BYTES
-      confirm_freeze_cost(total, snaps.size, "issue ##{issue_id}", write, after)
+      confirm_freeze_cost(total, snaps.size, "issue ##{issue_id}", write, after: after)
     else
       write.call
       after.try(&.call)
@@ -266,9 +212,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The byte-cost question. Built on ConfirmDialog directly rather than `confirm`: that
   # helper restores the modal it was raised OVER, and every freeze is raised from inside a
   # picker's or card's on_close — whose restore is the caller's `after`, run on both
-  # outcomes, which `confirm`'s accept-only action cannot express.
-  private def confirm_freeze_cost(total : Int64, count : Int32, dest : String,
-                                  write : Proc(Nil), after : Proc(Nil)? = nil) : Nil
+  # outcomes (or `declined`, run only when the operator says no), which `confirm`'s
+  # accept-only action cannot express.
+  private def confirm_freeze_cost(total : Int64, count : Int32, dest : String, write : Proc(Nil), *,
+                                  after : Proc(Nil)? = nil, declined : Proc(Nil)? = nil) : Nil
     what = count == 1 ? "This copy is" : "These #{count} copies are"
     ov = ConfirmDialog.new("FREEZE EVIDENCE",
       "#{what} #{Fmt.size(total)} of request/response bytes,\n" \
@@ -280,25 +227,25 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ov.on_commit = -> { accepted = true; true }
     ov.on_close = -> {
       write.call if accepted
+      declined.try(&.call) unless accepted
       after.try(&.call)
     }
     open_overlay(ov)
   end
 
   # Write the copies in order; stop at the first refusal (a quota reached mid-batch would
-  # refuse every later one the same way) and report it.
-  private def write_frozen(issue_id : Int64, snaps : Array(Evidence::Snapshot), link : Bool) : Array(Int64)
+  # refuse every later one the same way). Answers {ids written, the refusal or nil} — the
+  # caller composes ONE toast from both, so a refusal is never overwritten by a success
+  # line that does not mention it.
+  private def write_frozen(issue_id : Int64, snaps : Array(Evidence::Snapshot), link : Bool) : {Array(Int64), String?}
     ids = [] of Int64
     snaps.each do |snap|
       id, status = @session.store.freeze_evidence(issue_id, snap, link: link)
-      unless status.ok?
-        status(freeze_refusal(issue_id, status))
-        break
-      end
+      return {ids, freeze_refusal(issue_id, status)} unless status.ok?
       ids << id
       log_evidence_frozen(issue_id, id, snap)
     end
-    ids
+    {ids, nil}
   end
 
   private def freeze_refusal(issue_id : Int64, status : Store::FreezeStatus) : String

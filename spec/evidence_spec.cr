@@ -58,11 +58,16 @@ describe Gori::Evidence do
       snap.status.should eq(200)
     end
 
-    it "composes the url from the origin and the request target without doubling either" do
+    it "composes the url from the ORIGIN the tab dials and the request target" do
       Gori::Evidence.repeater_url("https://a.test", "/p?q=1").should eq("https://a.test/p?q=1")
       Gori::Evidence.repeater_url("https://a.test", "HTTP://b.test/x").should eq("HTTP://b.test/x")
       Gori::Evidence.repeater_url("https://a.test", "*").should eq("https://a.test *")
       Gori::Evidence.repeater_url("https://a.test", "").should eq("https://a.test")
+      # The sender reads {scheme, host, port} off the target field and ignores any path typed
+      # there, so the copy's url must too — `/api` + `GET /login` reaches `/login`.
+      Gori::Evidence.repeater_url("https://a.test/api", "/login").should eq("https://a.test/login")
+      Gori::Evidence.repeater_url("https://a.test:8443/", "/x").should eq("https://a.test:8443/x")
+      Gori::Evidence.repeater_url("a.test", "/x").should eq("http://a.test/x")
     end
   end
 
@@ -76,12 +81,33 @@ describe Gori::Evidence do
   end
 
   describe Gori::Evidence::Snapshot do
-    it "marks a copy at or past LARGE_BYTES as worth a confirm" do
+    it "costs the four blobs and nothing else" do
       big = Bytes.new(Gori::Evidence::LARGE_BYTES.to_i, 0x41_u8)
       snap = Gori::Evidence::Snapshot.new(Gori::Store::LinkRefKind::Flow, 1_i64, "GET", "http://a.test/",
         "HTTP/1.1", 200, nil, nil, "GET / HTTP/1.1\r\n\r\n".to_slice, nil, "HTTP/1.1 200 OK\r\n\r\n".to_slice, big)
-      snap.large?.should be_true
       snap.bytes.should eq(18 + 19 + Gori::Evidence::LARGE_BYTES)
+    end
+  end
+
+  describe ".snapshot_for" do
+    it "refuses a PENDING flow by name — its response is still in flight" do
+      with_store do |store|
+        fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
+          target: "/slow", http_version: "HTTP/1.1",
+          head: "GET /slow HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        answer = Gori::Evidence.snapshot_for(store, Gori::Store::LinkRefKind::Flow, fid)
+        answer.should be_a(String)
+        answer.as(String).should contain("no response yet")
+        # The response lands, and the same call now hands back the copy.
+        store.update_response(Gori::Store::CapturedResponse.new(fid, 200, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ok".to_slice))
+        Gori::Evidence.snapshot_for(store, Gori::Store::LinkRefKind::Flow, fid).should be_a(Gori::Evidence::Snapshot)
+        # A gone flow, a never-sent tab and a fuzz ref each get their own sentence.
+        Gori::Evidence.snapshot_for(store, Gori::Store::LinkRefKind::Flow, 999_i64).as(String).should contain("no flow with id 999")
+        rid = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+        Gori::Evidence.snapshot_for(store, Gori::Store::LinkRefKind::Repeater, rid).as(String).should contain("never been sent")
+        Gori::Evidence.snapshot_for(store, Gori::Store::LinkRefKind::Fuzz, 1_i64).as(String).should contain("only a flow or a repeater")
+      end
     end
   end
 

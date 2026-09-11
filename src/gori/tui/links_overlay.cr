@@ -29,6 +29,9 @@ module Gori::Tui
     CARD_BROWSE_HINT = "↑/↓ select · ↵/o open · a add · f freeze · d remove · esc close"
     ADD_HINT         = "f/r/z/m pick type · esc back"
     BROWSE_HINT      = "↑/↓ · ↵/o open · a add · f freeze · d remove · esc close"
+    # A NOTE owns no frozen evidence (#1038), so its card neither advertises `f` nor arms it.
+    NOTE_CARD_BROWSE_HINT = "↑/↓ select · ↵/o open · a add · d remove · esc close"
+    NOTE_BROWSE_HINT      = "↑/↓ · ↵/o open · a add · d remove · esc close"
     # The link sources, as the keys the adding-mode hint advertises.
     ADD_KEYS = "frzm"
 
@@ -106,7 +109,13 @@ module Gori::Tui
     end
 
     def hint : String
-      adding? ? ADD_HINT : BROWSE_HINT
+      return ADD_HINT if adding?
+      @owner_kind.issue? ? BROWSE_HINT : NOTE_BROWSE_HINT
+    end
+
+    # Whether `f` means anything on this card — an issue's does, a note's does not.
+    def freezable_owner? : Bool
+      @owner_kind.issue?
     end
 
     # Browse: ↑/↓ (or k/j) select · ↵/o open · a arms add · f freezes · d removes · esc closes.
@@ -133,7 +142,7 @@ module Gori::Tui
     # `f`: arm the freeze and drop the card so `on_close` can do the work (#1038) — only
     # with a row to freeze, so an empty card does not close itself on a stray key.
     private def arm_freeze : Symbol
-      return :stay if @resolved.empty?
+      return :stay if @resolved.empty? || !freezable_owner?
       @pending_freeze = true
       :cancel
     end
@@ -190,7 +199,7 @@ module Gori::Tui
       end
       Frame.card(screen, box, title, border: Theme.border_focus)
 
-      card_hint = adding? ? CARD_ADD_HINT : CARD_BROWSE_HINT
+      card_hint = adding? ? CARD_ADD_HINT : (freezable_owner? ? CARD_BROWSE_HINT : NOTE_CARD_BROWSE_HINT)
       screen.text(box.x + 2, box.y + 1, card_hint, Theme.muted, Theme.panel, width: box.w - 4)
       Frame.tee_divider(screen, box, box.y + 2)
 

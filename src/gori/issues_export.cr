@@ -198,25 +198,30 @@ module Gori
       # other captured string in this array's parent object.
       def self.append_evidence_json(j : JSON::Builder, f : Store::Issue, store : Store?) : Nil
         return unless store
-        store.issue_evidence(f.id).each do |m|
-          j.object do
-            j.field "id", m.id
-            j.field "source_kind", m.source_kind.label
-            j.field "source_id", m.source_id
-            j.field "frozen_at", m.created_at
-            j.field "method", one_line(m.method)
-            j.field "url", one_line(m.url)
-            j.field "protocol", m.protocol.try { |p| one_line(p) }
-            j.field "status", m.status
-            j.field "duration_us", m.duration_us
-            j.field "error", m.error.try { |e| one_line(e) }
-            j.field "request_truncated", m.request_truncated?
-            j.field "response_truncated", m.response_truncated?
-            j.field "request_sha256", m.request_sha256
-            j.field "response_sha256", m.response_sha256
-            j.field "bytes", m.bytes
-          end
-        end
+        store.issue_evidence(f.id).each { |m| j.object { evidence_fields(j, m) } }
+      end
+
+      # ONE copy's provenance fields — the object the JSON export, MCP `get_issue` /
+      # `list_evidence` / `get_evidence` and `gori run evidence --format json` all emit, so a
+      # reader that learned the shape from one surface can read it off another. `one_line`
+      # on the four captured strings, like the title/host fields beside them.
+      def self.evidence_fields(j : JSON::Builder, m : Store::IssueEvidenceMeta) : Nil
+        j.field "id", m.id
+        j.field "issue_id", m.issue_id
+        j.field "source_kind", m.source_kind.label
+        j.field "source_id", m.source_id
+        j.field "frozen_at", m.created_at
+        j.field "method", one_line(m.method)
+        j.field "url", one_line(m.url)
+        j.field "protocol", m.protocol.try { |p| one_line(p) }
+        j.field "status", m.status
+        j.field "duration_us", m.duration_us
+        j.field "error", m.error.try { |e| one_line(e) }
+        j.field "request_truncated", m.request_truncated?
+        j.field "response_truncated", m.response_truncated?
+        j.field "request_sha256", m.request_sha256
+        j.field "response_sha256", m.response_sha256
+        j.field "bytes", m.bytes
       end
 
       def self.append_links_json(j : JSON::Builder, f : Store::Issue, store : Store?) : Nil
@@ -316,7 +321,7 @@ module Gori
       # Drop a UTF-8 sequence the `cap` cut left incomplete: walk back over trailing
       # continuation bytes (10xxxxxx), then over the lead byte (11xxxxxx) they belonged to.
       # Leaves the slice ending on a whole codepoint so a split char isn't read as binary.
-      private def self.trim_to_codepoint_boundary(slice : Bytes) : Bytes
+      def self.trim_to_codepoint_boundary(slice : Bytes) : Bytes
         n = slice.size
         while n > 0 && (slice[n - 1] & 0xC0) == 0x80 # continuation byte
           n -= 1

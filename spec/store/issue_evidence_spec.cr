@@ -220,4 +220,28 @@ describe "Store#freeze_evidence (V26)" do
       store.get_evidence(id).not_nil!.response_body.not_nil!.should eq("hello".to_slice)
     end
   end
+
+  it "does not badge a new Repeater tab with a closed tab's copies when it inherits the id" do
+    with_store do |store|
+      rid = store.insert_repeater("https://acme.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "a".to_slice, nil, 1_i64)
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      snap = Gori::Evidence.from_repeater(store.get_repeater_full(rid).not_nil!).not_nil!
+      store.freeze_evidence(issue, snap)[1].ok?.should be_true
+      store.evidence_count_for(Gori::Store::LinkRefKind::Repeater, rid).should eq(1)
+
+      # Close the newest tab: `repeaters.id` has no AUTOINCREMENT, so the next tab takes the
+      # same id — while the copy (deliberately) survives the close.
+      store.delete_repeater(rid).should be_true
+      sleep 2.milliseconds
+      reused = store.insert_repeater("https://other.test", "GET /b HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      reused.should eq(rid)
+      store.issue_evidence(issue).size.should eq(1)
+      store.evidence_count_for(Gori::Store::LinkRefKind::Repeater, reused).should eq(0)
+      # …and a copy taken FROM the new tab counts for it.
+      store.update_repeater_response(reused, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "b".to_slice, nil, 1_i64)
+      store.freeze_evidence(issue, Gori::Evidence.from_repeater(store.get_repeater_full(reused).not_nil!).not_nil!)
+      store.evidence_count_for(Gori::Store::LinkRefKind::Repeater, reused).should eq(1)
+    end
+  end
 end
