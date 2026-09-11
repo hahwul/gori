@@ -522,17 +522,16 @@ module Gori
       # --response-file=stub.http` is the natural spelling. Distinct from `--body-file`, which
       # points at the BODY the live proxy reads per request; this one is read ONCE, now.
       #
-      # `-` reads stdin through the shared reader, not a bare `STDIN.gets_to_end`: a canned
-      # response is raw HTTP, so a terminal would echo it and then not end on one ^D (#1034).
+      # Read through `read_input_file` rather than here: a canned response is raw HTTP, so a
+      # `-` (or a `/dev/stdin` path) typed at a terminal would echo it and then not end on one
+      # `^D` (#1034) — and `File.read` on a DIRECTORY raises a bare `IO::Error` that the
+      # `File::Error` rescue this method used to carry could not catch, so `--response-file`
+      # pointed at one printed a backtrace where every sibling flag prints a sentence. Only
+      # `cmd_rewriter_add` reaches here, so the refusals say `gori run rewriter add`, not the
+      # bare `gori run rewriter` that dispatches to the LIST subcommand.
       private def self.read_stub_response(path : String) : String
-        if path == "-"
-          return read_stdin_text(STDIN, "gori run rewriter", "canned response",
-            "Pipe it in (`cat stub.http | gori run rewriter add … --response-file=-`), or " \
-            "pass the file's path instead of `-`.")
-        end
-        File.read(path)
-      rescue ex : File::Error
-        abort "gori run rewriter: cannot read --response-file '#{path}': #{ex.message}"
+        read_input_file(path, "gori run rewriter add", stdin: true,
+          noun: "canned response", flag: "--response-file=-")
       end
 
       private def self.cmd_rewriter_add(args : Array(String)) : Nil
@@ -573,7 +572,7 @@ module Gori
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("-fFIND", "--find=FIND", "Match substring/regex, or header name (required)") { |v| find = v }
           p.on("-vVALUE", "--value=VALUE", "Replacement, header value, canned response, or (--op=pipe) the COMMAND (default empty)") { |v| value = v }
-          p.on("--response-file=PATH", "short_circuit: read the canned response from PATH ('-' = stdin)") { |v| response_file = v }
+          p.on("--response-file=PATH", "short_circuit: read the canned response from PATH ('-' = stdin, which needs a pipe or a redirect — a terminal is refused)") { |v| response_file = v }
           p.on("--body-file=PATH", "short_circuit: serve PATH as the response BODY (re-read when it changes)") { |v| body_file = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -592,9 +591,15 @@ module Gori
         if match.regex? && !op.header? && !valid_regex?(f)
           abort "gori run rewriter add: invalid regex --find (failed to compile)"
         end
-        value = check_short_circuit_args(op, value, response_file, body_file)
-        check_pipe_value(op, value, "add")
+        # ABOVE the read: `check_short_circuit_args` is where `--response-file` is drained, and
+        # both of these are knowable from argv alone. `--op=short_circuit --part=ws
+        # --response-file=-` used to consume the whole generator — or, at a terminal, earn the
+        # stdin refusal — before saying that the op and the part cannot be paired at all, so
+        # the operator fixed the pipe and only then learned the flags were wrong. Same
+        # ordering, and same reason, as `repeater create` and `issues create` (#1034).
         check_ws_part(op, part, "add")
+        check_pipe_value(op, value, "add")
+        value = check_short_circuit_args(op, value, response_file, body_file)
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
         # A global rule needs no project at all — it lives in settings.json — but one is

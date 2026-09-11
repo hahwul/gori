@@ -489,7 +489,7 @@ module Gori
       def self.request_content(*, file : String?, raw : String?, stdin : Bool,
                                io : IO, what : String) : String
         if f = file
-          read_input_file(f, what)
+          read_input_file(f, what, noun: "request")
         elsif r = raw
           r
         elsif stdin
@@ -579,6 +579,14 @@ module Gori
           abort err
         end
         abort "gori run repeater create: --target is required" if target.nil? && flow_id.nil?
+        # Argv-only too, and it used to sit below BOTH the read and `open_store`: a typo'd
+        # preset drained the generator and took the project's open-lock before saying that a
+        # word typed on the command line is not one of four. The normalize stays with it, so
+        # the value the row is built from is still decided in one place.
+        if err = Settings.tls_preset_error(tls_preset)
+          abort "gori run repeater create: #{err}"
+        end
+        tls_preset = Settings.tls_preset_normalize(tls_preset)
 
         authored = !sources.empty?
         # Read here, before `open_store`: a pipe that never ends must not be holding the
@@ -647,14 +655,12 @@ module Gori
           end
 
           abort "gori run repeater create: --target is required" if tgt_str.empty?
-          # Refused HERE, not left for the first send. An unknown preset applies nothing, so a
-          # session stored with one dials with gori's bare OpenSSL hello on every later send
-          # while `repeater list` and the TUI chip both name a browser — and unlike the
-          # destination table there is no startup warning to catch it.
-          if err = Settings.tls_preset_error(tls_preset)
-            abort "gori run repeater create: #{err}"
-          end
-          tls_preset = Settings.tls_preset_normalize(tls_preset)
+          # The preset was refused and normalized ABOVE, before the request read — it is an
+          # argv value, and nothing between here and there can change it. Refused at all (and
+          # not left for the first send) because an unknown preset applies nothing: a session
+          # stored with one dials with gori's bare OpenSSL hello on every later send while
+          # `repeater list` and the TUI chip both name a browser, and unlike the destination
+          # table there is no startup warning to catch it.
 
           pos = store.next_repeater_position
 

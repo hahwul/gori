@@ -37,7 +37,7 @@ module Gori
           p.on("--flow=ID", "Replay this captured flow (repeatable; same as a positional id)") { |v| flow_ids << parse_flow_id(v, "gori run authorize") }
           p.on("-qQL", "--query=QL", "Also replay every flow matching this QL query (host: path: status: …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max flows --query may contribute (default #{Authorize::Plan::DEFAULT_LIMIT})") { |v| limit = parse_count(v, "--limit") }
-          p.on("--identities=FILE", "Identity set as JSON ('-' = stdin); default: the project's saved set") { |v| identities_file = v }
+          p.on("--identities=FILE", "Identity set as JSON ('-' = stdin, which needs a pipe or a redirect — a terminal is refused); default: the project's saved set") { |v| identities_file = v }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--unsafe-methods", "Also replay POST/PUT/PATCH/DELETE — each identity re-runs the side effect") { unsafe_methods = true }
@@ -63,9 +63,21 @@ module Gori
         # extra row here is `identities.size` more requests on a target.
         query.try { |q| Run.warn_query_terms("authorize", q) }
 
+        # …and ABOVE the read, because the read can block: "no flow id and no --query" is
+        # complete the moment the arguments are parsed, and reporting it after a `-` pipe has
+        # been drained (and the project opened, and scope loaded) spends the operator's
+        # generator on a verdict nothing in it could change. The condition has one home in the
+        # builder and the sentence one home below, so neither is re-derived here.
+        if Authorize::Plan.no_selection?(flow_ids, query)
+          authorize_plan_abort(Authorize::Plan.no_target_error)
+        end
+
         # Read the identity file BEFORE opening anything: an unreadable path is the operator's
         # typo, and it should not cost a project open (or a scope load) to hear about it.
-        identities_json = identities_file.try { |f| read_input_file(f, "gori run authorize", stdin: true, noun: "identity set") }
+        identities_json = identities_file.try do |f|
+          read_input_file(f, "gori run authorize", stdin: true,
+            noun: "identity set", flag: "--identities=-")
+        end
 
         store = open_store(resolve_read_project(project_name, db_path))
         # Authorize ALWAYS has a project in play (the flows and the identities both come out of

@@ -42,7 +42,7 @@ module Gori
           p.banner = "Usage: gori run sequence [<flow-id>] [options]"
           p.on("--flow=ID", "Seed the request from a captured flow (live replay)") { |v| flow_id = parse_flow_id(v, "gori run sequence") }
           p.on("--request=FILE", "Read a raw HTTP request to replay (live)") { |v| request_file = v }
-          p.on("--tokens=FILE", "Analyze pasted tokens (one per line; '-' = stdin) — no network") { |v| tokens_file = v }
+          p.on("--tokens=FILE", "Analyze pasted tokens (one per line; '-' = stdin, which needs a pipe or a redirect — a terminal is refused) — no network") { |v| tokens_file = v }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--target=URL", "Origin (scheme://host[:port]); required for --request/stdin") { |v| target_override = v }
@@ -230,7 +230,8 @@ module Gori
       end
 
       private def self.read_token_list(file : String) : Array(String)
-        raw = read_input_file(file, "gori run sequence", stdin: true, noun: "token list")
+        raw = read_input_file(file, "gori run sequence", stdin: true, noun: "token list",
+          flag: "--tokens=-")
         # Token lists are usually text, but a stray non-UTF-8 byte (0xff/0xfe) makes the
         # PCRE2 regex split raise "Regex match error: UTF-8 error" and kill the run. Scrub
         # to valid UTF-8 first (bad bytes → U+FFFD) so a lone junk byte doesn't abort the

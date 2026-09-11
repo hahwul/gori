@@ -259,6 +259,23 @@ module Gori::Authorize
       sent
     end
 
+    # "Neither a flow id nor a query" — the ONE argv-only refusal in this builder, split out
+    # so a surface can ask it before it has a store, or a pipe, to ask it with. `resolve_flows`
+    # is still its only raiser; nothing re-derives the condition next to a caller.
+    #
+    # `gori run authorize --identities -` used to drain the operator's identity generator,
+    # resolve the project and open the store before reporting a mistake that was complete the
+    # moment the arguments were typed (#1034). The surface now asks HERE first and formats the
+    # answer through the same `PlanError::Reason` arm it always did, so the sentence, the
+    # flags it names and the exhaustive `case` stay in one place.
+    def self.no_selection?(flow_ids : Array(Int64), query : String?) : Bool
+      flow_ids.empty? && query.try(&.strip).presence.nil?
+    end
+
+    def self.no_target_error : PlanError
+      PlanError.new(PlanError::Reason::NoTarget, "no flows selected")
+    end
+
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
       # Selection FIRST, identities second. `partition` needs both, but only this order
       # reports the right mistake: a bare `gori run authorize` in a project with no saved
@@ -357,9 +374,7 @@ module Gori::Authorize
     # the only one a "capped" warning may be built from (see `Plan#query_capped?`).
     private def self.resolve_flows(options : PlanOptions) : {Array(Store::FlowDetail), Int32}
       query = options.query.try(&.strip).presence
-      if options.flow_ids.empty? && query.nil?
-        raise PlanError.new(PlanError::Reason::NoTarget, "no flows selected")
-      end
+      raise no_target_error if no_selection?(options.flow_ids, query)
       details = [] of Store::FlowDetail
       # A pruned/unknown id contributes nothing rather than raising: it is not a flow that
       # was declined, it is a flow that no longer exists, and `NoFlows` below is what fires

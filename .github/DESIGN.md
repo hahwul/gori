@@ -2309,12 +2309,14 @@ held the scheduler for 2.7–3.0 seconds synchronously versus 9–11 ms with que
 allocations and total query time were comparable. This is cooperative scheduling, not a
 hard deadline: a single regex callback or filesystem operation cannot be preempted.
 
-### 2026-09-11 — a named stdin flag reads a pipe, and a terminal is refused
+### 2026-09-11: a named stdin flag reads a pipe, and a terminal is refused
+
+Refines: [P0](#p0), [P4](#p4). Issue #1034.
 
 `--request-stdin` shipped on the rule that a flag the operator NAMED makes blocking until EOF
 the answer to what they asked for: a `^D` notice on a tty, then the read. That treated a
 terminal as a quiet pipe with a human on the far end. It is not one, and each difference lands
-on exactly this door (#1034):
+on exactly this door:
 
 - The line discipline **echoes**. The raw request the flag exists to keep out of the process
   listing and the shell history — `Cookie`, `Authorization`, a PII body — goes into the
@@ -2325,16 +2327,34 @@ on exactly this door (#1034):
   driver that sends one hangs.
 - **`MAX_CANON`** truncates a line at 1024/4096 bytes before gori is handed an octet.
 
-None of it is reachable from the read side short of driving termios, and the echo has already
-happened by the first byte. So the terminal is refused, with the working spellings named:
-`Run.stdin_terminal_error` is the one verdict and `Run.read_stdin_text` the one door, which
-every explicit stdin road now goes through — `--request-stdin`, `--notes-stdin`, and the three
-flags that spell stdin `-` (`sequence --tokens`, `authorize --identities`,
-`rewriter --response-file`). A pipe and a `< file` redirect are non-tty file descriptors and
-are unchanged, byte-for-byte, so no script or CI job moves.
+Driving termios is not out of reach — `Termisu::Termios` already runs the TUI's pane, and its
+`Terminal::Mode.password` clears ECHO — but it answers only the first bullet. Canonical mode
+still flushes on `^D` and still truncates at `MAX_CANON`; raw mode removes keyboard EOF
+outright. There is no setting under which a terminal delivers a byte-exact multi-line request
+and then ends, so the door is refused rather than half-built (P0) and the refusal names the
+spellings that work (P4). `Run.stdin_terminal_error` is the one verdict and
+`Run.read_stdin_text` the one door.
 
-The IMPLICIT stdin roads (`fuzz`/`mine`/`sequence` sources, `decoder`, `jwt`, `cookie`,
-`notes`) keep their own `unless STDIN.tty?` fallback: there a terminal means "no source was
-given", not "the operator asked for this one". `spec/cli/run/stdin_terminal_spec.cr` sweeps
-`src/gori/cli/` for a `STDIN.gets_to_end` that is neither, so a third shape cannot be added
-by accident.
+**What the rule covers:** every stdin road an operator names by FLAG — `--request-stdin`,
+`--notes-stdin`, and the four that spell stdin `-` (`sequence --tokens`,
+`authorize --identities`, `rewriter --response-file`, and `-` on a `--…-file` flag) — plus a
+PATH that resolves to a terminal (`--request-file /dev/stdin` under a tty), which
+`read_input_file` checks on the open it was already making.
+
+**What it does not:** the IMPLICIT stdin roads (`fuzz`/`mine`/`sequence` sources, `decoder`,
+`jwt`, `cookie`, `notes`) keep their own `unless STDIN.tty?` fallback — there a terminal means
+"no source was given", not "the operator asked for this one" — and a wordlist
+(`Fuzz::Payload::WordlistFile`, which documents `-w /dev/stdin` as a supported source) still
+blocks on one. That road is streamed rather than read as a document, and its readability check
+only stats the path; opening it to test `tty?` would block on the FIFO wordlist the same check
+exists to serve, so it is left for its own change.
+
+A pipe and a `< file` redirect are non-tty file descriptors and are unchanged, byte-for-byte,
+so no script or CI job moves. A pty-backed but non-interactive fd 0 — `ssh -t`, `docker -t`,
+`script -q -c` — IS refused, deliberately: gori cannot tell it from an operator's terminal
+without reading termios flags the harness may have set either way, and refusing with a named
+alternative beats echoing a secret into a transcript on a guess.
+
+`spec/cli/run/stdin_terminal_spec.cr` drives both arms against real file descriptors (an
+`IO.pipe`, a redirect, and a `/dev/ptmx` master) and sweeps `src/gori/cli/` for a direct STDIN
+read that carries neither the explicit guard nor an implicit road's own `STDIN.tty?` check.

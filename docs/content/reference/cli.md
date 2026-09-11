@@ -326,9 +326,16 @@ terminal. A terminal echoes every byte back — the whole raw request, `Cookie` 
 `Authorization` with it, into the scrollback and into any captured PTY transcript, which is
 the exposure the flag exists to close for the process listing and the shell history. `^D` also
 flushes the pending line rather than ending the read there, so a request with no trailing
-newline needs two of them and a PTY-driven harness that sends one waits forever. Every stdin
-road in `gori run` follows the same rule, including the flags that spell stdin `-`
-(`sequence --tokens -`, `authorize --identities=-`, `rewriter --response-file=-`).
+newline needs two of them and a PTY-driven harness that sends one waits forever.
+
+The same rule covers every stdin road an operator names by **flag** — `issues --notes-stdin`,
+and the four that spell stdin `-` (`sequence --tokens -`, `authorize --identities=-`,
+`rewriter --response-file=-`, and `-` on any of the `--…-file` flags) — plus a *path* that
+resolves to a terminal, such as `--request-file /dev/stdin` under a tty. It does **not** cover
+the stdin sources gori falls back to when no flag was given (`fuzz`, `mine`, `sequence`,
+`decoder`, `jwt`, `cookie`, `notes`): there a terminal means "no source was given", and those
+commands print their own usage line instead. It also does not yet cover a **wordlist**
+(`fuzz -w /dev/stdin` and its `mine` / `discover` twins), which still blocks on a terminal.
 
 | Option | Description |
 | -------- | ------------- |
@@ -456,7 +463,7 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | Option | Description |
 | -------- | ------------- |
 | `--flow=ID`, `--request=FILE`, stdin | Request source for live replay (or a bare `<flow-id>`) |
-| `--tokens=FILE` | Analyze a pasted token list (one per line, `-` = stdin); no network |
+| `--tokens=FILE` | Analyze a pasted token list (one per line, `-` = stdin — a pipe or a redirect; a terminal is refused); no network |
 | Token location (pick one) | `--cookie=NAME`, `--header=NAME`, `--regex=RE`, `--position=A:B`, `--jsonpath=EXPR` |
 | `--count=N` | Target token count (default 500) |
 | `--target`, `--http2`, `--sni`, `-k` | Transport (target required for `--request`/stdin) |
@@ -480,7 +487,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 | `<flow-id>…`, `--flow=ID` | Captured flows to replay, in the order given (repeatable) |
 | `-q`, `--query=QL` | Also replay every flow matching this QL query, appended after the ids |
 | `-n`, `--limit=N` | Max flows `--query` may contribute (default 50). Every row becomes one request *per identity* |
-| `--identities=FILE` | Identity set as JSON (`-` = stdin); default: the project's saved set |
+| `--identities=FILE` | Identity set as JSON (`-` = stdin — a pipe or a redirect; a terminal is refused); default: the project's saved set |
 | `--unsafe-methods` | Also replay `POST`/`PUT`/`PATCH`/`DELETE`; each identity re-runs the side effect |
 | `--allow-unscoped` | Send even when the target is outside the project scope (sandbox and excludes still apply) |
 | `--timeout=SEC`, `-k`/`--insecure-upstream` | Per-request connect + idle timeout; skip upstream TLS verification |
@@ -899,7 +906,7 @@ gori run rewriter rm 3
 | `--target=SIDE` | `request` (default) or `response` |
 | `--part=PART` | `head` (default), `body`, or `ws` (a WebSocket message). Only meaningful for `replace` and `pipe` |
 | `--match=MODE` | `literal` (default) or `regex`, for `replace`, `pipe` and `short_circuit`. Regex replacements take `$1`, `$2`; `$$` is a literal `$` |
-| `--response-file=PATH` | `short_circuit`: read the canned response from PATH (`-` = stdin) |
+| `--response-file=PATH` | `short_circuit`: read the canned response from PATH (`-` = stdin — a pipe or a redirect; a terminal is refused) |
 | `--body-file=PATH` | `short_circuit`: serve PATH as the response body, re-read whenever it changes |
 | `-f`, `--find=FIND` | Required. The literal, pattern, or header name to act on |
 | `-v`, `--value=VALUE` | Replacement text, header value, or (with `--op=pipe`) the COMMAND to run. See [Process hooks](/guide/scripting/#process-hooks) |

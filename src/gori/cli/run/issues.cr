@@ -153,7 +153,7 @@ module Gori
         if n = notes
           n
         elsif f = file
-          read_input_file(f, "#{what}: --notes-file")
+          read_input_file(f, "#{what}: --notes-file", noun: "notes")
         elsif stdin
           read_stdin_text(io, what, "notes",
             stdin_pipe_hint(what, flag: "--notes-stdin", file_flag: "--notes-file",
