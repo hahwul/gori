@@ -665,7 +665,7 @@ module Gori
           ws = Repeater::WsEngine.replayable?(hs) ? fuzz_ws_seed_flow(id, project_name, db_path) : nil
           FuzzSeed.new(hs, built.target, built.http2, true, nil, ws)
         elsif !STDIN.tty?
-          FuzzSeed.new(STDIN.gets_to_end, nil, false, false, nil)
+          FuzzSeed.new(read_stdin_fallback(STDIN, "gori run fuzz", "request"), nil, false, false, nil)
         else
           abort "gori run fuzz: no source — give a <flow-id>, --flow/--repeater/--request, or pipe a request on stdin"
         end

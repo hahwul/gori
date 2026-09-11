@@ -2308,3 +2308,59 @@ and capture throughput on 10k/100k/500k fixtures. With 500k 1KB bodies, an absen
 held the scheduler for 2.7–3.0 seconds synchronously versus 9–11 ms with query controls;
 allocations and total query time were comparable. This is cooperative scheduling, not a
 hard deadline: a single regex callback or filesystem operation cannot be preempted.
+
+### 2026-09-11: a named stdin flag reads a pipe, and a terminal is refused
+
+Refines: [P0](#p0), [P4](#p4). Issue #1034.
+
+`--request-stdin` shipped on the rule that a flag the operator NAMED makes blocking until EOF
+the answer to what they asked for: a `^D` notice on a tty, then the read. That treated a
+terminal as a quiet pipe with a human on the far end. It is not one, and each difference lands
+on exactly this door:
+
+- The line discipline **echoes**. The raw request the flag exists to keep out of the process
+  listing and the shell history — `Cookie`, `Authorization`, a PII body — goes into the
+  scrollback instead, and under a PTY-driven harness into the captured transcript. The flag
+  closed one copy of the secret and opened another.
+- **`^D` is not EOF.** In canonical mode it flushes the pending line, so a request with no
+  trailing newline takes two — one to deliver the last line, one on the now-empty line — and a
+  driver that sends one hangs.
+- **`MAX_CANON`** truncates a line at 1024/4096 bytes before gori is handed an octet.
+
+Driving termios is not out of reach — `Termisu::Termios` already runs the TUI's pane, and its
+`Terminal::Mode.password` clears ECHO — but it answers only the first bullet. Canonical mode
+still flushes on `^D` and still truncates at `MAX_CANON`; raw mode removes keyboard EOF
+outright. There is no setting under which a terminal delivers a byte-exact multi-line request
+and then ends, so the door is refused rather than half-built (P0) and the refusal names the
+spellings that work (P4). `Run.stdin_terminal_error` is the one verdict and
+`Run.read_stdin_text` the one door.
+
+**What the rule covers:** every stdin road an operator names by FLAG — `--request-stdin`,
+`--notes-stdin`, and the four that spell stdin `-` (`sequence --tokens`,
+`authorize --identities`, `rewriter --response-file`, and `-` on a `--…-file` flag) — plus a
+PATH that resolves to a terminal (`--request-file /dev/stdin` under a tty), which
+`read_input_file` checks on the open it was already making.
+
+A WORDLIST path is covered too, through `Gori::TtyPath.terminal?` — one predicate for the
+three loaders (`Fuzz::Payload::WordlistFile`, `Miner::Wordlist`, `Discover::Wordlist`), each
+raising what its own error funnel already catches. The predicate stats before it opens:
+`character_device?` is true for every terminal and false for a FIFO, so the probe never opens
+the named pipe whose open would BLOCK until a writer arrives — the one source the lazy
+wordlist reader exists to serve. That pre-check is why the predicate has one home rather than
+three copies.
+
+**What it does not:** the IMPLICIT stdin roads (`fuzz`/`mine`/`sequence` sources, `decoder`,
+`jwt`, `cookie`, `notes`) keep their own `unless STDIN.tty?` fallback — there a terminal means
+"no source was given", not "the operator asked for this one". They do share the explicit
+doors' `IO::Error` rescue now (`Run.read_stdin_fallback`): fd 0 closed by a cron or systemd
+unit used to reach the operator as a Crystal backtrace on all seven.
+
+A pipe and a `< file` redirect are non-tty file descriptors and are unchanged, byte-for-byte,
+so no script or CI job moves. A pty-backed but non-interactive fd 0 — `ssh -t`, `docker -t`,
+`script -q -c` — IS refused, deliberately: gori cannot tell it from an operator's terminal
+without reading termios flags the harness may have set either way, and refusing with a named
+alternative beats echoing a secret into a transcript on a guess.
+
+`spec/cli/run/stdin_terminal_spec.cr` drives both arms against real file descriptors (an
+`IO.pipe`, a redirect, and a `/dev/ptmx` master) and sweeps `src/gori/cli/` for a direct STDIN
+read that carries neither the explicit guard nor an implicit road's own `STDIN.tty?` check.

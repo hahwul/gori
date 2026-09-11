@@ -86,7 +86,7 @@ module Gori
           abort "gori run jwt: too many arguments (one token)" if positional.size > 1
           s.strip
         elsif !STDIN.tty?
-          STDIN.gets_to_end.strip
+          read_stdin_fallback(STDIN, "gori run jwt", "token").strip
         else
           ""
         end

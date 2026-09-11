@@ -489,7 +489,7 @@ module Gori
       def self.request_content(*, file : String?, raw : String?, stdin : Bool,
                                io : IO, what : String) : String
         if f = file
-          read_input_file(f, what)
+          read_input_file(f, what, noun: "request")
         elsif r = raw
           r
         elsif stdin
@@ -499,12 +499,19 @@ module Gori
         end
       end
 
-      # `--request-stdin`: the request bytes, verbatim — the tty notice, the byte fidelity and
-      # the `IO::Error` rescue all live in `read_stdin_text`, which `issues create/update`'s
-      # `--notes-stdin` reads through too. Public (and kept as its own name) so the spec can
-      # drive THIS door rather than the shared reader: the noun is half the contract.
+      # `--request-stdin`: the request bytes, verbatim — the terminal refusal, the byte
+      # fidelity and the `IO::Error` rescue all live in `read_stdin_text`, which
+      # `issues create/update`'s `--notes-stdin` reads through too. Public (and kept as its
+      # own name) so the spec can drive THIS door rather than the shared reader: the noun is
+      # half the contract.
+      #
+      # The hint is built HERE rather than in the shared reader because it is the half of the
+      # refusal that only this flag can write: the pipe is the documented spelling, and
+      # `--request-file` is the one alternative that reads the same bytes.
       def self.read_request_stdin(io : IO, what : String) : String
-        read_stdin_text(io, what, "request")
+        read_stdin_text(io, what, "request",
+          stdin_pipe_hint(what, flag: "--request-stdin", file_flag: "--request-file",
+            producer: "generator"))
       end
 
       private def self.cmd_repeater_create(args : Array(String)) : Nil
@@ -533,7 +540,7 @@ module Gori
           p.on("-tURL", "--target=URL", "Target URL (scheme://host[:port])") { |v| target = v }
           p.on("-fFILE", "--request-file=FILE", "Read raw HTTP request from FILE") { |v| request_file = v }
           p.on("-rRAW", "--request-raw=RAW", "Verbatim raw HTTP request string") { |v| request_raw = v }
-          p.on("--request-stdin", "Read the raw HTTP request from stdin, byte-for-byte, as --request-file reads a file (`generator | gori run repeater create --target … --request-stdin`). Keeps a large or binary-derived request out of the argument vector, so it is not in the process listing and cannot hit the command-line length limit") { request_stdin = true }
+          p.on("--request-stdin", "Read the raw HTTP request from stdin, byte-for-byte, as --request-file reads a file (`generator | gori run repeater create --target … --request-stdin`). Keeps a large or binary-derived request out of the argument vector, so it is not in the process listing and cannot hit the command-line length limit. Needs a pipe or a redirect (`< req.http`): a terminal is refused, because it would echo the request back") { request_stdin = true }
           p.on("--name=NAME", "Custom repeater tab name") { |v| name = v }
           p.on("--tags=TAGS", "Free-text tags for grouping tabs (the TUI subtab label)") { |v| tags = v }
           p.on("--http2", "Use HTTP/2 (default: false, or how --flow was captured)") { http2 = true; http2_given = true }
@@ -572,6 +579,14 @@ module Gori
           abort err
         end
         abort "gori run repeater create: --target is required" if target.nil? && flow_id.nil?
+        # Argv-only too, and it used to sit below BOTH the read and `open_store`: a typo'd
+        # preset drained the generator and took the project's open-lock before saying that a
+        # word typed on the command line is not one of four. The normalize stays with it, so
+        # the value the row is built from is still decided in one place.
+        if err = Settings.tls_preset_error(tls_preset)
+          abort "gori run repeater create: #{err}"
+        end
+        tls_preset = Settings.tls_preset_normalize(tls_preset)
 
         authored = !sources.empty?
         # Read here, before `open_store`: a pipe that never ends must not be holding the
@@ -640,14 +655,12 @@ module Gori
           end
 
           abort "gori run repeater create: --target is required" if tgt_str.empty?
-          # Refused HERE, not left for the first send. An unknown preset applies nothing, so a
-          # session stored with one dials with gori's bare OpenSSL hello on every later send
-          # while `repeater list` and the TUI chip both name a browser — and unlike the
-          # destination table there is no startup warning to catch it.
-          if err = Settings.tls_preset_error(tls_preset)
-            abort "gori run repeater create: #{err}"
-          end
-          tls_preset = Settings.tls_preset_normalize(tls_preset)
+          # The preset was refused and normalized ABOVE, before the request read — it is an
+          # argv value, and nothing between here and there can change it. Refused at all (and
+          # not left for the first send) because an unknown preset applies nothing: a session
+          # stored with one dials with gori's bare OpenSSL hello on every later send while
+          # `repeater list` and the TUI chip both name a browser, and unlike the destination
+          # table there is no startup warning to catch it.
 
           pos = store.next_repeater_position
 

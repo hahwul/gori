@@ -118,7 +118,7 @@ module Gori
             abort "gori run cookie: too many arguments (one cookie)" if positional.size > 1
             v.strip
           elsif !STDIN.tty?
-            STDIN.gets_to_end.strip
+            read_stdin_fallback(STDIN, "gori run cookie", "cookie").strip
           else
             ""
           end

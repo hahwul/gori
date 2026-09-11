@@ -443,16 +443,42 @@ module Gori
       # between the check and the read. `File.read` then raises `File::AccessDeniedError` /
       # `File::NotFoundError`, and `File::Error < IO::Error` is re-raised by `Run.dispatch`
       # (which only absorbs EPIPE), so it escapes `CLI.run`'s `Gori::Error`-only rescue.
-      # Mirrors the guard `run/rewriter.cr`'s `read_stub_response` already had. `stdin:` is
-      # opt-in rather than the default so this stays a pure robustness change: only the one
-      # caller that already spelled `-` as stdin keeps that meaning, and the flags that used
-      # to reject `-` as an unreadable path go on rejecting it instead of quietly blocking
-      # on a terminal read.
-      private def self.read_input_file(path : String, what : String, *, stdin : Bool = false) : String
-        return STDIN.gets_to_end if stdin && path == "-"
+      # `run/rewriter.cr`'s `read_stub_response` reads through here for the same guard, rather
+      # than keeping the copy it was once credited with and never had: `File.read` on a
+      # DIRECTORY raises a bare `IO::Error` from `read(2)` (the `open(2)` succeeds), which a
+      # `File::Error` rescue does not catch — so `--response-file=/tmp` reached the operator
+      # as a twelve-frame backtrace. The rescue below is `IO::Error` for that reason: it is
+      # `File::Error`'s parent, so it still catches everything the narrower one did, plus the
+      # errnos that surface only once a byte is asked for.
+      #
+      # `stdin:` is opt-in rather than the default so this stays a pure robustness change:
+      # only the callers that already spelled `-` as stdin keep that meaning, and the flags
+      # that used to reject `-` as an unreadable path go on rejecting it.
+      #
+      # A PATH can name a terminal too — `--request-file /dev/stdin`, `--notes-file /dev/tty`,
+      # `/dev/fd/0` — and that road hangs and echoes exactly as `-` does, so the open below is
+      # checked with the same guard. It costs no extra open: `File.read` is this open and this
+      # `gets_to_end`, so a FIFO blocks where it always blocked and a regular file is
+      # unchanged.
+      #
+      # `noun` names what is being read and `flag` the option the operator typed, so the
+      # refusal says "the identity set" and `--identities=-` rather than "the input" and a
+      # placeholder. Both have defaults because nine of the eleven callers name a plain file
+      # path, where only the terminal sentence can ever use them.
+      private def self.read_input_file(path : String, what : String, *, stdin : Bool = false,
+                                       noun : String = "input", flag : String? = nil) : String
+        if stdin && path == "-"
+          return read_stdin_text(STDIN, what, noun, stdin_pipe_hint(what, flag: flag || "-"))
+        end
         abort "#{what}: not a readable file: #{path}" if File.directory?(path)
-        File.read(path)
-      rescue ex : File::Error
+        File.open(path) do |f|
+          if err = stdin_terminal_error(f, what: what, noun: noun,
+               hint: "#{path} names this terminal. Pass the path of a real file, or pipe the #{noun} in.")
+            abort err
+          end
+          f.gets_to_end
+        end
+      rescue ex : IO::Error
         abort "#{what}: cannot read '#{path}': #{ex.message}"
       end
 
@@ -463,12 +489,8 @@ module Gori
       # as its own octets rather than as U+FFFD. That is P7 besides: these are operator bytes,
       # and gori does not sanitize them.
       #
-      # No `STDIN.tty?` *guard*, unlike `fuzz_source`/`mine_source`/`sequence_source`. Their
-      # stdin road is IMPLICIT — the fallback when no source flag was passed — so without the
-      # guard a bare `gori run mine` would hang on a terminal. A flag NAMED by the operator
-      # makes blocking until EOF the answer to what they asked for. It does get a NOTICE,
-      # though: without one a forgotten pipe is indistinguishable from a hung command, and
-      # every other interactive read in gori announces itself first (`gori ca`).
+      # A TERMINAL is refused first (see `stdin_terminal_error`), so the read below is always
+      # a pipe, a redirect or a file — the three spellings that do not echo and do end.
       #
       # The rescue is the point of routing through here rather than a bare `io.gets_to_end`.
       # `Run.dispatch` re-raises any non-EPIPE `IO::Error` and `CLI.run` rescues only
@@ -476,15 +498,94 @@ module Gori
       # `Process.run` with no stdin pipe — reached the operator as a Crystal backtrace. Same
       # guard, and same reason for it, as `read_input_file`'s `File::Error` rescue.
       #
-      # `noun` names what is being read in both sentences, so each caller's prompt and refusal
-      # read like the flag the operator typed ("the request", "the notes").
-      private def self.read_stdin_text(io : IO, what : String, noun : String) : String
-        if io.is_a?(IO::FileDescriptor) && io.tty?
-          STDERR.puts "#{what}: reading the #{noun} from stdin — press ^D to finish"
+      # `noun` names what is being read in both sentences, so each caller's refusal reads like
+      # the flag the operator typed ("the request", "the notes").
+      private def self.read_stdin_text(io : IO, what : String, noun : String, hint : String) : String
+        if err = stdin_terminal_error(io, what: what, noun: noun, hint: hint)
+          abort err
         end
         io.gets_to_end
       rescue ex : IO::Error
         abort "#{what}: cannot read the #{noun} from stdin: #{ex.message}"
+      end
+
+      # The IMPLICIT stdin road's read: no terminal guard — a terminal there means "no source
+      # was given", and each caller already answers that with its own usage line — but the
+      # same `IO::Error` rescue the explicit doors get. `Run.dispatch` re-raises any non-EPIPE
+      # `IO::Error` and `CLI.run` rescues only `Gori::Error`, so fd 0 closed by a cron or
+      # systemd unit (`gori run notes create 0<&-`) reached the operator as a Crystal
+      # backtrace on all seven of these while the five flag doors printed a sentence.
+      #
+      # `noun` names what was being read, so the refusal reads like the command that spoke.
+      def self.read_stdin_fallback(io : IO, what : String, noun : String) : String
+        io.gets_to_end
+      rescue ex : IO::Error
+        abort "#{what}: cannot read the #{noun} from stdin: #{ex.message}"
+      end
+
+      # nil when `io` is the pipe/redirect an explicit stdin flag (or a `-` path) asks for;
+      # the sentence to `abort` with when it is a TERMINAL instead. Public so a spec can pin
+      # both arms — the `abort` above cannot be driven in-process.
+      #
+      # This REVERSES the rule `--request-stdin` shipped with (#1001): "a flag NAMED by the
+      # operator makes blocking until EOF the answer to what they asked for", a `^D` notice,
+      # and then the read. A terminal is not a quiet pipe with a human on the other end
+      # (#1034), and all three of its differences bite exactly this door:
+      #
+      #  * The line discipline ECHOES every byte back. The whole raw request — `Cookie`,
+      #    `Authorization`, a PII body — lands in the scrollback, and under a PTY-driven
+      #    harness in the captured transcript. That is the leak the flag EXISTS to close: it
+      #    keeps those same bytes out of the process listing and the shell history.
+      #  * `^D` is not EOF. In canonical mode it FLUSHES the pending line, so a request with
+      #    no trailing newline takes two — one to deliver the last line, one on the now-empty
+      #    line to end the read — and a driver that sends one waits forever.
+      #  * `MAX_CANON` caps a line at 1024/4096 bytes, so a long header or a single-line body
+      #    is truncated by the terminal before gori is handed an octet.
+      #
+      # Driving termios is not out of reach — `Termisu::Termios` already puts the operator's
+      # pane in raw mode, and its `Terminal::Mode.password` clears ECHO — but it fixes only
+      # the FIRST bullet. Canonical mode still flushes on `^D` and still truncates at
+      # `MAX_CANON`, and raw mode removes keyboard EOF altogether, so there is no termios
+      # setting under which a terminal delivers a byte-exact multi-line request and then ends.
+      # A door that cannot be made to work is refused rather than half-built (P0), with the
+      # safe spellings named. Nothing a script does changes: a pipe and a `< file` redirect
+      # are both non-tty file descriptors and still read byte-for-byte.
+      #
+      # The refusal is only as good as its `abort`, so this returns the sentence and the
+      # CALLER ends the command: `read_stdin_text` is the one door, and `gets_to_end` is
+      # unreachable past it.
+      #
+      # The IMPLICIT stdin roads (`fuzz_source`/`mine_source`/`sequence_source`, `decoder`,
+      # `jwt`, `cookie`, `notes`) keep their own `unless STDIN.tty?` guard: theirs is a
+      # fallback rather than a flag, and a terminal there means "no source was given", not
+      # "the operator asked for this one".
+      def self.stdin_terminal_error(io : IO, *, what : String, noun : String,
+                                    hint : String) : String?
+        return nil unless io.is_a?(IO::FileDescriptor) && io.tty?
+        "#{what}: refusing to read the #{noun} from a terminal — a terminal echoes it back " \
+        "into the scrollback (a captured PTY transcript with it), and ^D after a partial " \
+        "line flushes instead of ending the read. #{hint}"
+      end
+
+      # The "and here is the spelling that works" half of that refusal. Every door offers the
+      # pipe and the `< FILE` redirect; `file_flag` is the third road, for a flag that has a
+      # file-reading sibling. A `-` door passes none — there the path the `-` stands in for IS
+      # the alternative — and that is the only difference between the two shapes, so one
+      # builder writes both: a refusal that names two of three roads teaches the operator that
+      # the third is unsupported.
+      #
+      # `flag` is NAMED inside both examples rather than left under the `…`. An operator who
+      # follows `producer | gori run authorize …` verbatim drops `--identities=-`, and
+      # `gori run authorize` without it is not the same command — it replays live traffic
+      # against the project's SAVED identity set and reports success; `gori run sequence`
+      # without `--tokens -` falls through to the implicit stdin road, where the same bytes
+      # become a request template that is then SENT. A hint for a refusal must not be
+      # followable into a different command, least of all one that dials a target.
+      def self.stdin_pipe_hint(what : String, *, flag : String, file_flag : String? = nil,
+                               producer : String = "producer") : String
+        tail = file_flag ? "or pass #{file_flag}=FILE." : "or pass the file's path instead of `-`."
+        "Pipe it in (`#{producer} | #{what} … #{flag}`), redirect a file " \
+        "(`#{what} … #{flag} < FILE`), #{tail}"
       end
 
       # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;

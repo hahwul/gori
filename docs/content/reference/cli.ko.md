@@ -321,12 +321,31 @@ generate-request | gori run repeater create --target https://api.example.com --r
 없는 세션을 만드는 대신 거부됩니다. `--flow`는 이 셋 중 하나가 아니며 — 출처 역할도 하므로 —
 셋 중 어느 하나와도 함께 쓸 수 있습니다.
 
+`--request-stdin`은 파이프나 리다이렉트(`--request-stdin < req.http`)를 읽으며, 터미널은
+거부합니다. 터미널은 입력한 바이트를 그대로 되돌려 출력하므로 — `Cookie`와 `Authorization`을
+포함한 원시 요청 전체가 스크롤백에, 그리고 PTY로 캡처한 로그에 남습니다. 이는 이 플래그가
+프로세스 목록과 셸 히스토리에서 막으려던 바로 그 노출입니다. 또한 `^D`는 EOF가 아니라 대기 중인
+줄을 내보내기만 하므로, 끝에 개행이 없는 요청은 `^D`가 두 번 필요하고 한 번만 보내는 PTY 자동화는
+무한히 대기합니다.
+
+같은 규칙은 operator가 **플래그로 지정한** 모든 stdin 경로에 적용됩니다 — `issues --notes-stdin`,
+그리고 stdin을 `-`로 쓰는 네 가지(`sequence --tokens -`, `authorize --identities=-`,
+`rewriter --response-file=-`, 그리고 `--…-file` 계열 플래그의 `-`) — 여기에 터미널로 해석되는
+**경로**(tty에서의 `--request-file /dev/stdin` 등)까지 포함됩니다. **워드리스트** 경로도 포함됩니다 — `fuzz -w`, `mine --wordlist`,
+`discover --wordlist`는 `/dev/tty`(그리고 tty 상태의 `/dev/stdin`)를 무한 대기 대신
+`wordlist error: … is a terminal, not a file`로 거부합니다.
+
+반대로 플래그 없이 gori가 fallback으로 읽는 stdin 경로(`fuzz`, `mine`, `sequence`, `decoder`,
+`jwt`, `cookie`, `notes`)는 해당하지 않습니다. 거기서 터미널은 "소스를 주지 않았다"는 뜻이고, 각
+명령이 자체 usage를 출력합니다. 다만 이 경로들도 이제 읽을 수 없는 stdin(cron/systemd가 fd 0을 닫은
+경우)을 backtrace가 아니라 한 문장으로 보고합니다 — 플래그 도어가 이미 그랬던 것처럼.
+
 | Option | Description |
 |--------|-------------|
 | `-t`, `--target=URL` | 대상 URL (`--flow`로 복제하는 경우가 아니면 필수) |
 | `-f`, `--request-file=FILE` | FILE에서 원시 HTTP 요청을 읽음 (`--request-raw` / `--request-stdin`과 함께 쓸 수 없음) |
 | `-r`, `--request-raw=RAW` | 원시 HTTP 요청 문자열 그대로 (`--request-file` / `--request-stdin`과 함께 쓸 수 없음) |
-| `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 요청을 인자 벡터 밖에 둡니다 (`--request-file` / `--request-raw`과 함께 쓸 수 없음) |
+| `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 요청을 인자 벡터 밖에 둡니다. 파이프나 리다이렉트가 필요하며 터미널은 거부됩니다 (`--request-file` / `--request-raw`과 함께 쓸 수 없음) |
 | `--flow=ID` | 캡처한 플로우에서 요청 / 대상 / HTTP/2 복제 |
 | `--name=NAME`, `--tags=TAGS` | 사용자 지정 탭 이름, 그리고 TUI 하위 탭 라벨이 되는 자유 텍스트 태그 |
 | `--http2` / `--http1` (`--no-http2`) | 프로토콜 선택. `--http1`은 h2로 캡처된 `--flow`를 덮어씁니다 |
@@ -447,7 +466,7 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | Option | Description |
 |--------|-------------|
 | `--flow=ID`, `--request=FILE`, stdin | 라이브 리플레이의 요청 소스(또는 맨 앞의 `<flow-id>`) |
-| `--tokens=FILE` | 붙여넣은 토큰 목록 분석(한 줄에 하나, `-`=stdin), 네트워크 없음 |
+| `--tokens=FILE` | 붙여넣은 토큰 목록 분석(한 줄에 하나, `-`=stdin — 파이프나 리다이렉트가 필요하며 터미널은 거부됨), 네트워크 없음 |
 | 토큰 위치(하나만 선택) | `--cookie=NAME`, `--header=NAME`, `--regex=RE`, `--position=A:B`, `--jsonpath=EXPR` |
 | `--count=N` | 목표 토큰 개수(기본값 500) |
 | `--target`, `--http2`, `--sni`, `-k` | 트랜스포트(`--request`/stdin에는 target 필요) |
@@ -471,7 +490,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 | `<flow-id>…`, `--flow=ID` | 재전송할 캡처 플로우(지정한 순서대로, 반복 가능) |
 | `-q`, `--query=QL` | QL 쿼리에 매칭되는 플로우도 재전송(id 뒤에 이어 붙습니다) |
 | `-n`, `--limit=N` | `--query`가 기여할 수 있는 최대 플로우 수(기본값 50). 한 행이 *아이덴티티 수만큼*의 요청이 됩니다 |
-| `--identities=FILE` | 아이덴티티 집합 JSON(`-`=stdin). 기본값은 프로젝트에 저장된 집합 |
+| `--identities=FILE` | 아이덴티티 집합 JSON(`-`=stdin — 파이프나 리다이렉트가 필요하며 터미널은 거부됨). 기본값은 프로젝트에 저장된 집합 |
 | `--unsafe-methods` | `POST`/`PUT`/`PATCH`/`DELETE`도 재전송합니다. 아이덴티티마다 부수 효과가 다시 실행됩니다 |
 | `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 전송(샌드박스와 exclude는 그대로 적용) |
 | `--timeout=SEC`, `-k`/`--insecure-upstream` | 요청당 연결 + 유휴 타임아웃, 업스트림 TLS 검증 생략 |
@@ -817,7 +836,7 @@ gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-
 report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
 
-`--notes`, `--notes-file`, `--notes-stdin`은 함께 쓸 수 없고, 본문은 바이트 그대로 읽힙니다 — 여러 줄 UTF-8도 CRLF도 보존됩니다(프로젝트 env var로 바인딩된 값은 다른 이슈 필드와 마찬가지로 `$NAME`으로 마스킹됩니다). 파일이나 파이프로 넘긴 긴 작성물은 프로세스 목록과 셸 히스토리에 남지 않습니다. `create`에서는 이슈와 한 트랜잭션에 기록되므로 스크립트가 create 후 update를 이어 붙일 필요가 없습니다. 노트를 비울 때는 `update`에 `--notes ''`를 쓰고, 아무 바이트도 주지 않은 파일이나 파이프는 거부됩니다 — 리포트 생성기가 죽었다고 해서 기존 작성물이 조용히 지워지면 안 되기 때문입니다.
+`--notes`, `--notes-file`, `--notes-stdin`은 함께 쓸 수 없고, 본문은 바이트 그대로 읽힙니다 — 여러 줄 UTF-8도 CRLF도 보존됩니다(프로젝트 env var로 바인딩된 값은 다른 이슈 필드와 마찬가지로 `$NAME`으로 마스킹됩니다). 파일이나 파이프로 넘긴 긴 작성물은 프로세스 목록과 셸 히스토리에 남지 않습니다. `create`에서는 이슈와 한 트랜잭션에 기록되므로 스크립트가 create 후 update를 이어 붙일 필요가 없습니다. 노트를 비울 때는 `update`에 `--notes ''`를 쓰고, 아무 바이트도 주지 않은 파일이나 파이프는 거부됩니다 — 리포트 생성기가 죽었다고 해서 기존 작성물이 조용히 지워지면 안 되기 때문입니다. `--notes-stdin`도 `--request-stdin`과 같은 이유로 파이프나 리다이렉트(`--notes-stdin < notes.md`)를 요구하고 터미널은 거부합니다.
 
 | Option | Description |
 |--------|-------------|
@@ -890,7 +909,7 @@ gori run rewriter rm 3
 | `--target=SIDE` | `request`(기본값) 또는 `response` |
 | `--part=PART` | `head`(기본값), `body`, 또는 `ws`(WebSocket 메시지). `replace`와 `pipe`에서만 의미가 있음 |
 | `--match=MODE` | `literal`(기본값) 또는 `regex`. `replace`, `pipe`, `short_circuit`에 적용됩니다. 정규식 치환은 `$1`, `$2`를 쓰고 `$$`는 리터럴 `$` |
-| `--response-file=PATH` | `short_circuit`: 미리 준비한 응답을 PATH에서 읽음(`-`는 stdin) |
+| `--response-file=PATH` | `short_circuit`: 미리 준비한 응답을 PATH에서 읽음(`-`는 stdin — 파이프나 리다이렉트가 필요하며 터미널은 거부됨) |
 | `--body-file=PATH` | `short_circuit`: PATH를 응답 본문으로 제공하며, 파일이 바뀌면 다시 읽음 |
 | `-f`, `--find=FIND` | 필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름 |
 | `-v`, `--value=VALUE` | 치환할 텍스트, 헤더 값, 또는 `--op=pipe`일 때 실행할 명령. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |

@@ -94,7 +94,7 @@ module Gori
         parser.parse(args)
 
         body = text || (positional.empty? ? nil : positional.join(' '))
-        body ||= STDIN.gets_to_end unless STDIN.tty?
+        body ||= read_stdin_fallback(STDIN, "gori run notes", "note text") unless STDIN.tty?
         abort "gori run notes create: no note text (use --text, positional args, or pipe via STDIN)" if body.nil? || body.empty?
 
         store = open_store(resolve_read_project(project_name, db_path))
