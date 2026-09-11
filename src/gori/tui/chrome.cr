@@ -25,6 +25,7 @@ module Gori::Tui
       {:probe, "Probe"},
       {:authorize, "Authorize"},
       {:issues, "Issues"},
+      {:evidence, "Evidence"},
       {:notes, "Notes"},
       {:help, "Help"},
     ]
@@ -32,7 +33,7 @@ module Gori::Tui
     # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Only
     # affects reconcile's append path — once the user saves, tab_prefs is explicit and
     # this no longer applies.
-    DEFAULT_HIDDEN = [:miner, :sequencer, :colormarker, :authorize, :cookie]
+    DEFAULT_HIDDEN = [:miner, :sequencer, :colormarker, :authorize, :cookie, :evidence]
 
     # The human sidebar label for a tab symbol (the catalog name), used off the render
     # path too — e.g. the terminal-window title. Falls back to a capitalized symbol for

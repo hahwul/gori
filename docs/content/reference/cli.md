@@ -907,20 +907,23 @@ A pointer whose target was pruned lists as `(stale)` rather than disappearing, s
 
 ### run evidence
 
-An issue's **frozen** evidence: the immutable copy of one exchange, taken from a captured Flow or a Repeater tab at the moment it proved the finding. `links` is the pointer; this is the bytes. The Repeater's next send and History retention cannot reach a copy, so freeze once when a response confirms a finding and again after the retest — the issue keeps both.
+An Issue's **frozen** evidence: the immutable copy of one exchange, taken from a captured Flow or a Repeater tab at the moment it proved the finding. `links` is the live-source pointer; this is the archived bytes. The Repeater's next send and History retention cannot reach a copy, so freeze once when a response confirms a finding and again after the retest. One snapshot can be linked to several Issues, and removing its last Issue link leaves it orphaned until it is linked again or explicitly deleted.
 
 ```bash
 gori run evidence freeze --issue=7 --ref=repeater --ref-id=3       # copy + the live link
 gori run evidence freeze --issue=7 --ref=flow --ref-id=42 --no-link
 gori run evidence --issue=7                                        # list: source, time, status, size, SHA-256
+gori run evidence                                                  # the whole project archive, orphans included
 gori run evidence show 12                                          # the copy, credentials redacted
 gori run evidence show 12 --include-sensitive --format=json
+gori run evidence link 12 --issue=9                                # add another Issue membership
+gori run evidence unlink 12 --issue=7                              # snapshot remains if orphaned
 gori run evidence delete 12
 ```
 
 | Option | Description |
 | -------- | ------------- |
-| `--issue=N` | The issue that owns the copy. Required on `freeze` and `list` |
+| `--issue=N` | The Issue to link. Required on `freeze`, `link` and `unlink`; on `list` it narrows to one Issue's copies, and omitting it lists the whole project archive (newest first, orphans included) |
 | `--ref=KIND` | Source kind for `freeze`: `flow` or `repeater` — a fuzz or miner session has no single exchange |
 | `--ref-id=M` | Source id for `freeze` |
 | `--no-link` | `freeze` only copies; by default it also files the live link `links add` would, in the same transaction |

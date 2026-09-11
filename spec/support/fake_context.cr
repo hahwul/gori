@@ -407,6 +407,14 @@ class FakeExecContext < Gori::Verb::ExecContext
   property? issue_related_freezable : Bool = false
   property? issue_related_frozen : Bool = false
 
+  property selected_evidence : Int64? = nil
+  property? evidence_has_links : Bool = false
+  property? evidence_source_available : Bool = false
+
+  def selected_evidence_id : Int64?
+    @selected_evidence
+  end
+
   # The four linkable-entity ids, settable so both sides of the link.* gates can be
   # exercised (a verb is offered only once the entity has a persisted row to point at).
   property link_flow : Int64? = nil

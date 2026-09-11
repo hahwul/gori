@@ -1,3 +1,6 @@
+require "../../redact/policy"
+require "../../redact/wire"
+
 # Frozen issue evidence (#1038) — reopens Gori::Tui::Runner (see tui/runner.cr for the
 # event loop, Host facade, overlays, and rendering). Every entry point that freezes an
 # exchange lands here: the Issues detail's RELATED row, the LINKS card's `f`, the
@@ -53,14 +56,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @toast = "select a FROZEN row to delete"
       return
     end
+    linked = evidence_link_summary(m)
     confirm("DELETE FROZEN EVIDENCE",
       "Delete frozen evidence ##{m.id} (#{Evidence.label(m)},\n" \
-      "#{m.source_label}, #{Fmt.size(m.bytes)}) from issue ##{issue.id}?\n\n" \
+      "#{m.source_label}, #{Fmt.size(m.bytes)})?\n\n" \
+      "Affected Issue links: #{linked}\n\n" \
       "The live #{m.source_kind.tag} is not touched. This can't be undone.",
       confirm_label: "delete") do
       if @session.store.delete_evidence(m.id)
         refresh_issue_evidence(issue.id, nil)
         refresh_evidence_markers
+        refresh_evidence_availability
         # No bytes, no url: the feed must not carry what the copy held.
         log_evidence_event("issue ##{issue.id}: deleted frozen evidence ##{m.id} (#{m.source_label})")
         @toast = "frozen evidence ##{m.id} deleted"
@@ -70,9 +76,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
-  # The read-only viewer. `y` copies the shown pane through the same clipboard path the
-  # History detail uses — the bytes are the operator's own capture, and the copy is the
-  # decoded text the card shows.
+  # The read-only viewer. The card itself never edits or sends; its copy callback applies
+  # the same ambient #1035 body policy as the Evidence tab's copy/export actions.
   def open_evidence_viewer(id : Int64) : Nil
     ev = @session.store.get_evidence(id)
     unless ev
@@ -81,12 +86,243 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     viewer = EvidenceViewer.new(ev)
-    viewer.on_copy = ->(text : String) {
+    viewer.on_copy = ->(_text : String) {
+      clean, count = sanitized_evidence(ev)
+      text = evidence_pane_text(clean, viewer.pane)
       written = Clipboard.copy(text)
-      @toast = "copied frozen #{viewer.pane} (#{written}b)#{Clipboard.note(written, text)}"
+      marked = count ? " · SANITIZED (#{count})" : ""
+      @toast = "copied frozen #{viewer.pane} (#{written}b)#{marked}#{Clipboard.note(written, text)}"
       nil
     }
     open_overlay(viewer)
+  end
+
+  # --- project-wide Evidence tab -------------------------------------------
+
+  def selected_evidence_id : Int64?
+    evidence_controller.view.selected_id
+  end
+
+  def evidence_has_links? : Bool
+    evidence_controller.view.selected.try(&.issue_ids.empty?) == false
+  end
+
+  def evidence_source_available? : Bool
+    meta = evidence_controller.view.selected || return false
+    case meta.source_kind
+    when .flow?     then !@session.store.flow_row(meta.source_id).nil?
+    when .repeater? then !@session.store.get_repeater(meta.source_id).nil?
+    else                 false
+    end
+  end
+
+  def evidence_open : Nil
+    id = selected_evidence_id || return
+    open_evidence_viewer(id)
+  end
+
+  def evidence_filter : Nil
+    evidence_controller.view.start_query
+  end
+
+  def evidence_compare : Nil
+    view = evidence_controller.view
+    previous = view.compare_anchor
+    pair = view.compare_step
+    unless pair
+      @toast = previous ? "evidence comparison cancelled" : "evidence ##{view.compare_anchor} pinned as A — choose B and press c"
+      return
+    end
+    first = @session.store.get_evidence(pair[0])
+    second = @session.store.get_evidence(pair[1])
+    unless first && second
+      @toast = "one frozen copy is gone — choose the pair again"
+      view.clear_compare
+      view.reload(@session.store)
+      return
+    end
+    first_before = first.meta.created_at < second.meta.created_at ||
+                   (first.meta.created_at == second.meta.created_at && first.meta.id < second.meta.id)
+    a, b = first_before ? {first, second} : {second, first}
+    comparer_controller.view.set_pair(ComparerSlot.from_evidence(a), ComparerSlot.from_evidence(b))
+    goto_tab(:comparer)
+    @toast = "comparer: evidence ##{a.meta.id} → ##{b.meta.id}"
+  end
+
+  def evidence_open_issue : Nil
+    meta = evidence_controller.view.selected || return
+    ids = meta.issue_ids.select { |id| !@session.store.get_issue(id).nil? }
+    return (@toast = "linked Issues are gone — this evidence is now orphaned") if ids.empty?
+    return open_evidence_issue(ids.first) if ids.size == 1
+    open_evidence_issue_picker("OPEN LINKED ISSUE", ids) { |id| open_evidence_issue(id) }
+  end
+
+  def evidence_open_source : Nil
+    meta = evidence_controller.view.selected || return
+    navigate_link_ref(meta.source_kind, meta.source_id)
+  end
+
+  def evidence_duplicate_repeater : Nil
+    ev = selected_evidence || return
+    request = join_message(ev.request_head, ev.request_body)
+    repeater_controller.repeater_from_request(ev.meta.url, String.new(request),
+      ev.meta.protocol == "HTTP/2", nil, name: "evidence ##{ev.meta.id}")
+    # A WebSocket copy is its HANDSHAKE (the frame transcript was never frozen), so the tab
+    # this opens is an ordinary HTTP one — `repeater_flow` seeds a WS tab from a capture's
+    # messages, and a snapshot has none to seed from. Say which, rather than letting the
+    # operator press ^R expecting the socket back.
+    handshake = Repeater::WsEngine.replayable?(String.new(ev.request_head))
+    @toast = if handshake
+               "evidence ##{ev.meta.id} duplicated as the HANDSHAKE — a frozen copy carries no frames; nothing was sent"
+             else
+               "evidence ##{ev.meta.id} duplicated into Repeater — nothing was sent"
+             end
+  end
+
+  def evidence_link_issue : Nil
+    meta = evidence_controller.view.selected || return
+    ids = @session.store.issues.map(&.id).reject { |id| meta.issue_ids.includes?(id) }
+    return (@toast = "this evidence is already linked to every Issue") if ids.empty?
+    open_evidence_issue_picker("LINK EVIDENCE ##{meta.id}", ids) do |issue_id|
+      if @session.store.link_evidence(meta.id, issue_id)
+        evidence_controller.view.reload(@session.store)
+        refresh_issue_evidence(issue_id, nil)
+        @toast = "evidence ##{meta.id} linked to Issue ##{issue_id}"
+      else
+        @toast = "link failed — the evidence or Issue is gone"
+      end
+    end
+  end
+
+  def evidence_unlink_issue : Nil
+    meta = evidence_controller.view.selected || return
+    ids = meta.issue_ids.select { |id| !@session.store.get_issue(id).nil? }
+    return (@toast = "this evidence has no Issue links") if ids.empty?
+    open_evidence_issue_picker("UNLINK EVIDENCE ##{meta.id}", ids) do |issue_id|
+      if @session.store.unlink_evidence(meta.id, issue_id)
+        evidence_controller.view.reload(@session.store)
+        refresh_issue_evidence(issue_id, nil)
+        @toast = "evidence ##{meta.id} unlinked from Issue ##{issue_id}#{ids.size == 1 ? " — now orphaned" : ""}"
+      else
+        @toast = "unlink failed — the link is already gone"
+      end
+    end
+  end
+
+  def evidence_delete : Nil
+    meta = evidence_controller.view.selected || return
+    confirm("DELETE FROZEN EVIDENCE",
+      "Delete evidence ##{meta.id} (#{Evidence.label(meta)}, #{Fmt.size(meta.bytes)})?\n\n" \
+      "Affected Issue links: #{evidence_link_summary(meta)}\n\n" \
+      "Its hashes and frozen bytes will be removed. The original #{meta.source_kind.tag}, if present, is not touched.",
+      confirm_label: "delete") do
+      if @session.store.delete_evidence(meta.id)
+        evidence_controller.view.reload(@session.store)
+        refresh_evidence_markers
+        # Deleting the LAST copy takes the tab with it (the archive is what the tab is), and
+        # this delete's own toast would otherwise overwrite the one that says so — leaving
+        # the operator standing in Issues with no account of the tab that vanished.
+        refresh_evidence_availability
+        log_evidence_event("deleted frozen evidence ##{meta.id} (#{meta.source_label})")
+        @toast = if @evidence_available
+                   "frozen evidence ##{meta.id} deleted"
+                 else
+                   "frozen evidence ##{meta.id} deleted — the archive is empty, so Evidence closes until the next freeze"
+                 end
+      else
+        @toast = "could not delete (store busy) — nothing was changed, try again"
+      end
+    end
+  end
+
+  def evidence_export : Nil
+    ev = selected_evidence || return
+    open_export(:evidence_json, File.join(Dir.current, "evidence-#{ev.meta.id}.json")) do |path|
+      clean, count = sanitized_evidence(ev)
+      File.write(path, MCP::Serialize.evidence_json(clean, include_sensitive: false))
+      marked = count ? " · SANITIZED (#{count})" : ""
+      @toast = "exported evidence ##{ev.meta.id}#{marked} · #{path}"
+      true
+    rescue ex
+      @toast = "evidence export failed: #{ex.message}"
+      false
+    end
+  end
+
+  private def evidence_copy_as_menu : {String, Array(CopyMenu::Option)}
+    ev = selected_evidence || return {"COPY EVIDENCE AS", [] of CopyMenu::Option}
+    clean, count = sanitized_evidence(ev)
+    request = String.new(join_message(clean.request_head, clean.request_body))
+    options = CopyMenu.request_options(request, clean.meta.url)
+    if head = clean.response_head
+      response = String.new(join_message(head, clean.response_body))
+      options << CopyMenu::Option.new("Raw response", 's', response)
+      options << CopyMenu::Option.new("Req + Res pair", 'p', "#{request}\n\n#{response}")
+    end
+    {CopyMenu.sanitized_title("COPY EVIDENCE AS", count), options}
+  end
+
+  private def selected_evidence : Store::IssueEvidence?
+    selected_evidence_id.try { |id| @session.store.get_evidence(id) }
+  end
+
+  private def evidence_link_summary(meta : Store::IssueEvidenceMeta) : String
+    return "none (orphaned)" if meta.issue_ids.empty?
+    meta.issue_ids.map do |id|
+      title = @session.store.get_issue(id).try(&.title).try { |s| " #{s.scrub.gsub(/\s+/, " ")}" } || ""
+      "##{id}#{title}"
+    end.join(", ")
+  end
+
+  private def open_evidence_issue(id : Int64) : Nil
+    unless issues_controller.view.open_detail_id(id, @session.store)
+      @toast = "Issue ##{id} is gone"
+      return
+    end
+    goto_tab(:issues)
+  end
+
+  # `j`/`k` are left out on purpose: ChoicePicker tries a row mnemonic BEFORE its vim nav,
+  # so binding them would take the two keys a long Issue list is scrolled with. Rows past
+  # the end of this list are keyless and picked with ↑/↓ + ↵.
+  EVIDENCE_PICK_KEYS = (('1'..'9').to_a + ('a'..'z').to_a.reject { |c| c == 'j' || c == 'k' })
+
+  private def open_evidence_issue_picker(title : String, ids : Array(Int64), &picked : Int64 -> Nil) : Nil
+    issues = ids.compact_map { |id| @session.store.get_issue(id) }
+    return (@toast = "no Issues available") if issues.empty?
+    choices = issues.map_with_index do |issue, i|
+      # NOT `title` — a block assigning to the parameter's name rewrites it, and the card
+      # opened headed by the LAST issue in the list instead of what it does.
+      label = issue.title.scrub.gsub(/\s+/, " ")
+      ChoicePicker::Choice.new("##{issue.id} [#{issue.status.label}] #{label}",
+        EVIDENCE_PICK_KEYS[i]?, Theme.text, i)
+    end
+    picker = ChoicePicker.new(title, choices, -1, :evidence_issue)
+    open_choice_picker(picker) do |choice|
+      issues[choice.selected_value]?.try { |issue| picked.call(issue.id) }
+    end
+  end
+
+  private def sanitized_evidence(ev : Store::IssueEvidence) : {Store::IssueEvidence, Int32?}
+    matcher = Redact::Policy.ambient(@session.store) || return {ev, nil}
+    request = Redact::Wire.message(ev.request_head, ev.request_body, matcher)
+    response = Redact::Wire.message(ev.response_head, ev.response_body, matcher)
+    clean = Store::IssueEvidence.new(ev.meta, request.head, request.body,
+      ev.response_head.nil? ? nil : response.head, response.body)
+    {clean, request.count + response.count}
+  end
+
+  private def evidence_pane_text(ev : Store::IssueEvidence, pane : Symbol) : String
+    head, body = pane == :request ? {ev.request_head.as(Bytes?), ev.request_body} : {ev.response_head, ev.response_body}
+    EvidenceViewer.pane_text(head, body)
+  end
+
+  private def join_message(head : Bytes, body : Bytes?) : Bytes
+    return head unless body && !body.empty?
+    io = IO::Memory.new(head.size + body.size)
+    io.write(head)
+    io.write(body)
+    io.to_slice
   end
 
   # --- the LINKS card's `f` -------------------------------------------------
@@ -243,6 +479,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       id, status = @session.store.freeze_evidence(issue_id, snap, link: link)
       return {ids, freeze_refusal(issue_id, status)} unless status.ok?
       ids << id
+      refresh_evidence_availability
       log_evidence_frozen(issue_id, id, snap)
     end
     {ids, nil}

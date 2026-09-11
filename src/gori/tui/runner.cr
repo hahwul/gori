@@ -19,6 +19,7 @@ require "./controllers/intercept_controller"
 require "./controllers/notes_controller"
 require "./controllers/history_controller"
 require "./controllers/issues_controller"
+require "./controllers/evidence_controller"
 require "./controllers/probe_controller"
 require "./controllers/project_controller"
 require "./controllers/repeater_controller"
@@ -66,6 +67,7 @@ require "./name_prompt_overlay"
 require "./links_overlay"
 require "./link_picker"
 require "./evidence_viewer"
+require "./evidence_view"
 require "../links"
 require "../notes"
 require "./settings_view"
@@ -163,8 +165,9 @@ module Gori::Tui
       @space_menu = SpaceMenu.new(@session.registry)
       # Land on the home tab, but never on a hidden one (settings:tabs may hide Project;
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
-      vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
-      @active_tab = vis.includes?(:project) ? :project : vis.first
+      @evidence_available = @session.store.count_evidence > 0
+      vis = available_visible_tabs(Chrome.visible_tabs(Settings.tab_prefs)).map(&.first)
+      @active_tab = vis.includes?(:project) ? :project : (vis.first? || :project)
       # Custom Colormarker colours are absolute hexes (unlike the theme-relative built-ins), so
       # the render-side resolver keeps its own name→hue map. Prime it from settings now, and
       # re-sync it whenever the colour set changes (the data-version poll below, keyed on the
@@ -339,6 +342,7 @@ module Gori::Tui
         NotesController.new(self),
         HistoryController.new(self),
         IssuesController.new(self),
+        EvidenceController.new(self),
         ProbeController.new(self),
         ProjectController.new(self),
         RepeaterController.new(self),
@@ -397,6 +401,10 @@ module Gori::Tui
 
     private def issues_controller : IssuesController
       @tabs[:issues].as(IssuesController)
+    end
+
+    private def evidence_controller : EvidenceController
+      @tabs[:evidence].as(EvidenceController)
     end
 
     private def probe_controller : ProbeController
@@ -1046,6 +1054,7 @@ module Gori::Tui
     # store-backed views. Active-tab reloads use id/path soft-anchors; Repeater/Notes
     # soft-merge and skip dirty buffers so session UI is not clobbered.
     private def apply_external_change : Nil
+      refresh_evidence_availability
       # Scope has no dirty-edit-buffer concept to protect (add/remove/toggle write straight
       # through to the store), so it's always safe to refresh in place here — unlike a
       # controller with an open, unsaved editor. This is what keeps the Sitemap's in-scope
@@ -1957,6 +1966,8 @@ module Gori::Tui
         # it now offers the target set's formats — one flow's single-message list, or the
         # set-shaped urls/hosts/curl/raw for a mark set (#442).
         @overlay.detail? ? history_controller.detail_copy_as_menu : history_controller.list_copy_as_menu(history_target_flow_ids)
+      when :evidence
+        evidence_copy_as_menu
       else
         {"COPY AS", [] of CopyMenu::Option}
       end
@@ -2092,7 +2103,7 @@ module Gori::Tui
     # therefore hide the tab you are standing on). Use the GENUINE visibility (no force:) for
     # this decision — effective_tabs force-includes the active tab, which would mask the hide.
     private def settle_hidden_active_tab : Nil
-      vis = Chrome.visible_tabs(Settings.tab_prefs)
+      vis = available_visible_tabs(Chrome.visible_tabs(Settings.tab_prefs))
       return if vis.any? { |(s, _)| s == @active_tab }
       # Persist the outgoing tab's dirty buffer before snapping off — @active_tab still
       # names the tab being hidden here. flush_active_tab_edits covers all hideable tabs
@@ -2458,6 +2469,8 @@ module Gori::Tui
       # One reconcile per frame: the menu strip AND the ⋯ hidden count both derive from the
       # same tab reconcile — split_tabs computes both in a single pass (was two per frame).
       vis_tabs, hid_tabs = Chrome.split_tabs(Settings.tab_prefs, force: @active_tab)
+      vis_tabs = available_visible_tabs(vis_tabs)
+      hid_tabs = available_tabs(hid_tabs)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
@@ -2513,6 +2526,8 @@ module Gori::Tui
         authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
       Chrome.render_rule(screen, layout.rule)
       vis_tabs, hid_tabs = Chrome.split_tabs(Settings.tab_prefs, force: @active_tab)
+      vis_tabs = available_visible_tabs(vis_tabs)
+      hid_tabs = available_tabs(hid_tabs)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
@@ -3227,6 +3242,7 @@ module Gori::Tui
     # view_focus_first (which would reload/reset). For ^R/^N-style "open this and land
     # in it" jumps that manage their own view state.
     def goto_tab(tab : Symbol) : Nil
+      return unavailable_evidence_tab if tab == :evidence && !@evidence_available
       flush_active_tab_edits # cross-tab "open this and land in it" jumps must persist the outgoing edit too
       @active_tab = tab
       @focus = :body
@@ -3992,6 +4008,7 @@ module Gori::Tui
     end
 
     def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil
+      return unavailable_evidence_tab if tab == :evidence && !@evidence_available
       flush_active_tab_edits
       @active_tab = tab
       @focus = focus
@@ -4006,7 +4023,7 @@ module Gori::Tui
     # active tab force-included even if hidden (so a cross-tab jump to a hidden tab still
     # renders + highlights). The single source the menu render, click hit-test, and nav read.
     private def effective_tabs : Array({Symbol, String})
-      Chrome.visible_tabs(Settings.tab_prefs, force: @active_tab)
+      available_visible_tabs(Chrome.visible_tabs(Settings.tab_prefs, force: @active_tab))
     end
 
     # Positional number-key target: focus the Nth (1-based) VISIBLE tab — the order shown
@@ -4062,7 +4079,36 @@ module Gori::Tui
     # The tabs hidden from the bar right now — the ⋯ dropdown's contents. The active tab
     # is force-shown on the bar, so it's never listed here.
     private def hidden_tabs_now : Array({Symbol, String})
-      Chrome.hidden_tabs(Settings.tab_prefs, force: @active_tab)
+      available_tabs(Chrome.hidden_tabs(Settings.tab_prefs, force: @active_tab))
+    end
+
+    private def available_tabs(tabs : Array({Symbol, String})) : Array({Symbol, String})
+      return tabs if @evidence_available
+      tabs.reject { |(sym, _)| sym == :evidence }
+    end
+
+    # A saved layout can make Evidence its only visible tab in a populated project, then be
+    # reused in a new/emptied project where Evidence is unavailable. Keep the shell's
+    # visible/navigation ring non-empty in that transition; the tab editor will persist the
+    # correction only if the operator chooses to save it.
+    private def available_visible_tabs(tabs : Array({Symbol, String})) : Array({Symbol, String})
+      filtered = available_tabs(tabs)
+      filtered.empty? ? [{:project, Chrome.tab_label(:project)}] : filtered
+    end
+
+    private def unavailable_evidence_tab : Nil
+      @toast = "freeze evidence on an Issue before opening the Evidence tab"
+    end
+
+    private def refresh_evidence_availability : Nil
+      @evidence_available = @session.store.count_evidence > 0
+      if !@evidence_available && @active_tab == :evidence
+        @active_tab = :issues
+        @focus = :body
+        @overlay = OverlayKind::None
+        on_enter_tab
+        @toast = "Evidence is empty — freeze an Issue link to restore the archive tab"
+      end
     end
 
     private def hidden_tab_count : Int32
@@ -5574,7 +5620,7 @@ module Gori::Tui
     end
 
     private def tabs_editor(back : PreferencesOverlay?) : TabsOverlay
-      ov = TabsOverlay.new
+      ov = TabsOverlay.new(@evidence_available)
       ov.on_close = -> { resume_preferences(back) }
       ov.on_palette = -> { jump_to_palette }
       ov.on_toast = ->(msg : String) { @toast = msg; nil }
@@ -5651,7 +5697,7 @@ module Gori::Tui
           "Reset the tab bar to its default order and\n" \
           "visibility? This is saved immediately.",
           confirm_label: "reset", danger: true, return_to: :preferences) do
-          ov = TabsOverlay.new # reconciled from the persisted prefs, then reverted
+          ov = TabsOverlay.new(@evidence_available) # reconciled from the persisted prefs, then reverted
           ov.reset_to_defaults
           save_tabs(ov)
           prefs.reload_from_settings

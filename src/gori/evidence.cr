@@ -1,7 +1,9 @@
 require "digest/sha256"
+require "uri"
 require "./store"
 require "./env"
 require "./url"
+require "./filter_ast"
 require "./proxy/codec/http1"
 require "./repeater/flow_request"
 
@@ -227,6 +229,128 @@ module Gori
         u = u[(i + 3)..]
       end
       "#{meta.method} #{u}".scrub
+    end
+
+    # The normalized origin-form path used by the archive list and its free-text/filter
+    # projection. A malformed/operator-authored URL is evidence too, so parse failure falls
+    # back to the captured string rather than hiding the row.
+    def self.path(meta : Store::IssueEvidenceMeta) : String
+      uri = URI.parse(meta.url)
+      p = uri.path.empty? ? "/" : uri.path
+      uri.query ? "#{p}?#{uri.query}" : p
+    rescue
+      meta.url.scrub
+    end
+
+    def self.host(meta : Store::IssueEvidenceMeta) : String
+      (URI.parse(meta.url).host || "").scrub
+    rescue
+      ""
+    end
+
+    # The strongest current lifecycle state among the Issues linked to a snapshot. It is a
+    # projection of mutable links/statuses, never stored beside the immutable bytes.
+    def self.confirmation(meta : Store::IssueEvidenceMeta,
+                          statuses : Hash(Int64, Store::Status)) : String
+      linked = meta.issue_ids.compact_map { |id| statuses[id]? }
+      return "orphaned" if linked.empty?
+      return "confirmed" if linked.any?(&.confirmed?)
+      return "open" if linked.any?(&.open?)
+      return "resolved" if linked.all?(&.resolved?)
+      return "false-positive" if linked.all?(&.false_positive?)
+      "mixed"
+    end
+
+    # In-memory archive filter (#1039). The table is project-bounded by the 256 MiB evidence
+    # quota and rows carry metadata only, so filtering here avoids putting captured strings
+    # into dynamic SQL while retaining the boolean grammar used by the Issues list.
+    class Filter
+      FIELDS = %w[issue: host: method: status: confirmation: source: date:]
+
+      private record Term, field : Symbol, value : String, negate : Bool
+
+      def self.parse(query : String) : Filter
+        new(FilterAst.build(FilterAst.parse(query)) { |t| build_term(t) })
+      end
+
+      def initialize(@tree : FilterAst::Tree(Term)?)
+      end
+
+      def apply(rows : Array(Store::IssueEvidenceMeta),
+                statuses : Hash(Int64, Store::Status)) : Array(Store::IssueEvidenceMeta)
+        tree = @tree
+        return rows unless tree
+        rows.select { |m| eval(tree, m, statuses) }
+      end
+
+      private def self.build_term(t : FilterAst::Term) : Term
+        tok = t.text
+        if at = tok.index(':')
+          field = tok[0...at].downcase
+          value = tok[(at + 1)..].downcase
+          kind = case field
+                 when "issue"                   then :issue
+                 when "host"                    then :host
+                 when "method"                  then :method
+                 when "status"                  then :status
+                 when "confirmation", "confirm" then :confirmation
+                 when "source", "src"           then :source
+                 when "date"                    then :date
+                 else                                :text
+                 end
+          return Term.new(kind, kind == :text ? tok.downcase : value, t.negate?)
+        end
+        Term.new(:text, tok.downcase, t.negate?)
+      end
+
+      private def eval(tree : FilterAst::Tree(Term), m : Store::IssueEvidenceMeta,
+                       statuses : Hash(Int64, Store::Status)) : Bool
+        case tree.op
+        in .leaf? then match_term(tree.leaf, m, statuses)
+        in .not?  then !eval(tree.children.first, m, statuses)
+        in .and?  then tree.children.all? { |c| eval(c, m, statuses) }
+        in .or?   then tree.children.any? { |c| eval(c, m, statuses) }
+        end
+      end
+
+      private def match_term(t : Term, m : Store::IssueEvidenceMeta,
+                             statuses : Hash(Int64, Store::Status)) : Bool
+        return !t.negate if t.value.empty?
+        hit = case t.field
+              when :issue        then match_issue(t.value, m)
+              when :host         then Evidence.host(m).downcase.includes?(t.value)
+              when :method       then m.method.scrub.downcase == t.value
+              when :status       then match_status(t.value, m)
+              when :confirmation then Evidence.confirmation(m, statuses).includes?(t.value)
+              when :source       then m.source_kind.label == t.value || m.source_kind.tag == t.value
+              when :date         then Time.unix(m.created_at // 1_000_000).to_local.to_s("%Y-%m-%d").starts_with?(t.value)
+              else                    free_text(t.value, m, statuses)
+              end
+        t.negate ? !hit : hit
+      end
+
+      private def match_issue(value : String, m : Store::IssueEvidenceMeta) : Bool
+        return m.orphaned? if value == "orphaned" || value == "none"
+        id = value.lstrip('#').to_i64?
+        !!id && m.issue_ids.includes?(id)
+      end
+
+      private def match_status(value : String, m : Store::IssueEvidenceMeta) : Bool
+        return !m.error.nil? if value == "error"
+        return m.status.nil? && m.error.nil? if value == "none" || value == "no-response"
+        if value.size == 3 && value.ends_with?("xx") && (hundred = value[0].to_i?)
+          return (s = m.status) ? s // 100 == hundred : false
+        end
+        code = value.to_i?
+        !!code && m.status == code
+      end
+
+      private def free_text(value : String, m : Store::IssueEvidenceMeta,
+                            statuses : Hash(Int64, Store::Status)) : Bool
+        fields = [m.id.to_s, m.method.scrub, Evidence.host(m), Evidence.path(m), m.source_label,
+                  Evidence.confirmation(m, statuses)]
+        fields.any?(&.downcase.includes?(value)) || m.issue_ids.any? { |id| id.to_s == value.lstrip('#') }
+      end
     end
   end
 end

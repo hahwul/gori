@@ -32,7 +32,8 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 | **Probe** | 패시브 및 light-touch 액티브 보안 스캐너 |
 | **Authorize** | 요청을 여러 아이덴티티로 재전송해 접근 제어 결함 탐지 (기본 숨김) |
 | **Issues** | 심각도와 상태로 결과 트리아지 |
+| **Evidence** | 동결된 요청/응답 스냅숏 보관함 (첫 스냅숏이 생기면 나타남) |
 | **Notes** | 프로젝트별 마크다운 노트 |
 | **Help** | 키 바인딩과 링크 |
 
-일부 탭(Miner, Sequencer, Cookie, Colormarker, Authorize)은 탭 바를 깔끔하게 유지하려고 새 설치에서 숨겨져 있습니다. 탭 바의 `⋯` 메뉴, 커맨드 팔레트, 또는 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs**에서 언제든 다시 표시할 수 있습니다. 탭은 아니지만 전역적으로 작동하는 렌즈들도 있습니다. **capture**(`c`), **intercept**(`i`), **scope 렌즈**(`s`)는 어디서든 토글할 수 있습니다.
+일부 탭(Miner, Sequencer, Cookie, Colormarker, Authorize)은 탭 바를 깔끔하게 유지하려고 새 설치에서 숨겨져 있습니다. 탭 바의 `⋯` 메뉴, 커맨드 팔레트, 또는 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs**에서 언제든 다시 표시할 수 있습니다. **Evidence**도 기본 숨김이며, 프로젝트에 첫 동결 스냅숏이 생긴 뒤에만 목록에 나타납니다. 그전에는 보관할 것이 없기 때문입니다. 탭은 아니지만 전역적으로 작동하는 렌즈들도 있습니다. **capture**(`c`), **intercept**(`i`), **scope 렌즈**(`s`)는 어디서든 토글할 수 있습니다.

@@ -247,6 +247,11 @@ module Gori::Tui
         # since `d` acts on the marked set and this one does not.
         Item.new("Issues", "list: {issues.mark-toggle} mark · {issues.mark-all} all · ⇧arrows range · {issues.clear} clear · notes: i/↵ edit · {issue.select-line} line · {issue.copy} copy · space cmds"),
         Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {scope.toggle-lens} scope · {probe.clear} clear issues · space cmds"),
+        # Evidence is hidden until the project freezes its first snapshot, so this row is where
+        # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
+        # only one that destroys bytes no source can hand back, which is why it is named here
+        # rather than left to the space menu. Link/unlink are menu-only (space → k · u).
+        Item.new("Evidence", "↑/↓ ↵ open · {evidence.filter} filter · {evidence.compare} compare · {evidence.issue} issue · {evidence.source} source · {evidence.repeater} repeater · {evidence.delete} delete · space cmds"),
         # The drill-in STEP, keyed by the chord like the Comparer's pair rather than folded into
         # the two tab rows above — both sit within a few columns of the popup's width cap
         # (help_popup_overlay_spec), and a row that trails off into `…` is worse than no row.
@@ -349,6 +354,7 @@ module Gori::Tui
       :target      => "OTHER TABS",
       :sitemap     => "OTHER TABS",
       :issues      => "OTHER TABS",
+      :evidence    => "OTHER TABS",
       :probe       => "OTHER TABS",
       :authorize   => "OTHER TABS",
       :notes       => "OTHER TABS",

@@ -65,6 +65,7 @@ module Gori::Tui
       when :issues_sarif  then "issues (SARIF)"
       when :sequence_md   then "randomness report (Markdown)"
       when :sequence_json then "randomness report (JSON)"
+      when :evidence_json then "evidence (JSON)"
       else                     "file"
       end
     end
@@ -77,6 +78,7 @@ module Gori::Tui
       when :issues_sarif  then "Write every issue as a SARIF 2.1.0 log — the format GitHub code scanning and CI dashboards ingest."
       when :sequence_md   then "Write this session's token-randomness report to a Markdown file (no token values)."
       when :sequence_json then "Write this session's token-randomness report to a JSON file (no token values)."
+      when :evidence_json then "Write this immutable snapshot and provenance to a JSON file."
       else                     "Write the export to a file."
       end
     end

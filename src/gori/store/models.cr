@@ -682,9 +682,10 @@ module Gori
       end
     end
 
-    # One frozen exchange's PROVENANCE and shape — everything the Issues detail's RELATED
-    # list, an export and a marker need, and none of the bytes (V26, #1038). The list is
-    # read on every detail open, so it must stay as light as `FlowRow` does for History.
+    # One frozen exchange's PROVENANCE, Issue membership and shape — everything the Issues
+    # detail, the project-wide Evidence tab, exports and markers need, and none of the bytes
+    # (V26, #1038/#1039). Issue links are mutable and many-to-many; the snapshot fields and
+    # hashes are not. An empty `issue_ids` is a deliberately retained orphan.
     #
     # `source_kind` reuses `LinkRefKind` because a snapshot is taken FROM a linkable thing
     # and the two vocabularies must not drift; only Flow and Repeater are ever written (a
@@ -692,7 +693,7 @@ module Gori
     # is the one place that says so.
     struct IssueEvidenceMeta
       getter id : Int64
-      getter issue_id : Int64
+      getter issue_ids : Array(Int64)
       getter created_at : Int64 # unix micros — when the copy was TAKEN, not when the source ran
       getter source_kind : LinkRefKind
       getter source_id : Int64
@@ -708,9 +709,13 @@ module Gori
       getter response_sha256 : String? # nil = no response was stored (an errored send)
       getter bytes : Int64             # what the row costs against the evidence quota
 
-      def initialize(@id, @issue_id, @created_at, @source_kind, @source_id, @method, @url,
+      def initialize(@id, @issue_ids, @created_at, @source_kind, @source_id, @method, @url,
                      @protocol, @status, @duration_us, @error, @request_truncated,
                      @response_truncated, @request_sha256, @response_sha256, @bytes)
+      end
+
+      def orphaned? : Bool
+        @issue_ids.empty?
       end
 
       # `hist #12` / `repeater #3` — the source as the RELATED row and the toasts name it.

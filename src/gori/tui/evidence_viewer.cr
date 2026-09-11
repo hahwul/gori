@@ -157,7 +157,8 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, title, border: Theme.border_focus)
-      Frame.border_meta(screen, box, title, "issue ##{meta.issue_id}", bg: Theme.panel)
+      linked = meta.issue_ids.empty? ? "orphaned" : "issues #{meta.issue_ids.map { |id| "##{id}" }.join(",")}"
+      Frame.border_meta(screen, box, title, linked, bg: Theme.panel)
       Highlight.draw(screen, box.x + 2, box.y + 1, provenance_line, Theme.panel, box.w - 4)
       screen.text(box.x + 2, box.y + 2, hashes_line, Theme.muted, Theme.panel, width: box.w - 4)
       render_chips(screen, box)
@@ -273,6 +274,14 @@ module Gori::Tui
     # own lesson.
     def pane_text : String
       head, body = message(@pane)
+      EvidenceViewer.pane_text(head, body)
+    end
+
+    # ONE home for that shape, because the copy the Runner actually writes is taken from the
+    # REDACTED twin of this evidence (#1035) rather than from `@evidence` — and a copy built
+    # from the stored body instead of the ENTITY would hand the operator gzip or chunk
+    # framing where the card showed them text.
+    def self.pane_text(head : Bytes?, body : Bytes?) : String
       return "" unless head
       String.build do |io|
         io << String.new(head).scrub

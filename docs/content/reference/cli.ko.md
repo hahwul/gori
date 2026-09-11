@@ -906,20 +906,23 @@ gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
 
 ### run evidence {#run-evidence}
 
-이슈의 **동결된** 증거입니다. 캡처된 플로우나 Repeater 탭의 교환 하나를, 그것이 취약점을 확인해 준 순간에 그대로 복사한 변경 불가 사본입니다. `links`가 포인터라면 이것은 바이트입니다. Repeater의 다음 전송이나 History 보존 정리는 사본에 닿지 못하므로, 응답이 취약점을 확인해 줄 때 한 번, 재테스트 뒤에 한 번 더 동결하면 이슈가 둘 다 보관합니다.
+Issue의 **동결된** 증거입니다. 캡처된 플로우나 Repeater 탭의 교환 하나를, 그것이 취약점을 확인해 준 순간에 그대로 복사한 변경 불가 사본입니다. `links`가 live 출처 포인터라면 이것은 보관된 바이트입니다. Repeater의 다음 전송이나 History 보존 정리는 사본에 닿지 못하므로, 응답이 취약점을 확인해 줄 때 한 번, 재테스트 뒤에 한 번 더 동결하세요. 스냅숏 하나를 여러 Issue에 연결할 수 있고, 마지막 Issue 연결을 끊어도 다시 연결하거나 명시적으로 삭제할 때까지 고아 상태로 남습니다.
 
 ```bash
 gori run evidence freeze --issue=7 --ref=repeater --ref-id=3       # 사본 + live 링크
 gori run evidence freeze --issue=7 --ref=flow --ref-id=42 --no-link
 gori run evidence --issue=7                                        # 목록: 출처, 시각, 상태, 크기, SHA-256
+gori run evidence                                                  # 프로젝트 전체 보관함(고아 포함)
 gori run evidence show 12                                          # 사본 출력, 자격 증명은 가려짐
 gori run evidence show 12 --include-sensitive --format=json
+gori run evidence link 12 --issue=9                                # 다른 Issue에도 연결
+gori run evidence unlink 12 --issue=7                              # 고아가 되어도 스냅숏 유지
 gori run evidence delete 12
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--issue=N` | 사본을 소유하는 이슈. `freeze`와 `list`에서 필수 |
+| `--issue=N` | 연결할 Issue. `freeze`, `link`, `unlink`에서 필수. `list`에서는 한 Issue의 사본으로 좁히고, 생략하면 프로젝트 전체 보관함(최신순, 고아 포함)을 출력 |
 | `--ref=KIND` | `freeze`의 출처 종류: `flow` 또는 `repeater`. fuzz / miner 세션은 교환이 하나가 아니라 대상이 아닙니다 |
 | `--ref-id=M` | `freeze`의 출처 id |
 | `--no-link` | `freeze`가 사본만 만듭니다. 기본값은 `links add`가 만들 live 링크도 같은 트랜잭션에 함께 기록 |

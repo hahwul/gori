@@ -32,7 +32,8 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Probe** | Passive & light-touch active security scanner |
 | **Authorize** | Replay a request under several identities to find broken access control (hidden by default) |
 | **Issues** | Triage results by severity and status |
+| **Evidence** | Frozen request/response snapshots, project-wide (appears once one exists) |
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |
 
-Some tabs are hidden on a fresh install (Miner, Sequencer, Cookie, Colormarker, Authorize) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.
+Some tabs are hidden on a fresh install (Miner, Sequencer, Cookie, Colormarker, Authorize) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. **Evidence** is hidden too, and is only offered once the project holds its first frozen snapshot — there is nothing to archive before that. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.

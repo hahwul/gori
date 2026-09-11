@@ -1244,14 +1244,14 @@ module Gori
       # of the stored bytes (head + body), written at freeze time so a later reader — an export,
       # a report — can state what it was handed.
       #
-      # Ordinary `INTEGER PRIMARY KEY` (rowid reuse possible) is fine here, unlike the V10
-      # rebuild: nothing points AT an evidence row by id — `entity_links` never references
-      # one — so a reused id can re-bind nothing.
+      # Evidence and Issue membership are separate: bytes stay even when the last Issue is
+      # unlinked/deleted, and one immutable copy may support several findings (#1039).
+      # AUTOINCREMENT is required now that `evidence_issue_links` points AT an evidence id:
+      # a deleted id must never be reused underneath a stale peer's pending link operation.
       V26 = [
         <<-SQL,
           CREATE TABLE issue_evidence (
-            id                 INTEGER PRIMARY KEY,
-            issue_id           INTEGER NOT NULL,
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at         INTEGER NOT NULL,
             source_kind        TEXT    NOT NULL,
             source_id          INTEGER NOT NULL,
@@ -1272,8 +1272,18 @@ module Gori
             bytes              INTEGER NOT NULL
           )
           SQL
-        # The Issues detail lists an issue's snapshots in freeze order on every open.
-        "CREATE INDEX idx_issue_evidence_issue ON issue_evidence (issue_id, created_at)",
+        <<-SQL,
+          CREATE TABLE evidence_issue_links (
+            evidence_id INTEGER NOT NULL,
+            issue_id    INTEGER NOT NULL,
+            created_at  INTEGER NOT NULL,
+            PRIMARY KEY (evidence_id, issue_id)
+          )
+          SQL
+        # The Issues detail lists an issue's snapshots in freeze order on every open; the
+        # reverse index makes a global evidence row's linked Issue ids cheap to resolve.
+        "CREATE INDEX idx_evidence_issue_links_issue ON evidence_issue_links (issue_id, evidence_id)",
+        "CREATE INDEX idx_evidence_issue_links_evidence ON evidence_issue_links (evidence_id, issue_id)",
         # The History detail and the Repeater ask "does a frozen copy of THIS exist" per open.
         "CREATE INDEX idx_issue_evidence_source ON issue_evidence (source_kind, source_id)",
       ]

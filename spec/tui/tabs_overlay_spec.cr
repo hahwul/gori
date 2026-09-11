@@ -38,4 +38,13 @@ describe TabsOverlay do
     o.reset_to_defaults
     o.to_prefs.should eq(default) # back to the canonical catalog order/visibility
   end
+
+  it "does not offer Evidence before the project has its first snapshot" do
+    unavailable = TabsOverlay.new(false)
+    available = TabsOverlay.new(true)
+
+    unavailable.to_prefs.map(&.[0]).should_not contain("evidence")
+    available.to_prefs.map(&.[0]).should contain("evidence")
+    unavailable.entry_count.should eq(available.entry_count - 1)
+  end
 end

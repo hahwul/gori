@@ -48,6 +48,12 @@ describe "gori run evidence" do
       line = Gori::CLI::Run.evidence_line_for_spec(ev.meta)
       line.should start_with("##{ev.meta.id}  hist ##{ev.meta.source_id}  ")
       line.should contain("POST acme.test/login → 200  #{ev.meta.bytes} bytes  sha256 req #{ev.meta.request_sha256[0, 12]}… res #{ev.meta.response_sha256.not_nil![0, 12]}…")
+      # Membership is on the line because the project-wide listing is where an ORPHAN has to
+      # be recognisable — the copy no `--issue` listing can reach.
+      line.should contain("issues ##{ev.meta.issue_ids.first}")
+      store.unlink_evidence(ev.meta.id, ev.meta.issue_ids.first).should be_true
+      orphan = store.get_evidence_meta(ev.meta.id).not_nil!
+      Gori::CLI::Run.evidence_line_for_spec(orphan).should contain("issues orphaned")
     end
   end
 
@@ -55,7 +61,8 @@ describe "gori run evidence" do
     with_store do |store|
       ev = frozen(store)
       text = Gori::CLI::Run.evidence_text_for_spec(ev, false)
-      text.should contain("frozen evidence ##{ev.meta.id} on issue ##{ev.meta.issue_id}")
+      text.should contain("frozen evidence ##{ev.meta.id}")
+      text.should contain("issues:   ##{ev.meta.issue_ids.first}")
       text.should contain("sha256:   req #{ev.meta.request_sha256}")
       text.should contain("Cookie: [REDACTED]")
       text.should_not contain("sid=abc")

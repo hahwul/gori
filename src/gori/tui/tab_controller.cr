@@ -68,6 +68,10 @@ module Gori::Tui
     def issue_open_link : Nil
     end
 
+    # Evidence list row ↵ / double-click. The Runner opens the immutable byte viewer.
+    def evidence_open : Nil
+    end
+
     # The Probe MODE picker (`probe.set-mode`), which the MODE band's chip raises on a click.
     # A Runner verb body like the three above — but it was never DECLARED here: the call in
     # `ProbeController#handle_click` compiled only because the Runner is the one production

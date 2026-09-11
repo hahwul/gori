@@ -1,6 +1,7 @@
 require "../verb"
 require "./links"
 require "./read_edit"
+require "./evidence"
 
 module Gori
   module Verbs
@@ -930,6 +931,7 @@ module Gori
       register_oast(r)
       register_links(r)
       register_issues(r)
+      register_evidence(r)
       register_probe(r)
       register_fuzz(r)
       register_miner(r)

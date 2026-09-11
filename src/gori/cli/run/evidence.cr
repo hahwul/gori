@@ -1,7 +1,12 @@
-# `gori run evidence` — an issue's FROZEN evidence (#1038): the immutable copy of one
-# exchange, taken from a captured Flow or a Repeater tab at the moment it proved the finding.
-# `links` is the pointer; this is the bytes. A script that confirms a finding and then
-# retests the fix freezes twice and the issue holds both.
+# `gori run evidence` — FROZEN evidence (#1038/#1039): the immutable copy of one exchange,
+# taken from a captured Flow or a Repeater tab at the moment it proved the finding. `links`
+# is the pointer; this is the bytes. A script that confirms a finding and then retests the
+# fix freezes twice and the issue holds both.
+#
+# Issue membership is many-to-many and mutable (`link`/`unlink`) while the bytes are not, so
+# `list` without `--issue` is the headless twin of the TUI's Evidence tab: the project-wide
+# archive, orphans included. Anything narrower could not name a snapshot whose last Issue
+# link is gone, which is exactly the copy that needs finding.
 require "../../evidence"
 require "../../mcp/serialize"
 
@@ -9,18 +14,20 @@ module Gori
   module CLI
     module Run
       @[Subcommand("evidence", help: [
-        {"evidence", "Freeze/list/show/delete an issue's frozen evidence (immutable request+response copies)"},
+        {"evidence", "Freeze/list/show/link/unlink/delete frozen request+response copies"},
       ])]
       private def self.cmd_evidence(args : Array(String)) : Nil
         case sub = args.first?
         when "freeze"       then cmd_evidence_freeze(args[1..])
         when "list"         then cmd_evidence_list(args[1..])
         when "show"         then cmd_evidence_show(args[1..])
+        when "link"         then cmd_evidence_membership(args[1..], link: true)
+        when "unlink"       then cmd_evidence_membership(args[1..], link: false)
         when "delete", "rm" then cmd_evidence_delete(args[1..])
         else
           # See `verb_token?` — a bare word here is a mistyped verb, not a query.
           if verb_token?(sub)
-            abort "gori run evidence: unknown subcommand '#{sub}' (freeze, list, show, delete/rm)"
+            abort "gori run evidence: unknown subcommand '#{sub}' (freeze, list, show, link, unlink, delete/rm)"
           end
           cmd_evidence_list(args)
         end
@@ -99,17 +106,22 @@ module Gori
         leftover = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run evidence [list] --issue=N\n\n" \
-                     "List an issue's frozen evidence: source, when the copy was taken, status,\n" \
-                     "size and the SHA-256 of the stored request and response. Never the bytes —\n" \
-                     "those are `gori run evidence show ID`.\n\n" \
+          p.banner = "Usage: gori run evidence [list] [--issue=N]\n\n" \
+                     "List frozen evidence: source, when the copy was taken, status, size, the\n" \
+                     "Issues it is linked to and the SHA-256 of the stored request and response.\n" \
+                     "Never the bytes — those are `gori run evidence show ID`.\n\n" \
+                     "Without --issue this is the whole project archive, newest first, INCLUDING\n" \
+                     "orphans (a snapshot whose last Issue link was removed, or whose Issue was\n" \
+                     "deleted) — the copies no per-issue listing can reach.\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run evidence freeze --issue=N --ref=flow|repeater --ref-id=M [--no-link]\n" \
                      "  gori run evidence show ID [--include-sensitive] [--format=json]\n" \
+                     "  gori run evidence link ID --issue=N\n" \
+                     "  gori run evidence unlink ID --issue=N\n" \
                      "  gori run evidence delete ID   (`rm` is accepted)"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
+          p.on("--issue=N", "Issue id (omit for the whole project archive)") { |v| issue_id = parse_evidence_id(v, "--issue") }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
@@ -117,15 +129,17 @@ module Gori
           p.missing_option { |f| abort "gori run evidence: missing value for #{f}" }
         end
         parser.parse(args)
-        refuse_list_leftovers(leftover, "evidence", "freeze, list, show, delete/rm")
-        iid_opt = issue_id
-        abort "gori run evidence: --issue is required" if iid_opt.nil?
-        iid = iid_opt
+        refuse_list_leftovers(leftover, "evidence", "freeze, list, show, link, unlink, delete/rm")
+        iid = issue_id
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         metas = begin
-          abort "gori run evidence: no issue with id #{iid}" unless store.get_issue(iid)
-          store.issue_evidence(iid)
+          if iid
+            abort "gori run evidence: no issue with id #{iid}" unless store.get_issue(iid)
+            store.issue_evidence(iid)
+          else
+            store.evidence
+          end
         ensure
           store.close
         end
@@ -133,7 +147,7 @@ module Gori
         if format == :json
           puts(JSON.build { |j| j.array { metas.each { |m| j.object { MCP::Serialize.evidence_meta(j, m) } } } })
         elsif metas.empty?
-          puts "no frozen evidence on issue ##{iid}"
+          puts iid ? "no frozen evidence on issue ##{iid}" : "no frozen evidence in this project"
         else
           metas.each { |m| puts evidence_line(m) }
         end
@@ -181,6 +195,72 @@ module Gori
         end
       end
 
+      # Issue membership is mutable; the snapshot and its hashes are not. Link and unlink
+      # therefore name the frozen copy positionally and the Issue explicitly, rather than
+      # reusing the live entity-link command whose target is a source object.
+      private def self.cmd_evidence_membership(args : Array(String), *, link : Bool) : Nil
+        verb = link ? "link" : "unlink"
+        db_path : String? = nil
+        project_name : String? = nil
+        issue_id : Int64? = nil
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run evidence #{verb} ID --issue=N\n\n" \
+                     "#{link ? "Attach" : "Detach"} an Issue without changing the frozen bytes, hashes, or provenance. " \
+                     "Removing the last Issue leaves an orphan; it does not delete the snapshot."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| positional = before + after }
+          p.invalid_option { |f| abort "gori run evidence #{verb}: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run evidence #{verb}: missing value for #{f}" }
+        end
+        parser.parse(args)
+        abort "gori run evidence #{verb}: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
+        id_s = positional.first? || abort("gori run evidence #{verb}: <id> is required")
+        id = parse_evidence_id(id_s, "<id>")
+        iid_opt = issue_id
+        abort "gori run evidence #{verb}: --issue is required" if iid_opt.nil?
+        iid = iid_opt
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          meta = store.get_evidence_meta(id) || abort("gori run evidence #{verb}: no frozen evidence with id #{id}")
+          abort "gori run evidence #{verb}: no issue with id #{iid}" unless store.get_issue(iid)
+          if link
+            evidence_link_one(store, meta, iid)
+          else
+            evidence_unlink_one(store, meta, iid)
+          end
+        ensure
+          store.close
+        end
+      end
+
+      # An already-linked pair is reported, not refused: `link` states an end state, and a
+      # script that runs twice has not failed. `unlink` DOES refuse a pair that is not
+      # linked — there the end state is reached by doing nothing, but naming a link that
+      # was never there is a typo'd id far more often than it is idempotence.
+      private def self.evidence_link_one(store : Store, meta : Store::IssueEvidenceMeta, iid : Int64) : Nil
+        if meta.issue_ids.includes?(iid)
+          puts "Frozen evidence ##{meta.id} was already linked to issue ##{iid}."
+          return
+        end
+        abort "gori run evidence link: NOT linked (project busy or either row disappeared)" unless store.link_evidence(meta.id, iid)
+        puts "Linked frozen evidence ##{meta.id} to issue ##{iid}."
+      end
+
+      private def self.evidence_unlink_one(store : Store, meta : Store::IssueEvidenceMeta, iid : Int64) : Nil
+        unless meta.issue_ids.includes?(iid)
+          abort "gori run evidence unlink: frozen evidence ##{meta.id} is not linked to issue ##{iid}"
+        end
+        abort "gori run evidence unlink: NOT unlinked (project busy or link disappeared)" unless store.unlink_evidence(meta.id, iid)
+        orphaned = store.get_evidence_meta(meta.id).try(&.orphaned?) || false
+        puts "Unlinked frozen evidence ##{meta.id} from issue ##{iid}.#{orphaned ? " The snapshot is now orphaned." : ""}"
+      end
+
       private def self.cmd_evidence_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -206,7 +286,8 @@ module Gori
         begin
           meta = store.get_evidence_meta(id) || abort("gori run evidence delete: no frozen evidence with id #{id}")
           abort "gori run evidence delete: NOT deleted (project busy or unwritable) — the copy is unchanged" unless store.delete_evidence(id)
-          puts "Frozen evidence ##{id} deleted from issue ##{meta.issue_id}."
+          linked = meta.issue_ids.empty? ? " (orphaned)" : " linked to #{meta.issue_ids.map { |iid| "issue ##{iid}" }.join(", ")}"
+          puts "Frozen evidence ##{id}#{linked} deleted."
         ensure
           store.close
         end
@@ -239,9 +320,11 @@ module Gori
         notes << "request truncated" if m.request_truncated?
         notes << "response truncated" if m.response_truncated?
         tail = notes.empty? ? "" : "  (#{notes.join(", ")} at capture)"
+        linked = m.issue_ids.empty? ? "orphaned" : m.issue_ids.map { |id| "##{id}" }.join(",")
         "##{m.id}  #{m.source_label}  #{MCP::Serialize.unix_micros_iso(m.created_at)}  " \
         "#{Issues::Export.one_line(Evidence.label(m))} → #{outcome}  #{m.bytes} bytes  " \
-        "sha256 req #{m.request_sha256[0, 12]}… res #{m.response_sha256.try { |h| "#{h[0, 12]}…" } || "—"}#{tail}"
+        "sha256 req #{m.request_sha256[0, 12]}… res #{m.response_sha256.try { |h| "#{h[0, 12]}…" } || "—"}  " \
+        "issues #{linked}#{tail}"
       end
 
       # The text form of one copy: provenance lines, then the two messages. Heads through the
@@ -250,7 +333,13 @@ module Gori
       private def self.evidence_text(ev : Store::IssueEvidence, include_sensitive : Bool) : String
         m = ev.meta
         String.build do |io|
-          io << "frozen evidence #" << m.id << " on issue #" << m.issue_id << "\n"
+          io << "frozen evidence #" << m.id << "\n"
+          io << "issues:   "
+          if m.issue_ids.empty?
+            io << "— (orphaned)\n"
+          else
+            io << m.issue_ids.map { |id| "##{id}" }.join(", ") << "\n"
+          end
           io << "source:   " << m.source_label << "\n"
           io << "frozen:   " << MCP::Serialize.unix_micros_iso(m.created_at) << "\n"
           io << "exchange: " << Issues::Export.one_line(Evidence.label(m)) << " → "
