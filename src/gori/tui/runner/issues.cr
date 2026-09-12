@@ -185,11 +185,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @focus = :body
       @overlay = OverlayKind::Detail
     else
-      @toast = "evidence no longer captured (pruned)"
+      @toast = "the linked flow is no longer captured (pruned)"
     end
   end
 
-  # Send an issue's linked flow to the Repeater tab to re-test the evidence. CROSS-TAB
+  # Send an issue's linked flow to the Repeater tab to re-test the finding. CROSS-TAB
   # mediator: reads the Issues controller, opens a Repeater tab.
   def issue_repeater_flow : Nil
     return unless f = issues_controller.view.detail_issue
@@ -197,7 +197,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     if @session.store.get_flow(fid)
       repeater_flow(fid)
     else
-      @toast = "evidence no longer captured (pruned)"
+      @toast = "the linked flow is no longer captured (pruned)"
     end
   end
 

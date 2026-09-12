@@ -71,7 +71,9 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       # The badge is the coloured part: FROZEN in the same hue the History detail's marker uses.
       backend.fg_at(rel.x + 2, rel.y + 2).should eq(Theme.syn_header)
       backend.fg_at(rel.x + 2, rel.y + 1).should eq(Theme.muted)
-      backend.row(rel.y).should contain("2 · space l")
+      # The border count SPLITS once a frozen copy is in the card: one live pointer, one copy.
+      # `2` alone was true of the row count and false of everything an operator reads it for.
+      backend.row(rel.y).should contain("1 · 1 frozen · space l")
     end
   end
 
@@ -97,6 +99,46 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       backend.row(rel.y + 1).should contain("FROZEN")
       backend.row(rel.y + 1).should contain("GET acme.test/x")
       backend.row(rel.y + 1).should contain("hist ##{src}")
+    end
+  end
+
+  # The border count and the y3 meta row, the two places the card's neighbourhood names what
+  # backs an issue. Both had to move with #1038's vocabulary: "evidence" is the frozen copy
+  # now, so the live primary flow is labelled `flow`, and a single total over two kinds of row
+  # cannot say how much of the backing is immutable.
+  it "splits the border count on a frozen-only issue and labels the primary row `flow`" do
+    with_store do |store|
+      src = frozen_flow(store, "/only")
+      issue = store.insert_issue("SQLi", Gori::Store::Severity::High, "acme.test", src)
+      store.freeze_evidence(issue, Gori::Evidence.from_flow(store.get_flow(src).not_nil!))[1].ok?.should be_true
+
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      backend = render(view)
+      rel, _ = view.detail_split(Rect.new(0, 0, 100, 22))
+      # The primary `flow_id` is the y3 row, not a RELATED row, so the live half is honestly
+      # zero here: everything backing this issue in the card is immutable.
+      backend.row(rel.y).should contain("0 · 1 frozen · space l")
+      # y3 — the live pointer into History, no longer called `evidence`.
+      row = backend.row(3)
+      row.should contain("flow      GET acme.test/only → 500")
+      row.should_not contain("evidence")
+    end
+  end
+
+  it "leaves a link-only issue the one number it has always shown" do
+    with_store do |store|
+      live = frozen_flow(store, "/live")
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, "acme.test", nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, live)
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      rel, _ = view.detail_split(Rect.new(0, 0, 100, 22))
+      row = render(view).row(rel.y)
+      row.should contain("1 · space l")
+      row.should_not contain("frozen")
     end
   end
 

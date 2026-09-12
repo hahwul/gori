@@ -1318,9 +1318,9 @@ module Gori::Tui
         lines << {Theme.muted, score ? "cvss      #{sprintf("%.1f", score)}  ·  #{cvss}" : "cvss      #{cvss}"}
       end
       if fid = f.flow_id
-        lines << {Theme.muted, "evidence  flow ##{fid}"}
+        lines << {Theme.muted, "flow      ##{fid}"}
       else
-        lines << {Theme.muted, "evidence  (none — standalone issue)"}
+        lines << {Theme.muted, "flow      (none — standalone issue)"}
       end
       notes = f.notes.strip
       if notes.empty?
@@ -1454,15 +1454,18 @@ module Gori::Tui
       # you look for WHEN, and a third copy of the same string is not a third fact.
       screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: w)
 
-      # y3 — primary linked-flow evidence.
-      evidence = if flow = @detail_flow
-                   "evidence  #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
-                 elsif fid = issue.flow_id
-                   "evidence  flow ##{fid} (no longer captured)"
-                 else
-                   "evidence  (none — standalone issue)"
-                 end
-      screen.text(rect.x + 1, rect.y + 3, evidence, Theme.muted, width: w)
+      # y3 — the issue's PRIMARY linked flow. Labelled `flow`, not `evidence`: since #1038
+      # "evidence" names the FROZEN copy — immutable bytes this project holds — and this row is
+      # a live pointer into History that the next retention sweep can hollow out. The frozen
+      # copies are counted on the RELATED card's border below.
+      flow_line = if flow = @detail_flow
+                    "flow      #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
+                  elsif fid = issue.flow_id
+                    "flow      ##{fid} (no longer captured)"
+                  else
+                    "flow      (none — standalone issue)"
+                  end
+      screen.text(rect.x + 1, rect.y + 3, flow_line, Theme.muted, width: w)
 
       # y4 — the RETEST line, and ONLY when this issue has one (#1036). See
       # `refresh_retest_summary`: an issue with no retest pays no row, so the two cards below
@@ -1498,6 +1501,19 @@ module Gori::Tui
       screen.text(rect.x + 1, rect.y + 4, line, Theme.muted, width: w)
     end
 
+    # The RELATED border meta: the row count, and the `space l` affordance unless INS owns the
+    # keyboard. Two kinds of row share this card (see `RelatedRow`) and one total cannot say
+    # which, so once the issue holds a frozen copy the count SPLITS — `3 · 2 frozen` is three
+    # live pointers plus two immutable copies, and the live half stays the honest live count
+    # rather than the sum it used to be. An issue with no frozen rows keeps the one number it
+    # has always shown; nothing about a link-only issue changed.
+    private def related_meta(insert : Bool) : String
+      frozen = @detail_related.count(&.frozen?)
+      live = @detail_related.size - frozen
+      count = frozen == 0 ? @detail_related.size.to_s : "#{live} · #{frozen} frozen"
+      insert ? count : "#{count} · space l"
+    end
+
     # The RELATED card. Costs exactly the six rows the divider + heading + `LINKS_VISIBLE`
     # rows used to: the heading rides the top border, so closing the card is free.
     private def render_related_card(screen : Screen, card : Rect, active : Bool) : Nil
@@ -1509,8 +1525,7 @@ module Gori::Tui
       # so is a count inside a card title — it makes the title's width a moving target, which
       # is what a badge's `min_x` is derived from. The hint half drops while INS owns the
       # keyboard, exactly as the old inline hint did; the count never does.
-      n = @detail_related.size
-      Frame.border_meta(screen, card, "RELATED", notes_insert_mode? ? n.to_s : "#{n} · space l")
+      Frame.border_meta(screen, card, "RELATED", related_meta(notes_insert_mode?))
       body = card.inset(1, 1)
       # The scroll window the NEXT `move_links` measures against — the `@list_last_h`
       # convention. It has to be the rows this card ACTUALLY drew, not `LINKS_VISIBLE`: a
