@@ -13,14 +13,16 @@ module Gori
       # Session management + the lens/format toggles are COMMON (reachable from every pane).
       r.register Verb::Definition.new(
         "cookie.new", "New session", "Open a fresh blank Cookie session sub-tab",
-        Verb::Scope::Cookie, available: in_cookie, mnemonic: 'n') { |ctx| ctx.cookie_new; nil }
+        Verb::Scope::Cookie, [Verb::Chord.new("n", ctrl: true)],
+        available: in_cookie, mnemonic: 'n', section: :subtab) { |ctx| ctx.cookie_new; nil }
       r.register Verb::Definition.new(
         "cookie.close", "Close session", "Close the active Cookie session (keeps at least one)",
-        Verb::Scope::Cookie, available: in_cookie, mnemonic: 'w') { |ctx| ctx.cookie_close; nil }
+        Verb::Scope::Cookie, [Verb::Chord.new("w", ctrl: true)],
+        available: in_cookie, mnemonic: 'w', section: :subtab) { |ctx| ctx.cookie_close; nil }
       r.register Verb::Definition.new(
         "cookie.toggle-mode", "Toggle decode/forge", "Flip between the DECODE and FORGE lenses",
         Verb::Scope::Cookie, [Verb::Chord.new("t", ctrl: true)],
-        available: in_cookie, mnemonic: 'e') { |ctx| ctx.cookie_toggle_mode; nil }
+        available: in_cookie, mnemonic: 'm') { |ctx| ctx.cookie_toggle_mode; nil }
       r.register Verb::Definition.new(
         "cookie.cycle-format", "Cycle format", "Cycle the cookie format: auto / flask / rack / django",
         Verb::Scope::Cookie, [Verb::Chord.new("a", ctrl: true)],
@@ -65,7 +67,7 @@ module Gori
       # Sub-tab chip rename + content clone — tagged :subtab (mirrors JWT/Decoder).
       r.register Verb::Definition.new(
         "cookie.rename-subtab", "Rename subtab", "Rename the active session's sub-tab chip",
-        Verb::Scope::Cookie, available: in_cookie, mnemonic: 'r', section: :subtab) { |ctx| ctx.cookie_rename_subtab; nil }
+        Verb::Scope::Cookie, available: in_cookie, mnemonic: 'e', section: :subtab) { |ctx| ctx.cookie_rename_subtab; nil }
       r.register Verb::Definition.new(
         "cookie.duplicate-subtab", "Duplicate subtab", "Open a new session with the same cookie + payload",
         Verb::Scope::Cookie, available: in_cookie, mnemonic: 'd', section: :subtab) { |ctx| ctx.cookie_duplicate_subtab; nil }

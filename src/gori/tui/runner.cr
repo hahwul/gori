@@ -1533,23 +1533,21 @@ module Gori::Tui
         return
       end
 
-      # ^N opens a new blank repeater whenever the Repeater tab is active — body OR
-      # tab-bar focus — so the advertised empty-state shortcut is never a dead key.
-      if @active_tab == :repeater && @overlay.none? && ev.ctrl? && ev.key.lower_n?
-        repeater_controller.repeater_new
+      # ^N / ^W create and close a sub-tab from ANY focus level, on every tab that has a
+      # strip — the same `subtab_new` / `subtab_close` contract `handle_subtabs_key` runs
+      # (which is claimed above, so the strip keeps its own copy). They were per-tab guards
+      # before: ^N answered on Repeater/Fuzzer/Notes only, and ^W only from the strip or
+      # from the six controllers that had grown their own arm, so Fuzzer/Miner/Sequencer
+      # bodies had no close at all. The space menu now SHOWS both chords beside their rows,
+      # so a dead key here would be an advertised one.
+      if @overlay.none? && ev.ctrl? && ev.key.lower_n? && subtab_new_supported?
+        subtab_new
         return
       end
 
-      # ^N opens a new fuzz session from the Fuzzer tab (body OR tab-bar focus).
-      if @active_tab == :fuzzer && @overlay.none? && ev.ctrl? && ev.key.lower_n?
-        fuzzer_controller.fuzz_new
-        return
-      end
-
-      # ^N opens a new note from the Notes tab (body OR tab-bar focus), mirroring
-      # Repeater's new-request shortcut so it's never a dead key.
-      if @active_tab == :notes && @overlay.none? && ev.ctrl? && ev.key.lower_n?
-        notes_controller.notes_new
+      if @overlay.none? && ev.ctrl? && ev.key.lower_w? && subtab_close_supported?
+        subtab_close
+        resolve_subtab_focus # a close that empties the strip must not strand focus on it
         return
       end
 
@@ -2511,6 +2509,18 @@ module Gori::Tui
           {scope, @tabs[@active_tab]?.try(&.command_section) || :common}
         end
       end
+    end
+
+    # Whether the card carries the SUB-TABS bucket: the SCOPE has a sub-tab family, so the
+    # strip's verbs belong on the menu whatever level opened it (#1055) — the body panes,
+    # the strip itself and the tab bar all get the one menu.
+    #
+    # Keyed to the registry and NOT to `subtabs_shown?`: a Repeater with no sessions open
+    # draws no strip, and gating on the strip being DRAWN would have taken `New repeater
+    # request` off the menu in exactly the empty state that verb exists for. Scopes with no
+    # `:subtab` verbs are unaffected either way — SpaceMenu drops an empty bucket.
+    private def space_menu_subtabs?(scope : Verb::Scope) : Bool
+      @session.registry.has_section?(scope, :subtab)
     end
 
     # The status strip's glyph — spinner / ✓ / ✗ — comes from the KIND the producer passed to
@@ -3802,7 +3812,7 @@ module Gori::Tui
     def open_space_menu : Nil
       scope, section = space_menu_context
       # captures the scope+section + populates entries
-      @space_menu.open(scope, section, self, banner: space_menu_banner)
+      @space_menu.open(scope, section, self, banner: space_menu_banner, subtabs: space_menu_subtabs?(scope))
       # Don't open an empty popup: some focus areas (the tab bar, an open detail)
       # have only hidden nav verbs, so the entry list is empty. Opening there would
       # trap input behind an empty box — keep space a no-op (with a hint) instead.
@@ -5252,10 +5262,10 @@ module Gori::Tui
     end
 
     # The sub-tab-level verbs that act on every marked chip, on any of the nine strips —
-    # one flat table, because the ids already carry their scope. Two of the nine strips put
-    # their close in `:subtab`, seven in COMMON, and this table does not care which: the
-    # strip's menu shows COMMON ∪ `:subtab`, so both sections are on screen together, which
-    # is exactly why `subtab_mark_menu_count` must gate on the strip having focus.
+    # one flat table, because the ids already carry their scope. All nine now file their close
+    # under `:subtab` (#1055), and the SUB-TABS bucket is on screen from the body panes too —
+    # which is exactly why `subtab_mark_menu_count` must gate on the strip having focus: the
+    # same rows are reachable where every target is the CURSOR's sub-tab, not the marks.
     # "%s" takes the count phrase ("3 sub-tabs").
     SUBTAB_BATCH_TITLES = {
       "repeater.close-subtab"     => "Close %s",

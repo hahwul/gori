@@ -1528,7 +1528,7 @@ gori settings tls-fingerprint                    # 모든 규칙 + 규칙 없음
 gori settings tls-fingerprint shop.example.com   # 그 호스트가 실제로 받는 정책 하나
 gori settings tls-fingerprint --json             # 원본 목록까지 담은 기계 판독용 출력
 
-# …그리고 per-send 오버라이드가 대신 무엇을 보낼지. Repeater 탭의 ␣T나 `--tls-preset`
+# …그리고 per-send 오버라이드가 대신 무엇을 보낼지. Repeater 탭의 ␣P나 `--tls-preset`
 # 실행이 적용하는 것과 같은 좁히기를, settings.json을 건드리지 않고 미리 봅니다:
 gori settings tls-fingerprint shop.example.com --preset curl
 ```
@@ -1565,7 +1565,7 @@ gori run repeater create --tls-preset chrome …     # 세션에 저장
 gori run fuzz --flow 42 --auto --tls-preset chrome # 스윕 전체를 한 핸드셰이크로
 ```
 
-TUI에서는 Repeater 탭의 `␣T`(TARGET 밴드의 `␣T:…` 칩)이고, 탭과 함께 영속화되므로 다시 연 탭은 이전에 보낸 지문 그대로 보냅니다. Fuzzer는 `^O` 고급 카드의 **TLS fingerprint** 행입니다. MCP는 `send_request{tls_preset}`와 `fuzz_start{tls_preset}`이며, 결과 세트가 어느 핸드셰이크에서 나왔는지 말할 수 있도록 그대로 되돌려 줍니다.
+TUI에서는 Repeater 탭의 `␣P`(TARGET 밴드의 `␣P:…` 칩)이고, 탭과 함께 영속화되므로 다시 연 탭은 이전에 보낸 지문 그대로 보냅니다. Fuzzer는 `^O` 고급 카드의 **TLS fingerprint** 행입니다. MCP는 `send_request{tls_preset}`와 `fuzz_start{tls_preset}`이며, 결과 세트가 어느 핸드셰이크에서 나왔는지 말할 수 있도록 그대로 되돌려 줍니다.
 
 오버라이드는 목적지 정책을 통째로 갈아치우는 게 아니라 **좁힙니다**:
 

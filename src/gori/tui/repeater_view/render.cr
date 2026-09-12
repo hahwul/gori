@@ -49,8 +49,8 @@ class Gori::Tui::RepeaterView
     # An at-a-glance SNI marker on the top border (right of the title) whenever an
     # override is set, so a custom SNI is visible even before the row is reached.
     screen.text(sni_x, rect.y, SNI_BADGE, Theme.text_bright, Theme.accent_bg) if sni_x
-    # ` ␣T:tls ` / ` ␣T:chrome ` — the TLS fingerprint THIS TAB will present (#844), and the
-    # only thing on screen saying `␣T` has anything to offer. It rides the TARGET band for the
+    # ` ␣P:tls ` / ` ␣P:chrome ` — the TLS fingerprint THIS TAB will present (#844), and the
+    # only thing on screen saying `␣P` has anything to offer. It rides the TARGET band for the
     # same reason `^V` does: this is where "how do we connect" already lives.
     #
     # Three dresses. Muted while no override is set — this one really does have an off state,

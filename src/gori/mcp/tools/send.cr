@@ -630,7 +630,7 @@ module Gori
           # different questions: the reply says what THIS SEND did (and a plaintext send made no
           # ClientHello, so naming one would be a lie), while the row says what this TAB is set
           # to — which the operator chose, survives a retarget to https://, and is exactly what
-          # the TUI's muted `␣T:` chip reports as "set, and currently doing nothing" (P4).
+          # the TUI's muted `␣P:` chip reports as "set, and currently doing nothing" (P4).
           tls_preset: tls_preset
         )
         return nil unless repeater_id > 0

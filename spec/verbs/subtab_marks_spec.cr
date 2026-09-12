@@ -70,14 +70,15 @@ describe "sub-tab mark verbs" do
     end
   end
 
-  it "moves the Repeater strip's tag entry off the letter that marks" do
-    # `t` on the strip MARKS a chip (this file's whole subject), and `⇧T` marks the strip.
-    # The menu kept 't' for Tag when marking took the key, so the one surface that has both
-    # actions spelled them with the same letter — the drift the key audit's F12 names. Tag
-    # is 'a' now, "Add/edit flat tags", the app's add letter. With marks set it still tags
-    # every marked sub-tab.
+  it "keeps the Repeater strip's tag entry on 't', the SUB-TABS table's letter" do
+    # `t` on the strip MARKS a chip (this file's whole subject) and `⇧T` marks the strip, so
+    # the one surface with both actions does spell them with the same letter — the key audit
+    # moved Tag to 'a' over exactly that. Reverted by the maintainer's call for #1055: Repeater
+    # is the ONLY strip with a tag verb, so 't' costs the uniform table nothing, and the real
+    # fix is to move the strip's raw mark key and the menu letter together rather than to
+    # split Tag off alone. With marks set it still tags every marked sub-tab.
     tag = r["repeater.tag-subtab"]
     tag.section.should eq(:subtab)
-    tag.menu_key.should eq('a')
+    tag.menu_key.should eq('t')
   end
 end

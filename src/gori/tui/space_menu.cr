@@ -54,8 +54,13 @@ module Gori::Tui
     SECTION_LABELS = {
       :common => "COMMON", :request => "REQUEST", :response => "RESPONSE", :target => "TARGET",
       :template => "TEMPLATE", :config => "CONFIG", :results => "RESULTS", :detail => "DETAIL",
-      :input => "INPUT", :chain => "CHAIN", :output => "OUTPUT", :tab => "TAB", :subtab => "SUBTAB",
+      :input => "INPUT", :chain => "CHAIN", :output => "OUTPUT", :tab => "SUB-TABS", :subtab => "SUB-TABS",
     } of Symbol => String
+
+    # The one label both strip sections render under. `:subtab` (new/close/duplicate/rename/
+    # tag/mark) and `:tab` (search/filter the strip) are the SAME IDEA — they only ever
+    # differed in which focus level used to reveal them — so they are one bucket here.
+    SUBTAB_LABEL = SECTION_LABELS[:subtab]
 
     # The semantic bands a bucket is subdivided into, in RENDER ORDER — read top-to-
     # bottom / left-to-right, so the order is the reading order and the destructive
@@ -131,23 +136,22 @@ module Gori::Tui
     # action can never be a surprise. It wins over the section label and, crucially, applies to
     # the single-group branch too: History Body has no context section, so a section label
     # alone would never render.
-    def open(scope : Verb::Scope, section : Symbol, ctx : Verb::ExecContext, banner : String? = nil) : Nil
+    # `subtabs` — the active tab carries a sub-tab strip, so the strip's own verbs join the
+    # card as their own bucket NO MATTER which focus level opened it (#1055). Before, they
+    # were a context section like any other and so appeared only with the strip focused: from
+    # the body one had to walk focus up a level first, and with numbered tab jumps landing
+    # anywhere, "what space offers here" depended on which row the cursor happened to sit on.
+    # The bucket is the SAME set and the SAME letters on all nine strips — see the uniform
+    # table in .github/DESIGN.md — which is what makes it learnable as one thing rather than
+    # nine.
+    def open(scope : Verb::Scope, section : Symbol, ctx : Verb::ExecContext, banner : String? = nil,
+             subtabs : Bool = false) : Nil
       @ctx = ctx
       @selected = 0
       @scroll = 0
       @col_off = nil
       all = @registry.for_scope(scope, ctx).select(&.menu_key)
-      common = all.select { |v| v.section == :common }
-      context = section == :common ? [] of Verb::Definition : all.select { |v| v.section == section }
-
-      # Only NON-EMPTY sections become a bucket — an empty COMMON (never happens in
-      # practice, but defensive) or an empty CONTEXT (the common case for
-      # single-region tabs, or a section nothing is tagged for yet) simply drops out
-      # rather than rendering a header with nothing under it.
-      ctx_label = SECTION_LABELS[section]? || section.to_s.upcase
-      buckets = [] of {String, Array(Verb::Definition)}
-      buckets << {SECTION_LABELS[:common], common} unless common.empty?
-      buckets << {ctx_label, context} unless context.empty?
+      buckets, context = focus_buckets(all, section, subtabs)
 
       # Each focus-area bucket is then subdivided by the SEMANTIC axis when its verbs
       # carry one — that is what breaks the single-region scopes (History's 19-entry
@@ -172,13 +176,52 @@ module Gori::Tui
       # The card-title suffix tracks the FOCUS AREA only, never the semantic bands: a
       # semantically-grouped single-region menu (History Body) still reads a bare
       # "SPACE", because there is no focused sub-area to name. A banner always wins.
-      @section_label = banner || (context.empty? ? "" : ctx_label)
+      # From the strip itself there is no pane bucket to name, but the card should still say
+      # what it is scoped to — so the strip's own label stands in.
+      @section_label = banner || (context.empty? ? (strip_focus?(section, subtabs) ? SUBTAB_LABEL : "") : section_label(section))
       # Widest of the entry titles AND the group headers ("─ LABEL ─", 4 chars of
       # chrome around the label) — a grouped view with a long section label (e.g.
       # SECTION_LABELS additions) must still fit inside the box the entries sized.
       entry_w = @entries.empty? ? 0 : @entries.max_of { |v| Screen.draw_width(menu_title(v, ctx)) + chord_hint_w(v) }
       header_w = @groups.empty? ? 0 : @groups.max_of { |g| Screen.draw_width(g.label) + 4 }
       @title_w = {entry_w, header_w}.max
+    end
+
+    # The FOCUS-AREA split of `all`, in render order — COMMON, then the SUB-TABS bucket when
+    # the tab has a strip, then the focused pane's own section. Returned alongside that last
+    # one because the card's title suffix is the pane's label, and only when there IS a pane
+    # bucket to name.
+    #
+    # Only NON-EMPTY sections become a bucket — an empty COMMON (never happens in practice,
+    # but defensive) or an empty pane bucket (the common case for single-region tabs, or a
+    # section nothing is tagged for yet) simply drops out rather than rendering a header with
+    # nothing under it.
+    private def focus_buckets(all : Array(Verb::Definition), section : Symbol, subtabs : Bool)
+      common = all.select { |v| v.section == :common }
+      strip = subtabs ? all.select { |v| Verb::Registry::SUBTAB_SECTIONS.includes?(v.section) } : [] of Verb::Definition
+      # The focused pane's own bucket, suppressed when that pane IS the strip (or the tab
+      # bar's `:tab`): `strip` already carries those rows, and drawing them again under a
+      # second header would be the same action listed twice with the same letter.
+      context = if section == :common || strip_focus?(section, subtabs)
+                  [] of Verb::Definition
+                else
+                  all.select { |v| v.section == section }
+                end
+
+      buckets = [] of {String, Array(Verb::Definition)}
+      buckets << {SECTION_LABELS[:common], common} unless common.empty?
+      buckets << {SUBTAB_LABEL, strip} unless strip.empty?
+      buckets << {section_label(section), context} unless context.empty?
+      {buckets, context}
+    end
+
+    # The strip (or the tab bar) is what has focus, so the SUB-TABS bucket IS the context.
+    private def strip_focus?(section : Symbol, subtabs : Bool) : Bool
+      subtabs && Verb::Registry::SUBTAB_SECTIONS.includes?(section)
+    end
+
+    private def section_label(section : Symbol) : String
+      SECTION_LABELS[section]? || section.to_s.upcase
     end
 
     # One bucket's rows: its semantic bands (GROUP_ORDER, non-empty only) when ANY verb

@@ -15,22 +15,25 @@ module Gori
       # now reachable from anywhere in Decoder, same as Copy.
       r.register Verb::Definition.new(
         "decoder.new", "New conversion", "Open a fresh blank conversion sub-tab",
-        Verb::Scope::Decoder, available: in_decoder, mnemonic: 'n') { |ctx| ctx.decoder_new; nil }
+        Verb::Scope::Decoder, [Verb::Chord.new("n", ctrl: true)],
+        available: in_decoder, mnemonic: 'n', section: :subtab) { |ctx| ctx.decoder_new; nil }
 
       r.register Verb::Definition.new(
         "decoder.close", "Close conversion", "Close the active conversion sub-tab (keeps at least one)",
-        Verb::Scope::Decoder, available: in_decoder, mnemonic: 'w') { |ctx| ctx.decoder_close; nil }
+        Verb::Scope::Decoder, [Verb::Chord.new("w", ctrl: true)],
+        available: in_decoder, mnemonic: 'w', section: :subtab) { |ctx| ctx.decoder_close; nil }
 
       # Rename the active sub-tab's chip — mirrors repeater.rename-subtab/fuzz.rename-subtab
       # (verbs/history.cr): Decoder is also in renameable_subtabs? (runner.cr), but had no
       # :subtab verb of its own, so its sub-tab-strip space menu was flat COMMON with no
-      # way to rename. 'r' is the letter the STRIP binds for rename and is free within
-      # COMMON ∪ :subtab here (COMMON keys: n/w/y/o/s); it read 'e' until the key audit.
+      # way to rename. 'e' — the letter rename carries on all nine strips (see
+      # `repeater.rename-subtab`); the key audit briefly put it on the strip's 'r' here,
+      # which the four Send/Run tabs can never match.
       r.register Verb::Definition.new(
         "decoder.rename-subtab", "Rename subtab", "Rename the active conversion's sub-tab chip",
-        Verb::Scope::Decoder, available: in_decoder, mnemonic: 'r', section: :subtab) { |ctx| ctx.decoder_rename_subtab; nil }
-      # Content-only clone (input + chain + chip name). 'd' is free in COMMON ∪ :subtab
-      # (COMMON keys: n/w/y/o/s; :subtab has r).
+        Verb::Scope::Decoder, available: in_decoder, mnemonic: 'e', section: :subtab) { |ctx| ctx.decoder_rename_subtab; nil }
+      # Content-only clone (input + chain + chip name). 'd' is the bucket's Duplicate letter
+      # on all nine, and free in COMMON ∪ :subtab here (COMMON keys: y/o/s).
       r.register Verb::Definition.new(
         "decoder.duplicate-subtab", "Duplicate subtab", "Open a new conversion with the same input and chain",
         Verb::Scope::Decoder, available: in_decoder, mnemonic: 'd', section: :subtab) { |ctx| ctx.decoder_duplicate_subtab; nil }

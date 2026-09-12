@@ -325,7 +325,7 @@ module Gori::Tui
     #     the site's own text with every payload in the set. Escaping keeps the bytes:
     #     `render` puts the single `§` back on the wire, the Content-Length still agrees,
     #     and ^K still marks whatever the operator actually points at. (RepeaterView's
-    #     `space ▸ f` seed applies the same escape at the same kind of seam.)
+    #     `space ▸ F` seed applies the same escape at the same kind of seam.)
     #   * no `.scrub`. A capture is EVIDENCE and may legitimately not be valid UTF-8 — a
     #     protobuf/gRPC frame, a gzip'd POST, a latin-1 form field. Scrubbing rewrote each
     #     such byte to the three bytes of U+FFFD before the operator ever saw the request,
@@ -1639,7 +1639,7 @@ module Gori::Tui
       in Fuzz::PlanError::Reason::BadRaceCount
         "race needs at least 2 connections — set Race to 2 or more (^O config)"
       in Fuzz::PlanError::Reason::TlsPreset
-        # The ORDINARY path here, unlike the Repeater's `␣T` (which cycles known names and so
+        # The ORDINARY path here, unlike the Repeater's `␣P` (which cycles known names and so
         # cannot produce one): the advanced card's TLS fingerprint row is a TEXT field, so a
         # typo reaches this branch on the operator's first run. `ex.message` already names
         # every preset that does exist.

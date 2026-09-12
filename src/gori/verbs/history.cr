@@ -251,7 +251,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.new", "New repeater request", "Open a blank request in Repeater to author and send",
         Verb::Scope::Repeater, [Verb::Chord.new("n", ctrl: true)],
-        available: in_repeater, mnemonic: 'n') { |ctx| ctx.repeater_new; nil }
+        available: in_repeater, mnemonic: 'n', section: :subtab) { |ctx| ctx.repeater_new; nil }
 
       # "Minimize request" (Caido-"squash"-style): strip cosmetic headers, tracking-cookie
       # crumbs and unused query/body params, re-sending to verify the response is unchanged.
@@ -274,10 +274,11 @@ module Gori
         "repeater.find-subtab", "Search sub-tabs", "Filter the open repeater sessions and jump to one",
         Verb::Scope::Repeater,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 1 },
-        # 'f', the letter the STRIP itself binds for this picker. It read 's' until the key
+        # 'f', the letter the STRIP itself binds for this picker, and one of the nine the
+        # SUB-TABS bucket spells the same way on all nine strips. It read 's' until the key
         # audit, so an operator who found the action in the menu learned a letter the strip
-        # does not answer to. `repeater.fuzz` gave the letter up (it is 'z' now, which is
-        # what `history.fuzz` has always spelled "Send to Fuzzer").
+        # does not answer to. `repeater.fuzz` gave the letter up (it is 'F' now, joining
+        # `C` Send to Comparer in this scope's capital send family).
         mnemonic: 'f', section: :tab) { |ctx| ctx.repeater_find_subtab; nil }
 
       # Sub-tab rename/close — today's raw key-dispatch on the strip (`r` rename, ^W
@@ -294,14 +295,15 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.rename-subtab", "Rename subtab", "Rename the active repeater sub-tab's chip",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'e', section: :subtab) { |ctx| ctx.repeater_rename_subtab; nil }
-      # Tag / filter the sub-tab strip (issue #121). 'a' — "Add/edit flat tags", the app's
-      # add letter — and not the 't' this held: the strip's live `t` MARKS a chip
-      # (`repeater.subtab-mark-toggle`'s gesture, with `⇧T` beside it), so the menu was
-      # offering one letter for the other action on the one surface both belong to.
-      # The filter uses '/' (the shared filter idiom, unique here).
+      # Tag / filter the sub-tab strip (issue #121). 't' tags the active session and '/' opens
+      # the tag-filter bar — both letters of the SUB-TABS table, free across COMMON ∪ every
+      # Repeater section. The key audit briefly moved this to 'a' because the strip's LIVE `t`
+      # marks a chip; kept on 't' by the maintainer's call, since Repeater is the only strip
+      # with a tag verb and the table has nothing to be uniform with. Worth revisiting as a
+      # pair with the strip's raw mark key rather than on its own.
       r.register Verb::Definition.new(
         "repeater.tag-subtab", "Tag subtab", "Add/edit flat tags on the active repeater sub-tab",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'a', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 't', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
       r.register Verb::Definition.new(
         "repeater.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host / method",
         Verb::Scope::Repeater,
@@ -321,7 +323,8 @@ module Gori
         Verb::Scope::Repeater, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
       r.register Verb::Definition.new(
         "repeater.close-subtab", "Close subtab", "Close the active repeater sub-tab",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'w', section: :subtab) { |ctx| ctx.repeater_close_subtab; nil }
+        Verb::Scope::Repeater, [Verb::Chord.new("w", ctrl: true)],
+        available: in_repeater, mnemonic: 'w', section: :subtab) { |ctx| ctx.repeater_close_subtab; nil }
       # Duplicate the active session into a new sibling (content only — no flow/links).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/y/n/f/m/k/u; :subtab already has e/w).
       r.register Verb::Definition.new(
@@ -342,7 +345,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
         Verb::Scope::Repeater, [Verb::Chord.new("k", ctrl: true)],
-        available: in_repeater, mnemonic: 'w', section: :request) { |ctx| ctx.repeater_mark_word; nil }
+        available: in_repeater, mnemonic: 'W', section: :request) { |ctx| ctx.repeater_mark_word; nil }
       r.register Verb::Definition.new(
         "repeater.auto-mark", "Auto-mark params", "Wrap every request parameter value in a §…§ marker",
         Verb::Scope::Repeater, [Verb::Chord.new("a", ctrl: true)],
@@ -359,7 +362,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
         Verb::Scope::Repeater, [Verb::Chord.new("q", ctrl: true)],
-        available: in_repeater, mnemonic: 'e', section: :request) { |ctx| ctx.repeater_attach_chain; nil }
+        available: in_repeater, mnemonic: 'D', section: :request) { |ctx| ctx.repeater_attach_chain; nil }
 
       # Request-pane VIEW toggles — keymap-driven (Repeater scope) so they're rebindable.
       # The Runner delegators carry the pane-gating + status messages. Hex-edit the
@@ -379,7 +382,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL/WS flow: switch envelope/decoded · otherwise: insert a § marker at the cursor",
         Verb::Scope::Repeater, [Verb::Chord.new("t", ctrl: true)],
-        available: in_repeater, mnemonic: 'd', section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
+        available: in_repeater, mnemonic: 'V', section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
       r.register Verb::Definition.new(
         "repeater.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Repeater, [Verb::Chord.new("u", ctrl: true)],
@@ -391,14 +394,14 @@ module Gori
         "repeater.toggle-sni", "Toggle SNI override", "Override the TLS SNI on the target pane (dialed host unchanged)",
         Verb::Scope::Repeater, [Verb::Chord.new("s", ctrl: true)],
         available: in_repeater, mnemonic: 's', section: :target) { |ctx| ctx.repeater_toggle_sni; nil }
-      # Target-pane cycle, no chord. Same reasoning `␣K` and `␣F` give: the ctrl- space in
+      # Target-pane cycle, no chord. Same reasoning `␣K` and `␣R` give: the ctrl- space in
       # Repeater is dense, a fingerprint is a per-tab decision an operator makes once rather
-      # than a key they reach for mid-edit, and the TARGET band carries a `␣T:…` chip either
+      # than a key they reach for mid-edit, and the TARGET band carries a `␣P:…` chip either
       # way — so the state is on screen (and clickable) without opening the menu.
       r.register Verb::Definition.new(
         "repeater.cycle-tls-preset", "Cycle TLS fingerprint",
         "Shape THIS TAB's ClientHello like a named browser (chrome / firefox / safari / curl) instead of gori's own, for this tab only — the way to ask whether an origin answers differently by handshake, with a second tab on the same host set to a different preset. The destination's outbound_tls client certificate, protocol range and permissive flag still apply, and settings.json is not touched. An APPROXIMATION of that client's hello, not a byte-exact JA3 match: `gori settings tls-fingerprint HOST --preset NAME` prints what actually goes out. https targets only",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'T', section: :target) { |ctx| ctx.repeater_cycle_tls_preset; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'P', section: :target) { |ctx| ctx.repeater_cycle_tls_preset; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
         Verb::Scope::Repeater, [Verb::Chord.new("l", ctrl: true)],
@@ -417,13 +420,13 @@ module Gori
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'K', section: :request) { |ctx| ctx.repeater_toggle_ws_key; nil }
       # gRPC tab only, and no chord for the same reason `␣K` has none: the ctrl- space in
       # Repeater is dense, this is a per-tab decision rather than a mid-edit key, and the
-      # GRPC REQUEST pane carries a `␣F:FRAME` badge either way — so the state is on screen
+      # GRPC REQUEST pane carries a `␣R:FRAME` badge either way — so the state is on screen
       # (and clickable) without opening the menu.
       r.register Verb::Definition.new(
         "repeater.toggle-grpc-reframe", "Toggle gRPC reframe",
         "gRPC: recompute the 5-byte length prefix over the payload actually being sent (ON by default in this tab, so a ^X hex edit produces a well-formed unary message; turn it OFF to send the captured prefix, which is the `gori run repeater send` default and a standard parser test). Unary only — a 0-/multi-message body is sent verbatim either way",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'F', section: :request) { |ctx| ctx.repeater_toggle_grpc_reframe; nil }
-      # gRPC tab only, and no chord for the same reason `␣F` and `␣K` have none: the ctrl-
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'R', section: :request) { |ctx| ctx.repeater_toggle_grpc_reframe; nil }
+      # gRPC tab only, and no chord for the same reason `␣R` and `␣K` have none: the ctrl-
       # space in Repeater is dense, this is a per-payload decision rather than a mid-edit key,
       # and the GRPC REQUEST pane carries a `␣E:FIELDS` badge wherever the form is available —
       # so the state is on screen (and clickable) without opening the menu.
@@ -447,12 +450,17 @@ module Gori
       # sixteen other scopes that bind it, and the Repeater was the one place where the
       # reflex hit a display toggle instead. The chord is Chord.new("d", shift: true),
       # NOT Chord.new("D") — Keybind.from_event normalises a typed capital to
-      # shift+lowercase. menu_key skips shift chords, so the mnemonic stays the plain
-      # 'd' this section has always read as, in the space menu where nothing is destroyed.
+      # shift+lowercase.
+      #
+      # The MENU letter is 'D', so the two now agree. It read the plain 'd' this section
+      # had always used, which the SUB-TABS bucket claims for Duplicate on all nine strips
+      # — and a bucket that renders inside the :response view cannot share it. Landing on
+      # the capital the chord already carries is the cheapest possible move: one letter,
+      # one shift, and the row in the menu spells what the keyboard does.
       r.register Verb::Definition.new(
         "repeater.toggle-diff", "Toggle diff", "Switch the response pane between the raw response and a diff against the previous one",
         Verb::Scope::Repeater, [Verb::Chord.new("d", shift: true)],
-        available: in_repeater, mnemonic: 'd', section: :response) { |ctx| ctx.repeater_toggle_resp_diff; nil }
+        available: in_repeater, mnemonic: 'D', section: :response) { |ctx| ctx.repeater_toggle_resp_diff; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'h', section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
@@ -655,11 +663,15 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("i", shift: true)],
         available: history_targets, mnemonic: 'z', group: :send) { |ctx| ctx.fuzz_selected; nil }
       r.register Verb::Definition.new(
-        # 'z', the letter `history.fuzz` above already spells "Send to Fuzzer" with. It held
-        # 'f' until the key audit, where 'f' went to `repeater.find-subtab` so the menu and
-        # the strip stop naming the picker two different ways.
+        # 'F'. It held 'f' until the key audit, where 'f' went to `repeater.find-subtab` so the
+        # menu and the strip stop naming the picker two different ways — and 'f' is now one of
+        # the nine letters the SUB-TABS bucket reserves in EVERY Repeater view, so this could
+        # not stay whatever else happened. The capital joins `C` Send to Comparer, the other
+        # cross-tab send in this scope's COMMON. (`history.fuzz` spells the same act 'z' in
+        # the Body scope; cross-scope reuse is legal and the two lists never render together,
+        # but the send family inside a scope is the closer neighbour to agree with.)
         "repeater.fuzz", "Send to Fuzzer", "Turn this repeater request into a fuzz template",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'z') { |ctx| ctx.fuzz_from_repeater; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'F') { |ctx| ctx.fuzz_from_repeater; nil }
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
@@ -708,7 +720,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
         [Verb::Chord.new("n", ctrl: true)],
-        available: in_fuzzer, mnemonic: 'n') { |ctx| ctx.fuzz_new; nil }
+        available: in_fuzzer, mnemonic: 'n', section: :subtab) { |ctx| ctx.fuzz_new; nil }
 
       # Search-and-jump across open fuzz sessions — the Repeater find-subtab picker,
       # generalised (section :tab so it shows in the tab-bar space menu, like repeater).
@@ -752,7 +764,8 @@ module Gori
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'e', section: :subtab) { |ctx| ctx.fuzzer_rename_subtab; nil }
       r.register Verb::Definition.new(
         "fuzz.close-subtab", "Close subtab", "Close the active fuzz session",
-        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'w', section: :subtab) { |ctx| ctx.fuzzer_close_subtab; nil }
+        Verb::Scope::Fuzzer, [Verb::Chord.new("w", ctrl: true)],
+        available: in_fuzzer, mnemonic: 'w', section: :subtab) { |ctx| ctx.fuzzer_close_subtab; nil }
       # Content-only clone of the active fuzz session (no run results / flow / links).
       # 'd' is free in COMMON ∪ :subtab.
       r.register Verb::Definition.new(
@@ -772,7 +785,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
         Verb::Scope::Fuzzer, [Verb::Chord.new("k", ctrl: true)],
-        available: in_fuzzer, mnemonic: 'w', section: :template) { |ctx| ctx.fuzz_mark_word; nil }
+        available: in_fuzzer, mnemonic: 'W', section: :template) { |ctx| ctx.fuzz_mark_word; nil }
       r.register Verb::Definition.new(
         "fuzz.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
         Verb::Scope::Fuzzer, [Verb::Chord.new("t", ctrl: true)],
@@ -780,7 +793,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("q", ctrl: true)], # ^Y → Copy; see repeater.attach-chain
-        available: in_fuzzer, mnemonic: 'e', section: :template) { |ctx| ctx.fuzz_attach_chain; nil }
+        available: in_fuzzer, mnemonic: 'D', section: :template) { |ctx| ctx.fuzz_attach_chain; nil }
       r.register Verb::Definition.new(
         "fuzz.list-paste", "Add List payload set", "Open the payload-set editor pre-seeded to a List — a multi-line editor, one value per line (paste splits automatically)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("l", ctrl: true)],
@@ -852,7 +865,7 @@ module Gori
       # and validate_menu_keys! checks COMMON ∪ each section — a COMMON 'f' would raise at boot.
       r.register Verb::Definition.new(
         "mine.filter", "Filter findings", "Filter the FINDINGS table by parameter / location / evidence",
-        Verb::Scope::Miner, [Verb::Chord.new("/")], available: in_miner, mnemonic: 'f', section: :results) { |ctx| ctx.mine_filter; nil }
+        Verb::Scope::Miner, [Verb::Chord.new("/")], available: in_miner, mnemonic: 'F', section: :results) { |ctx| ctx.mine_filter; nil }
       # Send the selected finding (injected into the session request) to Repeater. COMMON so
       # it's reachable from summary/results/detail; gated on a selected finding. 'R', not 'p':
       # `fuzz.repeater` had to move off `r` too and its comment names 'R' as "the letter the
@@ -880,16 +893,18 @@ module Gori
       r.register Verb::Definition.new(
         "mine.rename-subtab", "Rename subtab", "Rename the active miner session's sub-tab chip",
         Verb::Scope::Miner, available: in_miner, mnemonic: 'e', section: :subtab) { |ctx| ctx.miner_rename_subtab; nil }
-      # `:common`, not `:subtab` — the space menu renders COMMON ∪ the FOCUSED PANE's section,
-      # so a `:subtab` close is invisible from the body and reachable only after moving focus
-      # to the strip. Decoder and JWT fixed that for themselves; this is the same fix.
+      # `:subtab`, with the rest of the chip family. Until #1055 this had to be `:common` —
+      # the menu rendered COMMON ∪ the FOCUSED PANE's section, so a `:subtab` close was
+      # invisible from the body and reachable only after moving focus to the strip. The
+      # SUB-TABS bucket now rides along with every view, so the honest section is free.
       #
       # Repeater and Fuzzer deliberately do NOT follow: `repeater.mark-word` / `fuzz.mark-word`
       # own 'w' in their `:request` / `:template` sections, so a COMMON 'w' would collide there
       # and `Registry#validate_menu_keys!` would raise at boot. Their close stays in :subtab.
       r.register Verb::Definition.new(
         "mine.close-subtab", "Close subtab", "Close the active miner session",
-        Verb::Scope::Miner, available: in_miner, mnemonic: 'w') { |ctx| ctx.miner_close_subtab; nil }
+        Verb::Scope::Miner, [Verb::Chord.new("w", ctrl: true)],
+        available: in_miner, mnemonic: 'w', section: :subtab) { |ctx| ctx.miner_close_subtab; nil }
 
       # Sub-tab search + inline filter (issue #121), section :tab — brings Miner to full
       # sub-tab parity (it had neither). Both gate on ≥2 sessions. 'f'/'/' are free here.

@@ -625,7 +625,7 @@ module Gori::Tui
       if view.grpc_mode?
         # A unary gRPC call hex-edits its message PAYLOAD; a 0- or multi-message body has no
         # unambiguous single payload to edit. What happens to the length prefix in front of
-        # that payload is `␣F:FRAME`'s answer, not this one — so the toast reads the toggle
+        # that payload is `␣R:FRAME`'s answer, not this one — so the toast reads the toggle
         # rather than promising the recompute it used to be fused with.
         if !view.grpc_reframable?
           @host.status("gRPC hex edit needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
@@ -634,7 +634,7 @@ module Gori::Tui
           # other rather than stacking two authoritative buffers over one slice.
           view.exit_grpc_fields if view.grpc_fields?
           on = view.toggle_request_hex
-          framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣F to reframe)"
+          framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣R to reframe)"
           @host.status(on ? "gRPC payload hex: on — #{framing} (^X/esc exit)" : "gRPC payload hex: off")
         else
           @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
@@ -690,7 +690,7 @@ module Gori::Tui
         return
       end
       view.toggle_grpc_fields
-      framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣F to reframe)"
+      framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣R to reframe)"
       @host.status("gRPC fields: on — ↑/↓ pick · ↵ edit · #{framing} (␣E/esc exit)")
     end
 
@@ -781,7 +781,7 @@ module Gori::Tui
                          : "gRPC reframe: off — sending the captured length prefix (stale after a ^X edit)")
     end
 
-    # `␣T` — cycle this tab's TLS fingerprint override (#844).
+    # `␣P` — cycle this tab's TLS fingerprint override (#844).
     #
     # The status line carries the honesty clause every other surface carries: #822 documents
     # these presets as APPROXIMATIONS, and a chip that reads `chrome` is exactly the place an
@@ -895,7 +895,7 @@ module Gori::Tui
         repeater_toggle_http2 # cycles WS→h1→h2 on a handshake tab, flips h1⇄h2 elsewhere
       when :tls_preset
         # No `focus_pane`, for the same reason `:transport` gives: the fingerprint belongs to
-        # the tab, not to a pane, and the `␣T` key does not move the caret either.
+        # the tab, not to a pane, and the `␣P` key does not move the caret either.
         repeater_cycle_tls_preset
       when :mark
         # The chord the badge names, doing what the chord does. It used to read `^K` — a
@@ -1814,7 +1814,7 @@ module Gori::Tui
         # so the clone sends the handshake its source would"), and leaving it out of the INSERT
         # meant the row said "no override" until some later save-on-leave committed: a peer
         # session reconciling the project, `repeater list` and MCP all read nil off the row
-        # while the chip on screen read `␣T:chrome`, and a crash before that save lost it.
+        # while the chip on screen read `␣P:chrome`, and a crash before that save lost it.
         tls_preset: view.tls_preset)
       id == 0 ? nil : id
     end
@@ -2793,7 +2793,7 @@ module Gori::Tui
         return
       end
       # Space opens the space menu, exactly as it does in the request pane's READ mode. The
-      # form's own hints name `␣E` and `␣F`, and swallowing space here made both of them
+      # form's own hints name `␣E` and `␣R`, and swallowing space here made both of them
       # unpressable — a footer advertising a key that does nothing.
       return @host.open_space_menu if key.space? && !ev.ctrl? && !ev.alt?
       case

@@ -27,6 +27,13 @@ module Gori
         @by_id[id]? || raise Gori::Error.new("unknown verb id: #{id}")
       end
 
+      # The two sections the space menu renders as ONE "SUB-TABS" bucket. `:subtab` holds the
+      # strip's own actions (new/close/duplicate/rename/tag/mark) and `:tab` the strip's
+      # search + filter; they are the same idea and only ever differed in which focus level
+      # revealed them. Since #1055 the bucket rides along with EVERY pane view of a tab that
+      # has a strip, which is why #validate_menu_keys! has to sweep those merged views too.
+      SUBTAB_SECTIONS = {:subtab, :tab}
+
       # True when scope has at least one non-hidden, MENU-KEYED verb tagged with
       # `section` — lets the tab-bar space menu (@focus == :menu) decide whether a
       # scope has its OWN :tab actions or should fall back to :common instead. Must
@@ -54,11 +61,17 @@ module Gori
 
         by_scope.each do |scope, verbs|
           common = verbs.select { |v| v.section == :common }
-          check_menu_keys!(scope, :common, common)
+          # The SUB-TABS bucket is part of every view on a tab that has a strip, so it is
+          # part of every sweep below — the reason a pane letter may no longer reuse one of
+          # the strip's nine (see .github/DESIGN.md).
+          strip = verbs.select { |v| SUBTAB_SECTIONS.includes?(v.section) }
+          check_menu_keys!(scope, :common, common + strip)
           sections = verbs.map(&.section).uniq!.reject { |s| s == :common }
           sections.each do |section|
             view = common + verbs.select { |v| v.section == section }
             check_menu_keys!(scope, section, view)
+            next if strip.empty? || SUBTAB_SECTIONS.includes?(section)
+            check_menu_keys!(scope, section, view + strip)
           end
         end
       end

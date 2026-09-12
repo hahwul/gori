@@ -12,14 +12,16 @@ module Gori
       # Session management + the two lens toggles are COMMON (reachable from every pane).
       r.register Verb::Definition.new(
         "jwt.new", "New session", "Open a fresh blank JWT session sub-tab",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'n') { |ctx| ctx.jwt_new; nil }
+        Verb::Scope::Jwt, [Verb::Chord.new("n", ctrl: true)],
+        available: in_jwt, mnemonic: 'n', section: :subtab) { |ctx| ctx.jwt_new; nil }
       r.register Verb::Definition.new(
         "jwt.close", "Close session", "Close the active JWT session (keeps at least one)",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'w') { |ctx| ctx.jwt_close; nil }
+        Verb::Scope::Jwt, [Verb::Chord.new("w", ctrl: true)],
+        available: in_jwt, mnemonic: 'w', section: :subtab) { |ctx| ctx.jwt_close; nil }
       r.register Verb::Definition.new(
         "jwt.toggle-mode", "Toggle decode/encode", "Flip between the DECODE and ENCODE lenses",
         Verb::Scope::Jwt, [Verb::Chord.new("t", ctrl: true)],
-        available: in_jwt, mnemonic: 'e') { |ctx| ctx.jwt_toggle_mode; nil }
+        available: in_jwt, mnemonic: 'm') { |ctx| ctx.jwt_toggle_mode; nil }
       r.register Verb::Definition.new(
         "jwt.cycle-alg", "Cycle signing alg", "Cycle the signing algorithm: HS256 / HS384 / HS512 / none",
         Verb::Scope::Jwt, [Verb::Chord.new("a", ctrl: true)], available: in_jwt, mnemonic: 'a') { |ctx| ctx.jwt_cycle_alg; nil }
@@ -54,7 +56,7 @@ module Gori
       # Sub-tab chip rename + content clone — tagged :subtab (mirrors Decoder).
       r.register Verb::Definition.new(
         "jwt.rename-subtab", "Rename subtab", "Rename the active session's sub-tab chip",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'r', section: :subtab) { |ctx| ctx.jwt_rename_subtab; nil }
+        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'e', section: :subtab) { |ctx| ctx.jwt_rename_subtab; nil }
       r.register Verb::Definition.new(
         "jwt.duplicate-subtab", "Duplicate subtab", "Open a new session with the same token + claims",
         Verb::Scope::Jwt, available: in_jwt, mnemonic: 'd', section: :subtab) { |ctx| ctx.jwt_duplicate_subtab; nil }

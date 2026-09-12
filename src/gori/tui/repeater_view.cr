@@ -313,7 +313,7 @@ module Gori::Tui
       # non-base64 key. See `WsEngine.build_handshake`.
       @ws_keep_key = false
       # The TLS fingerprint THIS TAB presents (#844), or nil for "whatever the destination's
-      # outbound_tls policy says" — which is what every tab did before it existed. `␣T` cycles
+      # outbound_tls policy says" — which is what every tab did before it existed. `␣P` cycles
       # it; the TARGET band carries a chip whenever it is set.
       #
       # PER TAB, which is the entire point: two tabs against one host with different values
