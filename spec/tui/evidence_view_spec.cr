@@ -74,8 +74,8 @@ describe Gori::Tui::EvidenceView do
       text.should contain("FALSE-POSITIVE")
 
       rows = text.lines
-      header = rows.find! { |row| row.includes?("REQUEST") }
-      row = rows.find! { |row| row.includes?("FALSE-POSITIVE") }
+      header = rows.find!(&.includes?("REQUEST"))
+      row = rows.find!(&.includes?("FALSE-POSITIVE"))
 
       # The widest confirmation keeps its last letter instead of being overdrawn.
       row.index("GET /login").should eq(header.index("REQUEST"))
