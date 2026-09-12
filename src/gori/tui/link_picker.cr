@@ -42,15 +42,6 @@ module Gori::Tui
     # two positionally-correlated lists, one read by the draw and one by the action, drift
     # into a row that says "New issue" and creates a note.
     CREATE_KINDS = {Store::LinkOwnerKind::Issue, Store::LinkOwnerKind::Note}
-    # Freezing (#1038) writes an `issue_evidence` row, and a note owns no evidence — so the
-    # freeze picker pins ONE create row and is handed issue rows only (`Runner#link_picker_rows`).
-    FREEZE_CREATE_KINDS = {Store::LinkOwnerKind::Issue}
-
-    IDLE_HINT = "type to filter · ↑/↓ select · ↵ link · esc cancel"
-    # The card's own hint row names the create rows too; the shell's bottom row does not.
-    CARD_HINT        = "type to filter · ↑/↓ select · ↵ link / create · esc cancel"
-    FREEZE_IDLE_HINT = "type to filter · ↑/↓ select · ↵ link & freeze · esc cancel"
-    FREEZE_CARD_HINT = "type to filter · ↑/↓ select · ↵ link & freeze / create · esc cancel"
 
     # Gutter for the kind badge, so labels line up down both kinds.
     BADGE_W = 6
@@ -59,12 +50,13 @@ module Gori::Tui
 
     @indexed : Array({Row, String})
 
-    # "Attach and freeze" (#1038): ↵ on an issue links the ref AND writes an immutable copy
-    # of its current exchange in the same transaction. A MODE of this card rather than a
-    # setting, so the title and the hint say what ↵ will do before it does it.
-    getter? freeze : Bool
+    # Does at least one of the refs being attached HAVE an exchange to copy (#1038)? There is
+    # no longer a freeze verb beside Link — ↵ freezes by default whenever there are bytes and
+    # the destination can own them — so this card's only job here is to SAY so before ↵ is
+    # pressed. A Bool, not the snapshots: the picker stays store-free and holds no evidence.
+    getter? freezable : Bool
 
-    def initialize(@rows : Array(Row), *, @freeze : Bool = false)
+    def initialize(@rows : Array(Row), *, @freezable : Bool = false)
       @indexed = @rows.map { |r| {r, haystack(r)} }
       @filtered = @rows
       # Prefer the first existing owner when there is one (create is always at the top),
@@ -72,12 +64,11 @@ module Gori::Tui
       @selected = @rows.empty? ? 0 : create_rows
     end
 
-    # The pinned create rows — both kinds, or the issue alone while freezing. The labels are
-    # DERIVED from these rather than kept in a second tuple beside them: two positionally-
-    # correlated lists, one read by the draw and one by the action, drift into a row that
-    # says "New issue" and creates a note.
-    def create_kinds : Tuple(Store::LinkOwnerKind) | Tuple(Store::LinkOwnerKind, Store::LinkOwnerKind)
-      @freeze ? FREEZE_CREATE_KINDS : CREATE_KINDS
+    # The pinned create rows. The labels are DERIVED from these rather than kept in a second
+    # tuple beside them: two positionally-correlated lists, one read by the draw and one by
+    # the action, drift into a row that says "New issue" and creates a note.
+    def create_kinds : Tuple(Store::LinkOwnerKind, Store::LinkOwnerKind)
+      CREATE_KINDS
     end
 
     def create_rows : Int32
@@ -112,11 +103,30 @@ module Gori::Tui
     end
 
     def title : String
-      @freeze ? "LINK & FREEZE TO" : "LINK TO"
+      "LINK TO"
     end
 
+    # What ↵ does to the HIGHLIGHTED row, said before it does it. It has to move with the
+    # cursor, because the answer is per-row: an issue can own the frozen bytes and a note
+    # cannot, and a create row makes the owner first. One hint for the card and for the
+    # shell's bottom line — once it names the row under the cursor there is nothing left
+    # for a separate "link / create" phrasing to add.
     def hint : String
-      @freeze ? FREEZE_IDLE_HINT : IDLE_HINT
+      "type to filter · ↑/↓ select · ↵ #{enter_action} · esc cancel"
+    end
+
+    def enter_action : String
+      if kind = selected_create
+        freezes_into?(kind) ? "create & freeze" : "create"
+      elsif row = selected_row
+        freezes_into?(row.kind) ? "link & freeze" : "link"
+      else
+        "link"
+      end
+    end
+
+    private def freezes_into?(kind : Store::LinkOwnerKind) : Bool
+      @freezable && kind.issue?
     end
 
     protected def refilter : Nil
@@ -154,7 +164,7 @@ module Gori::Tui
       box = overlay_box(area)
       return render_too_small(screen, area, "the link picker needs a larger window") unless box
       Frame.card(screen, box, title, border: Theme.border_focus)
-      list_top = render_filter(screen, box, @freeze ? FREEZE_CARD_HINT : CARD_HINT)
+      list_top = render_filter(screen, box, hint)
       list_h = list_height(box)
       ensure_visible(list_h)
       (0...list_h).each do |i|

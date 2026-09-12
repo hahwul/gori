@@ -126,10 +126,9 @@ module Gori
       # entity links (cross-tab attach + link-target ids for availability gating).
       # ONE attach intent, not one per owner kind: the picker it opens holds issues and
       # notes on the same list, plus a create row for each (see Tui::LinkPicker).
+      # ↵ on an issue additionally freezes each ref's current exchange as evidence (#1038);
+      # there is no second intent for that, because there is no second verb.
       abstract def link_attach : Nil
-      # `link_attach` with the picker in its LINK & FREEZE mode (#1038): the pick links the
-      # ref AND writes an immutable copy of its current exchange, in one transaction.
-      abstract def link_attach_freeze : Nil
       abstract def link_flow_id : Int64?
       abstract def link_repeater_id : Int64?
       abstract def link_fuzz_id : Int64?

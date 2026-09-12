@@ -143,9 +143,10 @@ end
 describe "LinkPicker — Overlay contract" do
   it "carries the chrome the Runner's ladder arms used to hard-code" do
     OverlayHarness.new(sample_picker).assert_chrome(OverlayKind::LinkPick, "LINK TO")
-    # The bottom row says "link"; the card's own hint row also names the create actions.
+    # ONE hint, on the card and on the shell's bottom row: once it names the row under the
+    # cursor there is nothing a separate "link / create" phrasing could add (#1038).
     sample_picker.hint.should eq("type to filter · ↑/↓ select · ↵ link · esc cancel")
-    OverlayHarness.new(sample_picker).rendered?("↵ link / create").should be_true
+    OverlayHarness.new(sample_picker).rendered?("↵ link · esc cancel").should be_true
   end
 
   it "keeps the two pinned create rows out of the filtered count (the off-by-two)" do
@@ -214,32 +215,47 @@ describe "LinkPicker — Overlay contract" do
     away.overlay.handle_click(away.area, 0, 0).should eq(:cancel)
   end
 
-  # The LINK & FREEZE mode (#1038): the same card, said out loud. Only an issue can own
-  # frozen evidence, so the note create row is gone and the caller hands it issue rows only.
-  it "pins a single create row and says what ↵ does in freeze mode" do
-    p = LinkPicker.new([issue_row(1_i64, "Reflected XSS")], freeze: true)
-    p.freeze?.should be_true
-    p.title.should eq("LINK & FREEZE TO")
-    p.hint.should eq("type to filter · ↑/↓ select · ↵ link & freeze · esc cancel")
-    p.create_rows.should eq(1)
-    p.entry_count.should eq(2)
-    p.selected.should eq(1)
-    p.selected_row.try(&.id).should eq(1_i64)
-    p.move(-1)
-    p.selected_create.should eq(Gori::Store::LinkOwnerKind::Issue)
-    p.selected_row.should be_nil
-    p.move(-1)
-    p.selected_create.should eq(Gori::Store::LinkOwnerKind::Issue) # no note row above it
+  # ONE card now (#1038) — the LINK & FREEZE mode is gone, along with its title, its single
+  # create row and its two hint constants. ↵ freezes by default where it can, so what the
+  # card owes the operator is a hint that says what ↵ will do to the row UNDER THE CURSOR:
+  # an issue can own the bytes, a note cannot, and a create row makes the owner first.
+  it "moves the ↵ hint with the cursor when the refs carry an exchange" do
+    p = LinkPicker.new([
+      issue_row(1_i64, "Reflected XSS"),
+      note_row(10_i64, 1, "Auth flow", "token reuse"),
+    ], freezable: true)
+    p.freezable?.should be_true
+    p.title.should eq("LINK TO") # one title, whatever ↵ ends up doing
+    p.create_rows.should eq(2)   # and both create rows, because a note is still a destination
+
+    p.set_selected(0)
+    p.enter_action.should eq("create & freeze")
+    p.hint.should eq("type to filter · ↑/↓ select · ↵ create & freeze · esc cancel")
+    p.set_selected(1) # + New note…
+    p.enter_action.should eq("create")
+    p.set_selected(2) # the issue
+    p.enter_action.should eq("link & freeze")
+    p.set_selected(3) # the note — a note owns no evidence
+    p.enter_action.should eq("link")
 
     h = OverlayHarness.new(p)
     h.rendered?("+ New issue…").should be_true
-    h.rendered?("+ New note…").should be_false
-    h.rendered?("↵ link & freeze / create").should be_true
+    h.rendered?("+ New note…").should be_true
+    h.rendered?("↵ link").should be_true
+  end
 
-    # The default mode is untouched.
-    plain = sample_picker
-    plain.freeze?.should be_false
-    plain.create_rows.should eq(2)
-    plain.title.should eq("LINK TO")
+  it "never promises a freeze when no ref has an exchange to copy" do
+    # A fuzz/miner session, a pending flow, a never-sent Repeater tab: the link is still the
+    # act, so the card opens — it must simply not say "& freeze" about bytes that do not exist.
+    p = LinkPicker.new([issue_row(1_i64, "Reflected XSS")])
+    p.freezable?.should be_false
+    p.set_selected(0)
+    p.enter_action.should eq("create")
+    p.set_selected(2)
+    p.enter_action.should eq("link")
+    p.hint.should eq("type to filter · ↑/↓ select · ↵ link · esc cancel")
+
+    # An empty project has no row under the cursor at all; the hint must still render.
+    LinkPicker.new([] of LinkPicker::Row, freezable: true).hint.should contain("↵ create & freeze")
   end
 end

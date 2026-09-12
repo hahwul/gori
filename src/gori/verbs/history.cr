@@ -905,16 +905,14 @@ module Gori
       fuzz_linkable = ->(ctx : Verb::ExecContext) {
         ctx.current_tab == :fuzzer && !ctx.link_fuzz_id.nil?
       }
+      # Linking to an issue also freezes the tab's request + its last response (#1038 — see
+      # register_links for why that is one verb and not two). The tab stays editable and
+      # sendable; what freezes is a COPY. A never-sent tab has no exchange, so it links and
+      # the toast says the bytes were not kept.
       r.register Verb::Definition.new(
-        "link.repeater.attach", "Link…", "Attach this repeater session to an issue or note — or create one",
+        "link.repeater.attach", "Link…",
+        "Attach this repeater session to an issue (freezing its request + last response as evidence) or a note — or create one",
         Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
-      # The Repeater's "Link & freeze…" (#1038) — see register_links for the History pair.
-      # Registered here beside its sibling so the two land together in the COMMON group.
-      # The tab stays editable and sendable; what freezes is a COPY of the request and its
-      # current last response, and a never-sent tab is refused at the pick.
-      r.register Verb::Definition.new(
-        "link.repeater.freeze", "Link & freeze…", "Attach this repeater session to an issue and freeze its request + last response as evidence",
-        Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'Z') { |ctx| ctx.link_attach_freeze; nil }
       r.register Verb::Definition.new(
         "link.fuzzer.attach", "Link…", "Attach this fuzz session to an issue or note — or create one",
         Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }

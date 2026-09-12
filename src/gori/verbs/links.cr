@@ -33,31 +33,27 @@ module Gori
         ctx.current_tab == :miner && !ctx.link_miner_id.nil?
       }
 
+      # ONE verb, and it keeps the bytes (#1038). There used to be a "Link & freeze…" sibling
+      # on `Z`; it asked the operator to understand that a link is a mutable pointer — that
+      # retention and the next send can hollow it out — at the moment of FILING, when the
+      # answer was almost always "keep the bytes". So ↵ on an issue links AND freezes the
+      # ref's current exchange in one transaction whenever there is one, and says so when
+      # there is not. A note still takes the pointer alone: a note owns no evidence.
       r.register Verb::Definition.new(
-        "link.history.attach", "Link…", "Attach the selected/marked flows to an issue or note — or create one",
+        "link.history.attach", "Link…",
+        "Attach the selected/marked flows to an issue (freezing their exchanges as evidence) or a note — or create one",
         Verb::Scope::Body, available: flow_targets, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
 
       r.register Verb::Definition.new(
-        "link.history-detail.attach", "Link…", "Attach this flow to an issue or note — or create one",
+        "link.history-detail.attach", "Link…",
+        "Attach this flow to an issue (freezing its exchange as evidence) or a note — or create one",
         Verb::Scope::HistoryDetail, available: flow_available, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
 
+      # No freeze half here, and none possible: a mining session is a template plus a run,
+      # not one exchange (`Evidence.freezable?`), so the picker's hint says "link".
       r.register Verb::Definition.new(
         "link.miner.attach", "Link…", "Attach this miner session to an issue or note — or create one",
         Verb::Scope::Miner, available: miner_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
-
-      # "Link & freeze…" (#1038) — the same picker in its freeze mode: the pick links the
-      # flow to an issue AND copies its current request/response into immutable evidence,
-      # in one transaction. A SIBLING verb rather than a key inside the picker, so the menu
-      # says what ↵ will do before the card opens. `Z` — freeZe — is free in all three
-      # scopes that offer it; `F` is not (HistoryDetail's copy, Repeater's gRPC reframe).
-      # Not offered from the Miner: a mining session has no single exchange to freeze.
-      r.register Verb::Definition.new(
-        "link.history.freeze", "Link & freeze…", "Attach the selected/marked flows to an issue and freeze their exchanges as evidence",
-        Verb::Scope::Body, available: flow_targets, mnemonic: 'Z') { |ctx| ctx.link_attach_freeze; nil }
-
-      r.register Verb::Definition.new(
-        "link.history-detail.freeze", "Link & freeze…", "Attach this flow to an issue and freeze its exchange as evidence",
-        Verb::Scope::HistoryDetail, available: flow_available, mnemonic: 'Z') { |ctx| ctx.link_attach_freeze; nil }
     end
   end
 end
