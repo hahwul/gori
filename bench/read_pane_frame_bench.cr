@@ -36,8 +36,10 @@ end
 W = 100
 H =  40
 
-# The Intercept preview's exact wiring: a windowed message, plain text bridged through
-# `Highlight.plain`, colour through `line_at`.
+# The Intercept preview's exact wiring: a windowed message, colour through `line_at` and
+# plain text through `plain_at` — which is the pane's other half of the same story. It used
+# to bridge the text through `Highlight.plain(line_at(i))`, i.e. tokenise the line and then
+# discard every colour, so each drawn logical line was styled TWICE a frame.
 def wrapped_pane(body : String) : {ReadPane, Highlight::Windowed}
   lines = ("POST /api/v1/submit HTTP/1.1\r\nHost: api.example.com\r\n" \
            "Content-Type: application/json\r\n\r\n#{body}").split('\n').map(&.rstrip('\r'))

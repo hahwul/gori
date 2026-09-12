@@ -262,9 +262,11 @@ describe Gori::Tui::HistoryView do
           (0...12).map { |y| backend.row(y) }.join("\n")
         end
 
-        # Pending: no response, so both cells are the em dash.
+        # Pending: no response, so both cells read whatever `Fmt` spells a missing value as —
+        # asked rather than written out, so this cannot pin a second spelling of that
+        # convention next to the one `Fmt` owns.
         pending = draw.call
-        pending.should contain("—")
+        pending.should contain(Fmt.size(nil))
         pending.should_not contain("3.5KB")
 
         store.update_response(Gori::Store::CapturedResponse.new(

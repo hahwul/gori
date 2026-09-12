@@ -3194,9 +3194,11 @@ module Gori::Tui
     # Through the memo, like the timestamp and the MIME label beside it: the value is a
     # frozen field of a settled flow, so this is the same String every frame it is drawn.
     # `nil` short-circuits rather than taking a key, so the pending rows of a live capture
-    # never fill the map with one entry for "no response yet".
+    # never fill the map with one entry for "no response yet" — but it still asks `Fmt`
+    # what a missing value reads as, because `Fmt` is where that convention lives and the
+    # Repeater and Fuzzer rows that call it directly have to keep agreeing with this one.
     private def fmt_size(bytes : Int64?) : String
-      return "—" unless bytes
+      return Fmt.size(nil) unless bytes
       @size_memo.fetch(bytes) do
         @size_memo.clear if @size_memo.size >= @max_rows
         @size_memo[bytes] = Fmt.size(bytes)
@@ -3206,7 +3208,7 @@ module Gori::Tui
     # Compact request→response latency (ms/s/m/h), bounded to ≤6 cols. "—" until the
     # response lands; a minute/hour tier keeps very slow flows from overflowing.
     private def fmt_dur(us : Int64?) : String
-      return "—" unless us
+      return Fmt.dur(nil) unless us
       @dur_memo.fetch(us) do
         @dur_memo.clear if @dur_memo.size >= @max_rows
         @dur_memo[us] = Fmt.dur(us)
