@@ -2181,7 +2181,19 @@ module Gori::Tui
     # was a reset") also covers the operator who dragged the bar back to its default by hand.
     private def tab_prefs_of(ov : TabsOverlay) : Array({String, Bool})
       prefs = ov.to_prefs
-      defaults = Chrome.reconcile([] of {String, Bool}).map { |(sym, _, vis)| {sym.to_s, vis} }
+      # Partitioned, like the editor's own list: `to_prefs` writes the bar first and everything
+      # off it after, so the comparison has to be against the defaults in THAT shape or an
+      # untouched open-and-save would look like a customised layout and pin today's defaults.
+      #
+      # …and WITHOUT Evidence when the archive is empty, for the same reason: the editor drops
+      # that row (`remove_unavailable_evidence`), so a twenty-row working copy was being
+      # compared against a twenty-one-row default and never matched. Which is to say the
+      # pinning this helper exists to prevent was happening in every project that had not
+      # frozen a snapshot yet — the common case, and the one no spec covered because
+      # `TabsOverlay.new` defaults to Evidence being available.
+      defaults = Chrome.bar_partition(Chrome.reconcile([] of {String, Bool}))
+        .reject { |(sym, _, _)| sym == :evidence && !@evidence_available }
+        .map { |(sym, _, vis)| {sym.to_s, vis} }
       prefs == defaults ? [] of {String, Bool} : prefs
     end
 

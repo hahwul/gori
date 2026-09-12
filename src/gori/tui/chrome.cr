@@ -203,6 +203,20 @@ module Gori::Tui
       out
     end
 
+    # A layout as the TAB EDITOR reads it: every tab on the bar first, in bar order, then
+    # everything off it. `reconcile` keeps the operator's stored order, in which an off-bar tab
+    # can sit between two slots (the factory layout has six of them between Fuzzer and Probe);
+    # that is the right shape to STORE — it is where a tab goes back to — but the wrong one to
+    # edit, because it makes the slot number and the row position two different things.
+    #
+    # Partitioned, the position IS the state: the numbered rows are the bar, the rest are what
+    # `0` reaches, and moving a row across the seam is the only thing "show this tab" can mean.
+    # Stable, so neither group's internal order moves.
+    def self.bar_partition(annotated : Array({Symbol, String, Bool})) : Array({Symbol, String, Bool})
+      on, off = annotated.partition { |(_, _, vis)| vis }
+      on + off
+    end
+
     # The factory layout as a prefs list — what an empty `tab_prefs` reconciles to. Written
     # out explicitly only where a config has to be REPLACED by the defaults rather than
     # reconciled against them.

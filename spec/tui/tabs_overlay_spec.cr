@@ -31,7 +31,7 @@ describe TabsOverlay do
   end
 
   it "reverts the working copy to the factory default order and visibility" do
-    default = Chrome.reconcile([] of {String, Bool}).map { |(s, _, v)| {s.to_s, v} }
+    default = Chrome.bar_partition(Chrome.reconcile([] of {String, Bool})).map { |(s, _, v)| {s.to_s, v} }
     o = TabsOverlay.new
     o.set_selected(0)
     o.move_selected(1) # reorder away from the default
@@ -53,10 +53,16 @@ describe TabsOverlay do
     first = box.y + 2
     backend.row(first)[box.x + 3].should eq('1') # slot 1
     backend.row(first).should_not contain("✓")   # …and nothing restating it
-    off = (0...o.entry_count).find { |i| o.slot_of(i).nil? }.not_nil!
-    backend.row(first + off)[box.x + 3].should eq(' ') # off the bar: an empty column
-    backend.fg_at(box.x + 6, first + off).should eq(Theme.text)
-    backend.fg_at(box.x + 6, first + off).should_not eq(Theme.muted)
+    # The list is partitioned, so the bar is the top N rows, the seam is the row after them,
+    # and the first tab off the bar is the row after that.
+    on_bar = o.to_prefs.count { |(_, vis)| vis }
+    o.slot_of(on_bar - 1).should eq(on_bar)
+    o.slot_of(on_bar).should be_nil
+    backend.row(first + on_bar).should contain("off the bar") # the seam, in place
+    off = first + on_bar + 1
+    backend.row(off)[box.x + 3].should eq(' ') # off the bar: an empty column
+    backend.fg_at(box.x + 6, off).should eq(Theme.text)
+    backend.fg_at(box.x + 6, off).should_not eq(Theme.muted)
   end
 
   it "marks an on-bar tab past the ninth slot, where no digit is left to print" do
@@ -78,6 +84,75 @@ describe TabsOverlay do
     ensure
       Gori::Settings.tab_slots = slots
     end
+  end
+
+  # Order and visibility used to be two things you edited with two keys, in a list where an
+  # off-bar tab could sit BETWEEN two slots — so "slot 3" and "third row" were different facts.
+  # Partitioned, they are one fact, and these are the three halves of that claim: the list is
+  # partitioned, a move across the seam trades, and `space` is the move that changes the count.
+  it "keeps the bar above the seam and everything else below it" do
+    o = TabsOverlay.new
+    vis = o.to_prefs.map { |(_, v)| v }
+    vis.index(false).not_nil!.should eq(vis.count(true)) # every true precedes every false
+    o.slot_of(0).should eq(1)
+    o.slot_of(vis.count(true)).should be_nil # the first row under the seam wears no digit
+  end
+
+  it "trades a tab in and one out when a move crosses the seam" do
+    o = TabsOverlay.new
+    on_bar = o.to_prefs.count { |(_, v)| v }
+    last_slot = o.to_prefs[on_bar - 1][0] # the tab holding the final slot
+    first_off = o.to_prefs[on_bar][0]     # the one just under the seam
+
+    o.set_selected(on_bar)
+    o.move_selected(-1) # ⇧K across the seam
+
+    o.to_prefs[on_bar - 1].should eq({first_off, true}) # came up onto the bar…
+    o.to_prefs[on_bar].should eq({last_slot, false})    # …and pushed the other one off
+    o.to_prefs.count { |(_, v)| v }.should eq(on_bar)   # the count never moved
+    o.selected.should eq(on_bar - 1)                    # the cursor followed the tab
+    o.slot_of(on_bar - 1).should eq(on_bar)
+  end
+
+  it "sends a row across the seam on space, which is what changes the count" do
+    slots = Gori::Settings.tab_slots?
+    begin
+      Gori::Settings.tab_slots = false # no cap, so the send is not refused
+      o = TabsOverlay.new
+      on_bar = o.to_prefs.count { |(_, v)| v }
+      sym = o.to_prefs[on_bar][0] # the first row under the seam
+
+      o.set_selected(on_bar)
+      o.toggle_selected.should be_true
+
+      o.to_prefs[on_bar].should eq({sym, true}) # landed as the last slot, in place
+      o.to_prefs.count { |(_, v)| v }.should eq(on_bar + 1)
+      o.selected.should eq(on_bar) # the selection followed it across
+
+      o.toggle_selected.should be_true # and back again, to where it came from
+      o.to_prefs[on_bar].should eq({sym, false})
+      o.to_prefs.count { |(_, v)| v }.should eq(on_bar)
+    ensure
+      Gori::Settings.tab_slots = slots
+    end
+  end
+
+  it "names the move that works when the bar is full" do
+    o = TabsOverlay.new
+    o.set_selected(o.to_prefs.count { |(_, v)| v }) # the first row under a full bar
+    o.toggle_selected.should be_false
+    # The old refusal said "take one off first" — two keystrokes for what ⇧K does in one.
+    o.hint.should contain("⇧K/⇧J")
+  end
+
+  it "does not select the seam when it is clicked" do
+    o = TabsOverlay.new
+    area = Rect.new(0, 0, 60, 40)
+    box = o.overlay_box(area).not_nil!
+    on_bar = o.to_prefs.count { |(_, v)| v }
+    o.row_at(box, box.x + 5, box.y + 2 + on_bar).should be_nil # the seam itself
+    o.row_at(box, box.x + 5, box.y + 2 + on_bar - 1).should eq(on_bar - 1)
+    o.row_at(box, box.x + 5, box.y + 2 + on_bar + 1).should eq(on_bar) # first row below it
   end
 
   it "does not offer Evidence before the project has its first snapshot" do

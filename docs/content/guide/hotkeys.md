@@ -120,7 +120,8 @@ for it to count and no layout that makes it disappear.
 
 ### Nine slots, and the tenth tab
 
-`settings:tabs` refuses a tenth tab and says so; take one off the bar first. A layout saved by an older
+`settings:tabs` refuses a tenth tab and says so — `⇧K` a row up across the seam instead, which
+trades it onto the bar and the last slot off. A layout saved by an older
 build (the bar used to be unbounded) is truncated to its **first nine, in your own order**,
 and gori names the folded tabs once on the launch that does it.
 

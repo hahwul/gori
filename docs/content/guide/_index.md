@@ -51,8 +51,10 @@ Sequencer, Cookie, Colormarker, Authorize) and Help, which `?` opens from anywhe
 snapshot — there is nothing to archive before that.
 
 Rearrange the nine in Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**, or
-`settings:tabs` in the palette: `space` puts a tab on the bar or takes it off, `⇧K`/`⇧J`
-reorder, and the slot numbers renumber as you go. A tenth is refused — take one off first. (If you would rather have the old
+`settings:tabs` in the palette. **The list is the bar**: the rows above the seam are the nine
+slots in order, everything below it is what `0` reaches, and the slot numbers renumber as you
+go. `⇧K`/`⇧J` move a row — up across the seam puts that tab on the bar and pushes the last
+slot off, so rearranging *is* choosing — and `space` sends a row straight across. (If you would rather have the old
 unbounded bar, turn off **Layout → Tab bar slots**; `0` keeps working either way.)
 
 Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope

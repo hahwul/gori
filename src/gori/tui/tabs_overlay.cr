@@ -14,16 +14,29 @@ module Gori::Tui
   #
   #   1  Project    ▎ selected, in slot 1
   #   2  Target
-  #      Miner        off the bar — reachable with `0`, not with a digit
+  #   ├── off the bar · 0 opens these ──┤
+  #      Miner        below the seam — reachable with `0`, not with a digit
   #
-  # THE NUMBER IS THE STATE. A `✓` beside a number said the same thing twice, and the `·` it
-  # paired with on an off-bar row said a third thing that was not true — that the tab was
-  # switched off, when `0` opens it either way. A row is on the bar exactly when it wears a
-  # slot; the only other mark is the `✓` for a tab riding an UNCAPPED bar past the ninth slot,
-  # where there is no digit left to print.
+  # ONE ORDERED LIST, AND THE POSITION IS THE STATE. Order and visibility used to be two
+  # separate things you edited with two separate keys — `⇧K`/`⇧J` moved a row inside a list
+  # where an off-bar tab could sit BETWEEN two slots, and `space` flipped a `✓` that had
+  # nothing to do with where the row was. So "slot 3" and "third row" were different facts, and
+  # the card could not be read as the bar it was editing.
   #
-  # The bar is NINE numbered slots (`Chrome::MAX_SLOTS`), so the tenth is refused the way
-  # taking the last one off is, and the numbers renumber live as ⇧K/⇧J reorder.
+  # Now the list is PARTITIONED (`Chrome.bar_partition`): the bar first, in bar order, then
+  # everything `0` reaches, with a seam drawn between them. The visibility bit belongs to the
+  # POSITION, not to the tab — `⇧K`/`⇧J` swap the two rows' tabs and leave the bits where they
+  # are, so moving a row up across the seam puts it on the bar and pushes its neighbour off.
+  # One gesture, one meaning: rearranging IS choosing.
+  #
+  # `space` is the same move written short — it sends a row straight across the seam, which is
+  # the one gesture that changes HOW MANY are on the bar rather than which. The bar is NINE
+  # numbered slots (`Chrome::MAX_SLOTS`), so a tenth is refused (⇧K trades instead), as is
+  # taking the last one off.
+  #
+  # A row is on the bar exactly when it sits above the seam; it wears its slot number there.
+  # The only other mark is the `✓` for a tab riding an UNCAPPED bar past the ninth slot, where
+  # being on the bar is true and there is no digit left to print.
   class TabsOverlay < Overlay
     # Injected at the open-site (Runner#open_settings): ^P leaves the modal stack for the
     # command palette, `r` raises the reset confirm, and a refused hide reports through the
@@ -50,19 +63,19 @@ module Gori::Tui
     end
 
     def hint : String
-      # The `0` answer — "where does a tab go when I take it off the bar" — moved to the
-      # card's border meta, where it reads as a fact about the card rather than as one more
-      # key in a row of keys this modal actually takes.
-      "↑/↓ select · space put on the bar / take off · ⇧K/⇧J reorder · r reset · ↵ save · esc cancel"
+      # "the top nine are the bar" is the whole model, so it rides in the hint rather than
+      # being something the operator has to infer from the numbers stopping. The `0` answer —
+      # "where does a tab go when it leaves the bar" — is on the seam itself, in place.
+      "↑/↓ select · ⇧K/⇧J move — the rows above the seam are the bar · space send across · r reset · ↵ save · esc cancel"
     end
 
-    # The row's slot number, or nil when the tab is off the bar (or on an uncapped bar past
-    # the ninth slot). The bar is nine numbered slots and the digit is how you reach one, so
-    # the editor shows the arrangement it is editing — and reordering renumbers live.
+    # The row's slot number, or nil when the row is below the seam (or on an uncapped bar past
+    # the ninth slot). The list is partitioned, so this is just the row's own index — which is
+    # the point: the number the operator will press and the position they dragged the row to
+    # are one fact, not two that have to be kept in step.
     def slot_of(i : Int32) : Int32?
       return nil unless @items[i]?.try(&.[2])
-      n = @items[0...i].count { |(_, _, v)| v } + 1
-      n <= Chrome::MAX_SLOTS ? n : nil # with the cap off the bar runs past the nine digits
+      i < Chrome::MAX_SLOTS ? i + 1 : nil # with the cap off the bar runs past the nine digits
     end
 
     # ↑/↓ move the selection and ⇧↑/⇧↓ reorder the selected tab; ↵ saves+applies, esc
@@ -136,7 +149,7 @@ module Gori::Tui
     # Rebuild the working copy from persisted config (called when the overlay opens),
     # so any uncommitted edits from a prior esc-cancelled session are discarded.
     def reset : Nil
-      @items = Chrome.reconcile(Settings.tab_prefs)
+      @items = Chrome.bar_partition(Chrome.reconcile(Settings.tab_prefs))
       remove_unavailable_evidence
       @selected = 0
     end
@@ -145,7 +158,7 @@ module Gori::Tui
     # catalog with only DEFAULT_HIDDEN hidden, ignoring persisted prefs. Edits the
     # working copy only (like every other key here); the live bar reverts on ↵.
     def reset_to_defaults : Nil
-      @items = Chrome.reconcile([] of {String, Bool})
+      @items = Chrome.bar_partition(Chrome.reconcile([] of {String, Bool}))
       remove_unavailable_evidence
       @selected = @selected.clamp(0, {@items.size - 1, 0}.max)
     end
@@ -175,34 +188,53 @@ module Gori::Tui
       @items.count { |(_, _, v)| v }
     end
 
-    # Put the selected tab on the bar, or take it off. Refuses (false) at BOTH ends: the last
-    # one on the bar (the bar can never go empty) and a tenth (the bar is nine numbered slots —
-    # see `Chrome::MAX_SLOTS`). The caller toasts whichever refusal fired.
+    # Send the selected row across the seam — onto the bar as its last slot, or off it as the
+    # first row below. A MOVE, not a flag: the row lands where the partition says a row in that
+    # state belongs, and the selection follows it there so the operator can see where it went.
+    #
+    # This is the one gesture that changes how MANY tabs are on the bar; `⇧K`/`⇧J` across the
+    # seam change which ones. Refuses (false) at both ends: the last tab on the bar (it can
+    # never go empty) and a tenth (the bar is nine numbered slots — see `Chrome::MAX_SLOTS`).
+    # The caller toasts whichever refusal fired.
     def toggle_selected : Bool
       return false unless item = @items[@selected]?
       sym, label, vis = item
       return false if vis && visible_count <= 1
       return false if !vis && Settings.tab_slots? && visible_count >= Chrome::MAX_SLOTS
-      @items[@selected] = {sym, label, !vis}
+      @items.delete_at(@selected)
+      # Both directions land at the same index — the seam — because that is where the partition
+      # puts a row of either state: the last slot on the bar, or the first row below it.
+      at = visible_count
+      @items.insert(at, {sym, label, !vis})
+      @selected = at
       true
     end
 
     # Why the space just refused — the two ends read nothing alike, and "the bar needs at least
-    # one tab" on a full bar would send the operator looking for a tab they had lost.
+    # one tab" on a full bar would send the operator looking for a tab they had lost. The full
+    # bar names `⇧K` rather than "take one off first": moving a row up ACROSS the seam trades
+    # the two, which is the thing the operator wanted and one keystroke instead of two.
     private def toggle_refusal : String
       if (item = @items[@selected]?) && !item[2]
-        "#{Chrome::MAX_SLOTS} tabs on the bar is the cap — take one off first"
+        "the bar is #{Chrome::MAX_SLOTS} slots — ⇧K moves this up into it and the last one out"
       else
         "the bar needs at least one tab"
       end
     end
 
-    # Move the selected row by ±1 (no wrap); selection follows the moved row so a
-    # repeated press keeps pushing it.
+    # Move the selected row by ±1 (no wrap); selection follows the moved row so a repeated
+    # press keeps pushing it.
+    #
+    # The TABS swap and the visibility bits STAY WITH THE POSITIONS, which is what makes the
+    # list one thing rather than two. Inside a group that is an ordinary reorder; across the
+    # seam it is a trade — the row coming up joins the bar, the row going down leaves it — so
+    # the count never changes and no move has to be refused.
     def move_selected(dir : Int32) : Nil
       j = @selected + dir
       return unless 0 <= j < @items.size
-      @items.swap(@selected, j)
+      a, b = @items[@selected], @items[j]
+      @items[@selected] = {b[0], b[1], a[2]}
+      @items[j] = {a[0], a[1], b[2]}
       @selected = j
     end
 
@@ -219,9 +251,37 @@ module Gori::Tui
     # the status bar (key_hints), so no row is reserved for it here.
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 48}.min
-      h = {area.h - 2, @items.size + 3}.min # title + up to @items rows + bottom border
+      h = {area.h - 2, screen_rows + 3}.min # title + up to screen_rows rows + bottom border
       return nil if w < 24 || h < 6
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+    end
+
+    # --- the seam -------------------------------------------------------------
+    #
+    # The rule between the bar and everything below it takes a DRAWN row of its own, so the
+    # list has one more row on screen than it has tabs. These four map between the two counts;
+    # every windowing and hit-test decision below is in SCREEN rows, and only `draw_row` and
+    # `row_at` come back to item indices. (`nil` from `seam_row` means no rule at all: the
+    # uncapped bar can hold every tab, and a seam with nothing under it is a lie.)
+    private def seam_row : Int32?
+      n = visible_count
+      (0 < n < @items.size) ? n : nil
+    end
+
+    private def screen_rows : Int32
+      @items.size + (seam_row ? 1 : 0)
+    end
+
+    # Item index → its row on screen.
+    private def screen_of(i : Int32) : Int32
+      (sr = seam_row) && i >= sr ? i + 1 : i
+    end
+
+    # Row on screen → the item drawn there, or nil for the seam itself.
+    private def item_at(row : Int32) : Int32?
+      return row unless sr = seam_row
+      return nil if row == sr
+      row > sr ? row - 1 : row
     end
 
     # List rows that fit between the title gap (box.y+2) and the bottom border (box.bottom-1).
@@ -229,11 +289,12 @@ module Gori::Tui
       {box.bottom - 1 - (box.y + 2), 0}.max
     end
 
-    # First visible row index, scrolled to keep @selected on screen without overscrolling
-    # past the end. Shared by render + row_at so the draw and the hit-test never drift.
+    # First SCREEN row shown, scrolled to keep the selected row on screen without
+    # overscrolling past the end. Shared by render + row_at so the draw and the hit-test never
+    # drift — including over the seam, which occupies a row here like any other.
     private def list_window(cap : Int32) : Int32
-      return 0 if cap <= 0 || @items.size <= cap
-      { {@selected - cap + 1, 0}.max, @items.size - cap }.min
+      return 0 if cap <= 0 || screen_rows <= cap
+      { {screen_of(@selected) - cap + 1, 0}.max, screen_rows - cap }.min
     end
 
     def render(screen : Screen, area : Rect) : Nil
@@ -245,7 +306,7 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, "TAB BAR", border: Theme.border_focus)
-      meta = Settings.tab_slots? ? "#{visible_count}/#{Chrome::MAX_SLOTS} slots · 0 opens every tab" : "#{visible_count} on the bar · 0 opens every tab"
+      meta = Settings.tab_slots? ? "#{visible_count}/#{Chrome::MAX_SLOTS} slots" : "#{visible_count} on the bar"
       Frame.border_meta(screen, box, "TAB BAR", meta, bg: Theme.panel)
 
       list_top = box.y + 2
@@ -253,10 +314,26 @@ module Gori::Tui
       @list_last_h = cap
       start = list_window(cap)
       cap.times do |row|
-        i = start + row
-        break if i >= @items.size
-        draw_row(screen, box, i, list_top + row)
+        sr = start + row
+        break if sr >= screen_rows
+        if i = item_at(sr)
+          draw_row(screen, box, i, list_top + row)
+        else
+          draw_seam(screen, box, list_top + row)
+        end
       end
+    end
+
+    # The rule between the bar and the rest, labelled with what is under it. It answers the
+    # question the operator is actually holding — "where does a tab go when it leaves the bar"
+    # — at the exact line where it goes, which is a better place for that sentence than a key
+    # hint. `Frame.tee_divider` is the card's own seam glyph (the filter cards use it), so the
+    # rule joins the border instead of butting into it.
+    private def draw_seam(screen : Screen, box : Rect, py : Int32) : Nil
+      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), Theme.panel)
+      Frame.tee_divider(screen, box, py)
+      label = " off the bar · 0 opens these "
+      screen.text(box.x + 3, py, label, Theme.muted, Theme.panel) if box.w > label.size + 6
     end
 
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
@@ -280,14 +357,18 @@ module Gori::Tui
     end
 
     # Row index under (mx,my) — inverts render's windowed layout (list at box.y+2, scrolled
-    # by list_window) so a click maps to the same row that was drawn.
+    # by list_window) so a click maps to the same row that was drawn. A click on the SEAM
+    # selects nothing: it is a label, not a row, and snapping the cursor to whichever tab
+    # happens to be next to it would be the card acting on a press that meant nothing.
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
       cap = list_capacity(box)
       row = my - (box.y + 2)
       return nil if row < 0 || row >= cap
-      i = list_window(cap) + row
-      i < @items.size ? i : nil
+      sr = list_window(cap) + row
+      return nil if sr >= screen_rows
+      i = item_at(sr)
+      i && i < @items.size ? i : nil
     end
   end
 end

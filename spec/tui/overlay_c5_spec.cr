@@ -63,14 +63,19 @@ end
 # TAB BAR
 # ---------------------------------------------------------------------------------------
 
-# Hide every tab but one, so the next space hits the "last visible" refusal. Each toggle
-# succeeds until only one is left standing, whose toggle is refused — which also parks the
-# selection on that row.
+# Take every tab but one off the bar, so the next space hits the "last one" refusal. Each
+# send-across succeeds until only one is left standing, whose send is refused — which also
+# parks the selection on that row.
+#
+# Re-reads the list every pass rather than walking a snapshot: `space` MOVES the row to the
+# seam now, so the indices a single `to_prefs` pass captured go stale the moment the first
+# one fires (the walk then landed back on a row it had already sent off and sent it BACK).
 private def leave_one_visible(o : TabsOverlay) : Nil
-  o.to_prefs.each_with_index do |(_, vis), i|
-    next unless vis
+  loop do
+    i = o.to_prefs.index { |(_, vis)| vis }
+    break unless i
     o.set_selected(i)
-    o.toggle_selected
+    break unless o.toggle_selected
   end
 end
 
