@@ -1,5 +1,6 @@
 require "json"
 require "../ansi"
+require "../jobs"
 require "../../bind_address"
 require "../../settings"
 
