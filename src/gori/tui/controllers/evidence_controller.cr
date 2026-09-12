@@ -69,7 +69,11 @@ module Gori::Tui
       if @evidence.querying?
         "type to filter · ↵ apply · esc clear"
       elsif anchor = @evidence.compare_anchor
-        "A=##{anchor} · move to B · c compare · esc cancel"
+        # `(older→newer)`: the pair is ordered by `created_at`, not by which half was pinned
+        # first (`evidence_compare`), so A here is the anchor and NOT necessarily the left side
+        # the Comparer opens with. Saying so costs six columns and stops the reading that a
+        # pin order chooses the diff direction.
+        "A=##{anchor} · move to B · c compare (older→newer) · esc cancel"
       else
         keys("↑/↓ move · ↵ open · {evidence.filter} filter · {evidence.compare} compare · {evidence.issue} issue · {evidence.source} source · space cmds · esc tabs")
       end
