@@ -73,6 +73,22 @@ module Gori
       list
     end
 
+    # Does ANY owner already link this ref? The ref side of `list_links`, and the only thing
+    # asked of it so far is a Bool: the link picker opens on `+ New issue…` for a ref nobody
+    # has filed yet and on the first existing owner otherwise, which is the common first
+    # filing made two keystrokes shorter.
+    #
+    # A scan rather than an index seek — `idx_entity_links_owner` and the UNIQUE constraint
+    # are both owner-first, and this table holds links, not flows. It runs once when a card
+    # opens, which is not a price worth a migration.
+    def ref_linked?(ref_kind : LinkRefKind, ref_id : Int64) : Bool
+      @db.query("SELECT 1 FROM entity_links WHERE ref_kind = ? AND ref_id = ? LIMIT 1",
+        ref_kind.label, ref_id) do |rs|
+        return true if rs.move_next
+      end
+      false
+    end
+
     # `exec_task_ok`: the store answers whether the write COMMITTED, and dropping that made
     # every caller report the change for a rolled-back batch. Same conversion as `delete_flows`
     # (`reads.cr`), whose comment states the reasoning once.

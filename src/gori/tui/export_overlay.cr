@@ -100,7 +100,12 @@ module Gori::Tui
     end
 
     def hint : String
-      "type to complete · ↹ pick · ↑↓ browse · ↵ write · esc cancel"
+      # Once the card is warning about an existing file, `↵ write` is no longer what ↵ does —
+      # the first ↵ armed the overwrite and wrote nothing, and the strip still promising a
+      # write is why that press reads as "nothing happened". The notice lives inside the card;
+      # this is the same fact on the line the eye is already on.
+      verb = @overwrite_armed ? "overwrite" : "write"
+      "type to complete · ↹ pick · ↑↓ browse · ↵ #{verb} · esc cancel"
     end
 
     # --- input ---------------------------------------------------------------

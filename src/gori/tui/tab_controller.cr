@@ -1203,6 +1203,17 @@ module Gori::Tui
       ""
     end
 
+    # The focused pane's own name, appended to the body badge (`BODY · RESPONSE`). nil — the
+    # bare badge — for every tab with one body, which is most of them.
+    #
+    # It exists for the multi-pane workbench tabs, where entering the body RESTORES the pane
+    # that was last focused: two runs of the identical keystroke prefix landed on TARGET and
+    # on RESPONSE, so the number of `↹` presses needed to reach a given pane could not be read
+    # off the screen at all. The badge is the one always-drawn slot that can say where you are.
+    def body_pane_label : String?
+      nil
+    end
+
     # A hint with its chords spelled as `{verb.id}` tokens, resolved through the effective
     # keymap (Hotkeys.expand) — the strip names the verb and the keymap says which key, so a
     # rebind reaches every strip written this way. Keys that are NOT verbs (↑/↓, esc, the

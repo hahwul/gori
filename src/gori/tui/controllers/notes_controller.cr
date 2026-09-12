@@ -384,7 +384,9 @@ module Gori::Tui
       @notes.new_note
       @notes.enter_insert!
       @host.focus_body
-      @host.status("new note (#{@notes.count}) — ^1-9 switch · ^W close · esc sub-tabs")
+      # `⇧1-9`, not `^1-9` — same reason as the Repeater's arrival hint: Ctrl+digit is the
+      # alias that many terminals never deliver, and the strip above says `⇧1-9 jump`.
+      @host.status("new note (#{@notes.count}) — ⇧1-9 switch · ^W close · esc sub-tabs")
     end
 
     # Create a blank note without focusing the Notes tab (link-picker "create +

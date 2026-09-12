@@ -221,16 +221,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # files a duplicate. The note path already gets here with nothing held (it runs from
     # the picker's on_close), so this is a no-op there.
     leave_overlay
+    # The card carries the standing toast as its first line, because the status row no longer
+    # can: while a confirm is up that row holds the card's KEYS (see `Runner#status_line`).
+    # The toast is also the fuller sentence — it names the evidence that was frozen with the
+    # link, which the old fixed wording dropped.
+    news = @toast
     case kind
     when :issue
       confirm("ISSUE CREATED",
-        "issue ##{id} created and linked.\nOpen it now, or stay here?",
+        "#{news || "issue ##{id} created and linked."}\nOpen it now, or stay here?",
         confirm_label: "open", cancel_label: "stay", danger: false) do
         navigate_to_created_issue(id)
       end
     when :note
       confirm("NOTE CREATED",
-        "note created and linked.\nOpen it now, or stay here?",
+        "#{news || "note created and linked."}\nOpen it now, or stay here?",
         confirm_label: "open", cancel_label: "stay", danger: false) do
         navigate_to_created_note(id)
       end

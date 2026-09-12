@@ -2733,11 +2733,15 @@ module Gori::Tui
           # The controller names its own body state (TabController#body_badge) — the same
           # answer `body_editor?` reads, asked one level wider so a view-owned drill-in can
           # say DETAIL too. History's arrives above, off `@overlay`.
-          case @tabs[@active_tab]?.try(&.body_badge)
-          when :editor then "EDITOR"
-          when :detail then "DETAIL"
-          else              "BODY"
-          end
+          badge = case @tabs[@active_tab]?.try(&.body_badge)
+                  when :editor then "EDITOR"
+                  when :detail then "DETAIL"
+                  else              "BODY"
+                  end
+          # …and, on a tab whose body is several panes, WHICH pane (TabController#
+          # body_pane_label). The badge is the only always-drawn slot that can answer it.
+          pane = @tabs[@active_tab]?.try(&.body_pane_label)
+          pane ? "#{badge} · #{pane}" : badge
         end
       end
     end
@@ -2887,6 +2891,13 @@ module Gori::Tui
     # the whole few seconds it is alive. Recency is the only rule that also gets the
     # opposite case right — fresh action feedback while an older notice is still up.
     private def status_line : String?
+      # A confirm card is a QUESTION, and its keys are letters nothing else on screen names —
+      # so the card's own hint takes this slot rather than a toast. The one that made it
+      # matter: ISSUE CREATED goes up in the same frame as "issue #21 created and linked",
+      # so the first ↵ was always pressed blind, and the line that explains it appeared only
+      # after some other key had cleared the toast. The news is not lost — `offer_open_created`
+      # puts the standing toast in the card, where it is read with the question.
+      return nil if @overlay.confirm?
       toast = @toast
       notice = Settings.companion_in_bar? ? @companion.frame.try(&.bubble) : nil
       return format_status_message(toast) unless notice
@@ -4411,7 +4422,17 @@ module Gori::Tui
       # close. A ref with no exchange comes back carrying its REFUSAL rather than being
       # dropped — it is still linked, and the toast names why its bytes were not kept.
       snaps = evidence_snapshots(refs)
-      lp = LinkPicker.new(link_picker_rows, freezable: snaps.any?(&.snapshot))
+      # `freeze_refusal` is the FIRST refusal the snapshots carry, and it is shown only because
+      # nothing froze: the card's ↵ token degrades from `link & freeze` to `link` on its own,
+      # and that degradation used to be silent — the row landed LIVE and no word on screen said
+      # why. A ref that was never a freeze candidate (fuzz/miner) carries no refusal, so those
+      # keep the plain token they always had.
+      #
+      # `linked:` opens the cursor on `+ New issue…` when nothing has been filed against these
+      # refs yet. Computed HERE because the picker holds no store: it is a flag, not a query.
+      lp = LinkPicker.new(link_picker_rows, freezable: snaps.any?(&.snapshot),
+        freeze_refusal: snaps.any?(&.snapshot) ? nil : snaps.compact_map(&.refusal).first?,
+        linked: refs.any? { |kind, id| @session.store.ref_linked?(kind, id) })
       # Put the History drill-in back on the way out. `open_overlay` overwrites @overlay and
       # closing clears it to None, which would tear down the flow detail the operator is
       # linking FROM — the same restore `confirm(return_to: :detail)` performs for the delete

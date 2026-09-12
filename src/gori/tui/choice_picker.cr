@@ -89,7 +89,11 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ select · ↵ set · key picks · esc cancel"
+      # "set" is right for the three pickers that CHANGE something the project keeps (a
+      # severity, a status, the scan mode) and wrong for the fourth: EXPORT ISSUES AS stores
+      # nothing — it asks a question once and the next ↵ writes a file. "↵ set" there read as
+      # "store a preference", which is a different act from the one about to happen.
+      "↑/↓ select · ↵ #{@kind == :export_format ? "export" : "set"} · key picks · esc cancel"
     end
 
     # ↑/↓ pick, ↵ sets, esc cancels. A printable matching a row's mnemonic sets that row
