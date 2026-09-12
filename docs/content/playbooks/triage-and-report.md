@@ -78,7 +78,9 @@ Read the verdicts exactly. `gone` means the newer capture *asked* and got a `404
 
 Not everything is an issue. **Notes** are free-form, per-project Markdown (multiple notes per project): a running log of what you tried, the payload that worked, the lead to return to. Create and edit them on the **Notes** tab.
 
-To tie the loose evidence together, press `Space` → **Link…** from History, the Repeater, the Fuzzer, or the Miner. One card lists every issue *and* every note, with `+ New issue…` / `+ New note…` pinned above them, so attaching what you are looking at to an existing issue, or filing a fresh one already linked, is the same keystroke. Whatever you type filters by title, host, or status, and becomes the new issue's title if you land on the create row. Landing on an **issue** also keeps the *bytes*: the response that confirmed the finding, which the next Repeater send or a retention sweep would otherwise take, is frozen as an immutable copy in the same step — listed as a **FROZEN** row on the issue's RELATED card and carried into every export with its SHA-256. A note takes the pointer alone, and a ref with no exchange yet (a pending flow, a never-sent tab) is still linked, with the toast saying why its bytes were not kept.
+To tie the loose evidence together, press `Space` → **Link…** from History, the Repeater, the Fuzzer, or the Miner. One card lists every issue *and* every note, with `+ New issue…` / `+ New note…` pinned above them, so attaching what you are looking at to an existing issue, or filing a fresh one already linked, is the same keystroke. Whatever you type filters by title, host, or status, and becomes the new issue's title if you land on the create row. The cursor opens on `+ New issue…` when nothing has been filed against what you are linking yet — the common first filing — and on the first existing issue once it has links. Landing on an **issue** also keeps the *bytes*: the response that confirmed the finding, which the next Repeater send or a retention sweep would otherwise take, is frozen as an immutable copy in the same step — listed as a **FROZEN** row on the issue's RELATED card and carried into every export with its SHA-256. A note takes the pointer alone, and a ref with no exchange yet (a pending flow, a never-sent tab) is still linked: the card's `↵` token says so before you press it (`↵ link — nothing to freeze: …`) and the toast repeats it after.
+
+Filing a new issue by hand **opens it**: the form commits, the Issues detail comes up on the new issue, and the toast ends with the way back — `issue #21 created and linked · frozen as evidence #5 · esc returns to History`. That `esc` lands exactly where you were, drill-in and cursor included. (A retest sweep, which files row after row from the Diff, deliberately stays where it is.)
 
 ```bash
 gori run notes create --text "SSRF candidate on /fetch, needs OAST to confirm"
@@ -95,7 +97,7 @@ When the issues are triaged, export them as a single Markdown document a teammat
 gori run issues --format markdown --export report.md
 ```
 
-In the TUI the same report is `⇧E` on the Issues tab: pick the format, then the destination path.
+In the TUI the same report is `⇧E` on the Issues tab — named in the list's own hint strip: pick the format (`↵ export`), then the destination path (`↵ write`, and `↵ overwrite` when the file is already there).
 
 When the report is going to a machine rather than a person, export SARIF instead, the format GitHub code scanning, DefectDojo and Azure DevOps ingest:
 
