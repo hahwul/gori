@@ -151,14 +151,63 @@ describe "sub-tab verbs" do
     r["fuzz.mark-word"].section.should eq(:template)
   end
 
-  it "puts rename on `e` everywhere it can" do
-    # One letter across the family. JWT is the documented exception: `jwt.toggle-mode` owns
-    # 'e' in its COMMON group, and the menu shows COMMON plus the focused section.
-    {"repeater", "fuzz", "comparer", "decoder", "mine", "sequence"}.each do |prefix|
-      r["#{prefix}.rename-subtab"].menu_key.should eq('e')
+  it "puts rename on the `r` the strip binds, wherever COMMON leaves the letter free" do
+    # The menu letter should be the key the STRIP answers to, and the strip's rename is `r`.
+    # Four scopes can say so; four cannot, and the reason is the same in all four: COMMON's
+    # 'r' is `*.run` / `repeater.send` — the menu echo of `^R` — and the space menu renders
+    # COMMON plus the focused section, so a rename taking 'r' would displace Run. A rename
+    # does not outrank the Run letter, so those four keep 'e'.
+    {"comparer", "decoder", "jwt", "cookie"}.each do |prefix|
+      r["#{prefix}.rename-subtab"].menu_key.should eq('r'), prefix
     end
-    r["jwt.rename-subtab"].menu_key.should eq('r')
+    {"repeater" => "repeater.send", "fuzz" => "fuzz.run",
+     "mine" => "mine.run", "sequence" => "sequence.run"}.each do |prefix, runner|
+      r["#{prefix}.rename-subtab"].menu_key.should eq('e'), prefix
+      r[runner].menu_key.should eq('r'), runner
+      r[runner].section.should eq(:common), runner
+    end
     r["jwt.toggle-mode"].menu_key.should eq('e')
+  end
+
+  it "puts sub-tab search on the `f` the strip binds, in every tab that has a strip" do
+    # `f` on the strip opens this picker in all of them; the menu said 's' on Repeater and
+    # Notes, which is a letter the strip does not answer to. What gave the letter up:
+    # `repeater.fuzz` → 'z' (what `history.fuzz` already spells "Send to Fuzzer") and
+    # `notes.find` → 'F' (find INSIDE the note, the second tier of the same word).
+    {"repeater", "fuzz", "mine", "sequence", "comparer", "decoder", "jwt", "cookie", "notes"}
+      .each do |prefix|
+        r["#{prefix}.find-subtab"].menu_key.should eq('f'), prefix
+      end
+    r["repeater.fuzz"].menu_key.should eq('z')
+    r["history.fuzz"].menu_key.should eq('z')
+    r["notes.find"].menu_key.should eq('F')
+  end
+end
+
+# `Verbs.registry` calls `validate_menu_keys!` and `validate_chords!` on its way out, so the
+# shipped key set is checked at BOOT. This pins that it stays checked, and pins what the chord
+# sweep covers: every OS profile, not just the one this binary was built for. `OVERRIDES` ships
+# empty today, so all three resolve to the same keymap — the point is that a future per-OS
+# substitution cannot introduce a collision on a profile nobody runs the suite on.
+describe "the shipped key set boots clean on every OS profile" do
+  it "has no space-menu collision and no chord collision or dead capital" do
+    r = Gori::Verbs.registry
+    r.validate_menu_keys!
+    r.validate_chords!
+  end
+
+  it "resolves the same effective chords on macOS, Linux and Windows" do
+    r = Gori::Verbs.registry
+    per_os = Gori::Verb::OsProfile::Os.values.map do |os|
+      keys = {} of String => Array(String)
+      r.each { |v| keys[v.id] = Gori::Verb::Keymap.effective_chords(v, os).map(&.label) }
+      keys
+    end
+    per_os.each { |k| k.should eq(per_os.first) }
+    # …and every keymap they build is loadable, which is what the TUI does at start-up.
+    Gori::Verb::OsProfile::Os.values.each do |os|
+      Gori::Verb::Keymap.build(r, os)
+    end
   end
 end
 

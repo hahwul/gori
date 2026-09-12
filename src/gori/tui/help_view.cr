@@ -105,7 +105,10 @@ module Gori::Tui
         Item.new("r", "rename the sub-tab (on the strip)"),
         Item.new("/", "filter sub-tabs (tag: name: host: method:)", "repeater.filter-subtabs"),
         Item.new("↹", "complete filter field/value while filtering"),
-        Item.new("t", "tag the active sub-tab (on the strip)", "repeater.tag-subtab"),
+        # `space → a`, not a bare `t`: on the strip `t` MARKS a chip and `⇧T` marks the whole
+        # strip (#683), so the row this replaces named the marking key for tagging. Tagging
+        # has no chord of its own and never did — the menu letter is the whole route.
+        Item.new("space → a", "tag the active sub-tab (from the strip)", "repeater.tag-subtab"),
         Item.new("i / ↵", "enter INS (edit) on request/target · esc back to READ"),
         Item.new("space", "command menu (READ mode on request/target/response)"),
         # Copy is the one READ verb that also works while TYPING: in INS a bare `y` is a

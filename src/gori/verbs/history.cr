@@ -274,23 +274,34 @@ module Gori
         "repeater.find-subtab", "Search sub-tabs", "Filter the open repeater sessions and jump to one",
         Verb::Scope::Repeater,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 1 },
-        mnemonic: 's', section: :tab) { |ctx| ctx.repeater_find_subtab; nil }
+        # 'f', the letter the STRIP itself binds for this picker. It read 's' until the key
+        # audit, so an operator who found the action in the menu learned a letter the strip
+        # does not answer to. `repeater.fuzz` gave the letter up (it is 'z' now, which is
+        # what `history.fuzz` has always spelled "Send to Fuzzer").
+        mnemonic: 'f', section: :tab) { |ctx| ctx.repeater_find_subtab; nil }
 
       # Sub-tab rename/close — today's raw key-dispatch on the strip (`r` rename, ^W
       # close) promoted to verbs so the :subtab space-menu group (reachable from the
       # strip) isn't empty. Reuse the SAME shell rename prompt + confirm-gated close
-      # (no new logic); mnemonics 'e'/'w' are free within COMMON ∪ :subtab (COMMON's
-      # keys are r/y/n/f/m/k/u — 'e' and 'w' only collide with OTHER sections,
-      # which never render alongside :subtab).
+      # (no new logic).
+      #
+      # 'e' and NOT the 'r' the strip binds, which is the one place the key audit's
+      # "menu letter = strip key" rule cannot be met: COMMON's 'r' here is
+      # `repeater.send`, the menu echo of `^R`, and COMMON renders inside the :subtab
+      # view. A rename does not take the Send letter. Same trade in Fuzzer, Miner and
+      # Sequencer (`*.run`); Comparer, Decoder, JWT and Cookie have no COMMON 'r' and
+      # all four spell rename 'r'.
       r.register Verb::Definition.new(
         "repeater.rename-subtab", "Rename subtab", "Rename the active repeater sub-tab's chip",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'e', section: :subtab) { |ctx| ctx.repeater_rename_subtab; nil }
-      # Tag / filter the sub-tab strip (issue #121). `t` tags the active session, `/`
-      # opens the tag-filter bar. 't' is free in COMMON ∪ :subtab (COMMON: r/y/n/f/m/k/u;
-      # :subtab: e/w/d); the filter uses '/' (the shared filter idiom, unique here).
+      # Tag / filter the sub-tab strip (issue #121). 'a' — "Add/edit flat tags", the app's
+      # add letter — and not the 't' this held: the strip's live `t` MARKS a chip
+      # (`repeater.subtab-mark-toggle`'s gesture, with `⇧T` beside it), so the menu was
+      # offering one letter for the other action on the one surface both belong to.
+      # The filter uses '/' (the shared filter idiom, unique here).
       r.register Verb::Definition.new(
         "repeater.tag-subtab", "Tag subtab", "Add/edit flat tags on the active repeater sub-tab",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 't', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'a', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
       r.register Verb::Definition.new(
         "repeater.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host / method",
         Verb::Scope::Repeater,
@@ -644,8 +655,11 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("i", shift: true)],
         available: history_targets, mnemonic: 'z', group: :send) { |ctx| ctx.fuzz_selected; nil }
       r.register Verb::Definition.new(
+        # 'z', the letter `history.fuzz` above already spells "Send to Fuzzer" with. It held
+        # 'f' until the key audit, where 'f' went to `repeater.find-subtab` so the menu and
+        # the strip stop naming the picker two different ways.
         "repeater.fuzz", "Send to Fuzzer", "Turn this repeater request into a fuzz template",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'f') { |ctx| ctx.fuzz_from_repeater; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'z') { |ctx| ctx.fuzz_from_repeater; nil }
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
@@ -729,6 +743,10 @@ module Gori
       # Sub-tab rename/close — mirrors repeater.rename-subtab/repeater.close-subtab above:
       # the strip's raw `r` rename / ^W close, promoted to verbs so :subtab isn't
       # empty. 'e'/'w' are free in COMMON ∪ :subtab (Fuzzer COMMON keys: r/s/y/k/u/S/v).
+      #
+      # 'e' and NOT the 'r' the strip binds: COMMON's 'r' here is `fuzz.run`, the menu echo of
+      # `^R`, and COMMON renders inside the :subtab view. A rename does not take the Run
+      # letter — see `repeater.rename-subtab` for the full note.
       r.register Verb::Definition.new(
         "fuzz.rename-subtab", "Rename subtab", "Rename the active fuzz session's sub-tab chip",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'e', section: :subtab) { |ctx| ctx.fuzzer_rename_subtab; nil }
@@ -855,6 +873,10 @@ module Gori
       # so this `:subtab` group held Duplicate alone while six other multi-session tabs
       # (Repeater, Fuzzer, Comparer, Decoder, JWT, Notes) list all three. 'e'/'w' are free
       # in COMMON ∪ :subtab here (COMMON: r/s/k/y/v/x/S/R; :subtab: d).
+      #
+      # 'e' and NOT the 'r' the strip binds: COMMON's 'r' here is `mine.run`, the menu echo of
+      # `^R`, and COMMON renders inside the :subtab view. A rename does not take the Run
+      # letter — see `repeater.rename-subtab` for the full note.
       r.register Verb::Definition.new(
         "mine.rename-subtab", "Rename subtab", "Rename the active miner session's sub-tab chip",
         Verb::Scope::Miner, available: in_miner, mnemonic: 'e', section: :subtab) { |ctx| ctx.miner_rename_subtab; nil }

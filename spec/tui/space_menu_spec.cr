@@ -232,7 +232,7 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("decoder.close")
     ids.should contain("decoder.rename-subtab")
     ids.should contain("decoder.duplicate-subtab")
-    menu.verb_for('e').try(&.id).should eq("decoder.rename-subtab")
+    menu.verb_for('r').try(&.id).should eq("decoder.rename-subtab")
     menu.verb_for('d').try(&.id).should eq("decoder.duplicate-subtab")
     ids.should contain("decoder.save")            # COMMON as of the library round
     ids.should_not contain("decoder.find-subtab") # :tab-only, not :subtab — no bleed
@@ -431,7 +431,9 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("decoder.load")
     ids.should_not contain("decoder.mode")        # a DIFFERENT section (:output) — no bleed
     ids.should_not contain("decoder.find-subtab") # a DIFFERENT section (:tab) — no bleed
-    menu.verb_for('e').try(&.id).should eq("decoder.rename-subtab")
+    # 'r', the letter the strip binds for rename — Decoder's COMMON has no 'r' to displace,
+    # unlike the four Run/Send scopes (registry_reach_spec pins both halves of that split).
+    menu.verb_for('r').try(&.id).should eq("decoder.rename-subtab")
     menu.verb_for('d').try(&.id).should eq("decoder.duplicate-subtab")
     menu.verb_for('s').try(&.id).should eq("decoder.save")
     menu.verb_for('o').try(&.id).should eq("decoder.load")

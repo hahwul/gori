@@ -19,7 +19,7 @@ Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어�
 
 > 대상은 **마크가 있으면 마크 전부, 없으면 활성 칩**
 
-그래서 `Shift-T` → `Ctrl-W`는 열린 세션 전부를 confirm 한 번으로 닫고, `Ctrl-R`은 마크된 세션을 함께 보내며(각각 자기 연결로, 최대 20개, confirm 후), `Space` → `d`는 전부 복제하고, `Space` → `t`는 입력한 태그를 전부에 붙입니다. 스트립에서 연 space 메뉴는 `SPACE · 3 MARKED`로 읽히고 항목 이름이 스스로 바뀝니다(`Close 3 sub-tabs`, `Send 3 sub-tabs`). 단일 대상으로 남는 동작은 `(cursor)`라고 말합니다. 필터가 가리고 있는 마크는 조용히 닫히지 않고 confirm에 드러납니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립이 같은 방식으로 마크·닫기·복제하며, 전송은 Repeater의 것입니다.
+그래서 `Shift-T` → `Ctrl-W`는 열린 세션 전부를 confirm 한 번으로 닫고, `Ctrl-R`은 마크된 세션을 함께 보내며(각각 자기 연결로, 최대 20개, confirm 후), `Space` → `d`는 전부 복제하고, `Space` → `a`는 입력한 태그를 전부에 붙입니다(스트립의 `t`는 마크이므로 태그는 자기 글자를 따로 씁니다). 스트립에서 연 space 메뉴는 `SPACE · 3 MARKED`로 읽히고 항목 이름이 스스로 바뀝니다(`Close 3 sub-tabs`, `Send 3 sub-tabs`). 단일 대상으로 남는 동작은 `(cursor)`라고 말합니다. 필터가 가리고 있는 마크는 조용히 닫히지 않고 confirm에 드러납니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립이 같은 방식으로 마크·닫기·복제하며, 전송은 Repeater의 것입니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="편집 가능한 HTTP/2 요청 패널, 헤더와 JSON 본문을 보여주는 응답 패널, 그리고 1152ms 만에 재전송된 200 상태 줄을 갖춘 gori Repeater 탭">

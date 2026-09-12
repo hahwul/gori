@@ -176,6 +176,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
 - Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias), structural keys (`esc`, `↵`, arrows, `↹`), and a pane-local letter such as `x` in an editor.
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
+- Where the **sub-tab strip** already binds a letter for an action, the menu spells that action with the same letter: `r` renames, `f` lists and searches the sub-tabs, `t` marks a chip and `⇧T` marks the strip. The exception is a scope whose COMMON group has already spent the letter on something an operator presses far more often — `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, so rename keeps `e` there rather than displacing it.
 - Pane-local keys that share a letter (Repeater response `x` = hex vs request/target `x` = select line) stay controller-owned so both meanings can coexist.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
 

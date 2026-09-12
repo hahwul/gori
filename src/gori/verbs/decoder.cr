@@ -24,12 +24,13 @@ module Gori
       # Rename the active sub-tab's chip — mirrors repeater.rename-subtab/fuzz.rename-subtab
       # (verbs/history.cr): Decoder is also in renameable_subtabs? (runner.cr), but had no
       # :subtab verb of its own, so its sub-tab-strip space menu was flat COMMON with no
-      # way to rename. 'e' is free within COMMON ∪ :subtab (COMMON keys: n/w/y).
+      # way to rename. 'r' is the letter the STRIP binds for rename and is free within
+      # COMMON ∪ :subtab here (COMMON keys: n/w/y/o/s); it read 'e' until the key audit.
       r.register Verb::Definition.new(
         "decoder.rename-subtab", "Rename subtab", "Rename the active conversion's sub-tab chip",
-        Verb::Scope::Decoder, available: in_decoder, mnemonic: 'e', section: :subtab) { |ctx| ctx.decoder_rename_subtab; nil }
+        Verb::Scope::Decoder, available: in_decoder, mnemonic: 'r', section: :subtab) { |ctx| ctx.decoder_rename_subtab; nil }
       # Content-only clone (input + chain + chip name). 'd' is free in COMMON ∪ :subtab
-      # (COMMON keys: n/w/y; :subtab has e).
+      # (COMMON keys: n/w/y/o/s; :subtab has r).
       r.register Verb::Definition.new(
         "decoder.duplicate-subtab", "Duplicate subtab", "Open a new conversion with the same input and chain",
         Verb::Scope::Decoder, available: in_decoder, mnemonic: 'd', section: :subtab) { |ctx| ctx.decoder_duplicate_subtab; nil }
