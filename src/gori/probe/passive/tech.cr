@@ -1,5 +1,6 @@
 require "json"
 require "./rule"
+require "../../utf8"
 require "../../ascii_bytes"
 require "../../proxy/h2/grpc"
 require "../../sse"
@@ -167,7 +168,7 @@ module Gori
           # (scrub cannot create or destroy an ASCII `"query"`), and the as_h?/as_s? guards below
           # still decide the outcome — so no detection is lost.
           return false unless AsciiBytes.contains_ci?(capped, QUERY_KEY)
-          text = String.new(capped).scrub
+          text = Utf8.text(capped)
           q = begin
             JSON.parse(text).as_h?.try(&.["query"]?).try(&.as_s?)
           rescue JSON::ParseException

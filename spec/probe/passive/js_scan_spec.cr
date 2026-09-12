@@ -58,6 +58,51 @@ describe Gori::Probe::Passive::JsScan do
     end
   end
 
+  # `strip` and `strip_comments` are two VIEWS of one walk (`strip_both`): the lexer consumes a
+  # script exactly once and emits the strings-blanked projection into one builder and the
+  # comments-only projection into the other. So the property to pin is that the fused walk still
+  # produces what two separate walks produced — a token consumed on one side but not the other
+  # would desync the two views' offsets, and DOM-XSS's window arithmetic is measured against
+  # those offsets.
+  describe ".strip_both" do
+    # Every token kind in one fragment: a line comment, a block comment, an escaped quote, a URL
+    # literal whose `//` must NOT read as a comment, and a template with a nested interpolation.
+    fragment = %(a = "x//y"; /* c */ b = 'it\\'s'; t = `p ${loc + "q"} s`; // tail\nz = 1;)
+
+    it "blanks string contents on one side and keeps them on the other" do
+      code, kept = JsScan.strip_both(fragment)
+      # The strings-blanked view: delimiters kept, contents gone, `${…}` still readable as code.
+      code.includes?("x//y").should be_false
+      code.includes?("loc + ").should be_true
+      # The comments-only view: string contents survive, comments do not.
+      kept.includes?("x//y").should be_true
+      kept.includes?("/* c */").should be_false
+      kept.includes?("// tail").should be_false
+      # Both are offset-preserving, which is the whole contract.
+      code.size.should eq(fragment.size)
+      kept.size.should eq(fragment.size)
+    end
+
+    it "returns exactly what the two separate entry points return" do
+      JsScan.strip_both(fragment).should eq({JsScan.strip(fragment), JsScan.strip_comments(fragment)})
+    end
+
+    it "agrees with the separate entry points over randomised token soup" do
+      # Bare delimiters, escapes and interpolation openers in every order — the shapes that
+      # expose a desync, which hand-written samples reliably miss.
+      alphabet = ['a', '/', '*', '\'', '"', '`', '$', '{', '}', '\\', '\n', ';', 'é']
+      rng = Random.new(20_260_912)
+      2_000.times do
+        src = String.build { |io| (rng.rand(1..40)).times { io << alphabet[rng.rand(alphabet.size)] } }
+        JsScan.strip_both(src).should eq({JsScan.strip(src), JsScan.strip_comments(src)})
+      end
+    end
+
+    it "handles an empty script without lexing it" do
+      JsScan.strip_both("").should eq({"", ""})
+    end
+  end
+
   # source_in_window works on BYTE offsets: char-index slicing was O(1) only while the script
   # stayed all-ASCII, and one non-ASCII byte turned every window slice into a walk from the
   # start of the string (measured 9ms -> 1765ms per flow). The pairs must be identical either

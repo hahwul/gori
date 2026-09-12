@@ -172,6 +172,30 @@ module Gori
           out
         end
 
+        # The two output sides of one lex pass, so the lexers below never spell a nil test.
+        # A nil side is one this call is not building (`strip` builds only `code`,
+        # `strip_comments` only `kept`); `strip_both` builds both.
+        #
+        # `String::Builder`, not `IO`: a concrete receiver keeps `<<` a direct call on the hot
+        # per-char path instead of a virtual dispatch. Every emission goes through `<<` (same
+        # char to both) or `push` (one char each, different) — never a multi-char write — so
+        # "one consumed char emits exactly one char per side", the invariant every offset in
+        # this file rests on, is visible in the shape rather than argued about.
+        private struct Sink
+          def initialize(@code : String::Builder?, @kept : String::Builder?)
+          end
+
+          def <<(ch : Char) : Nil
+            @code.try &.<<(ch)
+            @kept.try &.<<(ch)
+          end
+
+          def push(code_ch : Char, kept_ch : Char) : Nil
+            @code.try &.<<(code_ch)
+            @kept.try &.<<(kept_ch)
+          end
+        end
+
         # Blank // line comments, /* */ block comments, and '…' / "…" / `…` string literals,
         # replacing their CONTENTS with spaces so byte/char offsets are preserved. A single
         # conservative left-to-right pass. Regex literals are intentionally left intact:
@@ -179,36 +203,78 @@ module Gori
         # tokens. Every consumed char emits exactly one char, so indices stay aligned.
         def self.strip(js : String) : String
           return js if js.empty?
+          String.build(js.bytesize) { |io| lex(js, Sink.new(io, nil)) }
+        end
+
+        # Blank ONLY // and /* */ comments, keeping string/template CONTENTS intact (offsets
+        # preserved). For the string-literal-keyed rules (postMessage "message"/"*", prototype
+        # pollution "__proto__") that need those literals visible but must NOT match keywords
+        # inside commented-out example/debug code. Strings are copied verbatim so an embedded
+        # `//` or `/*` (e.g. in a URL literal) is not mistaken for a comment.
+        def self.strip_comments(js : String) : String
+          return js if js.empty?
+          String.build(js.bytesize) { |io| lex(js, Sink.new(nil, io)) }
+        end
+
+        # BOTH projections of one script from ONE pass: `{strip(js), strip_comments(js)}`.
+        #
+        # The two differ only in what they EMIT for a string literal's contents — they consume
+        # the script identically, token for token and index for index (an escape pair, a `${…}`
+        # interpolation and a closing quote are found at the same offsets whether the contents
+        # are blanked or copied). So a Context that needs both — every HTML or JS flow does, one
+        # for the DOM-XSS/clobbering rules and one for the postMessage/prototype-pollution rules
+        # — was lexing the same bytes twice. Fusing saves the walk, not the emission (each side
+        # still writes its own char), so the pair costs ~1.7 walks instead of 2: measured over
+        # the 256 KiB bundle in bench/probe_passive_bench, 1.75ms → 1.47ms. It pays far better on
+        # the non-ASCII variant of the same bundle, where `scan_source` falls back to
+        # `String#chars`: 2.92ms → 2.05ms, and one ~1 MiB `Array(Char)` built instead of two.
+        #
+        # Not a third lexer: `lex` below is the only one, and `strip`/`strip_comments` are it
+        # with the other side's builder left nil. Keeping one walk is the point — a copy of this
+        # control flow that drifted would desync the two views' offsets, which is the exact
+        # failure `lex_string` is written the way it is to prevent.
+        def self.strip_both(js : String) : {String, String}
+          return {js, js} if js.empty?
+          code = String::Builder.new(js.bytesize)
+          kept = String::Builder.new(js.bytesize)
+          lex(js, Sink.new(code, kept))
+          {code.to_s, kept.to_s}
+        end
+
+        # Opens a string / template literal. One home so the three places that ask — the top-level
+        # dispatch, a nested literal inside a `${…}`, and the closing-delimiter test — cannot
+        # drift apart on which quotes count.
+        private def self.quote?(ch : Char) : Bool
+          ch == '\'' || ch == '"' || ch == '`'
+        end
+
+        # The single left-to-right lexer behind all three entry points above.
+        private def self.lex(js : String, out_to : Sink) : Nil
           scan_source(js) do |chars, n|
-            String.build(js.bytesize) do |io|
-              i = 0
-              while i < n
-                # The token dispatch is spelled out here rather than delegated to
-                # `blank_token_at` (which `emit_interpolation` still uses), and the shape mirrors
-                # `strip_comments`' loop deliberately. That helper returns `Int32?` — nil meaning
-                # "no token starts here" — so the OVERWHELMINGLY common case, an ordinary code
-                # character, paid a nilable-union result on every char of the script. Deciding it
-                # from the char in the loop keeps this hot path on a plain Int32; the branch order
-                # (comment, then string) is the helper's, so what gets blanked is unchanged.
-                c = chars[i]
-                i = if c == '/' && i + 1 < n && chars[i + 1] == '/'
-                      blank_line_comment(chars, i, n, io)
-                    elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
-                      blank_block_comment(chars, i, n, io)
-                    elsif c == '\'' || c == '"' || c == '`'
-                      blank_string(chars, i, n, io, 0)
-                    else
-                      io << c
-                      i + 1
-                    end
-              end
+            i = 0
+            while i < n
+              # The token dispatch is spelled out here rather than delegated to a nilable-result
+              # helper: the OVERWHELMINGLY common case is an ordinary code character, and deciding
+              # it from the char in the loop keeps this hot path on a plain Int32. The branch
+              # order (comment, then string) is what both projections have always used.
+              c = chars[i]
+              i = if c == '/' && i + 1 < n && chars[i + 1] == '/'
+                    blank_line_comment(chars, i, n, out_to)
+                  elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
+                    blank_block_comment(chars, i, n, out_to)
+                  elsif quote?(c)
+                    lex_string(chars, i, n, out_to, 0)
+                  else
+                    out_to << c
+                    i + 1
+                  end
             end
           end
         end
 
         # Yields the random-access char source for `js` plus its length: a zero-allocation
-        # AsciiChars view when the script is all-ASCII, else the `Array(Char)` the lexers have
-        # always used. Both satisfy the same `size`/`[]` shape, so the lexers below are compiled
+        # AsciiChars view when the script is all-ASCII, else the `Array(Char)` the lexer has
+        # always used. Both satisfy the same `size`/`[]` shape, so the lexer below is compiled
         # for each and neither is special-cased. `ascii_only?` is a single byte pass, far cheaper
         # than the array it avoids.
         private def self.scan_source(js : String, &)
@@ -221,136 +287,106 @@ module Gori
           end
         end
 
-        # Template-literal nesting recurses one frame per level (blank_string →
-        # emit_interpolation → blank_token_at → …, and the copy_* mirror of it), and the depth is
-        # ATTACKER-CONTROLLED: it is just response-body text. The recursion happens on the way IN,
-        # so no closing delimiters are needed — an unterminated "`${" costs 3 bytes per level, and
-        # CLIENT_BODY_CAP / 3 = 87381 levels lands past the ~87k frames an 8 MiB fiber stack holds.
-        # A Crystal stack overflow is a FATAL SIGNAL, not a rescuable exception, so Analyzer's
-        # per-flow `rescue` cannot contain it: one 256 KiB response body took the whole process
-        # down (proxy capture, TUI, CLI and MCP alike). The body cap is not a defense here — it
-        # sits on the wrong side of the limit — so the lexers cap the nesting themselves.
+        # Template-literal nesting recurses one frame per level (lex_string → lex_interpolation
+        # → lex_string → …), and the depth is ATTACKER-CONTROLLED: it is just response-body text.
+        # The recursion happens on the way IN, so no closing delimiters are needed — an
+        # unterminated "`${" costs 3 bytes per level, and CLIENT_BODY_CAP / 3 = 87381 levels
+        # lands past the ~87k frames an 8 MiB fiber stack holds. A Crystal stack overflow is a
+        # FATAL SIGNAL, not a rescuable exception, so Analyzer's per-flow `rescue` cannot contain
+        # it: one 256 KiB response body took the whole process down (proxy capture, TUI, CLI and
+        # MCP alike). The body cap is not a defense here — it sits on the wrong side of the limit
+        # — so the lexer caps the nesting itself.
         #
         # 64 is far past anything real: minifiers do not add template nesting and hand-written
         # code does not go beyond a handful of levels. Past it we blank the rest of the FRAGMENT
         # (see blank_rest) rather than stop descending in place — declining to recurse would let a
         # nested backtick close the enclosing template early and re-lex the remainder, the exact
-        # desync copy_string exists to prevent. Blanking is offset-preserving and cannot desync;
+        # desync lex_string exists to prevent. Blanking is offset-preserving and cannot desync;
         # the cost is that content past 64 levels of nesting is not analyzed, which is the safe
         # direction (a missed lead, never a false one).
         MAX_INTERP_DEPTH = 64
 
         # Blank every remaining char of the fragment (one space each, offsets preserved) and
-        # return the end index, so the caller's `while i < n` loop terminates immediately.
-        private def self.blank_rest(chars, i : Int32, n : Int32, io : IO) : Int32
+        # return the end index, so the caller's `while i < n` loop terminates immediately. Both
+        # projections blank here — past the depth cap neither view is trustworthy.
+        private def self.blank_rest(chars, i : Int32, n : Int32, out_to : Sink) : Int32
           while i < n
-            io << ' '
+            out_to << ' '
             i += 1
           end
           n
         end
 
         # If chars[i] starts a // or /* */ comment, blank it (→ spaces, offsets preserved) and
-        # return the index just past it; else nil. Shared by the string- and comment-strip lexers.
-        # No `depth`: a comment never recurses.
-        private def self.blank_comment_at(chars, i : Int32, n : Int32, io : IO) : Int32?
+        # return the index just past it; else nil. A comment is blanked in BOTH projections —
+        # that is the one thing they agree on — and never recurses, so there is no `depth`.
+        private def self.lex_comment_at(chars, i : Int32, n : Int32, out_to : Sink) : Int32?
           c = chars[i]
           if c == '/' && i + 1 < n && chars[i + 1] == '/'
-            blank_line_comment(chars, i, n, io)
+            blank_line_comment(chars, i, n, out_to)
           elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
-            blank_block_comment(chars, i, n, io)
+            blank_block_comment(chars, i, n, out_to)
           end
         end
 
-        # If chars[i] starts a // comment, /* */ comment, or a '…'/"…"/`…` string, blank it
-        # (contents → spaces, offsets preserved) and return the index just past it; else nil.
-        # Shared by strip and emit_interpolation so the token lexing lives in one place.
-        # `depth` is the template-interpolation nesting level (see MAX_INTERP_DEPTH).
-        private def self.blank_token_at(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32?
-          if j = blank_comment_at(chars, i, n, io)
-            j
-          else
-            c = chars[i]
-            (c == '\'' || c == '"' || c == '`') ? blank_string(chars, i, n, io, depth) : nil
-          end
-        end
-
-        # Blank ONLY // and /* */ comments, keeping string/template CONTENTS intact (offsets
-        # preserved). For the string-literal-keyed rules (postMessage "message"/"*", prototype
-        # pollution "__proto__") that need those literals visible but must NOT match keywords
-        # inside commented-out example/debug code. Strings are copied verbatim so an embedded
-        # `//` or `/*` (e.g. in a URL literal) is not mistaken for a comment.
-        def self.strip_comments(js : String) : String
-          return js if js.empty?
-          scan_source(js) do |chars, n|
-            String.build(js.bytesize) do |io|
-              i = 0
-              while i < n
-                c = chars[i]
-                i = if c == '/' && i + 1 < n && chars[i + 1] == '/'
-                      blank_line_comment(chars, i, n, io)
-                    elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
-                      blank_block_comment(chars, i, n, io)
-                    elsif c == '\'' || c == '"' || c == '`'
-                      copy_string(chars, i, n, io, 0)
-                    else
-                      io << c
-                      i + 1
-                    end
-              end
-            end
-          end
-        end
-
-        # Copy a '…'/"…"/`…` literal verbatim (contents kept), consuming it so an embedded
-        # // or /* inside the string is not treated as a comment. Honors \\ escapes. For a
-        # template literal, a ${…} interpolation is CODE, not string content — it is consumed
-        # via copy_interpolation so a NESTED template's backtick inside ${…} is not mistaken
-        # for this template's closing delimiter (which would terminate early and re-lex the
-        # real remainder, blanking a URL's // as a comment).
-        private def self.copy_string(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32
+        # Consume a '…' / "…" / `…` literal, honoring \\ escapes: its CONTENTS are blanked into
+        # the `code` side (delimiters kept) and copied verbatim into the `kept` side. Consuming
+        # it in one pass is what stops an embedded `//` or `/*` inside the string from being read
+        # as a comment. For a template literal a `${…}` interpolation is CODE, not string
+        # content, so it is handed to lex_interpolation — which also keeps a NESTED template's
+        # backtick from being mistaken for this template's closing delimiter (that would
+        # terminate early and re-lex the real remainder, blanking a URL's // as a comment).
+        private def self.lex_string(chars, i : Int32, n : Int32, out_to : Sink, depth : Int32) : Int32
           quote = chars[i]
-          io << quote
+          out_to << quote # opening delimiter kept on both sides
           i += 1
           while i < n
             ch = chars[i]
             if ch == '\\' && i + 1 < n
-              io << ch << chars[i + 1]
+              out_to.push(' ', ch) # escaped pair: blanked as two spaces, kept verbatim
+              out_to.push(' ', chars[i + 1])
               i += 2
-              next
+            elsif quote == '`' && ch == '$' && i + 1 < n && chars[i + 1] == '{'
+              i = lex_interpolation(chars, i, n, out_to, depth)
+            elsif ch == quote
+              out_to << ch # closing delimiter kept on both sides
+              i += 1
+              break
+            else
+              out_to.push(' ', ch) # content blanked (incl. newlines inside a template), or kept
+              i += 1
             end
-            if quote == '`' && ch == '$' && i + 1 < n && chars[i + 1] == '{'
-              i = copy_interpolation(chars, i, n, io, depth)
-              next
-            end
-            io << ch
-            i += 1
-            break if ch == quote
           end
           i
         end
 
-        # Consume a template ${…} interpolation for the comment-only strip: blank real code
-        # comments inside it, but COPY string literals verbatim (so their contents stay for the
-        # string-key rules), tracking brace depth to find the matching `}`. Recurses through
-        # copy_string for nested strings/templates. `i` points at `$`. Offset-preserving.
-        private def self.copy_interpolation(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32
-          return blank_rest(chars, i, n, io) if depth >= MAX_INTERP_DEPTH
-          io << '$' << '{'
+        # Consume a template-literal `${…}` interpolation, tracking brace depth to find the
+        # matching `}`. Its expression is CODE, so both projections keep it visible — the `code`
+        # side so a source/sink keyword inside it survives (otherwise `innerHTML = `${location
+        # .hash}`` loses its source and DOM-XSS misses it), the `kept` side because it was never
+        # string content. They differ only on the delimiters: `code` blanks the `${` and the
+        # matching `}` so source_in_window's /[;{}\n]/ statement-boundary scan does not truncate
+        # the window at the interpolation, while `kept` copies them. Nested strings and comments
+        # recurse through lex_string / lex_comment_at, so each side gets its own treatment there
+        # too. `i` points at `$`.
+        private def self.lex_interpolation(chars, i : Int32, n : Int32, out_to : Sink, depth : Int32) : Int32
+          return blank_rest(chars, i, n, out_to) if depth >= MAX_INTERP_DEPTH
+          out_to.push(' ', '$') # blank the '${' delimiter on the code side (offset-preserved)
+          out_to.push(' ', '{')
           i += 2
           braces = 1
           while i < n && braces > 0
             ch = chars[i]
             if ch == '{' || ch == '}'
               braces += ch == '{' ? 1 : -1
-              io << ch
+              out_to.push(ch == '}' && braces == 0 ? ' ' : ch, ch) # blank the OUTER closing '}'
               i += 1
-            elsif j = blank_comment_at(chars, i, n, io) # real code comment inside ${…} → blank
+            elsif j = lex_comment_at(chars, i, n, out_to)
               i = j
-            elsif ch == '\'' || ch == '"' || ch == '`'
-              i = copy_string(chars, i, n, io, depth + 1) # string content kept
+            elsif quote?(ch)
+              i = lex_string(chars, i, n, out_to, depth + 1)
             else
-              io << ch
+              out_to << ch
               i += 1
             end
           end
@@ -358,86 +394,30 @@ module Gori
         end
 
         # Blank a // comment through end-of-line (the terminating newline is left to the caller).
-        private def self.blank_line_comment(chars, i : Int32, n : Int32, io : IO) : Int32
-          io << "  "
+        private def self.blank_line_comment(chars, i : Int32, n : Int32, out_to : Sink) : Int32
+          out_to << ' '
+          out_to << ' '
           i += 2
           while i < n && chars[i] != '\n'
-            io << ' '
+            out_to << ' '
             i += 1
           end
           i
         end
 
         # Blank a /* … */ comment, delimiters included.
-        private def self.blank_block_comment(chars, i : Int32, n : Int32, io : IO) : Int32
-          io << "  "
+        private def self.blank_block_comment(chars, i : Int32, n : Int32, out_to : Sink) : Int32
+          out_to << ' '
+          out_to << ' '
           i += 2
           while i < n && !(chars[i] == '*' && i + 1 < n && chars[i + 1] == '/')
-            io << ' '
+            out_to << ' '
             i += 1
           end
           if i < n
-            io << "  "
+            out_to << ' '
+            out_to << ' '
             i += 2
-          end
-          i
-        end
-
-        # Blank a '…' / "…" / `…` literal's CONTENTS (delimiters kept), honoring \\ escapes.
-        # For a template literal a `${…}` interpolation is CODE, not string content, so its
-        # expression is emitted (via emit_interpolation) instead of blanked — otherwise the
-        # common template-literal sink shape (innerHTML = `${location.hash}`) would lose its
-        # source and DOM-XSS would miss it.
-        private def self.blank_string(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32
-          quote = chars[i]
-          io << quote # opening delimiter kept
-          i += 1
-          while i < n
-            ch = chars[i]
-            if ch == '\\' && i + 1 < n
-              io << "  " # escaped pair, length preserved
-              i += 2
-              next
-            end
-            if ch == quote
-              io << ch # closing delimiter kept
-              i += 1
-              break
-            end
-            if quote == '`' && ch == '$' && i + 1 < n && chars[i + 1] == '{'
-              i = emit_interpolation(chars, i, n, io, depth) # ${…} expression kept as code
-              next
-            end
-            io << ' ' # content blanked (incl. newlines inside a template)
-            i += 1
-          end
-          i
-        end
-
-        # Emit a template-literal `${…}` interpolation as CODE: keep the expression visible so
-        # source/sink keywords inside it survive, but blank nested strings/comments (so their
-        # CONTENTS can't false-match) and track brace depth to find the matching `}`. Every
-        # consumed char emits exactly one char, so offsets stay aligned. `i` points at `$`.
-        private def self.emit_interpolation(chars, i : Int32, n : Int32, io : IO, depth : Int32) : Int32
-          return blank_rest(chars, i, n, io) if depth >= MAX_INTERP_DEPTH
-          io << "  " # blank the '${' delimiter (2 spaces, offset-preserved): keeps the inner
-          #            expression as code but removes the '{' so source_in_window's /[;{}\n]/
-          #            statement-boundary scan doesn't truncate the window at the interpolation
-          #            (else `innerHTML = `${location.hash}`` loses its source and DOM-XSS misses it)
-          i += 2
-          braces = 1
-          while i < n && braces > 0
-            ch = chars[i]
-            if ch == '{' || ch == '}'
-              braces += ch == '{' ? 1 : -1
-              io << (ch == '}' && braces == 0 ? ' ' : ch) # blank the OUTER closing '}'; keep inner braces
-              i += 1
-            elsif j = blank_token_at(chars, i, n, io, depth + 1) # nested string/comment (recurses for a nested template)
-              i = j
-            else
-              io << ch
-              i += 1
-            end
           end
           i
         end

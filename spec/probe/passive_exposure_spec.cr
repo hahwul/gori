@@ -5,6 +5,22 @@ describe Gori::Probe::Passive::ExposedConfig do
   private_plain = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
   private_html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
 
+  # `head_of` bounds the scan to the opening SCAN_PREFIX bytes, and the cut can land in the
+  # middle of a multi-byte character. PCRE2 RAISES on invalid UTF-8 rather than failing to
+  # match, and Passive.analyze catches a rule's raise per rule — so a broken cut would not
+  # crash, it would silently drop this rule's findings on every large page with any non-ASCII
+  # content. The repair behind the cut changed spelling (`String#scrub` → `Utf8.text`, which
+  # validates before repairing), so pin that the scan still sees a clean prefix and still
+  # reports the signature sitting inside it.
+  it "scans a prefix whose cut lands mid-codepoint" do
+    with_store do |store|
+      body = "[core]\n\trepositoryformatversion = 0\n" + ("가" * 20_000)
+      body.bytesize.should be > Gori::Probe::Passive::ExposedConfig::SCAN_PREFIX
+      dets = probe_analyze(store, resp_head: private_plain, content_type: "text/plain", body: body)
+      dets.find(&.code.==("exposed_config")).not_nil!.evidence.should eq(".git/config")
+    end
+  end
+
   it "flags a served .git/config" do
     with_store do |store|
       body = "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[remote \"origin\"]\n\turl = git@github.com:acme/app.git\n"
