@@ -2671,3 +2671,66 @@ What the keyset deliberately leaves alone: the enable/disable `x` on the four ru
 `x` is a state change, not a selection — KEY_AUDIT F4), and `intercept.select-line`, which
 ships keyless because the Intercept queue spends nearly every letter. A keyset respells keys;
 it does not hand one to a pane whose author decided against it.
+
+### 2026-09-12: one bare letter, one question — the settled key grammar
+
+Refines: [P4](#p4). The key-consistency audit's F2/F3/F4/F6/F7, on top of #1050, #1051 and
+the first-moves pass (#1054).
+
+gori's bare letters had drifted into meaning different things on tabs a hand moves between in
+one gesture. The audit measured it — 586 verbs, 34 scopes, 639 chord bindings — and the answer
+is not "one universal per letter" but **one question per letter**, settled below. A new pane
+action takes a letter from this table only if it answers that letter's question; otherwise it
+starts at L3 (the space menu), which is what the key budget in `docs/content/guide/hotkeys.md`
+has always said.
+
+| Key | The question it answers |
+|---|---|
+| `↵` | show this row **in place** |
+| `o` | open this row's own detail — `↵`'s alias, and nothing else (Sitemap is the named exception: `↵` expands a tree node there) |
+| `s` | go to the tab this row lives in; where a row has no source, the Global scope lens |
+| `d` | delete or dismiss the selected row |
+| `y` | copy |
+| `t` | flip this row's flag — mark on a list, enable/disable on a rule list |
+| `a` | add a new row here |
+| `e` | edit the selected row |
+| `/` | filter this list |
+| `f` | freeze (evidence contexts) · find (the sub-tab strip — a different tier) |
+| `r` | send this to the Repeater |
+| `^R` | run |
+| `w` | swap A ⇄ B |
+| `x` | select this line |
+| `⇧X` | wipe this tab (asks first) |
+| `space` | this tab's command menu |
+
+Three exceptions are deliberate and are documented rather than resolved, because each is a
+tab's own loop key and internally coherent:
+
+- **Intercept `f` = forward**, with `⇧F` = forward all. That tab's `f`/`⇧F` family reads as one
+  thing, and forwarding is what an operator does there many times a minute.
+- **History → Repeater and Repeater send stay `^R`**, which predates this table.
+- **The Project ACTIVITY feed's `s` cycles the source chip.** Folding it into that pane's `/`
+  bar needs the bar to parse `source:`/`level:`/`actor:`; it is a free-text query handed to
+  `events_recent(query:)`, and the chips are separate SQL parameters.
+
+This entry settles the half the two entries above it left open. The keyset one records that
+it "deliberately leaves alone… the enable/disable `x` on the four rule lists (that `x` is a
+state change, not a selection — KEY_AUDIT F4)" — F4 is settled here, so there is no such `x`
+left to leave alone: all four toggles are `t`, and `⇧V` under the vim keyset now reaches a
+select-line verb in every editor-capable scope with nothing else wearing the letter.
+
+Two mechanisms keep the table true rather than aspirational. `Registry#validate_chords!` and
+`#validate_menu_keys!` run at boot for every OS profile and raise on a same-scope chord
+collision, a dead capital-letter chord, or two verbs deriving one space-menu key inside one
+displayable view. Neither can see a CONTROLLER arm that claims a letter the registry also
+binds — the shape that made four verbs rebindable in the Hotkeys editor and inert in practice
+— so `spec/tui/one_key_one_meaning_spec.cr` sweeps every scope per letter, and a body that
+declines a key by name is the pattern to copy (`SequencerController#handle_body_key`).
+
+A space-menu **mnemonic** is a different keyspace from a chord: it is reached after `space`, it
+need only be unique within one displayable view, and it is a stable action identity. Where a
+chord moves and its old letter still reads best in the menu, the letter stays — `probe.open-
+evidence` is `s` on the body and `o` in the menu, and both swaps are `w` on the body and `s` in
+the menu. What a menu letter must never do is name a key the tab answers differently: that is
+why the sub-tab strip's letters and its menu's letters were unified (#1055), and why
+`sitemap.tag` gave `T` up to `sitemap.mark-all`.

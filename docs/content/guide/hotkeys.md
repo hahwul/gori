@@ -43,6 +43,34 @@ Rules of thumb:
 - **`r` sends to the Repeater; `Ctrl-R` runs.** Bare `r` is "send this row to the Repeater" in the five scopes that have a flow to send, and nothing elsewhere: the Diff's Run moved to `Ctrl-R` (which already owns Run in nine scopes), OAST's Resume listener moved to `Shift-R`, and the Project ACTIVITY feed's Refresh is a `Space` menu entry — a feed with a refresh key probably wants none at all, since it already re-reads on entry, on a peer's write and on the poll. The sub-tab strip's `r` = rename is a different tier and is unaffected.
 - Match & Replace and Notifications ship keyless (palette / badge); rebind them if you want a Global chord.
 
+## One bare letter, one question {#grammar}
+
+Bare letters are settled per **question**, not per tab. An action takes one of these only if it
+answers that letter's question; anything else starts at L3 (the space menu).
+
+| Key | Means |
+|-----|-------|
+| `Enter` | show this row in place |
+| `o` | open this row's own detail (`Enter`'s alias; on the Sitemap `Enter` expands, so `o` is the only one) |
+| `s` | go to the tab this row lives in — else the scope lens |
+| `d` | delete / dismiss the selected row |
+| `y` | copy |
+| `t` | flip this row's flag (mark, or a rule's on/off) |
+| `a` | add a row here |
+| `e` | edit the selected row |
+| `/` | filter this list |
+| `f` | freeze (evidence) · find (the sub-tab strip) |
+| `r` | send this to the Repeater |
+| `Ctrl-R` | run |
+| `w` | swap A ⇄ B |
+| `x` | select this line |
+| `Shift-X` | clear this tab (asks first) |
+| `Space` | this tab's command menu |
+
+Three exceptions are deliberate, each a tab's own loop key: **Intercept** `f` forwards (and
+`Shift-F` forwards all), **History → Repeater** and **Repeater send** stay on `Ctrl-R`, and the
+Project **ACTIVITY** feed's `s` cycles the source chip.
+
 ## Editing {#editing}
 
 The editor opens a working copy. Nothing is saved until you press `Enter`, and `Esc` discards every change.
