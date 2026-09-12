@@ -582,6 +582,16 @@ describe Gori::Discover::Url do
       end
     end
 
+    it "case-folds a segment whose capitals are outside ASCII, like every other one" do
+      # `parse_path` percent-encodes nothing here, so a crawl reaches both spellings as
+      # themselves — and they are one route, hence one template.
+      lower = U.template_key(U.parse("http://h/äöü/1").not_nil!)
+      U.template_key(U.parse("http://h/ÄÖÜ/1").not_nil!).should eq(lower)
+      lower.should eq("http://h/äöü/{n}")
+      U.fold_segment("ÄÖÜ").should eq("äöü")
+      U.fold_segment("Straße").should eq("straße")
+    end
+
     it "resolve still refuses a non-ASCII scheme-looking href without raising" do
       base = U.parse("https://app.test/a/b").not_nil!
       U.resolve(base, "caf\xE9/x").should eq("https://app.test/a/caf\xE9/x")
