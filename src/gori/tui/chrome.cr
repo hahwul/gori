@@ -559,8 +559,17 @@ module Gori::Tui
     end
 
     # The far-right "more" pill — a gold pill when it holds focus (mirroring the active
-    # tab), else a muted label. `more_focused` is only ever true when the menu bar has
+    # tab), else a two-tone label. `more_focused` is only ever true when the menu bar has
     # focus AND the affordance (not a tab) is the current stop.
+    #
+    # At rest it wears the SAME two tones an inactive numbered tab does — `0:` in
+    # `menu_number_ink`, the rest in `Theme.muted` — through the same `chip_zones` split.
+    # It is the one chip on the row whose whole job is to teach a key, and it was the only
+    # one painting that key in a flat single tone: the bar said "the number is the lesser
+    # half of a label" nine times and then unsaid it in the tenth position. Focused, the
+    # pill fills gold and the label is one bold ink, exactly as the active tab's is — a
+    # dimmed run inside a solid fill would be reading the number as secondary on the one
+    # chip the operator is standing on.
     private def self.render_more_button(screen : Screen, seg : Rect, hidden_count : Int32, focused : Bool) : Nil
       label = more_label(hidden_count)
       if focused
@@ -568,7 +577,9 @@ module Gori::Tui
         screen.fill(seg, bg)
         screen.text(seg.x + 1, seg.y, label, Theme.ink_on(bg), bg, Attribute::Bold)
       else
-        screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg)
+        num_end = chip_zones(label)[0]
+        screen.text(seg.x + 1, seg.y, label[0, num_end], menu_number_ink, Theme.bg) if num_end > 0
+        screen.text(seg.x + 1 + num_end, seg.y, label[num_end..], Theme.muted, Theme.bg)
       end
     end
 
