@@ -226,10 +226,10 @@ module Gori::Tui
       outcome = meta.status.try(&.to_s) || (meta.error ? "ERR" : "—")
       source = "→ #{outcome} · #{issue_text(meta)} · #{fmt_time(meta.created_at)} · #{meta.source_label}"
       source_w = {Screen.display_width(source), {rect.w // 2, 24}.max}.min
-      source_x = {rect.right - source_w - 1, rect.x + 21}.max
+      source_x = {rect.right - source_w - 1, rect.x + REQUEST_X}.max
       screen.text(source_x, y, source, Theme.muted, bg, width: {rect.right - source_x - 1, 0}.max)
-      screen.text(rect.x + 21, y, request, selected ? Theme.text_bright : Theme.text, bg,
-        width: {source_x - (rect.x + 22), 0}.max)
+      screen.text(rect.x + REQUEST_X, y, request, selected ? Theme.text_bright : Theme.text, bg,
+        width: {source_x - (rect.x + REQUEST_X + 1), 0}.max)
       if @compare_anchor == meta.id
         screen.cell(rect.x + CONFIRM_X - 1, y, 'A', Theme.focus_gold, bg, Attribute::Bold)
       end
