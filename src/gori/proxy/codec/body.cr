@@ -319,10 +319,14 @@ module Gori::Proxy::Codec
     # Whether any non-empty transfer-coding token is present (an empty/blank
     # Transfer-Encoding header carries none, so it isn't "present" for framing).
     private def self.te_present?(transfer_encodings : Array(String)) : Bool
+      return false if transfer_encodings.empty? # EMPTY_TE: no header, nothing to tokenize
       transfer_encodings.any? { |v| v.split(',').any? { |t| !t.strip.empty? } }
     end
 
     private def self.chunked?(transfer_encodings : Array(String)) : Bool
+      # No Transfer-Encoding at all (EMPTY_TE) is the common message, and the pipeline below
+      # answers `false` for it after building three throwaway Arrays. Say so up front.
+      return false if transfer_encodings.empty?
       tokens = transfer_encodings.flat_map(&.split(',')).map(&.strip.downcase).reject(&.empty?)
       return false if tokens.empty?
       final_chunked = tokens.last == "chunked"
@@ -339,8 +343,68 @@ module Gori::Proxy::Codec
       raise Gori::Error.new("Transfer-Encoding and Content-Length both present")
     end
 
+    # The body length a Content-Length declares, or nil when there is no usable one.
+    #
+    # Split in two because the general answer is expensive and almost never needed. The
+    # conformant message — ONE Content-Length field line whose value is a plain run of ASCII
+    # digits — is answered by `plain_content_length` off the value's bytes, allocating nothing;
+    # `content_length_strict` below is the original implementation, reached verbatim for
+    # everything else, so every rejection and every raise it makes still happens exactly where
+    # it did. That matters more here than the speed: this is the CL half of CL/TE smuggling,
+    # and a fast path that answered differently from the strict one WOULD BE the desync.
     private def self.content_length(headers : HeaderList) : Int64?
-      return nil unless headers.has?("Content-Length")
+      lines = 0
+      only = ""
+      headers.each do |h|
+        next unless h.name.compare("Content-Length", case_insensitive: true) == 0
+        lines += 1
+        only = h.value
+      end
+      return nil if lines == 0
+      if lines == 1
+        plain = plain_content_length(only)
+        return plain if plain
+      end
+      content_length_strict(headers)
+    end
+
+    # `value` as an Int64 when it is nothing but ASCII whitespace around 1..18 ASCII digits —
+    # the shape `content_length_strict` would parse to the same number with no raise and no
+    # rejection. nil means "not that shape", NOT "no length": every other spelling (a comma
+    # list, a sign, a non-digit, Unicode whitespace, a value too long to be certain of Int64
+    # range) goes to the strict path to be parsed or refused there.
+    private def self.plain_content_length(value : String) : Int64?
+      bytes = value.to_slice
+      from = 0
+      to = bytes.size
+      while to > from && ascii_ws?(bytes.unsafe_fetch(to - 1))
+        to -= 1
+      end
+      while from < to && ascii_ws?(bytes.unsafe_fetch(from))
+        from += 1
+      end
+      # 18 digits is the widest run that cannot overflow Int64, so the accumulate below needs
+      # no overflow guard of its own — and is written with the CHECKED operators anyway, so a
+      # wrong bound here would raise rather than hand the framing loop a wrapped length.
+      return nil if to - from == 0 || to - from > 18
+      n = 0_i64
+      while from < to
+        b = bytes.unsafe_fetch(from)
+        return nil unless b >= 0x30_u8 && b <= 0x39_u8 # '0'..'9'
+        n = n * 10 + (b - 0x30_u8)
+        from += 1
+      end
+      n
+    end
+
+    # SP / HTAB / LF / VT / FF / CR — what `String#strip` takes off an ASCII string, which is
+    # what the strict path applies to each token. Anything else at an edge is left in place so
+    # the value fails the digit test above and the strict path decides.
+    private def self.ascii_ws?(b : UInt8) : Bool
+      b == 0x20_u8 || (b >= 0x09_u8 && b <= 0x0d_u8)
+    end
+
+    private def self.content_length_strict(headers : HeaderList) : Int64?
       values = headers.get_all("Content-Length")
       return nil if values.empty?
       # A header line may itself be a comma list ("5, 5"); split + parse each token.

@@ -204,6 +204,37 @@ describe Gori::Proxy::Codec::Body do
       expect_raises(Gori::Error) { Body.request_framing(req) }
     end
 
+    # `content_length` answers the conformant single-digit-run header off the value's bytes and
+    # defers every other spelling to the strict path (the original implementation). The split is
+    # only safe while the two agree, and a disagreement here IS a CL desync — so the corpus
+    # below walks the boundary: what the fast path answers, and what it must hand over.
+    it "frames or refuses every Content-Length spelling the same way the strict parse does" do
+      framed = {
+        "0"                   => 0_i64,
+        "5"                   => 5_i64,
+        "007"                 => 7_i64,                   # leading zeros are still 1*DIGIT
+        "999999999999999999"  => 999999999999999999_i64,  # 18 digits: the fast path's own ceiling
+        "1000000000000000000" => 1000000000000000000_i64, # 19 digits, in range — strict parses it
+        "5, 5"                => 5_i64,                   # a comma list of identical values collapses
+      }
+      framed.each do |value, expected|
+        req = Http1.parse_request_head("POST / HTTP/1.1\r\nContent-Length: #{value}\r\n\r\n".to_slice)
+        Body.request_framing(req).should eq({BodyFraming::Length, expected})
+      end
+
+      # Not a length at all: no token survives, so the message is body-less exactly as before.
+      empty = Http1.parse_request_head("POST / HTTP/1.1\r\nContent-Length:\r\n\r\n".to_slice)
+      Body.request_framing(empty).should eq({BodyFraming::None, 0_i64})
+
+      ["5, 6",                   # conflicting values in one field line
+       "9999999999999999999999", # 22 digits: past Int64, and the fast path must not wrap it
+       "5x", "0x10", " 5 5",     # non-digits anywhere in the token
+       "1_000"].each do |value|
+        req = Http1.parse_request_head("POST / HTTP/1.1\r\nContent-Length: #{value}\r\n\r\n".to_slice)
+        expect_raises(Gori::Error) { Body.request_framing(req) }
+      end
+    end
+
     it "rejects Transfer-Encoding + Content-Length coexistence (CL.TE/TE.CL smuggling)" do
       req = Http1.parse_request_head("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n".to_slice)
       expect_raises(Gori::Error) { Body.request_framing(req) }
