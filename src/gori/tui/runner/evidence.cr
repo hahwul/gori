@@ -386,11 +386,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
                                          typed : String, back : Proc(Nil)) : Nil
     open_form = -> { open_issue_form_for_link(refs, typed, snapshots: snaps) }
     total = snaps.sum(&.bytes)
-    if total >= Evidence::LARGE_BYTES
-      confirm_freeze_cost(total, snaps.size, "a new issue", open_form, declined: back)
-    else
-      open_form.call
-    end
+    cost = -> {
+      if total >= Evidence::LARGE_BYTES
+        confirm_freeze_cost(total, snaps.size, "a new issue", open_form, declined: back)
+      else
+        open_form.call
+      end
+      nil
+    }
+    # BEFORE the byte cost, which is the same order `freeze_into_issue` uses: "these bytes are
+    # not one exchange" has to be answered before "these bytes cost 3 MB", or the operator
+    # pays attention to the size of a copy they would not have taken.
+    gate_request_drift(snaps, cost, declined: back)
   end
 
   # --- shared core ----------------------------------------------------------
@@ -437,12 +444,78 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       done.call(ids, refusal) unless ids.empty? && refusal.nil?
       nil
     }
-    if total >= Evidence::LARGE_BYTES
-      confirm_freeze_cost(total, snaps.size, "issue ##{issue_id}", write, after: after)
-    else
-      write.call
-      after.try(&.call)
+    cost = -> {
+      if total >= Evidence::LARGE_BYTES
+        confirm_freeze_cost(total, snaps.size, "issue ##{issue_id}", write, after: after)
+      else
+        write.call
+        after.try(&.call)
+      end
+      nil
+    }
+    gate_request_drift(snaps, cost, after: after)
+  end
+
+  # The drift question (#1038), raised BEFORE the byte cost and only when a snapshot needs
+  # it. A Repeater tab whose request was edited after its stored response arrived freezes a
+  # pair that never happened, which is the one thing frozen evidence exists not to produce —
+  # so the TUI, which has an operator looking at the tab, ASKS rather than refusing the way
+  # `gori run evidence freeze` and MCP `freeze_evidence` do. Saying it is the point; the
+  # answer is the operator's.
+  #
+  # Same modal chaining as `confirm_freeze_cost` and for the same reason (every freeze is
+  # raised from inside a picker's or card's `on_close`): `accept` carries on down the chain
+  # — which runs `after` itself — and a decline runs `declined` and then `after` here, so
+  # the picker or drill-in is restored on exactly one path either way.
+  private def gate_request_drift(snaps : Array(Evidence::Snapshot), accept : Proc(Nil), *,
+                                 after : Proc(Nil)? = nil, declined : Proc(Nil)? = nil) : Nil
+    drifted = snaps.count(&.request_drifted?)
+    if drifted.zero?
+      accept.call
+      return
     end
+    ov = Runner.drift_confirm(drifted, snaps.size)
+    accepted = false
+    ov.on_commit = -> { accepted = true; true }
+    ov.on_close = -> {
+      if accepted
+        accept.call
+      else
+        declined.try(&.call)
+        after.try(&.call)
+      end
+    }
+    open_overlay(ov)
+  end
+
+  # The card itself, and its wording. A class method because `Runner.new` owns a terminal and
+  # appears nowhere under spec/ — this is the seam the spec drives through `OverlayHarness`.
+  #
+  # `danger: false`, so ↵ is "freeze anyway": nothing is destroyed by answering yes, the copy
+  # is simply less useful than it looks, and the operator may well want it anyway (an edited
+  # request beside the response it PROVOKED a change in is a legitimate thing to keep, as
+  # long as gori said what it is).
+  def self.drift_confirm(drifted : Int32, total : Int32) : ConfirmDialog
+    ConfirmDialog.new("REQUEST EDITED SINCE THIS RESPONSE",
+      drift_confirm_message(drifted, total),
+      confirm_label: "freeze anyway", danger: false)
+  end
+
+  def self.drift_confirm_message(drifted : Int32, total : Int32) : String
+    subject = if total == 1
+                "This tab's request was edited after the response\n" \
+                "stored beside it was received."
+              elsif drifted == total
+                "All #{total} of these tabs had their request edited after\n" \
+                "their stored response was received."
+              else
+                "#{drifted} of these #{total} copies come from a tab whose request\n" \
+                "was edited after its stored response arrived."
+              end
+    "#{subject}\n\n" \
+    "A frozen copy is meant to be ONE exchange. This one\n" \
+    "would pair the EDITED request with the OLDER response.\n\n" \
+    "Send the tab again to freeze a matching pair."
   end
 
   # The byte-cost question. Built on ConfirmDialog directly rather than `confirm`: that

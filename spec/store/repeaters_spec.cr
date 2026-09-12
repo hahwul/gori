@@ -142,7 +142,7 @@ describe "Gori::Store repeater tabs (v9)" do
       id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
       head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
       body = "PONG".to_slice
-      store.update_repeater_response(id, head, body, nil, 4200_i64)
+      store.update_repeater_response(id, head, body, nil, 4200_i64, request_sha256: nil)
       r = store.repeaters.find!(&.id.==(id))
       String.new(r.response_head.not_nil!).should eq("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n")
       String.new(r.response_body.not_nil!).should eq("PONG")
@@ -153,10 +153,31 @@ describe "Gori::Store repeater tabs (v9)" do
     end
   end
 
+  it "stores the digest of the request that produced the response, and answers NULL for one \
+      persisted without it" do
+    with_store do |store|
+      req = "GET /admin HTTP/1.1\r\nHost: a.test\r\n\r\n"
+      id = store.insert_repeater("https://a.test", req.to_slice, false, true, nil, 0)
+      store.update_repeater_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ok".to_slice, nil, 1_i64,
+        request_sha256: Gori::Evidence.request_digest(req.to_slice))
+      store.get_repeater_full(id).not_nil!.response_request_sha256
+        .should eq(Gori::Evidence.request_digest(req.to_slice))
+      # The full project-open read carries it too — the freeze path is not the only reader.
+      store.repeaters.find!(&.id.==(id)).response_request_sha256.should_not be_nil
+
+      # A later response write REPLACES the digest with its own request's; the column belongs
+      # to the response beside it, not to the row's history.
+      store.update_repeater(id, "https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil)
+      store.update_repeater_response(id, "HTTP/1.1 204 No Content\r\n\r\n".to_slice, nil, nil, 2_i64,
+        request_sha256: nil)
+      store.get_repeater_full(id).not_nil!.response_request_sha256.should be_nil
+    end
+  end
+
   it "repeaters_meta omits the response BLOBs (lighter reconcile poll)" do
     with_store do |store|
       id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-      store.update_repeater_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice, nil, 1_i64)
+      store.update_repeater_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice, nil, 1_i64, request_sha256: nil)
       meta = store.repeaters_meta.find!(&.id.==(id))
       meta.response_head.should be_nil # not loaded by the metadata query
       meta.response_body.should be_nil
@@ -168,7 +189,7 @@ describe "Gori::Store repeater tabs (v9)" do
   it "persists an errored send (empty head, nil body, error text)" do
     with_store do |store|
       id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-      store.update_repeater_response(id, Bytes.empty, nil, "connect failed: a.test:443", 0_i64)
+      store.update_repeater_response(id, Bytes.empty, nil, "connect failed: a.test:443", 0_i64, request_sha256: nil)
       r = store.repeaters.find!(&.id.==(id))
       r.response_body.should be_nil
       r.response_error.should eq("connect failed: a.test:443")

@@ -83,12 +83,12 @@ module Gori::Tui
       # window and threw responses away silently: the pane simply kept showing the previous
       # one. Sizing the buffer to the gesture puts the `else` branch back to meaning only
       # what it says it means.
-      @repeater_results = Channel({RepeaterView, Repeater::Result, String?}).new(Runner::BATCH_SUBTAB_CAP)
+      @repeater_results = Channel({RepeaterView, Repeater::Result, String?, String?}).new(Runner::BATCH_SUBTAB_CAP)
       # WebSocket repeater transcripts arrive on their own channel (a distinct result
       # type from HTTP) and are applied by the same drain on a later tick.
       # Same size, same reason: `repeater_send` routes a WS sub-tab here, and a marked set
       # can be all WebSocket tabs.
-      @ws_results = Channel({RepeaterView, Repeater::WsEngine::Result}).new(Runner::BATCH_SUBTAB_CAP)
+      @ws_results = Channel({RepeaterView, Repeater::WsEngine::Result, String?}).new(Runner::BATCH_SUBTAB_CAP)
       # "Send group" pipelines several requests on one connection and delivers the
       # labelled per-request results here (distinct type again — an ordered array).
       @group_results = Channel({RepeaterView, Array({String, Repeater::Result})}).new(8)
@@ -1303,7 +1303,7 @@ module Gori::Tui
       applied = @refusal_applied
       @refusal_applied = false
       while pair = nonblocking_repeater_result
-        view, result, record_note = pair
+        view, result, record_note, sent_digest = pair
         # Drop a result whose sub-tab was closed (^W) mid-flight — applying it would
         # mutate an orphaned view and flash a toast for a gone session.
         next unless tab = @repeaters.find(&.view.same?(view))
@@ -1311,7 +1311,8 @@ module Gori::Tui
         # Persist a SUCCESSFUL send as the tab's last response (V11) so it survives a
         # reopen. Only on success: a later failed resend must not wipe a good response.
         if (id = tab.db_id) && result.ok?
-          @host.session.store.update_repeater_response(id, result.head, result.body, result.error, result.duration_us)
+          @host.session.store.update_repeater_response(id, result.head, result.body, result.error, result.duration_us,
+            request_sha256: sent_digest)
           probe_scan_repeater(id, result.head, result.body, result.duration_us, tab.flow_id, view)
         end
         note = record_note ? " · #{record_note}" : ""
@@ -1323,7 +1324,7 @@ module Gori::Tui
         applied = true
       end
       while pair = nonblocking_ws_result
-        view, result = pair
+        view, result, sent_digest = pair
         next unless tab = @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_ws(result)
         # The stored last response follows `answered?`, not `ok?`: a failed re-send must not
@@ -1332,7 +1333,8 @@ module Gori::Tui
         # exchange. See `WsEngine::Result#answered?`.
         id = tab.db_id
         if id && result.answered?
-          @host.session.store.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
+          @host.session.store.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us,
+            request_sha256: sent_digest)
         end
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
@@ -1474,7 +1476,7 @@ module Gori::Tui
     rescue
     end
 
-    private def nonblocking_repeater_result : {RepeaterView, Repeater::Result, String?}?
+    private def nonblocking_repeater_result : {RepeaterView, Repeater::Result, String?, String?}?
       select
       when p = @repeater_results.receive
         p
@@ -1483,7 +1485,7 @@ module Gori::Tui
       end
     end
 
-    private def nonblocking_ws_result : {RepeaterView, Repeater::WsEngine::Result}?
+    private def nonblocking_ws_result : {RepeaterView, Repeater::WsEngine::Result, String?}?
       select
       when p = @ws_results.receive
         p
@@ -2034,6 +2036,11 @@ module Gori::Tui
       end
       return false unless plan = repeater_plan(view, [wire], http2: view.http2?)
       save_repeater_tab(tab) # persist the request we're about to send (before it goes inflight)
+      # The request half of the pair the drain is about to complete, digested HERE because the
+      # drain runs a round-trip later and the tab may have been typed into since — which is
+      # precisely the drift this records. Over the bytes the save above put in the row
+      # (`RepeaterView#request_text`), not `plan.wire_bytes`: see `Evidence.request_digest`.
+      sent_digest = Evidence.request_digest(view.request_text.to_slice)
       if reason = plan.refusal
         apply_refusal { view.apply(Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)) }
         @host.status("repeater: #{reason}")
@@ -2057,7 +2064,7 @@ module Gori::Tui
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
-      launch_send_fiber(view, plan, sent_wire, results, record_store, record_ref, sent_at)
+      launch_send_fiber(view, plan, sent_wire, results, record_store, record_ref, sent_at, sent_digest)
       true
     end
 
@@ -2066,8 +2073,9 @@ module Gori::Tui
     # (the same rule the minimize and ws fibers follow), and `results` in particular is
     # passed in so a channel replaced by a project switch cannot be picked up mid-flight.
     private def launch_send_fiber(view : RepeaterView, plan : Repeater::Plan, sent_wire : Bytes,
-                                  results : Channel({RepeaterView, Repeater::Result, String?}),
-                                  record_store : Store?, record_ref : String?, sent_at : Int64) : Nil
+                                  results : Channel({RepeaterView, Repeater::Result, String?, String?}),
+                                  record_store : Store?, record_ref : String?, sent_at : Int64,
+                                  sent_digest : String) : Nil
       started = Time.instant
       spawn(name: "gori-repeater") do
         result = begin
@@ -2093,7 +2101,7 @@ module Gori::Tui
         # the largest batch one ^R can start (see the channel's construction), so a full
         # buffer can only mean that, never backpressure from a marked-set send.
         select
-        when results.send({view, result, record_note})
+        when results.send({view, result, record_note, sent_digest})
         else
         end
       ensure
@@ -2235,6 +2243,10 @@ module Gori::Tui
       # `gori run repeater send <id>` then read back until some later save-on-leave, and a
       # crash before that loses the edit.
       save_repeater_tab(tab)
+      # The same digest the HTTP arm takes, for the same reason and over the same bytes: the
+      # save above is what the row now holds, and the drain writes this handshake's response
+      # onto it after a round-trip the operator can type through.
+      sent_digest = Evidence.request_digest(view.request_text.to_slice)
       view.inflight = true
       # WebSocket sends are not written to History, and the CLI draws the same line
       # (`--record-history is HTTP-only`): a socket's evidence is its frame transcript, which
@@ -2243,7 +2255,7 @@ module Gori::Tui
       spawn(name: "gori-ws-repeater") do
         result = plan.send_ws(messages, Repeater::WsEngine::DEFAULT_IDLE, keep_key)
         select
-        when results.send({view, result})
+        when results.send({view, result, sent_digest})
         else
         end
       rescue ex

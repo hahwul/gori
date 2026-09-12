@@ -647,8 +647,13 @@ module Gori
 
         # Persist whatever was received even when framing failed after the
         # response head. This keeps partial evidence and enables paged reads.
+        # `saved_bytes` IS this row's request — the insert above wrote exactly them a few
+        # lines ago and nothing has edited them since — so the digest (Schema V28) records a
+        # pair that genuinely happened. A later `update_repeater` from any surface then reads
+        # as the drift it is.
         store.update_repeater_response(repeater_id, result.head, result.body,
-          result.error, result.duration_us)
+          result.error, result.duration_us,
+          request_sha256: Evidence.request_digest(saved_bytes))
         if result.response
           probe_scan_saved_repeater(repeater_id, masked_target, masked_req, http2, flow_id,
             result.head, result.body, result.duration_us)
@@ -1037,8 +1042,12 @@ module Gori
         # measured: `length(response_head)` 129 → 0, and with it the TUI tab's handshake card
         # and `repeater send --diff`'s baseline. The row is not this call's report; the result
         # below is, and it carries the failure in full.
+        # `repeater.request` is the handshake this send used and the bytes the row still
+        # holds — `send_websocket` never writes the request side — so it is the right half of
+        # the pair to digest (Schema V28).
         store.update_repeater_response(repeater_id, result.handshake_head, Bytes.empty,
-          result.error, result.duration_us) if result.answered?
+          result.error, result.duration_us,
+          request_sha256: Evidence.request_digest(repeater.request)) if result.answered?
         Log.info { "send_websocket #{plan.scheme}://#{host}:#{plan.port} repeater_id=#{repeater_id} -> #{result.ok? ? "ok" : result.error}" }
 
         payload = JSON.build do |j|

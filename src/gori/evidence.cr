@@ -57,13 +57,23 @@ module Gori
       response_head : Bytes?,
       response_body : Bytes?,
       request_truncated : Bool = false,
-      response_truncated : Bool = false do
+      response_truncated : Bool = false,
+      request_drifted : Bool = false do
       def request_truncated? : Bool
         @request_truncated
       end
 
       def response_truncated? : Bool
         @response_truncated
+      end
+
+      # The request and the response in this copy are NOT one exchange: the source is a
+      # Repeater tab whose saved request was edited after the stored response arrived. See
+      # `Evidence.from_repeater` for how it is decided and `DRIFT_REFUSAL` for what the
+      # surfaces do about it. Always false for a captured flow, whose two halves are one row
+      # written once.
+      def request_drifted? : Bool
+        @request_drifted
       end
 
       # SHA-256 over head + body, exactly the bytes the row stores. Computed on demand —
@@ -133,7 +143,21 @@ module Gori
     # named in the docs: the TUI and CLI persist a response only for a SUCCESSFUL send, so
     # after a failed re-send the copy carries the last good response (the pane shows the
     # error, the row does not); and the request is the tab's CURRENT saved text, so a request
-    # edited since that send freezes beside the response of the earlier one. Freeze right
+    # edited since that send freezes beside the response of the earlier one.
+    #
+    # The second of those is the one case that breaks the feature's own promise — one
+    # exchange — so it is DETECTED rather than only documented (#1038). `response_request_sha256`
+    # (Schema V28) is the digest of the request that produced the stored outcome; when it is
+    # present and disagrees with the request the row holds now, `request_drifted` is set and
+    # every surface says so before writing a copy.
+    #
+    # Computed past the never-sent guard, so it covers an ERRORED send as well as a response:
+    # "these bytes could not be delivered" is a claim about the request that was sent, and an
+    # edit since makes it as wrong as a mispaired 200 would be.
+    #
+    # A NULL digest leaves it FALSE. That is a response persisted before V28 (or by a gori
+    # that did not record it), and "not recorded" is not evidence of a mismatch — an unknown
+    # must not be reported as one. For those rows the old rule still stands: freeze right
     # after the send that proved the finding, which is when the two agree.
     #
     # The request is one wire blob (`repeaters.request`, head and body together); it is
@@ -154,6 +178,10 @@ module Gori
       resp_head = nil if resp_head && resp_head.empty?
       status = resp_head.try { |h| Proxy::Codec::Http1.parse_response_head(h).status }
       status = nil if status == 0
+      # Over `rec.request` whole, which is head + body as the split above produced them — the
+      # same bytes, and therefore the same digest, as this Snapshot's own `request_sha256`.
+      sent = rec.response_request_sha256
+      drifted = !sent.nil? && !sent.empty? && sent != request_digest(rec.request)
       Snapshot.new(
         source_kind: Store::LinkRefKind::Repeater,
         source_id: rec.id,
@@ -167,7 +195,38 @@ module Gori
         request_body: req_body,
         response_head: resp_head,
         response_body: resp_head ? rec.response_body : nil,
+        request_drifted: drifted,
       )
+    end
+
+    # What the headless surfaces refuse a DRIFTED Repeater snapshot with (#1038), beside
+    # `snapshot_for`'s other refusal sentences so the three surfaces say one thing. The TUI
+    # asks instead of refusing — it has a modal and an operator looking at the tab — but the
+    # FACT it states is this one.
+    #
+    # The fix comes first and is the same on every surface (send the tab again); the override
+    # is named per surface because a flag and a JSON field are not interchangeable, and a
+    # sentence that offered both would be wrong on both.
+    DRIFT_REFUSAL = "the tab's request was edited after this response was received, so the copy " \
+                    "would pair the edited request with the older response"
+
+    # nil when there is nothing to refuse — not a drifted snapshot, or the caller said to
+    # freeze it anyway. `override` is the surface's own spelling of that permission.
+    def self.drift_refusal(snap : Snapshot, allow_drift : Bool, override : String) : String?
+      return nil if allow_drift || !snap.request_drifted?
+      "#{DRIFT_REFUSAL} — send the tab again, or pass #{override} to freeze the edited " \
+      "request beside the old response"
+    end
+
+    # The digest `update_repeater_response` stores beside a response and `from_repeater`
+    # compares the tab's current request against. Over the SAVED request bytes — what
+    # `repeaters.request` holds — and deliberately NOT over the wire: `Repeater::Sender#wire`
+    # expands `$NAME` bindings and overlays the active session slot, so a wire digest would
+    # differ from the stored request on every tab that uses either and call all of them
+    # drifted. Same hash as `Snapshot#request_sha256`, which is what makes the comparison
+    # meaningful at all.
+    def self.request_digest(request : Bytes) : String
+      sha256(request, nil)
     end
 
     # The snapshot for a live ref, or the sentence that says why there is none — the shared

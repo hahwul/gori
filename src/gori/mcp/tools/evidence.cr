@@ -36,6 +36,15 @@ module Gori
 
         snap = Evidence.snapshot_for(store, kind, ref_id)
         return not_found(snap) if snap.is_a?(String)
+        # The one pairing that breaks this tool's own promise, refused by name (#1038). An
+        # agent has no tab to look at, so the TUI's "ask and let the operator decide" has no
+        # counterpart here — `allow_drift:true` is the deliberate override. CONFIRM_REQUIRED,
+        # the code every other gated-by-a-boolean write here answers with (`delete_repeater`,
+        # `delete_flows`, a large retest), because nothing in the CALL is wrong: the project
+        # is in a state this write would misrepresent, and the field named is the way past it.
+        if drift = Evidence.drift_refusal(snap, bool_arg(h, "allow_drift", false), "allow_drift:true")
+          return err(drift, "CONFIRM_REQUIRED", field: "allow_drift")
+        end
 
         id, status = store.freeze_evidence(issue_id, snap, link: link)
         case status
@@ -161,12 +170,16 @@ module Gori
           "with a SHA-256 of each. Do this the moment a response proves a finding: the tab's " \
           "next send replaces its response and retention prunes flows, but a frozen copy is " \
           "never changed or pruned. Freeze again after a retest to keep both. A never-sent " \
-          "Repeater tab is refused (there is no exchange). `link:true` (default) also files " \
-          "the live link add_link would, in the same transaction." do |s|
+          "Repeater tab is refused (there is no exchange), and so is one whose request was " \
+          "edited after its stored response arrived — that request and that response are not " \
+          "one exchange. Send the tab again, or set allow_drift to keep the mismatched pair " \
+          "anyway. `link:true` (default) also files the live link add_link would, in the " \
+          "same transaction." do |s|
           s.field "issue_id", intprop("the issue that owns the copy"), required: true
           s.field "ref_kind", enumprop("what to copy from", FREEZE_SOURCES), required: true
           s.field "ref_id", intprop("the flow or repeater id"), required: true
           s.field "link", boolprop("also attach the live link (default true)")
+          s.field "allow_drift", boolprop("freeze a Repeater tab whose request was edited after its stored response (default false)")
         end
         tool j, "link_evidence",
           "Link an existing frozen snapshot to another issue without changing its bytes, " \

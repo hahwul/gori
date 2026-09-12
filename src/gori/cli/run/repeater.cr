@@ -821,10 +821,11 @@ module Gori
       # #drain_results). Reopens the store because `send` closed it before the (slow) dial.
       # Callers gate on `result.ok?`: a failed resend must not wipe a good stored response.
       private def self.persist_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
-                                                 duration_us : Int64, project : Project) : Nil
+                                                 duration_us : Int64, project : Project,
+                                                 request_sha256 : String?) : Nil
         store = open_store(project)
         begin
-          store.update_repeater_response(id, head, body, error, duration_us)
+          store.update_repeater_response(id, head, body, error, duration_us, request_sha256: request_sha256)
         ensure
           store.close
         end
@@ -943,7 +944,8 @@ module Gori
           # seed puts CAPTURED frames in `ws_messages`. A session built from `--request-raw`
           # or MCP `ws_out_messages` leaves it nil and its rows stay the operator's draft.
           cmd_repeater_send_ws(id, plan, project, idle_ms, ws_messages, outbound, format,
-            verbatim, ws_keep_key || rec.ws_keep_key?, !rec.flow_id.nil?)
+            verbatim, ws_keep_key || rec.ws_keep_key?, !rec.flow_id.nil?,
+            Evidence.request_digest(rec.request))
           return
         end
 
@@ -981,7 +983,13 @@ module Gori
         # to a header carrying the reference itself, and that reads as a session that was sent
         # and rejected. See `Run.unbound_overlay_note`.
         report_unbound_slot_overlay("gori run repeater send")
-        persist_repeater_response(id, result.head, result.body, result.error, result.duration_us, project) if result.ok?
+        # The digest of the request that produced this response (Schema V28). `rec.request` is
+        # the SAVED row — this command sends what the row holds and never writes it back, so
+        # the row's request at the moment of this write is still exactly these bytes. The
+        # wire may differ (`--set`, `$NAME` expansion, the slot overlay) and deliberately does
+        # not count: the drift check compares the ROW's request, not what went out.
+        persist_repeater_response(id, result.head, result.body, result.error, result.duration_us,
+          project, Evidence.request_digest(rec.request)) if result.ok?
         exit 1 unless result.ok?
       end
 
@@ -1016,7 +1024,8 @@ module Gori
                                             message_override : Array(Store::WsOutMessage),
                                             outbound : Gori::Outbound, format : Symbol,
                                             verbatim : Bool, keep_key : Bool,
-                                            evidence : Bool = false) : Nil
+                                            evidence : Bool = false,
+                                            request_sha256 : String? = nil) : Nil
         abort_if_blocked!(plan, "gori run repeater send")
 
         store = open_store(project, read_only: true)
@@ -1038,7 +1047,8 @@ module Gori
         if result.answered?
           store2 = open_store(project)
           begin
-            store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
+            store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us,
+              request_sha256: request_sha256)
           ensure
             store2.close
           end

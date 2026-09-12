@@ -927,10 +927,13 @@ gori run evidence delete 12
 | `--ref=KIND` | Source kind for `freeze`: `flow` or `repeater` — a fuzz or miner session has no single exchange |
 | `--ref-id=M` | Source id for `freeze` |
 | `--no-link` | `freeze` only copies; by default it also files the live link `links add` would, in the same transaction |
+| `--allow-drift` | `freeze` a Repeater tab whose request was edited after its stored response arrived. Refused without it — see below |
 | `--include-sensitive` | `show` prints Authorization / Cookie / Set-Cookie / API-key values verbatim instead of `[REDACTED]`. The SHA-256s cover the stored wire bytes, so verifying them needs this |
 | `--format=FMT` | `text` (default) or `json`, on `freeze`, `list` and `show` |
 
-A Repeater tab that has never been sent is refused rather than frozen request-only, and so is a flow whose response has not landed. A Repeater copy pairs the tab's saved request (bindings unexpanded) with the last response the store holds for it — a successful send's; freeze right after the send that proved the finding. A WebSocket copy is the handshake; the frame transcript is not copied. A project's frozen evidence is bounded at 256 MB; past that `freeze` refuses until a copy is deleted. `show` decodes bodies and cuts the text form at 64 KB (the stored copy is complete); the JSON form takes the same shape `get_flow` returns.
+A Repeater tab that has never been sent is refused rather than frozen request-only, and so is a flow whose response has not landed. A Repeater copy pairs the tab's saved request (bindings unexpanded) with the last response the store holds for it — a successful send's; freeze right after the send that proved the finding.
+
+**Request drift.** A Repeater tab holds one request and one response, and editing the request does not change the response beside it: send, edit, freeze, and the copy pairs an edited request with an earlier exchange's response. gori records the SHA-256 of the request each send actually went out with, so it can tell — `freeze` refuses such a tab by name and tells you to send it again, `--allow-drift` writes the mismatched pair anyway, and the TUI asks before it writes. A response persisted by a gori older than this one has no recorded digest; those are treated as unknown, not as drift. A WebSocket copy is the handshake; the frame transcript is not copied. A project's frozen evidence is bounded at 256 MB; past that `freeze` refuses until a copy is deleted. `show` decodes bodies and cuts the text form at 64 KB (the stored copy is complete); the JSON form takes the same shape `get_flow` returns.
 
 ### run retest
 

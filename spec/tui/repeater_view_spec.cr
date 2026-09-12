@@ -2170,7 +2170,7 @@ describe Gori::Tui::RepeaterView do
       ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "KEEPME".to_slice, nil, 500_i64)
       view.apply(ok)
       view.focus_pane(:response)
-      store.update_repeater_response(rid, ok.head, ok.body, nil, ok.duration_us)
+      store.update_repeater_response(rid, ok.head, ok.body, nil, ok.duration_us, request_sha256: nil)
       store.flush
 
       row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!

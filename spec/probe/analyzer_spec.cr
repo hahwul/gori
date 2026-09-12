@@ -555,7 +555,7 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
       req = "GET /api HTTP/1.1\r\nHost: repeater.test\r\n\r\n"
       resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx/1.25\r\n\r\n"
       id = store.insert_repeater("https://repeater.test", req.to_slice, false, true, nil, 0)
-      store.update_repeater_response(id, resp.to_slice, "<html/>".to_slice, nil, 12_i64)
+      store.update_repeater_response(id, resp.to_slice, "<html/>".to_slice, nil, 12_i64, request_sha256: nil)
       store.get_repeater(id).should_not be_nil
       # get_repeater may not load response blobs — use full repeaters list
       rec = store.repeaters.find!(&.id.== id)
@@ -585,7 +585,7 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
       resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.example\r\n" \
              "Access-Control-Allow-Credentials: true\r\n\r\n"
       id = store.insert_repeater("http://acme.test", req.to_slice, false, false, nil, 0)
-      store.update_repeater_response(id, resp.to_slice, "{}".to_slice, nil, 5_i64)
+      store.update_repeater_response(id, resp.to_slice, "{}".to_slice, nil, 5_i64, request_sha256: nil)
       rec = store.repeaters.find!(&.id.== id)
       detail = Gori::Probe.detail_from_repeater(rec).not_nil!
       detail.row.method.should eq("POST")

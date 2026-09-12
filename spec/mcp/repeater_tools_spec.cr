@@ -60,7 +60,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         store.insert_repeater("https://ex.test", "GET /x HTTP/1.1\nHost: ex.test\n\n".to_slice, false, true, nil, 0)
         id = store.repeaters_meta.last.id
-        store.update_repeater_response(id, "HTTP/1.1 400 Bad\r\n\r\n".to_slice, "nope".to_slice, nil, 99_i64)
+        store.update_repeater_response(id, "HTTP/1.1 400 Bad\r\n\r\n".to_slice, "nope".to_slice, nil, 99_i64, request_sha256: nil)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{}}})
         payload = mcp_tool_payload(mcp_drive(store, call)[0])
         payload["sessions"].as_a.size.should eq(1)

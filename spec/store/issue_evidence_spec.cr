@@ -118,7 +118,7 @@ describe "Store#freeze_evidence (V26)" do
     with_store do |store|
       rid = store.insert_repeater("https://acme.test", "GET /v1 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
         false, true, nil, 0)
-      store.update_repeater_response(rid, "HTTP/1.1 500 Boom\r\n\r\n".to_slice, "stack".to_slice, nil, 9_i64)
+      store.update_repeater_response(rid, "HTTP/1.1 500 Boom\r\n\r\n".to_slice, "stack".to_slice, nil, 9_i64, request_sha256: nil)
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
       snap = Gori::Evidence.from_repeater(store.get_repeater_full(rid).not_nil!).not_nil!
       snap.status.should eq(500)
@@ -127,7 +127,7 @@ describe "Store#freeze_evidence (V26)" do
 
       # The next send replaces the tab's response — the working tab stays sendable — and
       # the copy still says 500.
-      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "fixed".to_slice, nil, 5_i64)
+      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "fixed".to_slice, nil, 5_i64, request_sha256: nil)
       store.get_repeater_full(rid).not_nil!.response_body.not_nil!.should eq("fixed".to_slice)
       frozen = store.get_evidence(id).not_nil!
       frozen.meta.status.should eq(500)
@@ -234,7 +234,7 @@ describe "Store#freeze_evidence (V26)" do
   it "does not badge a new Repeater tab with a closed tab's copies when it inherits the id" do
     with_store do |store|
       rid = store.insert_repeater("https://acme.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "a".to_slice, nil, 1_i64)
+      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "a".to_slice, nil, 1_i64, request_sha256: nil)
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
       snap = Gori::Evidence.from_repeater(store.get_repeater_full(rid).not_nil!).not_nil!
       store.freeze_evidence(issue, snap)[1].ok?.should be_true
@@ -249,7 +249,7 @@ describe "Store#freeze_evidence (V26)" do
       store.issue_evidence(issue).size.should eq(1)
       store.evidence_count_for(Gori::Store::LinkRefKind::Repeater, reused).should eq(0)
       # …and a copy taken FROM the new tab counts for it.
-      store.update_repeater_response(reused, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "b".to_slice, nil, 1_i64)
+      store.update_repeater_response(reused, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "b".to_slice, nil, 1_i64, request_sha256: nil)
       store.freeze_evidence(issue, Gori::Evidence.from_repeater(store.get_repeater_full(reused).not_nil!).not_nil!)
       store.evidence_count_for(Gori::Store::LinkRefKind::Repeater, reused).should eq(1)
     end

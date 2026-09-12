@@ -40,6 +40,7 @@ module Gori
         ref_s : String? = nil
         ref_id : Int64? = nil
         link = true
+        allow_drift = false
         format = :text
         leftover = [] of String
 
@@ -49,13 +50,16 @@ module Gori
                      "issue N: request, response, status, timing, protocol, error and truncation\n" \
                      "state, with a SHA-256 of each. The Repeater's next send and History retention\n" \
                      "cannot reach the copy. Freeze again after a retest to keep both.\n" \
-                     "A Repeater tab that has never been sent is refused: there is no exchange."
+                     "A Repeater tab that has never been sent is refused: there is no exchange,\n" \
+                     "and so is one whose request was edited after its stored response arrived —\n" \
+                     "that pair never happened. Send it again, or --allow-drift to keep it anyway."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--issue=N", "Issue id that owns the copy (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
           p.on("--ref=KIND", "Source kind: flow | repeater (required)") { |v| ref_s = v.strip.downcase }
           p.on("--ref-id=M", "Source id (required)") { |v| ref_id = parse_evidence_id(v, "--ref-id") }
           p.on("--no-link", "Only copy — do not also file the live link `links add` would") { link = false }
+          p.on("--allow-drift", "Freeze a Repeater tab whose request was edited after its stored response") { allow_drift = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
@@ -76,6 +80,13 @@ module Gori
           abort "gori run evidence freeze: no issue with id #{iid}" unless store.get_issue(iid)
           snap = Evidence.snapshot_for(store, kind, rid)
           abort "gori run evidence freeze: #{snap}" if snap.is_a?(String)
+          # REFUSED by default, where the TUI asks: this command is what a script calls, and a
+          # script cannot look at the tab. `--allow-drift` is the operator saying they already
+          # know — the copy is still written, still labelled evidence, and the sentence names
+          # the flag so nobody has to find it.
+          if drift = Evidence.drift_refusal(snap, allow_drift, "--allow-drift")
+            abort "gori run evidence freeze: #{drift}"
+          end
           id, status = store.freeze_evidence(iid, snap, link: link)
           case status
           in .issue_gone? then abort "gori run evidence freeze: issue ##{iid} was deleted before the copy was written"
