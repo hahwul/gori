@@ -125,7 +125,7 @@ describe Gori::Tui::ProbeRulesView do
     rules_store do |store|
       view = Gori::Tui::ProbeRulesView.new
       view.reload(store)
-      target = all_rows(view).find { |r| r.title.downcase.includes?("cors") }.not_nil!
+      target = all_rows(view).find(&.title.downcase.includes?("cors")).not_nil!
       view.move(-1000)
       while view.selected_row.try(&.rule_id) != target.rule_id
         view.move(1)

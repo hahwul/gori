@@ -203,7 +203,7 @@ describe "the shipped key set boots clean on every OS profile" do
       r.each { |v| keys[v.id] = Gori::Verb::Keymap.effective_chords(v, os).map(&.label) }
       keys
     end
-    per_os.each { |k| k.should eq(per_os.first) }
+    per_os.each(&.should(eq(per_os.first)))
     # …and every keymap they build is loadable, which is what the TUI does at start-up.
     Gori::Verb::OsProfile::Os.values.each do |os|
       Gori::Verb::Keymap.build(r, os)
