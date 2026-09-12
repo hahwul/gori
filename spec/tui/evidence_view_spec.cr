@@ -60,4 +60,25 @@ describe Gori::Tui::EvidenceView do
       view.compare_anchor.should be_nil
     end
   end
+
+  it "starts the REQUEST column where its header says, even beside a full-width CONFIRM" do
+    with_store do |store|
+      issue = store.insert_issue("noise", Gori::Store::Severity::Low, "acme.test", nil)
+      store.update_issue(issue, status: Gori::Store::Status::FalsePositive).should be_true
+      _, status = store.freeze_evidence(issue, archive_snapshot("/login"))
+      status.ok?.should be_true
+
+      view = EvidenceView.new
+      view.reload(store)
+      text = archive_render(view)
+      text.should contain("FALSE-POSITIVE")
+
+      rows = text.lines
+      header = rows.find! { |row| row.includes?("REQUEST") }
+      row = rows.find! { |row| row.includes?("FALSE-POSITIVE") }
+
+      # The widest confirmation keeps its last letter instead of being overdrawn.
+      row.index("GET /login").should eq(header.index("REQUEST"))
+    end
+  end
 end
