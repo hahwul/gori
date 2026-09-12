@@ -809,6 +809,28 @@ describe "Highlight.from_lines_windowed vs from_lines" do
     end
   end
 
+  # `plain_at` is the text seam for a pane whose only source is styled (ReadPane's caret,
+  # selection, search and copy). It must equal the concatenation `line_at` would have given —
+  # WITHOUT styling the line — including under the env overlay, which only splits spans.
+  fixtures.each do |name, (src, request)|
+    it "plain_at equals plain(line_at) on #{name}" do
+      literal = Set{"VER"}
+      win = Highlight.from_lines_windowed(src, request, env_tokens: request, literal: literal)
+      (0...win.total).each do |i|
+        win.plain_at(i).should eq(Highlight.plain(win.line_at(i))), "line #{i} of #{name}"
+      end
+    end
+  end
+
+  it "plain_at equals plain(line_at) on a byte-backed body, CR and scrub included" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice
+    body = ("{\"a\": 1}\r\n{\"b\": \"café\"}\n" + String.new(Bytes[0xff_u8, 0x0a_u8])).to_slice
+    win = Highlight.message_windowed(head, body, request: false)
+    (0...win.total).each do |i|
+      win.plain_at(i).should eq(Highlight.plain(win.line_at(i))), "line #{i}"
+    end
+  end
+
   it "leaves the env overlay OFF for the read-only windowed callers" do
     # `env_tokens` is opt-in rather than derived from `request`, so Intercept's held-bytes
     # view keeps rendering exactly as it did before the editor started sharing this path.

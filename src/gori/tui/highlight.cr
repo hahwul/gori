@@ -142,6 +142,19 @@ module Gori::Tui
         line = i < head.size ? head[i] : Highlight.body_styled(body[i - head.size], kind)
         env_tokens ? Highlight.with_env_tokens(line, literal) : line
       end
+
+      # The line's own characters, colour dropped — WITHOUT styling it. A body line is already
+      # a String in `body`, so `Highlight.plain(line_at(i))` was tokenising it and then throwing
+      # every span colour away; the head is pre-styled, so there it is only the join.
+      # Mirrors `HistoryView::DetailView#line_text`, and is exact for the same reason: spans
+      # partition the line in order and carry no inserted padding, and the `env_tokens` overlay
+      # only SPLITS spans — so the concatenation is the source line either way.
+      #
+      # The seam a pane needs when its only source is styled but it addresses text: ReadPane's
+      # caret, selection, search and copy all read this, once per drawn logical line.
+      def plain_at(i : Int32) : String
+        i < head.size ? Highlight.plain(head[i]) : body[i - head.size]
+      end
     end
 
     # Wrap an already-styled array so a caller that must style eagerly (markdown, whose
