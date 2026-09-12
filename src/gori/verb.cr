@@ -205,6 +205,7 @@ end
 
 require "./verb/registry"
 require "./verb/os_profile"
+require "./verb/keyset"
 require "./verb/keymap"
 require "./verb/reserved"
 require "./verb/conflicts"

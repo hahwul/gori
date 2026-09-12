@@ -834,7 +834,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `tabs` | Which TUI tabs are shown/hidden |
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname-overrides) above |
 | `env` | Env-token prefix and global values. See [env](#env) above |
-| `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
+| `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `keyset` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
 | `hooks` | External process hooks: `timeout_secs` (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See [Process hooks](/guide/scripting/#process-hooks) |
 | `decoder` | Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database) |
 | `rewriter` | GLOBAL Match & Replace rules, applied in every project, each with a default on/off state a project can override. See [Global and project rules](/guide/proxy/#global-and-project-rules) |

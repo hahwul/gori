@@ -16,6 +16,13 @@ module Gori::Settings
   # "auto" tracks the build's platform — the profile an install that never picked one uses.
   DEFAULT_KEYMAP_OS = "auto"
 
+  # Which EDITOR KEYSET the text panes use: `helix` (the shipped keys — `x` selects the line,
+  # then `y` copies it) or `vim` (`⇧V` selects, `u` undoes, `/` finds, `a` appends, `g`/`⇧G`
+  # jump). A keyset is a bundle of per-verb chord overrides, not an emulation — see
+  # Gori::Verb::Keyset for the table and what it deliberately does not try to be. It applies
+  # BELOW a per-verb rebind, so picking one and then moving a single key keeps that key moved.
+  DEFAULT_EDITOR_KEYSET = "helix"
+
   # Hotkey customization (settings:hotkeys). `keymap_os` pins an OS default profile —
   # "auto" tracks the build's platform; "darwin"/"linux"/"windows" force one.
   # `keymap_overrides` is SPARSE: verb-id → chord-label strings ("ctrl-p", "shift-s").
@@ -23,6 +30,7 @@ module Gori::Settings
   class_getter keymap_os : String = DEFAULT_KEYMAP_OS
   class_getter keymap_overrides : Hash(String, Array(String)) = {} of String => Array(String)
   class_getter command_modifier : String = DEFAULT_COMMAND_MODIFIER
+  class_getter editor_keyset : String = DEFAULT_EDITOR_KEYSET
 
   # Bumped by every setter above, so a memo built from the three (the parsed overrides,
   # an expanded hint strip — `Hotkeys.expand` runs per frame) can tell "same keymap" from
@@ -44,6 +52,13 @@ module Gori::Settings
     @@command_modifier = v
   end
 
+  # Bumps the revision like its siblings: a keyset change moves real chords, so every memo
+  # built from the effective keymap (`Hotkeys.expand`'s hint strips above all) has to drop.
+  def self.editor_keyset=(v : String) : String
+    @@keymap_revision &+= 1
+    @@editor_keyset = v
+  end
+
   # Tolerant hotkey parse: a non-object (or absent) node keeps current values. `os`
   # is normalized (unknown → "auto"); `bindings` is a sparse verb-id → chord-label
   # list (non-array entries dropped; unparseable chord labels dropped; an empty list
@@ -58,12 +73,23 @@ module Gori::Settings
     if v = h["command_modifier"]?.try(&.as_s?)
       self.command_modifier = normalize_command_modifier(v)
     end
+    # Read only WHEN PRESENT, like command_modifier above: a hotkeys block written by a build
+    # that predates keysets must keep the current value rather than be reset by a nil.
+    if v = h["keyset"]?.try(&.as_s?)
+      self.editor_keyset = normalize_editor_keyset(v)
+    end
     self.keymap_overrides = parse_keymap_bindings(h["bindings"]?)
   end
 
   # Allowed command modifiers; anything else falls back to the default.
   def self.normalize_command_modifier(s : String) : String
     {"ctrl", "alt"}.includes?(s) ? s : DEFAULT_COMMAND_MODIFIER
+  end
+
+  # Allowed editor keysets; anything else (a hand-edit, a keyset from a newer build) falls
+  # back to the shipped one rather than to an editor with no keys.
+  def self.normalize_editor_keyset(s : String) : String
+    Verb::Keyset::NAMES.includes?(s) ? s : DEFAULT_EDITOR_KEYSET
   end
 
   # Verb ids that were RENAMED, old → new. A stored override is keyed by verb id, so a rename
@@ -100,17 +126,20 @@ module Gori::Settings
     self.keymap_os = DEFAULT_KEYMAP_OS
     self.keymap_overrides = {} of String => Array(String)
     self.command_modifier = DEFAULT_COMMAND_MODIFIER
+    self.editor_keyset = DEFAULT_EDITOR_KEYSET
   end
 
   # Omit when untouched (default profile + default modifier + no overrides) so an
   # untouched install never writes a "hotkeys" block. Every field in the block must
   # appear in this guard — a modifier-only change would otherwise be dropped.
   private def self.serialize_hotkeys(j : JSON::Builder) : Nil
-    unless keymap_overrides.empty? && keymap_os == DEFAULT_KEYMAP_OS && command_modifier == DEFAULT_COMMAND_MODIFIER
+    unless keymap_overrides.empty? && keymap_os == DEFAULT_KEYMAP_OS &&
+           command_modifier == DEFAULT_COMMAND_MODIFIER && editor_keyset == DEFAULT_EDITOR_KEYSET
       j.field "hotkeys" do
         j.object do
           j.field "os", keymap_os
           j.field "command_modifier", command_modifier
+          j.field "keyset", editor_keyset
           unless keymap_overrides.empty?
             j.field "bindings" do
               j.object do

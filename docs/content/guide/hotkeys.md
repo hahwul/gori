@@ -39,7 +39,7 @@ Rules of thumb:
 - **History → Repeater** and **Repeater send** stay on **`Ctrl-R`** (same muscle memory). Do not move History→Repeater to bare `r`.
 - Match & Replace and Notifications ship keyless (palette / badge); rebind them if you want a Global chord.
 
-## Editing
+## Editing {#editing}
 
 The editor opens a working copy. Nothing is saved until you press `Enter`, and `Esc` discards every change.
 
@@ -152,7 +152,60 @@ yields, since the strip's letter has to read the same on all nine strips. `Space
 word in the Repeater/Fuzzer editors, `Space` `D` toggles the response diff, and the JWT and
 Cookie lens toggles moved to `m` (Mode — the Decoder's letter for the same gesture).
 
-## Reserved Keys
+## Editor Keysets {#editor-keysets}
+
+gori's text panes are **modal**: `Esc` and `i` move between READ and INSERT, and in READ the bare letters are commands. The shipped grammar is helix-shaped — **`x` selects the line, then `y` copies it** — which is one gesture away from vim, where the same thing is `V` then `y`. That one difference is what a vim-trained hand fights all day.
+
+**Preferences → Editor & Keys → Keys → Editor keyset** (`Ctrl-,`), or **`settings:keys`** in the palette, switches it:
+
+| Keyset | Select line | Undo | Find | Append | Top / bottom |
+|--------|-------------|------|------|--------|--------------|
+| **helix-ish** (default) | `x` | `Ctrl-Z` | `Ctrl-F` | — | — |
+| **vim-ish** | `⇧V` | `u` | `/` | `a` | `g` / `⇧G` |
+
+Everything not in that table is the same under both keysets, because gori already spells it the way vim does: `i` enters INSERT, `Esc` leaves it, `y` copies, `Ctrl-G` goes to a line, and arrows plus `Shift` extend a selection.
+
+### A keyset is a mapping, not an emulation
+
+It is a named bundle of key **overrides** for a small, fixed set of editor actions — exactly the mechanism the [OS default profiles](#os-default-profiles) are, one layer up. It does not add an operator-pending grammar, registers, counts, text objects, or any editing operation gori's panes do not already have. A READ-mode pane is a caret, a selection and a copy; naming keys for operations that do not exist is how "vim mode" becomes a promise the editor breaks.
+
+So some vim spellings are deliberately **not** offered, each for a reason you can check:
+
+- **`gg`, `dd`, `yy` and every other two-key sequence.** A gori chord is one keystroke. `g` alone is the top of the pane, and `y` with nothing selected already copies the whole pane — which is the useful half of what `yy` means.
+- **`:` commands, including `:42`.** A bare `:` is [reserved](#reserved-keys) for gori's own command line, so go-to-line stays `Ctrl-G` under both keysets.
+- **Delete.** There is no delete-line in a READ-mode pane to put on `dd` or `D`. Editing happens in INSERT.
+- **The enable/disable `x` on a rule list** (Colormarker, Probe rules, OAST providers, Rewriter). That `x` turns a rule on and off; it is not a selection, and a keyset does not move a state change onto `⇧V`.
+- **The Intercept queue's select-line**, which ships keyless on purpose — that pane reaches it from the space menu, and a keyset respells keys rather than handing one to a pane whose author decided against it.
+
+### The override order
+
+Four layers, most specific first:
+
+```text
+your own rebinding  >  the keyset  >  the OS default profile  >  the shipped chord
+```
+
+A keyset is therefore a better **default**, never a ceiling: pick `vim-ish` and then rebind one action in the [Hotkeys editor](#editing), and that one stays where you put it. "Reset to default" on a row puts it back to the **active keyset's** spelling, not to the shipped one.
+
+Every surface follows the active keyset with no extra step, because they all read the effective keymap: the status hint strips, the Help tab, the command palette, the space menu and the Hotkeys editor's own conflict messages. Under `vim-ish` the Notes footer reads `/ find` where it read `^F find`, and binding something to `⇧V` is refused by name because Select line is there.
+
+### It does not touch the space menu's letters
+
+A keyset moves the key you press **in the pane**, not the letter the [space menu](#space-menu) puts in front of a row — the same rule any per-action rebind follows, and the reason those letters are stable identities. Under `vim-ish` the menu still fronts Select line with `x`, and prints the live chord beside it:
+
+```text
+│ x Select line   ⇧V │
+```
+
+so the card teaches both halves rather than making you guess which one it means. The nine `SUB-TABS` letters (`n` `w` `d` `e` `t` `f` `/` `T` `N`) likewise mean the same thing on all nine strips whichever keyset you pick. The two namespaces cannot collide: the menu is modal, and a keyset only ever writes to the keymap.
+
+That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in — and gori checks the chord half at boot: `validate_chords!` sweeps every (OS profile × keyset) cell, and a keyset letter that shadowed a pane's own key would fail the build rather than ship.
+
+### What still works whatever you pick
+
+`Ctrl-Z` keeps undoing **inside INSERT** under `vim-ish` — that guard runs before the keymap in all nine text editors, which is where a typing hand wants it. `Ctrl-F` likewise still opens the find prompt, INSERT included; `/` is an addition in READ, not a replacement. And `i` is refused with a message on a read-only pane that sits beside an editor (the Repeater response, the Fuzzer results, the Decoder output), under both keysets.
+
+## Reserved Keys {#reserved-keys}
 
 Some keys can't be rebound because the terminal or gori needs them:
 
@@ -167,7 +220,7 @@ Some keys can't be rebound because the terminal or gori needs them:
 
 Flow-control/signal chords like `Ctrl-S` are **not** reserved; gori runs the terminal in raw mode, so they reach the app (Repeater's SNI toggle ships on `Ctrl-S`).
 
-## OS Default Profiles
+## OS Default Profiles {#os-default-profiles}
 
 The `←` / `→` profile selector picks which **default** key set a fresh (un-overridden) binding uses: `auto` (tracks the platform gori was built for), `macOS`, `Linux`, or `Windows`. Your own rebindings always sit on top of the chosen profile, regardless of OS.
 
@@ -205,6 +258,7 @@ Saved to `~/.gori/settings.json` (override the directory with `$GORI_HOME`) unde
   "hotkeys": {
     "os": "auto",
     "command_modifier": "alt",
+    "keyset": "vim",
     "bindings": {
       "rules.edit": ["g"],
       "scope.edit": []
@@ -213,17 +267,17 @@ Saved to `~/.gori/settings.json` (override the directory with `$GORI_HOME`) unde
 }
 ```
 
-`command_modifier` is `"ctrl"` (the default) or `"alt"`; an unknown value falls back to `"ctrl"`. An untouched install writes no `hotkeys` block at all.
+`command_modifier` is `"ctrl"` (the default) or `"alt"`, and `keyset` is `"helix"` (the default) or `"vim"` — see [Editor keysets](#editor-keysets). An unknown value for either falls back to the default rather than to no keys. An untouched install writes no `hotkeys` block at all.
 
 An absent action uses the profile default. Unknown ids and unparseable chords are ignored on load, so hand-edits and version drift degrade gracefully.
 
 ## Limitations
 
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
-- Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias), structural keys (`esc`, `↵`, arrows, `↹`), and a pane-local letter such as `x` in an editor.
+- Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias) and structural keys (`esc`, `↵`, arrows, `↹`).
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
 - Where the **sub-tab strip** already binds a letter for an action, the menu spells that action with the same letter where it can: `f` lists and searches the sub-tabs, `t` marks a chip and `⇧T` marks the strip. Rename is the one it cannot match — the strip binds `r`, and `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, where a rename does not get to displace it. One action must not have two spellings across the nine strips, so rename is **`e` on all of them** and the strip's `r` stays a raw chord. See [the space menu](#space-menu) for the whole table.
-- Pane-local keys that share a letter (Repeater response `x` = hex vs request/target `x` = select line) stay controller-owned so both meanings can coexist.
+- The editor actions are rebindable individually, and as a set via [Editor keysets](#editor-keysets). What the rebind editor will not move is the handful whose chord a hardcoded guard answers first: `Esc` (back to READ), `Ctrl-Z`, `Ctrl-F` and `Ctrl-G`. They are listed in the Help sheet so you can read them, and a keyset can give them a second, bare spelling — which is how `vim-ish` reaches `u` and `/`.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
 
 ## Next Steps

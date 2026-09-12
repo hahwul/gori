@@ -2629,3 +2629,45 @@ so a keyset has a row to give a second, bare spelling. **⇧arrow selection** st
 `ReadPane` motion, not in a chord. And **nothing that edits was added** — no delete-line, no
 open-line, no join. A READ-mode pane is a caret, a selection and a copy; naming keys for
 operations that do not exist would make the keyset a promise the editors cannot keep.
+
+### 2026-09-12: an editor keyset is a mapping, and the order is user > keyset > profile > default
+
+Vim users stumble on exactly one gesture in gori's editors: READ mode is helix-shaped, so `x`
+selects the line and `y` then copies the selection, where the same hand wants `V` then `y`.
+Everything else in the pane — `i` in, `esc` out, `y` copies, ⇧arrows extend — gori already
+spells the way vim does.
+
+So the answer is a **keyset**: a named bundle of key overrides for the small, fixed set of
+editor verbs, which is precisely what `OsProfile::OVERRIDES` already is, one layer up. It is
+NOT an emulation, and the distinction is load-bearing rather than modest. An emulation implies
+an operator-pending grammar (`d` waiting for a motion), registers, counts and text objects,
+and gori's READ pane has none of those to drive — a `ReadPane` is a caret, a selection and a
+copy. `Verb::Keyset::VIM` therefore contains only rows that RESPELL a verb that already
+exists, and the things it cannot offer are named in `docs/content/guide/hotkeys.md` rather
+than approximated: `gg`/`dd`/`yy` (a `Chord` is one keystroke), `:42` (`Verb::Reserved` keeps
+bare `:` for the command line), and delete (there is no delete-line in a READ pane to bind).
+
+**The order is `user > keyset > OS profile > declared`** (`Keymap.effective_chords`), and that
+ranking is the feature. A keyset placed ABOVE a per-verb rebind would mean picking `vim`
+silently undid work the operator did in `settings:keys`; below it, a keyset is a better
+DEFAULT that a single rebind can still overrule. It is also why `Hotkeys.default_for` — what
+the editor's "reset" row reverts to — takes the keyset: reverting to the `x` a verb file
+declares would hand a `vim` operator a key their keyset does not use, from a button labelled
+"default". Each layer REPLACES rather than merges, and a keyset row keeps `pinned_chords` for
+the same reason a user override does: nothing may carry `^Y` off with `y` and leave a pane
+with no way to copy in INS.
+
+Two safety properties, both checked rather than argued. `Registry#validate_chords!` now sweeps
+the full (OS profile × keyset) matrix, because a keyset substitutes a BUNDLE at once —
+`vim` moves fifteen select-line verbs onto `⇧V` in one step — so a verb that later claimed one
+of those letters in one of those scopes would shadow silently and only for the operators who
+picked that keyset. And `spec/verb/keyset_spec.cr` sweeps the vim bare letters (`u` `/` `a`
+`g` `⇧G`) against the eight scopes an editor pane can belong to: the Editor scope sits ahead
+of the tab scope, which `validate_chords!` cannot see, so a hit there is a DISPLACEMENT that
+must be documented rather than discovered. Today there are none — every one of those letters
+is free in every editor-capable tab scope.
+
+What the keyset deliberately leaves alone: the enable/disable `x` on the four rule lists (that
+`x` is a state change, not a selection — KEY_AUDIT F4), and `intercept.select-line`, which
+ships keyless because the Intercept queue spends nearly every letter. A keyset respells keys;
+it does not hand one to a pane whose author decided against it.

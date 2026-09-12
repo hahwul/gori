@@ -24,12 +24,16 @@ module Gori
       # rebinds are mutually checked. nil when `chord` is free for `verb_id`.
       def self.detect(registry : Registry, os : OsProfile::Os,
                       overrides : Hash(String, Array(Chord)),
-                      verb_id : String, chord : Chord) : Conflict?
+                      verb_id : String, chord : Chord,
+                      keyset : Keyset::Kind = Keyset.active) : Conflict?
         target = registry[verb_id]
         registry.each do |other|
           next if other.id == verb_id
           next unless overlap?(other.scope, target.scope)
-          if Keymap.effective_chords(other, os, overrides).includes?(chord)
+          # Under the ACTIVE keyset, so the editor answers about the keymap the operator is
+          # actually running: a `vim` user binding something to `⇧V` must be told that
+          # Select line is there, even though the verb file says `x`.
+          if Keymap.effective_chords(other, os, overrides, keyset).includes?(chord)
             return Conflict.new(chord, other.id, other.scope)
           end
         end

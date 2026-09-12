@@ -1240,8 +1240,9 @@ module Gori::Tui
       registry = @host.session.registry
       return false unless verb = registry[id]?
       os = Verb::OsProfile.resolve(Settings.keymap_os)
-      chords = Verb::Keymap.effective_chords(verb, os, Hotkeys.rebindable_overrides(registry))
-      chords = Verb::Keymap.effective_chords(verb, os) if chords.empty?
+      keyset = Verb::Keyset.resolve(Settings.editor_keyset)
+      chords = Verb::Keymap.effective_chords(verb, os, Hotkeys.rebindable_overrides(registry), keyset)
+      chords = Verb::Keymap.effective_chords(verb, os, Verb::Keymap::NO_OVERRIDES, keyset) if chords.empty?
       chords.includes?(chord)
     end
 

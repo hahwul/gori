@@ -119,6 +119,9 @@ module Gori::Tui
     KEYS_FIELDS = [
       Field.new("Command modifier", "which modifier fronts gori's built-in shortcuts (^P ^N ^W ^G ^F ^B ^E ^, ^1-9) — Option ADDS ⌥ as an alias, Ctrl keeps working; for terminals/multiplexers that swallow the Ctrl form (tmux's ^B, Ctrl+digit). macOS Terminal/iTerm must be set to send Option as Meta. ←/→ cycles",
         choices: COMMAND_MODIFIER_CHOICES, choice_labels: COMMAND_MODIFIER_LABELS),
+      Field.new("Editor keyset",
+        "how the READ-mode keys of a text pane are spelled: helix-ish selects the line with x, then y copies it · vim-ish moves that to ⇧V and adds u undo, / find, a append, g/⇧G top-bottom. A mapping, not an emulation — two-key chords (gg dd yy) and :commands are not expressible, and no new editing operation is added. Your own rebindings win over the keyset. ←/→ cycles",
+        choices: Gori::Hotkeys::KEYSETS, choice_labels: Gori::Hotkeys::KEYSET_LABELS),
     ]
     # The THEME section is special: a single field whose value is the selected theme
     # name, but rendered as a vertical, scrollable list (built-ins + user themes) rather
@@ -327,7 +330,7 @@ module Gori::Tui
                   Settings::DEFAULT_MOUSE ? "on" : "off",
                   Settings::DEFAULT_MOUSE_DRAG,
                 ]
-                when :keys  then [Settings::DEFAULT_COMMAND_MODIFIER]
+                when :keys  then [Settings::DEFAULT_COMMAND_MODIFIER, Settings::DEFAULT_EDITOR_KEYSET]
                 when :theme then [Theme.canonical(Settings::DEFAULT_THEME)]
                 when :layout then [
                   Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
@@ -454,9 +457,11 @@ module Gori::Tui
       ]
     end
 
-    # The KEYS row values (one row today — the command modifier).
+    # The KEYS row values. Both are clamped on the way OUT as well as in (the `mouse_values`
+    # defence): a hand-edited settings.json holding an unknown keyset would otherwise show a
+    # row whose ←/→ cycle cannot find its own current value in `choices`.
     private def keys_values : Array(String)
-      [Settings.command_modifier]
+      [Settings.command_modifier, Settings.normalize_editor_keyset(Settings.editor_keyset)]
     end
 
     # The GENERAL row values, read from the live Settings — one helper for the load and the
@@ -728,6 +733,7 @@ module Gori::Tui
       end
       if @section == :keys
         Settings.command_modifier = Settings.normalize_command_modifier(@values[0])
+        Settings.editor_keyset = Settings.normalize_editor_keyset(@values[1])
         @values = keys_values
         return persist
       end
