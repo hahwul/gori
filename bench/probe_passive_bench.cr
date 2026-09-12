@@ -148,12 +148,13 @@ BIG_HTML_FLOW = flow("GET", "/docs", "text/html; charset=utf-8",
 # A BINARY asset — an image, the single most common response shape in a real browse after the
 # document itself, and the one none of the fixtures above covers. It is deliberately NOT valid
 # UTF-8, which is the whole point: `Context#body_text` has to repair the bytes before any rule
-# hands them to PCRE, and repairing invalid bytes EXPANDS them (each becomes a 3-byte U+FFFD),
-# so a 64 KiB BODY_CAP prefix of binary becomes a ~180 KiB string that every body-scanning rule
-# then walks. Nothing in the BODY can produce a detection (the two the fixture reports are
-# header-only: the nginx `Server:` fingerprint and missing HSTS), so the body scan is pure
-# overhead on the fiber the passive scan shares with the proxy — and it is invisible in any
-# all-text fixture.
+# hands them to PCRE, and repairing invalid bytes EXPANDS them (each becomes a 3-byte U+FFFD).
+# Half this generator's bytes happen to be ASCII and pass through, so the 64 KiB BODY_CAP prefix
+# scrubs to 102,612 bytes — a 1.57× blow-up here, and up to 3× on a body with no ASCII at all.
+# (The fixture is 180 KiB so the cap really bites; only its first 64 KiB is ever scanned.)
+# Nothing in the BODY can produce a detection — the two the fixture reports are header-only, the
+# nginx `Server:` fingerprint and missing HSTS — so the body scan is pure overhead on the fiber
+# the passive scan shares with the proxy, and it is invisible in any all-text fixture.
 BIN_BODY = Bytes.new(180 * 1024) { |i| ((i.to_u64 &* 2654435761_u64) >> 13).to_u8! }
 
 BIN_RESP_HEAD = ("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n" \

@@ -1,4 +1,5 @@
 require "json"
+require "../../utf8"
 require "./types"
 require "../../ascii_bytes"
 require "../../miner/inject"
@@ -93,7 +94,9 @@ module Gori
           decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
           bytes = decoded || result.body
           return false if bytes.nil? || bytes.empty?
-          INTROSPECTION_RESULT.matches?(String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub)
+          # `Utf8.text` rather than `String#scrub` — same repair, but a valid body (which a JSON
+          # introspection result always is) skips the character walk. See `Gori::Utf8`.
+          INTROSPECTION_RESULT.matches?(Utf8.text(bytes[0, {bytes.size, BODY_CAP}.min]))
         end
 
         # The shared gate both `plan` and `dedup_key` funnel through, returning {probe_method,
@@ -147,7 +150,10 @@ module Gori
           end
           return false unless AsciiBytes.contains_ci?(capped, QUERY_KEY)
           q = begin
-            JSON.parse(String.new(capped).scrub).as_h?.try(&.["query"]?).try(&.as_s?)
+            # Twin of the same gate in `Passive::Tech`, down to the `Utf8.text` spelling: the
+            # prefilter above has already decided this body is worth parsing, so the repair only
+            # has to not cost a full character walk on the valid bodies that reach it.
+            JSON.parse(Utf8.text(capped)).as_h?.try(&.["query"]?).try(&.as_s?)
           rescue JSON::ParseException
             nil
           end

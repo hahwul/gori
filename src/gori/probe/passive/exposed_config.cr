@@ -117,15 +117,17 @@ module Gori
         end
 
         # The first SCAN_PREFIX bytes, repaired. The cut can land mid-codepoint, and PCRE RAISES
-        # on invalid UTF-8 — which here would take out the whole flow's detections, not just
-        # this rule's — so the slice is validated before any pattern sees it.
+        # on invalid UTF-8 rather than failing to match — `Passive.analyze` rescues per rule, so
+        # that would not lose the flow's other findings, but it would silently cost this rule
+        # every finding on every large page carrying any non-ASCII byte. So the slice is
+        # validated before any pattern sees it.
         #
         # Through `Utf8.text`, not a bare `scrub`: the source is `body_text`, which is already
         # valid, so the ONLY way this slice can be broken is a cut landing mid-codepoint — i.e.
         # essentially never, while the scrub walked all 16 KiB a character at a time to find that
         # out. That mattered most on a body this rule cannot possibly hit: an image response's
-        # `body_text` is 64 KiB of binary already expanded to U+FFFD, and this one call was 139µs
-        # of the 625µs that response costs the passive fiber. Same repair either way.
+        # `body_text` is a binary BODY_CAP prefix already expanded to U+FFFD, and this one call
+        # was 139µs of the 625µs that response cost the passive fiber. Same repair either way.
         private def head_of(text : String) : String
           return text if text.bytesize <= SCAN_PREFIX
           Utf8.text(text.to_slice[0, SCAN_PREFIX])
