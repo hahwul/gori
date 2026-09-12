@@ -3,6 +3,7 @@
 abstract class Gori::Verb::ExecContext
   # Probe → Rules sub-tab: toggle the selected rule, and add/edit/delete a custom rule.
   abstract def probe_rule_toggle : Nil            # enable/disable the selected Probe rule
+  abstract def probe_rule_filter : Nil            # open the RULES `/` bar (a lens over the rule list)
   abstract def probe_rule_add : Nil               # open the custom-rule popup to add a rule
   abstract def probe_rule_edit : Nil              # edit the selected custom rule
   abstract def probe_rule_delete : Nil            # delete the selected custom rule (with confirm)

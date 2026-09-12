@@ -26,6 +26,14 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.edit", "Edit rule", "Edit the selected rule in the popup editor",
         Verb::Scope::Colormarker, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: on_rule, mnemonic: 'e', section: :rules) { |ctx| ctx.colormarker_edit; nil }
+      # `/`, the app's filter key. A LENS over the policy list — it hides rows, never disables
+      # one — and the only action it changes is reordering, which `colormarker_move` refuses
+      # while a query is held (precedence is the WHOLE list's order, and a filtered list is
+      # not that order).
+      r.register Verb::Definition.new(
+        "colormarker.filter", "Filter rules", "Filter the rule list by name, match filter, colour or scope",
+        Verb::Scope::Colormarker, [Verb::Chord.new("/")], available: in_cm,
+        mnemonic: 'f', section: :rules) { |ctx| ctx.colormarker_filter; nil }
       r.register Verb::Definition.new(
         "colormarker.copy", "Copy", "Copy the selected rule's match filter (the QL that paints the row)",
         Verb::Scope::Colormarker, [Verb::Chord.new("y")], available: on_rule, mnemonic: 'y', section: :rules) { |ctx| ctx.read_copy; nil }

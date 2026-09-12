@@ -41,13 +41,26 @@ module Gori
       # `sitemap.batch-*` twins and no second menu: one declaration, one call path.
       #
       # `t` marks here as it does in History (mutt's tag key, and the same many-times-per-minute
-      # triage gesture that earns it an L1 bare key there). Tagging moves up to ⇧T, so the two
-      # lists finally agree on what `t` means. NOTE the deliberate divergence from History's ⇧T
-      # (mark-all): a tree has no useful "mark every row" — it would sweep hosts and folders
-      # into the same batch as the endpoints under them.
+      # triage gesture that earns it an L1 bare key there).
       r.register Verb::Definition.new(
         "sitemap.mark-toggle", "Mark path", "Mark/unmark this path and step down — the action menu then acts on every marked path",
         Verb::Scope::Sitemap, [Verb::Chord.new("t")], group: :triage) { |ctx| ctx.sitemap_mark_toggle; nil }
+
+      # ⇧T, the `t`/⇧T pair History, Issues and the Intercept queue all carry. It was held back
+      # on the argument that "a tree has no useful mark every row — it would sweep hosts and
+      # folders into the same batch as the endpoints under them", and that argument is answered
+      # rather than overruled: `mark_all_visible` marks only rows carrying a METHOD, so a host
+      # and a folder cannot enter the batch at all. The set is what the tree SHOWS — the `/`
+      # filter and the open folds — which is the same sentence History's ⇧T answers to.
+      #
+      # `Chord.new("t", shift: true)`, NOT `Chord.new("T")`: a typed capital normalises to
+      # shift+lowercase, so the capital spelling can never fire. menu_key skips shift chords,
+      # hence the explicit 'T' mnemonic — which `sitemap.tag` gives up below, because the menu
+      # letter has to name what the chord beside it does.
+      r.register Verb::Definition.new(
+        "sitemap.mark-all", "Mark all (shown)", "Mark every captured path the tree currently shows — hosts and folders are skipped",
+        Verb::Scope::Sitemap, [Verb::Chord.new("t", shift: true)],
+        mnemonic: 'T', group: :triage) { |ctx| ctx.sitemap_mark_all; nil }
 
       # ⇧↑/⇧↓ extend a contiguous range from the anchor — the keyboard form of a GUI
       # shift+click. Free in this scope: Keymap#lookup matches a Chord record EXACTLY, so
@@ -73,19 +86,18 @@ module Gori
         mnemonic: 'N') { |ctx| ctx.sitemap_mark_clear; nil }
 
       # Tag the selected path (or every marked path) with a free-text memo; a group fold node
-      # toasts. MENU-ONLY, on 'T'.
+      # toasts. MENU-ONLY, on 'm' — for the memo the description names.
       #
-      # It used to hold the ⇧T chord, and that was the one letter whose MEANING changed
-      # between sibling list tabs: History, Issues and Intercept all read `t`/⇧T as
-      # "mark / mark all", so a hand that learnt the pair there opened a text prompt here.
-      # ⇧T is deliberately left UNBOUND in this scope rather than reassigned — see
-      # `sitemap.mark-toggle` above for why a tree has no useful "mark every row" today, and
-      # keep the letter free for the day one is worth having. Tagging loses nothing by being
-      # a space-menu entry: `sitemap.mark-clear` is menu-only for the same reason.
+      # It held the ⇧T CHORD once, and that was the one letter whose meaning changed between
+      # sibling list tabs: History, Issues and Intercept all read `t`/⇧T as "mark / mark all",
+      # so a hand that learnt the pair there opened a text prompt here. It then kept 'T' as its
+      # menu letter while the chord sat unbound, which was the same lie one tier down — and
+      # `sitemap.mark-all` now holds both. Tagging loses nothing by being a space-menu entry:
+      # `sitemap.mark-clear` is menu-only for the same reason.
       r.register Verb::Definition.new(
         "sitemap.tag", "Tag path", "Pin a free-text memo to the selected — or every marked — path (filter with tag:)",
         Verb::Scope::Sitemap,
-        mnemonic: 'T', group: :triage) { |ctx| ctx.sitemap_tag; nil }
+        mnemonic: 'm', group: :triage) { |ctx| ctx.sitemap_tag; nil }
 
       # `g` — fold/unfold path-param ids (/users/<uuid> → {uuid}, /users/1,2,3… → [1, 2, 3 … +N]).
       r.register Verb::Definition.new(

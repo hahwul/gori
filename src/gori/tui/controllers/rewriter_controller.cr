@@ -6,6 +6,7 @@ require "../../store"
 require "../../rules"
 require "../../proxy/upstream"
 require "../viewport"
+require "../row_filter"
 
 module Gori::Tui
   # The Rewriter tab: manage the project's Match & Replace rules (the shared Rules engine
@@ -42,6 +43,7 @@ module Gori::Tui
       @last_body = Rect.new(0, 0, 0, 0) # last content rect — click/wheel geometry
       # The host the last transform scoped rules on — see `preview_host`.
       @preview_host = ""
+      @filter = RowFilter.new # the RULES list's `/` bar
     end
 
     def tab : Symbol
@@ -71,8 +73,50 @@ module Gori::Tui
       @host.session.bindings
     end
 
+    # The FILTERED list — what the RULES card shows and what `@sel` indexes. `rules_engine.rules`
+    # stays the source of truth for everything that writes, and every mutation below acts on the
+    # selected rule's ID, so a narrowing cannot send one to the wrong row. Reordering is the
+    # exception and `rewriter_move` refuses it while a query is held.
     private def rule_list : Array(Store::MatchRule)
-      rules_engine.rules
+      return rules_engine.rules unless @filter.active?
+      rules_engine.rules.select { |r| @filter.matches?(rule_haystack(r)) }
+    end
+
+    # What a row shows: the name, both halves of the rewrite, where it applies and its scope.
+    private def rule_haystack(rule : Store::MatchRule) : String
+      "#{rule.name} #{rule.pattern} #{rule.replacement} #{rule.host} #{rule.target} #{rule.part} #{rule.global? ? "global" : "project"}"
+    end
+
+    # --- the RULES list's `/` filter -------------------------------------------------------
+    def list_filter_editing? : Bool
+      @sub == :rules && @focus == :list && @filter.editing?
+    end
+
+    def handle_list_filter_key(ev : Termisu::Event::Key) : Bool
+      prev = rule_list[@sel]?.try(&.id)
+      @filter.handle_key(ev)
+      list = rule_list
+      @sel = (prev ? list.index { |r| r.id == prev } : nil) || @sel
+      @sel = @sel.clamp(0, {list.size - 1, 0}.max)
+      true
+    end
+
+    def rewriter_filter : Nil
+      return @host.status("no rules to filter — a adds one") if rules_engine.rules.empty?
+      @sub = :rules
+      @focus = :list
+      @filter.start
+    end
+
+    # The `/` bar takes the RULES card's top row while it is shown. ONE definition, read by
+    # render and by every hit-test, so a click can never resolve to a row the bar is on.
+    private def filter_row?(inner : Rect) : Bool
+      @sub == :rules && @filter.shown? && inner.h > 1
+    end
+
+    private def rules_list_rect(inner : Rect) : Rect
+      return inner unless filter_row?(inner)
+      Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
     end
 
     private def extract_list : Array(Store::ExtractRule)
@@ -192,6 +236,8 @@ module Gori::Tui
     end
 
     private def render_rules(screen : Screen, inner : Rect, body_focused : Bool) : Nil
+      @filter.render_bar(screen, Rect.new(inner.x + 1, inner.y, inner.w - 2, 1)) if filter_row?(inner)
+      inner = rules_list_rect(inner)
       list = rule_list
       @sel = @sel.clamp(0, {list.size - 1, 0}.max)
       ensure_visible(inner, list.size)
@@ -342,7 +388,7 @@ module Gori::Tui
     # The rules sub-tab's preview INPUT pane is a real editor (it holds an HTTP message, which
     # cannot be typed without spaces — or digits). Everything else here is a list.
     def body_takes_text? : Bool
-      @sub == :rules && @focus == :preview_in
+      (@sub == :rules && @focus == :preview_in) || list_filter_editing?
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool
@@ -618,6 +664,7 @@ module Gori::Tui
         return true
       end
       # The RULES list's scroll gauge rides the card's right hairline, which `row_at` excludes.
+      inner = rules_list_rect(inner)
       if row = @view.rules_gauge_row_at(inner, mx, my, rule_list.size, rules_engine.active?)
         @focus = :list
         @sel = row
@@ -688,7 +735,7 @@ module Gori::Tui
     private def double_click_row(inner : Rect, mx : Int32, my : Int32) : Bool
       case @sub
       when :rules
-        return false unless @view.row_at(inner, mx, my, @scroll, rule_list.size, rules_engine.active?)
+        return false unless @view.row_at(rules_list_rect(inner), mx, my, @scroll, rule_list.size, rules_engine.active?)
         rewriter_edit
       when :extract
         return false unless @view.sub_row_at(inner, mx, my, @sub_scroll, sub_count)
@@ -820,6 +867,7 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Bool
+      return @filter.set_preedit(text) if list_filter_editing?
       return false unless @focus == :preview_in
       @preview_input.set_preedit(text)
       true
@@ -902,6 +950,8 @@ module Gori::Tui
     end
 
     def rewriter_move(dir : Int32) : Nil
+      # Order is the composition order; a filtered list is not that order.
+      return @host.status("clear the filter (esc on the / bar) to reorder — order is the whole list's") if @filter.active?
       rule = selected_rule || return @host.status("no rewrite rule selected")
       # Only follow the rule when it actually moved: ⇧J on the last GLOBAL rule cannot push it
       # into the project block (that is a scope change, `s`), and walking the cursor there
@@ -1096,6 +1146,7 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
+      return @filter.hint if list_filter_editing?
       case @sub
       when :extract
         return keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.delete} delete · space cmds · esc tabs")
@@ -1111,7 +1162,7 @@ module Gori::Tui
       when :preview_out
         keys("↑/↓ move · ⇧arrows select · {rewriter.copy} copy · {rewriter.select-line} line · space cmds · ← input · esc input")
       else
-        keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
+        keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.filter} filter · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
       end
     end
   end

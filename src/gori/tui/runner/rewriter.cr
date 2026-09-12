@@ -21,6 +21,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     rewriter_controller.rewriter_delete
   end
 
+  def rewriter_filter : Nil
+    rewriter_controller.rewriter_filter
+  end
+
   def rewriter_move(dir : Int32) : Nil
     rewriter_controller.rewriter_move(dir)
   end

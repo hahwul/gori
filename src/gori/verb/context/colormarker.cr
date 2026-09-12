@@ -10,6 +10,7 @@ abstract class Gori::Verb::ExecContext
   abstract def colormarker_edit : Nil                # edit the selected rule
   abstract def colormarker_toggle : Nil              # enable/disable the selected rule HERE
   abstract def colormarker_delete : Nil              # delete the selected rule (confirms)
+  abstract def colormarker_filter : Nil              # open the policy list's `/` bar (a lens)
   abstract def colormarker_move(dir : Int32) : Nil   # reorder ±1 — which changes WHICH rule wins
   abstract def colormarker_duplicate : Nil           # copy the selected rule
   abstract def colormarker_reload : Nil              # re-read rules from the DB (external edits)

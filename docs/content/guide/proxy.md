@@ -115,9 +115,9 @@ Marks change **what the action menu acts on**, not which actions exist. The effe
 | Tag path | `Space` `T` | One editor, one memo, applied to every marked path (blank clears them all) |
 | Send to Repeater | `r` | One sub-tab per marked endpoint, deduplicated by captured flow (max 20) |
 
-So `/ status:5xx` → mark the paths that matter → `Space` → `T` → `auth` tags the lot, and `tag:auth` brings them back later. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Tag 3 paths`, `Send 3 paths to Repeater`). Discover and the Sequencer stay single-target (they scan one subtree / collect one endpoint's token), and their menu entries say `(cursor)` while marks are set.
+So `/ status:5xx` → `⇧T` marks every path the filter shows (or mark them one at a time with `t`) → `Space` → `m` → `auth` tags the lot, and `tag:auth` brings them back later. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Tag 3 paths`, `Send 3 paths to Repeater`). Discover and the Sequencer stay single-target (they scan one subtree / collect one endpoint's token), and their menu entries say `(cursor)` while marks are set.
 
-Note that **`t` marks and `Space` → `T` tags**: tagging is menu-only here, and `⇧T` is deliberately left unbound, so that `t` / `⇧T` keep meaning mark / mark all in every list tab. A synthetic `{uuid}` / `[1, 2, 3 …]` fold is not a real path, so it can't be marked or tagged: a range sweeps over it, and `t` on one says so. Unlike History there is no "mark all": on a tree that would sweep hosts and folders into the same batch as the endpoints under them.
+Note that **`t` marks, `⇧T` marks all and `Space` → `m` tags**: `t` / `⇧T` mean mark / mark all in every list tab, so tagging is the menu entry here. `⇧T` marks every **captured path** the tree currently shows — the `/` filter and the open folds decide the set — and a host or a folder row is skipped, because the batch would otherwise sweep them in beside the endpoints under them. A synthetic `{uuid}` / `[1, 2, 3 …]` fold is not a real path either, so it can't be marked or tagged: a range sweeps over it, and `t` on one says so.
 
 ## Protocol Support
 

@@ -718,6 +718,34 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  # ⇧T, the `t`/⇧T pair every other marked list carries. It was held back on the argument that
+  # a tree's mark-all "would sweep hosts and folders into the same batch as the endpoints under
+  # them" — so the set is every row carrying a METHOD, which a host and a folder never do.
+  it "marks every captured path `⇧T` can see, and never a host or a folder" do
+    with_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      capture(store, "acme.test", "GET", "/api/orders")
+      capture(store, "acme.test", "GET", "/health")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.mark_all_visible.should eq(3)
+      view.mark_count.should eq(3)
+      view.marked_keys.should eq([{"acme.test", "/api/orders"}, {"acme.test", "/api/users"},
+                                  {"acme.test", "/health"}])
+      # The host row and the `/api` folder are on screen and neither is in the set.
+      view.marked?("acme.test", "").should be_false
+      view.marked?("acme.test", "/api").should be_false
+
+      # Idempotent: a second press adds nothing rather than toggling the set off.
+      view.mark_all_visible.should eq(0)
+      view.mark_count.should eq(3)
+
+      view.clear_marks
+      view.mark_count.should eq(0)
+    end
+  end
+
   it "keeps a marked host from lighting up the id folds under it" do
     # Regression: a fold node keeps `path` empty, exactly like its host row, so a mark keyed on
     # (host, path) alone made `{"acme.test", ""}` mean BOTH — marking the host banded every

@@ -620,6 +620,10 @@ private class FakeContext < ExecContext
     @calls << :sitemap_mark_toggle
   end
 
+  def sitemap_mark_all : Nil
+    @calls << :sitemap_mark_all
+  end
+
   def sitemap_mark_clear : Nil
     @calls << :sitemap_mark_clear
   end
@@ -766,6 +770,10 @@ private class FakeContext < ExecContext
 
   def probe_rule_toggle : Nil
     @calls << :probe_rule_toggle
+  end
+
+  def probe_rule_filter : Nil
+    @calls << :probe_rule_filter
   end
 
   def probe_rule_add : Nil
@@ -1531,6 +1539,10 @@ private class FakeContext < ExecContext
     @calls << :rewriter_toggle
   end
 
+  def rewriter_filter : Nil
+    @calls << :rewriter_filter
+  end
+
   def rewriter_delete : Nil
     @calls << :rewriter_delete
   end
@@ -1573,6 +1585,10 @@ private class FakeContext < ExecContext
 
   def colormarker_toggle : Nil
     @calls << :colormarker_toggle
+  end
+
+  def colormarker_filter : Nil
+    @calls << :colormarker_filter
   end
 
   def colormarker_delete : Nil

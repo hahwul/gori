@@ -68,6 +68,32 @@ describe "one key, one meaning" do
       .should eq("sequence.configure")
   end
 
+  # `/` filters the list in eleven scopes and did not exist in the rule lists at all — the
+  # Probe RULES sub-tab is ~40 built-ins across three sections, where reaching one meant
+  # scrolling past the other two. All three share `RowFilter`, and all three are a LENS: a
+  # hidden rule is still enabled.
+  it "`/` filters the rule lists the way it filters every other list" do
+    {Gori::Verb::Scope::Colormarker => "colormarker.filter",
+     Gori::Verb::Scope::Rewriter    => "rewriter.filter",
+     Gori::Verb::Scope::ProbeRules  => "probe-rules.filter",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("/"), scope).should eq(id), scope.to_s
+      Gori::Verbs.registry[id].menu_key.should eq('f'), id
+    end
+  end
+
+  # `t` / `⇧T` are mark / mark-all in History, Issues and the Intercept queue. The Sitemap had
+  # the first and not the second.
+  it "`⇧T` marks all on the Sitemap, as it does in every other marked list" do
+    {Gori::Verb::Scope::Body      => "history.mark-all",
+     Gori::Verb::Scope::Issues    => "issues.mark-all",
+     Gori::Verb::Scope::Intercept => "intercept.mark-all",
+     Gori::Verb::Scope::Sitemap   => "sitemap.mark-all",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("t", shift: true), scope).should eq(id), scope.to_s
+    end
+  end
+
   it "History's hidden nav verbs are gated to History, not to every Body-scope tab" do
     ctx = FakeExecContext.new
     ctx.current_tab = :help

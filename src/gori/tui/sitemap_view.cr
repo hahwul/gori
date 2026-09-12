@@ -877,6 +877,26 @@ module Gori::Tui
       true
     end
 
+    # ⇧T — the list family's mark-all, on the tree. Marks every ENDPOINT the tree currently
+    # SHOWS: the `/` filter and the open folds decide the set, exactly as History's ⇧T is
+    # "every flow the current filter shows".
+    #
+    # `node.methods.empty?` is what makes this safe, and it is the objection this verb was
+    # held back over: a host row and a folder row carry no method, so neither can be swept
+    # into a batch beside the endpoints under them. A synthetic fold is refused a second
+    # time by `mark_key`. Returns how many marks it ADDED, so the caller can say "nothing
+    # to mark" rather than look like a dropped keystroke.
+    def mark_all_visible : Int32
+      before = @marks.size
+      visible_rows.each do |row|
+        next if row.node.methods.empty? # a host or a folder is not a path to act on
+        next unless key = mark_key(row)
+        @marks.add(key)
+      end
+      reset_mark_anchor
+      @marks.size - before
+    end
+
     def clear_marks : Nil
       @marks.clear
       reset_mark_anchor

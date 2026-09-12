@@ -174,12 +174,12 @@ module Gori::Tui
       return "type a tag · ↵ save · esc cancel" if @sitemap.tagging?
       return "type query · ↹ complete · ↵ apply · esc clear" if @sitemap.querying?
       # Marks survive a filter change, so the `/` affordance stays up while they're set.
-      # `space tag`, not `⇧T`: tagging is menu-only now — ⇧T meant "mark all" in every other
-      # marked list, so a hand that learnt `t`/⇧T there opened a text prompt here.
-      return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.copy} copy · space cmds (tag) · esc clears marks") if @sitemap.mark_count > 0
+      # `space tag`, not `⇧T`: tagging is menu-only — ⇧T is "mark all" here as it is in every
+      # other marked list, so a hand that learnt `t`/⇧T there finds it doing the same thing.
+      return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.copy} copy · space cmds (tag) · esc clears marks") if @sitemap.mark_count > 0
       # `space cmds` on BOTH branches. The mark-set branch above named it and this one did not,
       # so the same tab advertised the space menu only while marks happened to be set.
-      keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · ↵/→ expand · {sitemap.copy} copy · space cmds · esc sub-tabs")
+      keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · ↵/→ expand · {sitemap.copy} copy · space cmds · esc sub-tabs")
     end
 
     # Live IME composition flows to whichever text field is open (the QL filter bar or
@@ -469,6 +469,12 @@ module Gori::Tui
     # marked (nor tagged, nor resolved to an endpoint) — say so rather than eat the key.
     def sitemap_mark_toggle : Nil
       return @host.status("can't mark a fold — expand it and mark a value") unless @sitemap.toggle_mark
+      @host.status(mark_status)
+    end
+
+    def sitemap_mark_all : Nil
+      added = @sitemap.mark_all_visible
+      return @host.status("nothing to mark — this view shows no captured paths") if added == 0 && @sitemap.mark_count == 0
       @host.status(mark_status)
     end
 

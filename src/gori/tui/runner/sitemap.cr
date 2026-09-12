@@ -38,6 +38,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sitemap_controller.sitemap_mark_toggle
   end
 
+  def sitemap_mark_all : Nil
+    sitemap_controller.sitemap_mark_all
+  end
+
   def sitemap_mark_clear : Nil
     sitemap_controller.sitemap_mark_clear
   end

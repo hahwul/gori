@@ -150,8 +150,9 @@ module Gori::Tui
         #
         # `esc sub-tabs`, not `esc tabs`: escape goes to the strip (handle_body_key), and the
         # strip is always shown here, so `focus_pane` never downgrades it to the tab bar.
+        return @rules.filter_hint if @rules.filter_editing?
         edits = rules_custom_selected? ? " · ↵/e edit · {probe-rules.delete} delete" : ""
-        return keys("↑/↓ select · {probe-rules.toggle} on/off · {probe-rules.add} add#{edits} · space cmds · ↑ sub-tabs · esc sub-tabs")
+        return keys("↑/↓ select · {probe-rules.toggle} on/off · {probe-rules.add} add#{edits} · {probe-rules.filter} filter · space cmds · ↑ sub-tabs · esc sub-tabs")
       elsif @probe.detail_open?
         # Two panes now, and they do not offer the same keys, so the hint splits with them.
         # DESCRIPTION has no `↵` (there is no URL under the caret to open — `affected_url`
@@ -306,7 +307,7 @@ module Gori::Tui
     # closed we claim Tab (preview) only. When open, ↑/↓ scroll the detail pane.
     # The findings `/` query bar.
     def body_takes_text? : Bool
-      querying?
+      querying? || list_filter_editing?
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool
@@ -415,9 +416,25 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Bool
+      return @rules.set_filter_preedit(text) if rules_tab?
       return false unless @probe.querying?
       @probe.query_set_preedit(text)
       true
+    end
+
+    # The RULES sub-tab's own `/` bar — the shared `RowFilter`, not the FINDINGS QL bar above.
+    # Three sections and ~40 rules, and the only way to reach one was to scroll past the other
+    # two.
+    def list_filter_editing? : Bool
+      rules_tab? && @rules.filter_editing?
+    end
+
+    def handle_list_filter_key(ev : Termisu::Event::Key) : Bool
+      @rules.handle_filter_key(ev)
+    end
+
+    def rules_filter : Nil
+      @rules.filter_start
     end
 
     def querying? : Bool
