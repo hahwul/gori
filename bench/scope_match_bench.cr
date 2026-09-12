@@ -81,6 +81,34 @@ HOSTS = ["app.example.com", "evil.other.net", "telemetry.example.com", "api.acme
   end
 end
 
+# The HOST-ONLY scope — the ordinary shape of an engagement ("everything under these hosts,
+# minus this one"). It is measured separately because it is the shape with the most to lose
+# to a pointless copy: no rule reads `url_down`, so every byte of `url.downcase` was garbage,
+# and every host rule re-lowered and re-peeled the same host.
+HOST_ONLY = [
+  rule(1, "include", "host", "*.example.com"),
+  rule(2, "include", "host", "api.acme.io"),
+  rule(3, "exclude", "host", "telemetry.example.com"),
+]
+
+puts "\n== host-only scope (#{HOST_ONLY.size} rules, no string/regex rule) =="
+host_only = Scope.new(store, HOST_ONLY, enabled: true, sandbox: true)
+
+Benchmark.ips do |x|
+  x.report("in_scope_url? (per request)") do
+    URLS.each { |(u, h)| host_only.in_scope_url?(u, h) }
+  end
+  x.report("sandbox_blocks? (per request)") do
+    URLS.each { |(u, h)| host_only.sandbox_blocks?(u, h) }
+  end
+  x.report("may_match_host? (per CONNECT)") do
+    HOSTS.each { |h| host_only.may_match_host?(h) }
+  end
+  x.report("sandbox_blocks_host? (CONNECT)") do
+    HOSTS.each { |h| host_only.sandbox_blocks_host?(h) }
+  end
+end
+
 store.close
 File.delete(db_path) rescue nil
 puts "\ndone"

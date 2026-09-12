@@ -191,9 +191,16 @@ module Gori
         acc = ""
         node = host_node
         segments.each do |seg|
-          acc = "#{acc}/#{seg}"
           node = node.child(seg)
-          node.path = acc # idempotent on revisits; the durable tag key
+          # A node already carrying a path was stamped by an earlier target that walked this
+          # same prefix, and `path` IS `"#{acc}/#{seg}"` — the stamp above built it from the
+          # identical parent chain — so reuse the string instead of rebuilding it. The stamp
+          # was idempotent, but the concatenation feeding it was not free: every endpoint
+          # re-minted the WHOLE prefix chain, which is the O(depth²) bytes the comment above
+          # describes paid once per endpoint rather than once per node. A crawl's targets
+          # share their prefixes almost entirely, so that was nearly all of it.
+          acc = node.path.empty? ? "#{acc}/#{seg}" : node.path
+          node.path = acc
         end
         # Sticky: another target may reach this same node without being truncated itself,
         # and the node's path is a prefix either way once one of them was cut.

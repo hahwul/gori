@@ -77,6 +77,39 @@ describe Gori::HostPattern do
     end
   end
 
+  describe ".down / .normalize" do
+    # `down` is the hot-path stand-in for `String#downcase` and answers identically or the
+    # gate it feeds changes verdict. Pinned against `downcase` itself rather than a literal.
+    it "answers exactly what String#downcase does, ASCII or not" do
+      ["acme.test", "ACME.test", "aCmE.TEST", "[::1]", "xn--bcher-kva.test",
+       "äcme.test", "ÄCME.test", "acme.test.", "", "1.2.3.4"].each do |h|
+        Gori::HostPattern.down(h).should eq(h.downcase)
+      end
+    end
+
+    it "returns the SAME object when lowering would change nothing (no copy)" do
+      h = "api.acme.test"
+      Gori::HostPattern.down(h).should be(h)
+    end
+
+    it "normalize is bare(down(host)) — the form matches_bare? compares against" do
+      ["ACME.test.", "[::1]", "[FE80::1].", "Api.Acme.Test"].each do |h|
+        Gori::HostPattern.normalize(h).should eq(Gori::HostPattern.bare(h.downcase))
+      end
+    end
+
+    it "matches? and matches_bare?(normalize(host)) agree for every pattern shape" do
+      pats = ["acme.test", "*.acme.test", "::1", "[::1]", "ACME.test", "[a-"]
+      hosts = ["acme.test", "API.Acme.Test", "acme.test.", "::1", "[::1]", "evil.test", "xacme.test"]
+      pats.each do |p|
+        c = Gori::HostPattern::Compiled.new(p)
+        hosts.each do |h|
+          c.matches_bare?(Gori::HostPattern.normalize(h)).should eq(c.matches?(h))
+        end
+      end
+    end
+  end
+
   describe ".compile / .matches_any? / .match" do
     it "drops blank patterns and names the FIRST pattern that fired" do
       compiled = Gori::HostPattern.compile(["  ", "acme.test", "*.evil.test"])

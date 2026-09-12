@@ -45,3 +45,23 @@ end
     x.report("build + fold_templates!") { Gori::Sitemap.build(udata).each { |h| Gori::Sitemap.fold_templates!(h) } }
   end
 end
+
+# The DEEP case: endpoints sharing a long prefix, which is what a real API tree looks like
+# once a version, a tenant and a nested resource are in the path. `add` stamps every node's
+# FULL path from the root, so the prefix chain is rebuilt once per SEGMENT of every endpoint
+# — the O(depth²) the `add` comment measures, paid per endpoint rather than per node. Numeric
+# ids so `group_sequences!` has something to fold at this depth too.
+def deep_entries(n : Int32, depth : Int32) : Array({String, String, String})
+  prefix = String.build { |io| depth.times { |d| io << "/level" << d } }
+  rows = [] of {String, String, String}
+  n.times { |i| rows << {"api.example.com", "GET", "#{prefix}/#{i}/detail"} }
+  rows
+end
+
+{8, 24}.each do |depth|
+  data = deep_entries(2000, depth)
+  puts "\n2000 endpoints sharing a #{depth}-segment prefix (#{depth + 2} segments each):"
+  Benchmark.ips do |x|
+    x.report("Sitemap.build") { Gori::Sitemap.build(data) }
+  end
+end
