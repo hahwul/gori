@@ -280,7 +280,7 @@ describe Gori::Tui::DecoderController do
       with_decoder_host do |host|
         dc = DecoderController.new(host)
         dc.input_area.set_text("one\ntwo")
-        dc.handle_body_key(key(Termisu::Input::Key::LowerI, char: 'i')) # INS
+        dc.editor_enter_insert.should be_true # `i` is editor.insert; the shell calls this seam
         dc.handle_body_key(shift(Termisu::Input::Key::Down))
         dc.input_area.selection?.should be_true
         dc.goto_symbol.should eq :decoder_input # ⇧↓ on the last line stayed put

@@ -128,13 +128,16 @@ module Gori
       # description pane stopped borrowing the History list's scope. The read-mode flag itself
       # is tab-blind (ProjectView's pane defaults to :desc, so it reads true from boot), so the
       # gate carries the current_tab half the way in_notes_read / in_repeater_read do.
-      # No chord on select-line: ProjectController raw-dispatches 'x' in the desc pane and
-      # handle_body_key returns true there, so the Keymap never sees it (same reasoning as
-      # project.copy's dropped 'y') — a chord would only ever be dead weight in the rebind editor.
+      #
+      # `x` is a real chord again. It was dropped because `ProjectController` raw-dispatched
+      # the letter in the desc pane and `handle_body_key` returned true there, so the Keymap
+      # never saw it — the verb was listed in the rebind editor and a rebind moved nothing.
+      # That arm is gone (KEY_AUDIT §2e), and so is the same-shaped one behind `project.copy`'s
+      # `y` in verbs/core.cr.
       in_project_desc = ->(ctx : Verb::ExecContext) { ctx.current_tab == :project && ctx.project_desc_read_mode? }
       r.register Verb::Definition.new(
         "project.select-line", "Select line", "Select the entire current line",
-        Verb::Scope::ProjectDesc,
+        Verb::Scope::ProjectDesc, [Verb::Chord.new("x")],
         available: in_project_desc, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "project.clear-selection", "Clear selection", "Clear the text selection",

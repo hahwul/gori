@@ -127,15 +127,13 @@ describe "Gori::Verbs.register_core" do
 
   describe "project description copy" do
     # BARE 'y' stays chordless: ProjectController raw-dispatches it in the description pane and
-    # handle_body_key returns true there, so the shared Keymap is never consulted — a bare chord
-    # could only ever be dead weight in the rebind editor. The mnemonic mirrors that real key.
-    #
-    # `^Y` IS registered, because that raw dispatch only covers READ. In INS a bare `y` is a
-    # literal character (and typing it over a ⇧arrow selection REPLACES it), so the ctrl form is
-    # the only way to copy without leaving the mode.
-    it "carries the 'y' menu key with only the ctrl chord, in its own scope, gated on tab AND pane" do
+    # handle_body_key no longer raw-dispatches `y` there (that arm went with the editor-verb
+    # migration — KEY_AUDIT §2e), so the description pane carries the SAME pair every other
+    # Copy verb does: bare `y` for READ, and `^Y` for INS, where a bare `y` is a literal
+    # character that would REPLACE the ⇧arrow selection being copied.
+    it "carries the 'y' menu key on the READ + pinned INS pair, in its own scope, gated on tab AND pane" do
       verb = r["project.copy"]
-      verb.chords.should eq([typed_chord("y", ctrl: true)])
+      verb.chords.should eq([typed_chord("y"), typed_chord("y", ctrl: true)])
       verb.menu_key.should eq('y')
       verb.scope.should eq(Gori::Verb::Scope::ProjectDesc) # NOT Body — see the History list
       ctx = FakeExecContext.new

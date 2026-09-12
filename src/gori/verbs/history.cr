@@ -1,6 +1,7 @@
 require "../verb"
 require "./links"
 require "./read_edit"
+require "./editor"
 require "./evidence"
 
 module Gori
@@ -221,6 +222,9 @@ module Gori
         "repeater.send", "Send repeater", "Resend the request byte-exact and diff the response",
         Verb::Scope::Repeater, [Verb::Chord.new("r", ctrl: true)],
         available: in_repeater, mnemonic: 'r') { |ctx| ctx.repeater_send; nil }
+      # `↵` on the RESPONSE sends too. That arm moved to `register_editor` (verbs/editor.cr)
+      # as `repeater.send-enter` — it is a Scope::Repeater verb, but it exists BECAUSE of the
+      # Editor/tab scope split and reads with the rest of that story.
 
       # The single smart Copy: selection if one is active, else the whole focused
       # pane (ctx.read_copy — routes per-tab, added in Round 1). copy-all is gone.
@@ -991,6 +995,7 @@ module Gori
       register_env(r)
       register_activity(r)
       register_read_edit(r)
+      register_editor(r)
       r.validate_menu_keys! # fail fast if any scope has a colliding space-menu key
       r.validate_chords!    # …and on a same-scope chord collision or dead capital, on every OS profile
       r

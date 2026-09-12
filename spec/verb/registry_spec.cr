@@ -1783,6 +1783,42 @@ private class FakeContext < ExecContext
     editor_focused
   end
 
+  # --- Verb::Scope::Editor (verbs/editor.cr) ---
+  property? editor_pane : Bool = false
+  property? editor_read_mode : Bool = false
+
+  def editor_enter_insert : Nil
+    @calls << :editor_enter_insert
+  end
+
+  def editor_append_insert : Nil
+    @calls << :editor_append_insert
+  end
+
+  def editor_exit_insert : Nil
+    @calls << :editor_exit_insert
+  end
+
+  def editor_undo : Nil
+    @calls << :editor_undo
+  end
+
+  def editor_to_top : Nil
+    @calls << :editor_to_top
+  end
+
+  def editor_to_bottom : Nil
+    @calls << :editor_to_bottom
+  end
+
+  def editor_goto_line : Nil
+    @calls << :editor_goto_line
+  end
+
+  def editor_find : Nil
+    @calls << :editor_find
+  end
+
   def copy_as_open : Nil
     @calls << :copy_as_open
   end

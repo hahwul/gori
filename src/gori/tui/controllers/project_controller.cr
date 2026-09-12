@@ -73,9 +73,9 @@ module Gori::Tui
         settings_hint
       else
         if @project_view.desc_insert_mode?
-          keys("type to edit · ⇧arrows select · {project.copy} copy · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR")
+          keys("type to edit · ⇧arrows select · ^Y copy · esc read · ↑/↓/↔ move · {editor.goto-line} goto · {editor.find} find · ^E $EDITOR")
         else
-          "i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ^G goto · ^F find · esc sub-tabs"
+          keys("{editor.insert}/↵ edit · ⇧arrows select · {project.copy} copy · space cmds · ↑/↓ move · {editor.goto-line} goto · {editor.find} find · esc sub-tabs")
         end
       end
     end
@@ -597,7 +597,7 @@ module Gori::Tui
       elsif @project_view.desc_insert_mode?
         edit_desc_insert(ev, key, c)
       else
-        handle_desc_read(ev, key, c)
+        return handle_desc_read(ev, key, c)
       end
       true
     end
@@ -606,12 +606,15 @@ module Gori::Tui
     # caret and `follow_x`, so moving the caret sideways scrolls the view anyway — the
     # dedicated h-scroll chord was shadowing the selection every other text pane gives
     # ⇧arrows (and the `key.left? && selecting` branches below it were already dead code).
-    private def handle_desc_read(ev : Termisu::Event::Key, key, c : Char?) : Nil
-      return @host.open_space_menu if key.space? && !ev.ctrl? && !ev.alt?
+    # Returns false when the key should fall through to the keymap. `↵`/`i` (INSERT), `x`
+    # (select line) and `y` (copy) used to be arms here; they are now `editor.insert` /
+    # `editor.insert-enter` in `Scope::Editor` and `project.select-line` / `project.copy` in
+    # `Scope::ProjectDesc`, whose chords this handler was what made dead (KEY_AUDIT §2e).
+    private def handle_desc_read(ev : Termisu::Event::Key, key, c : Char?) : Bool
+      return true.tap { @host.open_space_menu } if key.space? && !ev.ctrl? && !ev.alt?
       selecting = ev.shift?
       case
-      when key.enter?, c == 'i'
-        @project_view.enter_desc_insert!
+      when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
         # ⇧↑ stays in the pane: leaving mid-extend abandons a selection being built.
         (@project_view.at_top? && !selecting) ? leave_to_strip : @project_view.desc_read_move(-1, 0, selecting: selecting)
@@ -619,9 +622,50 @@ module Gori::Tui
       when key.left?                              then @project_view.desc_read_move(0, -1, selecting: selecting)
       when key.right?                             then @project_view.desc_read_move(0, 1, selecting: selecting)
       when @project_view.desc_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
-      when c == 'x'                               then @project_view.desc_select_line
-      when c == 'y'                               then project_desc_copy
+      else
+        return false # i INSERT, x select-line, y copy, Global breath keys …
       end
+      true
+    end
+
+    # --- Verb::Scope::Editor — the DESCRIPTION pane ---
+    def editor_pane? : Bool
+      @project_view.pane == :desc
+    end
+
+    def editor_enter_insert : Bool
+      return false unless editor_pane?
+      @project_view.enter_desc_insert!
+      true
+    end
+
+    def editor_append_insert : Bool
+      return false unless editor_pane?
+      @project_view.desc_read_move(0, 1)
+      editor_enter_insert
+    end
+
+    def editor_exit_insert : Bool
+      return false unless editor_pane?
+      save
+      @project_view.exit_desc_insert!
+      true
+    end
+
+    def editor_undo : Bool
+      editor_pane? && @project_view.desc_read_undo
+    end
+
+    def editor_to_top : Bool
+      return false unless editor_pane?
+      @project_view.desc_read_to_edge(-1)
+      true
+    end
+
+    def editor_to_bottom : Bool
+      return false unless editor_pane?
+      @project_view.desc_read_to_edge(1)
+      true
     end
 
     private def edit_desc_insert(ev : Termisu::Event::Key, key, c : Char?) : Nil
@@ -675,15 +719,6 @@ module Gori::Tui
       end
       written = Clipboard.copy(text)
       @host.status("copied description to clipboard (#{written}b)#{Clipboard.note(written, text)}")
-    end
-
-    # Bare `y` in the description: the selection when one is held, else the WHOLE description.
-    # `^Y` (project.copy -> Runner#read_copy) has always answered that way; `y` is raw-dispatched
-    # here (see verbs/core.cr for why it has no chord) and fell back to the caret's LINE, so one
-    # pane's two copy keys disagreed about what "copy with nothing selected" means. This routes
-    # both through the same choice — the rule stated once per pane, as every sibling tab does it.
-    def project_desc_copy : Nil
-      project_desc_selection_active? ? project_copy : project_copy_all
     end
 
     # --- SCOPE pane: browse the rule list; a/e open the Miner-style popup overlay ---

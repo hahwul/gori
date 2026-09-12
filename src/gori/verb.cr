@@ -50,6 +50,15 @@ module Gori
       Env             # the Project tab's ENVIRONMENT var list has focus
       ProjectActivity # the Project tab's ACTIVITY pane has focus (the #124 event feed)
       PaletteOpen     # the command palette overlay is up
+      # The FOCUS dimension the other scopes don't have. Every scope above names a TAB (or an
+      # overlay); `Keymap#lookup` is keyed by one of them alone, so a tab whose panes want the
+      # same letter for two things could not say so and hand-rolled the second meaning in
+      # `handle_body_key` — the root cause KEY_AUDIT §2d names. Editor is consulted AHEAD of the
+      # tab's own scope whenever the focused pane is a text editor (Runner#scope_chain), which
+      # is exactly the pane set those hand-rolled arms were disambiguating. It is ADDITIVE: the
+      # tab scope is still consulted behind it, so a Repeater chord still fires in the Repeater's
+      # request editor, and Global still backs both.
+      Editor # the focused body pane is a text editor (READ or INS)
     end
 
     # The KIND of action, orthogonal to Scope (where it fires). Drives the

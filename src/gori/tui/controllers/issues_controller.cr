@@ -311,7 +311,7 @@ module Gori::Tui
         if @issues.notes_insert_mode?
           "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
         elsif @issues.notes_focused?
-          keys("↑/↓ move · ⇧arrows select · {issue.copy} copy · i/↵ edit · #{step}space cmds · ↹/←/esc related")
+          keys("↑/↓ move · ⇧arrows select · {issue.copy} copy · {editor.insert}/↵ edit · #{step}space cmds · ↹/←/esc related")
         else
           # `↹/↓ notes` and nothing else for the way down: `i` no longer enters the editor
           # from here (it prints `insert_key_refusal` instead, like the five workbench tabs
@@ -681,13 +681,16 @@ module Gori::Tui
       "RELATED is read-only — i edits the NOTES pane (↹/↓ down); intercept toggles from the tab bar"
     end
 
+    # `↵`/`i` (INSERT), `x` (select line) and `y` (copy) used to be arms here. They are now
+    # `editor.insert` / `editor.insert-enter` in `Scope::Editor` and `issue.select-line` /
+    # `issue.copy` in `Scope::IssuesDetail` — chords those two verbs have carried since they
+    # were written, and which this handler was what made dead (KEY_AUDIT §2d/§2e).
     private def handle_notes_read_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
       selecting = ev.shift?
       case
       when key.escape?
         @issues.focus_links!
-      when key.enter?, c == 'i'
-        @issues.enter_notes_insert!
+      when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)                       then notes_read_up(ev, selecting)
       when nav_down?(ev)                     then @issues.notes_read_move(1, 0, selecting: selecting)
       when key.left?                         then notes_read_left(ev, selecting)
@@ -704,8 +707,51 @@ module Gori::Tui
       # pinned `^Y`, and taking the same action is what that chord is for in this pane.
       when c == 'y' then issues_notes_copy
       else
-        return false
+        return false # i INSERT, x select-line, y copy, Global breath keys …
       end
+      true
+    end
+
+    # --- Verb::Scope::Editor — the NOTES pane of an open issue ---
+    # Notes-focused only. `i` from the RELATED pane used to enter notes INSERT from here,
+    # silently shadowing the Global intercept toggle with no message (KEY_AUDIT §2e, the
+    # one `i` claim of the nine that printed no refusal). `insert_key_refusal` below says so
+    # instead and points at `issue.edit-notes`, the registered verb that already does it.
+    def editor_pane? : Bool
+      @issues.detail_open? && @issues.notes_focused?
+    end
+
+    def editor_enter_insert : Bool
+      return false unless editor_pane?
+      @issues.enter_notes_insert!
+      true
+    end
+
+    def editor_append_insert : Bool
+      return false unless editor_pane?
+      @issues.notes_read_move(0, 1)
+      editor_enter_insert
+    end
+
+    def editor_exit_insert : Bool
+      return false unless @issues.detail_open? && @issues.notes_insert_mode?
+      @issues.exit_notes_insert!
+      true
+    end
+
+    def editor_undo : Bool
+      editor_pane? && @issues.notes_read_undo
+    end
+
+    def editor_to_top : Bool
+      return false unless editor_pane?
+      @issues.notes_read_to_edge(-1)
+      true
+    end
+
+    def editor_to_bottom : Bool
+      return false unless editor_pane?
+      @issues.notes_read_to_edge(1)
       true
     end
 

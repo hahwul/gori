@@ -2378,6 +2378,21 @@ module Gori::Tui
       @template_read.move(@editor, dr, dc, selecting: selecting)
     end
 
+    # READ-mode top / bottom of the template (`editor.top` / `editor.bottom`).
+    def template_read_to_edge(dir : Int32) : Nil
+      return if template_insert? || chain_pane_active?
+      @template_read.to_edge(@editor, dir)
+    end
+
+    # READ-mode undo (`editor.undo`). `template_undo` is the INS ladder's ^Z; this one hands
+    # the caret it restored back to the read cursor, which is what READ paints from.
+    def template_read_undo : Bool
+      return false if template_insert? || chain_pane_active?
+      template_undo
+      @template_read.sync_from(@editor)
+      true
+    end
+
     # PageUp / PageDown with the pane in READ mode — a screenful of the editor that draws it.
     def template_read_page(dir : Int32, selecting : Bool = false) : Nil
       template_read_move(dir * @editor.page_rows, 0, selecting: selecting)

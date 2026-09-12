@@ -436,7 +436,7 @@ module Gori::Tui
       key = ev.key
       selecting = ev.shift?
       case
-      when key.enter?, c == 'i' then s.input_mode = InputMode::Insert
+      when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
         s.input.at_top? ? cross_pane(s, -1) : s.input_read.move(s.input, -1, 0, selecting: selecting)
       when nav_down?(ev)
@@ -446,7 +446,7 @@ module Gori::Tui
       when key.home?  then s.input_home(selecting)
       when key.end?   then s.input_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # x/y/c + Global breath → keymap (crack is `c` in read mode)
+        return false # i INSERT, x/y/c + Global breath → keymap (crack is `c` in read mode)
       end
       true
     end
@@ -600,9 +600,62 @@ module Gori::Tui
       true
     end
 
+    # --- Verb::Scope::Editor — the INPUT pane only ---
+    # It is the one pane here with a READ mode to hold commands: the DECODED / OUTPUT panes are read-only and the PAYLOAD / OPTS / SECRET editors are always-typing
+    # (their `body_badge` is `:editor` from the moment they are focused, so a bare letter is
+    # always a character there and never a key the Editor scope could claim).
+    def editor_pane? : Bool
+      cur.pane == :input
+    end
+
+    def editor_enter_insert : Bool
+      return false unless editor_pane?
+      cur.input_mode = InputMode::Insert
+      true
+    end
+
+    def editor_append_insert : Bool
+      return false unless editor_pane?
+      s = cur
+      s.input_read.move(s.input, 0, 1)
+      editor_enter_insert
+    end
+
+    def editor_exit_insert : Bool
+      return false unless editor_pane?
+      cur.input_mode = InputMode::Read
+      true
+    end
+
+    # READ-mode undo: the read cursor has to adopt the caret `undo` restored (READ paints
+    # from `input_read`), and the decode has to re-run over the buffer that came back.
+    def editor_undo : Bool
+      return false unless editor_read_mode?
+      s = cur
+      s.input.undo
+      s.input_read.sync_from(s.input)
+      recompute_decode(s)
+      true
+    end
+
+    def editor_to_top : Bool
+      editor_input_edge(-1)
+    end
+
+    def editor_to_bottom : Bool
+      editor_input_edge(1)
+    end
+
+    private def editor_input_edge(dir : Int32) : Bool
+      return false unless editor_read_mode?
+      s = cur
+      s.input_read.to_edge(s.input, dir)
+      true
+    end
+
     def insert_key_refusal : String?
       return nil unless {:decoded, :output}.includes?(cur.pane)
-      "this pane is read-only — i edits the INPUT (↹ up); intercept toggles from the tab bar"
+      keys("this pane is read-only — {editor.insert} edits the INPUT (↹ up); intercept toggles from the tab bar")
     end
 
     def focus_first : Nil
@@ -1018,7 +1071,7 @@ module Gori::Tui
         if s.input_mode == InputMode::Insert
           keys("type a cookie · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} forge · {cookie.cycle-format} format · {cookie.clear} clear · ↑ sub-tabs")
         else
-          keys("i/↵ edit · {cookie.crack} crack · #{y} copy · space cmds · ↓ decoded · #{lens} forge · {cookie.cycle-format} format · ^N new · esc sub-tabs")
+          keys("{editor.insert}/↵ edit · {cookie.crack} crack · #{y} copy · space cmds · ↓ decoded · #{lens} forge · {cookie.cycle-format} format · ^N new · esc sub-tabs")
         end
       when :decoded
         keys("↑/↓ scroll · {cookie.crack} crack · #{y} copy · space cmds · ↑-top input · ↓ options · #{lens} forge · esc sub-tabs")

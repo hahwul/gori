@@ -1329,6 +1329,59 @@ module Gori::Tui
     def focus_resume : Nil
     end
 
+    # --- the EDITOR pane seam (Verb::Scope::Editor) ------------------------------
+    # Is the focused body pane a TEXT EDITOR — a pane a caret can enter INSERT in? The
+    # question `Keymap#lookup` could not ask, and the reason eleven panes hand-rolled `i` /
+    # `↵` / `x` in `handle_body_key` instead of binding them (KEY_AUDIT §1.4, §2d). The
+    # Runner asks it once per keystroke and, when it is true, consults `Scope::Editor` AHEAD
+    # of this tab's own scope (`Runner#scope_chain`).
+    #
+    # Deliberately WIDER than `body_badge == :editor`, which is the INS-only question
+    # ("are the keys under my fingers landing as text"). A Repeater request pane in READ is
+    # an editor pane with a `:body` badge, and READ is exactly where the bare-letter editor
+    # verbs live. Default false: a tab with no text pane never puts Editor in the chain.
+    def editor_pane? : Bool
+      false
+    end
+
+    # The READ half of the above. Derived rather than overridden — `body_badge` already
+    # answers "is this pane taking text", so a controller that answers `editor_pane?` gets
+    # this for free and the two can never disagree about what INS is.
+    def editor_read_mode? : Bool
+      editor_pane? && body_badge != :editor
+    end
+
+    # The five editor actions the shell routes to whichever pane holds focus, mirroring the
+    # READ-mode set (`read_select_line` / `read_copy` / …) the Runner already dispatches this
+    # way. Each returns whether the focused pane handled it, so a verb fired in a pane that
+    # cannot (an editor with no undo stack, say) reports rather than silently doing nothing.
+    def editor_enter_insert : Bool
+      false
+    end
+
+    # Append = one column right, then INSERT. Both halves are motions the editors already
+    # have; there is no new editing operation here (and deliberately no `o`/open-line, which
+    # WOULD be one). Defaults to plain insert for a pane that has no caret to step.
+    def editor_append_insert : Bool
+      editor_enter_insert
+    end
+
+    def editor_exit_insert : Bool
+      false
+    end
+
+    def editor_undo : Bool
+      false
+    end
+
+    def editor_to_top : Bool
+      false
+    end
+
+    def editor_to_bottom : Bool
+      false
+    end
+
     # --- the BODY's own `/` filter bar (the rule lists) ---------------------------------
     # Distinct from `subtab_filter_editing?` above, which is the STRIP's bar. Five rule lists
     # grew one in the key-audit round — Colormarker, Rewriter, Probe RULES, Host overrides and

@@ -111,14 +111,15 @@ module Gori::Tui
       true
     end
 
-    # READ: structure local; x/y and Global breath defer to the keymap.
+    # READ: structure local; every command letter defers to the keymap. `i`/`↵` (INSERT) used
+    # to be arms here and are now `editor.insert` / `editor.insert-enter` in `Scope::Editor`;
+    # `x`/`y` were already `notes.select-line` / `notes.copy`.
     private def handle_read(ev : Termisu::Event::Key, c : Char?) : Bool
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       selecting = ev.shift?
       case
-      when key.enter? then @notes.enter_insert!
-      when c == 'i'   then @notes.enter_insert!
+      when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
         if @notes.at_top?
           save_notes
@@ -133,6 +134,41 @@ module Gori::Tui
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false
       end
+      true
+    end
+
+    # --- Verb::Scope::Editor — the whole Notes body is one text editor ---
+    def editor_pane? : Bool
+      true
+    end
+
+    def editor_enter_insert : Bool
+      @notes.enter_insert!
+      true
+    end
+
+    def editor_append_insert : Bool
+      @notes.read_move(0, 1)
+      editor_enter_insert
+    end
+
+    def editor_exit_insert : Bool
+      @notes.exit_insert!
+      true
+    end
+
+    def editor_undo : Bool
+      @notes.undo
+      true
+    end
+
+    def editor_to_top : Bool
+      @notes.read_to_edge(-1)
+      true
+    end
+
+    def editor_to_bottom : Bool
+      @notes.read_to_edge(1)
       true
     end
 
@@ -318,10 +354,10 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @notes.insert_mode?
-        "type to edit · ⇧arrows select · ^Y copy · esc read · ^N new · ^W close · ^G goto · ^F find · ^1-9 · ↑ sub-tabs"
+        keys("type to edit · ⇧arrows select · ^Y copy · esc read · ^N new · ^W close · {editor.goto-line} goto · {editor.find} find · ^1-9 · ↑ sub-tabs")
       else
         y = Hotkeys.binding_label(@host.session.registry, "notes.copy", "y")
-        "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ^N new · ^W close · ^G goto · ^F find · esc sub-tabs"
+        keys("{editor.insert}/↵ edit · ⇧arrows select · #{y} copy · space cmds · ^N new · ^W close · {editor.goto-line} goto · {editor.find} find · esc sub-tabs")
       end
     end
 

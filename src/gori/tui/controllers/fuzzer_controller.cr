@@ -203,7 +203,7 @@ module Gori::Tui
         elsif v.target_insert?
           "type URL · #{sni} SNI · ↵/↓ template · #{run} run · ↹ pane · esc read"
         else
-          "i/↵ edit · #{read_common} · #{sni} SNI · #{run} run · ↹ pane · esc tabs"
+          keys("{editor.insert}/↵ edit · #{read_common} · #{sni} SNI · #{run} run · ↹ pane · esc tabs")
         end
       when :template
         if v.template_insert?
@@ -217,7 +217,7 @@ module Gori::Tui
           # REPLACES it, which is the whole reason `fuzzer.copy` carries a ctrl chord.
           "type · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^O config · #{run} run · esc read · ↹ text"
         else
-          "i/↵ edit · #{read_common} · #{marks} · ^F find · ^O config · #{run} run · ↹ pane · esc tabs"
+          keys("{editor.insert}/↵ edit · #{read_common} · #{marks} · {editor.undo} undo · {editor.find} find · ^O config · #{run} run · ↹ pane · esc tabs")
         end
       when :config then config_hint(v, run)
       when :results
@@ -529,8 +529,7 @@ module Gori::Tui
       c = ev.char || key.to_char
       selecting = ev.shift?
       case
-      when key.enter? then v.enter_target_insert!
-      when c == 'i'   then v.enter_target_insert!
+      when key.enter? then return false # editor.insert-enter
       when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
       when key.down?  then v.pane_advance(1)
       when key.left?  then v.target_read_move(-1, selecting: selecting)
@@ -538,7 +537,7 @@ module Gori::Tui
       when key.home?  then v.target_home(selecting)
       when key.end?   then v.target_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # x select-line, y copy, Global breath → keymap
+        return false # i INSERT, x select-line, y copy, Global breath → keymap
       end
       true
     end
@@ -654,8 +653,7 @@ module Gori::Tui
       c = ev.char || key.to_char
       selecting = ev.shift?
       case
-      when key.enter?     then v.enter_template_insert!
-      when c == 'i'       then v.enter_template_insert!
+      when key.enter? then return false # editor.insert-enter
       when key.up?        then template_up(v, selecting)
       when key.down?      then v.template_read_move(1, 0, selecting: selecting)
       when key.left?      then v.template_read_move(0, -1, selecting: selecting)
@@ -665,7 +663,7 @@ module Gori::Tui
       when key.home?      then v.template_home(selecting)
       when key.end?       then v.template_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # x/y + Global breath → keymap
+        return false # i INSERT, x/y + Global breath → keymap
       end
       true
     end
@@ -992,7 +990,63 @@ module Gori::Tui
 
     def insert_key_refusal : String?
       return nil unless (v = current_view) && (v.focus == :results || v.focus == :detail)
-      "results are read-only — i edits the TEMPLATE (↹ up); intercept toggles from the tab bar"
+      keys("results are read-only — {editor.insert} edits the TEMPLATE (↹ up); intercept toggles from the tab bar")
+    end
+
+    # --- Verb::Scope::Editor — the TEMPLATE and TARGET panes ---
+    def editor_pane? : Bool
+      return false unless v = current_view
+      v.focus == :template || v.focus == :target
+    end
+
+    def editor_enter_insert : Bool
+      return false unless v = current_view
+      case v.focus
+      when :template then v.enter_template_insert!
+      when :target   then v.enter_target_insert!
+      else                return false
+      end
+      true
+    end
+
+    def editor_append_insert : Bool
+      return false unless v = current_view
+      case v.focus
+      when :template then v.template_read_move(0, 1)
+      when :target   then v.target_read_move(1)
+      else                return false
+      end
+      editor_enter_insert
+    end
+
+    def editor_exit_insert : Bool
+      return false unless v = current_view
+      case v.focus
+      when :template then v.exit_template_insert!
+      when :target   then v.exit_target_insert!
+      else                return false
+      end
+      true
+    end
+
+    # Template only: the target is a one-line field with no undo stack.
+    def editor_undo : Bool
+      return false unless (v = current_view) && v.focus == :template
+      v.template_read_undo
+    end
+
+    def editor_to_top : Bool
+      editor_template_edge(-1)
+    end
+
+    def editor_to_bottom : Bool
+      editor_template_edge(1)
+    end
+
+    private def editor_template_edge(dir : Int32) : Bool
+      return false unless (v = current_view) && v.focus == :template
+      v.template_read_to_edge(dir)
+      true
     end
 
     # --- sub-tab nav (filter-aware: ←/→ skip hidden chips; ^1-9 escapes the filter) ---

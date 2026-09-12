@@ -1670,24 +1670,30 @@ module Gori::Tui
       @focus == :body && (@tabs[@active_tab]?.try(&.body_takes_text?) || false)
     end
 
-    # Keymap id for `chord` in `scope` (then Global) whose verb is currently available.
-    # A scoped hit that fails available? does not block the Global fallback — so e.g.
-    # Repeater's READ-only `y` does not shadow a future Global on the same letter when
-    # the user is in INS, and gated response tools never swallow breath keys.
+    # Keymap id for `chord` down the SCOPE CHAIN — Editor (only while a text editor pane
+    # holds focus), then `scope`, then Global — taking the first link whose verb is currently
+    # available. A hit that fails available? does not block the links behind it, so e.g.
+    # Repeater's READ-only `y` does not shadow a future Global on the same letter when the
+    # user is in INS, and gated response tools never swallow breath keys.
+    #
+    # `Scope::Editor` at the head is the FOCUS DIMENSION the keymap did not have (KEY_AUDIT
+    # §2d): eleven editor panes hand-rolled `i`/`↵`/`x` in `handle_body_key` because one
+    # `Scope` per tab could not say "here, in this pane". Putting it AHEAD of the tab scope
+    # rather than instead of it is what keeps the tab's own vocabulary alive in its editor —
+    # `{repeater.send-and-…}`, the Notes sub-tab keys, the Global breath keys all still
+    # resolve behind it.
     private def resolve_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
-      if id = @keymap.lookup(chord, scope)
-        verb = @session.registry[id]
-        return id if verb.available?(self)
-        # lookup already fell back to Global when the scope had no binding; when the
-        # scope HAD a binding that is gated off, try Global explicitly.
-        if verb.scope != Verb::Scope::Global && scope != Verb::Scope::Global
-          if gid = @keymap.lookup(chord, Verb::Scope::Global)
-            return gid if @session.registry[gid].available?(self)
-          end
-        end
-        return nil
+      if editor_pane? && (id = available_verb_id(chord, Verb::Scope::Editor))
+        return id
       end
-      nil
+      available_verb_id(chord, scope) || available_verb_id(chord, Verb::Scope::Global)
+    end
+
+    # One link of that chain: the id bound in EXACTLY `scope`, or nil when nothing is bound
+    # there OR what is bound is gated off right now.
+    private def available_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
+      return nil unless id = @keymap.lookup_in(chord, scope)
+      @session.registry[id].available?(self) ? id : nil
     end
 
     # --- Overlay seam (see overlay.cr) — generic dispatch for the ONE @active_overlay,
@@ -5597,6 +5603,63 @@ module Gori::Tui
         # selection-vs-whole-pane choice itself (it also words its own toast).
         detail_copy if @overlay.detail?
       end
+    end
+
+    # --- the EDITOR pane seam (Verb::Scope::Editor) ------------------------------
+    # Everything below routes to WHICHEVER controller currently holds an editor pane, the way
+    # read_select_line / read_copy already route the READ-mode half. The shell does not know
+    # which tab that is and does not need to — `TabController#editor_pane?` answers, and the
+    # defaults in tab_controller.cr make every non-editing tab a no-op.
+
+    # Is a text editor pane focused right now? Also the gate that puts `Scope::Editor` at the
+    # head of `resolve_verb_id`'s chain. An open overlay or focus on the tab bar / sub-tab
+    # strip means no: the editor is on screen but the keys are not going to it.
+    def editor_pane? : Bool
+      return false unless @overlay.none? && @focus == :body
+      @tabs[@active_tab]?.try(&.editor_pane?) || false
+    end
+
+    def editor_read_mode? : Bool
+      return false unless @overlay.none? && @focus == :body
+      @tabs[@active_tab]?.try(&.editor_read_mode?) || false
+    end
+
+    def editor_enter_insert : Nil
+      @tabs[@active_tab]?.try(&.editor_enter_insert)
+    end
+
+    def editor_append_insert : Nil
+      @tabs[@active_tab]?.try(&.editor_append_insert)
+    end
+
+    def editor_exit_insert : Nil
+      @tabs[@active_tab]?.try(&.editor_exit_insert)
+    end
+
+    # Says so when the pane has no undo rather than eating the key: READ-mode undo is new
+    # (the nine `^Z` guards are all INS-side), so "u did nothing" would otherwise read as a
+    # broken keyset rather than an empty stack.
+    def editor_undo : Nil
+      status("nothing to undo in this pane") unless @tabs[@active_tab]?.try(&.editor_undo)
+    end
+
+    def editor_to_top : Nil
+      @tabs[@active_tab]?.try(&.editor_to_top)
+    end
+
+    def editor_to_bottom : Nil
+      @tabs[@active_tab]?.try(&.editor_to_bottom)
+    end
+
+    # The two bottom prompts, reached through the keymap instead of through the hardcoded
+    # ^G/^F guards in handle_key. Same target resolution (`goto_target`), so a keyset's bare
+    # spelling and the Ctrl form open the same prompt over the same pane.
+    def editor_goto_line : Nil
+      (tgt = goto_target) ? open_goto(tgt) : status("no line-addressable pane is focused")
+    end
+
+    def editor_find : Nil
+      (tgt = goto_target) ? open_search(tgt) : status("no searchable pane is focused")
     end
 
     def detail_navigable? : Bool

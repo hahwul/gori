@@ -82,7 +82,16 @@ module Gori
 
       # Verb id bound to `chord` in `scope` (or globally), if any.
       def lookup(chord : Chord, scope : Scope) : String?
-        @by_scope[scope]?.try(&.[chord]?) || @by_scope[Scope::Global]?.try(&.[chord]?)
+        lookup_in(chord, scope) || lookup_in(chord, Scope::Global)
+      end
+
+      # Verb id bound to `chord` in EXACTLY `scope` — no Global fallback. What a caller
+      # walking a SCOPE CHAIN needs: the Runner consults `Scope::Editor` (the focus
+      # dimension), then the active tab's scope, then Global, and has to be able to ask each
+      # link on its own so an unavailable verb in one link does not hide the next. #lookup is
+      # this plus the Global tail, kept for the callers that only ever wanted the pair.
+      def lookup_in(chord : Chord, scope : Scope) : String?
+        @by_scope[scope]?.try(&.[chord]?)
       end
     end
   end

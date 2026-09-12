@@ -358,6 +358,22 @@ module Gori::Tui
       @desc_read.move(@desc_area, dr, dc, selecting: selecting)
     end
 
+    # READ-mode top / bottom of the description (`editor.top` / `editor.bottom`).
+    def desc_read_to_edge(dir : Int32) : Nil
+      return if desc_insert_mode?
+      @desc_read.to_edge(@desc_area, dir)
+    end
+
+    # READ-mode undo (`editor.undo`). `undo` moves the EDITOR caret and READ paints from
+    # `@desc_read`, so the read cursor has to adopt what was restored — the handover
+    # `desc_read_move` gets for free and a direct `undo` does not. INS keeps its own ^Z.
+    def desc_read_undo : Bool
+      return false if desc_insert_mode?
+      undo
+      @desc_read.sync_from(@desc_area)
+      true
+    end
+
     # One selection model per mode — see NotesView#selection? / RepeaterView#pane_selection?.
     def desc_copy_text : String
       if desc_insert_mode?

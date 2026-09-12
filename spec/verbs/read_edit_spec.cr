@@ -27,14 +27,11 @@ describe "Gori::Verbs.register_read_edit" do
     per_scope.each do |(prefix, scope, section)|
       select_line = r["#{prefix}.select-line"]
       select_line.scope.should eq(scope)
-      # Every scope but the Project description reaches the Keymap. That pane's handle_body_key
-      # returns true for every key, raw-dispatching 'x' itself, so a chord there could never
-      # fire — it is menu-only, like project.copy.
-      if prefix == "project"
-        select_line.chords.should be_empty
-      else
-        select_line.chords.should eq([typed_chord("x")])
-      end
+      # EVERY scope reaches the Keymap, the Project description included. Its `x` used to be
+      # raw-dispatched by `ProjectController#handle_desc_read` (which returned true for every
+      # key), so the chord could never fire and was left off; that arm is gone with the rest of
+      # the editor-pane arms (KEY_AUDIT §2e) and the chord is real again.
+      select_line.chords.should eq([typed_chord("x")])
       select_line.menu_key.should eq('x')
       select_line.section.should eq(section)
 
@@ -132,7 +129,11 @@ describe "Gori::Verbs.register_read_edit" do
     # tabs' verbs can no longer land in one (scope, :common) space-menu view at all.
     %w[project.select-line project.clear-selection project.send-to].each do |id|
       r[id].scope.should eq(Gori::Verb::Scope::ProjectDesc)
-      r[id].chords.should be_empty # the desc pane raw-dispatches its keys; the Keymap never runs
     end
+    # `x` is a live chord in that scope now (the raw dispatch behind its absence is gone);
+    # clear-selection and send-to stay menu-only, as they are in every other read scope.
+    r["project.select-line"].chords.should eq([typed_chord("x")])
+    r["project.clear-selection"].chords.should be_empty
+    r["project.send-to"].chords.should be_empty
   end
 end

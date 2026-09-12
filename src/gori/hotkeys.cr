@@ -21,12 +21,25 @@ module Gori
     #     space menu can TEACH them beside the rows it draws; the keymap never gets to see
     #     them, which is exactly what this list means.
     #   app.quit/app.back   — deliberately palette-only (single-key quit is a footgun)
+    #   editor.exit-insert  esc — every editor's INS ladder answers esc itself, upstream of
+    #     the keymap, and always will: esc is how you get OUT of a pane that is swallowing
+    #     every printable, so it cannot be routed through a table the pane is not consulting.
+    #     Registered anyway so Help, the palette and the space menu can name it (the reason
+    #     view.reveal-ws is registered), and listed here so the editor never offers to move it.
+    #   editor.undo/find/goto-line  ^Z ^F ^G — the same shape as view.reveal-ws's ^B: a
+    #     hardcoded guard (the nine INS ladders for ^Z, Runner#handle_key for ^F/^G) answers
+    #     the Ctrl form before the keymap, so moving it here would change nothing. They are
+    #     registered for the chord a keyset gives them instead — `vim` puts find on `/` and
+    #     undo on `u`, which DO reach the keymap because nothing claims a bare letter in an
+    #     editor pane. A per-verb user rebind is refused for the same reason the ^B one is;
+    #     the way to respell the editor family is the keyset.
     FIXED_IDS = {"view.reveal-ws", "app.quit", "app.back", "app.palette",
                  "repeater.new", "fuzz.new", "decoder.new", "jwt.new", "cookie.new",
                  "notes.new", "comparer.new",
                  "repeater.close-subtab", "fuzz.close-subtab", "mine.close-subtab",
                  "sequence.close-subtab", "decoder.close", "jwt.close", "cookie.close",
-                 "notes.close", "comparer.close-subtab"}
+                 "notes.close", "comparer.close-subtab",
+                 "editor.exit-insert", "editor.undo", "editor.find", "editor.goto-line"}
 
     # Chords consumed by a hardcoded handler BEFORE the keymap is consulted, so binding ANY
     # verb to one would be silently shadowed — the editor refuses them on top of the
