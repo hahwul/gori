@@ -41,6 +41,11 @@ want() { case " $ONLY " in *" $1 "*) return 0;; *) return 1;; esac; }
 
 [ -x "$GORI" ] || { echo "gori binary not found/executable at $GORI (run 'shards build' first)"; exit 1; }
 command -v tmux >/dev/null || { echo "tmux is required"; exit 1; }
+# The statusline scene's command IS a jq program. Without jq that scene still "succeeds":
+# the child exits 127, the row captures as `⋯ (exit 127)` — in the caution colour, which
+# reads as a deliberate warning in the SVG — and that gets committed as the documented
+# picture of the feature. Refuse up front instead.
+command -v jq >/dev/null || { echo "jq is required (the statusline scene's command is a jq program)"; exit 1; }
 
 WORK="$(mktemp -d)"
 export GORI_HOME="$WORK/home"
@@ -64,6 +69,38 @@ write_settings() {
 JSON
 }
 write_settings goridark
+
+# The statusline scene is the one shot that has to turn a feature ON: it ships off, so there
+# is nothing to photograph until settings say so. Written from python rather than a heredoc
+# because the command is a jq program thick with backslashes, quotes and the single quote
+# that would close a bash string — python takes it as a raw string and does the JSON escaping
+# itself, so what you read below is what jq receives.
+#
+# The fields it prints are picked to survive a partial re-run (SCENES=statusline): capture
+# state, project, bind address, flow count, probe mode and the catch-all upstream all come
+# straight off the session, so the row reads the same whether or not the Issues scene has
+# run and promoted findings first.
+#
+# write_statusline_settings <theme> — write_settings plus a live statusline row.
+write_statusline_settings() {
+  python3 - "$GORI_HOME/settings.json" "$1" <<'PY'
+import json, sys
+path, theme = sys.argv[1], sys.argv[2]
+# "\u001b" stays a six-character escape all the way down; jq is what turns it into a real ESC.
+command = (
+    r"""jq -r '(if .capturing then "\u001b[32m●" else "\u001b[31m○" end)"""
+    r""" + "\u001b[0m \(.project)  \u001b[90m\(.proxy.addr)\u001b[0m"""
+    r"""  \(.flows) flows  probe:\(.probe)" """
+    r"""+ (if .upstream == "" then "  \u001b[90mdirect\u001b[0m" """
+    r"""else "  \u001b[33m→ \(.upstream)\u001b[0m" end)'"""
+)
+json.dump({
+    "theme": theme, "mouse": True, "pretty_bodies": True,
+    "statusline": {"enabled": True, "command": command, "interval": 3, "timeout": 10},
+    "network": {"bind_host": "127.0.0.1", "bind_port": 8070, "upstream_proxy": ""},
+}, open(path, "w"))
+PY
+}
 
 P="http://127.0.0.1:$PORT"
 seed() { curl -sk -x "$P" -o /dev/null "$@" || true; }
@@ -216,13 +253,22 @@ run_scene() {
 }
 
 # run_tour <name> <rows> <title> <tmux-keys...> — `gori tutorial` (no picker).
+# Honours SCENES like run_scene does: without it, re-shooting one frame still spent half a
+# minute driving the guided tour and rewrote its two SVGs with a fresh (identical-looking,
+# not identical) capture, which is exactly the noise SCENES exists to avoid.
 run_tour() {
   local name="$1" rows="$2" title="$3"; shift 3
+  if [ -n "${SCENES:-}" ]; then
+    case " $SCENES " in *" $name "*) ;; *) return 0;; esac
+  fi
   _shoot "$name" "$rows" "$title" "tutorial" 0 "$@"
 }
 
-# Every scene, rendered into the current $OUT. Called once per theme.
+# Every scene, rendered into the current $OUT. Called once per theme, which it takes as an
+# argument rather than reading the caller's loop variable: the statusline scene below has to
+# rewrite settings.json under that palette and put it back.
 shoot_all() {
+  local theme="$1"
   run_scene history      26 "gori · History"                   3 SLEEP1 Enter
   run_scene response-detail 26 "gori · Response detail"        3 SLEEP0.6 Enter SLEEP0.3 Down Down SLEEP0.3 Enter SLEEP1 Right SLEEP1
   run_scene command-palette 26 "gori · Command palette · Ctrl-P" 3 SLEEP0.8 C-p SLEEP1
@@ -276,6 +322,13 @@ shoot_all() {
   # STARTS — typing leaves the view on its tail, which reads as a truncated blob.
   run_scene jwt          26 "gori · JWT"                       0 SLEEP0.6 jwt SLEEP0.5 Enter SLEEP1.2 Enter SLEEP0.3 "$JWT_SAMPLE" SLEEP1 Home SLEEP0.3 Escape SLEEP0.6
   run_tour  tutorial     26 "gori · Guided tour"               SLEEP1.5
+  # LAST, and it puts settings back: this is the only scene that edits settings.json, and
+  # every scene above documents the default install. Same History screen as the first shot
+  # on purpose — the picture is about the extra row at the bottom, so the rest of the frame
+  # has to be something the reader already recognises.
+  write_statusline_settings "$theme"
+  run_scene statusline   26 "gori · Statusline"                3 SLEEP1 Enter
+  write_settings "$theme"
 }
 
 # The Themes-page gallery (docs/content/guide/themes.md): the same History scene shot
@@ -362,7 +415,7 @@ if want scenes; then
     write_settings "$theme"
     mkdir -p "$OUT"
     echo "▸ capturing $theme → $OUT"
-    shoot_all
+    shoot_all "$theme"
   done
 fi
 

@@ -273,7 +273,7 @@ module Gori::Tui
       @intercept_agent_seen = false
       # Optional bottom statusline: runs a user script on an interval and shows its
       # ANSI-coloured stdout. Disabled by default (no fiber, no reserved row until on).
-      @statusline = StatuslineController.new(@session)
+      @statusline = StatuslineController.new(@session, @jobs)
       # Far-right status-bar readout of gori's own CPU/RSS (settings:display → Resource meter).
       # Samples nothing while disabled; see ResourceMeter for the idle-repaint discipline.
       @resource = ResourceMeter.new
@@ -2687,7 +2687,9 @@ module Gori::Tui
         hints: Hotkeys.retag(status_line || key_hints),
         activity: activity_chip, resource: @resource.label, time: clock_label,
         companion: companion_bar_frame)
-      Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
+      unless layout.statusline.empty?
+        Chrome.render_statusline(screen, layout.statusline, @statusline.segments, failed: @statusline.failed?)
+      end
       @palette.render(screen, layout.body) if @overlay.palette?
       active_overlay.try(&.render(screen, layout.body)) # migrated modals (Overlay seam; gated on @overlay)
       # The space menu + bottom prompts float over everything else (drawn last).

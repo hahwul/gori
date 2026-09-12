@@ -1025,13 +1025,23 @@ module Gori::Tui
     # The whole row is filled with the canvas bg first so an unclosed colour or a short
     # line can't leave stale cells; over-long output is truncated by display width via
     # Screen#text's width clamp (CJK/emoji-safe).
-    def self.render_statusline(screen : Screen, rect : Rect, segments : Array(Ansi::Segment)) : Nil
+    #
+    # `failed` says the row is GORI's marker — "⋯ (exit 127)", "⋯ (timed out)" — rather
+    # than anything the script printed, and it changes only the default ink: yellow, the
+    # caution role, instead of body text. Without it the two are one row of identical
+    # grey, so "your command is not running" looks exactly like "your command said this",
+    # and an operator reads a broken statusline as a working one reporting bad news. Only
+    # the DEFAULT moves: a marker carries no SGR of its own, so nothing here can be
+    # overridden by a script — and a script that prints escape codes still owns its colours.
+    def self.render_statusline(screen : Screen, rect : Rect, segments : Array(Ansi::Segment),
+                               *, failed : Bool = false) : Nil
       return if rect.empty?
       screen.fill(rect, Theme.bg)
+      ink = failed ? Theme.yellow : Theme.text
       x = rect.x + 1
       segments.each do |seg|
         break if x >= rect.right
-        fg = seg.fg || Theme.text
+        fg = seg.fg || ink
         bg = seg.bg || Theme.bg
         x = screen.text(x, rect.y, seg.text, fg, bg, seg.attr, width: {rect.right - x, 0}.max)
       end
