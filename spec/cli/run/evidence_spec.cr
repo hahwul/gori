@@ -22,6 +22,27 @@ module Gori::CLI::Run
   def self.evidence_text_for_spec(ev : Gori::Store::IssueEvidence, include_sensitive : Bool) : String
     evidence_text(ev, include_sensitive)
   end
+
+  def self.evidence_bytes_text_for_spec(bytes : Int64) : String
+    evidence_bytes_text(bytes)
+  end
+end
+
+# A copy big enough to have a second spelling: the small fixture above is under 1 kB, where
+# `34567 bytes (33.8kB)` would read `512 bytes (512B)` and say nothing twice.
+private def frozen_big(store) : Gori::Store::IssueEvidence
+  fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
+    method: "GET", target: "/big", http_version: "HTTP/1.1",
+    head: "GET /big HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil,
+    source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    fid, 200, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+    ("x" * 40_000).to_slice, duration_us: 7_i64))
+  iid = store.insert_issue("big", Gori::Store::Severity::Low, "acme.test", nil)
+  id, status = store.freeze_evidence(iid, Gori::Evidence.from_flow(store.get_flow(fid).not_nil!))
+  status.ok?.should be_true
+  store.get_evidence(id).not_nil!
 end
 
 private def frozen(store) : Gori::Store::IssueEvidence
@@ -110,6 +131,30 @@ describe "gori run evidence" do
       store.unlink_evidence(ev.meta.id, ev.meta.issue_ids.first).should be_true
       orphan = store.get_evidence_meta(ev.meta.id).not_nil!
       Gori::CLI::Run.evidence_line_for_spec(orphan).should contain("issues orphaned")
+    end
+  end
+
+  # A size is printed for a HUMAN and grepped by a SCRIPT, and the two want different
+  # spellings, so the text form gives both with the raw count first and unchanged.
+  it "prints the raw byte count AND the human size on the list line and the show form" do
+    with_store do |store|
+      ev = frozen_big(store)
+      human = Gori::CLI::Output.human_size(ev.meta.bytes)
+      human.should end_with("kB")
+      line = Gori::CLI::Run.evidence_line_for_spec(ev.meta)
+      line.should contain("#{ev.meta.bytes} bytes (#{human})")
+      Gori::CLI::Run.evidence_text_for_spec(ev, false).should contain(" · #{ev.meta.bytes} bytes (#{human})\n")
+    end
+  end
+
+  it "leaves a sub-kilobyte size as the bare count — there is no second spelling to give" do
+    Gori::CLI::Run.evidence_bytes_text_for_spec(512_i64).should eq("512 bytes")
+    Gori::CLI::Run.evidence_bytes_text_for_spec(1023_i64).should eq("1023 bytes")
+    Gori::CLI::Run.evidence_bytes_text_for_spec(1024_i64).should eq("1024 bytes (1.0kB)")
+    # …and the small fixture's own line therefore still carries exactly what a script reads.
+    with_store do |store|
+      ev = frozen(store)
+      Gori::CLI::Run.evidence_line_for_spec(ev.meta).should contain("#{ev.meta.bytes} bytes  sha256")
     end
   end
 
