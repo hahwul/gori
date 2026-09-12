@@ -32,6 +32,12 @@ module Gori
         # last_insert_rowid: exec_task's generic reply reads it AFTER the closure, so with
         # a flow_id it would otherwise return the link row's id, not the issue's.
         issue_id = c.scalar("SELECT last_insert_rowid()").as(Int64)
+        # The primary flow's `entity_links` row, in the SAME transaction as the issue. Not an
+        # optimisation and not a convenience: the primary flow IS the issue's first related
+        # row now — in the TUI card, the Markdown report, the JSON export and MCP — so a
+        # `flow_id` with no link row is an issue whose own seed is missing from every list that
+        # answers "what backs this". `Links.issue_links` synthesises the row for the pre-migration
+        # and imported projects that can still hold one, but nothing this store writes may need it.
         if fid = flow_id
           c.exec(
             "INSERT OR IGNORE INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES ('issue', ?, 'flow', ?, ?)",

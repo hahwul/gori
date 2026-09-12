@@ -74,7 +74,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # ↵ on the AFFECTED URLS list: open the flow THAT url was captured on, which for a group of
   # 50 is 50 different exchanges — `o` can only ever reach the one sample. CROSS-TAB mediator:
-  # reads the Probe controller, drives the History controller + overlay (issue_open_flow's shape).
+  # reads the Probe controller, drives the History controller + overlay (`navigate_link_ref`'s shape).
   #
   # The list holds bare strings — `upsert_probe_issue` accumulates `Detection#url` and keeps no
   # per-URL flow id — so the row is resolved through the store by URL, narrowed by the issue's

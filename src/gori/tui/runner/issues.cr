@@ -186,39 +186,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_issue_form(IssueForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT ISSUE", cvss: f.cvss || ""))
   end
 
-  # Jump from an issue to its linked flow's request/response in History. CROSS-TAB
-  # mediator: reads the Issues controller, drives the History controller + overlay.
-  def issue_open_flow : Nil
-    return unless f = issues_controller.view.detail_issue
-    return (@toast = "this issue has no linked flow") unless fid = f.flow_id
-    if history_controller.view.open_detail_id(fid, @session.store)
-      @active_tab = :history
-      @focus = :body
-      @overlay = OverlayKind::Detail
-    else
-      @toast = "the linked flow is no longer captured (pruned)"
-    end
-  end
-
-  # Send an issue's linked flow to the Repeater tab to re-test the finding. CROSS-TAB
-  # mediator: reads the Issues controller, opens a Repeater tab.
-  def issue_repeater_flow : Nil
-    return unless f = issues_controller.view.detail_issue
-    return (@toast = "this issue has no linked flow") unless fid = f.flow_id
-    if @session.store.get_flow(fid)
-      repeater_flow(fid)
-    else
-      @toast = "the linked flow is no longer captured (pruned)"
-    end
-  end
-
   def issue_links : Nil
     return unless f = issues_controller.view.detail_issue
     open_links_overlay(Store::LinkOwnerKind::Issue, f.id)
   end
 
-  # `issue_open_link` lives in runner/evidence.cr: ↵ on a RELATED row opens a LIVE link in
-  # its tab and a FROZEN copy in the read-only viewer, and the two halves belong together.
+  # `issue_open_link`, `issue_goto_link` and `issue_repeater_flow` live in runner/evidence.cr:
+  # all three act on the RELATED row under the cursor — ↵ shows its exchange, `s` goes to its
+  # source, `r` sends it to the Repeater — and the frozen half of each is the same code the
+  # Evidence tab runs, so the three belong beside it.
+  #
+  # There is no `issue_open_flow` any more: `o` opened the primary flow in History, which is
+  # `s` on the first RELATED row now that the primary flow IS that row.
 
   def issue_link_move(delta : Int32) : Nil
     issues_controller.issue_link_move(delta)

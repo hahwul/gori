@@ -145,6 +145,44 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
+  # `r` on the Issues detail: the selected RELATED row into a Repeater tab, nothing sent.
+  #
+  # It used to read `issues.flow_id` and only that — "Send linked flow to Repeater" — which
+  # was the third verb on this card acting on a fact the card did not show, while the cursor
+  # sat on a row the key ignored. Now the ROW is the target: a live flow row re-opens its
+  # captured request, a FROZEN row duplicates its frozen request exactly as the Evidence
+  # tab's own `r` does (one builder, `duplicate_evidence_into_repeater`).
+  #
+  # A cursor on any other row — a fuzz or miner session, which has no single exchange, or a
+  # live repeater row, which IS a Repeater tab and is what `s` opens — FALLS BACK to the
+  # issue's first flow row, which is what `r` has always meant here. A fallback, not a
+  # refusal: the key's old meaning still has to work from wherever the cursor happens to be.
+  def issue_repeater_flow : Nil
+    view = issues_controller.view
+    return unless view.detail_issue
+    row = view.repeater_target_row
+    unless row
+      @toast = "nothing here to send to the Repeater — RELATED holds no flow or frozen copy"
+      return
+    end
+    if m = row.frozen
+      if ev = @session.store.get_evidence(m.id)
+        duplicate_evidence_into_repeater(ev)
+      else
+        @toast = "frozen evidence ##{m.id} is gone — a peer may have deleted it"
+        view.reload_detail_links(@session.store)
+      end
+    elsif res = row.live
+      if @session.store.get_flow(res.link.ref_id)
+        repeater_flow(res.link.ref_id)
+      else
+        # The row resolved when RELATED was last rebuilt; a peer's prune between then and
+        # this keypress is the one way to get here, and it is the same sentence `s` gives.
+        @toast = "that flow is no longer captured (pruned)"
+      end
+    end
+  end
+
   # The frozen copy's only way out. A confirm — the bytes cannot be recovered from the
   # source, which is why they were frozen — then the row goes and RELATED re-reads.
   def issue_evidence_delete : Nil
@@ -359,6 +397,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def evidence_duplicate_repeater : Nil
     ev = selected_evidence || return
+    duplicate_evidence_into_repeater(ev)
+  end
+
+  # One frozen copy into a new Repeater tab, nothing sent — the Evidence tab's `r` and the
+  # Issues detail's `r` on a FROZEN row, which are the same act and must not drift into two
+  # spellings of the WS caveat below.
+  private def duplicate_evidence_into_repeater(ev : Store::IssueEvidence) : Nil
     request = join_message(ev.request_head, ev.request_body)
     repeater_controller.repeater_from_request(ev.meta.url, String.new(request),
       ev.meta.protocol == "HTTP/2", nil, name: "evidence ##{ev.meta.id}")

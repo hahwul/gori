@@ -248,13 +248,23 @@ module Gori
         "issue.edit-title", "Edit title/severity", "Rename the issue, score it, and set its severity",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("t")]) { |ctx| ctx.issue_edit_title; nil }
 
+      # There is no `issue.open-flow` here any more. `o` opened "the linked flow" in History,
+      # which is the act `s` already performs on the FIRST RELATED row — the row that primary
+      # flow now IS (see `IssuesView#reload_detail_links`). Two keys for one jump, one of them
+      # reaching a fact the card no longer shows separately, is the duplication this scope was
+      # carrying; `s` is the one that generalises to every row. A user keybinding naming the
+      # dropped id is discarded rather than raising (`Hotkeys.rebindable_overrides` filters
+      # through `registry[id]?`), the same way the old per-format export ids were.
+      #
+      # `r` stays, and acts on the ROW under the cursor: a live flow re-opens in a Repeater
+      # tab, a FROZEN row duplicates its frozen request the way the Evidence tab's `r` does
+      # (nothing is sent either way), and a cursor on a row that is neither — a fuzz session,
+      # a live repeater tab that `s` already reaches — falls back to the issue's first flow
+      # row, which is what `r` has always meant here. `:send` and the "Send to Repeater"
+      # title match `sitemap.repeater`, the sibling gesture on the same letter.
       r.register Verb::Definition.new(
-        "issue.open-flow", "Open linked flow", "Open the linked flow's request/response in History",
-        Verb::Scope::IssuesDetail, [Verb::Chord.new("o")]) { |ctx| ctx.issue_open_flow; nil }
-
-      r.register Verb::Definition.new(
-        "issue.repeater-flow", "Send linked flow to Repeater", "Send the linked flow to the Repeater tab",
-        Verb::Scope::IssuesDetail, [Verb::Chord.new("r")]) { |ctx| ctx.issue_repeater_flow; nil }
+        "issue.repeater-flow", "Send to Repeater", "Send the selected related exchange to Repeater (the first flow row when the cursor is on neither a flow nor a frozen copy)",
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("r")], group: :send) { |ctx| ctx.issue_repeater_flow; nil }
 
       r.register Verb::Definition.new(
         "issue.links", "Manage links", "View/add/remove related History/Repeater/Fuzzer/Miner URLs",

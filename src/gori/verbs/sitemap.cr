@@ -127,9 +127,10 @@ module Gori
         Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'd', group: :send) { |ctx| ctx.sitemap_discover; nil }
 
       # `o` — read the bytes behind the selected endpoint: resolve its representative captured
-      # flow and open History's detail on it. Same chord and same shape as the Issues tab's
-      # `issue.open-flow` (verbs/issues.cr) and Probe's `probe.open-flow` — "o opens the
-      # evidence" is now one gesture everywhere a list row stands in for a flow.
+      # flow and open History's detail on it. Same chord and same shape as Probe's
+      # `probe.open-flow` — "o opens the evidence" wherever a list row stands in for a flow.
+      # (The Issues detail had the third one; it went when the primary flow became the first
+      # RELATED row, where `s` opens it like every other row's source.)
       #
       # Cursor-only even with marks set (SITEMAP_CURSOR_ONLY in runner.cr): a detail overlay
       # shows one flow, so there is nothing for a batch to mean here.

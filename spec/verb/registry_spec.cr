@@ -953,10 +953,6 @@ private class FakeContext < ExecContext
     @calls << :issue_edit_title
   end
 
-  def issue_open_flow : Nil
-    @calls << :issue_open_flow
-  end
-
   def issue_repeater_flow : Nil
     @calls << :issue_repeater_flow
   end

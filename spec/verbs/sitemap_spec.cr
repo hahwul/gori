@@ -71,8 +71,9 @@ describe "Gori::Verbs.register_sitemap" do
     verb.chords.should eq([typed_chord("o")])
     verb.hidden?.should be_false # else it reaches neither the space menu nor Help
     verb.menu_key.should eq('o') # what for_scope+SpaceMenu need to render a row
-    # Same chord as the two siblings that make the same jump, so `o` means one thing.
-    r["issue.open-flow"].chords.should eq([typed_chord("o")])
+    # Same chord as the sibling that makes the same jump, so `o` means one thing. (The Issues
+    # detail had a third; it went when the primary flow became RELATED's first row, where `s`
+    # opens it like every other row's source.)
     r["probe.open-flow"].chords.should eq([typed_chord("o")])
   end
 

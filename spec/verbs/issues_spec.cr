@@ -218,7 +218,6 @@ describe "Gori::Verbs.register_issues" do
       {"issue.close"           => :issue_close,
        "issue.edit-notes"      => :issue_edit_notes,
        "issue.edit-title"      => :issue_edit_title,
-       "issue.open-flow"       => :issue_open_flow,
        "issue.repeater-flow"   => :issue_repeater_flow,
        "issue.delete"          => :issues_delete,
        "issue.links"           => :issue_links,
@@ -226,6 +225,14 @@ describe "Gori::Verbs.register_issues" do
        "issue.freeze-link"     => :issue_freeze_link,
        "issue.evidence-delete" => :issue_evidence_delete,
       }.each { |id, intent| verb_intents(r, id).should eq([intent]) }
+
+      # `o` went with the primary flow's meta row: it opened "the linked flow" in History,
+      # which is `s` on RELATED's first row now that the primary flow IS that row.
+      r["issue.open-flow"]?.should be_nil
+      # And `r` is a ROW verb now, banded and titled like `sitemap.repeater`, its sibling on
+      # the same letter.
+      r["issue.repeater-flow"].title.should eq("Send to Repeater")
+      r["issue.repeater-flow"].group.should eq(:send)
 
       ctx = FakeExecContext.new
       r["issue.link-down"].call(ctx)

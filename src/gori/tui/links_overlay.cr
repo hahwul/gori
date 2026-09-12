@@ -63,6 +63,11 @@ module Gori::Tui
       links = store.list_links(@owner_kind, @owner_id)
       if @owner_kind.issue?
         if f = store.get_issue(@owner_id)
+          # The primary flow stays OUT of this card even though it now leads the RELATED list
+          # (`Links.issue_links`): this card removes links, and the primary is `issues.flow_id`
+          # — a column, not a pointer the operator owns. Removing its row here would delete an
+          # `entity_links` row and change nothing on screen, because the column would still be
+          # there for RELATED to synthesise the row from. See `Links.dedupe_issue_flow`.
           links = Links.dedupe_issue_flow(links, f.flow_id)
         end
       end

@@ -291,10 +291,11 @@ describe "the Issues detail's shell frame" do
   it "keeps the gold when the focused card is too short to be drawn at all" do
     with_session do |host, session|
       detail_controller(host, session.store) do |ctl|
-        # Under nine interior rows `detail_split` drops RELATED entirely — and the detail opens
+        # Under eight interior rows `detail_split` drops RELATED entirely — and the detail opens
         # on RELATED. Handing the frame over there would leave NOTHING gold while the body
         # holds the keyboard, and it would heal on the first ⇥, which reads as a dead tab.
-        short = Rect.new(0, 0, 80, 10)
+        # (Eight, not nine, since the meta block gave up its `flow` row to NOTES.)
+        short = Rect.new(0, 0, 80, 9)
         rel, _ = ctl.view.detail_split(short.inset(1, 1))
         rel.h.should eq(0)
         backend = MemoryBackend.new(short.w, short.h)

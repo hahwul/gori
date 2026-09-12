@@ -125,6 +125,57 @@ describe Gori::Issues::Export do
   end
 
   describe ".markdown" do
+    # The primary flow is the FIRST bullet of `### Related` and appears exactly once. There is
+    # no `- **Flow:**` line above the list any more: a report reader asking what backs a
+    # finding was being answered twice, in two spellings, one of them above the list of the
+    # other. The fenced request/response still come from this flow — it is the report's
+    # evidence, and which row it belongs to is the first one.
+    it "names the primary flow once, as the first Related bullet" do
+      with_store do |store|
+        primary = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+          method: "GET", target: "/login", http_version: "HTTP/1.1",
+          head: "GET /login HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+        extra = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 2_i64, scheme: "https", host: "h.test", port: 443,
+          method: "GET", target: "/admin", http_version: "HTTP/1.1",
+          head: "GET /admin HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: primary, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+          body: "ok".to_slice, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
+        iid = store.insert_issue("auth bypass", Gori::Store::Severity::High, "h.test", primary)
+        store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, extra)
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should_not contain("**Flow:**")
+        related = md.lines.skip_while { |l| l != "### Related" }.select(&.starts_with?("- **"))
+        related.size.should eq(2)
+        related[0].should eq("- **hist** https://h.test/login — GET h.test/login")
+        related[1].should eq("- **hist** https://h.test/admin — GET h.test/admin")
+        md.scan("h.test/login —").size.should eq(1)
+        # The evidence fences are still the primary's bytes.
+        md.should contain("### Request")
+        md.should contain("GET /login HTTP/1.1")
+      end
+    end
+
+    # An issue filed before the entity_links migration still names its flow: the bullet is
+    # rebuilt from `issues.flow_id` rather than left out of the report.
+    it "keeps the primary bullet when the link row is missing" do
+      with_store do |store|
+        fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+          method: "GET", target: "/legacy", http_version: "HTTP/1.1",
+          head: "GET /legacy HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+        iid = store.insert_issue("old", Gori::Store::Severity::Low, "h.test", fid)
+        store.remove_link(store.list_links(Gori::Store::LinkOwnerKind::Issue, iid)[0].id).should be_true
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("### Related")
+        md.should contain("- **hist** https://h.test/legacy — GET h.test/legacy")
+      end
+    end
+
     it "keeps an attacker-controlled body (``` + headings) inside its code fence" do
       with_store do |store|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(

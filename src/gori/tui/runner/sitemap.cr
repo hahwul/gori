@@ -89,7 +89,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # Open the bytes behind the cursor row. CROSS-TAB mediator: resolves the tree node through
   # the store, then drives the History controller + detail overlay — exactly the hop
-  # issue_open_flow (runner/issues.cr) makes from an issue to its evidence.
+  # `navigate_link_ref` (runner/links.cr) makes from an Issue's RELATED row to its source.
   #
   # Deliberately NOT marked-set aware, unlike sitemap_repeater: a detail overlay shows one
   # flow, so the cursor row is the only thing it could mean. It uses the same

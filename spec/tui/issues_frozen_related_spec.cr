@@ -105,11 +105,11 @@ describe "the Issues detail's RELATED card with frozen evidence" do
     end
   end
 
-  # The border count and the y3 meta row, the two places the card's neighbourhood names what
-  # backs an issue. Both had to move with #1038's vocabulary: "evidence" is the frozen copy
-  # now, so the live primary flow is labelled `flow`, and a single total over two kinds of row
-  # cannot say how much of the backing is immutable.
-  it "splits the border count on a frozen-only issue and labels the primary row `flow`" do
+  # The border count, and the meta block that no longer competes with the card for the answer.
+  # An issue filed FROM a flow and then frozen has two rows: the live primary flow it was filed
+  # from, and the immutable copy. The count splits them (`1 · 1 frozen`) because a single total
+  # over two kinds of row cannot say how much of the backing survives retention.
+  it "counts the primary flow in the live half and keeps no `flow` meta row above the card" do
     with_store do |store|
       src = frozen_flow(store, "/only")
       issue = store.insert_issue("SQLi", Gori::Store::Severity::High, "acme.test", src)
@@ -120,13 +120,14 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       view.open_detail(store).should be_true
       backend = render(view)
       rel, _ = view.detail_split(Rect.new(0, 0, 100, 22))
-      # The primary `flow_id` is the y3 row, not a RELATED row, so the live half is honestly
-      # zero here: everything backing this issue in the card is immutable.
-      backend.row(rel.y).should contain("0 · 1 frozen · space l")
-      # y3 — the live pointer into History, no longer called `evidence`.
-      row = backend.row(3)
-      row.should contain("flow      GET acme.test/only → 500")
-      row.should_not contain("evidence")
+      backend.row(rel.y).should contain("1 · 1 frozen · space l")
+      # The primary flow is RELATED's FIRST row, live-badged like any other pointer…
+      backend.row(rel.y + 1).should contain("LIVE")
+      backend.row(rel.y + 1).should contain("GET acme.test/only")
+      # …and the meta block above the card says nothing about it: three rows, and none of
+      # them the `flow  GET … → 500` line this pane used to draw at y3.
+      rel.y.should eq(3)
+      (0...3).each { |y| backend.row(y).should_not contain("flow      ") }
     end
   end
 
