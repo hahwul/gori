@@ -90,7 +90,8 @@ end
 
 queries = ["host:host1", "host:missing", "path:/missing", "status:500", "status:999",
            "missing", "body:z", "body:zz", "body:commonneedle", "body:absentneedle",
-           "header:missing", "body~absentneedle", "scope:in src:proxy path:/missing"]
+           "header:missing", "body~absentneedle", "body~commonneedle header~absentheader",
+           "scope:in src:proxy path:/missing"]
 lens = Gori::QL::ScopeLens.new(Gori::QL::Filter.new("host LIKE ?", ["host1%"] of DB::Any))
 SIZES.each do |size|
   path = File.tempname("gori-history-bench", ".db")

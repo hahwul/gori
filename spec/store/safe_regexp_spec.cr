@@ -110,10 +110,51 @@ describe Gori::SafeRegexp do
       fast_answer("sql", "a \u{017F}ql injection".to_slice).should be_false
     end
 
+    it "finds a match whichever spelling the anchor byte wears" do
+      # The scan anchors on the needle's LAST byte and walks to it with `memchr`. Under `(?i)`
+      # that byte has TWO spellings, so there are two cursors — and each is advanced only when
+      # it was the one consumed. Get that wrong and the cursor left behind keeps re-reporting a
+      # position already rejected (a hang) or is skipped past a real match (a silent miss), so
+      # drive a haystack that alternates the two spellings around a rejected candidate.
+      hay = "xA xa yA ya xA".to_slice
+      fast_answer("(?i)ya", hay).should be_true
+      fast_answer("(?i)yA", hay).should be_true
+      agree("(?i)ya", hay)
+      # Only the upper spelling is present, and only behind the wrong lead byte.
+      fast_answer("(?i)za", hay).should be_false
+      # Case-SENSITIVE: one cursor, and it must not pick up the other spelling.
+      fast_answer("xA", hay).should be_true
+      fast_answer("zA", hay).should be_false
+      fast_answer("Xa", hay).should be_false
+    end
+
+    it "answers a one-byte needle through the same anchor walk" do
+      # A one-byte needle is all anchor and no verification. It used to have a loop of its own;
+      # the answers must not have moved with it.
+      agree("(?i)z", "the LAST byte is Z")
+      fast_answer("(?i)z", "the LAST byte is Z".to_slice).should be_true
+      fast_answer("z", "the LAST byte is Z".to_slice).should be_false
+      fast_answer("Z", "the LAST byte is Z".to_slice).should be_true
+      fast_answer("q", "the LAST byte is Z".to_slice).should be_false
+      # A non-letter needle folds to itself, so both cursors are the same byte.
+      fast_answer("(?i)/", "/api/v1".to_slice).should be_true
+      fast_answer("(?i)-", "/api/v1".to_slice).should be_false
+    end
+
+    it "matches at the very start and when the needle IS the haystack" do
+      # The anchor starts at `m - 1`, so an off-by-one there loses a match that begins at 0.
+      fast_answer("abc", "abc".to_slice).should be_true
+      fast_answer("(?i)ABC", "abc".to_slice).should be_true
+      fast_answer("abc", "abcd".to_slice).should be_true
+      fast_answer("bcd", "abcd".to_slice).should be_true
+      # One byte longer than the haystack is refused before the walk.
+      fast_answer("abcde", "abcd".to_slice).should be_false
+    end
+
     it "hands a haystack that outruns the work budget back to PCRE2" do
-      # The skip table narrows the quadratic case but does not remove it: a needle whose
-      # SUFFIX is the haystack's one repeated byte walks a position at a time and compares
-      # the whole needle at each. The budget catches that and defers rather than grinding —
+      # The anchor walk narrows the quadratic case but does not remove it: a needle whose
+      # SUFFIX is the haystack's one repeated byte lands the anchor at every position and
+      # compares the whole needle at each. The budget catches that and defers rather than grinding —
       # a captured body is the attacker's to shape, so this is a bound, not a nicety.
       repeated = Bytes.new(70_000, 'a'.ord.to_u8)
       fast_answer("b" + "a" * 64, repeated).should be_nil
@@ -123,6 +164,37 @@ describe Gori::SafeRegexp do
       # And an ordinary needle over the same body never comes close to the budget.
       fast_answer("absentneedle", repeated).should be_false
       fast_answer("a" * 64, repeated).should be_true
+    end
+  end
+
+  describe "the per-pattern slots the callback looks patterns up in" do
+    it "answers a query carrying two different patterns as if each ran alone" do
+      # SQLite alternates the two patterns as it walks rows, and the callback remembers a FEW
+      # (`SLOT_MAX`) rather than one precisely so neither evicts the other. A single slot still
+      # gave the right answer — it just allocated a fresh `String` per row — so what this pins
+      # is that holding several has not started crossing them: each clause must select exactly
+      # the rows it would have on its own, and the AND of the two exactly their intersection.
+      with_store do |store|
+        row = ->(target : String, header : String, body : String) do
+          store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+            method: "POST", target: target, http_version: "HTTP/1.1",
+            head: "POST #{target} HTTP/1.1\r\nHost: h.test\r\nX-Mark: #{header}\r\n\r\n".to_slice,
+            body: body.to_slice, source: Gori::FlowSource::Kind::Proxy))
+        end
+        both = row.call("/both", "alpha", "needleone")
+        head_only = row.call("/head", "alpha", "nothing")
+        body_only = row.call("/body", "beta", "needleone")
+        row.call("/neither", "beta", "nothing")
+
+        ids = ->(q : String) { store.search(Gori::QL.parse(q), 50, raise_on_error: true).map(&.id).sort! }
+        ids.call("body~needleone").should eq([both, body_only].sort)
+        ids.call("header~alpha").should eq([both, head_only].sort)
+        ids.call("body~needleone header~alpha").should eq([both])
+        # …and running them the other way round, which is the order that evicted before.
+        ids.call("header~alpha body~needleone").should eq([both])
+        ids.call("body~needleone").should eq([both, body_only].sort)
+      end
     end
   end
 

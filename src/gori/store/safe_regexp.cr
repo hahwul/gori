@@ -89,15 +89,16 @@ module Gori
       # `literal_match?`. Both false unless `fold`.
       long_s : Bool,
       kelvin : Bool,
-      # Boyer-Moore-Horspool bad-character table: with the needle laid over the haystack, how
-      # far the scan may jump when the byte under the needle's LAST position is `b`. A byte
-      # the needle does not carry jumps the whole needle. Empty for a one-byte needle, which
-      # never consults it. Built once per pattern.
-      skip : Array(Int32)
+      # The two spellings the needle's LAST byte may wear in the haystack — the byte the scan
+      # anchors on (see `search?`). Equal unless `fold` and that byte is an ASCII letter, in
+      # which case they are its lower and upper forms. Derived once per pattern so the scan
+      # loop never re-derives them.
+      anchor_lo : UInt8,
+      anchor_hi : UInt8
 
     # A pattern PCRE2 must own is CACHED as this rather than as `nil`, so the per-row lookup
     # is one hash instead of `has_key?` + `[]`.
-    NOT_LITERAL = Literal.new(Bytes.empty, false, false, false, [] of Int32)
+    NOT_LITERAL = Literal.new(Bytes.empty, false, false, false, 0_u8, 0_u8)
 
     # The two non-ASCII codepoints PCRE2's `(?i)` folds onto an ASCII letter, under the
     # UTF|UCP options Crystal compiles every Regex with. NOT assumed — enumerated by matching
@@ -171,20 +172,17 @@ module Gori
         n += 1
       end
       return nil if n == 0 # `` or `(?i)`: a match-all, which PCRE2 should answer
-      Literal.new(buf[0, n], fold, long_s, kelvin, skip_table(buf, n, fold))
+      lo, hi = anchor_bytes(buf[n - 1], fold)
+      Literal.new(buf[0, n], fold, long_s, kelvin, lo, hi)
     end
 
-    private def self.skip_table(buf : Bytes, n : Int32, fold : Bool) : Array(Int32)
-      return [] of Int32 if n == 1 # `contains_byte?` handles those and never reads the table
-      skip = Array(Int32).new(256, n)
-      (0...n - 1).each do |j|
-        b = buf[j]
-        skip[b] = n - 1 - j
-        # A folded needle has to be skippable by EITHER spelling of its letters, or the table
-        # would jump past a match the comparison would have found.
-        skip[b ^ 0x20_u8] = n - 1 - j if fold && b.unsafe_chr.ascii_letter?
-      end
-      skip
+    # The haystack bytes the anchor search looks for, given the needle's last byte. `byte_eq?`
+    # accepts exactly two for a folded ASCII letter (`b | 0x20 == want | 0x20` has no
+    # non-letter solutions — see the note there) and exactly one otherwise, so this enumerates
+    # the same set the comparison would.
+    private def self.anchor_bytes(last : UInt8, fold : Bool) : {UInt8, UInt8}
+      return {last, last} unless fold && last.unsafe_chr.ascii_letter?
+      {last | 0x20_u8, last & 0xDF_u8}
     end
 
     # `true` / `false`, or `nil` when this cannot answer and PCRE2 must.
@@ -206,7 +204,7 @@ module Gori
       # A needle longer than the haystack cannot match even under folding, so this needs no
       # deferral either: `ſ`/`K` make a MATCHED REGION longer than the needle, never shorter.
       return false if m > len
-      hit = m == 1 ? contains_byte?(hay, len, lit.needle[0], lit.fold) : horspool?(hay, len, lit)
+      hit = search?(hay, len, lit)
       return hit unless hit == false
       return false unless lit.long_s || lit.kelvin
       # Only now, and only for the miss, is the haystack worth a second look — and one pass
@@ -214,51 +212,85 @@ module Gori
       contains_fold_escape?(hay, len, lit) ? nil : false
     end
 
-    # Horspool, and comparing from the END of the needle is the load-bearing half of it. The
-    # obvious forward scan is fast on real traffic but quadratic on a body of one repeated
-    # byte — a needle whose PREFIX is that byte measured 1.1ms per 64KB body against PCRE2's
-    # 0.22ms, and a captured body is the ATTACKER's to shape. Testing the last position first
-    # is the same "required last code unit" trick that keeps PCRE2 fast there, and it costs
-    # nothing on the ordinary path: 64KB of JSON, absent needle, 6us here against PCRE2's
-    # 234us.
+    # Anchor search: `memchr` to every haystack position where the needle's LAST byte could
+    # sit, then verify the rest of the needle backwards from there.
     #
-    # The skip table narrows the quadratic case rather than removing it (a needle whose SUFFIX
-    # is the repeated byte still walks one position at a time, comparing the whole needle at
-    # each), so the scan carries a work budget and returns `nil` — hand the row to PCRE2 —
-    # rather than grinding. Four passes over the haystack is far more than any realistic
-    # needle spends, and it bounds the worst case at roughly 1.5x what PCRE2 alone would have
-    # cost instead of 8x.
-    private def self.horspool?(hay : Pointer(UInt8), len : Int32, lit : Literal) : Bool?
+    # Anchoring on the last byte is the load-bearing half, and it is why the Horspool scan
+    # this replaced also compared from the end. The obvious forward scan is fast on real
+    # traffic but quadratic on a body of one repeated byte — a needle whose PREFIX is that
+    # byte measured 1.1ms per 64KB body against PCRE2's 0.22ms, and a captured body is the
+    # ATTACKER's to shape. A required last code unit is the same trick that keeps PCRE2 fast
+    # there.
+    #
+    # What `memchr` buys over Horspool's bad-character table is that the stride between
+    # candidates stops being a Crystal loop stepping one position at a time: libc's `memchr`
+    # is vectorised, so the haystack is walked a word at a time and the loop below runs only
+    # where the anchor actually lands. Measured over 100k 1KB bodies
+    # (bench/history_filter_bench): `body:zz` 59ms -> 12ms, `body~absentneedle` 43ms -> 12ms,
+    # `body:z` 41ms -> 13ms. It buys nothing on `header:`, and that is the honest shape of it:
+    # a head is a few hundred bytes and its anchor is usually a letter HTTP heads are full of,
+    # so the candidates are dense and there is little stride to vectorise — 27.6ms -> 26.6ms
+    # over the same flows (bench/store_bench). The win is the long haystack.
+    #
+    # A folded ASCII-letter anchor has TWO spellings and therefore two cursors, each advanced
+    # only when it was the one consumed — so the two `memchr` walks still cover the haystack
+    # once each, not once per candidate. `byte_eq?` accepts exactly those two bytes for such a
+    # needle byte and exactly one otherwise (see the note there), so the candidate set is the
+    # full one: nothing the verification would have matched is skipped.
+    #
+    # Verification is still not free of the quadratic case (a needle whose SUFFIX repeats a
+    # byte the haystack is made of lands the anchor everywhere and compares the whole needle
+    # at each), so the scan carries the same work budget and returns `nil` — hand the row to
+    # PCRE2 — rather than grinding. Four passes over the haystack is far more than any
+    # realistic needle spends, and it bounds the worst case at roughly 1.5x what PCRE2 alone
+    # would have cost instead of 8x.
+    #
+    # A one-byte needle no longer needs a loop of its own: it is all anchor and no
+    # verification, and the `memchr` walk is the same one. The separate `contains_byte?` this
+    # had existed because the Horspool bookkeeping dominated at m == 1; there is none left.
+    private def self.search?(hay : Pointer(UInt8), len : Int32, lit : Literal) : Bool?
       needle = lit.needle
       m = needle.size
-      skip = lit.skip.to_unsafe # bounds-checked `Array#[]` in this loop is per haystack byte
+      fold = lit.fold
+      lo = lit.anchor_lo
+      hi = lit.anchor_hi
+      two = lo != hi
       budget = 4_i64 * len + 16
-      i = 0
-      limit = len - m
-      while i <= limit
-        j = m - 1
-        while j >= 0 && byte_eq?(hay[i + j], needle[j], lit.fold)
+      # The anchor cannot sit before the needle would fit; `literal_match?` has already
+      # refused m > len, so this start is in range.
+      a = index_of(hay, len, m - 1, lo)
+      b = two ? index_of(hay, len, m - 1, hi) : -1
+      loop do
+        pos = nearer(a, b)
+        return false if pos < 0
+        start = pos - (m - 1)
+        j = m - 2 # the anchor already answered for the last position
+        while j >= 0 && byte_eq?(hay[start + j], needle[j], fold)
           j -= 1
         end
         return true if j < 0
         budget -= m - j
         return nil if budget < 0
-        i += skip[hay[i + m - 1]]
+        a = index_of(hay, len, pos + 1, lo) if a == pos
+        b = index_of(hay, len, pos + 1, hi) if two && b == pos
       end
-      false
     end
 
-    # One byte, which is linear by construction — no table to consult and no budget to keep.
-    # Kept off the general loop because the bookkeeping for both dominated it there: `body:z`
-    # over 100k 1KB bodies went 39ms -> 117ms when a one-byte needle walked the same path.
-    private def self.contains_byte?(hay : Pointer(UInt8), len : Int32, want : UInt8,
-                                    fold : Bool) : Bool
-      i = 0
-      while i < len
-        return true if byte_eq?(hay[i], want, fold)
-        i += 1
-      end
-      false
+    # The nearer of two cursors, either of which may be -1 for "no more". -1 when both are.
+    private def self.nearer(a : Int32, b : Int32) : Int32
+      return b if a < 0
+      return a if b < 0
+      Math.min(a, b)
+    end
+
+    # The first index >= `from` holding `want`, or -1. `memchr` over the raw pointer: the
+    # haystack is SQLite's own buffer, and wrapping it in a `Slice` or a `String` to reach
+    # `index` would be an allocation per row on the hottest path this file has.
+    private def self.index_of(hay : Pointer(UInt8), len : Int32, from : Int32,
+                              want : UInt8) : Int32
+      return -1 if from >= len
+      found = LibC.memchr(hay + from, want.to_i32, (len - from).to_u64)
+      found.null? ? -1 : (found.as(Pointer(UInt8)) - hay).to_i32
     end
 
     # Does the haystack hold a codepoint PCRE2 would fold onto a letter this needle carries?
@@ -336,37 +368,56 @@ module Gori
       @@rows_invalid = 0
     end
 
-    # The pattern arrives as raw SQLite bytes on EVERY row, so `String.new` on it is an
-    # allocation per row — 64MB of garbage for one 500k-row `header:` scan, every byte of it
-    # another copy of the same eleven. Both clauses of a `body:`/`header:` term bind the same
-    # value, so a single remembered pattern covers the whole scan; a query with two `~` terms
-    # alternates and simply allocates, exactly as it did before this existed.
-    @@last_pattern : String? = nil
+    # Everything the callback needs about one pattern, looked up by the raw SQLite bytes.
+    #
+    # The pattern arrives as those bytes on EVERY row, so `String.new` on it is an allocation
+    # per row — 64MB of garbage for one 500k-row `header:` scan, every byte of it another copy
+    # of the same eleven. Remembering it removes that; carrying its `Literal` along removes the
+    # `@@literals` hash lookup (a `String` hash plus a compare, per row) that used to follow.
+    #
+    # A FEW slots and not one: both clauses of a `body:`/`header:` term bind the same value, so
+    # one covered that shape, but a query with two `~` terms (or a regex Scope rule
+    # AND-combined with a `~` term) alternates patterns as SQLite walks rows and a single slot
+    # evicted the other on every call — allocating per row again, which is exactly what this
+    # exists to stop. Four holds every realistic query at once; the lookup is a `memcmp` per
+    # slot, and a scan with one pattern still does exactly one.
+    record Slot, pattern : String, lit : Literal
+
+    SLOT_MAX = 4
+    @@slots = [] of Slot
 
     # :nodoc: — internal (called from FN, which needs an explicit receiver)
-    def self.intern(ptr : Pointer(UInt8), len : Int32) : String
-      if last = @@last_pattern
-        return last if last.bytesize == len && last.to_unsafe.memcmp(ptr, len) == 0
+    def self.slot(ptr : Pointer(UInt8), len : Int32) : Slot
+      @@slots.each do |s|
+        p = s.pattern
+        return s if p.bytesize == len && p.to_unsafe.memcmp(ptr, len) == 0
       end
-      @@last_pattern = String.new(ptr, len)
+      pattern = String.new(ptr, len)
+      # Bounded for the reason `@@cache` is: a realistic scan uses a handful of patterns, so
+      # this can never evict one mid-scan.
+      @@slots.clear if @@slots.size >= SLOT_MAX
+      fresh = Slot.new(pattern, literal(pattern) || NOT_LITERAL)
+      @@slots << fresh
+      fresh
     end
 
     # Closure-free proc (no captured locals) so it is valid as a C callback, matching
     # the driver's own FuncCallback signature: (context, argc, argv) ordered args.
     FN = ->(context : LibSQLite3::SQLite3Context, _argc : Int32, argv : LibSQLite3::SQLite3Value*) do
       args = Slice.new(argv, 2)
-      pattern = SafeRegexp.intern(LibSQLite3.value_text(args[0]), LibSQLite3.value_bytes(args[0]))
+      slot = SafeRegexp.slot(LibSQLite3.value_text(args[0]), LibSQLite3.value_bytes(args[0]))
+      lit = slot.lit
       # value_text first (forces the text representation + keeps the pointer valid),
       # then value_bytes for its true length — so an embedded NUL doesn't truncate.
       hay_ptr = LibSQLite3.value_text(args[1])
       hay_len = LibSQLite3.value_bytes(args[1])
       empty = hay_ptr.null? || hay_len <= 0
       matched =
-        if !empty && (lit = SafeRegexp.literal(pattern)) &&
+        if !empty && !lit.needle.empty? &&
            !(answer = SafeRegexp.literal_match?(hay_ptr, hay_len, lit)).nil?
           answer
         else
-          SafeRegexp.match_text(pattern, empty ? "" : String.new(hay_ptr, hay_len))
+          SafeRegexp.match_text(slot.pattern, empty ? "" : String.new(hay_ptr, hay_len))
         end
       LibSQLite3.result_int(context, matched ? 1 : 0)
       nil
