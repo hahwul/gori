@@ -104,7 +104,17 @@ module Gori::Tui
     private def self.apply_sgr(params : String, fg : Color?, bg : Color?,
                                attr : Attribute) : {Color?, Color?, Attribute}
       # An empty parameter list (bare ESC[m) means reset.
-      codes = params.empty? ? [0] : params.split(';').map { |p| p.empty? ? 0 : (p.to_i? || 0) }
+      return {nil, nil, Attribute::None} if params.empty?
+      # ITU T.416 spells extended colour with `:` sub-parameters — `38:2::r:g:b`, `38:5:n`,
+      # and `4:3` for a curly underline — where one `;`-parameter carries its own arguments.
+      # Splitting on `;` alone leaves that whole group as a single non-numeric string, and
+      # `to_i? || 0` then read it as code 0: a truecolor sequence written the ITU way
+      # SILENTLY RESET the style instead of setting a colour. Handled before the loop, so
+      # the `;` reader below stays the plain-integer reader it has always been.
+      return apply_sgr_subparams(params, fg, bg, attr) if params.includes?(':')
+      # A parameter that is not an integer at all is malformed, and ignoring one is always
+      # safer than obeying it: `0` here is the RESET code, so a typo would wipe the style.
+      codes = params.split(';').compact_map { |p| p.empty? ? 0 : p.to_i? }
       i = 0
       while i < codes.size
         code = codes[i]
@@ -154,6 +164,75 @@ module Gori::Tui
         i += 1
       end
       {fg, bg, attr}
+    end
+
+    # One SGR sequence whose parameters carry `:` sub-parameters (ITU T.416), where a single
+    # `;`-parameter carries its own arguments — `38:2::r:g:b`, `38:5:n`, `4:3` (curly
+    # underline). Each colon group is read as a unit; the plain groups around it are gathered
+    # into RUNS and handed back to the `;` reader intact, because a sequence may mix the two
+    # (`4:3;38;5;196`) and `38;5;196` only means a colour while its three parameters are read
+    # together — split apart, the `5` would be Blink.
+    private def self.apply_sgr_subparams(params : String, fg : Color?, bg : Color?,
+                                         attr : Attribute) : {Color?, Color?, Attribute}
+      run = [] of String
+      params.split(';').each do |group|
+        unless group.includes?(':')
+          run << group
+          next
+        end
+        unless run.empty?
+          fg, bg, attr = apply_sgr(run.join(';'), fg, bg, attr)
+          run.clear
+        end
+        fg, bg, attr = apply_subparam_group(group, fg, bg, attr)
+      end
+      run.empty? ? {fg, bg, attr} : apply_sgr(run.join(';'), fg, bg, attr)
+    end
+
+    # One `:`-joined parameter group. An extended-colour group sets the colour from its own
+    # arguments; anything else applies its LEADING code (so `4:3` still underlines) and drops
+    # the styling detail gori has no cell for.
+    private def self.apply_subparam_group(group : String, fg : Color?, bg : Color?,
+                                          attr : Attribute) : {Color?, Color?, Attribute}
+      sub = group.split(':')
+      code = sub[0].empty? ? 0 : (sub[0].to_i? || -1)
+      if code == 38 || code == 48
+        # nil ⇒ the group carried no readable colour; leave the running style ALONE rather
+        # than guess, which is the whole point of handling this form separately.
+        if col = subparam_color(sub)
+          code == 38 ? (fg = col) : (bg = col)
+        end
+        {fg, bg, attr}
+      elsif code >= 0
+        apply_sgr(code.to_s, fg, bg, attr)
+      else
+        {fg, bg, attr}
+      end
+    end
+
+    # The colour a `38:…` / `48:…` sub-parameter group carries, or nil when it carries none.
+    private def self.subparam_color(sub : Array(String)) : Color?
+      args = sub[1..]
+      case args[0]?.try(&.to_i?)
+      when 5 then (n = args[1]?.try(&.to_i?)) ? Color.ansi256(clamp255(n)) : nil
+      when 2 then truecolor_subparam(args)
+      end
+    end
+
+    # `38:2` in its two live spellings. T.416 writes [2, colour-space, r, g, b] and may append
+    # tolerance parameters after the blue; several emitters drop the colour-space slot entirely
+    # and write [2, r, g, b]. Counted FROM THE LEFT on an explicit arity switch, because the
+    # obvious shortcut — take the last three — reads `38:2::255:0:0:1` (red, plus a tolerance)
+    # as rgb(0, 0, 1), a confident black. Fewer than four arguments carries no colour at all:
+    # `38:2:1:2` would otherwise read its own mode digit as red.
+    private def self.truecolor_subparam(args : Array(String)) : Color?
+      rgb = case args.size
+            when 0, 1, 2, 3 then return nil
+            when 4          then args[1..3] # [2, r, g, b] — colour-space slot omitted
+            else                 args[2..4] # [2, cs, r, g, b, (tolerance…)]
+            end.map(&.to_i?)
+      return nil unless rgb.all? { |v| v }
+      Color.rgb(clamp255(rgb[0].as(Int32)), clamp255(rgb[1].as(Int32)), clamp255(rgb[2].as(Int32)))
     end
 
     private def self.clamp255(v : Int32) : Int32

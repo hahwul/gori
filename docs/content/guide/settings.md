@@ -58,7 +58,7 @@ Openers exist where a section needs more than a row of fields: the theme list, t
 | **Statusline** | Statusline on/off, Command, Interval (s), Timeout (s) |
 | **Reset** | Action: restore every setting to its factory default |
 
-Notifications fire on background results from the Miner, Fuzzer, Probe, and Discover. The [Statusline](/reference/config/#statusline) runs a shell command on an interval and renders its stdout as the bottom row.
+Notifications fire on background results from the Miner, Fuzzer, Probe, and Discover. The [Statusline](/reference/config/#statusline) runs a shell command on an interval and renders its stdout as the bottom row; the command reads a [JSON context](/reference/config/#statusline-context) describing the live session on stdin, and there are [ready-made examples](/reference/config/#statusline-examples) to paste into it.
 
 **Reset** is the whole file, not one section. `↵` (or `Ctrl-P` → **Settings: Reset**) asks, then puts `settings.json` back to a fresh install's state and applies it live: theme, keymap, tab bar, list and preview prefs, and the proxy bind. It also drops the data that lives in the same file: your global env values, hostname overrides, OAST provider tokens, saved decoder chains, and global rewriter and colormarker rules. Projects and their captures are untouched, and so are a project's own pinned bind and env.
 

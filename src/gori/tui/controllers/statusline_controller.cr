@@ -1,5 +1,6 @@
 require "json"
 require "../ansi"
+require "../jobs"
 require "../../bind_address"
 require "../../settings"
 
@@ -21,6 +22,27 @@ module Gori::Tui
     # alive) costs one short pause rather than wedging the worker.
     STATUS_GRACE = 200.milliseconds
 
+    # How long a child gets to act on the SIGTERM before it is killed outright.
+    TERM_GRACE = 300.milliseconds
+
+    # What one run produced: the row's raw text, and whether gori wrote that text rather
+    # than the script. The two have to stay told apart all the way to the render seam —
+    # a marker painted in the script's own colour reads as a line the script chose to
+    # print, which is the one thing it cannot be. `failed` is the whole reason this is a
+    # record and not a String: nothing downstream can recover it by inspecting the text
+    # (a script is free to print "⋯ (exit 3)" itself).
+    record Outcome, line : String, failed : Bool do
+      # The script spoke for itself.
+      def self.said(line : String) : Outcome
+        new(line, false)
+      end
+
+      # gori is speaking because the script could not.
+      def self.marker(line : String) : Outcome
+        new(line, true)
+      end
+    end
+
     # Run `command` via `/bin/sh -c`, feeding `stdin_json` on stdin, and return the
     # FIRST line of its stdout (styling still embedded). On timeout, failure or spawn
     # error, return a short marker instead of raising.
@@ -30,7 +52,7 @@ module Gori::Tui
     # pipe open), kill the child unless it has already been reaped, and reap it on a
     # detached fiber. This fiber never blocks on a bare `process.wait`, so a child still
     # writing more output can never wedge us.
-    def self.run(command : String, stdin_json : String, timeout_span : Time::Span) : String
+    def self.run(command : String, stdin_json : String, timeout_span : Time::Span) : Outcome
       process = Process.new("/bin/sh", ["-c", command],
         input: Process::Redirect::Pipe,
         output: Process::Redirect::Pipe,
@@ -52,12 +74,16 @@ module Gori::Tui
       end
 
       timed_out = false
+      # Whether the row about to be returned is GORI's text rather than the script's. Set
+      # on the two paths that write one — the timeout here, and the exit status below.
+      failed = false
       result =
         select
         when line = done.receive
           line
         when timeout(timeout_span)
           timed_out = true
+          failed = true
           "⋯ (timed out)"
         end
 
@@ -68,12 +94,12 @@ module Gori::Tui
       # nothing. stderr is discarded (draining a second pipe would need its own reader
       # fiber and its own cap), which leaves the status as the only evidence to show.
       #
-      # The wait is spawned HERE, not up front, and that ordering is load-bearing twice
-      # over: `Process#wait`'s own `ensure` closes `process.output` and releases the pid,
-      # so a wait racing the reader could swallow output that had no trailing newline, and
-      # a wait that won the race left the `terminate` below signalling a pid we no longer
-      # own. By this point the reader is finished with `output`, and `reaped` tells the
-      # teardown to keep its hands off an already-reaped child.
+      # The wait is spawned HERE, not up front, and that ordering is load-bearing:
+      # `Process#wait`'s own `ensure` closes `process.output`, so a wait racing the reader
+      # could swallow output that had no trailing newline. By this point the reader is
+      # finished with `output`. `reaped` then tells the teardown that this child's one and
+      # only `wait` has already been consumed — the pid it might otherwise signal is
+      # `signal_live`'s problem, not this ordering's.
       reaped = false
       status_ch = nil.as(Channel(Process::Status)?)
       if !timed_out && line.empty?
@@ -83,21 +109,71 @@ module Gori::Tui
         select
         when st = ch.receive
           reaped = true
-          line = exit_marker(st) unless st.success?
+          unless st.success?
+            line = exit_marker(st)
+            failed = true
+          end
         when timeout(STATUS_GRACE)
           # status not in yet — the fiber above is still in `wait` and will reap it
         end
       end
 
       output.close rescue nil # unblock the reader fiber if still in read()
-      unless reaped
-        process.terminate(graceful: false) rescue nil
-        # Exactly one `wait` per process, ever: only spawn one when the branch above did not.
-        spawn(name: "gori-statusline-reap") { process.wait rescue nil } if status_ch.nil?
-      end
-      line
+      reap_detached(process, status_ch) unless reaped
+      failed ? Outcome.marker(line) : Outcome.said(line)
     rescue File::NotFoundError | RuntimeError | IO::Error
-      "⋯ (statusline failed)"
+      Outcome.marker("⋯ (statusline failed)")
+    end
+
+    # Tear down a child we are done with: SIGTERM, a grace, then SIGKILL — and exactly one
+    # `wait` for the pid whichever way it goes. Detached, so the worker fiber is free for the
+    # next run while a stubborn child rides out the grace.
+    #
+    # SIGTERM FIRST, not the bare SIGKILL this used to send, and the reason is that gori
+    # cannot clean up after the script — only the script can. A `/bin/sh -c` child that
+    # forked anything of its own (`curl … &`, a pipeline, any command sh did not exec into)
+    # leaves those descendants running when sh dies: they are not in a group gori may signal
+    # (Crystal's `Process` has no `setpgid`, so the child shares GORI'S OWN process group, and
+    # signalling that group would kill gori), and there is no portable way to enumerate them.
+    # A trappable signal is the entire cleanup path such a script has, and SIGKILL denied it.
+    #
+    # It reaches the scripts it can reach, which turn out to be the right ones. POSIX defers a
+    # trap until the shell is between commands, so a trap around a FOREGROUND command never
+    # runs — but that script backgrounded nothing to clean up. `cmd & wait` IS interruptible,
+    # and is exactly the shape that leaves a descendant behind. The escalation below is what
+    # keeps the courtesy from becoming a second way to hang.
+    private def self.reap_detached(process : Process, status_ch : Channel(Process::Status)?) : Nil
+      spawn(name: "gori-statusline-reap") do
+        signal_live(process, graceful: true)
+        ch = status_ch
+        if ch.nil?
+          # Nobody is waiting on this pid yet — exactly one `wait` per process, ever, so
+          # spawn the only one it will get.
+          fresh = Channel(Process::Status).new(1)
+          ch = fresh
+          spawn(name: "gori-statusline-wait") { fresh.send(process.wait) rescue nil }
+        end
+        select
+        when ch.receive
+          # exited on its own, or took the TERM
+        when timeout(TERM_GRACE)
+          signal_live(process, graceful: false) # ignored the TERM → SIGKILL
+        end
+      end
+    end
+
+    # `terminate`, but only at a pid we still own. Crystal reaps every child in its SIGCHLD
+    # handler — `Process#wait` only reads the status back off a channel the handler closed —
+    # so a dead child's pid is free for the OS to hand to someone else the moment it exits,
+    # and `Process#terminate` signals `@pid` with no guard of its own. `terminated?` reads
+    # that same handler's bookkeeping (the closed channel), not a probe of the pid, which is
+    # what makes it safe to ask. Load-bearing for the SIGKILL above in particular: it fires a
+    # whole TERM_GRACE after the TERM, and an unguarded signal that late is a signal to
+    # whatever now holds the number.
+    private def self.signal_live(process : Process, *, graceful : Bool) : Nil
+      process.terminate(graceful: graceful) unless process.terminated?
+    rescue
+      # already gone, or never ours to signal
     end
 
     # The row shown for a run that produced nothing and failed. Short by necessity — it
@@ -144,15 +220,22 @@ module Gori::Tui
   # back through a latest-wins channel. Everything that touches Session/Store/Settings
   # happens on the main fiber (in `tick`); the worker only touches Process + channels.
   #
-  # INVARIANT (mirrors Jobs): @segments / @running / @last_run are mutated ONLY on the
-  # main fiber, from `tick`. The worker never touches them.
+  # INVARIANT (mirrors Jobs): @segments / @failed / @running / @last_run are mutated ONLY on
+  # the main fiber, from `tick`. The worker never touches them.
   class StatuslineController
     getter segments : Array(Ansi::Segment)
+    # Whether the row currently shows gori's own marker instead of the script's output.
+    # Read by the render seam, which paints the two differently — see Chrome.render_statusline.
+    getter? failed : Bool = false
     @last_spec : {String, Time::Span, Time::Span}
 
-    def initialize(@session : Gori::Session)
+    # `jobs` is the Runner's own job book, read (on the main fiber, at launch time only)
+    # for the context's `jobs` object. Handed in rather than reached for: it is Runner
+    # state, not Session state, and the same object the status bar's activity chip counts,
+    # so the row and the chip can never disagree about what is running.
+    def initialize(@session : Gori::Session, @jobs : Jobs)
       @work_ch = Channel({String, String, Time::Span}).new(1) # {command, ctx_json, timeout}
-      @result_ch = Channel(String).new(1)                     # latest-wins raw first line
+      @result_ch = Channel(Statusline::Outcome).new(1)        # latest-wins finished run
       @segments = [] of Ansi::Segment
       @rendered = nil.as(String?) # raw line the row currently shows (nil = nothing painted)
       @running = false            # a run is in flight (guards against overlapping launches)
@@ -183,6 +266,7 @@ module Gori::Tui
         changed = true unless @segments.empty?
         @segments = [] of Ansi::Segment
         @rendered = nil # so a re-enable repaints even if the output is unchanged
+        @failed = false # a cleared row is nobody's failure
         @last_run = nil
         @discard = true if @running
       end
@@ -236,19 +320,26 @@ module Gori::Tui
     # Returns true if the row changed. Runs on the main fiber — the only @segments writer.
     private def drain_result(apply : Bool) : Bool
       select
-      when line = @result_ch.receive
+      when outcome = @result_ch.receive
         @running = false
         if @discard # superseded command / turned off mid-run — this output is stale
           @discard = false
           return false
         end
         return false unless apply
+        line = outcome.line
         # Byte-identical to what the row already shows ⇒ NOT dirty. The render loop only
         # repaints when something reports dirty, so returning true unconditionally bought
         # a whole frame that painted not one different cell, once per interval, forever —
         # the exact thing ResourceMeter's idle-zero-CPU invariant exists to prevent.
-        return false if @rendered == line
+        #
+        # `failed` is part of that identity, not a free rider: the same seven characters
+        # mean different things depending on who wrote them, and they are drawn in
+        # different colours. A script that prints "⋯ (exit 3)" and then starts failing for
+        # real would otherwise keep the row in the script's colour forever.
+        return false if @rendered == line && @failed == outcome.failed
         @rendered = line
+        @failed = outcome.failed
         @segments = Ansi.parse(line)
         true
       else
@@ -286,7 +377,7 @@ module Gori::Tui
         msg = @work_ch.receive?
         break if msg.nil? # channel closed (stop) → exit
         cmd, ctx, to = msg
-        line = begin
+        outcome = begin
           Statusline.run(cmd, ctx, to)
         rescue ex
           # `Statusline.run` converts every failure it names into a marker of its own, so a raise
@@ -306,10 +397,10 @@ module Gori::Tui
             @last_error = signature
             ::Log.error(exception: ex) { "statusline command raised" }
           end
-          "⋯ (statusline error)"
+          Statusline::Outcome.marker("⋯ (statusline error)")
         end
         select
-        when @result_ch.send(line) # latest-wins
+        when @result_ch.send(outcome) # latest-wins
         else
           # main fiber hasn't drained the previous result yet — drop (never happens
           # while runs are serialized, but keeps the worker from ever blocking).
@@ -350,6 +441,55 @@ module Gori::Tui
           # Additive on purpose — `upstream` keeps its exact v1 meaning for existing scripts.
           j.field "upstream", Settings.effective_upstream_proxy
           j.field "upstream_rules", Settings.upstream_rules.size
+          # Everything below is the session's MODES — what gori is set to do to the next
+          # request, as opposed to what it has already captured. The context shipped with
+          # `project`/`flows`/`proxy` alone, which made the row strictly poorer than the
+          # top bar two rows above it: an operator could not write the one statusline that
+          # answers "is intercept still on?" or "is the sandbox blocking me?" — the exact
+          # questions a chip is up there for. Each field is read from the SAME source its
+          # chip renders from, so the row and the chip cannot disagree.
+          #
+          # Additive, and `version` stays 1: every field above keeps its exact meaning, so
+          # a script written against the original context reads identically.
+          scope = @session.scope
+          j.field "scope" do
+            j.object do
+              j.field "active", scope.active?
+              j.field "rules", scope.size
+              # The hard block gate. It gets its own field rather than riding `active`
+              # because the two are independent: the sandbox is what makes an out-of-scope
+              # destination fail instead of merely go unrecorded.
+              j.field "sandbox", scope.sandbox?
+            end
+          end
+          ic = @session.interceptor
+          j.field "intercept" do
+            j.object do
+              j.field "enabled", ic.enabled?
+              # Real clients are blocked on these. A queue that grows while the operator is
+              # on another tab is the single most useful number this row can carry.
+              j.field "queued", ic.pending_count
+              # `both` / `requestonly` / `responseonly` — the enum's own downcased name,
+              # byte-identical to the `direction` the intercept bridge already publishes
+              # to agents. One spelling for the machine contract, even where a prettier
+              # one exists.
+              j.field "direction", ic.direction.to_s.downcase
+            end
+          end
+          j.field "probe", @session.probe.mode.label
+          # Degraded to 0 rather than raised, the stance `Store#count` above already takes and
+          # for the same reason: this is a POLL reader on the render fiber, so a transient
+          # SQLITE_BUSY under a checkpoint would spend the tick-error budget on a row that
+          # corrects itself one interval later.
+          j.field "issues", (@session.store.count_issues rescue 0)
+          # The same book the status bar's activity chip counts, so "fuzzing 2" on the row
+          # and the spinner beside it are one fact. `label` is nil when nothing runs.
+          j.field "jobs" do
+            j.object do
+              j.field "running", @jobs.active.size
+              j.field "label", @jobs.activity_label
+            end
+          end
         end
       end
     end

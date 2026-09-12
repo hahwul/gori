@@ -164,7 +164,7 @@ module Gori::Tui
         "run a command and show its output at the very bottom — ←/→/space toggles",
         bool: true),
       Field.new("Command",
-        "shell command (/bin/sh -c) — receives a JSON context (project, capture, flows, proxy) on stdin"),
+        "shell command (/bin/sh -c) — a JSON context (project, proxy, scope, intercept, jobs…) arrives on stdin"),
       Field.new("Interval (s)",
         "how often to re-run the command — seconds (min 1)"),
       Field.new("Timeout (s)",
