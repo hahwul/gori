@@ -1073,9 +1073,16 @@ module Gori::Tui
     def issues_clear : Nil
       n = @host.session.store.count_issues
       return @host.status("issues: nothing to clear") if n <= 0
+      # Same split the per-issue delete confirm spells out, project-wide: `clear_issues` drops
+      # `evidence_issue_links` unqualified and leaves every `issue_evidence` row standing
+      # (#1039). Saying "frozen evidence goes too" claimed a byte deletion this wipe does not
+      # do — and the copies it names outlive it, orphaned but visible in the Evidence tab.
+      frozen = @host.session.store.count_evidence_links
+      frozen_note = frozen > 0 ? "\n#{frozen} frozen evidence link#{frozen == 1 ? " is" : "s are"} removed; " \
+                                 "the archived cop#{frozen == 1 ? "y stays" : "ies stay"} in the Evidence tab." : ""
       @host.confirm("CLEAR ISSUES",
         "Delete ALL #{n} issue#{n == 1 ? "" : "s"} for this project?\n" \
-        "Their notes, CVSS scores, evidence links and frozen evidence go too.\nThis can't be undone.",
+        "Their notes, CVSS scores and related links go too.#{frozen_note}\nThis can't be undone.",
         confirm_label: "clear", danger: true) do
         ok = @issues.clear(@host.session.store)
         @host.status(ok ? "issues cleared" : "issues NOT cleared (project busy) — every issue is still there")
