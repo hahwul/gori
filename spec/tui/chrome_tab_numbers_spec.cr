@@ -35,7 +35,7 @@ describe "Chrome tab-bar numbers" do
     Chrome.render_menu(Screen.new(backend), rect, active_tab: :history, focused: true,
       numbered: true)
     row = backend.row(0)
-    x = row.index(Chrome.more_label).not_nil!
+    x = row.index(Chrome::MORE_LABEL).not_nil!
     backend.fg_at(x, 0).should eq(Chrome.menu_number_ink)     # `0`, a step dimmer
     backend.fg_at(x + 1, 0).should eq(Chrome.menu_number_ink) # `:`, same run
     backend.fg_at(x + 2, 0).should eq(Theme.muted)            # `tabs`, the label half
@@ -45,7 +45,7 @@ describe "Chrome tab-bar numbers" do
     # `0:+12` counted a drawer of leftovers. `0` opens all twenty-one tabs, the nine on the bar
     # included, so the pill says what the key does rather than how many tabs are behind it —
     # and it no longer disappears when that count is zero.
-    Chrome.more_label.should eq("0:Tabs") # capitalised like the tabs it opens
+    Chrome::MORE_LABEL.should eq("0:Tabs") # capitalised like the tabs it opens
   end
 
   it "drops to one bold ink once the pill holds focus" do
@@ -55,7 +55,7 @@ describe "Chrome tab-bar numbers" do
     Chrome.render_menu(Screen.new(backend), rect, active_tab: :history, focused: true,
       numbered: true, more_focused: true)
     row = backend.row(0)
-    x = row.index(Chrome.more_label).not_nil!
+    x = row.index(Chrome::MORE_LABEL).not_nil!
     ink = Theme.ink_on(Theme.focus_gold)
     backend.fg_at(x, 0).should eq(ink)
     backend.fg_at(x + 2, 0).should eq(ink)

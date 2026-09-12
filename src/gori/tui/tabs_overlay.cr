@@ -63,10 +63,13 @@ module Gori::Tui
     end
 
     def hint : String
-      # "the top nine are the bar" is the whole model, so it rides in the hint rather than
-      # being something the operator has to infer from the numbers stopping. The `0` answer —
-      # "where does a tab go when it leaves the bar" — is on the seam itself, in place.
-      "↑/↓ select · ⇧K/⇧J move — the rows above the seam are the bar · space send across · r reset · ↵ save · esc cancel"
+      # `Chrome.render_status` TRUNCATES to the room left beside the status chips — about forty
+      # columns on an 80-column terminal — so a clause added at the front costs one at the
+      # back, and the ones at the back are `↵ save` and `esc cancel`. Two things therefore do
+      # not ride here: the model ("the rows above the seam are the bar"), which is on the seam
+      # itself in place; and `↑/↓ select`, which is what arrows do in every list in the app.
+      # What is left is the four keys that are particular to this card.
+      "⇧K/⇧J move · space across the seam · r reset · ↵ save · esc cancel"
     end
 
     # The row's slot number, or nil when the row is below the seam (or on an uncapped bar past
@@ -332,8 +335,11 @@ module Gori::Tui
     private def draw_seam(screen : Screen, box : Rect, py : Int32) : Nil
       screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), Theme.panel)
       Frame.tee_divider(screen, box, py)
-      label = " off the bar · 0 opens these "
-      screen.text(box.x + 3, py, label, Theme.muted, Theme.panel) if box.w > label.size + 6
+      # The `0` half is the half that must survive a narrow card: it is the answer to "where
+      # did the tab I just moved down go", and this seam is now the only place the editor
+      # says it. A card too narrow even for the short form keeps the bare rule.
+      label = [" off the bar · 0 opens these ", " 0 opens these "].find { |l| box.w > l.size + 6 }
+      screen.text(box.x + 3, py, label, Theme.muted, Theme.panel) if label
     end
 
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil

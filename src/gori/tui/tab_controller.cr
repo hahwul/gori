@@ -299,8 +299,8 @@ module Gori::Tui
     MARKER = '▎'
 
     # {icon rect, chips rect} for one chip row — the SINGLE source of both. Returned as a
-    # pair so no caller can narrow one without the other; `Chrome.more_button_rect` +
-    # `tabs_area` are the same pair one level up. `show: false` (a fixed or self-drawn strip)
+    # pair so no caller can narrow one without the other; `Chrome.menu_geometry`'s
+    # `{segments, more}` is the same pair one level up. `show: false` (a fixed or self-drawn strip)
     # gives {nil, row}, which is byte-for-byte the layout from before the affordance existed.
     #
     # The icon is dropped when it would not leave room for the FIRST VISIBLE chip plus the

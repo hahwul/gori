@@ -83,13 +83,28 @@ module Gori::Tui
     # Every whitespace-separated term must appear (case-insensitive); an all-digit term also
     # matches the row whose SLOT it is, so `0` then `3` is the long way round to `3` rather
     # than a query that finds nothing. Resets the cursor to the top.
+    #
+    # A row whose NAME matches sorts ahead of one that matched only on its summary, because a
+    # summary can carry another tab's name: Project's line is "targets, scope and project
+    # settings", and Project is row 1, so typing `target` used to select PROJECT and ↵ went
+    # there — the one query a reader is most likely to type for Target. Ranking is the fix
+    # rather than rewording the line, since the collision is structural: twenty-one summaries
+    # about one tool will keep naming each other's tabs.
     protected def refilter : Nil
       terms = query.downcase.split.map { |t| {t, (m = t.match(/\A(\d):?\z/)) ? m[1] : nil} }
-      @filtered = if terms.empty?
-                    @rows
-                  else
-                    @indexed.select { |(_, hay, slot)| terms.all? { |(t, n)| hay.includes?(t) || (n && n == slot) } }.map(&.first)
-                  end
+      if terms.empty?
+        @filtered = @rows
+      else
+        named = [] of Row
+        described = [] of Row
+        @indexed.each do |(row, hay, slot)|
+          next unless terms.all? { |(t, n)| hay.includes?(t) || (n && n == slot) }
+          # The name half of the haystack is everything before the summary — `label sym`.
+          by_name = terms.all? { |(t, n)| "#{row.label} #{row.sym}".downcase.includes?(t) || (n && n == slot) }
+          (by_name ? named : described) << row
+        end
+        @filtered = named + described
+      end
       @selected = 0
       @scroll = 0
     end

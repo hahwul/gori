@@ -74,7 +74,7 @@ module Gori::Tui
         # nine strips — which is what makes it worth a line here rather than nine.
         Item.new("space ▸ SUB-TABS", "the strip's actions from ANY pane — same letters on every tab"),
         Item.new("^1-9", "sub-tab N — the ⇧1-9 alias for terminals that deliver Ctrl+digit"),
-        Item.new("Settings: Tabs", "show/hide + reorder the nine slots (a tenth ✓ is refused)"),
+        Item.new("Settings: Tabs", "one list — ⇧K/⇧J move a row, and the rows above the seam are the bar"),
         Item.new("esc", "pop back to the tab bar"),
       ]},
       {"MOUSE", [

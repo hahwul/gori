@@ -330,10 +330,6 @@ module Gori::Tui
     # the pill vanish at zero, which left a working key with nothing on screen pointing at it.
     MORE_LABEL = "0:Tabs"
 
-    def self.more_label : String
-      MORE_LABEL
-    end
-
     # The gap between the last tab and the `0` stop: one column wider than the gap between two
     # tabs. The stop is not a tenth slot, and on a row where everything else is spaced by one
     # column, that extra column is the whole of what says so.
@@ -707,18 +703,27 @@ module Gori::Tui
       # 160, 87 at 200, and a lone pill out at the far edge reading as a stray island. One
       # anchor instead — the stop sits just past the last tab, so the order `→` walks and the
       # order the eye reads are the same one.
-      segs, start, tabs_end = pack_segments(rect, tabs, labels, widths, active_idx)
+      #
+      # Where it lands is decided by ARITHMETIC, before anything is packed: `pack_segments`
+      # lays the strip out for real, and asking it first and then re-asking it against a
+      # narrower area would pack the row twice on every frame — which is the common case, not
+      # the rare one, since a standard 80-column terminal cannot fit nine tabs beside the
+      # stop. `full_end` is where the last segment would end with the whole row to itself
+      # (each segment plus its one-column gap), so the test below is the same one the packer
+      # would have answered.
+      full_end = rect.x + widths.sum + tabs.size
+      area = rect
       more = nil
-      if start == 0 && segs.size == tabs.size && tabs_end + STOP_GAP + pill_w <= rect.right
-        more = Rect.new(tabs_end + STOP_GAP, rect.y, pill_w, 1)
+      if full_end + STOP_GAP + pill_w <= rect.right
+        more = Rect.new(full_end + STOP_GAP, rect.y, pill_w, 1)
       elsif (px = rect.right - pill_w) >= rect.x + 1
         # The strip does not fit beside it, so the stop pins to the right edge and the tabs
         # take what is left — the old geometry, and the only shape a narrow row can hold.
         # (No room even for that: no stop is drawn, and `0` still works.)
         more = Rect.new(px, rect.y, pill_w, 1)
         area = Rect.new(rect.x, rect.y, {px - 1 - rect.x, 0}.max, 1)
-        segs, start, _ = pack_segments(area, tabs, labels, widths, active_idx)
       end
+      segs, start, _ = pack_segments(area, tabs, labels, widths, active_idx)
 
       # The free run past the stop — RESERVED, not spare. Nothing draws here yet; it is where
       # a readout that is not a tab would go (or the top bar's ⌘, if the palette key ever wants

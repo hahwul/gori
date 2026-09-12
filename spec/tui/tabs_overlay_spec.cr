@@ -155,6 +155,28 @@ describe TabsOverlay do
     o.row_at(box, box.x + 5, box.y + 2 + on_bar + 1).should eq(on_bar) # first row below it
   end
 
+  # `Chrome.render_status` truncates the hint to whatever the status chips leave it, so a
+  # clause added at the front costs one at the back — and the ones at the back are `↵ save`
+  # and `esc cancel`. No hint in the app survives an 80-column row whole; the bound here just
+  # keeps this card from being the one that spends the most columns before reaching its keys.
+  it "keeps the hint inside the width the status bar will draw" do
+    Screen.display_width(TabsOverlay.new.hint).should be <= 68
+  end
+
+  # The seam is the only place the editor answers "where did the tab I just moved down go",
+  # so the `0` half of its label is the half that has to survive a narrow card.
+  it "keeps `0` on the seam when the card is too narrow for the whole label" do
+    o = TabsOverlay.new
+    area = Rect.new(0, 0, 38, 40)
+    box = o.overlay_box(area).not_nil!
+    box.w.should be < 36 # too narrow for " off the bar · 0 opens these "
+    backend = MemoryBackend.new(area.w, area.h)
+    o.render(Screen.new(backend), area)
+    seam = backend.row(box.y + 2 + o.to_prefs.count { |(_, vis)| vis })
+    seam.should contain("0 opens these")
+    seam.should_not contain("off the bar")
+  end
+
   it "does not offer Evidence before the project has its first snapshot" do
     unavailable = TabsOverlay.new(false)
     available = TabsOverlay.new(true)

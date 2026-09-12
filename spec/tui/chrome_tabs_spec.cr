@@ -204,8 +204,8 @@ describe "Chrome.menu_geometry" do
     last = geo.segments.last[1]
     mb = geo.more.not_nil!
     mb.x.should eq(last.right + Chrome::STOP_GAP)
-    mb.w.should eq(Chrome.more_label.size + 2) # padded pill, like a tab segment
-    mb.right.should be < rect.right            # …and nowhere near the far edge
+    mb.w.should eq(Chrome::MORE_LABEL.size + 2) # padded pill, like a tab segment
+    mb.right.should be < rect.right             # …and nowhere near the far edge
   end
 
   # The free run past the stop is RESERVED, not spare: it comes back as a rect so whoever

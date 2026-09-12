@@ -70,6 +70,30 @@ describe TabGotoPicker do
     picker.selected_sym.should eq(:decoder) # `hash` appears only in Decoder's line
   end
 
+  # A summary can carry another tab's name — Project's line is "targets, scope and project
+  # settings" and Project is row 1 — so folding summaries into the haystack made `target`
+  # select PROJECT, and ↵ went there. The query a reader is most likely to type for Target.
+  it "puts a name match ahead of a row that only matched on its summary" do
+    # NOT `rows` — an assignment inside a spec block rewrites the enclosing local, and the
+    # fixture above is shared with every example after this one.
+    pair = [
+      TabGotoPicker::Row.new(:project, "Project", 1, Chrome.tab_summary(:project)),
+      TabGotoPicker::Row.new(:target, "Target", 2, Chrome.tab_summary(:target)),
+    ]
+    picker = TabGotoPicker.new(pair)
+    "target".each_char { |c| picker.query_char(c) }
+    picker.entry_count.should eq(2) # Project still matches — it is just not first
+    picker.selected_sym.should eq(:target)
+    # …and the same for the prefixes on the way there, which is what typing looks like. `t`
+    # alone is left out on purpose: both NAMES carry it, so Project leading is the bar order
+    # answering, not the summary.
+    %w[ta tar targ].each do |q|
+      p2 = TabGotoPicker.new(pair)
+      q.each_char { |c| p2.query_char(c) }
+      p2.selected_sym.should eq(:target)
+    end
+  end
+
   it "still answers to a slot digit" do
     picker = TabGotoPicker.new(rows)
     picker.query_char('2')
