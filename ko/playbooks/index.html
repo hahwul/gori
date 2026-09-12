@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="하나의 gori 워크플로우를 처음부터 끝까지 따라 실행하는 실습 문서 — 스코프, 매핑, 인터셉트, 퍼징, 리포트까지 체크포인트를 하나씩 밟습니다.">
+  <title>플레이북 - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="플레이북">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/playbooks/">
+  <meta property="og:description" content="하나의 gori 워크플로우를 처음부터 끝까지 따라 실행하는 실습 문서 — 스코프, 매핑, 인터셉트, 퍼징, 리포트까지 체크포인트를 하나씩 밟습니다.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="플레이북">
+  <meta name="twitter:description" content="하나의 gori 워크플로우를 처음부터 끝까지 따라 실행하는 실습 문서 — 스코프, 매핑, 인터셉트, 퍼징, 리포트까지 체크포인트를 하나씩 밟습니다.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/playbooks/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"CollectionPage","name":"플레이북","url":"https://gori.hahwul.com/ko/playbooks/","description":"하나의 gori 워크플로우를 처음부터 끝까지 따라 실행하는 실습 문서 — 스코프, 매핑, 인터셉트, 퍼징, 리포트까지 체크포인트를 하나씩 밟습니다."}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  <link rel="preload" href="https://gori.hahwul.com/fonts/charis-sil-400.woff2" as="font" type="font/woff2" crossorigin>
+  
+  
+  
+</head>
+<body class="is-doc is-book" data-section="playbooks">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/playbooks/" class="active" aria-current="true">플레이북</a>
+    <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/playbooks/" class="active" aria-current="true">플레이북</a>
+      <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/playbooks/" hreflang="en" lang="en" aria-label="EN: English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/playbooks/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+  <a role="menuitem" href="https://gori.hahwul.com/ko/reference/brand/">브랜드 키트 →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<main id="main" class="book-main">
+  <section class="book-opening" aria-labelledby="book-title">
+    <div class="book-intro">
+      <p class="doc-kicker">플레이북 / 실전을 위한 안내서</p>
+      <h1 id="book-title">흐름 속으로.</h1>
+      <p class="book-subtitle">요청 하나씩, 손으로 익히는 보안 테스트.</p>
+      <p class="book-description">직접 따라 하는 열두 장의 실습. 스코프를 정하고, 트래픽을 따라가고, 가설을 검증하고, 발견한 것을 증거로 만드세요.</p>
+      <div class="book-actions"><a class="button button-primary" href="https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/">첫 장 읽기 <span aria-hidden="true">→</span></a><a href="#chapters">목차 살펴보기 <span aria-hidden="true">↓</span></a></div>
+    </div>
+    
+    
+    <a class="book-object" href="https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/">
+      <div class="book-spine" aria-hidden="true">GORI / PLAYBOOKS</div>
+      <div class="book-front">
+        <span class="cover-edition">플레이북</span>
+        <strong class="cover-title" lang="en">The gori<br>field guide.</strong>
+        <span class="cover-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')"></span>
+        <span class="cover-foot">캡처부터 리포트까지<span aria-hidden="true">↗</span></span>
+      </div>
+    </a>
+    
+  </section>
+  <section class="book-contents" id="chapters" aria-labelledby="contents-title">
+    <div class="book-contents-intro"><p class="doc-kicker">네 개의 부 / 열두 장의 실습</p><h2 id="contents-title">목차</h2><p>처음부터 읽어도, 필요한 장부터 펼쳐도 좋습니다. 각 실습의 체크포인트에서 지금까지의 결과를 확인하세요.</p><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">시작하기 →</a></div>
+    <div class="book-parts">
+    
+    
+    
+    <section class="book-part"><h3>기초</h3><ol>
+      <li value="1"><a href="https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/"><span class="chapter-number" aria-hidden="true">01</span><span><strong>엔게이지먼트 준비</strong><span class="chapter-description">프로젝트를 만들고, 스코프를 그리고, 테스트를 샌드박스 안에 가둡니다. 모든 액티브 도구가 발동 전에 확인하는 가드레일입니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    
+    
+    
+      <li value="2"><a href="https://gori.hahwul.com/ko/playbooks/map-the-attack-surface/"><span class="chapter-number" aria-hidden="true">02</span><span><strong>공격면 매핑</strong><span class="chapter-description">스코프가 걸린 캡처를 host→path 트리로 접고, Discover로 한 번도 클릭하지 않은 엔드포인트를 드러냅니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    </ol></section>
+    
+    <section class="book-part"><h3>수동 루프</h3><ol>
+      <li value="3"><a href="https://gori.hahwul.com/ko/playbooks/intercept-and-modify/"><span class="chapter-number" aria-hidden="true">03</span><span><strong>플로우 중 가로채기 및 수정</strong><span class="chapter-description">요청을 흐름 중간에 붙잡아 바꾸고 계속 흘려보낸 뒤, 그 변경을 규칙으로 고정합니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    
+    
+    
+      <li value="4"><a href="https://gori.hahwul.com/ko/playbooks/fuzz-a-parameter/"><span class="chapter-number" aria-hidden="true">04</span><span><strong>파라미터 퍼징</strong><span class="chapter-description">캡처한 요청의 한 부분을 표시하고, 워드리스트를 던지고, 튀는 응답을 읽어 냅니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    
+    
+    
+      <li value="5"><a href="https://gori.hahwul.com/ko/playbooks/carry-a-session/"><span class="chapter-number" aria-hidden="true">05</span><span><strong>세션 유지</strong><span class="chapter-description">한 번 로그인해 토큰을 캡처하고, 이후의 모든 요청을 인증된 사용자로 재전송합니다. 손으로도, 헤드리스로도.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    </ol></section>
+    
+    <section class="book-part"><h3>워크벤치</h3><ol>
+      <li value="6"><a href="https://gori.hahwul.com/ko/playbooks/decode-and-transform/"><span class="chapter-number" aria-hidden="true">06</span><span><strong>데이터 디코드와 변환</strong><span class="chapter-description">변환기를 파이프라인으로 이어 붙여(디코드하고, 또 디코드하고, 해시하고) 각 단계의 출력을 지켜본 뒤, 재사용하도록 저장합니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    
+    
+    
+      <li value="7"><a href="https://gori.hahwul.com/ko/playbooks/attack-a-jwt/"><span class="chapter-number" aria-hidden="true">07</span><span><strong>JWT 공격</strong><span class="chapter-description">JSON Web Token을 디코드하고, 클레임을 변조하고, 서버가 실제로 서명을 검증하는지 시험합니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    
+    
+    
+      <li value="8"><a href="https://gori.hahwul.com/ko/playbooks/crack-and-forge-cookies/"><span class="chapter-number" aria-hidden="true">08</span><span><strong>세션 쿠키 크랙과 위조</strong><span class="chapter-description">서명된 Flask, Rack, Django 쿠키를 읽고, 그것을 서명하는 비밀키를 복구하고, 직접 만들어 냅니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    
+    
+    
+      <li value="9"><a href="https://gori.hahwul.com/ko/playbooks/grade-token-randomness/"><span class="chapter-number" aria-hidden="true">09</span><span><strong>토큰 랜덤성 평가</strong><span class="chapter-description">세션 토큰 수백 개를 수집하고 Sequencer가 그것이 얼마나 예측 가능한지 채점하게 합니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    
+    
+    
+      <li value="10"><a href="https://gori.hahwul.com/ko/playbooks/confirm-blind-vulns-oast/"><span class="chapter-number" aria-hidden="true">10</span><span><strong>OAST로 블라인드 취약점 확인</strong><span class="chapter-description">어떤 버그는 응답에 절대 드러나지 않습니다. 서버가 나에게 연결하게 만들어 증명하고, 그 콜백을 잡으세요.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    </ol></section>
+    
+    <section class="book-part"><h3>마무리</h3><ol>
+      <li value="11"><a href="https://gori.hahwul.com/ko/playbooks/triage-and-report/"><span class="chapter-number" aria-hidden="true">11</span><span><strong>트리아지와 리포트</strong><span class="chapter-description">흩어진 발견들을 이슈로 모으고, diff로 수정을 증명하고, 동료가 읽을 수 있는 리포트로 내보냅니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    
+    
+    
+      <li value="12"><a href="https://gori.hahwul.com/ko/playbooks/run-an-ai-co-pilot/"><span class="chapter-number" aria-hidden="true">12</span><span><strong>AI 코파일럿 세션 실행</strong><span class="chapter-description">MCP로 같은 프로젝트에 에이전트를 붙이고 중요한 동작을 드러낸 채 사용합니다. 인텔리전스는 설계상 도구 바깥에 있습니다.</span></span><span class="chapter-arrow" aria-hidden="true">↗</span></a></li>
+    </ol></section>
+    
+    </div>
+  </section>
+  <div class="book-afterword docs-main"><article class="document-body"><h2 id="topics">시작하기 전에</h2>
+<p>플레이북은 실제 트래픽을 보냅니다. 테스트 권한이 있는 대상만 gori로 다루고, 그 대상을 <a href="/ko/guide/proxy/#scope">스코프</a> 안에 두세요. 아직 요청을 캡처하고 재전송해 보지 않았다면 먼저 10분짜리 <a href="/ko/getting-started/quick-start/">Quick Start</a>를 따라 하세요.</p>
+<h2 id="이-실전-가이드-사용법">이 실전 가이드 사용법</h2>
+<p>기초부터 시작해 장 순서대로 읽거나, 지금 하려는 작업에 맞는 Part를 펼치세요. 모든 절차는 다음으로 넘어가기 전에 보여야 할 정확한 상태인 <strong>체크포인트</strong>로 끝납니다. 체크포인트를 통과하지 못했다면 그 자리에서 멈추고, 연결된 가이드에서 도구의 동작을 확인한 뒤 계속하세요.</p>
+<h2 id="next-steps">레퍼런스를 곁에 두기</h2>
+<p><a href="/ko/guide/">Guide</a>에서는 각 워크벤치의 동작을 깊이 있게 설명하고, <a href="/ko/reference/">Reference</a>에서는 정확한 CLI 명령, 설정 키, 쿼리 언어 문법을 제공합니다.</p>
+</article></div>
+</main>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>

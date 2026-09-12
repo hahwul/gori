@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="An extra row at the bottom of the TUI, filled by a shell command of your own.">
+  <title>Statusline - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Statusline">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/statusline/">
+  <meta property="og:description" content="An extra row at the bottom of the TUI, filled by a shell command of your own.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Statusline">
+  <meta name="twitter:description" content="An extra row at the bottom of the TUI, filled by a shell command of your own.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/guide/statusline/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Statusline","url":"https://gori.hahwul.com/guide/statusline/","description":"An extra row at the bottom of the TUI, filled by a shell command of your own."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Statusline"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/statusline/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/statusline/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/statusline/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/statusline/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    <nav class="manual-nav" aria-label="Documentation">
+      <span class="manual-nav-label">Documentation</span>
+
+      
+      <details class="nav-group nav-section">
+        <summary>Getting Started</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <section class="nav-section guide-navigation" aria-labelledby="guide-navigation-title">
+        <h2 id="guide-navigation-title">Guide</h2>
+        <a class="nav-overview" href="https://gori.hahwul.com/guide/">Overview</a>
+
+        
+        
+        
+        
+        <details class="nav-group">
+          <summary>Core</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Workbenches</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/cookie/">Cookie</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/authorize/">Authorize</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Automation</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/scripting/">Scripting</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group" open>
+          <summary>Customize</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/statusline/" class="active" aria-current="page">Statusline</a></li>
+        </ul></details>
+        
+      </section>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/playbooks/">
+        <span>The gori field guide</span>
+        <strong>Playbooks →</strong>
+      </a>
+      
+
+      
+      <details class="nav-group nav-section">
+        <summary>Reference</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/brand/">Brand Kit</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/guide/">Guide</a>
+      <span aria-hidden="true">/</span><span>Customize</span>
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">Guide</p>
+      <h1>Statusline</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>The <strong>statusline</strong> is an opt-in row at the very bottom of the TUI. gori runs a shell command on an interval and renders its stdout as that row — a status bar you write yourself, inspired by Claude Code's status line. It ships off, and the <code>statusline</code> section stays out of <code>settings.json</code> until you change something.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/statusline.svg" alt="gori History tab with a statusline row along the very bottom, below the status bar, reading: token 58m left, then 1 times 5xx in red, then todo 2 and the text of the first unchecked task">
+  <figcaption>The <strong>statusline</strong> is the last row, under the status bar. This one is the <a href="#script">script below</a>: how long the token under test has, that the target has thrown a 5xx, and what is still on the list — none of which the chrome above it can say.</figcaption>
+</figure>
+<h2 id="turning-it-on">Turning it on</h2>
+<p>Open Preferences with <code>Ctrl-,</code>, go to <strong>General</strong>, and the <strong>Statusline</strong> rows are there: <code>Enabled</code>, the <code>Command</code> field, and the <code>Interval</code> and <code>Timeout</code> seconds. Type a command into the field and the row appears under the status bar.</p>
+<p>The same thing in <code>settings.json</code>:</p>
+<pre><code class="language-json hljs">{
+  &quot;statusline&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;command&quot;: &quot;date '+%H:%M'&quot;,
+    &quot;interval&quot;: 3,
+    &quot;timeout&quot;: 10
+  }
+}
+</code></pre>
+<p>That is a clock: the shape is the point, and what belongs in <code>command</code> instead is the rest of this page.</p>
+<p>Every key, its default and its exact meaning: <a href="/reference/config/#statusline"><code>statusline</code> in the configuration reference</a>.</p>
+<p>Three things worth knowing before you write one:</p>
+<ul>
+<li><strong>Only the first line of stdout is used</strong>, truncated to the terminal width. A script that prints a paragraph draws its first line and nothing else.</li>
+<li><strong>ANSI/SGR colour escapes are honoured</strong> — 16-colour, 256-colour and truecolor, plus bold, underline and friends — so the row can be coloured segments rather than one flat string.</li>
+<li><strong>Edits take effect immediately.</strong> Saving a new <code>command</code>, <code>interval</code> or <code>timeout</code> re-runs the command on the next frame instead of waiting out the current interval.</li>
+</ul>
+<p>It never blocks the UI: runs happen off the draw path, and they never overlap — gori launches the next one only after the previous has finished.</p>
+<h2 id="presets">Presets</h2>
+<p>The top bar already carries what gori knows about itself: the project, capture state, the
+address it is bound to, the scan mode. A statusline earns its row by saying what the bar
+cannot — something from outside gori, or something gori holds but does not count for you.</p>
+<p>Each of these is one line and goes straight into <code>command</code>, because the settings form's
+field is one line too. <code>\u001b</code> is how <code>jq</code> spells the escape character; the colours are
+optional. Under each command is the row it actually produced.</p>
+<figure class="preset-card">
+<figcaption class="preset-card-title">How long the token you are testing with has left</figcaption>
+  <div class="preset-card-config"><pre><code class="language-sh">jq -rn --argjson exp &quot;$(gori run jwt &quot;$(cat &quot;${GORI_HOME:-$HOME/.gori}/token.jwt&quot;)&quot; --format json | jq .payload.exp)&quot; '(($exp - now) / 60 | floor) as $m | if $m &lt; 5 then &quot;\u001b[31m⚠ token \($m)m left\u001b[0m&quot; else &quot;\u001b[32m●\u001b[0m token \($m)m left&quot; end'
+</code></pre>
+</div>
+  <img class="preset-card-shot" src="/images/tui/statusline-token.svg" alt="A statusline row: a green dot, then the words token 58m left">
+  <p class="preset-card-note">Keep the bearer token under test in a file and the row counts it down, turning red under five minutes — before a sweep starts coming back 401 and you spend ten minutes debugging the wrong thing. Any JWT tool would do here; gori has one.</p>
+</figure>
+<figure class="preset-card">
+<figcaption class="preset-card-title">Whether the target has started answering 5xx</figcaption>
+  <div class="preset-card-config"><pre><code class="language-sh">p=$(jq -r .project); gori run history --project &quot;$p&quot; -q 'status:&gt;=500' --format json 2&gt;/dev/null | jq -rs 'length | if . == 0 then &quot;&quot; else &quot;\u001b[31m\(.) × 5xx\u001b[0m&quot; end'
+</code></pre>
+</div>
+  <img class="preset-card-shot" src="/images/tui/statusline-errors.svg" alt="A statusline row in red: 1 × 5xx">
+  <p class="preset-card-note">A History query on a timer. It asks the whole project, not the rows History happens to be filtered to, and it prints nothing while the target is healthy — so the row appears the moment you break something.</p>
+</figure>
+<figure class="preset-card">
+<figcaption class="preset-card-title">What is still unchecked in your notes</figcaption>
+  <div class="preset-card-config"><pre><code class="language-sh">p=$(jq -r .project); gori run notes --all --project &quot;$p&quot; | awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf &quot;todo %d · %s&quot;, n, first }'
+</code></pre>
+</div>
+  <img class="preset-card-shot" src="/images/tui/statusline-todo.svg" alt="A statusline row: todo 2, then the text of the first unchecked task in the project notes">
+  <p class="preset-card-note">The `- [ ]` items in the project&#39;s notes, counted, with the first one spelled out. Your checklist stays in front of you instead of in a tab you have to go and open.</p>
+</figure>
+<p>Everything in <a href="#context">the context</a> is fair game too — <code>\(.flows)</code>, <code>\(.issues)</code>, the
+mode flags — but read the top bar first: a segment that repeats a chip costs you a row and
+tells you nothing. The shape that pays is the one above, gori's own data crossed with
+something gori has no way to know:</p>
+<pre><code class="language-sh hljs"># The project, and the branch you are testing it from.
+printf '%s · %s' &quot;$(jq -r .project)&quot; &quot;$(git branch --show-current 2&gt;/dev/null)&quot;
+</code></pre>
+<h2 id="script">When one line is not enough</h2>
+<p>Past a segment or two, <code>command</code> stops being a field you type into and becomes a script you
+keep. Point it at one:</p>
+<pre><code class="language-json hljs">{
+  &quot;statusline&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;command&quot;: &quot;sh \&quot;${GORI_HOME:-$HOME/.gori}/statusline.sh\&quot;&quot;,
+    &quot;interval&quot;: 5
+  }
+}
+</code></pre>
+<pre><code class="language-sh hljs">#!/bin/sh
+# statusline.sh — one row: how long the token has, whether the target is erroring,
+# and what is still unchecked. The context arrives on stdin, so read it once.
+ctx=$(cat)
+project=$(printf '%s' &quot;$ctx&quot; | jq -r .project)
+
+token=$(jq -rn --argjson exp &quot;$(gori run jwt &quot;$(cat &quot;${GORI_HOME:-$HOME/.gori}/token.jwt&quot;)&quot; --format json | jq .payload.exp)&quot; \
+  '(($exp - now) / 60 | floor) as $m | if $m &lt; 5 then &quot;\u001b[31m⚠ token \($m)m left\u001b[0m&quot; else &quot;\u001b[32m●\u001b[0m token \($m)m left&quot; end')
+errors=$(gori run history --project &quot;$project&quot; -q 'status:&gt;=500' --format json 2&gt;/dev/null |
+  jq -rs 'length | if . == 0 then &quot;&quot; else &quot;\u001b[31m\(.) × 5xx\u001b[0m&quot; end')
+todo=$(gori run notes --all --project &quot;$project&quot; |
+  awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf &quot;todo %d · %s&quot;, n, first }')
+
+printf '%s' &quot;$token&quot;
+[ -n &quot;$errors&quot; ] &amp;&amp; printf '   %s' &quot;$errors&quot;
+[ -n &quot;$todo&quot; ] &amp;&amp; printf '   %s' &quot;$todo&quot;
+printf '\n'
+</code></pre>
+<p>That is the row in the shot at the top of this page: the three presets above, joined, with
+each part printed only when it has something to say. Two things make it work — the context is
+read <strong>once</strong> into <code>$ctx</code>, because stdin is a pipe (see <a href="#context">above</a>), and the last
+statement is a plain <code>printf</code>, so a quiet run still exits 0 rather than reporting <code>⋯ (exit 1)</code>.</p>
+<p>Give it <code>interval: 5</code> or more: the script spawns three short-lived processes per run, which is
+nothing next to a browser but is not worth doing every second.</p>
+<h2 id="context">The context on stdin</h2>
+<p>Each run receives a JSON context on stdin describing the live session, so scripts can display proxy state without querying gori:</p>
+<pre><code class="language-json hljs">{
+  &quot;version&quot;: 1,
+  &quot;project&quot;: &quot;acme&quot;,
+  &quot;capturing&quot;: true,
+  &quot;flows&quot;: 1234,
+  &quot;proxy&quot;: { &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 8070, &quot;addr&quot;: &quot;127.0.0.1:8070&quot; },
+  &quot;upstream&quot;: &quot;&quot;,
+  &quot;upstream_rules&quot;: 0,
+  &quot;scope&quot;: { &quot;active&quot;: true, &quot;rules&quot;: 2, &quot;sandbox&quot;: false },
+  &quot;intercept&quot;: { &quot;enabled&quot;: false, &quot;queued&quot;: 0, &quot;direction&quot;: &quot;both&quot; },
+  &quot;probe&quot;: &quot;passive&quot;,
+  &quot;issues&quot;: 7,
+  &quot;jobs&quot;: { &quot;running&quot;: 1, &quot;label&quot;: &quot;fuzzing 1&quot; }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>Context schema version (currently <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>project</code></td>
+<td>string</td>
+<td>Active project name</td>
+</tr>
+<tr>
+<td><code>capturing</code></td>
+<td>bool</td>
+<td>Whether the proxy is currently capturing</td>
+</tr>
+<tr>
+<td><code>flows</code></td>
+<td>integer</td>
+<td>Number of captured flows</td>
+</tr>
+<tr>
+<td><code>proxy.host</code> / <code>proxy.port</code> / <code>proxy.addr</code></td>
+<td>string / integer / string</td>
+<td>The address the proxy is actually listening on</td>
+</tr>
+<tr>
+<td><code>upstream</code></td>
+<td>string</td>
+<td>The <strong>catch-all</strong> upstream proxy address/URI, or empty when connecting directly. A destination matched by an <a href="/reference/config/#upstream-rules">upstream rule</a> routes elsewhere; this field does not reflect that</td>
+</tr>
+<tr>
+<td><code>upstream_rules</code></td>
+<td>integer</td>
+<td>Number of <a href="/reference/config/#upstream-rules">upstream rules</a> in effect. Non-zero means routing is per-destination and <code>upstream</code> alone does not describe where traffic goes</td>
+</tr>
+<tr>
+<td><code>scope.active</code> / <code>scope.rules</code></td>
+<td>bool / integer</td>
+<td>Whether <a href="/guide/proxy/#scope">scope</a> filtering is actually in force — the lens is on <strong>and</strong> at least one rule exists — and how many rules there are</td>
+</tr>
+<tr>
+<td><code>scope.sandbox</code></td>
+<td>bool</td>
+<td>Whether the <a href="/guide/proxy/#sandbox">Sandbox</a> is blocking out-of-scope destinations outright, rather than merely not recording them</td>
+</tr>
+<tr>
+<td><code>intercept.enabled</code></td>
+<td>bool</td>
+<td>Whether catch is on. Real clients are held while it is</td>
+</tr>
+<tr>
+<td><code>intercept.queued</code></td>
+<td>integer</td>
+<td>Messages waiting for a decision right now</td>
+</tr>
+<tr>
+<td><code>intercept.direction</code></td>
+<td>string</td>
+<td><code>both</code>, <code>requestonly</code> or <code>responseonly</code> — which leg is caught</td>
+</tr>
+<tr>
+<td><code>probe</code></td>
+<td>string</td>
+<td>The <a href="/guide/scanning/#probe-the-scanner">scanner</a> mode: <code>off</code>, <code>passive</code>, <code>active</code> or <code>aggressive</code></td>
+</tr>
+<tr>
+<td><code>issues</code></td>
+<td>integer</td>
+<td>Issues recorded in this project</td>
+</tr>
+<tr>
+<td><code>jobs.running</code></td>
+<td>integer</td>
+<td>Background jobs in flight (fuzz, mine, discover, …) — the same book the activity chip counts, so an in-flight Repeater send is not one</td>
+</tr>
+<tr>
+<td><code>jobs.label</code></td>
+<td>string | null</td>
+<td>What the status bar&#39;s activity chip says, e.g. <code>&quot;fuzzing 1&quot;</code>; <code>null</code> when nothing is running</td>
+</tr>
+</tbody>
+</table>
+<p>Everything from <code>scope</code> down describes what gori is <em>set to do next</em> rather than what it has already captured — the same facts the top bar's chips carry, so a statusline can answer &quot;is intercept still on?&quot; without you looking up. The fields are additive and <code>version</code> stays <code>1</code>: a script written against an earlier context reads identically.</p>
+<p><strong>stdin is read once.</strong> It is a pipe, not a file, so the first command that consumes it gets everything and the second gets nothing — <code>&quot;$(jq -r .project)&quot; &quot;$(jq -r .flows)&quot;</code> silently prints an empty flow count. Read the whole context with one <code>jq</code>, as the presets above do, or capture it first:</p>
+<pre><code class="language-sh hljs">ctx=$(cat); printf '%s · %s flows' &quot;$(echo &quot;$ctx&quot; | jq -r .project)&quot; &quot;$(echo &quot;$ctx&quot; | jq -r .flows)&quot;
+</code></pre>
+<h2 id="failures">When the command fails</h2>
+<p>A command that fails without printing anything reports its exit status instead of leaving the row blank: <code>⋯ (exit 127)</code> for a command that was not found, <code>⋯ (killed)</code> for one a signal ended. A run that overruns <code>timeout</code> is terminated and the row reads <code>⋯ (timed out)</code>. A command that exits cleanly having printed nothing leaves the row empty, which is a legitimate thing for a script to do. stderr is discarded either way.</p>
+<p>Every one of these markers is drawn in the caution colour rather than in body text, so a statusline that has stopped working never reads as one reporting bad news.</p>
+<p><code>timeout</code> is deliberately separate from <code>interval</code>. Because runs never overlap, a script slower than <code>interval</code> simply refreshes as fast as it can rather than being killed on every run; only <code>timeout</code> ends one.</p>
+<p>A command that backgrounds work (<code>curl … &amp;</code>) must clean up after itself: gori kills the <code>/bin/sh</code> it started, and cannot reach anything that shell forked — it shares gori's own process group, so signalling the group would take gori down with it. A timed-out run is sent <code>SIGTERM</code> before <code>SIGKILL</code>, so a <code>trap … TERM</code> around <code>cmd &amp; wait</code> gets to tidy up; the simpler answer is to bound the command itself (<code>curl --max-time 2</code>, <code>timeout 2 …</code>).</p>
+<h2 id="where-else-a-command-can-run">Where else a command can run</h2>
+<p>The statusline is one of five settings that carry a command rather than data. The others are <a href="/guide/scripting/#process-hooks">process hooks</a> and the external editor; a profile exported with <code>gori settings export</code> can carry all of them, and both ends of that transfer <a href="/reference/cli/#profiles-that-carry-commands">say so</a>.</p>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  
+  <a href="https://gori.hahwul.com/guide/hotkeys/" rel="prev"><span>← Previous</span><strong>Hotkeys</strong></a>
+  
+  <a href="https://gori.hahwul.com/reference/"><span>Overview →</span><strong>Browse reference</strong></a>
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>

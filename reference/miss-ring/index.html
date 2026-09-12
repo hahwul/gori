@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="gori&#39;s companion: where the character came from, and the eight cells she is drawn on.">
+  <title>Miss Ring - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Miss Ring">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/reference/miss-ring/">
+  <meta property="og:description" content="gori&apos;s companion: where the character came from, and the eight cells she is drawn on.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Miss Ring">
+  <meta name="twitter:description" content="gori&apos;s companion: where the character came from, and the eight cells she is drawn on.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/reference/miss-ring/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Miss Ring","url":"https://gori.hahwul.com/reference/miss-ring/","description":"gori's companion: where the character came from, and the eight cells she is drawn on."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Reference","item":"https://gori.hahwul.com/reference/"},{"@type":"ListItem","position":3,"name":"Miss Ring"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/miss-ring/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/miss-ring/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/reference/miss-ring/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/miss-ring/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    <nav class="manual-nav" aria-label="Documentation">
+      <span class="manual-nav-label">Documentation</span>
+
+      
+      <details class="nav-group nav-section">
+        <summary>Getting Started</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <section class="nav-section guide-navigation" aria-labelledby="guide-navigation-title">
+        <h2 id="guide-navigation-title">Guide</h2>
+        <a class="nav-overview" href="https://gori.hahwul.com/guide/">Overview</a>
+
+        
+        
+        
+        
+        <details class="nav-group">
+          <summary>Core</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Workbenches</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/cookie/">Cookie</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/authorize/">Authorize</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Automation</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/scripting/">Scripting</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Customize</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/statusline/">Statusline</a></li>
+        </ul></details>
+        
+      </section>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/playbooks/">
+        <span>The gori field guide</span>
+        <strong>Playbooks →</strong>
+      </a>
+      
+
+      
+      <details class="nav-group nav-section" open>
+        <summary>Reference</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/brand/">Brand Kit</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/miss-ring/" class="active" aria-current="page">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/reference/">Reference</a>
+      
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">Reference</p>
+      <h1>Miss Ring</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>Miss Ring is gori's companion — off by default, and switched on in
+<strong>Preferences → Appearance → Companion</strong>. The <a href="/guide/settings/">Settings guide</a>
+covers what she does and the <a href="/reference/config/"><code>companion</code> key</a> covers how to
+configure her. This page is about how she is drawn.</p>
+<h2 id="origin">From a character to eight cells</h2>
+<div class="art-gallery">
+  <figure>
+    <img src="/images/miss-ring-character.webp" alt="The original Miss Ring character: a gold ring seen face-on, holding a round cream face with large lashed eyes and a small smile">
+    <figcaption>The character, as first drawn</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/miss-ring-sprite.webp" alt="The same character reduced to a blocky eight-by-three grid of gold and cream cells, with two round eyes, a small mouth and two lash strokes">
+    <figcaption>The same ring on an 8 × 3 cell grid</figcaption>
+  </figure>
+</div>
+<p>The motif is Loki's Miss Minutes crossed with Claude's mascot: huge lashed eyes,
+soft rounded forms, a face with almost nothing in it. The <em>silhouette</em>, though,
+is not borrowed — it is the gori mark itself, a ring, painted in whatever the
+live theme calls its brand gold.</p>
+<p>Getting her into a terminal meant giving all of that up except the ring and five
+glyphs. This is the whole sprite, and what your terminal actually paints:</p>
+<pre class="sprite"><code class="nohighlight"> ▄▀▀▀▄
+▐´●u●`▌
+ ▀▄▄▄▀</code></pre>
+<h2 id="grid">The grid</h2>
+<p>She is eight columns by three rows, and every cell holds exactly one glyph:</p>
+<pre class="sprite"><code class="nohighlight"> ▄▀▀▀▄ ˙
+▐´●u●`▌
+ ▀▄▄▄▀</code></pre>
+<ul>
+<li><strong>Row 0</strong> — the crown, and the mood badge alone in column 7 (here the dot
+she wears while a background job runs).</li>
+<li><strong>Row 1</strong> — the two walls, with the five-cell face between them.</li>
+<li><strong>Row 2</strong> — the floor. Column 7 is empty.</li>
+</ul>
+<p><strong>Why she is round and not oval.</strong> A terminal row is about twice as tall as a
+cell is wide, so three rows buy six units of height — and to read as a circle
+rather than an egg, the equator has to be six <em>cells</em> across, not seven. Half
+blocks put it exactly there: the left wall starts half a cell in, the right wall
+ends half a cell early, and the crown then tapers half a cell per step. A circle
+of diameter six wants 6.0 / 5.2 / 3.3 cells at those three bands, and the
+profile lands on 6.0 / 5.0 / 3.0.</p>
+<p><strong>The cost is her arms.</strong> A half-block wall begins at the midpoint of its cell,
+but a stub in the column beside it ends at that column's edge — half a cell
+short, with nothing able to bridge the gap. Closing it would mean making the
+wall a full block, which pushes the equator back out to seven cells and loses
+the circle. So Miss Ring has no arms, and the badge column carries mood instead.</p>
+<table>
+<thead>
+<tr>
+<th>Glyph</th>
+<th>Codepoint</th>
+<th>Job</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>▀</code></td>
+<td>U+2580 UPPER HALF BLOCK</td>
+<td>Crown and floor</td>
+</tr>
+<tr>
+<td><code>▄</code></td>
+<td>U+2584 LOWER HALF BLOCK</td>
+<td>Crown and floor</td>
+</tr>
+<tr>
+<td><code>▐</code></td>
+<td>U+2590 RIGHT HALF BLOCK</td>
+<td>Left wall</td>
+</tr>
+<tr>
+<td><code>▌</code></td>
+<td>U+258C LEFT HALF BLOCK</td>
+<td>Right wall</td>
+</tr>
+<tr>
+<td><code>´</code></td>
+<td>U+00B4 ACUTE ACCENT</td>
+<td>A lash rising to the right</td>
+</tr>
+<tr>
+<td><code>`</code></td>
+<td>U+0060 GRAVE ACCENT</td>
+<td>A lash rising to the left</td>
+</tr>
+</tbody>
+</table>
+<p>The mouth is spelled with <code>u</code>, <code>o</code>, <code>_</code>, <code>·</code> or <code>n</code>, and never with a cup like
+<code>˘</code> or <code>ᴗ</code>. A combining-style mark is drawn at cap height, which is exactly
+where the lashes are, so it would put the mouth <em>above</em> the eyes; and <code>ᴗ</code>, which
+sits at the right height, is missing from most monospace fonts and falls through
+to a proportional face or a box. <code>u</code> is the same cup, at the same height, in
+every monospace font there is.</p>
+<p>Colour is a second grid laid over the first — one role per cell, so a new
+expression never means restating the ring's shading:</p>
+<pre><code class="nohighlight">.CHRRC.X
+HlemelS.
+.CSSSC..</code></pre>
+<p><code>H</code> highlight · <code>R</code> the base gold · <code>S</code> shadow · <code>C</code> a dimmed corner ·
+<code>e</code> pupil · <code>l</code> lash · <code>m</code> mouth · <code>o</code> the hole · <code>X</code> badge · <code>.</code> the plate
+behind her. The light source is fixed to the upper left, which is why the crown
+runs highlight-then-base. The interior is a <em>hole</em>, painted the plate colour, so
+the terminal shows through the way a real ring's does — filling it with a light
+colour laid a bright bar through the middle of a three-row sprite, and the eye
+read the bar before it read the ring.</p>
+<h2 id="poses">Poses</h2>
+<p>The five cells inside the ring are the whole of an expression: two brows, two
+eyes and a mouth. The eyes say what she is doing; the brows say how she feels
+about it. Both lashes lean inward for the open resting face, both turn over for
+the furrowed one, and one at a time for the quizzical one — same two glyphs,
+opposite character.</p>
+<table>
+<thead>
+<tr>
+<th>Pose</th>
+<th>Face</th>
+<th>When it plays</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>idle</code></td>
+<td><code>▐´●u●`▌</code></td>
+<td>Resting</td>
+</tr>
+<tr>
+<td><code>blink</code></td>
+<td><code>▐´─u─`▌</code></td>
+<td>Every 3 seconds or so, and as the last beat of some gestures</td>
+</tr>
+<tr>
+<td><code>happy</code></td>
+<td><code>▐´^o^`▌</code></td>
+<td>A background job succeeded</td>
+</tr>
+<tr>
+<td><code>alert</code></td>
+<td><code>▐´O_O`▌</code></td>
+<td>A warning landed, or she was poked awake</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td><code>▐`×_×´▌</code></td>
+<td>Something failed — the one pose that also flinches</td>
+</tr>
+<tr>
+<td><code>doze</code></td>
+<td><code>▐´~·~`▌</code></td>
+<td>Asleep after 90 seconds of quiet</td>
+</tr>
+<tr>
+<td><code>oh</code></td>
+<td><code>▐´●o●`▌</code></td>
+<td>A yawn winding up, or a small &quot;oh&quot; on its own</td>
+</tr>
+<tr>
+<td><code>yawn</code></td>
+<td><code>▐´─o─`▌</code></td>
+<td>Mid-yawn, eyes squeezed shut</td>
+</tr>
+<tr>
+<td><code>smile</code></td>
+<td><code>▐´^u^`▌</code></td>
+<td>An idle gesture, and where <code>happy</code> settles</td>
+</tr>
+<tr>
+<td><code>squint</code></td>
+<td><code>▐´·u·`▌</code></td>
+<td>Peering at something</td>
+</tr>
+<tr>
+<td><code>flat</code></td>
+<td><code>▐´●_●`▌</code></td>
+<td>Deadpan, and where <code>error</code> settles</td>
+</tr>
+<tr>
+<td><code>wonder</code></td>
+<td><code>▐´●o●´▌</code></td>
+<td>One brow cocked — the curious &quot;oh?&quot;</td>
+</tr>
+<tr>
+<td><code>wry</code></td>
+<td><code>▐`^u●`▌</code></td>
+<td>One eye crinkled: she got it</td>
+</tr>
+<tr>
+<td><code>hmm</code></td>
+<td><code>▐´·_●´▌</code></td>
+<td>Weighing something up, and where a warning settles</td>
+</tr>
+<tr>
+<td><code>pout</code></td>
+<td><code>▐`●n●´▌</code></td>
+<td>The sulk — the cup turned over</td>
+</tr>
+</tbody>
+</table>
+<p>A reaction is an arc rather than a single face: she hits the peak, holds it
+about a second and a half, then settles into the quieter version of it for the
+rest. Six of these are reactions, the rest are idle gestures she plays
+unprompted, and the three settle poses belong to both.</p>
+<p>She also winks, but only from <code>idle</code> — a winking <code>alert</code> or <code>doze</code> would read as
+a rendering glitch rather than a gesture:</p>
+<table>
+<thead>
+<tr>
+<th>Wink</th>
+<th>Face</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Left</td>
+<td><code>▐´─u●`▌</code></td>
+</tr>
+<tr>
+<td>Right</td>
+<td><code>▐´●u─`▌</code></td>
+</tr>
+</tbody>
+</table>
+<p>The badge in column 7 is the only thing outside the ring, and it says what she
+could not fit into a face:</p>
+<table>
+<thead>
+<tr>
+<th>Badge</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>z</code></td>
+<td>Dozing</td>
+</tr>
+<tr>
+<td><code>·</code></td>
+<td>Something succeeded</td>
+</tr>
+<tr>
+<td><code>!</code></td>
+<td>A warning</td>
+</tr>
+<tr>
+<td><code>×</code></td>
+<td>A failure</td>
+</tr>
+<tr>
+<td><code>˙</code> <code>·</code> <code>.</code></td>
+<td>A dot bobbing while a background job runs, in step with the status row&#39;s own spinner</td>
+</tr>
+</tbody>
+</table>
+<h2 id="in-the-terminal">In the terminal</h2>
+<figure class="tui-shot">
+  <img src="/images/tui/readme.svg" alt="The gori History tab with Miss Ring sitting in the bottom-right corner of the body, a speech bubble above her reading &quot;hi! ready when you are&quot;">
+  <figcaption>Miss Ring in <code>body</code> placement, saying the one thing she says unprompted: <em>hi! ready when you are</em>.</figcaption>
+</figure>
+<p>Two placements. <code>body</code> puts the full 8 × 3 sprite in the bottom-right corner of
+the tab body, with room above her for a speech bubble; clicking her opens the
+notification ring. <code>bar</code> folds her into an eight-cell chip in the status row —
+the middle row plus the badge borrowed from the cell above it, which is why
+every idle gesture lives in the face and not in the glint. Resting, a failure,
+and dozing:</p>
+<pre class="sprite sprite--stack"><code class="nohighlight">▐´●u●`▌
+▐`×_×´▌×
+▐´~·~`▌z</code></pre>
+<p>Everything else — when she blinks, how often she moves, whether she speaks at
+all — is in the <a href="/guide/settings/">Settings guide</a>.</p>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  
+  <a href="https://gori.hahwul.com/reference/brand/" rel="prev"><span>← Previous</span><strong>Brand Kit</strong></a>
+  
+  <a href="https://gori.hahwul.com/reference/"><span>Overview →</span><strong>Browse reference</strong></a>
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>
