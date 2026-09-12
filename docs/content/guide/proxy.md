@@ -657,7 +657,7 @@ Host overrides are a `/etc/hosts`-style map: dial a specific IP for a hostname w
 
 | Layer | Where | Precedence |
 |-------|-------|------------|
-| **Project** | **Project** tab → HOST OVERRIDES pane (`a` / `e` / `d`) | Wins on collision |
+| **Project** | **Project** tab → Host overrides pane (`a` / `e` / `d`) | Wins on collision |
 | **Global** | Preferences (`Ctrl-,`) → **Network & Tabs** → **Network** → **Hostname overrides**, `Ctrl-P` → **Settings: Hostnames**, or `hostname_overrides` in `settings.json` | Fallback |
 
 Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the `Host` header intact.
@@ -741,12 +741,12 @@ detail rather than whole facts.
 
 | Sub-tab | Purpose |
 |------|---------|
-| **DESCRIPTION** | Free-form project notes |
-| **SCOPE** | Include/exclude rules (host, string, or regex) |
-| **HOST OVERRIDES** | Per-project dial map |
-| **ENV** | Per-project `$KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
-| **PROJECT SETTINGS** | Scope-lens + **sandbox** toggles, per-project network pins (bind / upstream) that override the global Settings default, and the gRPC [`.proto` schema](#proto-schema) path |
-| **ACTIVITY** | Who changed what on this project: the append-only event feed, newest first. Config changes (scope rules, the sandbox, host overrides, `$KEY` vars, rewrite rules, the network pins) are recorded wherever they are made, and every row names the **actor** that made it: `tui`, `cli`, or `agent`. Background job results and agent tool calls land here too. Filter by `s` source, `l` level, `a` actor or `/` text; `↵` opens the flow or session an event names, and `⇧X` empties the feed (it asks first, since the agent audit trail goes with it). `⇧X` is the same key that clears History, Probe issues, the Issues list and the Authorize queue, each in its own tab; plain `c` stays the capture toggle here as it does everywhere else. This is where a hook or a session binding that failed *without* raising a notification becomes visible |
+| **Description** | Free-form project notes |
+| **Scope** | Include/exclude rules (host, string, or regex) |
+| **Host overrides** | Per-project dial map |
+| **Env** | Per-project `$KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
+| **Project settings** | Scope-lens + **sandbox** toggles, per-project network pins (bind / upstream) that override the global Settings default, and the gRPC [`.proto` schema](#proto-schema) path |
+| **Activity** | Who changed what on this project: the append-only event feed, newest first. Config changes (scope rules, the sandbox, host overrides, `$KEY` vars, rewrite rules, the network pins) are recorded wherever they are made, and every row names the **actor** that made it: `tui`, `cli`, or `agent`. Background job results and agent tool calls land here too. Filter by `s` source, `l` level, `a` actor or `/` text; `↵` opens the flow or session an event names, and `⇧X` empties the feed (it asks first, since the agent audit trail goes with it). `⇧X` is the same key that clears History, Probe issues, the Issues list and the Authorize queue, each in its own tab; plain `c` stays the capture toggle here as it does everywhere else. This is where a hook or a session binding that failed *without* raising a notification becomes visible |
 
 Scope rules and host overrides are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. Full flags are in the [CLI Reference](/reference/cli/#run-project).
 

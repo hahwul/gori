@@ -385,7 +385,9 @@ describe "ProjectView ACTIVITY pane" do
       # from the card's own border rather than from a hardcoded offset, so the assertion cannot
       # drift with the OVERVIEW band above it. If the draw skipped the bar while the geometry
       # reserved it, the two would be one row apart.
-      card = rows.index(&.includes?("─ ACTIVITY ")).not_nil!
+      # The sub-tab cards lost their border titles (the chip strip one row above names the
+      # pane), so the anchor is that chip: the card's top border is the row under the strip.
+      card = rows.index(&.includes?("Activity")).not_nil! + 1
       rows[card + 1].should contain("/ filter")
       rows.join("\n").should contain("What agents and background jobs did")
     end

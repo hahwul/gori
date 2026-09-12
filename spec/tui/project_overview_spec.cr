@@ -302,11 +302,12 @@ describe "ProjectView DESCRIPTION empty state" do
       store.set_setting(ProjectView::DESC_KEY, "")
       view.reload(project, store)
       b = render_tab(view, 100, 30, focused: true)
-      dy = row_of(b, "DESCRIPTION")
-      dy.should_not be_nil
+      # The sub-tab cards carry no border title any more (the chip strip names the pane), so
+      # the card is located through the view's own geometry rather than by finding its label.
+      card = view.desc_card_rect(Rect.new(0, 0, 100, 30)).not_nil!
       # `paint_chrome`'s only ink on an empty buffer is one accent-bg caret at the card's
       # interior top-left. Gating the card without gating the chrome leaves it on the art.
-      b.bg_at(1, dy.not_nil! + 1).should_not eq Theme.accent_bg
+      b.bg_at(card.x + 1, card.y + 1).should_not eq Theme.accent_bg
     end
   end
 

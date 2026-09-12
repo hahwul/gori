@@ -571,12 +571,15 @@ module Gori::Tui
     end
 
     private def render_summary(screen : Screen, rect : Rect, focused : Bool) : Nil
-      Frame.card(screen, rect, "MINER", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
+      # No border TITLE: this card is the tab itself, and the tab bar plus the sub-tab strip
+      # directly above it already say so — `MINER` here was the third printing of the word.
+      # The FINDINGS card below keeps its title: it names a pane, not the tab.
+      Frame.card(screen, rect, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       # Run control on the border: while mining a lit ` ^X:STOP `, otherwise a muted
       # ` ^R:MINE ` (run / re-run) — so both chords stay in view once findings fill the
       # pane. A state-swapping badge, not a boolean toggle: the chord itself changes.
       chord, name = @running ? {"^X", "STOP"} : {"^R", "MINE"}
-      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + "MINER".size + 4, chord, name, @running)
+      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + 2, chord, name, @running)
       x = rect.x + 2
       y = rect.y + 1
       # Guarded like every line below it: on a 1-2 row card `rect.y + 1` is the bottom
@@ -818,7 +821,7 @@ module Gori::Tui
       sum, _ = pane_rects(rect)
       return nil if sum.empty?
       chord, name = @running ? {"^X", "STOP"} : {"^R", "MINE"}
-      Frame.right_badge_hit(mx, my, sum.y, sum.right - 1, sum.x + "MINER".size + 4,
+      Frame.right_badge_hit(mx, my, sum.y, sum.right - 1, sum.x + 2,
         [{:run, chord, name}] of {Symbol, String, String})
     end
   end
