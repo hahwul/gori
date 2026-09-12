@@ -33,10 +33,56 @@ module Gori
       links.map { |l| resolve(store, l) }
     end
 
-    # Drop links that duplicate the issue's primary flow_id (shown on the evidence row).
+    # Drop the link row that IS the issue's primary flow. One caller left: the "Manage links"
+    # card, which is a list of REMOVABLE pointers, and the primary flow is not one — it is
+    # `issues.flow_id`, a column, and deleting its link row would leave the column behind for
+    # `issue_links` below to synthesise the row straight back. Everywhere the question is "what
+    # backs this issue" — the RELATED card, the Markdown report, the JSON/MCP `links` array —
+    # uses `issue_links` instead and shows the primary FIRST rather than not at all.
     def self.dedupe_issue_flow(links : Array(Store::EntityLink), flow_id : Int64?) : Array(Store::EntityLink)
       return links unless fid = flow_id
       links.reject { |l| l.ref_kind.flow? && l.ref_id == fid }
+    end
+
+    # An issue's related material in CARD order: the PRIMARY flow first, exactly once, then
+    # every other link in link order.
+    #
+    # The primary flow used to be a SEPARATE thing — a `flow` meta row above the RELATED card,
+    # a `- **Flow:**` bullet above the report's Related list — and this method's ancestor
+    # (`dedupe_issue_flow`) existed to take it back OUT of the list so it would not appear
+    # twice. An issue relates to traffic four ways (flow_id, entity links, frozen evidence,
+    # retest steps) and the operator sees ONE question, "what backs this issue", so the answer
+    # is one list and the seed flow is simply its first row.
+    #
+    # SYNTHESISED when `issues.flow_id` has no `entity_links` row of its own. `insert_issue`
+    # writes that row in the same transaction as the issue and has since the table existed, so
+    # the shapes that reach here are an issue filed BEFORE the entity_links migration, an
+    # imported or hand-edited project, and a link deleted by SQL. Dropping the primary there
+    # would make an issue's own seed vanish from the card and the report, so it is rebuilt from
+    # the column instead. The synthetic row carries `id = 0`: it is not an `entity_links` row,
+    # so nothing may remove it by id (the RELATED card's verbs read `ref_kind`/`ref_id` only;
+    # unlinking lives in the LINKS overlay, which lists the table and skips the primary).
+    #
+    # A PRUNED flow is not one of these shapes: `delete_flows` nulls `issues.flow_id` along
+    # with the link (`detach_flow_refs`), so an issue whose evidence was pruned has no primary
+    # at all rather than a dangling one.
+    def self.issue_links(links : Array(Store::EntityLink), issue_id : Int64,
+                         flow_id : Int64?) : Array(Store::EntityLink)
+      return links unless fid = flow_id
+      primary = links.find { |l| l.ref_kind.flow? && l.ref_id == fid } || synthetic_flow_link(issue_id, fid)
+      rest = links.reject { |l| l.ref_kind.flow? && l.ref_id == fid }
+      rest.unshift(primary)
+    end
+
+    # The stand-in row for a `flow_id` the links table has no row for — see `issue_links`.
+    def self.synthetic_flow_link(issue_id : Int64, flow_id : Int64) : Store::EntityLink
+      Store::EntityLink.new(0_i64, Store::LinkOwnerKind::Issue, issue_id,
+        Store::LinkRefKind::Flow, flow_id, 0_i64)
+    end
+
+    # `issue_links` over an issue record — the spelling every caller that has one uses.
+    def self.issue_links(links : Array(Store::EntityLink), issue : Store::Issue) : Array(Store::EntityLink)
+      issue_links(links, issue.id, issue.flow_id)
     end
 
     private def self.resolve_flow(store : Store, link : Store::EntityLink) : Resolved

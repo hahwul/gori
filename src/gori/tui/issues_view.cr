@@ -64,7 +64,6 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @detail = nil.as(Store::Issue?)
-      @detail_flow = nil.as(Store::FlowRow?)
       @detail_links = [] of Store::EntityLink
       @detail_related = [] of RelatedRow
       @links_scroll = 0
@@ -546,7 +545,6 @@ module Gori::Tui
 
     private def open_detail_issue(issue : Store::Issue, store : Store) : Bool
       @detail = issue
-      @detail_flow = issue.flow_id.try { |fid| store.flow_row(fid) }
       reload_detail_links(store)
       refresh_retest_summary(store)
       @links_scroll = 0
@@ -647,13 +645,20 @@ module Gori::Tui
       @retest_summary = line
     end
 
-    # Rebuild the RELATED rows: the live links first, in link order, then the frozen
-    # copies, oldest first. Live first so an issue's rows keep the order they have always
-    # had; a freeze appends rather than reshuffling what the operator was reading.
+    # Rebuild the RELATED rows: the PRIMARY flow first, then the other live links in link
+    # order, then the frozen copies, oldest first. Live first so an issue's rows keep the
+    # order they have always had; a freeze appends rather than reshuffling what the operator
+    # was reading.
+    #
+    # The primary flow leads because it is what the issue was filed FROM — and it is in this
+    # list at all because the detail has no `flow` meta row any more (see `render_detail`).
+    # `Links.issue_links` is what guarantees both halves: first, and exactly once. It also
+    # SYNTHESISES the row when `issues.flow_id` has no `entity_links` row — an issue filed
+    # before `insert_issue` wrote one, a link removed by hand, a `delete_flows` that cascaded
+    # it away — so nothing an issue names can disappear from the card.
     def reload_detail_links(store : Store) : Nil
       return unless issue = @detail
-      @detail_links = store.list_links(Store::LinkOwnerKind::Issue, issue.id)
-      @detail_links = Links.dedupe_issue_flow(@detail_links, issue.flow_id)
+      @detail_links = Links.issue_links(store.list_links(Store::LinkOwnerKind::Issue, issue.id), issue)
       rows = Links.resolve_all(store, @detail_links).map { |res| RelatedRow.new(live: res) }
       store.issue_evidence(issue.id).each { |m| rows << RelatedRow.new(frozen: m) }
       @detail_related = rows
@@ -682,6 +687,28 @@ module Gori::Tui
 
     def selected_related : RelatedRow?
       @detail_related[@selected_link]?
+    end
+
+    # What `r` (`issue.repeater-flow`) acts on: the row under the cursor when it carries a
+    # request this key can duplicate, else the FIRST row that does — which on any issue filed
+    # from a flow is the primary flow, RELATED's first row and what `r` has always meant here.
+    #
+    # A fallback rather than a refusal: `r` used to read `issues.flow_id` and ignore the cursor
+    # entirely, so it has to keep working from wherever the cursor happens to be sitting.
+    def repeater_target_row : RelatedRow?
+      sel = selected_related
+      return sel if sel && repeater_target?(sel)
+      @detail_related.find { |r| repeater_target?(r) }
+    end
+
+    # A frozen copy always carries a request. A live row does only when it is a flow that still
+    # resolves: a fuzz or miner session has no single exchange, a stale row has no bytes left,
+    # and a live REPEATER row is already a Repeater tab — `s` opens it, and duplicating a tab
+    # into a copy of itself is not what this key means.
+    private def repeater_target?(row : RelatedRow) : Bool
+      return true if row.frozen?
+      res = row.live || return false
+      res.link.ref_kind.flow? && !res.stale?
     end
 
     # The LIVE link under the RELATED cursor — nil on a frozen row as well as on none.
@@ -1454,25 +1481,21 @@ module Gori::Tui
       # you look for WHEN, and a third copy of the same string is not a third fact.
       screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: w)
 
-      # y3 — the issue's PRIMARY linked flow. Labelled `flow`, not `evidence`: since #1038
-      # "evidence" names the FROZEN copy — immutable bytes this project holds — and this row is
-      # a live pointer into History that the next retention sweep can hollow out. The frozen
-      # copies are counted on the RELATED card's border below.
-      flow_line = if flow = @detail_flow
-                    "flow      #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
-                  elsif fid = issue.flow_id
-                    "flow      ##{fid} (no longer captured)"
-                  else
-                    "flow      (none — standalone issue)"
-                  end
-      screen.text(rect.x + 1, rect.y + 3, flow_line, Theme.muted, width: w)
-
-      # y4 — the RETEST line, and ONLY when this issue has one (#1036). See
+      # There is no `flow` meta row here any more. An issue relates to traffic four ways
+      # (`flow_id`, entity links, frozen evidence, retest steps) and the operator sees ONE
+      # question — "what backs this issue" — so the primary flow is not a separate line above
+      # the card: it is the FIRST row inside it (`reload_detail_links` → `Links.issue_links`,
+      # which puts it first exactly once and synthesises it for a flow_id whose link row is
+      # gone). A line saying `flow  GET … → 200` over a card whose first row said the same
+      # thing was the same fact twice, in two vocabularies, and `s` on that row already goes
+      # where the removed `o` went.
+      #
+      # y3 — the RETEST line, and ONLY when this issue has one (#1036). See
       # `refresh_retest_summary`: an issue with no retest pays no row, so the two cards below
       # keep the height they have always had.
       render_retest_row(screen, rect, w)
 
-      # y4/y5+ — RELATED and NOTES, two CLOSED sibling cards.
+      # y3/y4+ — RELATED and NOTES, two CLOSED sibling cards.
       #
       # RELATED used to be an OPEN region — an `inner_divider`, a text heading, then the link
       # rows — with the closed NOTES card directly beneath it, and an open-ended block above a
@@ -1488,17 +1511,17 @@ module Gori::Tui
       render_notes_card(screen, notes_card, focused)
     end
 
-    # y4 — the RETEST line, drawn only when this issue HAS one (see `refresh_retest_summary`).
+    # y3 — the RETEST line, drawn only when this issue HAS one (see `refresh_retest_summary`).
     #
     # BOUNDED, like every other conditional element in this pane: `render_drill` hands over
-    # whatever the rail chrome left, with no minimum-height floor, and rows y0-y3 already fill
-    # a 4-row interior exactly. An unguarded fifth row paints outside `rect` on any issue that
+    # whatever the rail chrome left, with no minimum-height floor, and rows y0-y2 already fill
+    # a 3-row interior exactly. An unguarded fourth row paints outside `rect` on any issue that
     # has a retest — the overspill `render_related_card` refuses with `card.h < 2`, and the
     # CVSS chip refuses by measuring `room`.
     private def render_retest_row(screen : Screen, rect : Rect, w : Int32) : Nil
       line = @retest_summary || return
-      return if rect.y + 4 >= rect.bottom
-      screen.text(rect.x + 1, rect.y + 4, line, Theme.muted, width: w)
+      return if rect.y + 3 >= rect.bottom
+      screen.text(rect.x + 1, rect.y + 3, line, Theme.muted, width: w)
     end
 
     # The RELATED border meta: the row count, and the `space l` affordance unless INS owns the
@@ -1610,11 +1633,14 @@ module Gori::Tui
       paint_notes_read_chrome(screen, body, notes_active && !notes_insert_mode?)
     end
 
-    # Rows the detail's meta block owns before the two cards: title, chips, timestamps,
-    # evidence — plus the RETEST line when this issue has one, which is what
-    # `detail_head_rows` adds. A CONSTANT would have to be the worst case and would charge
-    # every issue for a feature most never configure.
-    DETAIL_HEAD_ROWS = 4
+    # Rows the detail's meta block owns before the two cards: title, chips, timestamps — plus
+    # the RETEST line when this issue has one, which is what `detail_head_rows` adds. A
+    # CONSTANT would have to be the worst case and would charge every issue for a feature most
+    # never configure.
+    #
+    # THREE since the primary flow stopped being a meta row of its own (see `render_detail`):
+    # the row it gave up goes to NOTES, which is the pane an operator reads and types in.
+    DETAIL_HEAD_ROWS = 3
 
     # What the meta block actually costs on THIS issue. Read by `detail_split`, so the four
     # RELATED/NOTES hit-tests in `IssuesController` invert the same arithmetic `render_detail`
@@ -1740,7 +1766,6 @@ module Gori::Tui
       peer_notes = false
       if issue = @detail
         @detail = store.get_issue(issue.id)
-        @detail_flow = @detail.try { |f| f.flow_id.try { |fid| store.flow_row(fid) } }
         reload_detail_links(store)
         # Beside `reload_detail_links`, and for the same reason this method exists: a peer
         # session — an agent's MCP `add_retest_step`, another gori's `gori run retest` — can

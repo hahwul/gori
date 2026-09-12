@@ -57,23 +57,12 @@ module Gori
         end
         io << "- **Status:** " << f.status.label << "\n"
         io << "- **Host:** " << (f.host.try { |h| one_line(h) } || "—") << "\n"
-        if fid = f.flow_id
-          io << "- **Flow:** "
-          if flow
-            # method/target/host are captured (attacker/server-controlled) data — an embedded
-            # newline (reachable via an h2 :path/:method pseudo-header) would break the one-line
-            # structure, so sanitize them like f.title/f.host above.
-            # `Url.absolute_form?`, not `starts_with?("http")`: the loose test calls
-            # `httpbin.org/x` absolute and drops the host, and misses `HTTP://` (schemes
-            # are case-insensitive, RFC 3986 3.1) so an uppercase target came out doubled
-            # as `a.testHTTP://a.test/x`. Composed by hand rather than via `Url.location`
-            # only because each part has to be `one_line`d first.
-            loc = Url.absolute_form?(flow.row.target) ? one_line(flow.row.target) : "#{one_line(flow.row.host)}#{one_line(flow.row.target)}"
-            io << one_line(flow.row.method) << " " << loc << " → " << (flow.row.status || "-") << " (#" << fid << ")\n"
-          else
-            io << "#" << fid << " (no longer captured)\n"
-          end
-        end
+        # No `- **Flow:**` bullet. The primary flow is the FIRST entry of the Related list
+        # below — `resolve_issue_links` puts it there, exactly once, and synthesises it when
+        # the link row is missing — because a report reader asking "what backs this finding"
+        # was being answered twice, in two spellings, one of them above the list of the other.
+        # The request/response fences further down still come from this flow: they are the
+        # report's evidence, and which row they belong to is the first one.
         append_related_links(io, resolved_links)
         append_frozen_evidence(io, frozen)
         # notes is multi-line by design (free text) — scrub_controls fixes invalid UTF-8
@@ -87,12 +76,18 @@ module Gori
         end
       end
 
-      # An issue's related workbench entities, resolved for display. One place, because both
-      # Markdown (`append_related_links`) and SARIF (a `gori/links` property bag) need the same
-      # list and reading it twice per issue is two round-trips for one answer.
+      # An issue's related workbench entities, resolved for display, PRIMARY FLOW FIRST. One
+      # place, because both Markdown (`append_related_links`) and SARIF (a `gori/links`
+      # property bag) need the same list and reading it twice per issue is two round-trips for
+      # one answer.
+      #
+      # `Links.issue_links`, where this used to call `dedupe_issue_flow`: the primary flow was
+      # taken OUT of the list because it had a bullet of its own above it, and now it leads the
+      # list instead. Same count either way — the flow appears exactly once — so a reader
+      # parsing `### Related` sees one more entry and no duplicate.
       protected def self.resolve_issue_links(f : Store::Issue, store : Store) : Array(Links::Resolved)
         Links.resolve_all(store,
-          Links.dedupe_issue_flow(store.list_links(Store::LinkOwnerKind::Issue, f.id), f.flow_id))
+          Links.issue_links(store.list_links(Store::LinkOwnerKind::Issue, f.id), f))
       end
 
       def self.json(issues : Array(Store::Issue), store : Store? = nil) : String
@@ -111,6 +106,10 @@ module Gori
                 j.field "cvss", f.cvss.try { |c| one_line(c) }
                 j.field "cvss_score", f.cvss_score
                 j.field "host", f.host.try { |h| one_line(h) }
+                # KEPT for compatibility, and it is the same fact as `links[0]`: the flow the
+                # issue was filed from is the first entry of `links` below. Readers that only
+                # know this field keep working; readers that want everything backing the issue
+                # read one array instead of a field plus an array.
                 j.field "flow_id", f.flow_id
                 j.field "created_at", f.created_at
                 j.field "updated_at", f.updated_at
@@ -228,10 +227,13 @@ module Gori
         j.field "bytes", m.bytes
       end
 
+      # The `links` array of the JSON export and of MCP `get_issue` / `list_issues`. The
+      # PRIMARY flow leads it and appears exactly once (`Links.issue_links`); `flow_id` stays
+      # on the object beside it, which is the compat spelling of the same fact — the first
+      # entry of this array.
       def self.append_links_json(j : JSON::Builder, f : Store::Issue, store : Store?) : Nil
         return unless store
-        links = Links.dedupe_issue_flow(
-          store.list_links(Store::LinkOwnerKind::Issue, f.id), f.flow_id)
+        links = Links.issue_links(store.list_links(Store::LinkOwnerKind::Issue, f.id), f)
         Links.resolve_all(store, links).each do |res|
           j.object do
             j.field "kind", res.link.ref_kind.label

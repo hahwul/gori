@@ -585,8 +585,11 @@ describe "Issues verbs" do
     keymap.lookup(typed_chord("]"), Gori::Verb::Scope::IssuesDetail).should eq("nav.next-tab") # the Global chord; severity is a menu row
     keymap.lookup(typed_chord("}"), Gori::Verb::Scope::IssuesDetail).should eq("issue.status-up")
     keymap.lookup(typed_chord("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
-    keymap.lookup(typed_chord("o"), Gori::Verb::Scope::IssuesDetail).should eq("issue.open-flow")
+    # `o` is UNBOUND in this scope: `issue.open-flow` opened "the linked flow", which is what
+    # `s` does on RELATED's first row now that the primary flow IS that row.
+    keymap.lookup(typed_chord("o"), Gori::Verb::Scope::IssuesDetail).should be_nil
     keymap.lookup(typed_chord("r"), Gori::Verb::Scope::IssuesDetail).should eq("issue.repeater-flow")
+    reg["issue.open-flow"]?.should be_nil
     # export is a chord-less Global palette verb; the FORMAT comes from a picker, not the id
     reg["issues.export"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
     keymap.lookup(typed_chord("e", shift: true), Gori::Verb::Scope::Issues).should eq("issues.export-key")

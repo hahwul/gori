@@ -423,10 +423,16 @@ describe Gori::Issues::Export do
         res["webRequest"]["target"].as_s.should eq("https://h.test/a")
 
         res["message"]["text"].as_s.should contain("found via param fuzzing")
-        link = res["properties"]["gori/links"][0]
-        link["kind"].as_s.should eq("flow")
-        link["ref_id"].as_i64.should eq(linked)
-        link["url"].as_s.should eq("https://h.test/other")
+        # The primary flow LEADS the bag and appears exactly once — it is the issue's first
+        # related item, not a separate `Flow:` fact above the list — with the extra link after it.
+        links = res["properties"]["gori/links"].as_a
+        links.size.should eq(2)
+        links[0]["kind"].as_s.should eq("flow")
+        links[0]["ref_id"].as_i64.should eq(primary)
+        links[0]["url"].as_s.should eq("https://h.test/a")
+        links[1]["kind"].as_s.should eq("flow")
+        links[1]["ref_id"].as_i64.should eq(linked)
+        links[1]["url"].as_s.should eq("https://h.test/other")
       end
     end
 

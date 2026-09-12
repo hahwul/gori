@@ -78,8 +78,10 @@ describe "the Issues detail's two panes" do
       with_store do |store|
         detail(store) do |view|
           rel, notes = view.detail_split(Rect.new(0, 0, 80, 20))
-          # Four meta rows (title, chips, timestamps, evidence), then the card.
-          rel.y.should eq(4)
+          # THREE meta rows (title, chips, timestamps), then the card. The `flow` row that
+          # used to be the fourth is gone: the primary flow is RELATED's first row now, and
+          # the row it gave up went to NOTES.
+          rel.y.should eq(3)
           # Frame + LINKS_VISIBLE rows: the same six the divider + heading + four rows took.
           rel.h.should eq(IssuesView::LINKS_VISIBLE + 2)
           rel.inset(1, 1).h.should eq(IssuesView::LINKS_VISIBLE)
@@ -102,7 +104,8 @@ describe "the Issues detail's two panes" do
             notes.bottom.should eq(h)
           end
           # The specific height that produced it: interior of 4 rows -> avail - 3 == 1.
-          rel, notes = view.detail_split(Rect.new(0, 0, 40, 8))
+          # h == 7 since the meta block lost its `flow` row (it was h == 8 when the head was 4).
+          rel, notes = view.detail_split(Rect.new(0, 0, 40, 7))
           rel.h.should eq(0)
           notes.h.should eq(4) # the row RELATED used to keep and never paint
         end

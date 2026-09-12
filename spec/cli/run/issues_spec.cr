@@ -158,10 +158,15 @@ describe "gori run issues --format json" do
         Gori::Store::LinkRefKind::Repeater, 9_i64)
       parsed = JSON.parse(Gori::Issues::Export.json(store.issues, store)).as_a
       links = parsed[0]["links"].as_a
-      links.size.should eq(1) # primary flow link is deduped from the export list
-      links[0]["kind"].as_s.should eq("repeater")
-      links[0]["ref_id"].as_i.should eq(9)
-      links[0]["label"].as_s.should_not be_empty
+      # The primary flow LEADS the list and appears exactly once — it is the issue's first
+      # related item, and `flow_id` beside it is the compat spelling of that same entry.
+      links.size.should eq(2)
+      links[0]["kind"].as_s.should eq("flow")
+      links[0]["ref_id"].as_i64.should eq(fid)
+      parsed[0]["flow_id"].as_i64.should eq(fid)
+      links[1]["kind"].as_s.should eq("repeater")
+      links[1]["ref_id"].as_i.should eq(9)
+      links[1]["label"].as_s.should_not be_empty
     end
   end
 end
@@ -192,7 +197,10 @@ describe "gori run issues --format markdown" do
       md = Gori::Issues::Export.markdown(issues, store, "demo")
       md.should contain("### Request")
       md.should contain("GET /v1/debug HTTP/1.1")
-      md.should contain("(##{fid})")
+      # The flow the report fences is named ONCE, as the first row of Related — there is no
+      # `- **Flow:**` bullet above the list saying the same thing in another vocabulary.
+      md.should contain("### Related\n\n- **hist** https://api.test/v1/debug — GET api.test/v1/debug\n")
+      md.should_not contain("**Flow:**")
       # The header block's terminating CRLF CRLF is trimmed, so the last header
       # line abuts the closing fence (no stack of blank lines inside the block).
       md.should contain("Host: api.test\n```")

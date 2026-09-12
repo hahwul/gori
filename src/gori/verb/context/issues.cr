@@ -49,9 +49,12 @@ abstract class Gori::Verb::ExecContext
   abstract def issues_copy : Nil              # copy selection from issue notes (READ)
   abstract def issues_copy_all : Nil          # copy all issue notes (space menu)
   abstract def issue_edit_title : Nil         # rename + set severity via the form overlay
-  abstract def issue_open_flow : Nil          # open the linked flow's detail in History
-  abstract def issue_repeater_flow : Nil      # send the linked flow to Repeater
-  abstract def issue_links : Nil              # open the links overlay for the open issue
+  # `r` — the selected RELATED row into a Repeater tab (a live flow's capture, a frozen row's
+  # frozen request), falling back to the issue's first flow row. There is no `issue_open_flow`
+  # twin: `o` opened "the linked flow", which is `s` on the first RELATED row now that the
+  # primary flow IS that row.
+  abstract def issue_repeater_flow : Nil
+  abstract def issue_links : Nil # open the links overlay for the open issue
   # ↵ SHOWS the selected RELATED row's exchange in place (a read-only viewer over the frozen
   # copy, or over the live source as it is now); `s` GOES to the tab it lives in. One key,
   # one action — ↵ used to mean "open a modal" on a frozen row and "teleport" on a live one.

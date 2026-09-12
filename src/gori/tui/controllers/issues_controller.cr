@@ -344,11 +344,16 @@ module Gori::Tui
     #   * `↵ view` / `↵ open session` — ↵ SHOWS the row's exchange in place, on every kind that
     #     has one. A fuzz or miner row has none (a session is a template plus a run), so there ↵
     #     opens the session and the token says which of the two it is about to do.
+    #
+    # The `o flow` token is gone with the verb: the primary flow is the card's FIRST ROW now,
+    # and `s source` above is what opens it in History. `r repeater` stays and reads as a
+    # row verb like the three beside it — it sends the row under the cursor, falling back to
+    # the first flow row (see `Runner#issue_repeater_flow`).
     private def related_hint(step : String) : String
       freeze = related_freezable? ? "{issue.freeze-link} freeze · " : ""
       goto = @issues.selected_related ? "{issue.goto-link} source · " : ""
       open = related_session? ? "↵ open session" : "↵ view"
-      keys("↑/↓ links · #{open} · #{goto}#{freeze}↹/↓ notes · i edit · #{step}{issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+      keys("↑/↓ links · #{open} · #{goto}#{freeze}{issue.repeater-flow} repeater · ↹/↓ notes · i edit · #{step}space cmds · ←/esc back")
     end
 
     # The RELATED cursor sits on a live flow/repeater row that still resolves — the gate

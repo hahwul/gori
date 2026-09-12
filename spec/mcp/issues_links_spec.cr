@@ -240,6 +240,54 @@ describe "MCP delete_issue" do
   end
 end
 
+# `get_issue` / `list_issues` answer "what backs this issue" with ONE array. The flow the
+# issue was filed from leads it and appears exactly once; `flow_id` stays beside it as the
+# compat spelling of that first entry, which is what the tool descriptions promise.
+describe "MCP issue links" do
+  it "leads an issue's links with the primary flow, once, and keeps flow_id agreeing" do
+    with_store do |store|
+      primary = mcp_seed_flow(store, "/login")
+      extra = mcp_seed_flow(store, "/admin")
+      iid = store.insert_issue("SQLi", Gori::Store::Severity::High, "acme.test", primary)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, extra)
+      tools = tools_for(store)
+
+      got = mcp_ok_json(tools, "get_issue", %({"id":#{iid}}))
+      links = got["links"].as_a
+      links.size.should eq(2)
+      links[0]["kind"].as_s.should eq("flow")
+      links[0]["ref_id"].as_i64.should eq(primary)
+      links[1]["ref_id"].as_i64.should eq(extra)
+      got["flow_id"].as_i64.should eq(primary)
+      links.count { |l| l["ref_id"].as_i64 == primary }.should eq(1)
+
+      # The listing serialises through the same builder, so it agrees row for row.
+      listed = mcp_ok_json(tools, "list_issues", "{}")["issues"].as_a
+      listed[0]["links"].as_a[0]["ref_id"].as_i64.should eq(primary)
+    end
+  end
+
+  # An issue filed before the entity_links migration (or imported): `flow_id` set, no link
+  # row. The primary is rebuilt from the column so an agent reading `links` is not told the
+  # issue is backed by nothing.
+  it "synthesises the primary entry when the link row is missing" do
+    with_store do |store|
+      primary = mcp_seed_flow(store, "/legacy")
+      iid = store.insert_issue("old", Gori::Store::Severity::Low, "acme.test", primary)
+      store.remove_link(store.list_links(Gori::Store::LinkOwnerKind::Issue, iid)[0].id).should be_true
+
+      got = mcp_ok_json(tools_for(store), "get_issue", %({"id":#{iid}}))
+      links = got["links"].as_a
+      links.size.should eq(1)
+      links[0]["ref_id"].as_i64.should eq(primary)
+      links[0]["stale"].as_bool.should be_false
+      # …while `list_links`, which lists the TABLE, still reports what the table holds.
+      mcp_ok_json(tools_for(store), "list_links",
+        %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(0)
+    end
+  end
+end
+
 describe "MCP entity links" do
   it "lists an issue's evidence resolved to labels, and round-trips add/remove" do
     with_store do |store|

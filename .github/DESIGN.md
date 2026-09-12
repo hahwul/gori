@@ -372,7 +372,11 @@ migrations in `src/gori/store/schema.cr`.
   truth.
 - **Sitemap node**: one node per distinct URL segment (P3), with operator path tags.
 - **Issue**: the final output, a human-confirmed finding, triaged, optionally linked to the
-  flow, note, or session that evidences it.
+  flow, note, or session that evidences it. `flow_id` is the flow it was FILED from — the seed
+  `insert_issue` links in the same transaction, and the first row of everything that answers
+  "what backs this issue" (the RELATED card, the report's Related list, the JSON/MCP `links`).
+  It is not a separate kind of relation; see the 2026-09-12 entry for why it stays a column and
+  what a schema fold would have to answer.
 - **Frozen evidence**: an immutable copy of ONE exchange — request, response, provenance and
   a SHA-256 of each — taken from a Flow or a Repeater tab at the moment it proved a finding,
   so retention and the next send cannot reach it. Issue membership is mutable and
@@ -2482,3 +2486,64 @@ no single exchange to put on a card, so ↵ there navigates, and the hint token 
 `↵ open session` rather than promising a view that cannot exist. It is read off
 `Evidence.freezable?` — the same predicate the freeze gate and the `f` token read — so the
 three cannot disagree about which rows have an exchange.
+### 2026-09-12: the primary flow is the first related row
+
+Refines: [P1](#p1), [P4](#p4). The Issues detail's RELATED card, continuing the ↵/`s` entry above.
+
+An Issue relates to traffic four ways — `issues.flow_id`, `entity_links`, frozen evidence,
+retest steps — and it used to PRESENT the first of them as a different KIND of thing from the
+rest. The detail drew `flow  GET /login → 200` as a meta row above the RELATED card; the
+Markdown report wrote `- **Flow:** …` above its `### Related` list; and both had to hide the
+flow from the list underneath (`Links.dedupe_issue_flow`) so it would not appear twice. Three
+places spelling one fact, and the operator arriving at the card with one question — what backs
+this issue — got the answer split across a line and a list in two vocabularies.
+
+So the primary flow is simply the FIRST RELATED ROW. `Links.issue_links` is the one ordering:
+primary first, exactly once, then the other links in link order, then the frozen copies. The
+row is LIVE-badged like any other pointer, which makes every key on the card mean one thing on
+every row — `s` opens it in History (the act the removed `o` had its own key for), `↵` shows
+its bytes, `f` freezes them, `r` sends it to the Repeater. The meta block drops from four rows
+to three and NOTES gains the row, which is the pane an operator reads and types in.
+
+`r` moved with it. It used to read `issues.flow_id` and nothing else — a card verb acting on a
+fact the card did not show, while the cursor sat on a row it ignored — and now takes the row
+under the cursor: a live flow's capture, or a FROZEN row's frozen request through
+`duplicate_evidence_into_repeater`, the builder the Evidence tab's own `r` calls, so the
+WebSocket-handshake caveat cannot drift into two wordings. A cursor on a row it cannot send —
+a fuzz or miner session, a live Repeater row `s` already opens — FALLS BACK to the first flow
+row, because that is what the key meant before it looked at the cursor at all.
+
+A `flow_id` whose `entity_links` row is missing SYNTHESISES the row (`id = 0`, never removable
+by id) rather than dropping it. `insert_issue` has written that link since the table existed,
+so the shapes that reach it are an issue filed before that migration, an imported project, or
+a link deleted by SQL — and in all three the issue's own seed would otherwise vanish from the
+card and the report. A pruned flow is NOT one of them: `detach_flow_refs` nulls `issues.flow_id`
+along with the link, so an issue whose evidence was pruned has no primary rather than a
+dangling one.
+
+**The column stays.** `issues.flow_id` is the seed `insert_issue` links from in one
+transaction, the source of the SARIF result's `webRequest`/`webResponse`, and what
+`gori run issues create --flow`, MCP `create_issue(flow_id:)`, the Probe analyzer's automatic
+filing and the Sequencer's promotion all write. It is also kept as a field in the JSON export
+and in MCP `get_issue`/`list_issues`, documented there as "the first linked flow" — the compat
+spelling of `links[0]`.
+
+What a later SCHEMA fold would need, in the order it would have to answer them:
+
+- **The five writers.** Every one passes a flow id positionally to `insert_issue`; folding the
+  column means each writes a link instead, and `insert_issue` loses a parameter that four
+  surfaces' argument validation is currently written against (`--flow`'s range and existence
+  refusals, `create_issue`'s two `flow_id` errors).
+- **SARIF.** `Export.sarif` reads `f.flow_id` per issue to build `webRequest`/`webResponse` and
+  the result's location. Without the column it would have to pick a flow out of the links —
+  which means the ORDER in `entity_links` becomes load-bearing for a document format, where
+  today it is only a display order.
+- **Order itself.** `list_links` orders by `(created_at, id)`, and the primary is first only
+  because `insert_issue` writes it in the issue's own transaction. A fold needs an explicit
+  rank (a column on `entity_links`, or a `role`), or "the first one" stops being a fact.
+- **The JSON/MCP field.** `flow_id` would become derived (`links[0]` where kind is flow) or be
+  dropped, which is a breaking change for a reader that has only ever read the field.
+- **The dedupe that is left.** The "Manage links" card still takes the primary OUT
+  (`Links.dedupe_issue_flow`), because it lists REMOVABLE pointers and the primary is a column
+  — removing its row there would delete an `entity_links` row and change nothing on screen. A
+  fold is exactly what would make the primary removable, and that card is where it would show.

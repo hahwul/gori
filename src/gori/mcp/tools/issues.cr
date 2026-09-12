@@ -166,12 +166,16 @@ module Gori
       private def list_issues_tools(j : JSON::Builder) : Nil
         tool j, "list_issues",
           "List triage issues (severity + status), newest/most-severe first. " \
-          "Returns an object {issues, returned, offset, total} — not a bare array." do |s|
+          "Returns an object {issues, returned, offset, total} — not a bare array. " \
+          "Each issue's `links` lists everything backing it, the flow it was filed from first; " \
+          "`flow_id` is that first linked flow." do |s|
           s.field "limit", intprop("max rows (default 100, max 500)")
           s.field "offset", intprop("start row (default 0)")
         end
 
-        tool j, "get_issue", "Get one issue by id." do |s|
+        tool j, "get_issue",
+          "Get one issue by id. `links` lists everything backing it, the flow it was filed " \
+          "from first; `flow_id` is that first linked flow. `evidence` holds the frozen copies." do |s|
           s.field "id", intprop("issue id"), required: true
         end
 
@@ -182,7 +186,7 @@ module Gori
           s.field "severity", enumprop("issue severity (default: derived from cvss, else info)", SEVERITIES)
           s.field "cvss", strprop("optional CVSS vector or numeric score (e.g. 9.8 or CVSS:3.1/...)")
           s.field "host", strprop("optional host the issue concerns")
-          s.field "flow_id", intprop("optional flow id this issue links to")
+          s.field "flow_id", intprop("optional flow this issue is filed from — it becomes the issue's first linked flow")
           s.field "repeater_id", intprop("optional repeater id this issue links to")
         end
 

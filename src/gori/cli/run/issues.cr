@@ -439,6 +439,12 @@ module Gori
             if h = f.host
               io << "  (" << Issues::Export.one_line(h) << ')'
             end
+            # The issue's FIRST related item, in the compact spelling this one-line-per-issue
+            # listing has room for. There is no related LIST here to make it the first row of
+            # — `issues_text` is handed the issue rows and no store — so the rule "the primary
+            # flow is the first related row" lands on this listing as "the token names the
+            # first related item", and `--format markdown` / `json` are where the whole list
+            # is. Same id `--flow` wrote.
             io << "  flow#" << f.flow_id if f.flow_id
             io << '\n'
           end

@@ -90,18 +90,80 @@ describe "entity_links (V21)" do
   end
 end
 
+private def seeded_flow(store) : Int64
+  store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
+    target: "/", http_version: "HTTP/1.1",
+    head: "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+end
+
 describe Gori::Links do
-  it "dedupes an issue's primary flow from the related list" do
+  # The ORDER every surface that answers "what backs this issue" reads: the primary flow
+  # first, exactly once, then the rest in link order. It is not deduped away any more — the
+  # detail card, the Markdown report and the JSON/MCP `links` array have no separate `flow`
+  # line for it to have been hidden from.
+  it "leads an issue's related list with the primary flow, exactly once" do
     with_store do |store|
-      fid = store.insert_flow(Gori::Store::CapturedRequest.new(
-        created_at: 1_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
-        target: "/", http_version: "HTTP/1.1",
-        head: "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+      fid = seeded_flow(store)
       issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, fid)
       store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
         Gori::Store::LinkRefKind::Repeater, 3_i64)
       raw = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
       raw.size.should eq(2)
+      ordered = Gori::Links.issue_links(raw, store.get_issue(issue_id).not_nil!)
+      ordered.size.should eq(2)
+      ordered[0].ref_kind.should eq(Gori::Store::LinkRefKind::Flow)
+      ordered[0].ref_id.should eq(fid)
+      ordered[0].id.should_not eq(0) # the REAL row insert_issue wrote, not a stand-in
+      ordered[1].ref_kind.should eq(Gori::Store::LinkRefKind::Repeater)
+    end
+  end
+
+  # An OLD-STYLE issue: a `flow_id` whose `entity_links` row is not there — a project filed
+  # before `insert_issue` wrote one, a link removed by hand, a `delete_flows` that cascaded it
+  # away. The row is SYNTHESISED rather than dropped, or the issue's own seed would vanish
+  # from every list that names what backs it.
+  it "synthesises the primary row when the link row is gone" do
+    with_store do |store|
+      fid = seeded_flow(store)
+      issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, fid)
+      link = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)[0]
+      store.remove_link(link.id).should be_true
+      raw = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
+      raw.should be_empty
+
+      ordered = Gori::Links.issue_links(raw, store.get_issue(issue_id).not_nil!)
+      ordered.size.should eq(1)
+      ordered[0].ref_kind.should eq(Gori::Store::LinkRefKind::Flow)
+      ordered[0].ref_id.should eq(fid)
+      # id 0 marks it as no row of the table: nothing may try to remove it by id.
+      ordered[0].id.should eq(0)
+      ordered[0].owner_id.should eq(issue_id)
+      # It resolves like any other flow link — the card renders it with no special case.
+      Gori::Links.resolve_all(store, ordered)[0].label.should eq("GET a.test/")
+    end
+  end
+
+  # An issue with no flow_id has no primary and nothing to reorder.
+  it "leaves a standalone issue's links in link order" do
+    with_store do |store|
+      issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
+        Gori::Store::LinkRefKind::Repeater, 3_i64)
+      raw = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
+      Gori::Links.issue_links(raw, store.get_issue(issue_id).not_nil!).should eq(raw)
+    end
+  end
+
+  # The "Manage links" card is the one surface that still takes the primary OUT: it lists
+  # REMOVABLE pointers, and the primary is `issues.flow_id`, a column.
+  it "keeps the primary flow out of the removable-links list" do
+    with_store do |store|
+      fid = seeded_flow(store)
+      issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, fid)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
+        Gori::Store::LinkRefKind::Repeater, 3_i64)
+      raw = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
       deduped = Gori::Links.dedupe_issue_flow(raw, fid)
       deduped.size.should eq(1)
       deduped[0].ref_kind.should eq(Gori::Store::LinkRefKind::Repeater)

@@ -255,11 +255,16 @@ module Gori::Tui
         # they can be read before they are pressed. Its card is also the one place that SENDS
         # from the Issues tab.
         Item.new("{issue.retest}", "in an Issue: open its RETEST card — ordered Repeater steps, their assertions, and the last run"),
-        # RELATED's pair, named here because neither key is in the space menu's first screen
+        # RELATED's keys, named here because none of them is in the space menu's first screen
         # and because ↵ changed meaning: it SHOWS the selected row's exchange in place (frozen
         # copy or live source), where it used to teleport on a live row and open a modal on a
         # frozen one. A fuzz/miner row has no one exchange, so there ↵ opens the session.
-        Item.new("in RELATED", "↵ view the row's exchange (a fuzz/miner session: open it) · {issue.goto-link} source · {issue.freeze-link} freeze"),
+        #
+        # The card's FIRST row is the flow the issue was filed from — there is no separate
+        # `flow` line above it and no `o` to open it any more, which is why this row names
+        # what the list holds as well as what the keys do.
+        Item.new("RELATED row 1", "the flow the issue was filed from — {issue.goto-link} opens it in History"),
+        Item.new("in RELATED", "↵ view the row's exchange (a fuzz/miner session: open it) · {issue.goto-link} source · {issue.freeze-link} freeze · {issue.repeater-flow} repeater"),
         Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {scope.toggle-lens} scope · {probe.clear} clear issues · space cmds"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
