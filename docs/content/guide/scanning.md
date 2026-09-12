@@ -68,7 +68,7 @@ gori run mine <flow-id> \
 
 A mine is latency-bound rather than CPU-bound (it sends a bucket, waits, bisects, waits), so what it mostly costs is round trips. Two things keep that count down: the run reuses one connection across its probes (one TCP, and on https one TLS, handshake per worker instead of one per probe; turn it off with the **reuse connections** checkbox, `--no-keep-alive`, or `keep_alive: false` when the target behaves per-connection), and every location is mined through one shared pool of workers, so three locations do not cost three times one location and the tail of a bisection no longer runs alone.
 
-> The Miner tab is hidden by default. Enable it from the command palette (`Ctrl-P`) when you need it.
+> The Miner tab is off the bar by default. Press `0` to open it, or give it a slot in `settings:tabs`.
 
 ## Discover: Spider & Brute-Force
 

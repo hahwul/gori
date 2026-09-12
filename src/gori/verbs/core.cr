@@ -331,7 +331,7 @@ module Gori
       # letters beats walking a dropdown. NOT hidden — "Go to tab…" is a thing to find in the
       # palette, unlike the nine positional jumps it fronts.
       r.register Verb::Definition.new(
-        "nav.goto", "Go to tab…", "Filter and jump to any tab — the nine slots and the hidden ones",
+        "nav.goto", "Go to tab…", "Filter and jump to any of the 21 tabs — on the bar or not",
         Verb::Scope::Global, [Verb::Chord.new("0")],
         category: Verb::Category::Navigation) { |ctx| ctx.open_tab_goto; nil }
 

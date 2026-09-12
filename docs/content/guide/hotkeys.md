@@ -102,9 +102,14 @@ The tab bar is **nine numbered slots**, and the numbers are the primary way to m
 | Key | Action |
 |-----|--------|
 | `1`–`9` | Jump to slot N on the tab bar |
-| `0` | **Go to tab…** — a type-to-filter list of all 21 tabs, the nine slots and the hidden ones |
+| `0` | **Go to tab…** — a type-to-filter list of all 21 tabs, each with a line on what it is for |
 | `⇧1`–`⇧9` | Jump to sub-tab N of the active tab |
 | `⇧0` | **Find sub-tab…** — the same picker `f` opens from the strip |
+
+<figure class="tui-shot">
+  <img src="/images/tui/tab-goto.svg" alt="gori Go to tab card: a filter bar over the whole tab catalog, the nine tabs on the bar wearing the digits 1 to 9 and everything else wearing none, each row followed by a line saying what that tab is for">
+  <figcaption><code>0</code> opens the whole catalog. The nine on the bar wear the digit that reaches them; the rest wear none — that is the only difference being off the bar makes.</figcaption>
+</figure>
 
 These work from **everywhere** — the tab bar, the sub-tab strip, a list body, a drill-in
 detail, a read-only pane — with one exception: while a field is taking text (an editor in
@@ -114,15 +119,22 @@ Decoder's CHAIN field), a digit is a character. It is the same rule `Space` foll
 typeable into a conversion chain.
 
 The bar paints the numbers by default (**Preferences → Layout → Tab numbers**, `settings:layout`).
-The far-right pill reads `0:+12` — the key, and how many tabs are behind it.
+The pill just past the last tab reads `0:Tabs` — the key, and what it opens. It sits two
+columns after the ninth slot rather than pinned to the right edge, so the order `→` walks and
+the order you read are the same one; only when the strip stops fitting beside it does it pin
+right and let the tabs scroll. It is there whatever your layout is: `0` reaches the whole
+catalog, the nine on the bar included, so there is nothing for it to count and no layout that
+makes it disappear. The run to the right of it is left free on purpose — a place for a readout
+that is not a tab.
 
 ### Nine slots, and the tenth tab
 
-`settings:tabs` refuses a tenth ✓ and says so; hide one first. A layout saved by an older
+`settings:tabs` refuses a tenth tab and says so — `⇧K` a row up across the seam instead, which
+trades it onto the bar and the last slot off. A layout saved by an older
 build (the bar used to be unbounded) is truncated to its **first nine, in your own order**,
 and gori names the folded tabs once on the launch that does it.
 
-One tab can still ride past the ninth slot: a hidden tab you jumped to with `0` sits at the
+One tab can still ride past the ninth slot: an off-bar tab you jumped to with `0` sits at the
 far right of the bar, **without a number**, until you leave it. It is where you are standing,
 not a slot you arranged — and no digit points at it.
 

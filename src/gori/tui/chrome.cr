@@ -32,9 +32,52 @@ module Gori::Tui
       {:help, "Help"},
     ]
 
-    # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Only
+    # One line per tab, for the `0` picker — the card that lists the WHOLE catalog is the one
+    # place an operator meets a tab before using it, so it is where the tab gets to say what it
+    # is for. Names alone are a directory you already have to know; twenty-one of them is a
+    # directory nobody reads twice.
+    #
+    # Keyed by catalog symbol and gated by a spec (`tab_goto_picker_spec`) so a tab added
+    # without a line fails the suite rather than shipping a blank column. Kept at ≤38 display
+    # columns — what survives beside the label in the picker's 58-wide card.
+    TAB_SUMMARY = {
+      :project     => "targets, scope and project settings",
+      :target      => "one host, mapped — tree and discover",
+      :history     => "every request the proxy captured",
+      :intercept   => "hold requests and edit them in flight",
+      :repeater    => "hand-edit a request and send it again",
+      :fuzzer      => "payload lists over a marked request",
+      :miner       => "find parameters a page never shows",
+      :oast        => "out-of-band callbacks, caught live",
+      :sequencer   => "token randomness, sampled and analysed",
+      :decoder     => "encode, decode and hash, in a chain",
+      :jwt         => "read, verify and forge JSON web tokens",
+      :cookie      => "decode and forge session cookies",
+      :comparer    => "two flows, diffed side by side",
+      :rewriter    => "match & replace rules on live traffic",
+      :colormarker => "colour History rows by your own rules",
+      :probe       => "passive and active checks on captures",
+      :authorize   => "replay one request as another identity",
+      :issues      => "what you found, ranked and written up",
+      :evidence    => "frozen snapshots the project archived",
+      :notes       => "scratch notes kept with the project",
+      :help        => "the keyboard cheat-sheet — ? anywhere",
+    }
+
+    # This tab's one line, or "" for an unknown key — a future tab renders a blank column
+    # rather than raising on the render path.
+    def self.tab_summary(sym : Symbol) : String
+      TAB_SUMMARY[sym]? || ""
+    end
+
+    # Tabs OFF THE BAR by default on a fresh install (settings:tabs trades one in). Only
     # affects reconcile's append path — once the user saves, tab_prefs is explicit and
     # this no longer applies.
+    #
+    # `hidden` here — the name and the `false` in tab_prefs — means "not on the bar", never
+    # "disabled" or "unavailable": `0` opens every one of these, and the picker it opens is the
+    # whole catalog rather than this list. The word is inherited from the tab-hiding feature
+    # this replaced, and the UI no longer speaks it; do not reintroduce it to the surfaces.
     #
     # The bar is NINE SLOTS, so the default set is exactly nine and the choice of which nine is
     # the default itself rather than whatever the cap happened to truncate to. In catalog
@@ -160,6 +203,20 @@ module Gori::Tui
       out
     end
 
+    # A layout as the TAB EDITOR reads it: every tab on the bar first, in bar order, then
+    # everything off it. `reconcile` keeps the operator's stored order, in which an off-bar tab
+    # can sit between two slots (the factory layout has six of them between Fuzzer and Probe);
+    # that is the right shape to STORE — it is where a tab goes back to — but the wrong one to
+    # edit, because it makes the slot number and the row position two different things.
+    #
+    # Partitioned, the position IS the state: the numbered rows are the bar, the rest are what
+    # `0` reaches, and moving a row across the seam is the only thing "show this tab" can mean.
+    # Stable, so neither group's internal order moves.
+    def self.bar_partition(annotated : Array({Symbol, String, Bool})) : Array({Symbol, String, Bool})
+      on, off = annotated.partition { |(_, _, vis)| vis }
+      on + off
+    end
+
     # The factory layout as a prefs list — what an empty `tab_prefs` reconciles to. Written
     # out explicitly only where a config has to be REPLACED by the defaults rather than
     # reconciled against them.
@@ -190,7 +247,7 @@ module Gori::Tui
     # tab) is ALWAYS present even when hidden — so a jump to a hidden tab is never stranded
     # off-bar and menu_layout's active_idx lookup always succeeds (instead of silently
     # falling back to 0). A force-shown hidden tab is APPENDED at the far right (just left of
-    # the `0:+N` stop), not spliced into its catalog position mid-strip — and WITHOUT a
+    # the `0:Tabs` stop), not spliced into its catalog position mid-strip — and WITHOUT a
     # number, since the nine slots are the only positions a digit reaches (see MAX_SLOTS).
     def self.visible_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : Array({Symbol, String})
       visible_slots(prefs, force)[0]
@@ -209,7 +266,7 @@ module Gori::Tui
     end
 
     # Append the force-shown active tab (a hidden tab jumped to) to the far right of the
-    # visible strip — right next to the `0:+N` stop — so opening a hidden tab reveals it at
+    # visible strip — right next to the `0:Tabs` stop — so opening a hidden tab reveals it at
     # the end of the bar rather than splicing it into the middle at its catalog position. A
     # no-op when `force` is absent or the tab is already on the bar. Shared by visible_tabs
     # and split_tabs so the render strip and the nav strip can never drift.
@@ -220,10 +277,11 @@ module Gori::Tui
       end
     end
 
-    # The tabs NOT on the bar — hidden via settings:tabs (Miner by default) — for the
-    # far-right "more" dropdown. Mirrors visible_tabs' force logic in reverse: the
-    # active tab is force-SHOWN on the bar, so it's excluded here even when its stored
-    # visibility is false (it would otherwise appear both on the bar and in the list).
+    # The tabs NOT on the bar — taken off in settings:tabs (twelve by default). Mirrors
+    # visible_tabs' force logic in reverse: the active tab is force-SHOWN on the bar, so it's
+    # excluded here even when its stored visibility is false (it would otherwise appear both on
+    # the bar and in the list). The `0` picker lists these AFTER the bar's own, so this is the
+    # tail of that card rather than a drawer of its own.
     def self.hidden_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : Array({Symbol, String})
       reconcile(prefs).reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
     end
@@ -261,24 +319,21 @@ module Gori::Tui
     # changes the answer without touching either of the other two.
     @@split_memo : {Array({String, Bool}), Symbol?, Split, Bool}? = nil
 
-    # The "more" affordance label — the `0` key that opens the Go-to picker, plus how many
-    # catalog tabs are off the bar. It reads as a KEY (`0:+12`) rather than as an ellipsis
-    # because the bar's whole job is now to teach its own digits: every other pill on the row
-    # wears the number that reaches it, and the last one should not be the exception.
-    def self.more_label(hidden_count : Int32) : String
-      "0:+#{hidden_count}"
-    end
+    # The `0` stop's label — the key that opens the Go-to picker. It reads as a KEY because the
+    # bar's whole job is to teach its own digits: every other pill on the row wears the number
+    # that reaches it, and the last one should not be the exception. The name is capitalised
+    # like a tab's, because that is what it opens.
+    #
+    # It used to be `0:+12` — a COUNT of the tabs off the bar — and that was the old
+    # tab-hiding vocabulary talking. `0` opens the whole twenty-one-tab catalog, the nine on
+    # the bar included; "twelve more" names a drawer that no longer exists. The count also made
+    # the pill vanish at zero, which left a working key with nothing on screen pointing at it.
+    MORE_LABEL = "0:Tabs"
 
-    # The far-right "more" button's cell rect on the menu row, or nil when nothing is
-    # hidden (no button) or the row is too narrow to host it. Shared by render + the
-    # click hit-test so they can't drift.
-    def self.more_button_rect(rect : Rect, hidden_count : Int32) : Rect?
-      return nil if hidden_count <= 0 || rect.empty?
-      w = more_label(hidden_count).size + 2 # a padded pill, like a tab segment
-      x = rect.right - w
-      return nil if x < rect.x + 1 # no room without colliding with the ‹ overflow cell
-      Rect.new(x, rect.y, w, 1)
-    end
+    # The gap between the last tab and the `0` stop: one column wider than the gap between two
+    # tabs. The stop is not a tenth slot, and on a row where everything else is spaced by one
+    # column, that extra column is the whole of what says so.
+    STOP_GAP = 2
 
     # One right-aligned bar chip. `clickable` marks the chips that act on a click; it is
     # HIT-TEST METADATA ONLY and carries no styling. A lifted band was tried here as a
@@ -528,16 +583,12 @@ module Gori::Tui
     # held-intercept count rides inline as a `(N)` badge.
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
                          tabs : Array({Symbol, String}) = TABS,
-                         intercept_count : Int32 = 0, hidden_count : Int32 = 0,
+                         intercept_count : Int32 = 0,
                          more_focused : Bool = false, numbered : Bool = false,
                          slots : Int32? = nil) : Nil
       return if rect.empty?
 
-      # Carve the rightmost cells out for the "more" dropdown button (when tabs are
-      # hidden) so the segment layout never packs a tab over it. A one-col gutter sits
-      # between the last tab and the button.
-      more = more_button_rect(rect, hidden_count)
-      segs, start = menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count, numbered, slots)
+      segs, start, more, _ = menu_layout(rect, active_tab, tabs, intercept_count, numbered, slots)
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0 # earlier tabs hidden
       segs.each do |(sym, label, seg)|
         if sym == active_tab
@@ -555,7 +606,7 @@ module Gori::Tui
         end
       end
 
-      render_more_button(screen, more, hidden_count, more_focused) if more
+      render_more_button(screen, more, more_focused) if more
     end
 
     # The far-right "more" pill — a gold pill when it holds focus (mirroring the active
@@ -570,8 +621,8 @@ module Gori::Tui
     # pill fills gold and the label is one bold ink, exactly as the active tab's is — a
     # dimmed run inside a solid fill would be reading the number as secondary on the one
     # chip the operator is standing on.
-    private def self.render_more_button(screen : Screen, seg : Rect, hidden_count : Int32, focused : Bool) : Nil
-      label = more_label(hidden_count)
+    private def self.render_more_button(screen : Screen, seg : Rect, focused : Bool) : Nil
+      label = MORE_LABEL
       if focused
         bg = Theme.focus_gold
         screen.fill(seg, bg)
@@ -583,25 +634,30 @@ module Gori::Tui
       end
     end
 
-    # Pure: the visible tab segments under the menu strip — {symbol, cell rect} —
-    # computed IDENTICALLY to render_menu (shares menu_layout) so a click hit-test
-    # can never drift from what was drawn. Coords are 0-based cells.
-    def self.menu_segments(rect : Rect, active_tab : Symbol, *,
+    # Everything drawn on the menu row, from ONE layout pass: the tab segments, the `0` stop,
+    # and the free run past it. The click hit-test reads this, so it can never see a different
+    # row than render_menu drew. Coords are 0-based cells.
+    record MenuGeometry,
+      segments : Array({Symbol, Rect}),
+      more : Rect?,
+      trailing : Rect
+
+    def self.menu_geometry(rect : Rect, active_tab : Symbol, *,
                            tabs : Array({Symbol, String}) = TABS,
-                           intercept_count : Int32 = 0, hidden_count : Int32 = 0,
-                           numbered : Bool = false, slots : Int32? = nil) : Array({Symbol, Rect})
-      return [] of {Symbol, Rect} if rect.empty?
-      menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count, numbered, slots)[0]
-        .map { |(sym, _, seg)| {sym, seg} }
+                           intercept_count : Int32 = 0,
+                           numbered : Bool = false, slots : Int32? = nil) : MenuGeometry
+      return MenuGeometry.new([] of {Symbol, Rect}, nil, rect) if rect.empty?
+      segs, _, more, trailing = menu_layout(rect, active_tab, tabs, intercept_count, numbered, slots)
+      MenuGeometry.new(segs.map { |(sym, _, seg)| {sym, seg} }, more, trailing)
     end
 
-    # The drawable region for tab segments: the menu row minus the far-right "more"
-    # button (plus a one-col gutter) when tabs are hidden. Shared by render_menu +
-    # menu_segments so the drawn segments and the click hit-test can never drift.
-    private def self.tabs_area(rect : Rect, hidden_count : Int32) : Rect
-      more = more_button_rect(rect, hidden_count)
-      return rect unless more
-      Rect.new(rect.x, rect.y, {more.x - 1 - rect.x, 0}.max, 1)
+    # Just the tab segments — the common half of `menu_geometry`.
+    def self.menu_segments(rect : Rect, active_tab : Symbol, *,
+                           tabs : Array({Symbol, String}) = TABS,
+                           intercept_count : Int32 = 0,
+                           numbered : Bool = false, slots : Int32? = nil) : Array({Symbol, Rect})
+      menu_geometry(rect, active_tab, tabs: tabs, intercept_count: intercept_count,
+        numbered: numbered, slots: slots).segments
     end
 
     # The single source of menu-segment geometry: each visible tab's {symbol, label,
@@ -628,8 +684,7 @@ module Gori::Tui
     # that does not reach it.
     private def self.menu_layout(rect : Rect, active_tab : Symbol, tabs : Array({Symbol, String}),
                                  intercept_count : Int32, numbered : Bool = false,
-                                 slots : Int32? = nil) : {Array({Symbol, String, Rect}), Int32}
-      segs = [] of {Symbol, String, Rect}
+                                 slots : Int32? = nil) : {Array({Symbol, String, Rect}), Int32, Rect?, Rect}
       numbered_to = numbered_slots(slots || MAX_SLOTS)
       labels = tabs.map_with_index do |(sym, label), i|
         num = numbered && i < numbered_to ? "#{i + 1}:" : ""
@@ -641,19 +696,65 @@ module Gori::Tui
       # label two different ways.
       widths = labels.map { |l| Screen.display_width(l) + 2 } # one space of padding each side
       active_idx = tabs.index { |(sym, _)| sym == active_tab } || 0
+      pill_w = MORE_LABEL.size + 2 # a padded pill, like a tab segment
+
+      # THE STOP FOLLOWS THE TABS. It used to pin to the right edge, which left the row with
+      # two anchors and a void between them that GREW with the terminal: 46 empty columns at
+      # 160, 87 at 200, and a lone pill out at the far edge reading as a stray island. One
+      # anchor instead — the stop sits just past the last tab, so the order `→` walks and the
+      # order the eye reads are the same one.
+      #
+      # Where it lands is decided by ARITHMETIC, before anything is packed: `pack_segments`
+      # lays the strip out for real, and asking it first and then re-asking it against a
+      # narrower area would pack the row twice on every frame — which is the common case, not
+      # the rare one, since a standard 80-column terminal cannot fit nine tabs beside the
+      # stop. `full_end` is where the last segment would end with the whole row to itself
+      # (each segment plus its one-column gap), so the test below is the same one the packer
+      # would have answered.
+      full_end = rect.x + widths.sum + tabs.size
+      area = rect
+      more = nil
+      if full_end + STOP_GAP + pill_w <= rect.right
+        more = Rect.new(full_end + STOP_GAP, rect.y, pill_w, 1)
+      elsif (px = rect.right - pill_w) >= rect.x + 1
+        # The strip does not fit beside it, so the stop pins to the right edge and the tabs
+        # take what is left — the old geometry, and the only shape a narrow row can hold.
+        # (No room even for that: no stop is drawn, and `0` still works.)
+        more = Rect.new(px, rect.y, pill_w, 1)
+        area = Rect.new(rect.x, rect.y, {px - 1 - rect.x, 0}.max, 1)
+      end
+      segs, start, _ = pack_segments(area, tabs, labels, widths, active_idx)
+
+      # The free run past the stop — RESERVED, not spare. Nothing draws here yet; it is where
+      # a readout that is not a tab would go (or the top bar's ⌘, if the palette key ever wants
+      # to sit beside the key that opens the tabs). Returned as a rect rather than left as
+      # whatever is past the pill so that whoever claims it inherits the one geometry the
+      # render and the hit-test already share, instead of measuring the row a second way.
+      tx = more ? more.right + 1 : rect.right
+      trailing = Rect.new({tx, rect.right}.min, rect.y, {rect.right - tx, 0}.max, 1)
+      {segs, start, more, trailing}
+    end
+
+    # Lay the tab segments into `area`, windowed so the active one is always drawn. Returns the
+    # segments, the window start (the `‹` marker's reason to exist) and the column just past
+    # the last segment.
+    private def self.pack_segments(area : Rect, tabs : Array({Symbol, String}),
+                                   labels : Array(String), widths : Array(Int32),
+                                   active_idx : Int32) : {Array({Symbol, String, Rect}), Int32, Int32}
+      segs = [] of {Symbol, String, Rect}
       # Window the strip so the active segment is ALWAYS visible: on a narrow row
       # advance the start until segments [start..active] fit, so the menu scrolls
       # instead of breaking and hiding every tab from the overflow point on.
-      start = scroll_start(widths, active_idx, rect.w - 2)
-      x = rect.x + 1
+      start = scroll_start(widths, active_idx, area.w - 2)
+      x = area.x + 1
       tabs.each_with_index do |(sym, _), i|
         next if i < start
         seg_w = widths[i]
-        break if x + seg_w > rect.right + 1
-        segs << {sym, labels[i], Rect.new(x, rect.y, seg_w, 1)}
+        break if x + seg_w > area.right + 1
+        segs << {sym, labels[i], Rect.new(x, area.y, seg_w, 1)}
         x += seg_w + 1 # a column of breathing room between segments
       end
-      {segs, start}
+      {segs, start, x - 1}
     end
 
     # Leftmost visible segment index that keeps `active_idx` on-screen, given each

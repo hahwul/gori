@@ -134,7 +134,25 @@ describe "Runner#save_tabs" do
   it "reconciles an empty prefs list to the same arrangement reset_to_defaults produces" do
     ov = Gori::Tui::TabsOverlay.new
     ov.reset_to_defaults
-    defaults = Gori::Tui::Chrome.reconcile([] of {String, Bool}).map { |(sym, _, vis)| {sym.to_s, vis} }
+    defaults = Gori::Tui::Chrome.bar_partition(Gori::Tui::Chrome.reconcile([] of {String, Bool}))
+      .map { |(sym, _, vis)| {sym.to_s, vis} }
     ov.to_prefs.should eq(defaults)
+  end
+
+  # The case the example above cannot see, and the one nearly every project is in: with no
+  # frozen snapshot the editor drops the Evidence row, so an untouched working copy is twenty
+  # rows against a twenty-one-row default. It never matched, so the pinning this helper exists
+  # to prevent happened anyway — a reset-and-save in a fresh project wrote today's
+  # DEFAULT_HIDDEN into the file. `tab_prefs_of` has to drop the same row the overlay did.
+  it "still matches the defaults when the editor dropped an unavailable Evidence row" do
+    ov = Gori::Tui::TabsOverlay.new(false)
+    ov.reset_to_defaults
+    defaults = Gori::Tui::Chrome.bar_partition(Gori::Tui::Chrome.reconcile([] of {String, Bool}))
+      .reject { |(sym, _, _)| sym == :evidence }
+      .map { |(sym, _, vis)| {sym.to_s, vis} }
+    ov.to_prefs.should eq(defaults)
+
+    helper = runner_body("private def tab_prefs_of(ov : TabsOverlay) : Array({String, Bool})")
+    helper.should contain("@evidence_available")
   end
 end

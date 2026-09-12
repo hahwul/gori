@@ -172,6 +172,32 @@ seed_description() {
 }
 seed_description
 
+# The Notes tab is one of the nine slots, so the showcase strip has a button for it — and an
+# empty project shot the onboarding card instead of the thing the tab is for. Notes live in
+# `settings` as one JSON doc (`Gori::Notes::DOCS_KEY`), not a table, so this is the same
+# one-row dressing `seed_description` is. Two notes, because the sub-tab strip only appears at
+# two or more and the strip is half of what the tab looks like.
+seed_notes() {
+  sqlite3 "$DB" <<'SQL'
+INSERT OR REPLACE INTO settings (key, value) VALUES ('notes.docs', json_object(
+  'cur', 0,
+  'next_id', 3,
+  'notes', json_array(
+    json_object('id', 1, 'text', 'httpbingo — scope notes' || char(10) || char(10) ||
+      'Login sets TWO cookies: a Flask session (itsdangerous, weak key) and a bearer' || char(10) ||
+      'JWT echoed in the body. Both reach /v1/users/:id — see Issues #2.' || char(10) || char(10) ||
+      '- [x] map the API surface (Target > Discover)' || char(10) ||
+      '- [x] mine /v1/search for hidden params -> `debug`, `next`' || char(10) ||
+      '- [ ] re-test #4 after the token rotation lands' || char(10) ||
+      '- [ ] ask about the /v1/import allowlist before filing the SSRF'),
+    json_object('id', 2, 'text', 'github api — read-only pass' || char(10) || char(10) ||
+      'Unauthenticated only. Rate limit is 60/h so keep the Fuzzer off this host.')
+  )
+));
+SQL
+}
+seed_notes
+
 # _shoot <name> <rows> <title> <subcmd> <preamble:0|1> <tmux-keys...>
 # Launches `gori <subcmd>` in a fresh tmux pane, optionally walks the project
 # picker preamble, sends the keys, and renders the capture to SVG. Interleave
@@ -250,31 +276,40 @@ shoot_all() {
   run_scene sitemap      26 "gori · Sitemap"                   2 SLEEP1.2
   run_scene project      26 "gori · Project"                   1 SLEEP1.2
   run_scene intercept    26 "gori · Intercept"                 4 SLEEP1.2
-  # Probe and Issues sit past the 1-9 positional-jump range (11th/12th visible
-  # tab — Rewriter went visible and pushed both right), so land on Comparer (9)
-  # and cycle right with `]` the rest of the way. Issues then promotes a few
-  # Probe findings on the way through so the shot isn't the empty-state
-  # onboarding card.
+  # THE BAR IS NINE NUMBERED SLOTS, and `1`-`9` reach exactly those nine:
   #
-  # COUNT THE BAR, DON'T TRUST THIS LIST. Every positional jump here is a
-  # position in Chrome::TABS minus DEFAULT_HIDDEN, and a tab going visible
-  # silently retargets every jump to its right — that is how the Decoder scene
-  # below spent three weeks shipping a picture of the OAST tab. After a catalog
-  # change, re-read the strip in a capture and fix the numbers.
-  run_scene probe        26 "gori · Probe scanner"             9 SLEEP0.3 ] SLEEP0.3 ] SLEEP1.4
-  run_scene issues       26 "gori · Issues"                    9 SLEEP0.3 ] SLEEP0.3 ] SLEEP0.3 Enter SLEEP0.4 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.7 Escape SLEEP0.3 ] SLEEP1.4
-  # The Decoder opens EMPTY, so the shot has to build the chain the guide
-  # describes (base64-encode then upper, with the per-step PIPELINE readout).
-  # `Tab` — not `Enter` — is what drops focus from the tab strip into the body;
-  # at TABS scope a bare `i` is the intercept toggle, not "edit". The trailing
-  # Escape closes the converter completer, which otherwise hangs over CHAIN's
-  # bottom border.
-  run_scene decoder      26 "gori · Decoder"                   8 SLEEP0.8 Tab SLEEP0.5 i SLEEP0.4 "admin:hunter2" SLEEP0.4 Escape SLEEP0.4 Down SLEEP0.5 "base64 > upper" SLEEP0.8 Escape SLEEP0.8
+  #   1 Project · 2 Target · 3 History · 4 Intercept · 5 Repeater · 6 Fuzzer ·
+  #   7 Probe · 8 Issues · 9 Notes
+  #
+  # Everything else — OAST, Decoder, JWT, Sequencer, the rest — is off the bar and reached
+  # with `0` (Go to tab…), which is a NAME, not a position. Prefer `0 <name> Enter` for those:
+  # it is what the guide tells a reader to press, and it is the only navigation here that
+  # cannot silently retarget. A positional jump is a position in `Chrome::TABS` minus
+  # `Chrome::DEFAULT_HIDDEN`, and a tab going on or off the bar slides every digit to its
+  # right — that is how the Decoder scene once spent three weeks shipping a picture of the
+  # OAST tab. After a catalog change, re-read the strip in a capture and fix the numbers.
+  #
+  # `0` lands in the BODY (the picker drills in, like the palette's "Go to …"), so an off-bar
+  # scene needs no `Tab` after it. The tab it opens also rides the far right of the bar
+  # WITHOUT a number until you leave it — that is the temporary tenth tab, and it is supposed
+  # to be in the shot.
+  run_scene probe        26 "gori · Probe scanner"             7 SLEEP1.4
+  run_scene issues       26 "gori · Issues"                    7 SLEEP0.5 Enter SLEEP0.4 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.6 Down SLEEP0.3 p SLEEP0.7 Escape SLEEP0.3 ] SLEEP1.4
+  run_scene notes        26 "gori · Notes"                     9 SLEEP1.4
+  # The Decoder opens EMPTY, so the shot has to build the chain the guide describes
+  # (base64-encode then upper, with the per-step PIPELINE readout). At TABS scope a bare `i`
+  # is the intercept toggle, not "edit" — but `0` has already dropped focus into the body, so
+  # `i` is the editor here. The trailing Escape closes the converter completer, which
+  # otherwise hangs over CHAIN's bottom border.
+  run_scene decoder      26 "gori · Decoder"                   0 SLEEP0.6 decoder SLEEP0.5 Enter SLEEP0.8 i SLEEP0.4 "admin:hunter2" SLEEP0.4 Escape SLEEP0.4 Down SLEEP0.5 "base64 > upper" SLEEP0.8 Escape SLEEP0.8
   # OAST reads its Callbacks table straight out of the project DB (hydrate →
   # oast_callbacks_since 0), so seed_oast's synthetic hits are all this needs —
   # no live registration, no third-party provider, and no real source IP baked
   # into a published image.
-  run_scene oast         26 "gori · OAST"                      7 SLEEP1.4
+  run_scene oast         26 "gori · OAST"                      0 SLEEP0.6 oast SLEEP0.5 Enter SLEEP1.4
+  # The Go-to card itself: `0` from the bar, before anything is typed, so the shot shows the
+  # whole catalog — the nine slots wearing their digits and everything else wearing none.
+  run_scene tab-goto     26 "gori · Go to tab…"                0 SLEEP1.2
   # The Sequencer shot is the SEND TO SEQUENCER card over History, not the tab
   # (which is hidden and empty until something is sent to it). Down x7 lands on
   # the /cookies/set flow — the one with a Set-Cookie for the config card to
@@ -282,12 +317,10 @@ shoot_all() {
   run_scene sequencer    26 "gori · Sequencer"                 3 SLEEP1.4 Down Down Down Down Down Down Down SLEEP0.5 Space SLEEP0.4 q SLEEP1.4
   run_scene repeater     26 "gori · Repeater"                  3 SLEEP0.6 Enter SLEEP0.4 C-r SLEEP1.2 C-r SLEEP3
   run_scene fuzzer       34 "gori · Fuzzer"                    3 SLEEP0.6 Enter SLEEP0.3 Down SLEEP0.3 I SLEEP1 C-a SLEEP0.6 C-l SLEEP0.8 admin Enter root SLEEP0.5 Escape SLEEP0.7 C-r SLEEP5
-  # JWT ships HIDDEN, so this reveals it the way the guide tells a reader to (palette →
-  # Go to JWT) rather than by a positional jump, then types the sample token and sends the
-  # caret Home so INPUT shows where the token STARTS — typing leaves the view on its tail,
-  # which reads as a truncated blob. The guide has carried a jwt.svg since the tab shipped
-  # and this list never had the scene that makes it, so the shot went stale in place.
-  run_scene jwt          26 "gori · JWT"                       C-p SLEEP0.8 jwt SLEEP0.5 Enter SLEEP1.2 Enter SLEEP0.3 "$JWT_SAMPLE" SLEEP1 Home SLEEP0.3 Escape SLEEP0.6
+  # JWT is off the bar, so this reaches it the way the guide tells a reader to (`0`, type,
+  # ↵), then types the sample token and sends the caret Home so INPUT shows where the token
+  # STARTS — typing leaves the view on its tail, which reads as a truncated blob.
+  run_scene jwt          26 "gori · JWT"                       0 SLEEP0.6 jwt SLEEP0.5 Enter SLEEP1.2 Enter SLEEP0.3 "$JWT_SAMPLE" SLEEP1 Home SLEEP0.3 Escape SLEEP0.6
   run_tour  tutorial     26 "gori · Guided tour"               SLEEP1.5
   # LAST, and it puts settings back: this is the only scene that edits settings.json, and
   # every scene above documents the default install. Same History screen as the first shot

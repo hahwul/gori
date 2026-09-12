@@ -65,19 +65,40 @@
         <span class="showcase-bar-dim">·</span>
         <span class="showcase-live"><i></i>localhost:8070</span>
       </div>
+      {# The strip IS gori's bar, so it has gori's shape: NINE numbered slots and the `0:Tabs`
+         stop. The digit is painted a step under its name the way the real bar paints it
+         (Chrome::MENU_NUMBER_DIM), and the stop opens the same list the `0` key opens —
+         including the way a tab reached through it rides the far right of the bar, without a
+         number, until you leave it (`showcaseTemp`, filled by home.js). #}
       <div class="showcase-tabs" id="showcaseTabs" role="group" aria-label="{{ "home.showcase_tabs_aria" | t }}">
-        <button type="button" aria-pressed="false" data-shot="project" data-alt="{{ "home.showcase_alt_project" | t }}">Project</button>
-        <button type="button" aria-pressed="false" data-shot="sitemap" data-alt="{{ "home.showcase_alt_sitemap" | t }}">Target</button>
-        <button type="button" aria-pressed="true" data-shot="history" data-alt="{{ "home.showcase_alt" | t }}">History</button>
-        <button type="button" aria-pressed="false" data-shot="intercept" data-alt="{{ "home.showcase_alt_intercept" | t }}">Intercept</button>
-        <button type="button" aria-pressed="false" data-shot="repeater" data-alt="{{ "home.showcase_alt_repeater" | t }}">Repeater</button>
-        <button type="button" aria-pressed="false" data-shot="fuzzer" data-alt="{{ "home.showcase_alt_fuzzer" | t }}">Fuzzer</button>
-        <button type="button" aria-pressed="false" data-shot="oast" data-alt="{{ "home.showcase_alt_oast" | t }}">OAST</button>
-        <button type="button" aria-pressed="false" data-shot="decoder" data-alt="{{ "home.showcase_alt_decoder" | t }}">Decoder</button>
-        <button type="button" aria-pressed="false" data-shot="jwt" data-alt="{{ "home.showcase_alt_jwt" | t }}">JWT</button>
-        <button type="button" aria-pressed="false" data-shot="sequencer" data-alt="{{ "home.showcase_alt_sequencer" | t }}">Sequencer</button>
-        <button type="button" aria-pressed="false" data-shot="probe" data-alt="{{ "home.showcase_alt_probe" | t }}">Probe</button>
-        <button type="button" aria-pressed="false" data-shot="issues" data-alt="{{ "home.showcase_alt_issues" | t }}">Issues</button>
+        <button type="button" aria-pressed="false" data-shot="project" data-alt="{{ "home.showcase_alt_project" | t }}"><i>1:</i>Project</button>
+        <button type="button" aria-pressed="false" data-shot="sitemap" data-alt="{{ "home.showcase_alt_sitemap" | t }}"><i>2:</i>Target</button>
+        <button type="button" aria-pressed="true" data-shot="history" data-alt="{{ "home.showcase_alt" | t }}"><i>3:</i>History</button>
+        <button type="button" aria-pressed="false" data-shot="intercept" data-alt="{{ "home.showcase_alt_intercept" | t }}"><i>4:</i>Intercept</button>
+        <button type="button" aria-pressed="false" data-shot="repeater" data-alt="{{ "home.showcase_alt_repeater" | t }}"><i>5:</i>Repeater</button>
+        <button type="button" aria-pressed="false" data-shot="fuzzer" data-alt="{{ "home.showcase_alt_fuzzer" | t }}"><i>6:</i>Fuzzer</button>
+        <button type="button" aria-pressed="false" data-shot="probe" data-alt="{{ "home.showcase_alt_probe" | t }}"><i>7:</i>Probe</button>
+        <button type="button" aria-pressed="false" data-shot="issues" data-alt="{{ "home.showcase_alt_issues" | t }}"><i>8:</i>Issues</button>
+        <button type="button" aria-pressed="false" data-shot="notes" data-alt="{{ "home.showcase_alt_notes" | t }}"><i>9:</i>Notes</button>
+        <button type="button" class="showcase-temp" id="showcaseTemp" aria-pressed="true" hidden></button>
+        <button type="button" class="showcase-more" id="showcaseMore" aria-expanded="false" aria-controls="showcaseGoto"><i>0:</i>Tabs</button>
+      </div>
+      <div class="showcase-goto-anchor">
+      <div class="showcase-goto" id="showcaseGoto" role="group" aria-label="{{ "home.showcase_goto_aria" | t }}" hidden>
+        <button type="button" aria-pressed="false" data-shot="oast" data-alt="{{ "home.showcase_alt_oast" | t }}">
+          <b>OAST</b><span>{{ "home.showcase_sum_oast" | t }}</span>
+        </button>
+        <button type="button" aria-pressed="false" data-shot="sequencer" data-alt="{{ "home.showcase_alt_sequencer" | t }}">
+          <b>Sequencer</b><span>{{ "home.showcase_sum_sequencer" | t }}</span>
+        </button>
+        <button type="button" aria-pressed="false" data-shot="decoder" data-alt="{{ "home.showcase_alt_decoder" | t }}">
+          <b>Decoder</b><span>{{ "home.showcase_sum_decoder" | t }}</span>
+        </button>
+        <button type="button" aria-pressed="false" data-shot="jwt" data-alt="{{ "home.showcase_alt_jwt" | t }}">
+          <b>JWT</b><span>{{ "home.showcase_sum_jwt" | t }}</span>
+        </button>
+        <p>{{ "home.showcase_goto_rest" | t }}</p>
+      </div>
       </div>
       <div class="showcase-screen">
         <img id="showcaseShot" src="{{ base_url }}/images/tui/history.svg" alt="{{ "home.showcase_alt" | t }}">

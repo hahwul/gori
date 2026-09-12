@@ -90,7 +90,7 @@ module Gori::Tui
       Section.new(:network, "settings.network", "Network",
         "Edit the proxy bind address + upstream proxy", :network, :form),
       Section.new(:tabs, "settings.tabs", "Tabs",
-        "Customize the top tab bar — show/hide tabs and reorder them", :network, :opener),
+        "Customize the top tab bar — one ordered list, the top nine are the slots", :network, :opener),
       # Reachable via the Network section's "Hostname overrides" opener field, so it
       # keeps its palette verb but is not given its own tab row (in_tab: false).
       Section.new(:hosts, "settings.host-overrides", "Hostnames",

@@ -63,14 +63,19 @@ end
 # TAB BAR
 # ---------------------------------------------------------------------------------------
 
-# Hide every tab but one, so the next space hits the "last visible" refusal. Each toggle
-# succeeds until only one is left standing, whose toggle is refused — which also parks the
-# selection on that row.
+# Take every tab but one off the bar, so the next space hits the "last one" refusal. Each
+# send-across succeeds until only one is left standing, whose send is refused — which also
+# parks the selection on that row.
+#
+# Re-reads the list every pass rather than walking a snapshot: `space` MOVES the row to the
+# seam now, so the indices a single `to_prefs` pass captured go stale the moment the first
+# one fires (the walk then landed back on a row it had already sent off and sent it BACK).
 private def leave_one_visible(o : TabsOverlay) : Nil
-  o.to_prefs.each_with_index do |(_, vis), i|
-    next unless vis
+  loop do
+    i = o.to_prefs.index { |(_, vis)| vis }
+    break unless i
     o.set_selected(i)
-    o.toggle_selected
+    break unless o.toggle_selected
   end
 end
 
@@ -102,15 +107,15 @@ describe "C5 · TabsOverlay on the Overlay seam" do
     ov.to_prefs[2].should eq(before[1])
   end
 
-  it "refuses to hide the last visible tab and reports the refusal as a toast" do
+  it "refuses to take the last tab off the bar and reports the refusal as a toast" do
     ov = TabsOverlay.new
     toasts = [] of String
     ov.on_toast = ->(m : String) { toasts << m; nil }
     leave_one_visible(ov)
     h = OverlayHarness.new(ov)
     h.press(SPACE, ' ').should eq(:open)
-    toasts.should eq(["keep at least one tab visible"])
-    ov.to_prefs.count { |(_, vis)| vis }.should eq(1) # the hide really was refused
+    toasts.should eq(["the bar needs at least one tab"])
+    ov.to_prefs.count { |(_, vis)| vis }.should eq(1) # the take-off really was refused
   end
 
   it "keeps the modal up while r raises the shell's reset confirm" do

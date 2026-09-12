@@ -1124,7 +1124,7 @@ gori run colormarker rm 3
 
 `preview`는 조건이 최근 플로우 중 몇 개에 **매칭**되는지와, 실제로 몇 개를 **칠하게** 되는지를 함께 보고합니다. 앞선 활성 규칙이 이미 그 행을 차지했다면 두 숫자가 달라집니다. `preview`가 `--scope`도 받는 이유가 이것입니다. 전역 규칙은 모든 프로젝트 규칙보다 먼저 해석되므로, `--scope=global` 후보에게서 행을 뺏을 수 있는 프로젝트 규칙은 하나도 없습니다. `update`, `rm`(`delete`), `enable`, `disable`, `move`는 목록의 규칙 id와 `--scope`를 받습니다. 두 저장소가 서로 독립적으로 번호를 매기므로 id만으로는 서로 다른 두 규칙을 가리키기 때문입니다. 목록은 스코프를 `G`/`P` 접두사로 출력합니다(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻).
 
-탭은 **기본적으로 숨겨져 있습니다.** `settings:tabs`에서 Rewriter 옆에 표시할 수 있습니다. 대화형 편집기는 [프록시 & History](/ko/guide/proxy/)를 참고하세요.
+탭은 **기본적으로 바 위에 없습니다.** `0`으로 열거나, `settings:tabs`에서 Rewriter 옆에 슬롯을 줄 수 있습니다. 대화형 편집기는 [프록시 & History](/ko/guide/proxy/)를 참고하세요.
 
 #### colormarker color {#run-colormarker-color}
 

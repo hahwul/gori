@@ -57,12 +57,20 @@ durations, and live response bodies vary), so eyeball the output before
 committing. The theme gallery on the Themes page (`theme-<name>.svg`) is shot in
 the same run by `shoot_themes` — the History scene under each gallery palette.
 
-Most scenes reach their tab by positional jump (`3` for History, `8` for
-Decoder, …), and those positions are `Chrome::TABS` minus `DEFAULT_HIDDEN` — so
-a tab going visible by default silently retargets every jump to its right. That
-is not hypothetical: the Decoder scene shipped a picture of the OAST tab for
-three weeks after OAST went visible. When the catalog changes, read the tab
-strip back out of a capture and fix the numbers.
+A scene on the bar reaches its tab by positional jump — the bar is nine numbered
+slots, so `1`-`9` are Project · Target · History · Intercept · Repeater · Fuzzer ·
+Probe · Issues · Notes and nothing else. A scene off the bar reaches its tab by
+NAME, with `0` (Go to tab…), type, `↵`: that is what the guide tells a reader to
+press, and it is the only navigation here that cannot silently retarget. A
+positional jump is a position in `Chrome::TABS` minus `DEFAULT_HIDDEN`, and a tab
+moving on or off the bar slides every digit to its right — the Decoder scene once
+shipped a picture of the OAST tab for three weeks that way. When the catalog
+changes, read the tab strip back out of a capture and fix the numbers.
+
+`0` lands in the BODY (the picker drills in, like the palette's "Go to …"), so an
+off-bar scene needs no `Tab` after it — and the tab it opens rides the far right
+of the bar without a number until you leave it, which is supposed to be in the
+shot.
 
 `statusline.svg` is the one scene that edits `settings.json` before firing: the statusline
 ships off, so there is nothing to photograph until a command is configured. It runs last in

@@ -84,6 +84,13 @@ showcase_alt_jwt = "디코딩된 토큰 헤더와 서명 공격 목록이 나란
 showcase_alt_sequencer = "토큰 무작위성 검사를 설정하는 gori Sequencer 오버레이. 토큰 유형, 쿠키 이름, 샘플 수, 동시성을 지정합니다."
 showcase_alt_probe = "패시브·액티브 스캔 체크와 발견 항목을 나열하는 gori Probe 탭"
 showcase_alt_issues = "심각도와 상태 컬럼으로 정리된 이슈를 나열하는 gori Issues 탭"
+showcase_alt_notes = "gori Notes 탭: 프로젝트 노트 두 개가 서브탭으로 있고 에디터에 점검 체크리스트가 열려 있는 화면"
+showcase_goto_aria = "0 키 뒤에 있는 탭들"
+showcase_sum_oast = "아웃오브밴드 콜백을 실시간으로 받기"
+showcase_sum_sequencer = "토큰 무작위성 샘플링과 분석"
+showcase_sum_decoder = "인코딩·디코딩·해시를 체인으로"
+showcase_sum_jwt = "JSON 웹 토큰 읽기·검증·위조"
+showcase_goto_rest = "<code>0</code>은 모든 탭에 닿습니다 — Miner, Cookie, Comparer, Rewriter, Colormarker, Authorize, Evidence, Help도 그 뒤에 있습니다."
 showcase_note = "클라이언트가 보내는 모든 요청은 <strong>History</strong>에 플로우로 쌓이며, 한 번의 키 입력으로 Repeater, Fuzzer, 이슈로 넘어갑니다."
 
 path_start_kicker = "시작하기"

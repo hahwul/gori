@@ -8,6 +8,13 @@ module Gori::Tui
   # The `0` key's Go-to picker: a type-to-filter list over the WHOLE tab catalog — the nine
   # numbered slots AND everything settings:tabs keeps off the bar — where ↵ jumps.
   #
+  # Every row reads the same. An off-bar row used to wear a `·`, a muted label and the literal
+  # word "hidden", which is the vocabulary of the tab-HIDING feature the nine slots replaced:
+  # it said "this tab is off" about a tab that opens on the next keypress. The only thing being
+  # off the bar actually costs a tab is a digit, so the digit is the only thing the card says
+  # about it, and the dim is spent on the COLUMN (a summary is a step below its label) rather
+  # than on the ROW.
+  #
   # It replaces the ⋯ dropdown (`MoreMenu`), and not for tidiness. The bar is nine slots and
   # the catalog is twenty-one tabs, so the "more" list is no longer a short overflow of one or
   # two: it is a DOZEN, which is a list you type at rather than one you walk. The dropdown had
@@ -19,18 +26,31 @@ module Gori::Tui
   # `on_commit` (Runner#open_tab_goto), which force-shows a hidden tab exactly as the palette's
   # "Go to …" does.
   class TabGotoPicker < FilterPickerOverlay
-    # `slot` is the tab's 1-based position on the bar, or nil when it is off the bar — the
-    # one distinction the card draws, because it is also the one that says whether a digit
-    # reaches the row directly.
-    record Row, sym : Symbol, label : String, slot : Int32?
+    # `slot` is the tab's 1-based position on the bar, or nil when it is off the bar — the one
+    # distinction the card draws, because it is also the only one there is: whether a digit
+    # reaches the row directly. `summary` is the tab's one line (`Chrome.tab_summary`),
+    # defaulted so a caller that only has names still builds a row.
+    record Row, sym : Symbol, label : String, slot : Int32?, summary : String = ""
+
+    # The label column, in display cells: the longest catalog name ("Colormarker") so every
+    # summary starts on the same column instead of ragging off the names.
+    LABEL_W = 11
+
+    # Card width with room for a summary beside the label, and the floor a summary needs to be
+    # worth drawing. Under the floor the summary folds away entirely and the label takes the
+    # whole row back: a line cut to a dozen columns is a fragment, not a phrase, and the label
+    # is the half you navigate by.
+    WIDE_W        = 58
+    MIN_SUMMARY_W = 18
 
     @indexed : Array({Row, String, String}) # each row with its filter haystack + its slot digit
 
     def initialize(@rows : Array(Row))
       # Precompute each row's haystack ONCE (not per keystroke), as SubtabPicker does. The
       # slot digit rides beside it so "3" finds slot 3 — the bar spells the number, so the
-      # picker has to answer to it.
-      @indexed = @rows.map { |row| {row, "#{row.label} #{row.sym}".downcase, row.slot.try(&.to_s) || ""} }
+      # picker has to answer to it. The SUMMARY is in the haystack too: the card shows it, so
+      # it has to be typeable — `hash` finds Decoder, `token` finds JWT and Sequencer.
+      @indexed = @rows.map { |row| {row, "#{row.label} #{row.sym} #{row.summary}".downcase, row.slot.try(&.to_s) || ""} }
       @filtered = @rows
     end
 
@@ -63,21 +83,37 @@ module Gori::Tui
     # Every whitespace-separated term must appear (case-insensitive); an all-digit term also
     # matches the row whose SLOT it is, so `0` then `3` is the long way round to `3` rather
     # than a query that finds nothing. Resets the cursor to the top.
+    #
+    # A row whose NAME matches sorts ahead of one that matched only on its summary, because a
+    # summary can carry another tab's name: Project's line is "targets, scope and project
+    # settings", and Project is row 1, so typing `target` used to select PROJECT and ↵ went
+    # there — the one query a reader is most likely to type for Target. Ranking is the fix
+    # rather than rewording the line, since the collision is structural: twenty-one summaries
+    # about one tool will keep naming each other's tabs.
     protected def refilter : Nil
       terms = query.downcase.split.map { |t| {t, (m = t.match(/\A(\d):?\z/)) ? m[1] : nil} }
-      @filtered = if terms.empty?
-                    @rows
-                  else
-                    @indexed.select { |(_, hay, slot)| terms.all? { |(t, n)| hay.includes?(t) || (n && n == slot) } }.map(&.first)
-                  end
+      if terms.empty?
+        @filtered = @rows
+      else
+        named = [] of Row
+        described = [] of Row
+        @indexed.each do |(row, hay, slot)|
+          next unless terms.all? { |(t, n)| hay.includes?(t) || (n && n == slot) }
+          # The name half of the haystack is everything before the summary — `label sym`.
+          by_name = terms.all? { |(t, n)| "#{row.label} #{row.sym}".downcase.includes?(t) || (n && n == slot) }
+          (by_name ? named : described) << row
+        end
+        @filtered = named + described
+      end
       @selected = 0
       @scroll = 0
     end
 
-    # A centred card — narrower than the sub-tab picker's, since a row is a short tab name
-    # rather than a request line. nil when there isn't room to draw.
+    # A centred card, wide enough for `1: History  every request the proxy captured` and
+    # shrinking to the area on a narrow terminal (where `summary_w` folds the summary away).
+    # nil when there isn't room to draw.
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 44}.min
+      w = {area.w - 4, WIDE_W}.min
       # Shrinks to the content, but never below the floor the card needs to be legible (a
       # filter bar, a divider, and rows worth scrolling) — a two-row list is still a card.
       h = {area.h - 2, {@rows.size + 5, 8}.max}.min
@@ -121,6 +157,14 @@ module Gori::Tui
       end
     end
 
+    # Cells left for the summary column in this card, or 0 when the card is too narrow to
+    # carry one. One column short of the border, so the longest line has a gutter rather than
+    # sitting against the frame. Pure, so the spec can ask the same question the render does.
+    def summary_w(box : Rect) : Int32
+      w = box.right - 2 - (box.x + 6 + LABEL_W + 1)
+      w >= MIN_SUMMARY_W ? w : 0
+    end
+
     private def draw_row(screen : Screen, box : Rect, ry : Int32, row : Row, active : Bool) : Nil
       bg = active ? Theme.accent_bg : Theme.panel
       fg = active ? Theme.text_bright : Theme.text
@@ -129,17 +173,23 @@ module Gori::Tui
 
       num_x = box.x + 3
       label_x = num_x + 3
-      # A slotted row wears the digit that reaches it; an off-bar row wears the `·` the tab
-      # editor uses for "hidden", so the two cards say the same thing the same way.
+      # A slotted row wears the digit that reaches it; an off-bar row leaves the column blank.
+      # No placeholder glyph: `0` opens this card whatever the row is, so "no digit" is the
+      # whole of what there is to say, and a marker would be saying more than that.
       if slot = row.slot
         screen.text(num_x, ry, "#{slot}:", Theme.accent, bg, width: 2)
-      else
-        screen.cell(num_x, ry, '·', Theme.muted, bg)
       end
-      label_w = {box.right - 1 - label_x - 8, 1}.max
-      screen.text(label_x, ry, row.label, row.slot ? fg : Theme.muted, bg,
-        row.slot ? Attribute::Bold : Attribute::None, width: label_w)
-      screen.text(label_x + label_w + 1, ry, row.slot ? "" : "hidden", Theme.muted, bg)
+
+      sw = summary_w(box)
+      label_w = sw > 0 ? LABEL_W : {box.right - 1 - label_x, 1}.max
+      screen.text(label_x, ry, row.label, fg, bg, Attribute::Bold, width: label_w)
+      return if sw <= 0 || row.summary.empty?
+      # The one dim in the card, and it is per-COLUMN: the summary is a step under its own
+      # label on every row, slotted or not, so no row can read as the lesser one. On the
+      # selection band `Theme.muted` loses the fill, so the selected row's summary settles to
+      # `Theme.text` instead — a step under its `text_bright` label, the same relation.
+      screen.text(label_x + label_w + 1, ry, row.summary,
+        active ? Theme.text : Theme.muted, bg, width: sw)
     end
   end
 end
