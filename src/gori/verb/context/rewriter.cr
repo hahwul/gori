@@ -8,6 +8,7 @@ abstract class Gori::Verb::ExecContext
   abstract def rewriter_edit : Nil                # edit the selected rule
   abstract def rewriter_toggle : Nil              # enable/disable the selected rule
   abstract def rewriter_delete : Nil              # delete the selected rule (confirms)
+  abstract def rewriter_filter : Nil              # open the rule list's `/` bar (a lens)
   abstract def rewriter_move(dir : Int32) : Nil   # reorder the selected rule ±1 in apply order
   abstract def rewriter_duplicate : Nil           # copy the selected rule
   abstract def rewriter_reload : Nil              # re-read rules from the DB (external edits)

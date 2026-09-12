@@ -105,7 +105,10 @@ module Gori::Tui
         Item.new("r", "rename the sub-tab (on the strip)"),
         Item.new("/", "filter sub-tabs (tag: name: host: method:)", "repeater.filter-subtabs"),
         Item.new("↹", "complete filter field/value while filtering"),
-        Item.new("t", "tag the active sub-tab (on the strip)", "repeater.tag-subtab"),
+        # `space → a`, not a bare `t`: on the strip `t` MARKS a chip and `⇧T` marks the whole
+        # strip (#683), so the row this replaces named the marking key for tagging. Tagging
+        # has no chord of its own and never did — the menu letter is the whole route.
+        Item.new("space → a", "tag the active sub-tab (from the strip)", "repeater.tag-subtab"),
         Item.new("i / ↵", "enter INS (edit) on request/target · esc back to READ"),
         Item.new("space", "command menu (READ mode on request/target/response)"),
         # Copy is the one READ verb that also works while TYPING: in INS a bare `y` is a
@@ -128,7 +131,7 @@ module Gori::Tui
         Item.new("^V", "transport: HTTP/1.1 ↔ HTTP/2 · on a WebSocket tab, WS → h1 → h2 (send the handshake as plain HTTP)", "repeater.toggle-http2"),
         Item.new("space → g", "send group: %%%-split requests on one connection"),
         Item.new("↹", "cycle target → request → response"),
-        Item.new("d", "response: toggle diff", "repeater.toggle-diff"),
+        Item.new("⇧D", "response: toggle diff", "repeater.toggle-diff"),
         Item.new("p", "response: pretty bodies", "repeater.toggle-pretty"),
         Item.new("^X", "response: hex dump (pane-local)"),
         Item.new("⇧←/→", "response: scroll a long line sideways"),
@@ -215,6 +218,10 @@ module Gori::Tui
         Item.new("↑/↓ · ↵", "callbacks: select · open detail"),
         Item.new("space → p", "promote a callback to an Issue", "oast.promote"),
         Item.new("space → a", "add a provider · e edit · x enable/disable"),
+        # Two copies, opposite directions of one interaction: the payload gori SENT (list) and
+        # what came BACK (detail). Only the detail's can be a chord — `validate_chords!` allows
+        # one `y` per scope — so the list's is named by its space-menu letter.
+        Item.new("{oast.copy-callback} · space → y", "detail: copy the callback · list: copy the last generated payload URL"),
         Item.new("payload", "insert an OAST payload into the focused editor (space → O)", "oast.insert-payload"),
       ]},
       {"SEQUENCER", [
@@ -244,7 +251,7 @@ module Gori::Tui
         Item.new("^B", "reveal whitespace"),
       ]},
       {"OTHER TABS", [
-        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · space → T tag"),
+        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · space → m tag"),
         # `⇧X clear` sits in the LIST half, where the chord fires — and it is on this row at all
         # for the reason the Probe and Authorize rows carry theirs: a wipe has to be named where
         # it can be read before it is pressed. Marks make that sharper here than anywhere else,
@@ -270,7 +277,11 @@ module Gori::Tui
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here
         # rather than left to the space menu. Link/unlink are menu-only (space → k · u).
-        Item.new("Evidence", "↑/↓ ↵ open · {evidence.filter} filter · {evidence.compare} compare · {evidence.issue} issue · {evidence.source} source · {evidence.repeater} repeater · {evidence.delete} delete · space cmds"),
+        #
+        # No `↑/↓` on this one row: it is the longest on the Shortcuts page and sits against
+        # `HelpPopupOverlay::MAX_W` (help_popup_overlay_spec measures it), so the list arrows —
+        # the one thing on the row that is true of every list in the app — are what comes off.
+        Item.new("Evidence", "↵ open · {evidence.copy} copy · {evidence.filter} filter · {evidence.compare} compare · {evidence.issue} issue · {evidence.source} source · {evidence.repeater} repeater · {evidence.delete} delete · space cmds"),
         # The drill-in STEP, keyed by the chord like the Comparer's pair rather than folded into
         # the two tab rows above — both sit within a few columns of the popup's width cap
         # (help_popup_overlay_spec), and a row that trails off into `…` is worse than no row.
@@ -293,8 +304,8 @@ module Gori::Tui
         # ACTIVITY is a Project sub-tab, so its keys hang off the row above rather than earning
         # a section — but `⇧X` there deletes the durable audit trail, which is the one key on
         # this tab that must be named somewhere the operator can read before pressing it.
-        Item.new("  activity", "{activity.filter-source} source · {activity.filter-level} level · {activity.filter-actor} actor · {activity.find} filter · ↵ open · {activity.clear} clear the feed"),
-        Item.new("Intercept", "↵/e edit · {intercept.forward} fwd · {intercept.drop} drop · {intercept.forward-all} all · {intercept.direction} catch · {intercept.filter} condition · {intercept.toggle} on/off"),
+        Item.new("  activity", "{activity.filter-source} source · {activity.filter-level} level · {activity.filter-actor} actor · {activity.find} filter · ↵ open · {activity.copy} copy · {activity.clear} clear the feed"),
+        Item.new("Intercept", "↵/e edit · {intercept.forward} fwd · {intercept.drop} drop · {intercept.forward-all} all · {intercept.copy} copy · {intercept.direction} catch · {intercept.filter} condition · {intercept.toggle} on/off"),
       ]},
       {"DECODER", [
         Item.new("i / ↵", "enter INS on INPUT · esc back to READ"),

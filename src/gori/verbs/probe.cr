@@ -206,6 +206,13 @@ module Gori
         "probe-rules.delete", "Delete custom rule", "Delete the selected custom rule",
         Verb::Scope::ProbeRules, [Verb::Chord.new("d")], available: probe_custom,
         group: :danger) { |ctx| ctx.probe_rule_delete; nil }
+      # `/`, the app's filter key in eleven other list scopes and the one this list needed
+      # most: ~40 built-in rules across three sections, where reaching one meant scrolling
+      # past the other two. A LENS only — a hidden rule is still enabled.
+      r.register Verb::Definition.new(
+        "probe-rules.filter", "Filter rules", "Filter the rule list by name, category or description",
+        Verb::Scope::ProbeRules, [Verb::Chord.new("/")],
+        mnemonic: 'f') { |ctx| ctx.probe_rule_filter; nil }
     end
   end
 end

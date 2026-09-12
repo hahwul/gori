@@ -15,6 +15,7 @@ abstract class Gori::Verb::ExecContext
   abstract def activity_filter_actor : Nil   # cycle the actor chip (all → tui → cli → agent)
   abstract def activity_clear_filters : Nil  # drop every narrowing, chips and query alike
   abstract def activity_clear : Nil          # DESTRUCTIVE: empty the feed (asks first)
+  abstract def activity_copy : Nil           # copy the selected event as one line of text
   abstract def activity_find : Nil           # open the `/` free-text filter bar
   abstract def activity_refresh : Nil        # re-read the page now, without waiting for the poll
   abstract def activity_row_selected? : Bool # an event is selected (gates open in the menu)

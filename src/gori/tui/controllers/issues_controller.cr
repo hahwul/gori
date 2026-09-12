@@ -313,10 +313,10 @@ module Gori::Tui
         elsif @issues.notes_focused?
           keys("↑/↓ move · ⇧arrows select · {issue.copy} copy · i/↵ edit · #{step}space cmds · ↹/←/esc related")
         else
-          # `↹/↓ notes`, and `i edit` rather than the old `i/↵ notes`: ↵ in this pane opens
-          # the selected RELATED item (`issue.open-link`), so naming it as the way into the
-          # notes editor was wrong about one of the two keys it listed.
-          #
+          # `↹/↓ notes` and nothing else for the way down: `i` no longer enters the editor
+          # from here (it prints `insert_key_refusal` instead, like the five workbench tabs
+          # with a read-only pane beside an editor), and ↵ in this pane shows the selected
+          # RELATED row's exchange. Naming either as the route into NOTES was wrong.
           related_hint(step)
         end
       elsif @issues.querying?
@@ -359,7 +359,7 @@ module Gori::Tui
       freeze = related_freezable? ? "{issue.freeze-link} freeze · " : ""
       goto = @issues.selected_related ? "{issue.goto-link} source · " : ""
       open = related_session? ? "↵ open session" : "↵ view"
-      keys("↑/↓ links · #{open} · #{goto}#{freeze}{issue.repeater-flow} repeater · ↹/↓ notes · i edit · #{step}space cmds · ←/esc back")
+      keys("↑/↓ links · #{open} · #{goto}#{freeze}{issue.repeater-flow} repeater · ↹/↓ notes · #{step}space cmds · ←/esc back")
     end
 
     # The RELATED cursor sits on a live flow/repeater row that still resolves — the gate
@@ -652,10 +652,6 @@ module Gori::Tui
       if @issues.notes_insert_mode?
         return handle_notes_insert_key(ev, key, c)
       end
-      if !@issues.notes_focused? && c == 'i'
-        @issues.enter_notes_insert!
-        return true
-      end
       if key.space? && !ev.ctrl? && !ev.alt?
         @host.open_space_menu
         return true
@@ -664,6 +660,25 @@ module Gori::Tui
         return handle_notes_read_key(ev, key, c)
       end
       false
+    end
+
+    # RELATED is a read-only pane sitting beside an editor, which is the exact shape the five
+    # workbench tabs answer with a named refusal (`TabController#insert_key_refusal`). This one
+    # used to claim `i` from ANY detail focus and drop straight into the notes editor, so the
+    # Global `intercept.toggle` vanished on this tab with nothing said — the silent half of the
+    # contradiction the other five had already been taught to speak.
+    #
+    # `i` from RELATED now does nothing loudly. That is #1051's grammar for this pane: ↵ shows
+    # the row's exchange, `s` goes to its source, `f` freezes it — every key acts on the ROW
+    # under the cursor, and dropping the cursor into another pane's editor was never part of
+    # it. `↹`/`↓` is the way down, as the strip says.
+    #
+    # nil on the LIST (Global `i` still toggles intercept there) and nil with NOTES focused,
+    # where `handle_notes_read_key` claims `i` for the editor it belongs to and this is never
+    # reached.
+    def insert_key_refusal : String?
+      return nil unless @issues.detail_open? && !@issues.notes_focused?
+      "RELATED is read-only — i edits the NOTES pane (↹/↓ down); intercept toggles from the tab bar"
     end
 
     private def handle_notes_read_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
@@ -678,15 +693,16 @@ module Gori::Tui
       when key.left?                         then notes_read_left(ev, selecting)
       when key.right?                        then @issues.notes_read_move(0, 1, selecting: selecting)
       when @issues.notes_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
-      # `x` carries its own modifier guard rather than the method taking one at the top:
-      # `notes_read_motion_key` above is the shared editor set, which OWNS ⌃←/⌥← (word
-      # motion), so an early `return false if ev.ctrl?` would cost the pane those. Bare only,
-      # because `ev.char` falls back to `key.to_char` — without this `^X` ran select-line,
-      # shadowing the `x` that a rebind of `issue.select-line` moves. `y` below stays
-      # modifier-blind on purpose: its Ctrl form IS `issue.copy`'s pinned `^Y`, and taking
-      # the same action is what that chord is for in this pane.
-      when !ev.ctrl? && !ev.alt? && c == 'x' then @issues.notes_select_line
-      when c == 'y'                          then issues_notes_copy
+      # `x` is NOT claimed here: `issue.select-line` is a plain chord gated on
+      # `issues_notes_read_mode?`, which is exactly this pane, so the `return false` below
+      # hands the letter to the keymap and a rebind of that verb moves the live key. The arm
+      # that stood here called `notes_select_line` directly, which is why a rebind moved
+      # nothing — and it needed its own bare-only guard (`ev.char` falls back to
+      # `key.to_char`, so `^X` reached it) that the keymap does not need.
+      #
+      # `y` DOES stay claimed, and stays modifier-blind: its Ctrl form IS `issue.copy`'s
+      # pinned `^Y`, and taking the same action is what that chord is for in this pane.
+      when c == 'y' then issues_notes_copy
       else
         return false
       end

@@ -82,7 +82,7 @@ module Gori::Tui
         # pin order chooses the diff direction.
         "A=##{anchor} · move to B · c compare (older→newer) · esc cancel"
       else
-        keys("↑/↓ move · ↵ open · {evidence.filter} filter · {evidence.compare} compare · {evidence.issue} issue · {evidence.source} source · space cmds · esc tabs")
+        keys("↑/↓ move · ↵ open · {evidence.copy} copy · {evidence.filter} filter · {evidence.compare} compare · {evidence.issue} issue · {evidence.source} source · space cmds · esc tabs")
       end
     end
 

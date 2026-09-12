@@ -33,6 +33,15 @@ module Gori
         "Cycle which surface acted: all, tui, cli, agent",
         Verb::Scope::ProjectActivity, [Verb::Chord.new("a")]) { |ctx| ctx.activity_filter_actor; nil }
 
+      # `y`, the app's copy letter, on the one read-only pane that had no way to take a line
+      # out of it at all. Free across this scope (o/↵/s/l/a//,r/⇧X are its claims), and gated
+      # on a row the way `activity.open` is — a feed with nothing selected has nothing to copy.
+      r.register Verb::Definition.new(
+        "activity.copy", "Copy event",
+        "Copy the selected event as one line: time, level, source, actor and message",
+        Verb::Scope::ProjectActivity, [Verb::Chord.new("y")],
+        available: have_row, mnemonic: 'y') { |ctx| ctx.activity_copy; nil }
+
       r.register Verb::Definition.new(
         "activity.find", "Filter events",
         "Filter the feed by text across source, kind and message",

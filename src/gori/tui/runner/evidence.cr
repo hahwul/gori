@@ -475,6 +475,27 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
+  # `y` on the list — the copy reflex every other list scope answers, on the one tab whose
+  # rows ARE bytes. What the viewer's `y` copies for the pane it is showing, this copies for
+  # the whole exchange, through the same ambient #1035 policy: a snapshot on the clipboard has
+  # left the project, and the Evidence tab's other two exits (`⇧E` export, `space → Y` copy-as)
+  # already pass it. A snapshot with no response copies its request alone rather than a
+  # trailing blank — `response_head` is nil there, not empty.
+  def evidence_copy : Nil
+    ev = selected_evidence || return
+    clean, count = sanitized_evidence(ev)
+    request = EvidenceViewer.pane_text(clean.request_head, clean.request_body)
+    text = if clean.response_head
+             "#{request}\n\n#{EvidenceViewer.pane_text(clean.response_head, clean.response_body)}"
+           else
+             request
+           end
+    return (@toast = "evidence ##{ev.meta.id} has no bytes to copy") if text.empty?
+    written = Clipboard.copy(text)
+    marked = count ? " · SANITIZED (#{count})" : ""
+    @toast = "copied evidence ##{ev.meta.id} (#{written}b)#{marked}#{Clipboard.note(written, text)}"
+  end
+
   def evidence_export : Nil
     ev = selected_evidence || return
     open_export(:evidence_json, File.join(Dir.current, "evidence-#{ev.meta.id}.json")) do |path|

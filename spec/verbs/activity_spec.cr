@@ -10,6 +10,7 @@ describe "Gori::Verbs.register_activity" do
     {"activity.open"          => :activity_open,
      "activity.filter-source" => :activity_filter_source,
      "activity.filter-level"  => :activity_filter_level,
+     "activity.copy"          => :activity_copy,
      "activity.find"          => :activity_find,
      "activity.clear-filters" => :activity_clear_filters,
      "activity.clear"         => :activity_clear,
@@ -17,6 +18,18 @@ describe "Gori::Verbs.register_activity" do
       r[id].scope.should eq(Gori::Verb::Scope::ProjectActivity)
       verb_intents(r, id).should eq([intent])
     end
+  end
+
+  # The feed was one of four scopes with no copy at all, on a tab whose rows are the record an
+  # operator pastes into a ticket. `y` is the app's copy letter in 24 other scopes.
+  it "answers the copy reflex on bare `y`, gated on a selected row" do
+    r["activity.copy"].chords.should eq([typed_chord("y")])
+    r["activity.copy"].menu_key.should eq('y')
+    ctx = FakeExecContext.new
+    ctx.current_tab = :project
+    r["activity.copy"].available?(ctx).should be_false
+    ctx.activity_has_row = true
+    r["activity.copy"].available?(ctx).should be_true
   end
 
   # The one that matters, and it is now about BOTH letters. `c` is `capture.toggle` in Global

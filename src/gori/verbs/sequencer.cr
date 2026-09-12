@@ -69,6 +69,10 @@ module Gori
       # have listed :sequencer all along, but with no verbs this tab had NO `:subtab` menu
       # group at all — the only multi-session tab without one. 'e'/'w' are free in
       # COMMON ∪ :subtab (COMMON: r/s/c/i/x/y/v/S/E/J).
+      #
+      # 'e' and NOT the 'r' the strip binds: COMMON's 'r' here is `sequence.run`, the menu echo of
+      # `^R`, and COMMON renders inside the :subtab view. A rename does not take the Run
+      # letter — see `repeater.rename-subtab` for the full note.
       in_seq = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer }
       r.register Verb::Definition.new(
         "sequence.rename-subtab", "Rename subtab", "Rename the active sequencing session's sub-tab chip",

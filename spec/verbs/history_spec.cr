@@ -274,6 +274,16 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "repeater.toggle-sni").should eq([:repeater_toggle_sni])
     end
 
+    it "leaves bare `d` off the Repeater — diff is ⇧D, and `d` destroys everywhere else" do
+      # The one scope where `d` was not "delete the selected thing". The reflex now finds
+      # nothing bound rather than a display toggle; the space menu keeps the 'd' mnemonic,
+      # because nothing in the menu is destroyed by reading it.
+      r["repeater.toggle-diff"].chords.should eq([shift_chord('D')])
+      r["repeater.toggle-diff"].mnemonic.should eq('d')
+      bare_d = typed_chord("d")
+      r.select { |v| v.scope == Gori::Verb::Scope::Repeater && v.chords.includes?(bare_d) }.should be_empty
+    end
+
     it "gates Link… on the session having been persisted" do
       # link_repeater_id is nil until the session has a row — linking before that would
       # attach evidence to an id that does not exist.

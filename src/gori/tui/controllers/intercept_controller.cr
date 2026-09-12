@@ -44,8 +44,9 @@ module Gori::Tui
         # NEITHER, which is why the guard spec's "advertises a band, names no copy key" rule
         # could not see it. Both are live — `handle_edit_key` routes ⇧arrows through
         # `edit_motion_key`, and `intercept.copy` carries `^Y` on the wider `intercept_copyable?`
-        # gate precisely for this pane. Bare `y` is chordless here (the queue spends the
-        # letters) AND a literal character while typing, so `^Y` is the only copy there is.
+        # gate precisely for this pane. Bare `y` IS bound on the queue now, but it is a literal
+        # character while typing (and `text_input_active?` stands the keymap down here), so `^Y`
+        # is still the only copy there is in this strip.
         "type to edit · ⇧arrows select · ^Y copy · ^R forward · ⇧↹/esc queue"
       elsif @intercept.querying?
         "type condition · ↹ complete · ↵ apply · esc clear"
@@ -70,7 +71,8 @@ module Gori::Tui
       fa = Hotkeys.binding_label(reg, "intercept.forward-all", "⇧F")
       filt = Hotkeys.binding_label(reg, "intercept.filter", "/")
       catch = Hotkeys.binding_label(reg, "intercept.direction", "c")
-      "↑/↓ move · #{mark} mark · ⇧↑/↓ range · ↵/e edit · #{f} fwd · #{d} drop · #{fa} all · #{filt} filter · #{catch} catch · space cmds · esc tabs"
+      y = Hotkeys.binding_label(reg, "intercept.copy", "y")
+      "↑/↓ move · #{mark} mark · ⇧↑/↓ range · ↵/e edit · #{f} fwd · #{d} drop · #{fa} all · #{y} copy · #{filt} filter · #{catch} catch · space cmds · esc tabs"
     end
 
     def goto_symbol : Symbol? # the held-message editor is ^G/^F-searchable

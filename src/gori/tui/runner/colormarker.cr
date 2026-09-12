@@ -17,6 +17,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     colormarker_controller.colormarker_delete
   end
 
+  def colormarker_filter : Nil
+    colormarker_controller.colormarker_filter
+  end
+
   def colormarker_move(dir : Int32) : Nil
     colormarker_controller.colormarker_move(dir)
   end

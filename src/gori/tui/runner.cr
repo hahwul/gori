@@ -1457,6 +1457,13 @@ module Gori::Tui
       if @active_tab == :project && @overlay.none? && @focus == :body && project_controller.activity_querying?
         return if project_controller.handle_activity_query_key(ev)
       end
+      # The BODY's own `/` bar on the five rule lists (Colormarker, Rewriter, Probe RULES,
+      # Host overrides, Env). One generic arm rather than five named ones: they all carry the
+      # same `RowFilter`, so the claim is `TabController#list_filter_editing?` and the tab
+      # answers for whichever pane is showing.
+      if @overlay.none? && @focus == :body && (lf = @tabs[@active_tab]?) && lf.list_filter_editing?
+        return if lf.handle_list_filter_key(ev)
+      end
       # Sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc. Opened
       # from the strip (not the body), so it's not gated on @focus. Generic across the
       # workbench tabs — only the active tab's controller can be in filter-edit mode.

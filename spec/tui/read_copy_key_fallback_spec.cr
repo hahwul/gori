@@ -137,8 +137,10 @@ end
 # Not a fallback bug like the two above but the same key in the same kind of pane: OAST's
 # callback detail swallowed EVERY key it did not itself handle, so the `y copy · x line` its
 # footer names were both dead — `y` reached no copy at all and `x` never got out to its chord.
+# Both are plain chords now (`oast.copy-callback`, `oast.select-line`), so the pane's job here
+# is to hand BOTH letters back rather than to copy anything itself.
 describe "bare `y` in the OAST callback detail" do
-  it "copies the callback, and leaves `x` to the keymap" do
+  it "leaves `y` and `x` to the keymap, and `oast.copy-callback` is what `y` reaches" do
     with_session do |host, session|
       store = session.store
       sid = store.insert_oast_session(nil, "interactsh", "https://oast.test",
@@ -151,11 +153,23 @@ describe "bare `y` in the OAST callback detail" do
       ctl.handle_body_key(key(Termisu::Input::Key::Enter)).should be_true # ↵ opens the detail
       ctl.oast_detail_readable?.should be_true
 
-      ctl.handle_body_key(Y.call).should be_true
-      host.statuses.last.should start_with("copied all (")
-
-      # `x` is oast.select-line, a plain chord: the pane must hand it back, not eat it.
+      # Neither letter is claimed here any more: the keymap owns both, which is what makes
+      # them visible to (and movable from) the Hotkeys editor.
+      ctl.handle_body_key(Y.call).should be_false
       ctl.handle_body_key(key(Termisu::Input::Key::LowerX, :none, 'x')).should be_false
+
+      # …and the verb the fall-through lands on still copies the whole callback.
+      ctl.oast_detail_copy
+      host.statuses.last.should start_with("copied all (")
     end
+  end
+
+  it "binds `y` in Scope::OastCallbacks to the DETAIL copy, the one the scope can carry" do
+    reg = Gori::Verbs.registry
+    reg["oast.copy-callback"].chords.should eq([typed_chord("y")])
+    # `validate_chords!` allows one `y` per scope and the keymap has no focus dimension, so
+    # the LIST's payload-URL copy keeps its menu letter and its controller arm.
+    reg["oast.copy"].chords.should be_empty
+    reg["oast.copy"].menu_key.should eq('y')
   end
 end

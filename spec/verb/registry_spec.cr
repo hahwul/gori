@@ -620,6 +620,10 @@ private class FakeContext < ExecContext
     @calls << :sitemap_mark_toggle
   end
 
+  def sitemap_mark_all : Nil
+    @calls << :sitemap_mark_all
+  end
+
   def sitemap_mark_clear : Nil
     @calls << :sitemap_mark_clear
   end
@@ -768,6 +772,10 @@ private class FakeContext < ExecContext
     @calls << :probe_rule_toggle
   end
 
+  def probe_rule_filter : Nil
+    @calls << :probe_rule_filter
+  end
+
   def probe_rule_add : Nil
     @calls << :probe_rule_add
   end
@@ -842,6 +850,10 @@ private class FakeContext < ExecContext
 
   def activity_clear : Nil
     @calls << :activity_clear
+  end
+
+  def activity_copy : Nil
+    @calls << :activity_copy
   end
 
   def activity_find : Nil
@@ -1009,7 +1021,7 @@ private class FakeContext < ExecContext
     false
   end
 
-  {% for name in %w[evidence_open evidence_filter evidence_compare evidence_open_issue evidence_open_source evidence_export evidence_duplicate_repeater evidence_link_issue evidence_unlink_issue evidence_delete] %}
+  {% for name in %w[evidence_open evidence_filter evidence_compare evidence_open_issue evidence_open_source evidence_copy evidence_export evidence_duplicate_repeater evidence_link_issue evidence_unlink_issue evidence_delete] %}
     def {{ name.id }} : Nil
       @calls << :{{ name.id }}
     end
@@ -1527,6 +1539,10 @@ private class FakeContext < ExecContext
     @calls << :rewriter_toggle
   end
 
+  def rewriter_filter : Nil
+    @calls << :rewriter_filter
+  end
+
   def rewriter_delete : Nil
     @calls << :rewriter_delete
   end
@@ -1569,6 +1585,10 @@ private class FakeContext < ExecContext
 
   def colormarker_toggle : Nil
     @calls << :colormarker_toggle
+  end
+
+  def colormarker_filter : Nil
+    @calls << :colormarker_filter
   end
 
   def colormarker_delete : Nil

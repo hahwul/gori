@@ -118,8 +118,8 @@ describe "Gori::Verbs.register_colormarker" do
         v.section == :colors ? (colors_keys << k) : (rules_keys << k)
       end
     end
-    rules_keys.size.should eq(11) # add/edit/toggle/copy/delete/move×2/scope/duplicate/reload/default
-    rules_keys.uniq.size.should eq(11)
+    rules_keys.size.should eq(12) # add/edit/toggle/filter/copy/delete/move×2/scope/duplicate/reload/default
+    rules_keys.uniq.size.should eq(12)
     colors_keys.size.should eq(3)
     colors_keys.uniq.size.should eq(3)
   end

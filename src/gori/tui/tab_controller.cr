@@ -1329,6 +1329,21 @@ module Gori::Tui
     def focus_resume : Nil
     end
 
+    # --- the BODY's own `/` filter bar (the rule lists) ---------------------------------
+    # Distinct from `subtab_filter_editing?` above, which is the STRIP's bar. Five rule lists
+    # grew one in the key-audit round — Colormarker, Rewriter, Probe RULES, Host overrides and
+    # Env — and they all share `RowFilter`, so the shell needs one claim rather than five. The
+    # arm in `Runner#handle_key` routes keys here ahead of the focus ring while `editing?`,
+    # exactly as the strip's bar is routed; `body_takes_text?` is each controller's own job.
+    def list_filter_editing? : Bool
+      false
+    end
+
+    # ALWAYS consume while editing (a Tab that escaped would move the focus ring mid-edit).
+    def handle_list_filter_key(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     # Why a bare `i` does nothing on the FOCUSED pane, or nil when it should reach the keymap.
     # `i` enters INSERT in every editor pane; on the read-only pane beside one — the Repeater
     # RESPONSE, the Fuzzer RESULTS, the Decoder OUTPUT — the same reflex fell through to the

@@ -38,6 +38,62 @@ describe "one key, one meaning" do
     end
   end
 
+  # `y` is the app's copy letter: 24 scopes bound it and four did not — Intercept answered only
+  # `^Y`, the Evidence archive and the Project ACTIVITY feed answered nothing at all, and the
+  # OAST callback detail copied from a raw controller arm the keymap could not see. All four
+  # are real chords now, so the reflex lands and the Hotkeys editor can move every one of them.
+  it "`y` copies on every list that has something to copy" do
+    {Gori::Verb::Scope::Intercept       => "intercept.copy",
+     Gori::Verb::Scope::Evidence        => "evidence.copy",
+     Gori::Verb::Scope::ProjectActivity => "activity.copy",
+     Gori::Verb::Scope::OastCallbacks   => "oast.copy-callback",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("y"), scope).should eq(id), scope.to_s
+    end
+    # `^Y` stays pinned beside the letter wherever a pane can be typed into.
+    keymap.lookup(Gori::Verb::Chord.new("y", ctrl: true), Gori::Verb::Scope::Intercept)
+      .should eq("intercept.copy")
+  end
+
+  # `x` = select line was a registered chord in both scopes AND a raw controller arm doing
+  # the same thing first, so the verb showed in the Hotkeys editor and a rebind moved
+  # nothing. The arms are gone; these are the bindings the letter actually reaches.
+  it "`x` selects the line through the keymap, not through a controller arm" do
+    keymap.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::Repeater)
+      .should eq("repeater.select-line")
+    keymap.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::IssuesDetail)
+      .should eq("issue.select-line")
+    # The Sequencer's `c` was the third of the same shape — one arm, one identical verb.
+    keymap.lookup(Gori::Verb::Chord.new("c"), Gori::Verb::Scope::Sequencer)
+      .should eq("sequence.configure")
+  end
+
+  # `/` filters the list in eleven scopes and did not exist in the rule lists at all — the
+  # Probe RULES sub-tab is ~40 built-ins across three sections, where reaching one meant
+  # scrolling past the other two. All three share `RowFilter`, and all three are a LENS: a
+  # hidden rule is still enabled.
+  it "`/` filters the rule lists the way it filters every other list" do
+    {Gori::Verb::Scope::Colormarker => "colormarker.filter",
+     Gori::Verb::Scope::Rewriter    => "rewriter.filter",
+     Gori::Verb::Scope::ProbeRules  => "probe-rules.filter",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("/"), scope).should eq(id), scope.to_s
+      Gori::Verbs.registry[id].menu_key.should eq('f'), id
+    end
+  end
+
+  # `t` / `⇧T` are mark / mark-all in History, Issues and the Intercept queue. The Sitemap had
+  # the first and not the second.
+  it "`⇧T` marks all on the Sitemap, as it does in every other marked list" do
+    {Gori::Verb::Scope::Body      => "history.mark-all",
+     Gori::Verb::Scope::Issues    => "issues.mark-all",
+     Gori::Verb::Scope::Intercept => "intercept.mark-all",
+     Gori::Verb::Scope::Sitemap   => "sitemap.mark-all",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("t", shift: true), scope).should eq(id), scope.to_s
+    end
+  end
+
   it "History's hidden nav verbs are gated to History, not to every Body-scope tab" do
     ctx = FakeExecContext.new
     ctx.current_tab = :help
@@ -65,9 +121,70 @@ describe "TabController#insert_key_refusal" do
           controller.insert_key_refusal.should be_nil
           controller.focus_last # OUTPUT
           controller.insert_key_refusal.not_nil!.should contain("read-only")
+        when IssuesController
+          # The LIST has no editor beside it, so Global `i` (toggle intercept) must still
+          # reach the keymap from here.
+          controller.insert_key_refusal.should be_nil
         else
           controller.insert_key_refusal # never raises on a tab without such a pane
         end
+      end
+    end
+  end
+
+  # The other half of the keymap-ownership example above: a chord the registry owns is only
+  # live if the controller HANDS THE KEY BACK. All three of these bodies swallow whatever
+  # they do not name, so each had to decline its letter explicitly when its arm came out.
+  it "hands `x` and `c` back to the keymap instead of swallowing them" do
+    TuiContract.with_session("select-line-fallthrough") do |session|
+      store = session.store
+      store.insert_issue("reflected param", Gori::Store::Severity::Medium, "acme.test", nil)
+      TuiContract.each_controller(session) do |controller, _host|
+        case controller
+        when RepeaterController
+          controller.repeater_new
+          v = controller.current_view.not_nil!
+          {:request, :target, :response}.each do |pane|
+            v.focus_pane(pane)
+            controller.repeater_read_mode?.should be_true, pane.to_s
+            controller.handle_body_key(TuiContract.plain('x')).should be_false, pane.to_s
+          end
+        when IssuesController
+          controller.view.reload(store)
+          controller.view.open_detail(store).should be_true
+          controller.view.focus_notes!
+          controller.issues_notes_read_mode?.should be_true
+          controller.handle_detail_key(TuiContract.plain('x')).should be_false
+          # The Sequencer's `c` is the third of the shape and its decline is named in
+          # `handle_body_key`; standing a session up here would mean starting a real
+          # collection, so the keymap example above is what pins that one.
+        end
+      end
+    end
+  end
+
+  # IssuesDetail claimed bare `i` from ANY detail focus and dropped into the notes editor, so
+  # the Global intercept toggle vanished on this tab with nothing said — the one silent member
+  # of a family that was taught to speak five tabs ago. RELATED is a read-only pane beside an
+  # editor; it answers like one now.
+  it "refuses `i` from RELATED and stays quiet once NOTES has focus" do
+    TuiContract.with_session("issues-related-i") do |session|
+      store = session.store
+      store.insert_issue("reflected param", Gori::Store::Severity::Medium, "acme.test", nil)
+      TuiContract.each_controller(session) do |controller, _host|
+        next unless controller.is_a?(IssuesController)
+        controller.view.reload(store)
+        controller.view.open_detail(store).should be_true
+        controller.view.notes_focused?.should be_false
+        refusal = controller.insert_key_refusal.not_nil!
+        refusal.should contain("read-only")
+        refusal.should contain("intercept")
+        # …and the detail handler must HAND the key back, or the runner never reaches the
+        # refusal it just produced.
+        controller.handle_detail_key(TuiContract.plain('i')).should be_false
+
+        controller.view.focus_notes!
+        controller.insert_key_refusal.should be_nil
       end
     end
   end

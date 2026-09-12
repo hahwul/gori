@@ -190,9 +190,8 @@ module Gori
 
       # The Intercept's read-only held-message preview. Mouse-placed caret (see
       # `InterceptController#handle_click`), so `x`/`y` act on wherever the pointer left it.
-      # No chords: the queue already spends nearly every letter, and `x`/`y` there would collide
-      # with a live queue action — the menu is the discoverable route, as it is for the Project
-      # description.
+      # `x` stays chordless (the queue spends its letters on a live action apiece and select-line
+      # is the menu's job here, as it is on the Project description); `y` does NOT — see below.
       in_icept_preview = ->(ctx : Verb::ExecContext) { ctx.current_tab == :intercept && ctx.intercept_preview_readable? }
       in_icept_copy = ->(ctx : Verb::ExecContext) { ctx.current_tab == :intercept && ctx.intercept_copyable? }
       r.register Verb::Definition.new(
@@ -205,12 +204,18 @@ module Gori
         "intercept.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
         Verb::Scope::Intercept, available: sendable.call(in_icept_preview), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
-        # Bare `y` stays chordless for the reason above (the queue spends the letters), but `^Y`
-        # IS registered and the gate is the WIDER `intercept_copyable?`: the held-bytes editor
-        # can build a ⇧arrow selection in INS, where a bare `y` is a literal character that
-        # REPLACES it. A ctrl chord collides with nothing in the queue.
+        # `y` in READ and `^Y` in INS too — the copy pair every other text pane ships, and the
+        # queue is not the exception it was written as: `y` is free across Scope::Intercept
+        # (f/d/⇧F/t/⇧T/c/`/` are its claims), so the letter collides with nothing and the one
+        # tab that answered the copy reflex with silence now answers it.
+        #
+        # The gate is the WIDER `intercept_copyable?`, shared by both chords: the held-bytes
+        # editor can build a ⇧arrow selection in INS, where a bare `y` is a literal character
+        # that REPLACES it. `Runner#text_input_active?` is what keeps the bare chord out of
+        # that editor (Intercept answers `body_takes_text?` while editing), so `^Y` is still
+        # the only copy there is while typing — which is what makes it the pinned half.
         "intercept.copy", "Copy", "Copy the selected preview text, or the whole held message if nothing is selected",
-        Verb::Scope::Intercept, [Verb::Chord.new("y", ctrl: true)],
+        Verb::Scope::Intercept, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
         available: in_icept_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # An OAST callback's detail. `section: :detail` (OastController#command_section answers to
@@ -228,9 +233,19 @@ module Gori
       r.register Verb::Definition.new(
         "oast.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
         Verb::Scope::OastCallbacks, available: sendable.call(in_oast_detail), mnemonic: 'S', section: :detail) { |ctx| ctx.send_to_open; nil }
+      # The detail's `y` is a REAL chord now, so the Hotkeys editor can see and move it — it
+      # used to be a raw `c == 'y'` arm in `OastController#handle_body_key`, which meant the
+      # verb showed as unbound and a rebind moved nothing. It pairs with `oast.select-line`'s
+      # `x`, one line above, the way `y`/`x` pair in every other READ pane.
+      #
+      # Only ONE of this scope's two copies can hold the letter: `validate_chords!` is a static
+      # per-scope sweep and the keymap has no focus dimension, so `oast.copy` (the LIST's "copy
+      # the payload URL I just generated") keeps its controller arm and its 'y' menu letter.
+      # The arm runs before the keymap, so the list is unchanged; this chord is only ever
+      # reached with the detail open, which is what `in_oast_detail` already says.
       r.register Verb::Definition.new(
         "oast.copy-callback", "Copy callback", "Copy the selected callback text, or the whole callback if nothing is selected",
-        Verb::Scope::OastCallbacks,
+        Verb::Scope::OastCallbacks, [Verb::Chord.new("y")],
         available: in_oast_detail, mnemonic: 'y', section: :detail) { |ctx| ctx.read_copy; nil }
 
       # A Probe issue's detail, which is TWO read panes — AFFECTED URLS and DESCRIPTION — and

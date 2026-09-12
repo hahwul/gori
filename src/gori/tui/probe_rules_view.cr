@@ -4,6 +4,7 @@ require "./frame"
 require "../probe"
 require "../store"
 require "./viewport"
+require "./row_filter"
 
 module Gori::Tui
   # The Probe tab's "Rules" sub-tab body: a navigable list of the scan rules that drive the
@@ -40,9 +41,87 @@ module Gori::Tui
     end
 
     def initialize
+      @all = [] of Row
       @rows = [] of Row
       @sel = 0
       @scroll = 0
+      @filter = RowFilter.new # the `/` bar over ~40 rules in three sections
+    end
+
+    # --- the `/` filter ------------------------------------------------------------------
+    # A LENS over `@all`, the flattened section list `reload` builds. `@rows` — what the
+    # cursor, the draw loop and every hit-test walk — is what survives it, with a section
+    # header kept only while something under it does. Nothing here writes: a hidden rule is
+    # still enabled, and `reload` rebuilds the source either way.
+    def filter_start : Nil
+      @filter.start
+    end
+
+    def filter_editing? : Bool
+      @filter.editing?
+    end
+
+    def filter_shown? : Bool
+      @filter.shown?
+    end
+
+    def filter_hint : String
+      @filter.hint
+    end
+
+    def filter_active? : Bool
+      @filter.active?
+    end
+
+    def no_match_line : String
+      @filter.no_match_line("rules")
+    end
+
+    def render_filter_bar(screen : Screen, rect : Rect) : Nil
+      @filter.render_bar(screen, rect)
+    end
+
+    # Re-anchored by the row's own key, since a narrowing shifts every index.
+    def handle_filter_key(ev : Termisu::Event::Key) : Bool
+      prev = selected_row.try(&.rule_id)
+      @filter.handle_key(ev)
+      apply_filter(prev)
+      true
+    end
+
+    def set_filter_preedit(text : String) : Bool
+      @filter.set_preedit(text)
+    end
+
+    private def apply_filter(keep : String? = selected_row.try(&.rule_id)) : Nil
+      @rows = if @filter.active?
+                keep_sections(@all.select { |r| r.kind == :header || @filter.matches?(row_haystack(r)) })
+              else
+                @all
+              end
+      if keep && (i = @rows.index { |r| r.selectable? && r.rule_id == keep })
+        @sel = i
+      end
+      clamp_selection
+      @scroll = 0 if @rows.empty?
+    end
+
+    # Drop a header whose section has nothing left under it — a filter that answers with three
+    # bare titles and no rows reads as broken rather than as empty.
+    private def keep_sections(rows : Array(Row)) : Array(Row)
+      out = [] of Row
+      rows.each_with_index do |row, i|
+        next if row.kind == :header && !(rows[i + 1]?.try(&.selectable?) || false)
+        out << row
+      end
+      out
+    end
+
+    # Name, category/meta and the description — the description matters most here, because it
+    # is where the word an operator remembers about a rule ("header", "cors", "redirect")
+    # usually lives rather than in the title.
+    private def row_haystack(row : Row) : String
+      "#{row.title} #{row.meta} #{row.note} #{row.desc} #{row.rule_id}"
     end
 
     # Rebuild the row list from the built-in registries + this project's disabled set + the merged
@@ -69,8 +148,8 @@ module Gori::Tui
       else
         custom.each { |c| rows << custom_row(c) }
       end
-      @rows = rows
-      clamp_selection
+      @all = rows
+      apply_filter
     end
 
     private def oob_ready?(store : Store) : Bool
@@ -155,12 +234,21 @@ module Gori::Tui
     # rule) resolved to the row one past the last visible one. Same shape as the Colormarker
     # note row and the Sitemap tag prompt.
     private def list_h(rect : Rect) : Int32
-      (footer_text && rect.h >= 3) ? rect.h - 1 : rect.h
+      h = list_rect(rect).h
+      (footer_text && rect.h >= 3) ? h - 1 : h
+    end
+
+    # The interior minus the `/` bar's row, which it takes only while shown. Render and both
+    # hit-tests read it, so a click can never resolve to a row the bar is sitting on.
+    private def list_rect(rect : Rect) : Rect
+      return rect unless @filter.shown? && rect.h > 1
+      Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1)
     end
 
     def row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless rect.contains?(mx, my)
-      i = my - rect.y
+      list = list_rect(rect)
+      i = my - list.y
       return nil if i < 0 || i >= list_h(rect)
       idx = @scroll + i
       (0 <= idx < @rows.size) ? idx : nil
@@ -174,7 +262,8 @@ module Gori::Tui
     # proportional hit made ~4 of ~40 track positions silent no-ops, a thumb that moved
     # nowhere. Every other gauge in this sweep resolves to a row the click can land on.
     def gauge_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      idx = Frame.scroll_gauge_row(Rect.new(rect.x, rect.y, rect.w, list_h(rect)), @rows.size, mx, my)
+      list = list_rect(rect)
+      idx = Frame.scroll_gauge_row(Rect.new(list.x, list.y, list.w, list_h(rect)), @rows.size, mx, my)
       return nil unless idx
       nearest_selectable(idx)
     end
@@ -211,14 +300,22 @@ module Gori::Tui
       # Reserve the bottom line for the selected rule's description when there is room — the one
       # place the Rules tab explains what a rule DOES, so an operator toggling it isn't guessing
       # from the name. Falls away on a very short pane (the list keeps every line it can).
+      @filter.render_bar(screen, Rect.new(rect.x, rect.y, rect.w, 1)) if @filter.shown? && rect.h > 1
+      list = list_rect(rect)
       footer = footer_text
       list_h = list_h(rect)
       @list_last_h = list_h
+      if @rows.empty?
+        # Rules exist (they are compiled in); only a query can empty this list.
+        screen.text(list.x + 1, list.y, @filter.no_match_line("rules"), Theme.muted, Theme.bg,
+          width: {list.w - 2, 0}.max) if list.h > 0
+        return
+      end
       ensure_visible(list_h)
       list_h.times do |i|
         idx = @scroll + i
         break if idx >= @rows.size
-        draw_row(screen, rect, @rows[idx], idx, rect.y + i, focused)
+        draw_row(screen, rect, @rows[idx], idx, list.y + i, focused)
       end
       if footer && rect.h >= 3
         y = rect.bottom - 1
@@ -228,7 +325,7 @@ module Gori::Tui
       # This list runs to ~40 rows across three sections and had no scroll affordance at all,
       # so an operator scrolled past the ACTIVE section with nothing on screen saying there
       # was more. Tracks `list_h`, the rows actually windowed — not the footer under them.
-      Frame.scroll_gauge(screen, Rect.new(rect.x, rect.y, rect.w, list_h),
+      Frame.scroll_gauge(screen, Rect.new(list.x, list.y, list.w, list_h),
         @rows.size, @scroll, focused)
     end
 

@@ -130,21 +130,22 @@ describe "Gori::Verbs.register_sitemap" do
     clear.available?(ctx).should be_true
   end
 
-  it "gives `t` to marking and leaves ⇧T unbound, with tagging menu-only" do
-    # The lists agree on `t` = mark. ⇧T is where they STOPPED agreeing: History, Issues and
-    # Intercept all read it as "mark all", so a hand that learnt the `t`/⇧T pair there opened
-    # a text prompt here. Tagging is a space-menu entry now, like `sitemap.mark-clear`, and
-    # ⇧T is deliberately left free rather than reassigned — a tree has no useful "mark every
-    # row" today (see sitemap.mark-toggle), and this keeps the letter for the day it does.
+  it "spells the `t` / ⇧T mark pair the way every other list tab does, with tagging menu-only" do
+    # The lists agree on `t` = mark. ⇧T is where they used to STOP agreeing: History, Issues
+    # and Intercept all read it as "mark all", so a hand that learnt the pair there opened a
+    # text prompt here. Both keys are the family's now, and the tree's own objection to a
+    # mark-all — that it would sweep hosts and folders in beside the endpoints — is answered
+    # in `SitemapView#mark_all_visible`, which marks only rows carrying a method.
     r["sitemap.mark-toggle"].chords.should eq([typed_chord("t")])
     r["sitemap.mark-toggle"].menu_key.should eq('t')
+    r["sitemap.mark-all"].chords.should eq([shift_chord('T')])
+    r["sitemap.mark-all"].menu_key.should eq('T')
+    verb_intents(r, "sitemap.mark-all").should eq([:sitemap_mark_all])
+    # Tagging kept the 'T' menu letter for a while after losing the chord, which was the same
+    # lie one tier down: the letter beside a chord has to name what the chord does.
     tag = r["sitemap.tag"]
     tag.chords.should be_empty
-    tag.menu_key.should eq('T')
-    shift_t = typed_chord("t", shift: true)
-    sitemap_verbs = [] of Gori::Verb::Definition
-    r.each { |v| sitemap_verbs << v if v.scope.sitemap? }
-    sitemap_verbs.none? { |v| v.chords.includes?(shift_t) }.should be_true
+    tag.menu_key.should eq('m')
   end
 
   it "extends the range on ⇧arrows without shadowing plain tree nav" do

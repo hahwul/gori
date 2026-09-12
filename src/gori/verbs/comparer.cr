@@ -70,9 +70,11 @@ module Gori
         Verb::Scope::Comparer, available: in_comparer, mnemonic: 'n',
         section: :common) { |ctx| ctx.comparer_new; nil }
 
+      # 'r', the letter the STRIP binds for rename. It read 'e' until the key audit, which
+      # taught two letters for one action on the one surface that has both.
       r.register Verb::Definition.new(
         "comparer.rename-subtab", "Rename comparison", "Rename the active comparison chip",
-        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'e',
+        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'r',
         section: :subtab) { |ctx| ctx.comparer_rename_subtab; nil }
 
       # `:common`, not `:subtab` — the space menu renders COMMON ∪ the FOCUSED PANE's section,

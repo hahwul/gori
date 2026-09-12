@@ -5,6 +5,7 @@ require "../../store"
 require "../../settings"
 require "../../colormarker"
 require "../viewport"
+require "../row_filter"
 
 module Gori::Tui
   # The Colormarker tab: two stacked panes. The POLICY list on top manages this project's
@@ -30,6 +31,41 @@ module Gori::Tui
       @focus = :rules       # :rules | :colors
       @colors_shown = false # whether the body is tall enough to host the colours pane
       @last_body = Rect.new(0, 0, 0, 0)
+      @filter = RowFilter.new # the POLICY list's `/` bar
+    end
+
+    # --- the POLICY list's `/` filter ------------------------------------------------------
+    # A LENS over `Colormarker#rules`: `rule_list` is what the cursor, the draw loop and every
+    # verb walk, and every mutation below acts on the selected rule's ID, so a narrowing cannot
+    # send one to the wrong row. The one exception is REORDERING, which is refused while a
+    # query is held — "move up" over a list with rows hidden between the visible ones would
+    # move the rule somewhere the screen cannot show, and precedence is the one thing on this
+    # tab an operator reorders by watching it happen.
+    def list_filter_editing? : Bool
+      @focus == :rules && @filter.editing?
+    end
+
+    def handle_list_filter_key(ev : Termisu::Event::Key) : Bool
+      prev = selected_rule.try(&.id)
+      @filter.handle_key(ev)
+      list = rule_list
+      @sel = (prev ? list.index { |r| r.id == prev } : nil) || @sel
+      @sel = @sel.clamp(0, {list.size - 1, 0}.max)
+      true
+    end
+
+    def set_preedit(text : String) : Bool
+      @filter.set_preedit(text)
+    end
+
+    def body_takes_text? : Bool
+      list_filter_editing?
+    end
+
+    def colormarker_filter : Nil
+      return @host.status("no colour rules to filter — a adds one") if engine.rules.empty?
+      @focus = :rules
+      @filter.start
     end
 
     def tab : Symbol
@@ -51,8 +87,16 @@ module Gori::Tui
       @host.session.colormarker
     end
 
+    # The FILTERED list — what the pane shows and what `@sel` indexes. `engine.rules` stays the
+    # source of truth for everything that writes.
     private def rule_list : Array(Store::ColorRule)
-      engine.rules
+      return engine.rules unless @filter.active?
+      engine.rules.select { |r| @filter.matches?(rule_haystack(r)) }
+    end
+
+    # Name, the match filter itself and the scope word — the three things a row shows.
+    private def rule_haystack(rule : Store::ColorRule) : String
+      "#{rule.name} #{rule.match_filter} #{rule.color} #{rule.global? ? "global" : "project"}"
     end
 
     private def custom_colors : Array(Settings::ColormarkerColor)
@@ -116,6 +160,8 @@ module Gori::Tui
         @colors_shown = !colors_r.empty?
         @focus = :rules unless @colors_shown # can't rest on a pane that is not drawn
 
+        @filter.render_bar(screen, Rect.new(rules_r.x + 1, rules_r.y, rules_r.w - 2, 1)) if filter_row?(rules_r)
+        rules_r = rules_list_rect(rules_r)
         rlist = rule_list
         @sel = @sel.clamp(0, {rlist.size - 1, 0}.max)
         ensure_visible(rules_r, rlist.size)
@@ -132,6 +178,17 @@ module Gori::Tui
       end
     end
 
+    # The `/` bar takes the POLICY card's top row while it is shown. ONE definition, read by
+    # render and by both hit-tests, so a click can never resolve to a row the bar is sitting on.
+    private def filter_row?(rules_r : Rect) : Bool
+      @filter.shown? && rules_r.h > 1
+    end
+
+    private def rules_list_rect(rules_r : Rect) : Rect
+      return rules_r unless filter_row?(rules_r)
+      Rect.new(rules_r.x, rules_r.y + 1, rules_r.w, rules_r.h - 1)
+    end
+
     # Both counts are the arrays the caller hands straight to the matching view — `rule_list`
     # for the POLICY pane, `custom_colors` for the COLOURS pane — so each window and its draw
     # walk the same list by construction. `row_capacity` takes the count because the pane's
@@ -146,10 +203,11 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
+      return @filter.hint if list_filter_editing?
       if @focus == :colors
         keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.delete} delete · space cmds · esc tabs")
       else
-        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.copy} copy · {colormarker.delete} delete · space cmds · ↹ colours")
+        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.filter} filter · {colormarker.copy} copy · {colormarker.delete} delete · space cmds · ↹ colours")
       end
     end
 
@@ -282,6 +340,7 @@ module Gori::Tui
       inner = BodyChrome.frame_inner(rect)
       @last_body = inner
       rules_r, colors_r = @view.pane_rects(inner)
+      rules_r = rules_list_rect(rules_r)
       if !colors_r.empty? && colors_r.contains?(mx, my)
         @focus = :colors
         n = custom_colors.size
@@ -388,6 +447,8 @@ module Gori::Tui
     # says that rather than leaving an operator to infer it from a list that merely shuffled.
     def colormarker_move(dir : Int32) : Nil
       rule = selected_rule || return @host.status("no colour rule selected")
+      # Precedence is read off the list, and a filtered list is not the order the engine holds.
+      return @host.status("clear the filter (esc on the / bar) to reorder — precedence is the whole list's order") if @filter.active?
       if engine.move(rule.id, dir, rule.scope)
         move_sel(dir)
         @host.status("precedence changed — the first enabled match paints the row")

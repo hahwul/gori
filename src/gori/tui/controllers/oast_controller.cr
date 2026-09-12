@@ -1236,13 +1236,14 @@ module Gori::Tui
             with_cb_pane { @cb_pane.move(-1, 0, selecting: ev.shift?) }
           end
         when key.down?, key.lower_j? then with_cb_pane { @cb_pane.move(1, 0, selecting: ev.shift?) }
-        when c == 'y'                then oast_detail_copy
         else
           # Home / End / PgUp / PgDn, ⇧ extending — and FALL THROUGH on anything else, which is
-          # what `x` (oast.select-line, a plain chord) needs to reach the keymap. The old
-          # unconditional `return true` swallowed every unhandled key, so the two this pane's
-          # footer names — `y copy · x line` — were both dead here: `y` had no chord to reach
-          # (it is raw-dispatched above, as it is in the callbacks LIST) and `x` never got out.
+          # what `x` (oast.select-line) and `y` (oast.copy-callback) need to reach the keymap.
+          # `y` was raw-dispatched here until the audit: the verb showed as unbound in the
+          # Hotkeys editor and a rebind moved nothing, because this arm ran first. Both are
+          # plain chords gated on `oast_detail_readable?` now, so this pane's footer — `y copy
+          # · x line` — names two keys the editor owns. The old unconditional `return true`
+          # swallowed every unhandled key, which is what had made `x` dead here as well.
           # Same fall-through the list below hands `g`/`r`/`a` to the keymap with.
           handled = false
           with_cb_pane { handled = @cb_pane.motion_key(ev) }
@@ -1261,6 +1262,12 @@ module Gori::Tui
           @cb_detail = true
           @cb_pane.reset # a different callback renumbers every line
         end
+        # The LIST's `y` stays controller-local, alone in this file now. `oast.copy-callback`
+        # holds the scope's real `y` chord and `validate_chords!` allows exactly one per scope
+        # — the keymap has no focus dimension — so `oast.copy` keeps its 'y' MENU letter and
+        # this arm, which runs before the keymap and is therefore what the list actually does.
+        # The two are opposite directions of one interaction (the payload gori sent vs. what
+        # came back), so they are not one verb, and the menu has to keep saying which is which.
       when c == 'y' then copy_payload
         # `g` (get payload), `r` (resume) and `a` (add issue) are NOT claimed here: each can open
         # an overlay, which a controller cannot do, so they stay verbs with plain chords and reach

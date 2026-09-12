@@ -179,6 +179,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     probe_controller.rules_toggle_selected
   end
 
+  def probe_rule_filter : Nil
+    probe_controller.rules_filter
+  end
+
   def probe_rule_add : Nil
     probe_controller.rules_add
   end

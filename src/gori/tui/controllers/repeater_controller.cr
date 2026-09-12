@@ -260,7 +260,7 @@ module Gori::Tui
       send = Hotkeys.binding_label(reg, "repeater.send", "^R")
       hex = Hotkeys.binding_label(reg, "repeater.toggle-hex", "^X")
       sni = Hotkeys.binding_label(reg, "repeater.toggle-sni", "^S")
-      diff = Hotkeys.binding_label(reg, "repeater.toggle-diff", "d")
+      diff = Hotkeys.binding_label(reg, "repeater.toggle-diff", "⇧D")
       pretty = Hotkeys.binding_label(reg, "repeater.toggle-pretty", "p")
       # The §-marker trio, named in both request footers. `^T` in particular was reachable
       # only by already knowing it: the border badge advertises MARK, not the key that makes
@@ -2865,9 +2865,8 @@ module Gori::Tui
       when key.page_down?           then view.request_read_page(1, selecting: selecting)
       when key.home?                then view.edit_home(selecting)
       when key.end?                 then view.edit_end(selecting)
-      when c == 'x'                 then view.pane_select_line
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # y copy, Global c/i/s, …
+        return false # x select-line, y copy, Global c/i/s, …
       end
       true
     end
@@ -2886,9 +2885,8 @@ module Gori::Tui
       when key.right?, key.lower_l? then view.target_read_move(1, selecting: selecting)
       when key.home?                then view.target_home(selecting)
       when key.end?                 then view.target_end(selecting)
-      when c == 'x'                 then view.pane_select_line
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false
+        return false # x select-line, y copy, Global c/i/s, …
       end
       true
     end
@@ -2969,10 +2967,9 @@ module Gori::Tui
       when transcript
         # Transcript: no d/x/p tools; still let Global breath / copy through.
         return false if c && !ev.ctrl? && !ev.alt? && !c.control?
-      when key.lower_x? then view.pane_select_line # 'x' selects the line everywhere (hex is ^X)
-      when key.lower_b? then @host.toggle_reveal   # bare `b` (Global reveal is ^B)
+      when key.lower_b? then @host.toggle_reveal # bare `b` (Global reveal is ^B)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # d diff, p pretty, y copy, Global c/i/s, …
+        return false # x select-line, ⇧D diff, p pretty, y copy, Global c/i/s, …
       end
       true
     end
