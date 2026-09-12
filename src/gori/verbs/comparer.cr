@@ -58,11 +58,18 @@ module Gori
         Verb::Scope::Comparer, [Verb::Chord.new("p", shift: true)],
         available: in_diff, mnemonic: 'G') { |ctx| ctx.comparer_jump_change(-1); nil }
 
+      # MENU-ONLY since the key audit's F3, for the reason `history.toggle-follow` carries:
+      # `f` is freeze in evidence contexts and find on the sub-tab strip, and folding is a
+      # session-rare toggle rather than a loop key.
+      #
+      # The letter stays 'z' and does NOT become 'f': `comparer.find-subtab` holds 'f' in this
+      # scope's :tab section, COMMON renders inside that view, and `validate_menu_keys!` would
+      # raise at boot. The strip's `f` IS the find tier, so the collision is the rule working
+      # rather than an accident to route around.
       r.register Verb::Definition.new(
         "comparer.toggle-fold", "Fold unchanged",
         "Collapse the runs of identical lines, keeping context around each change",
-        Verb::Scope::Comparer, [Verb::Chord.new("f")],
-        available: in_diff, mnemonic: 'z') { |ctx| ctx.comparer_toggle_fold; nil }
+        Verb::Scope::Comparer, available: in_diff, mnemonic: 'z') { |ctx| ctx.comparer_toggle_fold; nil }
 
       # Sub-tab strip / space menu (session multi-pair workspace).
       r.register Verb::Definition.new(

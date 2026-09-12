@@ -341,7 +341,7 @@ module Gori::Tui
     # drawn, or `right_edge + 1` when nothing fit, so the caller can size what sits left of it.
     #
     # This is the filter-bar cluster four views had each written out: History's
-    # `count · s scope · f:follow`, Sitemap's `count · s scope · g:fold`, and the bare
+    # `count · s scope · ⌁follow`, Sitemap's `count · s scope · g:fold`, and the bare
     # `count · s scope` in Issues and Probe. Same shape, four copies, and they had already
     # drifted on the gap — a TWO-column step after the count, a ONE-column step between the
     # chips, in the same method. `toggle_badge` is not this: it fills a `" chord:NAME "` pill,

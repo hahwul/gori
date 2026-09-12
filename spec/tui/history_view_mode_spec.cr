@@ -97,7 +97,7 @@ describe "HistoryView — view mode" do
     end
   end
 
-  it "draws v:all muted at rest and v:name left of f:follow when one is on" do
+  it "draws v:all muted at rest and v:name left of ⌁follow when one is on" do
     with_store do |store|
       view = HistoryView.new
       view.reload(store)
@@ -108,9 +108,9 @@ describe "HistoryView — view mode" do
       view.reload(store)
       row = screen_rows(view).first
       row.should contain("v:history")
-      # `Frame.right_text_chain` draws rightmost-first, so "left of f:follow" is an ordering
+      # `Frame.right_text_chain` draws rightmost-first, so "left of ⌁follow" is an ordering
       # claim about the rendered row, not about the array.
-      row.index("v:history").not_nil!.should be < row.index("f:follow").not_nil!
+      row.index("v:history").not_nil!.should be < row.index("⌁follow").not_nil!
     end
   end
 
@@ -125,7 +125,7 @@ describe "HistoryView — view mode" do
       # Its neighbour immediately after it: a truncated label would read `v:history+rpt…`, and
       # an ellipsis anywhere else on this row belongs to the filter hint, not to the chip.
       row = screen_rows(view).first
-      row.should contain("v:history+rptr f:follow")
+      row.should contain("v:history+rptr ⌁follow")
       row.should_not contain("v:History")
     end
   end
@@ -141,7 +141,7 @@ describe "HistoryView — view mode" do
   end
 
   it "lowercases an operator's own view name in the chip, and still truncates it" do
-    # The chip is a mode indicator beside `f:follow` and `s scope:off`, not a place a name is
+    # The chip is a mode indicator beside `⌁follow` and `s scope:off`, not a place a name is
     # quoted — so a saved view's casing goes the same way a builtin's does. The picker, the CLI
     # and MCP keep the name the operator typed.
     with_store do |store|

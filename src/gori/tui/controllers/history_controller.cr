@@ -229,7 +229,8 @@ module Gori::Tui
     end
 
     # The filter bar row. Its right cluster's chips do exactly what their own chords do —
-    # `s` flips the scope lens, `f` follow, `v` opens the view picker — and the field left of
+    # `s` flips the scope lens, the `⌁follow` chip toggles follow (menu-only since F3 took
+    # bare `f` back), `v` opens the view picker — and the field left of
     # them opens for editing like `/`. A chip that is a READOUT rather than a control (the row
     # count, the mark count) still consumes the click: it is chrome, not a list row, and
     # falling through would move the selection out from under the pointer.
@@ -496,7 +497,6 @@ module Gori::Tui
       reg = @host.session.registry
       repeater = Hotkeys.binding_label(reg, "history.repeater", "^R")
       issue = Hotkeys.binding_label(reg, "issue.create", "⇧F")
-      follow = Hotkeys.binding_label(reg, "history.toggle-follow", "f")
       filter = Hotkeys.binding_label(reg, "history.query", "/")
       intercept = Hotkeys.binding_label(reg, "intercept.toggle", "i")
       if @host.overlay == :detail
@@ -541,7 +541,7 @@ module Gori::Tui
         return "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs" if @history.preview_focus != :list
         return "↑/↓ move · ↵ open · ↹ preview · #{repeater} repeater · #{filter} filter · #{clear} clear · space cmds · esc tabs"
       end
-      "↑/↓ move · ↵ open · #{repeater} repeater · #{issue} issue · #{follow} follow · #{clear} clear · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
+      "↑/↓ move · ↵ open · #{repeater} repeater · #{issue} issue · #{clear} clear · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
     end
 
     # Live IME composition only flows to the QL filter bar (the one text field).

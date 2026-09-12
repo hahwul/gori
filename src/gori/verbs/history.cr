@@ -41,9 +41,15 @@ module Gori
         "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 size:>10000 body~regex …)",
         Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history, group: :view) { |ctx| ctx.history_query; nil }
 
+      # MENU-ONLY since the key audit's F3. `f` carried six unrelated meanings across the tabs
+      # and settles into two TIERS: **freeze** in every evidence context (the Issues detail and
+      # the evidence card already agreed), and **find** on the sub-tab strip, which is a
+      # different tier and cannot collide. Follow is a session-rare toggle — flipped once and
+      # left — which is the L3 price the key budget names, so it keeps the 'f' letter in the
+      # menu and gives up the bare key.
       r.register Verb::Definition.new(
         "history.toggle-follow", "Toggle follow", "Follow newest flows (tail) on/off",
-        Verb::Scope::Body, [Verb::Chord.new("f")], available: in_history, group: :view) { |ctx| ctx.toggle_follow; nil }
+        Verb::Scope::Body, available: in_history, mnemonic: 'f', group: :view) { |ctx| ctx.toggle_follow; nil }
 
       # `v` is a bare-key (L1) claim, argued the same way `t` is below. A view is the answer to
       # "what am I looking at", asked every time the operator returns to the tab and every time

@@ -89,7 +89,7 @@ module Gori
 
       # What the History filter row's `v:` chip spells. A LABEL, not the name, for two reasons
       # that both belong to that row and to nowhere else: every chip beside it reads
-      # `f:follow` / `s scope:off` / `3 marked`, so a Title-Case one is the only word on the
+      # `⌁follow` / `s scope:off` / `3 marked`, so a Title-Case one is the only word on the
       # bar shouting; and the chip is the narrowest place a view is ever printed, which is why
       # `CHIP_LABELS` exists at all.
       #
