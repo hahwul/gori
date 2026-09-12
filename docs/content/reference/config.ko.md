@@ -436,16 +436,11 @@ TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 �
 
 TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **General** → **Statusline**). 활성화하면 gori가 일정 간격으로 셸 명령을 실행하고 그 stdout을 해당 행으로 렌더링합니다. Claude Code의 상태 표시줄에서 영감을 받은 커스터마이즈 가능한 상태 바라고 생각하면 됩니다. 기본적으로 비활성화되어 있으며, 변경하기 전까지는 이 섹션이 `settings.json`에서 생략됩니다.
 
-<figure class="tui-shot">
-  <img src="/images/tui/statusline.svg" alt="상태 바 아래 맨 마지막 행에 statusline이 붙은 gori History 탭. 셸 명령이 만들어낸 색상 세그먼트로 프로젝트 이름, 캡처 상태, 플로우 수, 스코프 상태를 보여준다">
-  <figcaption><strong>statusline</strong>은 상태 바 아래 맨 마지막 행입니다. 직접 지정한 셸 명령의 출력 한 줄이 타이머에 맞춰 갱신됩니다.</figcaption>
-</figure>
-
 ```json
 {
   "statusline": {
     "enabled": true,
-    "command": "jq -r '\"\\(.project) · \\(.flows) flows\"'",
+    "command": "date '+%H:%M'",
     "interval": 3,
     "timeout": 10
   }
@@ -463,78 +458,9 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 
 `timeout`은 `interval`과 의도적으로 분리되어 있습니다. 실행은 겹치지 않으므로(이전 실행이 끝난 뒤에야 다음 실행을 띄웁니다) `interval`보다 느린 스크립트는 매번 죽는 대신 가능한 만큼만 천천히 갱신됩니다. `timeout`을 초과한 실행은 종료되고 행은 `⋯ (timed out)`이 됩니다.
 
-아무것도 출력하지 못하고 실패한 명령은 행을 비워 두는 대신 종료 상태를 보고합니다. 명령을 찾지 못했으면 `⋯ (exit 127)`, 시그널로 끝났으면 `⋯ (killed)`. 정상 종료했는데 출력이 없으면 행은 비어 있습니다(스크립트가 그렇게 할 수 있는 정당한 선택입니다). 어느 쪽이든 stderr는 버려집니다. 이 표식들은 본문 색이 아니라 주의 색으로 그려지므로, 멈춰 버린 statusline이 "나쁜 소식을 전하는 멀쩡한 statusline"으로 읽히지 않습니다.
-
 편집은 즉시 반영됩니다. `command` · `interval` · `timeout`을 저장하면 현재 간격이 끝나기를 기다리지 않고 다음 프레임에 다시 실행합니다.
 
-#### stdin으로 들어오는 컨텍스트 {#statusline-context}
-
-각 실행은 라이브 세션을 설명하는 JSON 컨텍스트를 stdin으로 받으므로, 스크립트는 gori를 쿼리하지 않고도 프록시 상태를 표시할 수 있습니다:
-
-```json
-{
-  "version": 1,
-  "project": "acme",
-  "capturing": true,
-  "flows": 1234,
-  "proxy": { "host": "127.0.0.1", "port": 8070, "addr": "127.0.0.1:8070" },
-  "upstream": "",
-  "upstream_rules": 0,
-  "scope": { "active": true, "rules": 2, "sandbox": false },
-  "intercept": { "enabled": false, "queued": 0, "direction": "both" },
-  "probe": "passive",
-  "issues": 7,
-  "jobs": { "running": 1, "label": "fuzzing 1" }
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `version` | integer | 컨텍스트 스키마 버전 (현재 `1`) |
-| `project` | string | 활성 프로젝트 이름 |
-| `capturing` | bool | 프록시가 현재 캡처 중인지 여부 |
-| `flows` | integer | 캡처한 플로우 수 |
-| `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | 프록시가 실제로 리스닝 중인 주소 |
-| `upstream` | string | **캐치올** 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. [업스트림 규칙](#upstream-rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
-| `upstream_rules` | integer | 적용 중인 [업스트림 규칙](#upstream-rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
-| `scope.active` / `scope.rules` | bool / integer | [스코프](/ko/guide/proxy/#scope) 필터가 실제로 작동 중인지 — 렌즈가 켜져 있고 **동시에** 규칙이 하나 이상 — 그리고 규칙이 몇 개인지 |
-| `scope.sandbox` | bool | [Sandbox](/ko/guide/proxy/#sandbox)가 스코프 밖 목적지를 기록만 안 하는 게 아니라 아예 차단하고 있는지 |
-| `intercept.enabled` | bool | catch가 켜져 있는지. 켜져 있는 동안 실제 클라이언트가 붙잡혀 있음 |
-| `intercept.queued` | integer | 지금 결정을 기다리는 메시지 수 |
-| `intercept.direction` | string | `both` · `requestonly` · `responseonly` — 어느 쪽 다리를 붙잡는지 |
-| `probe` | string | [스캐너](/ko/guide/scanning/#probe-the-scanner) 모드: `off` · `passive` · `active` · `aggressive` |
-| `issues` | integer | 이 프로젝트에 기록된 이슈 수 |
-| `jobs.running` | integer | 진행 중인 백그라운드 작업 수 (fuzz · mine · discover 등) — 활동 칩이 세는 바로 그 장부라, 전송 중인 Repeater 요청은 포함되지 않음 |
-| `jobs.label` | string \| null | 상태 바의 활동 칩이 말하는 문구, 예: `"fuzzing 1"`. 실행 중인 게 없으면 `null` |
-
-`scope`부터 아래는 이미 캡처한 것이 아니라 **gori가 다음에 무엇을 할지**를 설명합니다. 상단 바의 칩들이 나르는 바로 그 사실이라, 위를 올려다보지 않고도 "intercept가 아직 켜져 있나?"를 statusline이 답할 수 있습니다. 필드는 추가만 되었고 `version`은 `1` 그대로입니다. 이전 컨텍스트에 맞춰 쓴 스크립트는 똑같이 동작합니다.
-
-**stdin은 한 번만 읽힙니다.** 파일이 아니라 파이프이므로 먼저 읽는 명령이 전부 가져가고 두 번째는 아무것도 못 받습니다 — `"$(jq -r .project)" "$(jq -r .flows)"`는 플로우 수를 조용히 빈 값으로 출력합니다. 위 예시처럼 `jq` 하나로 전체를 읽거나, 먼저 담아 두세요:
-
-```sh
-ctx=$(cat); printf '%s · %s flows' "$(echo "$ctx" | jq -r .project)" "$(echo "$ctx" | jq -r .flows)"
-```
-
-#### 예시 {#statusline-examples}
-
-아래는 모두 한 줄이며 `command`에 그대로 넣으면 됩니다 — 설정 폼의 입력란도 한 줄입니다. `\u001b`는 `jq`가 이스케이프 문자를 적는 방식입니다. 색상은 선택 사항입니다.
-
-```sh
-# 프로젝트 · 캡처 상태 · 개수. 캡처 중이면 초록 점.
-jq -r '(if .capturing then "\u001b[32m●" else "\u001b[31m○" end) + "\u001b[0m \(.project)  \(.flows) flows  \(.issues) issues"'
-```
-
-```sh
-# 다음 요청의 동작을 바꾸는 모드만 크게 — 각각 켜져 있을 때만 표시.
-jq -r '[ (select(.intercept.enabled) | "\u001b[33mINTERCEPT \(.intercept.queued)\u001b[0m"), (select(.scope.sandbox) | "\u001b[31mSANDBOX\u001b[0m"), (select(.jobs.running > 0) | .jobs.label) ] | join("  ")'
-```
-
-```sh
-# 왼쪽은 gori, 오른쪽은 이 머신: 프록시 엔드포인트와 현재 git 브랜치.
-printf '%s | %s' "$(jq -r '"\(.project)@\(.proxy.addr)"')" "$(git branch --show-current 2>/dev/null)"
-```
-
-백그라운드로 일을 넘기는 명령(`curl … &`)은 스스로 뒷정리를 해야 합니다. gori는 자기가 띄운 `/bin/sh`만 죽일 수 있고, 그 셸이 fork한 것에는 손이 닿지 않습니다 — gori 자신의 프로세스 그룹을 공유하므로 그룹에 시그널을 보내면 gori까지 함께 죽습니다. 타임아웃된 실행에는 `SIGKILL` 전에 `SIGTERM`을 먼저 보내므로 `cmd & wait` 주위의 `trap … TERM`은 정리할 기회를 얻습니다. 더 간단한 답은 명령 자체에 한도를 거는 것입니다 (`curl --max-time 2`, `timeout 2 …`).
+나머지는 [Statusline 가이드](/ko/guide/statusline/)에 있습니다. 매 실행이 stdin으로 받는 [JSON 컨텍스트](/ko/guide/statusline/#context), 그대로 붙여 넣을 수 있는 [명령들](/ko/guide/statusline/#presets)과 각각이 만들어낸 행의 사진, 그리고 [명령이 실패했을 때 행이 하는 말](/ko/guide/statusline/#failures)입니다.
 
 ### display {#display}
 

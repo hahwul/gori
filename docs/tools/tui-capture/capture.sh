@@ -70,36 +70,93 @@ JSON
 }
 write_settings goridark
 
-# The statusline scene is the one shot that has to turn a feature ON: it ships off, so there
+# The statusline scenes are the shots that have to turn a feature ON: it ships off, so there
 # is nothing to photograph until settings say so. Written from python rather than a heredoc
-# because the command is a jq program thick with backslashes, quotes and the single quote
-# that would close a bash string — python takes it as a raw string and does the JSON escaping
-# itself, so what you read below is what jq receives.
+# because every one of these commands is thick with backslashes, quotes and the single quote
+# that would close a bash string — python takes them as raw strings and does the JSON escaping
+# itself, so what you read below is what /bin/sh receives.
 #
-# The fields it prints are picked to survive a partial re-run (SCENES=statusline): capture
-# state, project, bind address, flow count, probe mode and the catch-all upstream all come
-# straight off the session, so the row reads the same whether or not the Issues scene has
-# run and promoted findings first.
+# write_statusline_settings <theme> [preset] — write_settings plus a live statusline row.
 #
-# write_statusline_settings <theme> — write_settings plus a live statusline row.
+# `preset` picks the command. `script` (the default) is the whole-screen scene's: the
+# composite the guide prints under "When one line is not enough", run from a file the way a
+# row that long should be. The other three are the guide's one-line presets, each shot as a
+# strip directly under the command it is a picture of — which is why they are held HERE, in
+# one place, rather than retyped per scene: a command that has drifted from the page it
+# illustrates is worse than no picture at all. Keep them byte-identical to the guide's code
+# blocks.
+#
+# All four deliberately say what the top bar cannot — when the token under test expires,
+# whether the target has started answering 5xx, what is still unchecked in the notes — because
+# the row this feature sells has to earn its line. They call `gori run`, so the pane puts the
+# built binary on PATH (_shoot).
 write_statusline_settings() {
-  python3 - "$GORI_HOME/settings.json" "$1" <<'PY'
+  python3 - "$GORI_HOME/settings.json" "$1" "${2:-script}" <<'PY'
 import json, sys
-path, theme = sys.argv[1], sys.argv[2]
+path, theme, preset = sys.argv[1], sys.argv[2], sys.argv[3]
 # "\u001b" stays a six-character escape all the way down; jq is what turns it into a real ESC.
-command = (
-    r"""jq -r '(if .capturing then "\u001b[32m●" else "\u001b[31m○" end)"""
-    r""" + "\u001b[0m \(.project)  \u001b[90m\(.proxy.addr)\u001b[0m"""
-    r"""  \(.flows) flows  probe:\(.probe)" """
-    r"""+ (if .upstream == "" then "  \u001b[90mdirect\u001b[0m" """
-    r"""else "  \u001b[33m→ \(.upstream)\u001b[0m" end)'"""
-)
+commands = {
+    "script": r'''sh "${GORI_HOME:-$HOME/.gori}/statusline.sh"''',
+    "token": (
+        r"""jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt")" """
+        r"""--format json | jq .payload.exp)" '(($exp - now) / 60 | floor) as $m |"""
+        r''' if $m < 5 then "\u001b[31m\u26a0 token \($m)m left\u001b[0m"'''
+        r""" else "\u001b[32m\u25cf\u001b[0m token \($m)m left" end'"""
+    ),
+    "errors": (
+        r"""p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' --format json"""
+        r""" 2>/dev/null | jq -rs 'length | if . == 0 then "" else"""
+        r""" "\u001b[31m\(.) \u00d7 5xx\u001b[0m" end'"""
+    ),
+    "todo": (
+        r"""p=$(jq -r .project); gori run notes --all --project "$p" |"""
+        r""" awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) }"""
+        r""" END { if (n) printf "todo %d · %s", n, first }'"""
+    ),
+}
 json.dump({
     "theme": theme, "mouse": True, "pretty_bodies": True,
-    "statusline": {"enabled": True, "command": command, "interval": 3, "timeout": 10},
+    "statusline": {"enabled": True, "command": commands[preset], "interval": 3, "timeout": 10},
     "network": {"bind_host": "127.0.0.1", "bind_port": 8070, "upstream_proxy": ""},
 }, open(path, "w"))
 PY
+}
+
+# write_statusline_script — the composite the whole-screen scene photographs, byte-identical
+# to the one the guide prints (docs/content/guide/statusline.md, "When one line is not
+# enough"). A quoted heredoc: nothing in it is expanded as it is WRITTEN, only when it RUNS.
+#
+# The hero shot used to print the project, the bind address and the probe mode — every one of
+# which is already a chip two rows above it, so the picture argued against the feature. This
+# says what the chrome cannot.
+write_statusline_script() {
+  cat > "$GORI_HOME/statusline.sh" <<'SH'
+#!/bin/sh
+# statusline.sh — one row: how long the token has, whether the target is erroring,
+# and what is still unchecked. The context arrives on stdin, so read it once.
+ctx=$(cat)
+project=$(printf '%s' "$ctx" | jq -r .project)
+
+token=$(jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt")" --format json | jq .payload.exp)" \
+  '(($exp - now) / 60 | floor) as $m | if $m < 5 then "\u001b[31m⚠ token \($m)m left\u001b[0m" else "\u001b[32m●\u001b[0m token \($m)m left" end')
+errors=$(gori run history --project "$project" -q 'status:>=500' --format json 2>/dev/null |
+  jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end')
+todo=$(gori run notes --all --project "$project" |
+  awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf "todo %d · %s", n, first }')
+
+printf '%s' "$token"
+[ -n "$errors" ] && printf '   %s' "$errors"
+[ -n "$todo" ] && printf '   %s' "$todo"
+printf '\n'
+SH
+}
+
+# The `token` preset reads the JWT under test from $GORI_HOME, which is how a reader would
+# keep one. Minted by gori itself, an hour out, so the row reads as a session that has just
+# authenticated rather than one already broken.
+write_demo_token() {
+  "$GORI" run jwt "$JWT_SAMPLE" --encode --alg HS256 --secret secret \
+    --set exp=$(( $(date +%s) + 3540 )) 2>/dev/null | tail -1 > "$GORI_HOME/token.jwt"
 }
 
 P="http://127.0.0.1:$PORT"
@@ -202,15 +259,19 @@ seed_notes
 # Launches `gori <subcmd>` in a fresh tmux pane, optionally walks the project
 # picker preamble, sends the keys, and renders the capture to SVG. Interleave
 # the literal token SLEEP<seconds> to pause between keys.
+# The pane also carries the built binary on PATH: the statusline preset strips run
+# `gori run …`, the spelling the guide prints and the one a reader has on PATH.
 # Set SHOT_COLS for a single call to widen that pane beyond the default $COLS,
 # and SHOT_ARIA when the window title is decorative and needs a spoken label.
+# SHOT_TAIL=<n> renders only the last n drawn rows, with no window chrome — a
+# strip of the screen rather than a screenshot of it (see run_strip).
 _shoot() {
   local name="$1" rows="$2" title="$3" subcmd="$4" preamble="$5"; shift 5
   local cols="${SHOT_COLS:-$COLS}"
   tmux kill-session -t goricap 2>/dev/null || true
   TERM=xterm-256color tmux new-session -d -s goricap -x "$cols" -y "$rows"
   tmux send-keys -t goricap \
-    "cd $REPO && clear && GORI_HOME=$GORI_HOME TERM=xterm-256color '$GORI' $subcmd 2>/dev/null" C-m
+    "cd $REPO && clear && PATH=$(dirname "$GORI"):\$PATH GORI_HOME=$GORI_HOME TERM=xterm-256color '$GORI' $subcmd 2>/dev/null" C-m
   sleep 3
   if [ "$preamble" = 1 ]; then
     # preamble: open the "default" project from the picker
@@ -231,10 +292,19 @@ _shoot() {
   python3 - "$WORK/$name.ansi" <<'PY'
 import sys; p=sys.argv[1]; t=open(p).read().replace("8091","8070"); open(p,"w").write(t)
 PY
-  local aria=()
-  if [ -n "${SHOT_ARIA:-}" ]; then aria=(--aria "$SHOT_ARIA"); fi
+  # A strip carries no window chrome: it is one row lifted out of a screen the
+  # reader has already been shown whole, and a title bar over a single line
+  # reads as a window with nothing in it. The scene title becomes the spoken
+  # label instead, since nothing else in the picture says what it is.
+  local render=()
+  if [ -n "${SHOT_TAIL:-}" ]; then
+    render=(--tail "$SHOT_TAIL" --pad 10 --aria "${SHOT_ARIA:-$title}")
+  else
+    render=(--title "$title")
+    if [ -n "${SHOT_ARIA:-}" ]; then render+=(--aria "$SHOT_ARIA"); fi
+  fi
   python3 "$HERE/ansi2svg.py" "$WORK/$name.ansi" "$OUT/$name.svg" \
-    --title "$title" ${aria[@]+"${aria[@]}"} --fs 15
+    "${render[@]}" --fs 15
 }
 
 # run_scene <name> <rows> <title> <tmux-keys...> — the full TUI over the seeded DB.
@@ -262,6 +332,17 @@ run_tour() {
     case " $SCENES " in *" $name "*) ;; *) return 0;; esac
   fi
   _shoot "$name" "$rows" "$title" "tutorial" 0 "$@"
+}
+
+# run_strip <name> <aria> <tmux-keys...> — the same TUI as run_scene, rendered as its LAST
+# ROW ONLY: the statusline, with no window chrome around it. A bare row carries no title to
+# speak, so `aria` is what a screen reader gets.
+run_strip() {
+  local name="$1" aria="$2"; shift 2
+  SHOT_TAIL=1
+  SHOT_ARIA="$aria"
+  run_scene "$name" 26 "$aria" "$@"
+  unset SHOT_TAIL SHOT_ARIA
 }
 
 # Every scene, rendered into the current $OUT. Called once per theme, which it takes as an
@@ -326,8 +407,31 @@ shoot_all() {
   # every scene above documents the default install. Same History screen as the first shot
   # on purpose — the picture is about the extra row at the bottom, so the rest of the frame
   # has to be something the reader already recognises.
+  write_demo_token
+  write_statusline_script
   write_statusline_settings "$theme"
   run_scene statusline   26 "gori · Statusline"                3 SLEEP1 Enter
+  # The preset gallery on the Statusline guide: the same three commands the page prints,
+  # each shot as ONE ROW. The card puts the picture directly under the command it came from,
+  # and a full 26-row screenshot there would be three-quarters History for a feature that is
+  # one line tall. The extra sleep is for the COMMAND, not the UI: _shoot has already waited
+  # out the launch, and the row only fills once the first run returns.
+  #
+  # Nothing here is staged except the token file: the 5xx count and the notes come out of the
+  # seeded project through `gori run`, the same way a reader's would.
+  write_demo_token
+  write_statusline_settings "$theme" token
+  run_strip statusline-token \
+    "gori statusline row: a green dot, then how long the token under test has before it expires" \
+    3 SLEEP2
+  write_statusline_settings "$theme" errors
+  run_strip statusline-errors \
+    "gori statusline row, in red: how many captured responses came back 5xx" \
+    3 SLEEP2
+  write_statusline_settings "$theme" todo
+  run_strip statusline-todo \
+    "gori statusline row: how many unchecked tasks the project notes hold, and the first of them" \
+    3 SLEEP2
   write_settings "$theme"
 }
 
@@ -405,13 +509,23 @@ shoot_readme() {
     run_scene readme 38 "𝓰𝓸𝓻𝓲" 3 SLEEP0.4 Enter SLEEP1
 }
 
-# One pass per "theme:subdir" spec in $SHOTS. The seeded DB is shared across
-# passes; only the theme in settings.json changes between them, so the light and
-# dark galleries show the same flows.
+# One pass per "theme:subdir" spec in $SHOTS. Every pass photographs the same project:
+# only the theme in settings.json changes between them.
+#
+# Which means the DB has to be PUT BACK between passes, because scenes mutate it. The
+# Issues scene promotes findings, so the second pass promoted three more on top of the
+# first pass's three — the light Issues shot listed rows the dark one did not, and a
+# statusline strip counting `.issues` disagreed with its own light twin on a page where
+# the reader can flip between them with one click. The seed snapshot is taken after all
+# seeding (flows, OAST callbacks, notes) and restored at the top of each pass.
+SEED_SNAPSHOT="$WORK/seed.db"
+cp "$DB" "$SEED_SNAPSHOT"
+
 if want scenes; then
   for spec in $SHOTS; do
     theme="${spec%%:*}" subdir="${spec#*:}"
     OUT="$TUI_ROOT${subdir:+/$subdir}"
+    cp "$SEED_SNAPSHOT" "$DB"; rm -f "$DB-wal" "$DB-shm"
     write_settings "$theme"
     mkdir -p "$OUT"
     echo "▸ capturing $theme → $OUT"
