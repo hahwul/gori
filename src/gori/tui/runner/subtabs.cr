@@ -118,6 +118,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
+  # The strips where ^W closes a sub-tab (mirrors subtab_close's cases) — all nine, which is
+  # why this is spelled as the complement of "has no strip" rather than a second list to keep
+  # in step with the one below.
+  private def subtab_close_supported? : Bool
+    case @active_tab
+    when :repeater, :fuzzer, :miner, :sequencer, :decoder, :jwt, :cookie, :notes, :comparer then true
+    else                                                                                         false
+    end
+  end
+
   private def subtab_close : Nil
     case @active_tab
     when :repeater  then repeater_controller.request_close

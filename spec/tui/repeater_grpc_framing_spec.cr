@@ -253,7 +253,7 @@ describe "RepeaterView gRPC reframe toggle" do
 
   # Drawn AND hit-testable, in both halves of the gRPC branch — the defect `␣K:KEY` had, and
   # the state matters most exactly while the payload is being hex-edited.
-  it "draws a clickable ␣F:FRAME badge in both the MSG and HEX states" do
+  it "draws a clickable ␣R:FRAME badge in both the MSG and HEX states" do
     grpc_tmp_store do |store|
       view = unary.call(store)
       view.focus_pane(:request)
@@ -263,16 +263,16 @@ describe "RepeaterView gRPC reframe toggle" do
       b = MemoryBackend.new(160, 24)
       view.render(Screen.new(b), rect)
       row = b.row(border_y)
-      row.should contain("␣F:FRAME")
-      col = row.index("␣F:FRAME").not_nil!
+      row.should contain("␣R:FRAME")
+      col = row.index("␣R:FRAME").not_nil!
       view.chrome_hit(rect, col + 1, border_y).should eq(:grpc_reframe)
 
       view.toggle_request_hex.should be_true
       b2 = MemoryBackend.new(160, 24)
       view.render(Screen.new(b2), rect)
       row2 = b2.row(border_y)
-      row2.should contain("␣F:FRAME")
-      col2 = row2.index("␣F:FRAME").not_nil!
+      row2.should contain("␣R:FRAME")
+      col2 = row2.index("␣R:FRAME").not_nil!
       view.chrome_hit(rect, col2 + 1, border_y).should eq(:grpc_reframe)
     end
   end

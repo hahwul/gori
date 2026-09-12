@@ -13,15 +13,17 @@ end
 describe "Gori::Verbs.register_jwt" do
   r = Gori::Verbs.registry
 
-  it "keeps session management and the lens toggles in :common (reachable from every pane)" do
-    {"jwt.new"          => :jwt_new,
-     "jwt.close"        => :jwt_close,
-     "jwt.toggle-mode"  => :jwt_toggle_mode,
-     "jwt.cycle-alg"    => :jwt_cycle_alg,
-     "jwt.load-decoded" => :jwt_load_decoded,
-     "jwt.clear"        => :jwt_clear,
-    }.each do |id, intent|
-      r[id].section.should eq(:common)
+  it "keeps the lens toggles in :common and files session management on :subtab" do
+    # New/Close moved to :subtab with the rest of the chip family (#1055) — the SUB-TABS
+    # bucket renders on every view, so the section is no longer a visibility decision.
+    {"jwt.new"          => {:subtab, :jwt_new},
+     "jwt.close"        => {:subtab, :jwt_close},
+     "jwt.toggle-mode"  => {:common, :jwt_toggle_mode},
+     "jwt.cycle-alg"    => {:common, :jwt_cycle_alg},
+     "jwt.load-decoded" => {:common, :jwt_load_decoded},
+     "jwt.clear"        => {:common, :jwt_clear},
+    }.each do |id, (section, intent)|
+      r[id].section.should eq(section)
       r[id].available?(FakeExecContext.new).should be_false # gated on the JWT tab
       r[id].available?(in_jwt).should be_true
       verb_intents(r, id).should eq([intent])

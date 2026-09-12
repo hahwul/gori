@@ -77,16 +77,18 @@ module Gori
       r.register Verb::Definition.new(
         "sequence.rename-subtab", "Rename subtab", "Rename the active sequencing session's sub-tab chip",
         Verb::Scope::Sequencer, available: in_seq, mnemonic: 'e', section: :subtab) { |ctx| ctx.sequencer_rename_subtab; nil }
-      # `:common`, not `:subtab` — the space menu renders COMMON ∪ the FOCUSED PANE's section,
-      # so a `:subtab` close is invisible from the body and reachable only after moving focus
-      # to the strip. Decoder and JWT fixed that for themselves; this is the same fix.
+      # `:subtab`, with the rest of the chip family. Until #1055 this had to be `:common` —
+      # the menu rendered COMMON ∪ the FOCUSED PANE's section, so a `:subtab` close was
+      # invisible from the body and reachable only after moving focus to the strip. The
+      # SUB-TABS bucket now rides along with every view, so the honest section is free.
       #
       # Repeater and Fuzzer deliberately do NOT follow: `repeater.mark-word` / `fuzz.mark-word`
       # own 'w' in their `:request` / `:template` sections, so a COMMON 'w' would collide there
       # and `Registry#validate_menu_keys!` would raise at boot. Their close stays in :subtab.
       r.register Verb::Definition.new(
         "sequence.close-subtab", "Close subtab", "Close the active sequencing session",
-        Verb::Scope::Sequencer, available: in_seq, mnemonic: 'w') { |ctx| ctx.sequencer_close_subtab; nil }
+        Verb::Scope::Sequencer, [Verb::Chord.new("w", ctrl: true)],
+        available: in_seq, mnemonic: 'w', section: :subtab) { |ctx| ctx.sequencer_close_subtab; nil }
       r.register Verb::Definition.new(
         "sequence.find-subtab", "Search sub-tabs", "Filter the open sequencing sessions and jump to one",
         Verb::Scope::Sequencer,

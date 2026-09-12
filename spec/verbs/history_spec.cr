@@ -274,12 +274,14 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "repeater.toggle-sni").should eq([:repeater_toggle_sni])
     end
 
-    it "leaves bare `d` off the Repeater — diff is ⇧D, and `d` destroys everywhere else" do
+    it "leaves bare `d` off the Repeater — diff is ⇧D on the chord AND in the menu" do
       # The one scope where `d` was not "delete the selected thing". The reflex now finds
-      # nothing bound rather than a display toggle; the space menu keeps the 'd' mnemonic,
-      # because nothing in the menu is destroyed by reading it.
+      # nothing bound rather than a display toggle. The MENU letter followed the chord to the
+      # capital: `d` is Duplicate on all nine sub-tab strips (#1055) and the SUB-TABS bucket
+      # renders inside the :response view, so the plain letter was no longer this verb's to
+      # keep — which leaves the row and the keyboard spelling it the same way.
       r["repeater.toggle-diff"].chords.should eq([shift_chord('D')])
-      r["repeater.toggle-diff"].mnemonic.should eq('d')
+      r["repeater.toggle-diff"].mnemonic.should eq('D')
       bare_d = typed_chord("d")
       r.select { |v| v.scope == Gori::Verb::Scope::Repeater && v.chords.includes?(bare_d) }.should be_empty
     end

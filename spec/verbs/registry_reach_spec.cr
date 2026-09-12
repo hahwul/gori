@@ -128,59 +128,93 @@ describe "sub-tab verbs" do
     end
   end
 
-  # WHERE close lands in the menu. `SpaceMenu#open` renders COMMON ∪ the focused pane's
-  # section, so a `:subtab` close is invisible from the body — an operator editing in a pane
-  # has to move focus to the strip first. Decoder and JWT fixed that for themselves ("Round 4",
-  # decoder_spec) and the rest inherited the old placement, which read as the majority.
-  it "files close under COMMON, so it is reachable from the body" do
-    {"decoder.close", "jwt.close", "comparer.close-subtab",
-     "mine.close-subtab", "sequence.close-subtab"}.each do |id|
-      r[id].section.should eq(:common)
+  # WHERE the strip's verbs land. They no longer have to choose: `SpaceMenu#open` draws
+  # `:subtab` ∪ `:tab` as ONE "SUB-TABS" bucket on every view of a tab that has a strip
+  # (#1055), so a `:subtab` tag is reachable from the body panes, from the strip, and from
+  # the tab bar alike. Half the family used to sit in COMMON purely to escape the old rule;
+  # now the whole family is filed where it belongs.
+  it "files every strip verb under :subtab, and the strip's search/filter under :tab" do
+    {"decoder.close", "jwt.close", "comparer.close-subtab", "mine.close-subtab",
+     "sequence.close-subtab", "repeater.close-subtab", "fuzz.close-subtab",
+     "repeater.new", "fuzz.new", "decoder.new", "jwt.new", "cookie.new",
+     "notes.new", "comparer.new"}.each do |id|
+      r[id].section.should eq(:subtab)
+    end
+    {"repeater.find-subtab", "fuzz.find-subtab", "notes.find-subtab",
+     "repeater.filter-subtabs"}.each do |id|
+      r[id].section.should eq(:tab)
     end
   end
 
-  it "leaves Repeater and Fuzzer out, because `w` is taken in their editor sections" do
-    # NOT drift: `repeater.mark-word` / `fuzz.mark-word` own 'w' in `:request` / `:template`,
-    # and a COMMON entry renders alongside them — `Registry#validate_menu_keys!` would raise
-    # at boot. `^W` still closes from anywhere; only the menu row is strip-only there.
-    r["repeater.close-subtab"].section.should eq(:subtab)
-    r["fuzz.close-subtab"].section.should eq(:subtab)
-    r["repeater.mark-word"].menu_key.should eq('w')
+  it "hands `w` to close, and moves the two editors' mark-word to `W`" do
+    # The collision the old placement could not solve: `repeater.mark-word` / `fuzz.mark-word`
+    # owned 'w' in `:request` / `:template`, and the bucket now renders alongside them, so
+    # `Registry#validate_menu_keys!` would raise at boot. The PANE letter moved, not the
+    # strip's — `w` close is one of the nine letters that must read the same on all nine
+    # strips, and `W` is the same letter one shift away.
+    r["repeater.mark-word"].menu_key.should eq('W')
     r["repeater.mark-word"].section.should eq(:request)
-    r["fuzz.mark-word"].menu_key.should eq('w')
+    r["fuzz.mark-word"].menu_key.should eq('W')
     r["fuzz.mark-word"].section.should eq(:template)
   end
 
-  it "puts rename on the `r` the strip binds, wherever COMMON leaves the letter free" do
-    # The menu letter should be the key the STRIP answers to, and the strip's rename is `r`.
-    # Four scopes can say so; four cannot, and the reason is the same in all four: COMMON's
-    # 'r' is `*.run` / `repeater.send` — the menu echo of `^R` — and the space menu renders
-    # COMMON plus the focused section, so a rename taking 'r' would displace Run. A rename
-    # does not outrank the Run letter, so those four keep 'e'.
-    {"comparer", "decoder", "jwt", "cookie"}.each do |prefix|
-      r["#{prefix}.rename-subtab"].menu_key.should eq('r'), prefix
-    end
-    {"repeater" => "repeater.send", "fuzz" => "fuzz.run",
-     "mine" => "mine.run", "sequence" => "sequence.run"}.each do |prefix, runner|
+  it "puts rename on `e` on every strip that has one" do
+    # One letter across the family, with no exception left. The key audit reached for the `r`
+    # the STRIP binds, which is the better answer wherever it is available — and it is
+    # available on only four of the nine. On the other four, COMMON's 'r' is `*.run` /
+    # `repeater.send`, the menu echo of `^R`, and COMMON renders inside the :subtab view: a
+    # rename does not displace the Run letter. Two spellings for one action across the nine
+    # strips is precisely what the SUB-TABS bucket exists to end, so rename is 'e' on all of
+    # them and the strip's raw `r` chord is untouched.
+    {"repeater", "fuzz", "comparer", "decoder", "mine", "sequence", "jwt", "cookie"}.each do |prefix|
       r["#{prefix}.rename-subtab"].menu_key.should eq('e'), prefix
+    end
+    # The four that could not have taken 'r', and why — pinned so the reason outlives the memo.
+    {"repeater" => "repeater.send", "fuzz" => "fuzz.run",
+     "mine" => "mine.run", "sequence" => "sequence.run"}.each do |_prefix, runner|
       r[runner].menu_key.should eq('r'), runner
       r[runner].section.should eq(:common), runner
     end
-    r["jwt.toggle-mode"].menu_key.should eq('e')
+    # JWT and Cookie held 'e' for their lens toggle and put rename on 'r'; both toggles moved
+    # to 'm' (Mode — the Decoder's letter for the same gesture).
+    r["jwt.toggle-mode"].menu_key.should eq('m')
+    r["cookie.toggle-mode"].menu_key.should eq('m')
+    # Notes derives its chip label from the body text, so it has no rename — which is why
+    # `notes.edit` may keep 'e'.
+    r["notes.rename-subtab"]?.should be_nil
+    r["notes.edit"].menu_key.should eq('e')
+  end
+
+  it "gives the strip the SAME nine letters on all nine tabs" do
+    # The whole point of the bucket: one table to learn, not nine. A tab that lacks an
+    # intent simply omits the row — it never spends that letter on something else.
+    {"new" => 'n', "close" => 'w', "duplicate" => 'd', "rename" => 'e', "tag" => 't',
+     "find" => 'f', "filter" => '/', "mark-all" => 'T', "mark-clear" => 'N'}.each do |intent, key|
+      r.each do |v|
+        next unless Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(v.section)
+        next unless v.id.ends_with?(intent) || v.id.ends_with?("#{intent}-subtab") ||
+                    v.id.ends_with?("#{intent}-subtabs") || v.id.ends_with?("subtab-#{intent}")
+        v.menu_key.should eq(key)
+      end
+    end
   end
 
   it "puts sub-tab search on the `f` the strip binds, in every tab that has a strip" do
     # `f` on the strip opens this picker in all of them; the menu said 's' on Repeater and
-    # Notes, which is a letter the strip does not answer to. What gave the letter up:
-    # `repeater.fuzz` → 'z' (what `history.fuzz` already spells "Send to Fuzzer") and
-    # `notes.find` → 'F' (find INSIDE the note, the second tier of the same word).
+    # Notes, which is a letter the strip does not answer to. It is also one of the nine the
+    # SUB-TABS bucket now reserves in EVERY view of those tabs, so what held 'f' had to move
+    # whatever else was true: `repeater.fuzz` → 'F' (joining `C` Send to Comparer in that
+    # scope's capital send family) and `notes.find` → 's', the letter `notes.find-subtab`
+    # vacated, so the pair is a straight swap.
     {"repeater", "fuzz", "mine", "sequence", "comparer", "decoder", "jwt", "cookie", "notes"}
       .each do |prefix|
         r["#{prefix}.find-subtab"].menu_key.should eq('f'), prefix
       end
-    r["repeater.fuzz"].menu_key.should eq('z')
+    r["repeater.fuzz"].menu_key.should eq('F')
+    r["notes.find"].menu_key.should eq('s')
+    # `history.fuzz` keeps 'z' for the same act in the BODY scope: cross-scope reuse is legal
+    # and the two menus never render together.
     r["history.fuzz"].menu_key.should eq('z')
-    r["notes.find"].menu_key.should eq('F')
   end
 end
 

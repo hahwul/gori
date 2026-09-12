@@ -67,26 +67,32 @@ module Gori
       # Sub-tab strip / space menu (session multi-pair workspace).
       r.register Verb::Definition.new(
         "comparer.new", "New comparison", "Open a fresh blank comparison sub-tab",
-        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'n',
-        section: :common) { |ctx| ctx.comparer_new; nil }
+        Verb::Scope::Comparer, [Verb::Chord.new("n", ctrl: true)],
+        available: in_comparer, mnemonic: 'n',
+        section: :subtab) { |ctx| ctx.comparer_new; nil }
 
-      # 'r', the letter the STRIP binds for rename. It read 'e' until the key audit, which
-      # taught two letters for one action on the one surface that has both.
+      # 'e'. The key audit briefly put this on 'r' — the letter the STRIP binds — which is
+      # right on the four tabs that can afford it and impossible on the four whose COMMON 'r'
+      # is Send/Run. Two spellings for one action across the nine strips is the thing the
+      # SUB-TABS bucket exists to end, so rename is 'e' everywhere and `r` on the strip stays
+      # the raw chord it always was.
       r.register Verb::Definition.new(
         "comparer.rename-subtab", "Rename comparison", "Rename the active comparison chip",
-        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'r',
+        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'e',
         section: :subtab) { |ctx| ctx.comparer_rename_subtab; nil }
 
-      # `:common`, not `:subtab` — the space menu renders COMMON ∪ the FOCUSED PANE's section,
-      # so a `:subtab` close is invisible from the body and reachable only after moving focus
-      # to the strip. Decoder and JWT fixed that for themselves; this is the same fix.
-      #
-      # Repeater and Fuzzer deliberately do NOT follow: `repeater.mark-word` / `fuzz.mark-word`
-      # own 'w' in their `:request` / `:template` sections, so a COMMON 'w' would collide there
-      # and `Registry#validate_menu_keys!` would raise at boot. Their close stays in :subtab.
+      # `:subtab`, with the rest of the chip family. Until #1055 this had to be `:common` —
+      # the menu rendered COMMON ∪ the FOCUSED PANE's section, so a `:subtab` close was
+      # invisible from the body and reachable only after moving focus to the strip — and
+      # Repeater/Fuzzer could not follow even into COMMON, because `repeater.mark-word` /
+      # `fuzz.mark-word` owned 'w' in their `:request` / `:template` sections. Both halves of
+      # that knot are gone: the SUB-TABS bucket rides along with every view, and `w` close is
+      # one of the nine letters the bucket spells the same way on all nine strips, so the two
+      # editors' mark-word moved to `W` instead.
       r.register Verb::Definition.new(
         "comparer.close-subtab", "Close comparison", "Close the active comparison sub-tab (keeps ≥1)",
-        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'w') { |ctx| ctx.comparer_close_subtab; nil }
+        Verb::Scope::Comparer, [Verb::Chord.new("w", ctrl: true)],
+        available: in_comparer, mnemonic: 'w', section: :subtab) { |ctx| ctx.comparer_close_subtab; nil }
 
       r.register Verb::Definition.new(
         "comparer.duplicate-subtab", "Duplicate comparison", "Clone the active A/B pair into a new sub-tab",

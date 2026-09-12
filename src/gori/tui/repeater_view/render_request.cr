@@ -75,13 +75,13 @@ class Gori::Tui::RepeaterView
     # rightmost, a gold button while idle, recessed while a send is in flight.
     send_edge = Frame.action_badge(screen, right_edge, rect.y, min_x, "^R", "SEND", !@inflight)
     if @grpc_mode # head as text; a unary call's payload is hex-editable (^X → MSG/HEX)
-      # `␣F:FRAME` chains left of the hex chip and is drawn in BOTH halves of this branch,
+      # `␣R:FRAME` chains left of the hex chip and is drawn in BOTH halves of this branch,
       # because the state it reports matters most exactly while the payload is being hex-edited:
       # off, the five captured length bytes go out in front of the edited payload. Drawn only
       # where it is live (`grpc_reframable?`) — the same condition `chrome_hit` lists it under.
       if h = @req_hex_edit
         hex_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
-        hex_edge = Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "␣F", "FRAME", @grpc_reframe) if @grpc_reframable
+        hex_edge = Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "␣R", "FRAME", @grpc_reframe) if @grpc_reframable
         # `␣E:FIELDS` chains left of FRAME in every state it is available in, for the same
         # reason FRAME is drawn in both hex states: the operator has to be able to SEE that a
         # typed editor exists over the bytes they are currently overtyping (#828).
@@ -92,14 +92,14 @@ class Gori::Tui::RepeaterView
         # one editor, and `␣E` is the way back to the head.
         fields_edge = send_edge
         fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
-        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "␣F", "FRAME", @grpc_reframe) if @grpc_reframable
+        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "␣R", "FRAME", @grpc_reframe) if @grpc_reframable
         Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "␣E", "FIELDS", true)
         render_grpc_fields(screen, rect.inset(1, 1), focused)
       else
         msg_edge = send_edge
         if @grpc_reframable
           msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false)
-          msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "␣F", "FRAME", @grpc_reframe)
+          msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "␣R", "FRAME", @grpc_reframe)
         end
         msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "␣E", "FIELDS", false) if grpc_fields_available?
         # The gRPC head is a mode-switched text editor like every other non-hex request card

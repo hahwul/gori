@@ -31,7 +31,7 @@ Rules of thumb:
 - Default for new pane actions is L3 (space menu only). Promote to a direct key only after the loop proves it.
 - **Ctrl** is for actions that must work while typing (INS), and for run/stop on a workbench (`Ctrl-R` / `Ctrl-X`). It is not a general upgrade from bare.
 - **Shift** carries the whole-tab wipes. `⇧X` is `Clear` in every tab that has one (History, Probe, Authorize, Issues, and the Project ACTIVITY feed), with `X` as the space-menu letter beside it. The letter is `x` and not `c` because of what sits under the shift: bare `x` is bound in none of those five scopes, while bare `c` is live in all of them (`capture.toggle`, and `dismiss` on the Probe list), and a project wipe does not belong one shift above a key an operator presses all day. A destructive chord must also be **named where it can be read before it is pressed** (the Help sheet and the tab's own body hint, not the space menu alone), and it must ask first.
-- **`d` destroys.** Bare `d` deletes or dismisses the selected row in every scope that binds it — sixteen of them. The Repeater's response diff was the one exception, and it now sits on `⇧D` so the reflex never lands on a display toggle; the space menu keeps its `d` letter, where nothing is destroyed by reading it. A new pane action that is not a delete does not get `d`.
+- **`d` destroys.** Bare `d` deletes or dismisses the selected row in every scope that binds it — sixteen of them. The Repeater's response diff was the one exception, and it now sits on `⇧D` so the reflex never lands on a display toggle. Its space-menu letter is `⇧D` too: `d` is **Duplicate sub-tab** on all nine sub-tab strips (see [the space menu](#space-menu)), and that bucket is drawn in every pane, so the plain letter was no longer the diff toggle's to keep — which leaves the row and the keyboard spelling it the same way. A new pane action that is not a delete does not get `d`.
 - **Copy is the worked example of that rule.** `y` copies in READ, and `Ctrl-Y` copies in **INS as well**, in every text box. In INS a bare `y` is a literal character, and typing it over a `Shift`+arrows selection *replaces* the selection, so the copy reflex needs a chord that survives typing. Both are the same verb (`*.copy`), so a rebind moves the READ letter and **`Ctrl-Y` stays where it is**: it is pinned, in every scope, including through an explicit unbind. Unbinding `y` is a statement about READ mode, and it must not quietly leave a text pane with no way at all to copy what you just selected.
 - **Every list that holds something worth copying binds `y`.** A pane that shows bytes, a row, or a line of record and answers nothing to `y` is a gap, not a design: the Intercept queue, the Evidence archive, the Project ACTIVITY feed and the OAST callback detail each had one and each now answers the letter. Where two copies live in one place and mean opposite things — OAST's list copies the payload gori *sent*, its detail copies what came *back* — only one can hold the chord (a scope has no focus dimension in the keymap), and the other keeps its space-menu letter.
 - **`/` filters the list you are looking at.** Every list long enough to scroll answers it, including the three rule lists that did not: Colormarker, Match & Replace and the Probe **RULES** sub-tab (~40 built-in rules across three sections). The bar is a **lens** — it hides rows, it never disables one — and `Esc` clears it. The one thing it changes is reordering: on the two lists where order decides which rule wins, a move is refused while a query is held, because a filtered list is not the order the rule engine holds.
@@ -107,6 +107,51 @@ different one, so `⇧1`–`⇧9` work where your terminal reports the shift mod
 otherwise. Both fallbacks are always live: **`f`** on the sub-tab strip opens the same picker
 `⇧0` does, and `Ctrl-1`…`Ctrl-9` is the alias for `⇧1`–`⇧9` on terminals that deliver it.
 
+## The space menu {#space-menu}
+
+`Space` in a navigable pane opens the action menu for **where you are standing** — the
+pane's own verbs, grouped under `COMMON` and the focused area's label, each fronted by one
+mnemonic letter. It is not the palette: there is no typing and no filter, just one keypress
+per row.
+
+### One menu per tab, whatever has focus
+
+Nine tabs carry a **sub-tab strip** — Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT,
+Cookie, Comparer and Notes. The strip's own actions used to be a context section like any
+other: they appeared *only* while the strip had focus, so from a body pane you had to walk
+focus up a level before `Space` would even offer "close this sub-tab".
+
+They are now their own `SUB-TABS` bucket, and it is in the menu from **every** level of a tab
+that has a strip — the body panes, the strip itself and the tab bar. With `⇧1`–`⇧9` dropping
+you anywhere, what `Space` offers must not depend on which row the cursor happens to be on.
+
+### The same nine letters on all nine strips
+
+The bucket is one table to learn, not nine. A tab that does not have an action simply omits
+the row; it never spends that letter on something else.
+
+| Key | Action | Direct chord |
+|-----|--------|--------------|
+| `n` | New sub-tab | `Ctrl-N` |
+| `w` | Close sub-tab (or every marked one) | `Ctrl-W` |
+| `d` | Duplicate sub-tab | |
+| `e` | Rename sub-tab | `r` on the strip |
+| `t` | Tag sub-tab (Repeater) | |
+| `f` | Search sub-tabs — the `⌕` picker | `f` on the strip, `⇧0` anywhere |
+| `/` | Filter the strip (name / host / method / tag) | |
+| `T` | Mark every sub-tab the filter shows | |
+| `N` | Clear the sub-tab marks | `Esc` on the strip |
+
+`Ctrl-N` and `Ctrl-W` are shown beside their rows, and they work from any pane on all nine
+tabs — the menu teaches the faster key rather than hiding it. (Miner and Sequencer seed
+their sessions from a run, so they have no `n`.)
+
+Because the bucket rides along with every pane, its nine letters are **reserved in every view
+of those tabs**. A pane action that wanted one had to move: the rule is that the *pane* letter
+yields, since the strip's letter has to read the same on all nine strips. `Space` `W` marks a
+word in the Repeater/Fuzzer editors, `Space` `D` toggles the response diff, and the JWT and
+Cookie lens toggles moved to `m` (Mode — the Decoder's letter for the same gesture).
+
 ## Reserved Keys
 
 Some keys can't be rebound because the terminal or gori needs them:
@@ -177,7 +222,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
 - Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias), structural keys (`esc`, `↵`, arrows, `↹`), and a pane-local letter such as `x` in an editor.
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
-- Where the **sub-tab strip** already binds a letter for an action, the menu spells that action with the same letter: `r` renames, `f` lists and searches the sub-tabs, `t` marks a chip and `⇧T` marks the strip. The exception is a scope whose COMMON group has already spent the letter on something an operator presses far more often — `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, so rename keeps `e` there rather than displacing it.
+- Where the **sub-tab strip** already binds a letter for an action, the menu spells that action with the same letter where it can: `f` lists and searches the sub-tabs, `t` marks a chip and `⇧T` marks the strip. Rename is the one it cannot match — the strip binds `r`, and `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, where a rename does not get to displace it. One action must not have two spellings across the nine strips, so rename is **`e` on all of them** and the strip's `r` stays a raw chord. See [the space menu](#space-menu) for the whole table.
 - Pane-local keys that share a letter (Repeater response `x` = hex vs request/target `x` = select line) stay controller-owned so both meanings can coexist.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
 

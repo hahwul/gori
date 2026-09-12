@@ -11,11 +11,13 @@ module Gori
 
       r.register Verb::Definition.new(
         "notes.new", "New note", "Open a fresh blank note sub-tab",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'n') { |ctx| ctx.notes_new; nil }
+        Verb::Scope::Notes, [Verb::Chord.new("n", ctrl: true)],
+        available: in_notes, mnemonic: 'n', section: :subtab) { |ctx| ctx.notes_new; nil }
 
       r.register Verb::Definition.new(
         "notes.close", "Close note", "Close the active note sub-tab (keeps at least one)",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'w') { |ctx| ctx.notes_close; nil }
+        Verb::Scope::Notes, [Verb::Chord.new("w", ctrl: true)],
+        available: in_notes, mnemonic: 'w', section: :subtab) { |ctx| ctx.notes_close; nil }
 
       # Content-only clone (new note id; entity_links are not copied). Tagged :subtab so
       # it fronts the strip's Space menu; 'd' is free in COMMON ∪ :subtab.
@@ -89,13 +91,14 @@ module Gori
         "notes.goto", "Go to line", "Jump the cursor to a line number",
         Verb::Scope::Notes, available: in_notes, mnemonic: 'g') { |ctx| ctx.notes_goto; nil }
 
-      # 'F' and not 'f': the strip's `f` finds a SUB-TAB, and `notes.find-subtab` carries that
-      # letter now. The shift is the same second-tier marker `y`/`Y` and `t`/`⇧T` use — one
-      # find is over the chips, the other is inside the note the chips point at. `^F` is the
-      # real key either way and is unaffected.
+      # 's' and not 'f': the strip's `f` finds a SUB-TAB, and `notes.find-subtab` carries that
+      # letter now — one of the nine the SUB-TABS bucket reserves in every Notes view. It
+      # takes the 's' that `notes.find-subtab` vacated, so the pair is a straight swap and
+      # "Search in note" keeps a letter of its own rather than living one shift above a
+      # different find. `^F` is the real key either way and is unaffected.
       r.register Verb::Definition.new(
         "notes.find", "Find in note", "Search for text in the current note",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'F') { |ctx| ctx.notes_find; nil }
+        Verb::Scope::Notes, available: in_notes, mnemonic: 's') { |ctx| ctx.notes_find; nil }
 
       r.register Verb::Definition.new(
         "notes.links", "Manage links", "View/add/remove related History/Repeater/Fuzzer/Miner URLs",

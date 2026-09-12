@@ -11,7 +11,7 @@ class Gori::Tui::RepeaterView
     (h = @req_hex_edit) ? String.new(h.to_bytes) : @editor.wire_text
   end
 
-  # The same request handed to a tab that reads `§…§` as TEMPLATE SYNTAX — `space ▸ f`
+  # The same request handed to a tab that reads `§…§` as TEMPLATE SYNTAX — `space ▸ F`
   # (Send to Fuzzer). Where this tab's markers are inert (a capture whose body legitimately
   # carries `§`; see `markers_live?`), the literal `§` are escaped to `§§` — the escape
   # `Fuzz::Template.parse` already defines — so the receiving template renders them back to
@@ -29,13 +29,13 @@ class Gori::Tui::RepeaterView
   # spent three round-trips removing for the `%%%` separator. Only the PROVENANCE question
   # (`markers_live?`) is ours; the byte rule belongs to the template.
   #
-  # Each road escapes exactly once: `space ▸ f` goes runner/fuzzer.cr → here →
+  # Each road escapes exactly once: `space ▸ F` goes runner/fuzzer.cr → here →
   # `FuzzerView#load_request`, which sets the text unescaped, so a captured `§` is never
   # doubled.
   # The `marker_bytes_in?` guard is LOAD-BEARING, not a redundant pre-check.
   # `escape_literal_markers` returns `raw` itself when there is no `§`, but `String.new(Bytes)`
   # always copies — so collapsing this to one line would copy the whole request buffer on
-  # every marker-free `space ▸ f`, which is the overwhelmingly common seed and exactly the
+  # every marker-free `space ▸ F`, which is the overwhelmingly common seed and exactly the
   # allocation the helper's own comment says it avoids.
   def fuzz_seed_text : String
     text = request_text

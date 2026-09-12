@@ -118,7 +118,7 @@ module Gori::Fuzz
   # ## Framing
   #
   # A re-encoded message changes length, so the 5-byte gRPC prefix is rebuilt by
-  # `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣F:FRAME` path is made of. Not a second
+  # `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣R:FRAME` path is made of. Not a second
   # framer, and not `Config#reframe_grpc?`: that knob repairs a prefix a byte-level payload left
   # stale, and is documented as opt-in because a deliberately-wrong prefix is one of the standard
   # gRPC parser tests. Here the message was re-encoded THROUGH the schema at the operator's
@@ -581,7 +581,7 @@ module Gori::Fuzz
     end
 
     # `{the request, the framed message's `[start, end)` in it}`. The head as rendered, then the
-    # message re-framed by `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣F:FRAME` path
+    # message re-framed by `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣R:FRAME` path
     # is built on, whose flag byte is `0x00` here because `build` refuses any other one.
     private def splice(raw : Bytes, msg : Bytes) : {Bytes, {Int32, Int32}}
       # The body is byte-constant in SIZE across variations of the BASE template (every `§…§` is

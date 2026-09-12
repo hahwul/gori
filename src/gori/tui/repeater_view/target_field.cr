@@ -160,7 +160,7 @@ class Gori::Tui::RepeaterView
     t.size >= 8 && t[0, 8].compare("https://", case_insensitive: true) == 0
   end
 
-  # `␣T`: advance to the next fingerprint. Cycles nil → chrome → firefox → safari → curl → nil,
+  # `␣P`: advance to the next fingerprint. Cycles nil → chrome → firefox → safari → curl → nil,
   # so every value including "no override" is reachable with one key and nothing has to be
   # typed — which is also why an unknown preset can never originate here.
   def cycle_tls_preset : String?

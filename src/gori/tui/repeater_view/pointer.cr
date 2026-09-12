@@ -23,7 +23,7 @@ class Gori::Tui::RepeaterView
         return :target_mode
       end
       _, tls_x, tr_edge = target_chrome_chain(rect)
-      # The `␣T` fingerprint chip (#844). Tested against the SAME `tls_chip_label` the draw
+      # The `␣P` fingerprint chip (#844). Tested against the SAME `tls_chip_label` the draw
       # writes, at the same x the chain placed it — the geometry is inverted exactly, not
       # re-derived, which is the rule the `option_cycle` cue miss in #839 was about.
       if tls_x && mx >= tls_x && mx < tls_x + tls_chip_label.size
@@ -81,7 +81,7 @@ class Gori::Tui::RepeaterView
                  # Chains left of whichever hex chip is drawn — in BOTH states, matching
                  # render_request. Recompute the 5-byte length prefix over the payload, or send
                  # the captured one in front of it (DESIGN.md §7).
-                 b << {:grpc_reframe, "␣F", "FRAME"} if @grpc_reframable
+                 b << {:grpc_reframe, "␣R", "FRAME"} if @grpc_reframable
                  # Same condition `render_request` draws it under, so the live cells are
                  # exactly the painted ones — the rule this list already keeps for FRAME.
                  b << {:grpc_fields, "␣E", "FIELDS"} if grpc_fields_available?

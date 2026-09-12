@@ -25,11 +25,12 @@ describe "Gori::Verbs.register_decoder" do
     end
   end
 
-  it "keeps New/Close in :common so session management works from inside the body panes" do
-    # Tagged :tab/:subtab they were invisible from INPUT/CHAIN/OUTPUT, since the space menu
-    # renders COMMON ∪ the focused pane's section only.
-    r["decoder.new"].section.should eq(:common)
-    r["decoder.close"].section.should eq(:common)
+  it "files New/Close on :subtab, which is reachable from every pane since #1055" do
+    # They sat in COMMON to escape the old rule (COMMON ∪ the focused pane's section only,
+    # so a :subtab row was invisible from INPUT/CHAIN/OUTPUT). The SUB-TABS bucket now rides
+    # along with every view, so the honest section costs nothing.
+    r["decoder.new"].section.should eq(:subtab)
+    r["decoder.close"].section.should eq(:subtab)
     verb_intents(r, "decoder.new").should eq([:decoder_new])
     verb_intents(r, "decoder.close").should eq([:decoder_close])
   end

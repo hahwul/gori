@@ -151,7 +151,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.current_tab = :notes
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Notes, :common, ctx)
+    menu.open(Gori::Verb::Scope::Notes, :common, ctx, subtabs: true)
 
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.notes?).should be_true
@@ -200,17 +200,18 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('y').try(&.id).should eq("decoder.copy")
   end
 
-  it "keeps Decoder's New/Close in COMMON (Round 4) so they show from every context, not just the tab bar/strip" do
+  it "shows Decoder's New/Close from every context — tab bar, strip and each body pane" do
     ctx = FakeExecContext.new
     ctx.current_tab = :decoder
-    ctx.decoder_read_mode = true # so COMMON's Copy shows too, for a fuller COMMON+CONTEXT picture
+    ctx.decoder_read_mode = true    # so COMMON's Copy shows too, for a fuller COMMON+CONTEXT picture
+    ctx.subtab_search_tab_count = 2 # …and the strip's search/filter rows
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     # Tab-bar focus (@focus == :menu): COMMON + the TAB group (find/filter sub-tabs).
     # Save/Load are COMMON too — they were :tab, which made the chain library reachable
     # ONLY from here; see the :subtab and :chain examples below for the other two contexts
     # that used to be missing it.
-    menu.open(Gori::Verb::Scope::Decoder, :tab, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :tab, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("decoder.copy")
     ids.should contain("decoder.new")
@@ -225,32 +226,32 @@ describe Gori::Tui::SpaceMenu do
     # Sub-tab strip focus (@focus == :subtabs): Decoder now has its OWN :subtab verbs
     # (rename + duplicate, mirroring Repeater/Fuzzer) — COMMON + SUBTAB, New/Close/Copy/
     # Rename/Duplicate all reachable from the strip.
-    menu.open(Gori::Verb::Scope::Decoder, :subtab, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :subtab, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("decoder.copy")
     ids.should contain("decoder.new")
     ids.should contain("decoder.close")
     ids.should contain("decoder.rename-subtab")
     ids.should contain("decoder.duplicate-subtab")
-    menu.verb_for('r').try(&.id).should eq("decoder.rename-subtab")
+    menu.verb_for('e').try(&.id).should eq("decoder.rename-subtab")
     menu.verb_for('d').try(&.id).should eq("decoder.duplicate-subtab")
-    ids.should contain("decoder.save")            # COMMON as of the library round
-    ids.should_not contain("decoder.find-subtab") # :tab-only, not :subtab — no bleed
+    ids.should contain("decoder.save")        # COMMON as of the library round
+    ids.should contain("decoder.find-subtab") # :tab rides in the SAME bucket now (#1055)
 
     # Body-pane focus: OUTPUT gets Cycle output mode + COMMON's New/Close/Copy/Save/Load —
     # the whole point of Round 4 is New/Close now show INSIDE the body panes too.
-    menu.open(Gori::Verb::Scope::Decoder, :output, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :output, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("decoder.mode")
     ids.should contain("decoder.new")
     ids.should contain("decoder.close")
     ids.should contain("decoder.save")
-    ids.should_not contain("decoder.find-subtab") # a DIFFERENT group (:tab) — no bleed
+    ids.should contain("decoder.find-subtab") # the SUB-TABS bucket rides along here too
 
     # CHAIN pane: Save/Load are COMMON, and CHAIN has no actions of its own, so this
     # renders as a flat COMMON-only group (the single-group-omits-header rule) — which
     # still carries the chain library, the one thing this pane most obviously wants.
-    menu.open(Gori::Verb::Scope::Decoder, :chain, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :chain, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("decoder.new")
     ids.should contain("decoder.close")
@@ -344,19 +345,17 @@ describe Gori::Tui::SpaceMenu do
     ctx.current_tab = :fuzzer
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Fuzzer, :template, ctx)
+    menu.open(Gori::Verb::Scope::Fuzzer, :template, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("fuzz.run")      # COMMON
-    ids.should contain("fuzz.new")      # Round 5: New moved into COMMON, so it's here too
+    ids.should contain("fuzz.new")      # SUB-TABS — the bucket rides along with every pane
     ids.should contain("fuzz.automark") # :template
     # 'a', matching `repeater.auto-mark`. It was 'm' here while the Repeater — the pane most
     # operators learn first — has always used 'a' for the same action.
     menu.verb_for('a').try(&.id).should eq("fuzz.automark")
 
-    # Round 5: fuzz.new moved :tab → :common, so Fuzzer no longer has any :tab-only
-    # verbs — the tab bar now falls back to a flat COMMON-only render (same rule that
-    # already covered Decoder's tab bar pre-Round-5), New/Run/Stop/Copy all present.
-    menu.open(Gori::Verb::Scope::Fuzzer, :tab, ctx)
+    # From the tab bar the card is COMMON ∪ SUB-TABS — same bucket, one fewer.
+    menu.open(Gori::Verb::Scope::Fuzzer, :tab, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("fuzz.run")
     ids.should contain("fuzz.new")
@@ -370,7 +369,7 @@ describe Gori::Tui::SpaceMenu do
     ctx.repeater_tab_count = 1 # gate duplicate availability
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Repeater, :subtab, ctx)
+    menu.open(Gori::Verb::Scope::Repeater, :subtab, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("repeater.send")              # COMMON
     ids.should contain("repeater.rename-subtab")     # :subtab
@@ -386,16 +385,20 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.current_tab = :repeater
     ctx.repeater_read_mode = true # so repeater.select-line ('x') is available in the menu
+    ctx.repeater_tab_count = 1    # …and the strip's Duplicate, which now rides along
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Repeater, :response, ctx)
+    menu.open(Gori::Verb::Scope::Repeater, :response, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("repeater.send")            # COMMON
     ids.should contain("repeater.toggle-pretty")   # :response
     ids.should contain("repeater.toggle-diff")     # :response
     ids.should contain("repeater.toggle-resp-hex") # :response
     menu.verb_for('p').try(&.id).should eq("repeater.toggle-pretty")
-    menu.verb_for('d').try(&.id).should eq("repeater.toggle-diff")
+    # `d` is the strip's Duplicate on every tab now, so the response pane's diff toggle
+    # moved to `D` — the same letter one shift away, and the initial of its own title.
+    menu.verb_for('d').try(&.id).should eq("repeater.duplicate-subtab")
+    menu.verb_for('D').try(&.id).should eq("repeater.toggle-diff")
     menu.verb_for('x').try(&.id).should eq("repeater.select-line")
     menu.verb_for('h').try(&.id).should eq("repeater.toggle-resp-hex")
   end
@@ -405,13 +408,13 @@ describe Gori::Tui::SpaceMenu do
     ctx.current_tab = :fuzzer
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Fuzzer, :subtab, ctx)
+    menu.open(Gori::Verb::Scope::Fuzzer, :subtab, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("fuzz.run")              # COMMON
     ids.should contain("fuzz.rename-subtab")    # :subtab
     ids.should contain("fuzz.close-subtab")     # :subtab
     ids.should contain("fuzz.duplicate-subtab") # :subtab
-    ids.should_not contain("fuzz.automark")     # a DIFFERENT section (:template) — no bleed
+    ids.should_not contain("fuzz.automark")     # a body pane's section — never bleeds into the strip's card
     menu.verb_for('e').try(&.id).should eq("fuzz.rename-subtab")
     menu.verb_for('w').try(&.id).should eq("fuzz.close-subtab")
     menu.verb_for('d').try(&.id).should eq("fuzz.duplicate-subtab")
@@ -420,20 +423,22 @@ describe Gori::Tui::SpaceMenu do
   it "populates Decoder's :subtab group with rename/duplicate (asymmetry fix — was flat COMMON, no way to rename from the strip)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :decoder
+    ctx.subtab_search_tab_count = 2 # so the strip's search + filter rows are available
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Decoder, :subtab, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :subtab, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
-    ids.should contain("decoder.new")              # COMMON
-    ids.should contain("decoder.rename-subtab")    # :subtab
-    ids.should contain("decoder.duplicate-subtab") # :subtab
+    ids.should contain("decoder.new")              # SUB-TABS
+    ids.should contain("decoder.rename-subtab")    # SUB-TABS
+    ids.should contain("decoder.duplicate-subtab") # SUB-TABS
     ids.should contain("decoder.save")             # COMMON — the strip is where a conversion is managed
     ids.should contain("decoder.load")
-    ids.should_not contain("decoder.mode")        # a DIFFERENT section (:output) — no bleed
-    ids.should_not contain("decoder.find-subtab") # a DIFFERENT section (:tab) — no bleed
-    # 'r', the letter the strip binds for rename — Decoder's COMMON has no 'r' to displace,
-    # unlike the four Run/Send scopes (registry_reach_spec pins both halves of that split).
-    menu.verb_for('r').try(&.id).should eq("decoder.rename-subtab")
+    ids.should_not contain("decoder.mode")    # a DIFFERENT section (:output) — no bleed
+    ids.should contain("decoder.find-subtab") # :tab is part of the SUB-TABS bucket (#1055)
+    # 'e', the letter rename carries on all nine strips. Decoder's COMMON has no 'r' to
+    # displace and could have taken the strip's own key, but four of the nine cannot —
+    # registry_reach_spec pins why one spelling beats two.
+    menu.verb_for('e').try(&.id).should eq("decoder.rename-subtab")
     menu.verb_for('d').try(&.id).should eq("decoder.duplicate-subtab")
     menu.verb_for('s').try(&.id).should eq("decoder.save")
     menu.verb_for('o').try(&.id).should eq("decoder.load")
@@ -894,5 +899,145 @@ describe "send-to verbs" do
     ctx = FakeExecContext.new
     registry.find { |d| d.id == "notes.send-to" }.not_nil!.call(ctx)
     ctx.send_to_opened.should be_true
+  end
+end
+
+# The decision this pins (#1055): on a tab with a sub-tab strip there is ONE space menu,
+# whatever level opened it. The strip's verbs used to be a context section like any other
+# — visible only with the strip focused — so from a body pane the operator had to walk
+# focus up a level before `space` would even offer "close this sub-tab". With numbered tab
+# jumps landing anywhere, what `space` offers must not depend on which row the cursor is on.
+# scope, the tab symbol, and one body-pane section each tab actually reports.
+STRIP_TABS = [
+  {Gori::Verb::Scope::Repeater, :repeater, :request},
+  {Gori::Verb::Scope::Fuzzer, :fuzzer, :template},
+  {Gori::Verb::Scope::Miner, :miner, :results},
+  {Gori::Verb::Scope::Sequencer, :sequencer, :common},
+  {Gori::Verb::Scope::Decoder, :decoder, :input},
+  {Gori::Verb::Scope::Jwt, :jwt, :input},
+  {Gori::Verb::Scope::Cookie, :cookie, :input},
+  {Gori::Verb::Scope::Comparer, :comparer, :common},
+  {Gori::Verb::Scope::Notes, :notes, :common},
+]
+
+private def strip_ctx(tab : Symbol) : FakeExecContext
+  ctx = FakeExecContext.new
+  ctx.current_tab = tab
+  ctx.repeater_tab_count = 2
+  ctx.subtab_search_tab_count = 2 # ≥2 arms the strip's search/filter and mark-all
+  ctx.subtab_marks = 1            # …and Clear marks
+  ctx
+end
+
+# Every id in `:subtab` / `:tab` for this scope that the context makes available — the
+# bucket's full contents, computed from the registry rather than re-listed per tab.
+private def strip_ids(scope, ctx) : Array(String)
+  Gori::Verbs.registry.select do |v|
+    v.scope == scope && !v.hidden? && v.menu_key &&
+      Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(v.section) && v.available?(ctx)
+  end.map(&.id)
+end
+
+describe "the SUB-TABS bucket, on every strip and from every focus level" do
+  STRIP_TABS.each do |(scope, tab, pane)|
+    it "offers #{tab}'s sub-tab verbs from the BODY, not just the strip" do
+      ctx = strip_ctx(tab)
+      wanted = strip_ids(scope, ctx)
+      wanted.should_not be_empty # every one of the nine has a strip bucket
+
+      menu = SpaceMenu.new(Gori::Verbs.registry)
+      menu.open(scope, pane, ctx, subtabs: true)
+      body_ids = menu.entries.map(&.id)
+      wanted.each { |id| body_ids.should contain(id) }
+
+      # …and from the strip it is the same bucket with one fewer: no pane section joins it.
+      menu.open(scope, :subtab, ctx, subtabs: true)
+      strip = menu.entries.map(&.id)
+      wanted.each { |id| strip.should contain(id) }
+      strip.each do |id|
+        s = Gori::Verbs.registry[id].section
+        (s == :common || Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(s)).should be_true
+      end
+    end
+
+    it "labels #{tab}'s bucket SUB-TABS and keeps the banner naming the focused pane" do
+      ctx = strip_ctx(tab)
+      menu = SpaceMenu.new(Gori::Verbs.registry)
+      backend = MemoryBackend.new(110, 40)
+      menu.open(scope, pane, ctx, subtabs: true)
+      menu.render(Screen.new(backend), Rect.new(0, 0, 110, 38))
+      backend.contains?("SUB-TABS").should be_true
+      # The card title still names the FOCUS AREA (or the mark banner) — unchanged.
+      backend.contains?("SPACE").should be_true
+    end
+  end
+
+  it "gives the bucket the same letter for the same intent on all nine tabs" do
+    reg = Gori::Verbs.registry
+    by_intent = Hash(String, Set(Char)).new { |h, k| h[k] = Set(Char).new }
+    STRIP_TABS.each do |(scope, tab, _)|
+      ctx = strip_ctx(tab)
+      strip_ids(scope, ctx).each do |id|
+        v = reg[id]
+        intent = id.split('.').last.sub("-subtabs", "").sub("-subtab", "").sub("subtab-", "")
+        by_intent[intent] << v.menu_key.not_nil!
+      end
+    end
+    # One letter per intent, across every strip that has that intent at all.
+    by_intent.each do |intent, keys|
+      keys.size.should eq(1), "#{intent} is spelled #{keys.to_a.sort.join('/')} across the nine strips"
+    end
+    by_intent["new"].should eq(Set{'n'})
+    by_intent["close"].should eq(Set{'w'})
+    by_intent["duplicate"].should eq(Set{'d'})
+    by_intent["rename"].should eq(Set{'e'})
+    by_intent["find"].should eq(Set{'f'})
+    by_intent["filter"].should eq(Set{'/'})
+    by_intent["mark-all"].should eq(Set{'T'})
+    by_intent["mark-clear"].should eq(Set{'N'})
+  end
+
+  it "teaches ^N / ^W beside the rows that own them" do
+    # The chords are on the verbs (and in Hotkeys::FIXED_IDS, since Runner#handle_key claims
+    # them before the keymap) precisely so the menu can name them — a row the operator can
+    # only reach through the menu teaches nothing about the chord that does it faster.
+    reg = Gori::Verbs.registry
+    ctrl_n = Gori::Verb::Chord.new("n", ctrl: true)
+    ctrl_w = Gori::Verb::Chord.new("w", ctrl: true)
+    %w[repeater.new fuzz.new decoder.new jwt.new cookie.new notes.new comparer.new].each do |id|
+      reg[id].chords.should contain(ctrl_n)
+      Gori::Hotkeys::FIXED_IDS.includes?(id).should be_true
+    end
+    %w[repeater.close-subtab fuzz.close-subtab mine.close-subtab sequence.close-subtab
+      decoder.close jwt.close cookie.close notes.close comparer.close-subtab].each do |id|
+      reg[id].chords.should contain(ctrl_w)
+      Gori::Hotkeys::FIXED_IDS.includes?(id).should be_true
+    end
+  end
+
+  it "still offers New when the strip is not drawn at all" do
+    # The bucket keys off the SCOPE having a sub-tab family, not off the strip being on
+    # screen: a Repeater with no sessions open draws no strip, and that is precisely the
+    # state `New repeater request` exists for.
+    ctx = FakeExecContext.new
+    ctx.current_tab = :repeater
+    ctx.repeater_tab_count = 0 # no chips, so no strip
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Repeater, :common, ctx, subtabs: true)
+    menu.verb_for('n').try(&.id).should eq("repeater.new")
+    # …and the rows that genuinely need a chip stay out, on their own availability gates.
+    menu.entries.map(&.id).should_not contain("repeater.duplicate-subtab")
+  end
+
+  it "keeps every displayable view collision-free on all three OS profiles" do
+    # `Registry#validate_menu_keys!` runs at build time, and a view is now COMMON ∪ SUB-TABS
+    # ∪ one pane section. The OS profiles substitute CHORDS, never mnemonics, so a menu key
+    # cannot differ by profile — building the registry under each is what proves it.
+    %w[darwin linux windows].each do |os|
+      Gori::Settings.keymap_os = os
+      Gori::Verbs.registry.should_not be_nil
+    end
+  ensure
+    Gori::Settings.keymap_os = "auto"
   end
 end

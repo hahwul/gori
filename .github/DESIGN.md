@@ -47,6 +47,33 @@ verb registry; they reach feature parity by calling the same engines ([§2](#s2)
 convention rather than a shared code path. That gap is real, known, and under decision in
 issue #357.
 
+**The space menu is one menu per tab, not one per focus level.** `Verb::Definition#section`
+is a FOCUS-AREA axis, and for a long time it gated visibility straight through: the card was
+`COMMON ∪ the focused pane's section`, so the sub-tab strip's own verbs — new, close,
+duplicate, rename, tag, find, mark — showed only while the strip had focus. From a body pane
+the operator had to walk focus up a level before `Space` would offer to close the sub-tab
+they were looking at. With `⇧1`–`⇧9` landing anywhere on the strip, *what `Space` offers must
+not depend on which row the cursor happens to be on*. So on the nine tabs that carry a strip
+(Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT, Cookie, Comparer, Notes) the `:subtab` and
+`:tab` sections are drawn as one `SUB-TABS` bucket on **every** view — body, strip and tab
+bar. The two sections were always the same idea (the strip's actions, and the strip's
+search/filter); only the focus level that revealed them differed.
+
+**The bucket spells an intent with the same letter on all nine strips** — `n` new, `w` close,
+`d` duplicate, `e` rename, `t` tag, `f` find, `/` filter, `T` mark-all, `N` clear-marks — and
+a tab that lacks an intent omits the row rather than spending the letter elsewhere. That is
+what makes it one table to learn instead of nine, and it is the reason the bucket is worth a
+rule of its own: nine letters are now reserved in every view of those tabs, which is a real
+tax on the pane sections.
+
+**When a letter collides, the PANE mnemonic moves, not the strip's.** A strip letter has to
+read the same on all nine strips, so moving it costs nine tabs to save one pane; a pane letter
+costs exactly one pane. The exception is a pane letter that is the tab's primary verb — which
+is why rename is `e` and not `r`: `r` is Send/Run (with `Ctrl-R` beside it) in four of the
+nine, and no uniform strip letter is worth taking the key those tabs exist for.
+`Registry#validate_menu_keys!` sweeps the merged views at build time, so a collision is a
+boot-time raise rather than a silently unreachable row.
+
 <a id="p2"></a>
 
 ### P2: not assigned

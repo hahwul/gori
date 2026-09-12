@@ -68,6 +68,11 @@ module Gori::Tui
         # It earns a line here for the same reason j/k does — the key is real on eight tabs and
         # named on none of them until the operator is already standing on the strip.
         Item.new("f", "sub-tab strip: list + search every sub-tab (⌕, from any chip)"),
+        # The menu used to be focus-dependent: the strip's own verbs showed only while the
+        # strip was focused, so from a body pane one had to walk focus up before `space` would
+        # offer "close this sub-tab". One menu per tab now, and the same nine letters on all
+        # nine strips — which is what makes it worth a line here rather than nine.
+        Item.new("space ▸ SUB-TABS", "the strip's actions from ANY pane — same letters on every tab"),
         Item.new("^1-9", "sub-tab N — the ⇧1-9 alias for terminals that deliver Ctrl+digit"),
         Item.new("Settings: Tabs", "show/hide + reorder the nine slots (a tenth ✓ is refused)"),
         Item.new("esc", "pop back to the tab bar"),
@@ -101,7 +106,7 @@ module Gori::Tui
       ]},
       {"REPEATER", [
         Item.new("^R", "send the request", "repeater.send"),
-        Item.new("^N / ^W", "new / close a sub-tab"),
+        Item.new("^N / ^W", "new / close a sub-tab — from any pane, not just the strip"),
         Item.new("r", "rename the sub-tab (on the strip)"),
         Item.new("/", "filter sub-tabs (tag: name: host: method:)", "repeater.filter-subtabs"),
         Item.new("↹", "complete filter field/value while filtering"),
@@ -138,7 +143,7 @@ module Gori::Tui
       ]},
       {"FUZZER", [
         Item.new("⇧I", "send a flow/repeater here (History/Repeater)"),
-        Item.new("^N / ^W", "new / close a sub-tab"),
+        Item.new("^N / ^W", "new / close a sub-tab — from any pane, not just the strip"),
         Item.new("i / ↵", "enter INS (edit) on target/template · esc back to READ"),
         Item.new("space", "command menu (READ mode on target/template/results/detail)"),
         # NOT `y · O`. The `*.copy-all` verbs are gone — `Runner#read_copy` folds it into one
@@ -177,7 +182,7 @@ module Gori::Tui
         Item.new("↹", "summary ⟷ findings"),
         Item.new("↑/↓ · ↵", "findings: select · open detail"),
         Item.new("space → R", "send the selected finding to Repeater (param injected)", "mine.repeater"),
-        Item.new("^N / ^W", "new / close a sub-tab"),
+        Item.new("^N / ^W", "new / close a sub-tab — from any pane, not just the strip"),
       ]},
       {"JWT", [
         Item.new("^T", "switch decode ⟷ encode", "jwt.toggle-mode"),
@@ -196,7 +201,7 @@ module Gori::Tui
         Item.new("{jwt.copy} · ^Y", "copy selection/pane — `y` in READ, ^Y while typing (ENCODE panes: ^Y only)"),
         Item.new("⇧arrows", "select text in INPUT / HEADER / PAYLOAD (not SECRET — single-line field)"),
         Item.new("↑/↓ · ↵", "attacks: select · copy the selected payload"),
-        Item.new("^N / ^W", "new / close a sub-tab"),
+        Item.new("^N / ^W", "new / close a sub-tab — from any pane, not just the strip"),
       ]},
       {"COOKIE", [
         Item.new("^T", "switch decode ⟷ forge", "cookie.toggle-mode"),
@@ -211,7 +216,7 @@ module Gori::Tui
         Item.new("l", "seed the FORGE payload from the decoded cookie (space menu)", "cookie.load-decoded"),
         # Same shape as the JWT row above: the letter follows a rebind, the `^Y` pin does not.
         Item.new("{cookie.copy} · ^Y", "copy selection/pane — `y` in READ, ^Y while typing an editable pane"),
-        Item.new("^N / ^W", "new / close a sub-tab"),
+        Item.new("^N / ^W", "new / close a sub-tab — from any pane, not just the strip"),
       ]},
       {"OAST", [
         Item.new("{oast.listen} · {oast.stop}", "start listening · stop"),

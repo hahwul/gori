@@ -1,6 +1,6 @@
 # gRPC repeater mode (an `application/grpc` h2 flow): the editor holds the editable request
 # HEAD and the framed message body is sent byte-exact — or, for the unary case the hex editor
-# can reach, with its length prefix recomputed while `␣F:FRAME` is on — plus the deframed
+# can reach, with its length prefix recomputed while `␣R:FRAME` is on — plus the deframed
 # response transcript and status row.
 # Reopens Gori::Tui::RepeaterView (see tui/repeater_view.cr).
 class Gori::Tui::RepeaterView
@@ -15,7 +15,7 @@ class Gori::Tui::RepeaterView
   # comment in repeater_view.cr and DESIGN.md §7.
   getter? grpc_reframe : Bool
 
-  # `␣F:FRAME` / `repeater.toggle-grpc-reframe`. Refused unless this is a gRPC tab holding a
+  # `␣R:FRAME` / `repeater.toggle-grpc-reframe`. Refused unless this is a gRPC tab holding a
   # REFRAMABLE body: there is otherwise no unary prefix to recompute, and a flag that cannot
   # change what goes on the wire is worse than a toast saying so.
   #
@@ -32,7 +32,7 @@ class Gori::Tui::RepeaterView
   # HEAD is seeded into the editor (editable — metadata headers). The message body is wire
   # protobuf, not text, so it isn't text-editable — but a UNARY call (exactly one framed
   # message) exposes its payload for HEX editing (^X), with the 5-byte length prefix
-  # recomputed on send while `␣F:FRAME` is on (see grpc_request_bytes; the toggle defaults on
+  # recomputed on send while `␣R:FRAME` is on (see grpc_request_bytes; the toggle defaults on
   # here and off headless). A 0- or multi-message body is kept byte-exact in @grpc_body and
   # re-appended verbatim. The response renders as a deframed gRPC transcript + grpc-status,
   # each payload decoded schema-lessly (`p` swaps the tree for a hex preview) — the wire
@@ -111,7 +111,7 @@ class Gori::Tui::RepeaterView
   # CRLFCRLF terminator (what H2Engine.split_head_body keys on) + the message body.
   # A reframable (unary) call sends the current payload — hex-edited via @req_hex_edit while
   # in hex mode, else the stored @grpc_payload — behind either a RECOMPUTED length prefix
-  # (`␣F:FRAME` on, the default) or the CAPTURED one (off, which is how a deliberately-stale
+  # (`␣R:FRAME` on, the default) or the CAPTURED one (off, which is how a deliberately-stale
   # prefix is sent); a non-reframable body is the pristine @grpc_body, verbatim.
   # Auto-Content-Length never applies over h2 (it frames by DATA/END_STREAM).
   private def grpc_request_bytes : Bytes

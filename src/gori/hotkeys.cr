@@ -16,9 +16,17 @@ module Gori
     # handler BEFORE the keymap — so a rebind/unbind on them can't take effect:
     #   view.reveal-ws  ^B  — Runner#handle_key global guard
     #   app.palette     ^P  — every controller's handle_body_key opens the palette (save-first)
-    #   repeater.new/fuzz.new ^N — Runner#handle_key intercepts ^N at menu/body/subtabs focus
+    #   *.new / *.close     ^N/^W — Runner#handle_key runs subtab_new / subtab_close for every
+    #     tab that has a strip, at any focus level (#1055). The chords sit on the verbs so the
+    #     space menu can TEACH them beside the rows it draws; the keymap never gets to see
+    #     them, which is exactly what this list means.
     #   app.quit/app.back   — deliberately palette-only (single-key quit is a footgun)
-    FIXED_IDS = {"view.reveal-ws", "app.quit", "app.back", "app.palette", "repeater.new", "fuzz.new"}
+    FIXED_IDS = {"view.reveal-ws", "app.quit", "app.back", "app.palette",
+                 "repeater.new", "fuzz.new", "decoder.new", "jwt.new", "cookie.new",
+                 "notes.new", "comparer.new",
+                 "repeater.close-subtab", "fuzz.close-subtab", "mine.close-subtab",
+                 "sequence.close-subtab", "decoder.close", "jwt.close", "cookie.close",
+                 "notes.close", "comparer.close-subtab"}
 
     # Chords consumed by a hardcoded handler BEFORE the keymap is consulted, so binding ANY
     # verb to one would be silently shadowed — the editor refuses them on top of the
