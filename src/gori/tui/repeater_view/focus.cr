@@ -94,11 +94,17 @@ class Gori::Tui::RepeaterView
     chain_pane_active? ? @chain_pane.set_preedit(text) : req_editor.set_preedit(text)
   end
 
+  # The ring WRAPS, unlike the shell's default (`Runner#view_pane_advance` reads a false as
+  # "no further pane — go back to the tab bar"). Three panes and a one-way ring made `↹` do
+  # `esc`'s job at the end of it: from RESPONSE it left for the tab bar while the strip said
+  # `↹ pane`, and TARGET — the pane you reach for to change the host — was then only
+  # reachable by `⇧↹`, which no strip named at all.
+  #
+  # Closing the ring costs nothing, because this tab has never used `↹` as its way out: every
+  # pane strip says `esc tabs`, and esc still pops to the sub-tab strip and then the bar.
   def pane_advance(dir : Int32) : Bool
     i = PANE_ORDER.index(@focus) || 0
-    ni = i + dir
-    return false if ni < 0 || ni >= PANE_ORDER.size
-    set_focus(PANE_ORDER[ni])
+    set_focus(PANE_ORDER[(i + dir) % PANE_ORDER.size])
     true
   end
 

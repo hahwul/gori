@@ -287,19 +287,19 @@ module Gori::Tui
         return ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · ^F find · #{send} send · ↹ pane · esc tabs" : grpc_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · ^F find · #{send} send · ↹ pane · ⇧↹ back · esc tabs" : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
       when :target
         if v.target_insert?
-          v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · esc read"
+          v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · ⇧↹ back · esc read"
         else
-          "i/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · esc tabs"
+          "i/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · ⇧↹ back · esc tabs"
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
+        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · ⇧↹ back · esc tabs"
       when :request
         if v.request_insert?
           # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
@@ -319,7 +319,7 @@ module Gori::Tui
           # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
           # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
           back = v.ws_http_only? ? keys(" · {repeater.toggle-http2} websocket") : ""
-          "i/↵ edit · #{read_common} · #{marks} · ^G goto · ^F find · #{hex} hex#{back} · ↹ pane · esc tabs"
+          "i/↵ edit · #{read_common} · #{marks} · ^G goto · ^F find · #{hex} hex#{back} · ↹ pane · ⇧↹ back · esc tabs"
         end
       else
         ""
@@ -496,7 +496,7 @@ module Gori::Tui
     # plain-HTTP `:request` arm has said `↹ text` since it grew its own INSERT branch; these
     # two (and gRPC) shared one string across the modes and kept the READ token.
     private def tab_token(v : RepeaterView) : String
-      v.request_insert? ? "↹ text" : "↹ pane"
+      v.request_insert? ? "↹ text" : "↹ pane · ⇧↹ back"
     end
 
     # The RESPONSE column's footer on a WS tab — the twin of `ws_hint`, naming the card being
@@ -504,7 +504,7 @@ module Gori::Tui
     # reachable and nothing said so.
     private def ws_resp_hint(v : RepeaterView, read_common : String, send : String) : String
       card = v.resp_pane == :handshake ? "handshake response" : "transcript"
-      keys("↑/↓ move #{card} · #{read_common} · ←/→ char · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · esc tabs")
+      keys("↑/↓ move #{card} · #{read_common} · ←/→ char · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · ⇧↹ back · esc tabs")
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---

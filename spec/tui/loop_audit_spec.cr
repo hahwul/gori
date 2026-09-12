@@ -235,6 +235,42 @@ describe "the core-loop hints" do
     end
   end
 
+  describe "F2 — the Repeater pane ring wraps instead of dead-ending" do
+    it "sends ↹ from RESPONSE round to TARGET, and ⇧↹ the other way" do
+      TuiContract.with_session("ring-f2") do |session|
+        host = TuiContract::Host.new(session)
+        host.tab = :repeater
+        ctl = RepeaterController.new(host)
+        ctl.repeater_new
+        v = ctl.current_view.not_nil!
+
+        v.focus_pane(:response)
+        v.pane_advance(1).should be_true # …and NOT false, which the shell reads as "tab bar"
+        v.focus.should eq(:target)
+
+        v.pane_advance(-1).should be_true
+        v.focus.should eq(:response)
+      end
+    end
+
+    it "names ⇧↹ in the pane strips that were the only place the ring was described" do
+      TuiContract.with_session("ring-f2-hint") do |session|
+        host = TuiContract::Host.new(session)
+        host.tab = :repeater
+        ctl = RepeaterController.new(host)
+        ctl.repeater_new
+        v = ctl.current_view.not_nil!
+        {:target, :request, :response}.each do |pane|
+          v.focus_pane(pane)
+          ctl.body_hint(:body).should contain("⇧↹ back"), "the #{pane} strip does not name ⇧↹"
+        end
+        # esc is still the way UP, and still says so.
+        v.focus_pane(:response)
+        ctl.body_hint(:body).should contain("esc tabs")
+      end
+    end
+  end
+
   describe "F8 — Compare goes to the Comparer, like every sibling Send verb" do
     comparer_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "comparer.cr"))
 
