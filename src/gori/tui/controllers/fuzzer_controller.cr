@@ -265,6 +265,14 @@ module Gori::Tui
     # --- input ---
     # Returns false when the key should fall through to the shell keymap (rebindable
     # verbs + Global breath). READ panes own structure; command letters defer.
+    # The pane's own INS/READ mode — see RepeaterController#body_takes_text? for why this is
+    # `pane_insert?` rather than `editor_captures_tab?`.
+    def body_takes_text? : Bool
+      v = current_view
+      return false unless v
+      v.pane_insert?(v.focus)
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
       if v.nil?

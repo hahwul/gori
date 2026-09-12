@@ -321,6 +321,7 @@ describe SettingsView do
     prev = {
       Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview,
       Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.tab_numbers?,
+      Gori::Settings.tab_slots?,
     }
     begin
       ENV["GORI_HOME"] = dir
@@ -330,6 +331,7 @@ describe SettingsView do
       Gori::Settings.history_list_order = "newest"
       Gori::Settings.sitemap_expand_depth = -1
       Gori::Settings.tab_numbers = false
+      Gori::Settings.tab_slots = false
       v = SettingsView.new
       v.reload(:layout)
       v.section.should eq(:layout)
@@ -345,8 +347,11 @@ describe SettingsView do
       v.toggle_or_move(1) # all → 0
       v.move_field(1)
       v.toggle_or_move(1) # tab numbers on
+      v.move_field(1)
+      v.toggle_or_move(1) # tab bar slots on
       v.save
       Gori::Settings.tab_numbers?.should be_true
+      Gori::Settings.tab_slots?.should be_true
       Gori::Settings.history_preview.should be_true
       Gori::Settings.probe_preview.should be_true
       Gori::Settings.issues_preview.should be_true
@@ -361,9 +366,10 @@ describe SettingsView do
       Gori::Settings.history_list_order.should eq(Gori::Settings::DEFAULT_HISTORY_LIST_ORDER)
       Gori::Settings.sitemap_expand_depth.should eq(Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
       Gori::Settings.tab_numbers?.should eq(Gori::Settings::DEFAULT_TAB_NUMBERS)
+      Gori::Settings.tab_slots?.should eq(Gori::Settings::DEFAULT_TAB_SLOTS)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.tab_numbers = prev
+      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.tab_numbers, Gori::Settings.tab_slots = prev
       FileUtils.rm_rf(dir)
     end
   end

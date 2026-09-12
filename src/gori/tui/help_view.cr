@@ -54,7 +54,10 @@ module Gori::Tui
         Item.new("←/→", "switch tab (on the tab bar)"),
         Item.new("↹ / ⇧↹", "focus ring: tab bar ↔ panes"),
         Item.new("↵ / ↓", "enter the tab body"),
-        Item.new("1-9", "jump to the Nth visible tab (Settings → Layout → Tab numbers paints them)"),
+        Item.new("1-9", "jump to slot N on the tab bar — the bar is nine numbered slots"),
+        Item.new("0", "go to ANY tab — a type-to-filter list of the slots and the hidden ones", "nav.goto"),
+        Item.new("⇧1-9", "jump to sub-tab N of the active tab (on a non-US layout see ^1-9 / f)"),
+        Item.new("⇧0", "find a sub-tab — the same picker `f` opens from the strip", "subtab.find"),
         # Seventeen surfaces bind j/k and no hint anywhere named them, so a whole navigation
         # layer was reachable only by guessing. It belongs HERE rather than in each tab's
         # hint: it is a global convention like ^P or ^D, the hints are already at the width
@@ -65,7 +68,8 @@ module Gori::Tui
         # It earns a line here for the same reason j/k does — the key is real on eight tabs and
         # named on none of them until the operator is already standing on the strip.
         Item.new("f", "sub-tab strip: list + search every sub-tab (⌕, from any chip)"),
-        Item.new("Settings: Tabs", "show/hide + reorder tabs"),
+        Item.new("^1-9", "sub-tab N — the ⇧1-9 alias for terminals that deliver Ctrl+digit"),
+        Item.new("Settings: Tabs", "show/hide + reorder the nine slots (a tenth ✓ is refused)"),
         Item.new("esc", "pop back to the tab bar"),
       ]},
       {"MOUSE", [
@@ -293,7 +297,7 @@ module Gori::Tui
         Item.new("{decoder.save} · {decoder.load}", "save the chain under a name · pick from the saved chains"),
         Item.new("chain library", "shared by every project · picker: type to filter · ^X deletes an entry"),
         Item.new("^N · ^W", "new · close conversion sub-tab"),
-        Item.new("^1-9 · r", "switch sub-tab · rename (on the strip)"),
+        Item.new("⇧1-9 · r", "switch sub-tab · rename (on the strip)"),
         Item.new("space", "command menu from the strip, tab bar, INPUT READ or OUTPUT (a literal space while typing)"),
       ]},
       {"REWRITER", [

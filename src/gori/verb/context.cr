@@ -99,6 +99,10 @@ module Gori
       # follows the user's settings:tabs order/visibility. Out-of-range n is a no-op.
       abstract def focus_visible_tab(n : Int32) : Nil
       abstract def cycle_tab(delta : Int32) : Nil
+      # The `0` key's picker: a type-to-filter list over the WHOLE tab catalog — the nine
+      # numbered slots and everything settings:tabs keeps off the bar — where ↵ jumps
+      # (force-showing a hidden tab, exactly as the named "Go to …" verbs do).
+      abstract def open_tab_goto : Nil
       # Horizontal tab-bar navigation (←/→ on the menu). Like cycle_tab(±1), but → past
       # the last visible tab lands on the far-right "more" dropdown affordance (holding
       # the settings-hidden tabs) instead of wrapping; ← steps back off it.
@@ -113,7 +117,11 @@ module Gori
       # terminals can't deliver). Operate on the active tab; count gates the menu entry.
       abstract def subtab_search_open : Nil    # open the sub-tab search picker for the active tab
       abstract def subtab_search_count : Int32 # active tab's open sub-tab count (gates the search entry)
-      abstract def subtab_filter_open : Nil    # open the `/` sub-tab filter bar for the active tab (issue #121)
+      # ⇧1-⇧9: jump to the Nth (1-based) sub-tab of the active tab. Generic for the same
+      # reason the three above are — the shell routes to whichever strip is active — so the
+      # nine chords are registered once instead of hand-rolled in seven controllers.
+      abstract def subtab_jump(n : Int32) : Nil
+      abstract def subtab_filter_open : Nil # open the `/` sub-tab filter bar for the active tab (issue #121)
       # Sub-tab multi-select (#683). Generic, like the three above: the shell already routes
       # to whichever strip is active, so nine scopes' menu entries share one intent each
       # rather than widening this catalogue nine times over. The toggle is deliberately

@@ -307,15 +307,52 @@ module Gori
         "nav.prev-tab", "Previous tab", "Focus the previous tab", Verb::Scope::Global,
         [Verb::Chord.new("[")], category: Verb::Category::Navigation) { |ctx| ctx.cycle_tab(-1); nil }
 
-      # Positional tab jump: digit N focuses the Nth VISIBLE tab (the order on the bar) —
+      # Positional tab jump: digit N focuses the Nth SLOT on the bar (the order on the bar) —
       # so the numbers follow the user's settings:tabs order/visibility. Hidden, so the
       # keys exist but don't clutter the palette; the named "Go to …" verbs below are the
       # discoverable entries (and the way to reach a hidden tab by command).
+      #
+      # The bar is nine slots and the digits are the primary way to move between them, so the
+      # Runner claims this family BEFORE the per-focus handlers that return ahead of the
+      # keymap (the sub-tab strip, the drill-in details, each controller's body keys) — see
+      # `Runner#tab_digit_family?`. A digit is a character only where a space is.
       (1..9).each do |n|
         r.register Verb::Definition.new(
-          "nav.pos#{n}", "Go to tab #{n}", "Focus the #{n}th visible tab", Verb::Scope::Global,
+          "nav.pos#{n}", "Go to tab #{n}", "Focus the #{n}th slot on the tab bar", Verb::Scope::Global,
           [Verb::Chord.new(n.to_s)], hidden: true) { |ctx| ctx.focus_visible_tab(n); nil }
       end
+
+      # `0` — the tenth key of the family, and the only one that opens something. Nine slots
+      # cannot hold twenty-one tabs, so the rest live behind a type-to-filter picker over the
+      # WHOLE catalog (slotted and hidden alike): with twelve tabs off the bar, typing three
+      # letters beats walking a dropdown. NOT hidden — "Go to tab…" is a thing to find in the
+      # palette, unlike the nine positional jumps it fronts.
+      r.register Verb::Definition.new(
+        "nav.goto", "Go to tab…", "Filter and jump to any tab — the nine slots and the hidden ones",
+        Verb::Scope::Global, [Verb::Chord.new("0")],
+        category: Verb::Category::Navigation) { |ctx| ctx.open_tab_goto; nil }
+
+      # ⇧1-⇧9 / ⇧0 are the same family one level down: the sub-tab strip. Registered ONCE
+      # here rather than forked across the seven controllers that own a strip — the shell
+      # already routes `subtab_jump` to whichever controller is active, exactly as
+      # `subtab_search_open` has since the picker was generalised.
+      #
+      # The gate is "the active tab HAS a strip" (`subtab_search_count`), so on a tab without
+      # one the chord falls through to Global rather than firing into nothing. Terminals
+      # disagree about how a shifted digit arrives; `Tui::Keybind::SHIFTED_DIGITS` folds both
+      # spellings onto this chord.
+      has_subtabs = ->(ctx : Verb::ExecContext) { ctx.subtab_search_count >= 1 }
+      (1..9).each do |n|
+        r.register Verb::Definition.new(
+          "subtab.pos#{n}", "Go to sub-tab #{n}", "Jump to the #{n}th sub-tab of the active tab",
+          Verb::Scope::Global, [Verb::Chord.new(n.to_s, shift: true)],
+          hidden: true, available: has_subtabs) { |ctx| ctx.subtab_jump(n); nil }
+      end
+
+      r.register Verb::Definition.new(
+        "subtab.find", "Find sub-tab…", "Filter and jump to a sub-tab of the active tab",
+        Verb::Scope::Global, [Verb::Chord.new("0", shift: true)],
+        available: has_subtabs, category: Verb::Category::Navigation) { |ctx| ctx.subtab_search_open; nil }
 
       # Named tab jumps (no chord) — palette discoverability + the only by-command way to
       # reach a tab hidden in settings:tabs (focus_tab force-shows it while active). Keep

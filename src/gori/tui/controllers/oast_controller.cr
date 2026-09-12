@@ -1204,6 +1204,11 @@ module Gori::Tui
     # Input
     # =========================================================================
 
+    # The Callbacks `/` free-text filter.
+    def body_takes_text? : Bool
+      cb_filter_editing?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       if key.space? && !ev.ctrl? && !ev.alt?

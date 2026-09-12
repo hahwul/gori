@@ -50,6 +50,11 @@ module Gori::Tui
     # ONLY while marks are set — with none set, esc still pops to the sub-tab strip. (The QL
     # bar and the tag editor claim every key ahead of this while either is up, so their own
     # esc handling is unaffected.)
+    # The `/` query bar and the tag prompt — the two panes that take characters here.
+    def body_takes_text? : Bool
+      @sitemap.querying? || @sitemap.tagging?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return false if ev.ctrl? || ev.alt?
       return false unless ev.key.escape? && @sitemap.mark_count > 0

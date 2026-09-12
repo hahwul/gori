@@ -340,6 +340,18 @@ module Gori::Tui
     end
 
     # --- key handling ---
+    # Every pane `route_pane` sends characters to: the INPUT editor in INS, the HEADER and
+    # PAYLOAD JSON editors, and the SECRET field. The read-only faces (DECODED / OUTPUT) and
+    # the ATTACKS list are not — a digit is navigation there.
+    def body_takes_text? : Bool
+      s = cur
+      case s.pane
+      when :input                     then s.input_mode == InputMode::Insert
+      when :header, :payload, :secret then true
+      else                                 false
+      end
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char

@@ -215,6 +215,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @tabs[@active_tab]?.try(&.jump_subtab(idx))
   end
 
+  # `subtab.posN` (⇧1-⇧9): jump to the Nth sub-tab of the ACTIVE tab, 1-based, from wherever
+  # the digit family reaches — the strip, the body, a read-only pane — not just the strip the
+  # `^1-9` alias is bound to. Focus is left where it is on purpose: ⇧3 while editing session 1
+  # means "show me session 3", not "and put me back on the chip row".
+  #
+  # ONE implementation for the seven strips, like `subtab_search_open`: the controller the
+  # shell is already routing to owns `jump_subtab`, which clamps and saves the outgoing
+  # session itself, so an out-of-range N is a safe no-op rather than nine guards.
+  def subtab_jump(n : Int32) : Nil
+    jump_subtab(n - 1)
+  end
+
   # ===== multi-select on the strip (issue #683) ==============================
   # `t` marks, exactly as it does in History, Issues, the Intercept queue and the Sitemap —
   # mutt's tag key, and the same many-times-per-minute gesture that earns it a bare letter

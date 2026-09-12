@@ -597,6 +597,11 @@ module Gori::Tui
     # BEFORE the Issues keymap, so the esc branch shadows issues.leave ONLY while marks are
     # set — with none set, esc still pops to the tab bar. (The `/` filter bar claims every
     # key ahead of this while it's up, so filter-esc is unaffected.)
+    # The list's `/` query bar and the detail's NOTES editor in INS.
+    def body_takes_text? : Bool
+      @issues.querying? || @issues.notes_insert_mode?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return false if @issues.detail_open?
       return false if ev.ctrl? || ev.alt?

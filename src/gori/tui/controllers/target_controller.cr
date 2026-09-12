@@ -149,6 +149,11 @@ module Gori::Tui
     end
 
     # --- forwarded input / focus / lifecycle ---
+    # Target is a shell over Sitemap / Discover / Diff — each answers for its own panes.
+    def body_takes_text? : Bool
+      active_child.body_takes_text?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       active_child.handle_body_key(ev)
     end

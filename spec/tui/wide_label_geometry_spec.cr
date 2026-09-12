@@ -66,10 +66,23 @@ describe "wide-label geometry" do
     row[hint_x, 10].should eq("hints here")
   end
 
-  it "widens the hidden-tab dropdown to a Hangul label's cells" do
-    menu = MoreMenu.new([{:history, "히스토리"}, {:notes, "Notes"}])
-    box = menu.overlay_box(Rect.new(70, 0, 10, 1), Rect.new(0, 1, 80, 20)).not_nil!
-    box.w.should eq(Screen.draw_width("히스토리") + 4)
+  it "keeps a Hangul tab label whole in the Go-to picker" do
+    # The hidden-tab DROPDOWN sized its card to the widest label; the picker that replaced it
+    # is a fixed centred card, so the question moved from "is the box wide enough" to "does
+    # the label survive the column" — the same failure (cells vs. characters) one step along.
+    backend = MemoryBackend.new(80, 24)
+    picker = TabGotoPicker.new([
+      TabGotoPicker::Row.new(:history, "히스토리", 3),
+      TabGotoPicker::Row.new(:notes, "Notes", nil),
+    ])
+    area = Rect.new(0, 1, 80, 20)
+    picker.render(Screen.new(backend), area)
+    box = picker.overlay_box(area).not_nil!
+    # MemoryBackend spells a wide grapheme as its cell plus a blank continuation cell, so the
+    # row reads "히 스 토 리" — squeezing the padding out is what asks the real question: did
+    # every character survive, or did the column cut one in half?
+    row = backend.row(box.y + FilterPickerOverlay::LIST_OFFSET).gsub(" ", "")
+    row.should contain("히스토리")
   end
 
   it "pads a protobuf preview by cells, so a Hangul value keeps its column" do

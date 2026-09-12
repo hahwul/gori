@@ -177,6 +177,14 @@ module Gori::Tui
         capturing: @host.session.capturing?)
     end
 
+    # Every field on the Project tab that takes characters: the description editor in INS, the
+    # HOST OVERRIDES / ENV inline add rows, a text row in SETTINGS, and the ACTIVITY `/` bar.
+    # The same set `set_preedit` accepts — an IME composes into exactly the fields a digit is
+    # a character in — so the two are written as one expression rather than drifting apart.
+    def body_takes_text? : Bool
+      project_text_field_focused?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       # The SCOPE / HOST OVERRIDES panes defer their action keys (a/e/d → verbs, space →
       # action menu, Global chords → capture/rules/…) to the keymap by returning false;
@@ -419,13 +427,20 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Bool
-      return false unless @project_view.pane == :desc && @project_view.desc_insert_mode? ||
-                          @project_view.ov_adding? ||
-                          @project_view.env_adding? || @project_view.env_prefix_editing? ||
-                          (@project_view.pane == :settings && @project_view.settings_text_row?) ||
-                          (@project_view.pane == :activity && @project_view.activity_querying?)
+      return false unless project_text_field_focused?
       @project_view.set_preedit(text)
       true
+    end
+
+    # The Project panes that take CHARACTERS. Read by `set_preedit` (an IME composes into a
+    # text field and nothing else) and by `body_takes_text?` (a digit is a character in a text
+    # field and nothing else) — the same question twice, so it is written once.
+    private def project_text_field_focused? : Bool
+      (@project_view.pane == :desc && @project_view.desc_insert_mode?) ||
+        @project_view.ov_adding? ||
+        @project_view.env_adding? || @project_view.env_prefix_editing? ||
+        (@project_view.pane == :settings && @project_view.settings_text_row?) ||
+        (@project_view.pane == :activity && @project_view.activity_querying?)
     end
 
     def project_desc_read_mode? : Bool

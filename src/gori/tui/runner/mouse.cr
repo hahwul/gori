@@ -298,7 +298,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # a single packed line would conflict on every merge.
   MODAL_OVERLAYS = {
     OverlayKind::Palette,
-    OverlayKind::TabsMore,
   }
 
   private def modal_overlay? : Bool
@@ -309,15 +308,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Click the top tab bar: switch to the clicked tab and land focus on the bar
   # (TABS level) — clicking a tab selects the tab, it does not drill into the body.
   private def click_menu(rect : Rect, mx : Int32, my : Int32) : Nil
-    # The far-right ⋯ "more" affordance opens the hidden-tabs dropdown.
-    if (mb = Chrome.more_button_rect(rect, hidden_tab_count)) && mb.contains?(mx, my)
+    tabs, hidden, slots = effective_bar
+    # The far-right `0:+N` pill opens the Go-to picker — the same card the `0` key and the
+    # bar's own far-right stop open.
+    if (mb = Chrome.more_button_rect(rect, hidden.size)) && mb.contains?(mx, my)
       focus_pane(:menu) # land on the bar (clears any stale overlay / saves edits)
-      open_more_menu
+      open_tab_goto
       return
     end
-    seg = Chrome.menu_segments(rect, @active_tab, tabs: effective_tabs,
-      intercept_count: @session.interceptor.pending_count, hidden_count: hidden_tab_count,
-      numbered: Settings.tab_numbers?).find { |(_, r)| r.contains?(mx, my) }
+    seg = Chrome.menu_segments(rect, @active_tab, tabs: tabs,
+      intercept_count: @session.interceptor.pending_count, hidden_count: hidden.size,
+      numbered: Settings.tab_numbers?, slots: slots).find { |(_, r)| r.contains?(mx, my) }
     if seg
       seg[0] == @active_tab ? focus_pane(:menu) : focus_tab(seg[0], focus: :menu)
     else
@@ -350,7 +351,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     true # consume any click on the strip row, even between chips
   end
 
-  # Clicking the ⌕ pill opens the picker, like the tab bar's ⋯ affordance opens the
+  # Clicking the ⌕ pill opens the picker, like the tab bar's `0:+N` stop opens the
   # hidden-tabs menu. ORDER IS LOAD-BEARING: focus_pane clears @overlay, so opening first
   # would have the focus hop close the picker it just opened.
   private def open_subtab_find_from_click : Nil
@@ -438,8 +439,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     case @overlay
-    when .palette?   then click_palette(area, mx, my)
-    when .tabs_more? then click_more_menu(layout, mx, my)
+    when .palette? then click_palette(area, mx, my)
     end
   end
 
@@ -533,8 +533,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     case @overlay
-    when .palette?   then @palette.move(step)
-    when .tabs_more? then @more_menu.try(&.move(step))
+    when .palette? then @palette.move(step)
     end
   end
 end

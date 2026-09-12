@@ -57,10 +57,10 @@ require "./browser_picker"
 require "./choice_picker"
 require "./issue_form"
 require "./cvss_calculator_overlay"
-require "./more_menu"
 require "./copy_picker"
 require "./send_picker"
 require "./flow_picker"
+require "./tab_goto_picker"
 require "./subtab_picker"
 require "./library_picker"
 require "./name_prompt_overlay"
@@ -169,7 +169,12 @@ module Gori::Tui
       # Land on the home tab, but never on a hidden one (settings:tabs may hide Project;
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       @evidence_available = @session.store.count_evidence > 0
-      vis = available_visible_tabs(Chrome.visible_tabs(Settings.tab_prefs)).map(&.first)
+      # A layout saved before the nine slots may name more visible tabs than the bar holds.
+      # Settle that ONCE, here, before anything reads the prefs — it rewrites them, so the
+      # notice is raised on this launch and never again. Assigned to @toast further down
+      # (it is not initialised yet at this point in the ladder).
+      fold_notice = Runner.settle_tab_slots
+      vis = available_tabs(Chrome.visible_tabs(Settings.tab_prefs)).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : (vis.first? || :project)
       # Custom Colormarker colours are absolute hexes (unlike the theme-relative built-ins), so
       # the render-side resolver keeps its own name→hue map. Prime it from settings now, and
@@ -232,10 +237,6 @@ module Gori::Tui
       # Pretty-print bodies (JSON/XML/form/…) toggle — global view pref like reveal,
       # seeded from the persisted default, propagated to History/Repeater each frame.
       @pretty = Settings.pretty_bodies_default
-      # The tab-bar "more" dropdown (the ⋯ affordance → ↵/↓): lists the settings-hidden
-      # tabs (Miner by default). @overlay is :tabs_more while it's open; built fresh each
-      # time from the current hidden set.
-      @more_menu = nil.as(MoreMenu?)
       # The "copy as X" format picker (Repeater/History detail → space Y). ORTHOGONAL to
       # @overlay (like @space_menu_open) so it floats over whatever's underneath — the
       # Repeater body (@overlay :none) OR the History detail drill-in (@overlay :detail) —
@@ -293,7 +294,7 @@ module Gori::Tui
       @active_overlay = nil.as(Overlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
-      @menu_more = false               # tab-bar focus is on the far-right ⋯ "more" affordance (only meaningful when @focus == :menu)
+      @menu_more = false               # tab-bar focus is on the far-right `0:+N` stop (only meaningful when @focus == :menu)
       # Sub-tab strip focus is on the left-edge ⌕ affordance rather than a chip. A HINT
       # only — `subtab_find_focused?` is the truth, and it re-derives the answer from the
       # live frame. That matters: `@focus` is assigned raw at twenty-odd sites across
@@ -301,7 +302,7 @@ module Gori::Tui
       # at all), so a flag that had to be cleared everywhere would rot on the next one added.
       # Deriving instead makes "the pill is focused but not on screen" unrepresentable.
       @subtab_find_focus = false
-      @toast = nil.as(String?) # transient action feedback; nil → show key hints
+      @toast = fold_notice.as(String?) # transient action feedback; nil → show key hints
       # When the toast was set. The status row has ONE text slot and Miss Ring's bar
       # placement also writes to it, so the two are resolved by recency rather than by a
       # fixed precedence — see #companion_notice for why a fixed one is wrong.
@@ -1390,11 +1391,31 @@ module Gori::Tui
         return
       end
       return handle_palette_key(ev) if @overlay.palette?
-      return handle_more_menu_key(ev) if @overlay.tabs_more?
       # Migrated modals (Overlay base) dispatch generically — no per-modal handle_*_key.
       if ov = active_overlay
         dispatch_overlay_key(ov, ev)
         return
+      end
+      # THE DIGIT FAMILY, claimed here and nowhere else.
+      #
+      # The tab bar is nine numbered slots and the numbers are how you move: `1`-`9` jump to
+      # a slot, `0` opens the Go-to picker, `⇧1`-`⇧9` jump to a sub-tab and `⇧0` finds one.
+      # A number painted on the bar has to mean the same thing wherever the hand is, and it
+      # did not: a dozen handlers below return BEFORE the keymap — the sub-tab strip swallows
+      # everything it does not recognise, the drill-in details and every controller's
+      # `handle_body_key` claim their own bare keys — so the digits worked on the tab bar and
+      # in about half the panes underneath it.
+      #
+      # Hoisted above all of them, and gated by exactly one question: is this keystroke TEXT?
+      # `text_input_active?` answers it the way `space` already does — an editor in insert
+      # mode, a query or filter bar, a field taking a value — and a modal answers it by owning
+      # the keys outright (the arm above returns first; the CVSS calculator's digits, the
+      # pickers' filters and the hotkey editor's capture are all behind it).
+      #
+      # Routed through the keymap rather than calling `focus_visible_tab` directly, so the
+      # family stays rebindable and a scoped digit binding would still win.
+      if tab_digit_family?(ev) && !text_input_active?
+        return if dispatch_chord(ev)
       end
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
@@ -1572,10 +1593,7 @@ module Gori::Tui
       # Resolve through the keymap, honouring available? so a scoped binding that is
       # gated off (e.g. Repeater copy only in READ) does not swallow the chord — and so
       # Global breath keys (c/i/s) still fire when a scoped verb is unavailable.
-      if id = resolve_verb_id(chord, current_scope)
-        @toast = @session.registry[id].call(self) || @toast
-        return
-      end
+      return if dispatch_chord(ev, chord)
       # A bare printable nothing binds HERE. Say so: typed text that missed its field used to
       # vanish letter by letter — except the letters that were Global breath keys, which
       # fired (`s` flipped the scope lens, `c` stopped capture) with nothing on screen tying
@@ -1597,6 +1615,41 @@ module Gori::Tui
       # pane + the Intercept queue route space from their own handlers, which return
       # before this point.)
       open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+    end
+
+    # Resolve `ev` through the keymap and run what it finds; true when a verb fired. Shared
+    # by the tail of `handle_key` and the digit family it hoists above the per-focus handlers,
+    # so the two cannot resolve or report differently.
+    private def dispatch_chord(ev : Termisu::Event::Key, chord : Verb::Chord? = nil) : Bool
+      chord ||= Keybind.from_event(ev)
+      return false unless chord
+      return false unless id = resolve_verb_id(chord, current_scope)
+      @toast = @session.registry[id].call(self) || @toast
+      true
+    end
+
+    # `0`-`9`, bare or with shift and nothing else — the tab / sub-tab navigation family.
+    # Shift is folded onto the digit by `Keybind::SHIFTED_DIGITS`, so a terminal that sends
+    # `!` and one that sends shift+`1` both land here.
+    private def tab_digit_family?(ev : Termisu::Event::Key) : Bool
+      return false if ev.ctrl? || ev.alt?
+      return false unless c = ev.char || ev.key.to_char
+      ('0' <= c <= '9') || Keybind::SHIFTED_DIGITS.has_key?(c)
+    end
+
+    # Is a bare printable key TEXT right now? The digit family stands down in exactly the
+    # states that already swallow `space` as a literal: an editor in insert mode, a query or
+    # filter bar, a line-edit prompt, a numeric field.
+    #
+    # The bottom prompts (^G go-to-line, ^F find, the rename and tag bars) and every modal
+    # return above the digit arm, so they need no entry here. What is left is the active tab's
+    # own body, which is the one thing the shell cannot answer for itself — each controller
+    # owns its panes and its modes, so each answers `body_takes_text?` (TabController).
+    # The `/` sub-tab filter is asked without the focus gate, exactly as `handle_key` asks it
+    # below: the bar is opened from the STRIP, so it takes keys while `@focus` is `:subtabs`.
+    private def text_input_active? : Bool
+      return true if (ctl = @tabs[@active_tab]?) && ctl.subtab_filter_editing?
+      @focus == :body && (@tabs[@active_tab]?.try(&.body_takes_text?) || false)
     end
 
     # Keymap id for `chord` in `scope` (then Global) whose verb is currently available.
@@ -2107,14 +2160,17 @@ module Gori::Tui
     # therefore hide the tab you are standing on). Use the GENUINE visibility (no force:) for
     # this decision — effective_tabs force-includes the active tab, which would mask the hide.
     private def settle_hidden_active_tab : Nil
-      vis = available_visible_tabs(Chrome.visible_tabs(Settings.tab_prefs))
+      vis = available_tabs(Chrome.visible_tabs(Settings.tab_prefs))
       return if vis.any? { |(s, _)| s == @active_tab }
       # Persist the outgoing tab's dirty buffer before snapping off — @active_tab still
       # names the tab being hidden here. flush_active_tab_edits covers all hideable tabs
       # (Notes/Fuzzer/Issues/Miner included), unlike the old project/repeater/decoder-only
       # flush which silently dropped the others at hide-time.
       flush_active_tab_edits
-      @active_tab = vis.first[0]
+      # `vis` can be empty here: an Evidence-only layout reused in a project whose archive is
+      # empty. Project is the home tab and `effective_bar` falls back to it for the same
+      # reason, so the two agree on where a stranded operator lands.
+      @active_tab = vis.first?.try(&.[0]) || :project
       on_enter_tab
       @focus = :menu
     end
@@ -2459,16 +2515,14 @@ module Gori::Tui
         listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
         authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
       Chrome.render_rule(screen, layout.rule)
-      # One reconcile per frame: the menu strip AND the ⋯ hidden count both derive from the
-      # same tab reconcile — split_tabs computes both in a single pass (was two per frame).
-      vis_tabs, hid_tabs = Chrome.split_tabs(Settings.tab_prefs, force: @active_tab)
-      vis_tabs = available_visible_tabs(vis_tabs)
-      hid_tabs = available_tabs(hid_tabs)
+      # One reconcile per frame: the menu strip, the off-bar count AND the slot numbers all
+      # derive from the same tab reconcile — split_tabs computes them in a single pass.
+      vis_tabs, hid_tabs, slots = effective_bar
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
         hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more,
-        numbered: Settings.tab_numbers?)
+        numbered: Settings.tab_numbers?, slots: slots)
       render_body(screen, layout.body)
       render_companion(screen, layout.body)
       # One retag for the whole status row: key_hints already funnels the Runner's own
@@ -2480,7 +2534,6 @@ module Gori::Tui
         companion: companion_bar_frame)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay.palette?
-      @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay.tabs_more?
       active_overlay.try(&.render(screen, layout.body)) # migrated modals (Overlay seam; gated on @overlay)
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
@@ -2518,14 +2571,12 @@ module Gori::Tui
         listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
         authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
       Chrome.render_rule(screen, layout.rule)
-      vis_tabs, hid_tabs = Chrome.split_tabs(Settings.tab_prefs, force: @active_tab)
-      vis_tabs = available_visible_tabs(vis_tabs)
-      hid_tabs = available_tabs(hid_tabs)
+      vis_tabs, hid_tabs, slots = effective_bar
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
         hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more,
-        numbered: Settings.tab_numbers?)
+        numbered: Settings.tab_numbers?, slots: slots)
       body = layout.body
       # A message may carry wire bytes or newlines (an IndexError's does not, a parser's may):
       # one line, valid UTF-8, or the frame meant to report the crash would be the next one.
@@ -2720,12 +2771,11 @@ module Gori::Tui
         return ov.hint
       end
       case @overlay
-      when .palette?   then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when .tabs_more? then "↑/↓ select · ↵ open tab · ←/esc close"
-      when .detail?    then history_controller.body_hint(:body)
+      when .palette? then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
+      when .detail?  then history_controller.body_hint(:body)
       else
-        # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
-        return "↵/↓ show hidden tabs · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
+        # Focus on the far-right `0:+N` stop: ↵/↓ opens the Go-to picker, same as the key.
+        return "↵/↓ go to tab… · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         #
         # `c` and `i` earn their place here even though they are Global verbs reachable from
@@ -2733,7 +2783,7 @@ module Gori::Tui
         # keypress lands on one of them — and both change what the PROXY does, from a tab that
         # shows neither: `i` starts holding every request, `c` stops recording entirely. They
         # were the only unadvertised keys at this focus with an effect outside the current tab.
-        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · 1-9 jump · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · q projects · ^D quit") if @focus == :menu
+        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · 1-9 slots · 0 go to · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · q projects · ^D quit") if @focus == :menu
         if @focus == :subtabs
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really
@@ -2742,7 +2792,7 @@ module Gori::Tui
           # A fixed strip (Help) has no create/close and a read-only body — don't
           # advertise ^N/^W/edit as live keys there.
           if @tabs[@active_tab]?.try(&.subtabs_fixed?)
-            return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ↑/esc tabs"
+            return "←/→ switch sub-tab · ↓/↵ enter · ⇧1-9 jump · ↑/esc tabs"
           end
           rn = renameable_subtabs? ? " · r rename" : ""
           mk = subtab_marks_shown? ? " · t mark" : ""
@@ -2750,17 +2800,18 @@ module Gori::Tui
           # the row has to say so rather than keep advertising the gesture it used to be.
           marked = subtab_marked_count
           tail = marked > 0 ? "#{marked} marked · esc unmark · ↑ tabs" : "↑/esc tabs"
-          # `f find` takes the column `^1-9 jump` used to hold. Both keys still work; only one
-          # of them works EVERYWHERE. Ctrl+digit has no control character, so on many terminals
-          # the jump never arrives (docs/content/guide/hotkeys.md says so in as many words),
-          # and it runs out at nine on the strips that pile up past nine.
+          # `⇧1-9 jump` is the strip's own digit row and `f find` the way past nine chips. The
+          # `^1-9` alias still works and is deliberately NOT advertised here: Ctrl+digit has no
+          # control character, so on many terminals the jump never arrives
+          # (docs/content/guide/hotkeys.md says so in as many words) — a hint must not name the
+          # key that might not land when a key that does is sitting beside it.
           #
           # Miner sessions are background-seeded (^N is a no-op) and its body is a read-only
           # table (↵ ENTERS, doesn't edit) — drop the ^N/edit tokens that fit editor strips.
           unless subtab_new_supported?
-            return "←/→ switch sub-tab · ↓/↵ enter · f find#{mk} · ^W close · space cmds#{rn} · #{tail}"
+            return "←/→ switch sub-tab · ↓/↵ enter · ⇧1-9 jump · f find#{mk} · ^W close · space cmds#{rn} · #{tail}"
           end
-          return "←/→ switch sub-tab · ↓/↵ edit · f find#{mk} · ^N new · ^W close · space cmds#{rn} · #{tail}"
+          return "←/→ switch sub-tab · ↓/↵ edit · ⇧1-9 jump · f find#{mk} · ^N new · ^W close · space cmds#{rn} · #{tail}"
         end
         body_hints
       end
@@ -2789,10 +2840,10 @@ module Gori::Tui
       @body_h = rect.h # remembered for PageUp/PageDown's screenful step (see page_nav_delta)
       # Onboarding empty-state cards are drawn by the body but a modal lands on top of
       # them a few lines later, so a dialog shorter than the card leaves its tail poking
-      # out (see TrafficEmptyState.suppressed?). Every overlay but the ⋯ dropdown centres
-      # itself in this same rect; tabs_more is anchored to its tab-bar chip and doesn't
-      # cover the card, so it keeps it.
-      TrafficEmptyState.suppressed = !@overlay.none? && !@overlay.tabs_more?
+      # out (see TrafficEmptyState.suppressed?). Every overlay centres itself in this same
+      # rect — including the Go-to picker, which took the ⋯ dropdown's place and is a card
+      # rather than something anchored to a tab-bar chip — so every one of them suppresses.
+      TrafficEmptyState.suppressed = !@overlay.none?
       # Every catalog tab has a controller that owns its body render; the `?` guard is
       # defensive (a blank body beats a crash if the active tab ever lacks one).
       @tabs[@active_tab]?.try(&.render_body(screen, rect, @focus))
@@ -2800,7 +2851,7 @@ module Gori::Tui
 
     # Miss Ring rides the BODY rect (bottom-right), so she has to paint over the tab body
     # — hence immediately after render_body. But every float drawn AFTER this point (the
-    # palette, the ⋯ menu, migrated modals, the space menu, the pickers, the bottom
+    # palette, migrated modals, the space menu, the pickers, the bottom
     # prompts) would clip her box and leave an orphaned corner poking out — exactly the
     # failure TrafficEmptyState.suppressed exists to prevent. So the gate hides her
     # outright rather than relying on z-order.
@@ -2857,7 +2908,7 @@ module Gori::Tui
     end
 
     private def companion_visible? : Bool
-      return false unless @overlay.none? # palette / detail / tabs_more / every modal
+      return false unless @overlay.none? # palette / detail / every modal
       return false if @space_menu_open || copy_as_shown? || send_to_shown?
       return false if @goto_open || @search_open || @rename_open || @tag_edit_open
       return false if body_editor? # she steps aside while you're typing
@@ -3102,6 +3153,51 @@ module Gori::Tui
     # Pure + class-level for the same reason the exit prompts above are: the Runner needs a
     # live tty. `@overlay.confirm?` deliberately stays at the chord's call site — "don't stack a
     # second modal on the one already asking this question" is dispatch, not policy.
+    # The one-time migration onto the nine-slot bar, run at boot before anything reads
+    # `Settings.tab_prefs`. Returns the notice to show, or nil when there is nothing to say.
+    #
+    # Three cases, and the middle one is why this is not just "let reconcile truncate":
+    #
+    #   • no saved prefs, or a bar that already fits → nothing happens; a fresh install simply
+    #     gets DEFAULT_HIDDEN's nine.
+    #   • prefs that are EXACTLY the pre-slots factory default → the owner never chose those
+    #     fifteen tabs, so truncating by position would hand them Project…JWT: neither the bar
+    #     they had nor the one we now ship. They get the new default instead, silently, which
+    #     is what "I never touched this" should mean.
+    #   • anything else → CUSTOMISED. Their first nine stay, in their own order, because that
+    #     order is what their fingers learned; the rest fold behind `0` and are NAMED in a
+    #     toast, because a tab vanishing off the bar with no explanation is the failure this
+    #     whole migration has to avoid.
+    #
+    # The truncated list is persisted either way, so the check fails next launch and the
+    # notice fires exactly once. A save that fails is not fatal — the notice would simply
+    # repeat, which beats refusing to start.
+    #
+    # A class method, not an instance one, for the same reason `quit_decision` is: it is a
+    # policy over Settings with no terminal behind it, and `Runner.new` owns a terminal.
+    # `prefs` is the layout to settle, defaulting to the persisted one; it is a parameter only
+    # so a spec can hand one in without writing the singleton first.
+    def self.settle_tab_slots(prefs : Array({String, Bool}) = Settings.tab_prefs) : String?
+      return nil unless Settings.tab_slots?
+      return nil if prefs.empty? # fresh install → the factory nine, nothing moved
+      uncapped = Chrome.reconcile(prefs, capped: false)
+      visible = uncapped.select { |(_, _, v)| v }
+      return nil if visible.size <= Chrome::MAX_SLOTS
+      if Chrome.legacy_default?(uncapped)
+        # Never customised: drop the saved copy entirely rather than writing today's defaults
+        # out, so the NEXT tab gori adds lands by DEFAULT_HIDDEN instead of being pinned
+        # visible by a config this migration froze.
+        Settings.tab_prefs = [] of {String, Bool}
+        Settings.save
+        return nil
+      end
+      folded = visible[Chrome::MAX_SLOTS..].map { |(_, label, _)| label }
+      Settings.tab_prefs = Chrome.reconcile(prefs).map { |(sym, _, vis)| {sym.to_s, vis} }
+      Settings.save
+      "#{folded.size} #{folded.size == 1 ? "tab" : "tabs"} moved behind 0 " \
+      "(#{folded.join(", ")}) — settings:tabs picks your nine"
+    end
+
     def self.quit_decision(confirm_setting : Bool, *, chord : Bool, armed : Bool,
                            notes_conflict : Bool = false) : QuitAction
       return QuitAction::Confirm if confirm_setting
@@ -3134,7 +3230,7 @@ module Gori::Tui
     # modal by this. The invariant is worth keeping true: an overlay added later that swallows
     # esc would, for the first time, be able to hold the quit chord hostage.
     #
-    # SCOPE — deliberately the `active_overlay` seam and nothing else. The Palette, the ⋯
+    # SCOPE — deliberately the `active_overlay` seam and nothing else. The Palette, the
     # dropdown (MODAL_OVERLAYS, no Overlay object) and the prompt-tier strips (space menu,
     # copy-as, send-to, ^G goto, ^F find, rename, tag-edit) keep the old behaviour: none of
     # them has anything that could answer for the chord, so yielding there would only make ^D
@@ -3963,7 +4059,7 @@ module Gori::Tui
       decoder_controller.commit if @active_tab == :decoder && @focus == :body && pane != :body
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
       @focus = pane
-      @menu_more = false # any focus change lands on a real tab, not the ⋯ affordance
+      @menu_more = false # any focus change lands on a real tab, not the `0:+N` stop
       # Unconditional, INCLUDING pane == :subtabs. This is what keeps entering a tab landing
       # on chip 1: `enter_content` descends through here, so the strip is always entered at
       # a session, never at the ⌕ affordance. Reaching the affordance is always a deliberate
@@ -3974,13 +4070,13 @@ module Gori::Tui
     end
 
     # Descend from the tab menu (↓/↵/j on the tab bar). When focus is on the far-right
-    # ⋯ "more" affordance, ↓/↵ EXPANDS the hidden-tabs dropdown instead. Otherwise: tabs
+    # far-right `0:+N` stop, ↓/↵ opens the Go-to picker instead. Otherwise: tabs
     # with a navigable sub-tab strip (Repeater/Notes/Decoder) land on the STRIP first so
     # ←/→ can switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
     # the body. (`focus_pane`'s guard would otherwise route an absent strip to the menu,
     # so the active tab is checked here.)
     def enter_content : Nil
-      return open_more_menu if @menu_more
+      return open_tab_goto if @menu_more
       focus_pane(subtabs_shown? ? :subtabs : :body)
     end
 
@@ -4015,19 +4111,47 @@ module Gori::Tui
       view_focus_resume
     end
 
-    # The effective tab strip — the configured order/visibility (settings:tabs), with the
-    # active tab force-included even if hidden (so a cross-tab jump to a hidden tab still
-    # renders + highlights). The single source the menu render, click hit-test, and nav read.
-    private def effective_tabs : Array({Symbol, String})
-      available_visible_tabs(Chrome.visible_tabs(Settings.tab_prefs, force: @active_tab))
+    # The effective tab bar for this frame: {visible strip, off-bar list, slot count}.
+    #
+    # The strip is the configured order/visibility (settings:tabs, capped at
+    # `Chrome::MAX_SLOTS`) with the active tab force-included even if hidden — so a cross-tab
+    # jump to a hidden tab still renders + highlights. That force-shown tab is APPENDED past
+    # the slots, which is why the count is returned rather than inferred from the strip's
+    # length: it is a temporary tenth tab, drawn without a number, and no digit points at it.
+    #
+    # Evidence is off the bar until the archive holds a snapshot; dropping it here CLOSES the
+    # gap in the numbering rather than leaving a hole, so the digits stay 1..N.
+    #
+    # The single source the menu render, the click hit-test and nav all read.
+    private def effective_bar : {Array({Symbol, String}), Array({Symbol, String}), Int32}
+      vis, hid, slots = Chrome.split_tabs(Settings.tab_prefs, force: @active_tab)
+      return {vis, hid, slots} if @evidence_available
+      hid = hid.reject { |(s, _)| s == :evidence }
+      if i = vis.index { |(s, _)| s == :evidence }
+        vis = vis.dup
+        vis.delete_at(i)
+        slots -= 1 if i < slots
+      end
+      # A saved layout can make Evidence its only visible tab in a populated project, then be
+      # reused in a new/emptied project where Evidence is unavailable. Keep the shell's
+      # visible/navigation ring non-empty in that transition; the tab editor will persist the
+      # correction only if the operator chooses to save it.
+      vis.empty? ? {[{:project, Chrome.tab_label(:project)}], hid, 1} : {vis, hid, slots}
     end
 
-    # Positional number-key target: focus the Nth (1-based) VISIBLE tab — the order shown
-    # on the bar. Out-of-range n (fewer tabs visible than the digit) is a no-op.
+    private def effective_tabs : Array({Symbol, String})
+      effective_bar[0]
+    end
+
+    # Positional number-key target: focus the Nth (1-based) SLOT on the bar. Out-of-range n
+    # (fewer slots filled than the digit) is a no-op, and so is a digit that would land on the
+    # force-shown tab past the ninth slot — the bar paints no number there, so none answers.
     # Lands on the tab bar (TABS level), like a tab-bar click: a number jump selects the
     # tab, it does not drill into the body.
     def focus_visible_tab(n : Int32) : Nil
-      if t = effective_tabs[n - 1]?
+      tabs, _, slots = effective_bar
+      return if n < 1 || n > Chrome.numbered_slots(slots)
+      if t = tabs[n - 1]?
         focus_tab(t[0], focus: :menu)
       end
     end
@@ -4047,10 +4171,10 @@ module Gori::Tui
       view_focus_resume if @focus == :body
     end
 
-    # ←/→ on the tab bar. → past the last visible tab lands on the far-right ⋯ "more"
+    # ←/→ on the tab bar. → past the last visible tab lands on the far-right `0:+N`
     # affordance (when tabs are hidden) rather than wrapping; ← steps back off it onto
     # the last tab. Everywhere else these are plain cycle_tab(±1). (`[`/`]` keep the
-    # from-anywhere wrap via cycle_tab — the ⋯ stop is menu-bar-only.)
+    # from-anywhere wrap via cycle_tab — the `0:+N` stop is menu-bar-only.)
     def menu_right : Nil
       return if @menu_more
       if last_visible_tab? && hidden_tab_count > 0
@@ -4061,7 +4185,7 @@ module Gori::Tui
     end
 
     def menu_left : Nil
-      # ← off the ⋯ affordance steps back onto the bar; otherwise cycle left. The
+      # ← off the `0:+N` stop steps back onto the bar; otherwise cycle left. The
       # LEFTMOST tab is a hard stop — no wrap to the far end (mirrors menu_right's
       # no-wrap at the right edge). A stray ← on Project used to jump to the last tab,
       # which was almost always accidental, so the left edge is now inert.
@@ -4072,24 +4196,15 @@ module Gori::Tui
       end
     end
 
-    # The tabs hidden from the bar right now — the ⋯ dropdown's contents. The active tab
-    # is force-shown on the bar, so it's never listed here.
+    # The tabs off the bar right now — what the `0:+N` pill counts. The active tab is
+    # force-shown on the bar, so it's never listed here.
     private def hidden_tabs_now : Array({Symbol, String})
-      available_tabs(Chrome.hidden_tabs(Settings.tab_prefs, force: @active_tab))
+      effective_bar[1]
     end
 
     private def available_tabs(tabs : Array({Symbol, String})) : Array({Symbol, String})
       return tabs if @evidence_available
       tabs.reject { |(sym, _)| sym == :evidence }
-    end
-
-    # A saved layout can make Evidence its only visible tab in a populated project, then be
-    # reused in a new/emptied project where Evidence is unavailable. Keep the shell's
-    # visible/navigation ring non-empty in that transition; the tab editor will persist the
-    # correction only if the operator chooses to save it.
-    private def available_visible_tabs(tabs : Array({Symbol, String})) : Array({Symbol, String})
-      filtered = available_tabs(tabs)
-      filtered.empty? ? [{:project, Chrome.tab_label(:project)}] : filtered
     end
 
     private def unavailable_evidence_tab : Nil
@@ -4119,73 +4234,35 @@ module Gori::Tui
       effective_tabs.first?.try(&.first) == @active_tab
     end
 
-    # The anchor the dropdown drops down from — the ⋯ button's cell rect, or (defensively,
-    # on a terminal too narrow to draw the button) a zero-width rect flush with the menu's
-    # right edge, so the dropdown never becomes an invisible-but-input-capturing modal.
-    private def more_anchor_rect(layout : Layout) : Rect
-      Chrome.more_button_rect(layout.menu, hidden_tab_count) ||
-        Rect.new(layout.menu.right, layout.menu.y, 0, 1)
-    end
-
-    # Open the hidden-tabs dropdown from the ⋯ affordance (↵/↓ on it, or a click).
-    # No-op when nothing is hidden. Keeps @menu_more set so a dismiss returns to the ⋯.
-    def open_more_menu : Nil
-      items = hidden_tabs_now
-      return if items.empty?
-      @focus = :menu
-      @menu_more = true
-      @more_menu = MoreMenu.new(items)
-      @overlay = OverlayKind::TabsMore
-    end
-
-    # Dismiss the dropdown back to the ⋯ affordance (esc / ← / click-outside). Focus
-    # stays on the bar with @menu_more set, so ←/→ keep navigating from there.
-    private def close_more_menu : Nil
-      @overlay = OverlayKind::None
-      @more_menu = nil
-    end
-
-    # ↑/↓ (or j/k) move · ↵ switch to the hidden tab (force-shown on the bar, like a
-    # palette "Go to …") · esc/← dismiss back to the ⋯ affordance.
+    # The `0` key: a type-to-filter picker over the WHOLE tab catalog — the nine numbered
+    # slots and everything settings:tabs keeps off the bar. It is also what the `0:+N` pill's
+    # click and the bar's far-right stop (↵/↓) open, so the key, the pill and the stop are one
+    # gesture rather than three.
     #
-    # ↑ ON THE FIRST ROW dismisses too, in the same spirit as ←: the dropdown drops DOWN
-    # out of the tab bar, so "up past the top" is a walk back onto the bar. Clamping there
-    # instead (the old behaviour) left ↑ looking dead at the one spot a user is most likely
-    # to press it — the list opens with row 0 already selected.
-    private def handle_more_menu_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      mm = @more_menu
-      return close_more_menu unless mm
-      case
-      when key.escape?, key.left? then close_more_menu
-      when key.up?, key.lower_k?
-        mm.selected == 0 ? close_more_menu : mm.move(-1)
-      when key.down?, key.lower_j? then mm.move(1)
-      when key.enter?, key.space?  then apply_more_menu
+    # This replaced the ⋯ dropdown (`MoreMenu`). Nine slots against a twenty-one tab catalog
+    # means the off-bar list is a DOZEN entries, which is a list you type at: the dropdown had
+    # no filter, could not reach a tab that WAS on the bar, and carried a key table of its own.
+    # One component fewer is part of the point.
+    def open_tab_goto : Nil
+      tabs, _, slots = effective_bar
+      slot_of = {} of Symbol => Int32
+      numbered = Chrome.numbered_slots(slots)
+      tabs.each_with_index { |(sym, _), i| slot_of[sym] = i + 1 if i < numbered }
+      rows = Chrome::TABS.map { |(sym, label)| TabGotoPicker::Row.new(sym, label, slot_of[sym]?) }
+      picker = TabGotoPicker.new(rows)
+      # Opens on the ACTIVE tab, like the sub-tab picker on the active chip: ↵ with no query
+      # stays put, and ↑/↓ walk out from where the operator is standing.
+      if cur = rows.index { |r| r.sym == @active_tab }
+        picker.set_selected(cur)
       end
-    end
-
-    # Switch to the selected hidden tab and drill into its content (like "Go to …").
-    private def apply_more_menu : Nil
-      mm = @more_menu
-      return close_more_menu unless mm
-      if sym = mm.selected_sym
-        close_more_menu
-        focus_tab(sym) # :body — the deliberate pick drills in; force-shows the tab on the bar
-      else
-        close_more_menu
-      end
-    end
-
-    private def click_more_menu(layout : Layout, mx : Int32, my : Int32) : Nil
-      mm = @more_menu
-      return close_more_menu unless mm
-      if idx = mm.row_at(more_anchor_rect(layout), layout.body, mx, my)
-        mm.set_selected(idx)
-        apply_more_menu
-      else
-        close_more_menu # click outside the list → dismiss (back to the ⋯ affordance)
-      end
+      picker.on_commit = -> {
+        if sym = picker.selected_sym
+          focus_tab(sym) # :body — the deliberate pick drills in; force-shows a hidden tab
+        end
+        true
+      }
+      @menu_more = false # the pick lands on a real tab, never back on the pill
+      open_overlay(picker)
     end
 
     # --- unified focus ring (tab-bar ◂▸ body panes) --------------------------
@@ -4193,7 +4270,7 @@ module Gori::Tui
     # Tab (+1) / Shift-Tab (-1) move focus one step around the ring: from the tab
     # bar into the body's first/last pane, between panes, then back to the bar.
     private def focus_advance(dir : Int32) : Nil
-      @menu_more = false # the ring lands on a tab / body pane, never the ⋯ affordance
+      @menu_more = false # the ring lands on a tab / body pane, never the `0:+N` stop
       if @focus == :menu
         @focus = :body
         dir > 0 ? view_focus_first : view_focus_last

@@ -256,6 +256,14 @@ private class FakeContext < ExecContext
     0
   end
 
+  def subtab_jump(n : Int32) : Nil
+    @calls << :subtab_jump
+  end
+
+  def open_tab_goto : Nil
+    @calls << :open_tab_goto
+  end
+
   def repeater_rename_subtab : Nil
     @calls << :repeater_rename_subtab
   end

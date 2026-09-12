@@ -1,3 +1,5 @@
+require "../settings"
+
 module Gori::Tui
   # The persistent shell: top bar, left sidebar (tabs), and bottom status line.
   # Stateless renderers — they take the current state and draw it (immediate mode).
@@ -33,7 +35,41 @@ module Gori::Tui
     # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Only
     # affects reconcile's append path — once the user saves, tab_prefs is explicit and
     # this no longer applies.
-    DEFAULT_HIDDEN = [:miner, :sequencer, :colormarker, :authorize, :cookie, :evidence]
+    #
+    # The bar is NINE SLOTS, so the default set is exactly nine and the choice of which nine is
+    # the default itself rather than whatever the cap happened to truncate to. In catalog
+    # order that leaves:
+    #
+    #   1 Project · 2 Target · 3 History · 4 Intercept · 5 Repeater · 6 Fuzzer · 7 Probe ·
+    #   8 Issues · 9 Notes
+    #
+    # — the capture-triage-retest-record loop, end to end. OAST, Decoder, JWT, Comparer and
+    # Rewriter are workbenches an operator reaches FOR, not ones they live in; they start
+    # behind `0` alongside the specialised tabs that were already hidden. Help joins them
+    # because `?` opens it from anywhere, which is a better affordance than a slot.
+    #
+    # `TABS` is deliberately NOT reordered to achieve this: its order is what reconcile uses
+    # to slot a NEW tab next to its catalog neighbours in an existing config, so it has to keep
+    # meaning "where this tab lives relative to the others", not "the default bar".
+    DEFAULT_HIDDEN = [:miner, :oast, :sequencer, :decoder, :jwt, :cookie, :comparer,
+                      :rewriter, :colormarker, :authorize, :evidence, :help]
+
+    # The default set BEFORE the nine slots. Kept so a saved layout that was never customised
+    # can be RECOGNISED (`legacy_default?`) and handed the new default, rather than truncated
+    # by position into a bar that is neither the old one nor the new one — see
+    # `Runner.settle_tab_slots`. Delete this once no config in the wild predates the slots.
+    LEGACY_DEFAULT_HIDDEN = [:miner, :sequencer, :colormarker, :authorize, :cookie, :evidence]
+
+    # The bar is NINE NUMBERED SLOTS and nothing more. `1`-`9` is the primary way to move
+    # between tabs, so a slot without a digit — or a digit without a slot — is a bar that
+    # cannot teach itself. settings:tabs refuses the tenth ✓ and `reconcile` truncates a
+    # prefs file written by an older build (or by hand) down to the first nine.
+    #
+    # ONE tab may still ride past the ninth slot: the active tab when it is hidden
+    # (`visible_tabs`' `force`). It is drawn at the far right WITHOUT a number, because it
+    # is where the operator happens to be standing rather than a slot they arranged — see
+    # `append_forced` and `menu_layout`'s `slots`.
+    MAX_SLOTS = 9
 
     # The human sidebar label for a tab symbol (the catalog name), used off the render
     # path too — e.g. the terminal-window title. Falls back to a capitalized symbol for
@@ -72,7 +108,13 @@ module Gori::Tui
     # with their default visibility — so a tab added in a newer build (e.g. Probe, left of
     # Issues) lands where the catalog puts it even for an existing config, and is never
     # hidden by an older one. Guarantees ≥1 visible (a hand-edited all-hidden config reveals #1).
-    def self.reconcile(prefs : Array({String, Bool})) : Array({Symbol, String, Bool})
+    # `capped` is the nine-slot cap (settings:layout → "Tab bar slots", default on). Off, the
+    # bar is unbounded and scrolls with `‹`/`›` as it did before the slots — the digits still
+    # reach its first nine and `0` still reaches everything. Passed rather than read here on
+    # principle (Chrome reads no Settings), but defaulted from Settings so the ~6 call sites
+    # that simply want "the current layout" do not each have to remember to ask.
+    def self.reconcile(prefs : Array({String, Bool}),
+                       capped : Bool = Settings.tab_slots?) : Array({Symbol, String, Bool})
       label_of = {} of Symbol => String
       by_str = {} of String => Symbol
       cat_idx = {} of Symbol => Int32
@@ -100,23 +142,74 @@ module Gori::Tui
         f = out.first
         out[0] = {f[0], f[1], true}
       end
+      # The nine-slot cap, applied to every config on the way IN rather than only at the
+      # settings:tabs ✓ that refuses the tenth. A prefs file written by an older build (the
+      # bar was unbounded) or edited by hand can ask for twelve visible tabs, and a bar with
+      # an unreachable tenth tab is exactly what the numbers exist to rule out. Truncation is
+      # by POSITION in the user's OWN order: their first nine are the ones their fingers
+      # learned. The rest go to the hidden list, where `0` still reaches them and settings:tabs
+      # can trade one back in.
+      if capped
+        shown = 0
+        out.each_with_index do |(sym, label, vis), i|
+          next unless vis
+          shown += 1
+          out[i] = {sym, label, false} if shown > MAX_SLOTS
+        end
+      end
       out
+    end
+
+    # The factory layout as a prefs list — what an empty `tab_prefs` reconciles to. Written
+    # out explicitly only where a config has to be REPLACED by the defaults rather than
+    # reconciled against them.
+    def self.default_prefs : Array({String, Bool})
+      TABS.map { |(sym, _)| {sym.to_s, !DEFAULT_HIDDEN.includes?(sym)} }
+    end
+
+    # Is this reconciled layout exactly the pre-slots factory default — catalog order, only
+    # LEGACY_DEFAULT_HIDDEN hidden? Such a config was saved by settings:tabs' ↵ without any
+    # edit (or by an older build that always persisted), so its owner never chose those
+    # fifteen tabs and should get the NEW default rather than its first nine. Anything else
+    # is treated as customised, including a config saved before a tab existed: reconcile fills
+    # the gap with today's default visibility, which is a guess, and a guess must not silently
+    # rearrange a bar someone arranged.
+    def self.legacy_default?(annotated : Array({Symbol, String, Bool})) : Bool
+      annotated.map { |(sym, _, vis)| {sym, vis} } ==
+        TABS.map { |(sym, _)| {sym, !LEGACY_DEFAULT_HIDDEN.includes?(sym)} }
+    end
+
+    # How many of a strip's leading entries wear a number. Never more than the nine digits
+    # there are: with the cap OFF the bar can hold twenty tabs, and `1`-`9` still means its
+    # first nine — a `12:` painted on a tab no key reaches would be the bar lying.
+    def self.numbered_slots(slots : Int32) : Int32
+      {slots, MAX_SLOTS}.min
     end
 
     # The rendered/navigation strip: visible, ordered {symbol, label}. `force` (the active
     # tab) is ALWAYS present even when hidden — so a jump to a hidden tab is never stranded
     # off-bar and menu_layout's active_idx lookup always succeeds (instead of silently
     # falling back to 0). A force-shown hidden tab is APPENDED at the far right (just left of
-    # the ⋯ list), not spliced into its catalog position mid-strip.
+    # the `0:+N` stop), not spliced into its catalog position mid-strip — and WITHOUT a
+    # number, since the nine slots are the only positions a digit reaches (see MAX_SLOTS).
     def self.visible_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : Array({Symbol, String})
+      visible_slots(prefs, force)[0]
+    end
+
+    # `visible_tabs`, plus how many of the returned entries own a NUMBERED SLOT. The two
+    # differ by exactly one entry: the force-shown active tab, appended past the slots
+    # without a number (see MAX_SLOTS). A caller that paints or resolves a digit wants this
+    # pair, never the strip length — the appended tab is not `nav.pos10`, it is nowhere.
+    def self.visible_slots(prefs : Array({String, Bool}), force : Symbol? = nil) : {Array({Symbol, String}), Int32}
       ann = reconcile(prefs)
       vis = ann.select { |(_, _, v)| v }.map { |(s, l, _)| {s, l} }
+      slots = vis.size
       append_forced(ann, vis, force)
-      vis
+      {vis, slots}
     end
 
     # Append the force-shown active tab (a hidden tab jumped to) to the far right of the
-    # visible strip — right next to the ⋯ hidden list — so opening a hidden tab reveals it at
+    # visible strip — right next to the `0:+N` stop — so opening a hidden tab reveals it at
     # the end of the bar rather than splicing it into the middle at its catalog position. A
     # no-op when `force` is absent or the tab is already on the bar. Shared by visible_tabs
     # and split_tabs so the render strip and the nav strip can never drift.
@@ -135,9 +228,10 @@ module Gori::Tui
       reconcile(prefs).reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
     end
 
-    # The visible strip AND the hidden list from ONE reconcile pass — {visible, hidden},
-    # each identical to what visible_tabs / hidden_tabs return alone. The render path needs
-    # both every frame (the menu strip + the ⋯ hidden count); calling visible_tabs and
+    # The visible strip, the hidden list AND the slot count from ONE reconcile pass —
+    # {visible, hidden, slots}, each identical to what visible_slots / hidden_tabs return
+    # alone (`slots` is `visible_slots`' second element). The render path needs
+    # both every frame (the menu strip + the off-bar count); calling visible_tabs and
     # hidden_tabs separately rebuilt reconcile's catalog hashes twice per frame for the same
     # output. Pure function of prefs, so folding the two into one pass is byte-identical.
     #
@@ -146,25 +240,33 @@ module Gori::Tui
     # that changes only when the operator edits the tab layout or switches tab. A tuple
     # equality over ≤25 small entries is what the hit costs; the prefs are copied into the
     # memo so a later in-place edit of the live array cannot make a stale hit look fresh.
-    def self.split_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : {Array({Symbol, String}), Array({Symbol, String})}
-      if (memo = @@split_memo) && memo[1] == force && memo[0] == prefs
+    def self.split_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : Split
+      capped = Settings.tab_slots?
+      if (memo = @@split_memo) && memo[1] == force && memo[3] == capped && memo[0] == prefs
         return memo[2]
       end
-      ann = reconcile(prefs)
+      ann = reconcile(prefs, capped)
       vis = ann.select { |(_, _, v)| v }.map { |(s, l, _)| {s, l} }
+      slots = vis.size
       append_forced(ann, vis, force)
       hidden = ann.reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
-      out = {vis, hidden}
-      @@split_memo = {prefs.dup, force, out}
+      out = {vis, hidden, slots}
+      @@split_memo = {prefs.dup, force, out, capped}
       out
     end
 
-    @@split_memo : {Array({String, Bool}), Symbol?, {Array({Symbol, String}), Array({Symbol, String})}}? = nil
+    alias Split = {Array({Symbol, String}), Array({Symbol, String}), Int32}
 
-    # The "more" affordance label — a ⋯ ellipsis plus the hidden-tab count, so the bar
-    # reads "there are N tabs tucked away here" at a glance.
+    # Keyed on the cap as well as on (prefs, force): flipping settings:layout's slot switch
+    # changes the answer without touching either of the other two.
+    @@split_memo : {Array({String, Bool}), Symbol?, Split, Bool}? = nil
+
+    # The "more" affordance label — the `0` key that opens the Go-to picker, plus how many
+    # catalog tabs are off the bar. It reads as a KEY (`0:+12`) rather than as an ellipsis
+    # because the bar's whole job is now to teach its own digits: every other pill on the row
+    # wears the number that reaches it, and the last one should not be the exception.
     def self.more_label(hidden_count : Int32) : String
-      "⋯ #{hidden_count}"
+      "0:+#{hidden_count}"
     end
 
     # The far-right "more" button's cell rect on the menu row, or nil when nothing is
@@ -427,14 +529,15 @@ module Gori::Tui
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
                          tabs : Array({Symbol, String}) = TABS,
                          intercept_count : Int32 = 0, hidden_count : Int32 = 0,
-                         more_focused : Bool = false, numbered : Bool = false) : Nil
+                         more_focused : Bool = false, numbered : Bool = false,
+                         slots : Int32? = nil) : Nil
       return if rect.empty?
 
       # Carve the rightmost cells out for the "more" dropdown button (when tabs are
       # hidden) so the segment layout never packs a tab over it. A one-col gutter sits
       # between the last tab and the button.
       more = more_button_rect(rect, hidden_count)
-      segs, start = menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count, numbered)
+      segs, start = menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count, numbered, slots)
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0 # earlier tabs hidden
       segs.each do |(sym, label, seg)|
         if sym == active_tab
@@ -475,9 +578,9 @@ module Gori::Tui
     def self.menu_segments(rect : Rect, active_tab : Symbol, *,
                            tabs : Array({Symbol, String}) = TABS,
                            intercept_count : Int32 = 0, hidden_count : Int32 = 0,
-                           numbered : Bool = false) : Array({Symbol, Rect})
+                           numbered : Bool = false, slots : Int32? = nil) : Array({Symbol, Rect})
       return [] of {Symbol, Rect} if rect.empty?
-      menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count, numbered)[0]
+      menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count, numbered, slots)[0]
         .map { |(sym, _, seg)| {sym, seg} }
     end
 
@@ -502,15 +605,23 @@ module Gori::Tui
       Theme.blend(Theme.muted, Theme.bg, MENU_NUMBER_DIM)
     end
 
-    # `numbered` prefixes the first nine labels with `N:` — the sub-tab strip's convention,
-    # and the number `nav.posN` answers to: the Nth VISIBLE tab, an absolute position, so a
-    # scrolled bar showing `5:History` first still sends `5` there. Off by default
+    # `numbered` prefixes the SLOTTED labels with `N:` — the sub-tab strip's convention, and
+    # the number `nav.posN` answers to: the Nth VISIBLE tab, an absolute position, so a
+    # scrolled bar showing `5:History` first still sends `5` there. On by default
     # (`Settings.tab_numbers?`); Chrome reads no Settings itself, the caller passes it.
+    #
+    # `slots` is how many leading entries of `tabs` sit in a slot (`visible_slots`' second
+    # element), defaulting to the nine the bar holds. It exists for the one strip that is
+    # longer than its slots: a hidden tab jumped to rides at the far right, and painting it
+    # `10:` — or worse, reusing a number a real slot already owns — would advertise a key
+    # that does not reach it.
     private def self.menu_layout(rect : Rect, active_tab : Symbol, tabs : Array({Symbol, String}),
-                                 intercept_count : Int32, numbered : Bool = false) : {Array({Symbol, String, Rect}), Int32}
+                                 intercept_count : Int32, numbered : Bool = false,
+                                 slots : Int32? = nil) : {Array({Symbol, String, Rect}), Int32}
       segs = [] of {Symbol, String, Rect}
+      numbered_to = numbered_slots(slots || MAX_SLOTS)
       labels = tabs.map_with_index do |(sym, label), i|
-        num = numbered && i < 9 ? "#{i + 1}:" : ""
+        num = numbered && i < numbered_to ? "#{i + 1}:" : ""
         "#{num}#{label}#{menu_badge(sym, intercept_count)}"
       end
       # Columns, like strip_layout's sibling line. The catalog TABS are fixed ASCII, where
