@@ -575,6 +575,17 @@ module Gori::Tui
       s.pane == :input && s.input_mode == InputMode::Insert
     end
 
+    # The CHAIN field takes text WHENEVER it is focused — there is no READ mode on a
+    # one-line spec, `route_pane_keys` sends every printable to `edit_chain`, and the
+    # converter names are full of digits (`base64`, `base32`, `sha256`, `rot13`, `utf16`).
+    # The default gate (`editor_captures_tab?`) answers for the INPUT editor alone, so `6`
+    # in `base64` jumped to the Fuzzer and took the half-typed chain with it: no chain
+    # containing a digit was typeable at all. The popup is the same field's filter, so it
+    # needs no clause of its own.
+    def body_takes_text? : Bool
+      cur.pane == :chain || editor_captures_tab?
+    end
+
     def handle_editor_tab(ev : Termisu::Event::Key) : Bool
       return false unless editor_captures_tab?
       s = cur

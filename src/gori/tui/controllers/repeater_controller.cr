@@ -242,6 +242,14 @@ module Gori::Tui
       (v = current_view) ? (v.pane_insert?(v.focus) ? :editor : :body) : :body
     end
 
+    # Which of the three panes the keys are landing in (`BODY · RESPONSE`). This tab is the
+    # reason the seam exists: entering the body restores the LAST-focused pane, so `5 ↵ ↵`
+    # lands somewhere the screen did not say, and the number of `↹` presses to reach the
+    # response could only be found by pressing one and looking.
+    def body_pane_label : String?
+      (v = current_view) ? v.focus.to_s.upcase : nil
+    end
+
     # Hints depend on the focused pane and READ vs INS mode. Chord tokens for rebindable
     # verbs resolve through Hotkeys so a rebind is reflected in the status line.
     def body_hint(focus : Symbol) : String
@@ -267,7 +275,11 @@ module Gori::Tui
       # ^R send lives on the REQUEST border chip (` ^R:SEND `) — not re-listed in the
       # request-focus footer (discoverability is the border badge; keys still work).
       return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · #{hex}/esc exit" if v.request_hex?
-      read_common = "⇧arrows select · #{y} copy · space cmds"
+      # `y` is one verb with two behaviours — the selection when there is one, the WHOLE pane
+      # when there is not (`Runner#read_copy`) — and the token said "copy" for both, so the
+      # first `y` on an unselected response put 256 bytes on the clipboard and announced
+      # "copied all" after the fact. The strip says which one it is about to be.
+      read_common = "⇧arrows select · #{y} copy#{repeater_selection_active? ? "" : " all"} · space cmds"
       if v.ws_mode?
         # The response column has two cards on a WS tab, so name the card being read and the
         # key that swaps them — the same shape `ws_hint` uses for the request column's two.
@@ -275,19 +287,19 @@ module Gori::Tui
         return ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · ^F find · #{send} send · ↹ pane · esc tabs" : grpc_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · ^F find · #{send} send · ↹ pane · ⇧↹ back · esc tabs" : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
       when :target
         if v.target_insert?
-          v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · esc read"
+          v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · ⇧↹ back · esc read"
         else
-          "i/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · esc tabs"
+          "i/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · ⇧↹ back · esc tabs"
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
+        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · ⇧↹ back · esc tabs"
       when :request
         if v.request_insert?
           # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
@@ -297,12 +309,17 @@ module Gori::Tui
           # `^Y copy` is named here and not only in READ: a ⇧arrow selection can be built in
           # INSERT, and the bare `y` that copies it in READ is a literal character here — one
           # that REPLACES the selection. The footer has to say which key copies while typing.
-          "type to edit · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^G goto · ^F find · #{hex} hex · esc read · ↹ text"
+          # `esc read` and `↹ text` lead, and the marker/goto/find tail takes the `…`: the two
+          # tokens that say a loop verb has become literal text are the two the operator needs
+          # when they have just typed `^R` into the body, and at 132 columns they were the two
+          # past the cut. Every other token here describes editing, which is what the operator
+          # is already doing.
+          "esc read · ↹ text · type to edit · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^G goto · ^F find · #{hex} hex"
         else
           # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
           # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
           back = v.ws_http_only? ? keys(" · {repeater.toggle-http2} websocket") : ""
-          "i/↵ edit · #{read_common} · #{marks} · ^G goto · ^F find · #{hex} hex#{back} · ↹ pane · esc tabs"
+          "i/↵ edit · #{read_common} · #{marks} · ^G goto · ^F find · #{hex} hex#{back} · ↹ pane · ⇧↹ back · esc tabs"
         end
       else
         ""
@@ -324,7 +341,7 @@ module Gori::Tui
         # `↹ text`, not `↹ pane`, for the same reason as well: `editor_captures_tab?` is
         # `request_text_editing?`, which has no gRPC arm, so Tab splices a TAB into the
         # head/metadata. The old token promised a focus move and silently corrupted a header.
-        "type head/metadata · ⇧arrows select · ^Y copy · esc read · ↹ text"
+        "esc read · ↹ text · type head/metadata · ⇧arrows select · ^Y copy"
       else
         msg = v.grpc_reframable? ? "{repeater.toggle-hex} hex-edit payload · " : ""
         fields = v.grpc_fields_available? ? "␣E fields · " : ""
@@ -479,7 +496,7 @@ module Gori::Tui
     # plain-HTTP `:request` arm has said `↹ text` since it grew its own INSERT branch; these
     # two (and gRPC) shared one string across the modes and kept the READ token.
     private def tab_token(v : RepeaterView) : String
-      v.request_insert? ? "↹ text" : "↹ pane"
+      v.request_insert? ? "↹ text" : "↹ pane · ⇧↹ back"
     end
 
     # The RESPONSE column's footer on a WS tab — the twin of `ws_hint`, naming the card being
@@ -487,7 +504,7 @@ module Gori::Tui
     # reachable and nothing said so.
     private def ws_resp_hint(v : RepeaterView, read_common : String, send : String) : String
       card = v.resp_pane == :handshake ? "handshake response" : "transcript"
-      keys("↑/↓ move #{card} · #{read_common} · ←/→ char · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · esc tabs")
+      keys("↑/↓ move #{card} · #{read_common} · ←/→ char · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · ⇧↹ back · esc tabs")
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
@@ -1675,7 +1692,11 @@ module Gori::Tui
       else
         view.load(detail)
         @repeaters << RepeaterTab.new(view, id, persist_new_repeater(view, id))
-        @host.status("repeater: #{view.summary} — #{graphql_raw_note(detail)}type to edit · ^R send · ^N new · ^1-9 switch · esc back")
+        # `⇧1-9`, not `^1-9`: Ctrl+digit carries no control character, so on many terminals the
+        # jump never arrives at all — which is why docs/content/guide/hotkeys.md calls ⇧1-9 the
+        # primary and the SUBTABS strip one keypress away says `⇧1-9 jump`. An arrival hint is
+        # the first thing read on this tab; it must not teach the alias that might not land.
+        @host.status("repeater: #{view.summary} — #{graphql_raw_note(detail)}type to edit · ^R send · ^N new · ⇧1-9 switch · esc back")
       end
       @current_repeater_idx = @repeaters.size - 1
       @host.goto_tab(:repeater)
@@ -1688,7 +1709,7 @@ module Gori::Tui
       @repeaters << RepeaterTab.new(view, nil, persist_new_repeater(view, nil))
       @current_repeater_idx = @repeaters.size - 1
       @host.goto_tab(:repeater)
-      @host.status("new repeater — edit the request & target · ^R send · ^1-9 switch · esc back")
+      @host.status("new repeater — edit the request & target · ^R send · ⇧1-9 switch · esc back")
     end
 
     # Open a hand-authored repeater session from an arbitrary request (Miner finding, etc.).

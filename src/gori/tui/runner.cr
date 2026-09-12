@@ -1465,6 +1465,12 @@ module Gori::Tui
         return
       end
       if @active_tab == :issues && @overlay.none? && @focus == :body && issues_controller.view.detail_open?
+        # esc on an issue just filed by hand goes back where the form was opened (#F19),
+        # BEFORE the detail's own esc, which would close it into the Issues list. One shot:
+        # `return_to_filing_origin` spends the origin, so the next esc is the ordinary one.
+        if ev.key.escape? && !ev.ctrl? && !ev.alt?
+          return if return_to_filing_origin
+        end
         return if issues_controller.handle_detail_key(ev)
       end
       # History detail drill-in: shift+arrows select, space opens the action menu.
@@ -1600,6 +1606,13 @@ module Gori::Tui
       # the flip to the typing. The named keys (arrows, ↵, esc, ↹) and every modified chord
       # stay silent: those are navigation, legitimately unbound in some scopes (`space` is a
       # named key too, so the leader below is never named here).
+      # A bare printable the TAB BAR does not bind but the tab's body does: name the `↵` that
+      # gets there, rather than "nothing bound here" one row above a header advertising the
+      # very key that was pressed (F10).
+      if @focus == :menu && (below = body_scope_verb(chord))
+        status(Runner.enter_first_hint(chord, below.title, strip: subtabs_shown?))
+        return
+      end
       if hint = Runner.unbound_key_hint(chord)
         status(Hotkeys.expand(@session.registry, hint))
         return
@@ -2064,15 +2077,21 @@ module Gori::Tui
       !@send_picker.nil?
     end
 
-    # "Send selection to X" (space → S): capture the focused pane's current selection
-    # and open a centered picker of string-handling destinations (Decoder for now).
-    # Gated upstream by read_selection_active?, so a selection is normally present; if
-    # it came back empty the verb just no-ops with a toast rather than opening an empty
-    # send.
+    # "Send selection to X" (space → S): capture the focused pane's current selection — or,
+    # with nothing selected, the line under the cursor, which is the same fallback `y` takes
+    # (`read_selection_text` → each pane's `*_copy_text`) — and open a centered picker of
+    # string-handling destinations.
+    #
+    # The verb is listed in the menu either way (#F17): gated on a live selection it was
+    # invisible until one existed, and nothing on screen named the `x` that makes one, so the
+    # only route from a response to the Decoder / JWT / Cookie / Sequencer was one you had to
+    # already know. An empty payload — an empty pane — still no-ops with a toast.
     def send_to_open : Nil
       payload = read_selection_text
       if payload.empty?
-        @toast = "nothing selected to send"
+        # With no selection this verb sends the line under the cursor (#F17), so an empty
+        # payload now means an empty PANE, not an empty selection.
+        @toast = "nothing under the cursor to send"
         return
       end
       sp = SendPicker.new("Send selection to", payload, SendMenu.destinations)
@@ -2206,6 +2225,74 @@ module Gori::Tui
       true
     end
 
+    # Where an issue was filed FROM, so the detail it opens into has a way back (#F19).
+    #
+    # An issue filed by hand is read next in ~every case, so the create no longer ASKS —
+    # it opens the issue and says how to return. The question that used to be here (an
+    # open/stay confirm) was one modal per filing, answered "open" nearly every time, on a
+    # card whose buttons and keys were different letters.
+    #
+    # `drill_in` is History's shell-held drill-in (`@overlay == :detail`), which is the one
+    # piece of the origin that does not live in a controller: the list's cursor, the open
+    # flow and the Repeater's sub-tab index all survive on their own, so restoring is a
+    # matter of pointing focus back at them.
+    record FilingOrigin, issue_id : Int64, tab : Symbol, focus : Symbol, drill_in : Bool, label : String
+
+    @filing_origin : FilingOrigin? = nil
+
+    # The tab's own name, as the bar spells it — the word the toast promises esc will take you
+    # back to, so it has to be the one on screen.
+    def self.filing_origin_label(tab : Symbol) : String
+      Chrome::TABS.find { |(sym, _)| sym == tab }.try(&.[1]) || tab.to_s
+    end
+
+    # What the create's toast ends with, and the state `esc` puts back. Both pure, because
+    # `Runner.new` owns a terminal: these are the halves of #F19 a spec can read.
+    def self.filing_return_hint(label : String) : String
+      " · esc returns to #{label}"
+    end
+
+    def self.filing_return_state(origin : FilingOrigin) : {Symbol, Symbol, OverlayKind}
+      {origin.tab, origin.focus, origin.drill_in ? OverlayKind::Detail : OverlayKind::None}
+    end
+
+    # Snapshot the origin and open the new issue in the Issues detail. Returns the clause the
+    # create's toast ends with — the way back, named — or "" when the issue could not be
+    # opened (a store that lost it), in which case nothing is recorded and nothing is claimed.
+    private def open_filed_issue(id : Int64) : String
+      origin_tab = @active_tab
+      origin_focus = @focus
+      drill_in = origin_tab == :history && !history_controller.view.detail_flow_id.nil?
+      label = Runner.filing_origin_label(origin_tab)
+      history_controller.cancel_searches if origin_tab == :history
+      @active_tab = :issues
+      @focus = :body
+      @overlay = OverlayKind::None
+      unless issues_controller.view.open_by_id(@session.store, id)
+        issues_controller.view.reload(@session.store)
+        return ""
+      end
+      # Filed FROM the Issues tab (its own `n`): there is nowhere to send esc back to, so the
+      # detail closes into the list the ordinary way and the toast promises nothing.
+      return "" if origin_tab == :issues
+      @filing_origin = FilingOrigin.new(id, origin_tab, origin_focus, drill_in, label)
+      Runner.filing_return_hint(label)
+    end
+
+    # `esc` on the detail of an issue that was just filed: back to exactly where the form was
+    # opened from. One shot — the origin is spent here, so a second esc closes the detail the
+    # ordinary way.
+    private def return_to_filing_origin : Bool
+      origin = @filing_origin
+      return false unless origin
+      return false unless issues_controller.view.detail_issue.try(&.id) == origin.issue_id
+      @filing_origin = nil
+      issues_controller.view.close_detail
+      @active_tab, @focus, @overlay = Runner.filing_return_state(origin)
+      @toast = "back to #{origin.label}"
+      true
+    end
+
     # The IssueForm's injected commit. Returns true when the shell should close the form.
     private def create_issue_from_form(form : IssueForm) : Bool
       title = form.issue_title.strip
@@ -2263,29 +2350,28 @@ module Gori::Tui
           # which is exactly where a marked set arrives, so reporting only the picker's own ref
           # would leave the N flows just attached unmentioned.
           msg = attached > 1 ? "issue ##{new_id} created and linked · #{attached} flows attached" : "issue ##{new_id} created and linked"
-          @toast = msg + write_form_snapshots(new_id, form)
-          # Ask open-vs-stay (default stay). FALSE, not true: offer_open_created has just
-          # put a confirm up, and "close the overlay" would be asking the shell to close a
-          # form it is no longer holding. close_active_overlay's identity check would make
-          # that inert anyway; saying false states the intent rather than relying on it.
-          offer_open_created(:issue, new_id)
-          return false
+          news = msg + write_form_snapshots(new_id, form)
+          # Open it (#F19) rather than asking. TRUE, so the shell drops the form: the issue
+          # is on screen behind it and there is no second modal to hand the overlay to.
+          @toast = news + open_filed_issue(new_id)
+          return true
         elsif form.stay_on_create?
           # Filed from a list the operator is still reading (the retest Diff): the create
           # must not move them off it, so the Issues list is refreshed IN PLACE and the
-          # toast names the id and whether evidence went with it. `offer_open_created`'s
-          # confirm is deliberately not raised here either — a retest sweep files row after
-          # row, and one modal per row is one modal too many.
+          # toast names the id and whether evidence went with it. It does NOT open the issue
+          # the way the two hand-filing paths above do (#F19) — a retest sweep files row
+          # after row, and being moved off the list between two of them is the interruption
+          # the old open/stay modal was, minus the question.
           issues_controller.view.reload(@session.store)
           msg = attached > 0 ? "issue ##{new_id} filed with its capture attached" : "issue ##{new_id} filed"
           @toast = msg + write_form_snapshots(new_id, form)
         else
-          history_controller.cancel_searches if @active_tab == :history
-          @active_tab = :issues
-          @focus = :body
-          issues_controller.view.reload(@session.store)
-          msg = attached > 1 ? "issue created with #{attached} flows attached" : "issue created"
-          @toast = msg + write_form_snapshots(new_id, form)
+          # The other hand-filed path (History's Add issue, and every form with no ref to
+          # link). It already landed on the Issues tab; now it lands on the ISSUE, with the
+          # way back named — the same act as the link path above, so the same ending.
+          msg = attached > 1 ? "issue ##{new_id} created with #{attached} flows attached" : "issue ##{new_id} created"
+          news = msg + write_form_snapshots(new_id, form)
+          @toast = news + open_filed_issue(new_id)
         end
       end
       true
@@ -2367,6 +2453,23 @@ module Gori::Tui
       @toast = verb.call(self) || @toast if verb
     end
 
+    # The verb `chord` would fire if the body had focus, or nil. Deliberately NOT gated on
+    # `available?`: this answers "is there something here one level down", and a verb that is
+    # momentarily unavailable (an empty list, nothing selected) is still the reason the key is
+    # not the tab bar's. Bare printables only — a modified chord on the bar is deliberate.
+    private def body_scope_verb(chord : Verb::Chord) : Verb::Definition?
+      return nil if chord.ctrl || chord.alt || chord.key.size != 1
+      scope = @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body
+      return nil if scope == Verb::Scope::Sidebar
+      id = @keymap.lookup(chord, scope)
+      return nil if id.nil?
+      verb = @session.registry[id]?
+      # A Global binding is not "one level down" — it fires from the bar too, so it would
+      # already have run above.
+      return nil if verb.nil? || verb.scope == Verb::Scope::Global
+      verb
+    end
+
     private def current_scope : Verb::Scope
       case @overlay
       when .palette?
@@ -2422,6 +2525,23 @@ module Gori::Tui
     def self.unbound_key_hint(chord : Verb::Chord) : String?
       return nil if chord.ctrl || chord.alt || chord.key.size != 1
       "‹#{Hotkeys.display_label(chord)}› — nothing bound here · space menu · {tab.help} help"
+    end
+
+    # …and the same line for a key that IS bound — one level down. On the tab bar `/` answered
+    # "nothing bound here" from one row above a list header that reads `/ filter`: true about
+    # the SIDEBAR scope and useless, because the key the operator wanted was `↵` and nothing
+    # said so. The letter deliberately does not fall through (that is the tab bar's own
+    # decision, see the `1-9 slots` hint); it is ANSWERED instead.
+    #
+    # `verb` names what the key does down there, so the line teaches the pair rather than just
+    # refusing: `‹/› — press ↵ to enter the list, then / filter`.
+    # `where` is what one `↵` from the bar actually reaches — the list itself, or the sub-tab
+    # strip above it on the workbench tabs, where the body is one more ↵ down. Naming the
+    # wrong one would repeat the defect this fixes in miniature.
+    def self.enter_first_hint(chord : Verb::Chord, verb : String, strip : Bool = false) : String
+      key = Hotkeys.display_label(chord)
+      where = strip ? "↵↵ to enter the body" : "↵ to enter the list"
+      "‹#{key}› — press #{where}, then #{key} #{verb.downcase}"
     end
 
     # The strip line for `message`: led by `spinner` / ✓ / ✗ when `kinded` names this same
@@ -2733,11 +2853,15 @@ module Gori::Tui
           # The controller names its own body state (TabController#body_badge) — the same
           # answer `body_editor?` reads, asked one level wider so a view-owned drill-in can
           # say DETAIL too. History's arrives above, off `@overlay`.
-          case @tabs[@active_tab]?.try(&.body_badge)
-          when :editor then "EDITOR"
-          when :detail then "DETAIL"
-          else              "BODY"
-          end
+          badge = case @tabs[@active_tab]?.try(&.body_badge)
+                  when :editor then "EDITOR"
+                  when :detail then "DETAIL"
+                  else              "BODY"
+                  end
+          # …and, on a tab whose body is several panes, WHICH pane (TabController#
+          # body_pane_label). The badge is the only always-drawn slot that can answer it.
+          pane = @tabs[@active_tab]?.try(&.body_pane_label)
+          pane ? "#{badge} · #{pane}" : badge
         end
       end
     end
@@ -2887,6 +3011,14 @@ module Gori::Tui
     # the whole few seconds it is alive. Recency is the only rule that also gets the
     # opposite case right — fresh action feedback while an older notice is still up.
     private def status_line : String?
+      # A confirm card is a QUESTION, and its keys are letters nothing else on screen names —
+      # so the card's own hint takes this slot rather than a toast. The case that made it
+      # matter was NOTE CREATED (and ISSUE CREATED, before #F19 stopped asking that one): the
+      # card goes up in the same frame as its own creation toast, so the first ↵ was pressed
+      # blind and the line that explains it appeared only after some other key had cleared the
+      # toast. The news is not lost — `offer_open_created` puts the standing toast in the card,
+      # where it is read with the question.
+      return nil if @overlay.confirm?
       toast = @toast
       notice = Settings.companion_in_bar? ? @companion.frame.try(&.bubble) : nil
       return format_status_message(toast) unless notice
@@ -4411,7 +4543,17 @@ module Gori::Tui
       # close. A ref with no exchange comes back carrying its REFUSAL rather than being
       # dropped — it is still linked, and the toast names why its bytes were not kept.
       snaps = evidence_snapshots(refs)
-      lp = LinkPicker.new(link_picker_rows, freezable: snaps.any?(&.snapshot))
+      # `freeze_refusal` is the FIRST refusal the snapshots carry, and it is shown only because
+      # nothing froze: the card's ↵ token degrades from `link & freeze` to `link` on its own,
+      # and that degradation used to be silent — the row landed LIVE and no word on screen said
+      # why. A ref that was never a freeze candidate (fuzz/miner) carries no refusal, so those
+      # keep the plain token they always had.
+      #
+      # `linked:` opens the cursor on `+ New issue…` when nothing has been filed against these
+      # refs yet. Computed HERE because the picker holds no store: it is a flag, not a query.
+      lp = LinkPicker.new(link_picker_rows, freezable: snaps.any?(&.snapshot),
+        freeze_refusal: snaps.any?(&.snapshot) ? nil : snaps.compact_map(&.refusal).first?,
+        linked: refs.any? { |kind, id| @session.store.ref_linked?(kind, id) })
       # Put the History drill-in back on the way out. `open_overlay` overwrites @overlay and
       # closing clears it to None, which would tear down the flow detail the operator is
       # linking FROM — the same restore `confirm(return_to: :detail)` performs for the delete
@@ -5065,8 +5207,18 @@ module Gori::Tui
       notes.copy repeater.copy decoder.copy issue.copy project.copy fuzzer.copy detail.copy
     ]
 
+    # The `S` verbs, which are listed whether or not anything is selected (#F17) and send the
+    # line under the cursor when nothing is. Their registered title names the selection case,
+    # so the MENU says which one this press would be.
+    READ_SEND_VERBS = %w[
+      notes.send-to repeater.send-to decoder.send-to fuzzer.send-to jwt.send-to cookie.send-to
+      issue.send-to project.send-to rewriter.send-to comparer.send-to intercept.send-to
+      oast.send-to probe.send-to sequence.send-to mine.send-to detail.send-to
+    ]
+
     def space_menu_title(verb_id : String) : String?
       return "Copy selection" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
+      return "Send line to…" if READ_SEND_VERBS.includes?(verb_id) && !read_selection_active?
       history_mark_menu_title(verb_id) || intercept_mark_menu_title(verb_id) ||
         sitemap_mark_menu_title(verb_id) || issues_mark_menu_title(verb_id) ||
         subtab_mark_menu_title(verb_id)

@@ -206,6 +206,16 @@ benchmark:
     crystal build bench/proxy_bench.cr -o bin/proxy_bench --release
     ./bin/proxy_bench
 
+# Type-check every program in scripts/ without generating code.
+#
+# The sibling of `benchmark-check`, against the same silent rot: nothing else compiles
+# these, and `seed_demo.cr` — the demo database every manual TUI pass starts from — sat
+# unbuildable on main for four call sites' worth of an argument that grew in #1047. The CI
+# `benchmarks` job runs the SAME script.
+[group('development')]
+scripts-check:
+    scripts/script_check.sh
+
 # Seed the local "demo" project with a varied dataset for the TUI to explore.
 [group('demo')]
 seed-demo:

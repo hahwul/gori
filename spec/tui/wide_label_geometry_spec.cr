@@ -16,7 +16,9 @@ describe "wide-label geometry" do
     dlg = ConfirmDialog.new("DELETE", "Delete this?", confirm_label: "삭제", cancel_label: "취소")
     box = dlg.overlay_box(Rect.new(0, 0, 80, 24))
     confirm_rect, cancel_rect = dlg.button_rects(box)
-    confirm_rect.w.should eq(Screen.draw_width(" 삭제 ")) # 6 cells — `size` said 4
+    # The button wears its accelerator (`[y] 삭제`), and the width still counts CELLS: 4 for
+    # the two Hangul syllables, not 2 for the two characters.
+    confirm_rect.w.should eq(Screen.draw_width(" [y] 삭제 ")) # 10 cells — `size` said 8
     cancel_rect.x.should eq(confirm_rect.right + 4)
     dlg.button_at(box, confirm_rect.right - 1, confirm_rect.y).should eq(:confirm)
     dlg.button_at(box, cancel_rect.right - 1, cancel_rect.y).should eq(:cancel)

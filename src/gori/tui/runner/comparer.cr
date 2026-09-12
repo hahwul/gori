@@ -84,6 +84,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # CROSS-TAB mediator: send History's selected flow to the next Comparer slot
   # on the *active* comparison sub-tab (rings A → B → A).
+  # The one-slot fills all end on a toast naming `0` — the Go-to picker, which reaches every
+  # tab including a hidden one — rather than `^P`. The palette does open the Comparer, but it
+  # is not the gesture that shipped for tabs off the bar (#1050), and a hint that names the
+  # second-best route teaches it.
   def comparer_add_selected : Nil
     ids = history_target_flow_ids
     return (@toast = "select a flow first") if ids.empty?
@@ -95,7 +99,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     detail = @session.store.get_flow(id)
     return (@toast = "flow no longer available") unless detail
     slot = comparer_controller.view.add_flow(detail)
-    @toast = "comparer: set #{slot.to_s.upcase} — open Comparer (^P) to view the diff"
+    @toast = "comparer: set #{slot.to_s.upcase} — open Comparer (0) for the diff"
   end
 
   # Exactly 2 marked (#442): fill A and B directly instead of making the user guess where
@@ -107,7 +111,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     b = @session.store.get_flow(newer)
     return (@toast = "flow no longer available") unless a && b
     comparer_controller.view.set_pair(a, b)
-    @toast = "comparer: A ##{older} · B ##{newer} — open Comparer (^P) to view the diff"
+    # …and GO there, like every sibling Send verb (Fuzzer, Sequencer, Decoder, Repeater all
+    # land you in the tab they filled). This one alone stopped at a toast, and the toast
+    # pointed at the palette: reaching the diff that was already built cost six more
+    # keystrokes — the single most expensive avoidable step in the measured loop.
+    #
+    # Only the PAIR navigates. The one-slot fills below deliberately stay put: A is set from
+    # a list the operator is still reading, and B is the next thing they mark.
+    goto_tab(:comparer)
+    @toast = "comparer: A ##{older} · B ##{newer}"
   end
 
   # CROSS-TAB: the active Repeater tab's last send → the next Comparer slot. The Repeater
@@ -118,7 +130,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     slot = repeater_controller.current_view.try(&.comparer_slot)
     return (@toast = "send the request first (^R) — there is no response to compare") unless slot
     which = comparer_controller.view.add_slot(slot)
-    @toast = "comparer: set #{which.to_s.upcase} ← repeater — open Comparer (^P) to view the diff"
+    @toast = "comparer: set #{which.to_s.upcase} ← repeater — open Comparer (0) for the diff"
   end
 
   # CROSS-TAB: the Sitemap cursor's endpoint → the next Comparer slot, resolved through the
@@ -132,7 +144,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     detail = @session.store.get_flow(id)
     return (@toast = "that request was pruned since the tree was built") unless detail
     which = comparer_controller.view.add_flow(detail)
-    @toast = "comparer: set #{which.to_s.upcase} — open Comparer (^P) to view the diff"
+    @toast = "comparer: set #{which.to_s.upcase} — open Comparer (0) for the diff"
   end
 
   # CROSS-TAB: the selected fuzz result → the next Comparer slot. The request is the one the
@@ -144,7 +156,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     slot = fuzzer_controller.comparer_slot
     return (@toast = "select a result first") unless slot
     which = comparer_controller.view.add_slot(slot)
-    @toast = "comparer: set #{which.to_s.upcase} ← fuzz — open Comparer (^P) to view the diff"
+    @toast = "comparer: set #{which.to_s.upcase} ← fuzz — open Comparer (0) for the diff"
   end
 
   # Both flows are set — the gate for the diff's row select / copy verbs.

@@ -65,6 +65,13 @@ module Gori::Tui
       @evidence.querying? ? :editor : :body
     end
 
+    # The `/` filter is text, so the digit family stands down inside it — `evidence:26`
+    # or a date filter must land in the bar rather than jumping four tabs. Same rule and
+    # same reason as History's and Issues' query bars (TabController#body_takes_text?).
+    def body_takes_text? : Bool
+      @evidence.querying?
+    end
+
     def body_hint(focus : Symbol) : String
       if @evidence.querying?
         "type to filter · ↵ apply · esc clear"

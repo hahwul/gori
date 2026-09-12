@@ -56,12 +56,25 @@ module Gori::Tui
     # pressed. A Bool, not the snapshots: the picker stays store-free and holds no evidence.
     getter? freezable : Bool
 
-    def initialize(@rows : Array(Row), *, @freezable : Bool = false)
+    # …and, when it is false, WHY — the refusal `Evidence.snapshot_for` already wrote ("repeater
+    # #3 has never been sent"). Without it the ↵ token silently degraded from `link & freeze` to
+    # `link`, the row landed LIVE, and nothing on the card or in the toast said a copy had not
+    # been kept: an evidence gap the operator only finds later, in the issue.
+    #
+    # nil where there is nothing to explain — a note row, or a fuzz/miner ref that was never a
+    # freeze candidate at all (`Evidence.freezable?`), which is why those carry no refusal.
+    getter freeze_refusal : String?
+
+    def initialize(@rows : Array(Row), *, @freezable : Bool = false, @freeze_refusal : String? = nil,
+                   @linked : Bool = true)
       @indexed = @rows.map { |r| {r, haystack(r)} }
       @filtered = @rows
-      # Prefer the first existing owner when there is one (create is always at the top),
-      # so a reflexive ↵ links rather than opening a form.
-      @selected = @rows.empty? ? 0 : create_rows
+      # Prefer the first existing owner when there is one (create is always at the top), so a
+      # reflexive ↵ links rather than opening a form — EXCEPT for a ref nobody has linked yet
+      # (`linked: false`), where the common act is the first filing and the cursor opening two
+      # rows below `+ New issue…` cost `↑ ↑` every time. A flag, not a store read: this card
+      # holds no store.
+      @selected = @rows.empty? || !@linked ? 0 : create_rows
     end
 
     # The pinned create rows. The labels are DERIVED from these rather than kept in a second
@@ -117,9 +130,9 @@ module Gori::Tui
 
     def enter_action : String
       if kind = selected_create
-        freezes_into?(kind) ? "create & freeze" : "create"
+        freezes_into?(kind) ? "create & freeze" : "create#{freeze_gap(kind)}"
       elsif row = selected_row
-        freezes_into?(row.kind) ? "link & freeze" : "link"
+        freezes_into?(row.kind) ? "link & freeze" : "link#{freeze_gap(row.kind)}"
       else
         "link"
       end
@@ -127,6 +140,15 @@ module Gori::Tui
 
     private def freezes_into?(kind : Store::LinkOwnerKind) : Bool
       @freezable && kind.issue?
+    end
+
+    # Why the row under the cursor is not offering a freeze, when there IS a reason to give.
+    # Only on an issue row: a note cannot own frozen bytes at all, so its plain `link` is the
+    # design rather than a degradation, and saying "nothing to freeze" there would report a
+    # refusal that was never made.
+    private def freeze_gap(kind : Store::LinkOwnerKind) : String
+      return "" unless kind.issue?
+      (why = @freeze_refusal) ? " — nothing to freeze: #{why}" : ""
     end
 
     protected def refilter : Nil

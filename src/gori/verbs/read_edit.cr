@@ -18,6 +18,17 @@ module Gori
     def self.register_read_edit(r : Verb::Registry) : Nil
       in_sel = ->(ctx : Verb::ExecContext) { ctx.read_selection_active? }
 
+      # `S Send selection to…` is LISTED without a selection too, and acts on the line under
+      # the cursor when there is none — every `*_selection_text` already falls back to it, the
+      # same fallback `y` takes. Gated on `in_sel` alone it was invisible until a selection
+      # existed, and nothing anywhere advertised the `x` that makes one: the only route from a
+      # response to the Decoder / JWT / Cookie / Sequencer was a verb you had to already know
+      # about to discover. The menu title says which of the two it is about to send
+      # (`Runner#space_menu_title`).
+      sendable = ->(readable : Proc(Verb::ExecContext, Bool)) do
+        ->(ctx : Verb::ExecContext) { ctx.read_selection_active? || readable.call(ctx) }
+      end
+
       in_notes_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.notes_read_mode? }
       r.register Verb::Definition.new(
         "notes.select-line", "Select line", "Select the entire current line",
@@ -28,7 +39,7 @@ module Gori
         Verb::Scope::Notes, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "notes.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Notes, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Notes, available: sendable.call(in_notes_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # Plain 'x' = select-line in every Repeater read-mode pane (request/target/response),
       # now that hex is ^X everywhere (the old x=resp-hex collision is gone). Tagged
@@ -51,7 +62,7 @@ module Gori
       # uncluttered when nothing is selected.
       r.register Verb::Definition.new(
         "repeater.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Repeater, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Repeater, available: sendable.call(in_repeater_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # Tagged :input (Decoder's read-mode panes are INPUT-read and OUTPUT; :input is
       # the more relevant "editing" pane — OUTPUT keeps 'x' reachable by keybinding).
@@ -67,7 +78,7 @@ module Gori
       # panes (command_section is cur.pane); see the repeater.send-to note above.
       r.register Verb::Definition.new(
         "decoder.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Decoder, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Decoder, available: sendable.call(in_decoder_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # Tagged :template (Fuzzer's only section named for this in Round 5's spec —
       # :target/:results/:detail are also read-mode-gated, but :template is the one
@@ -84,7 +95,7 @@ module Gori
       # (command_section follows the focused pane); see the repeater.send-to note above.
       r.register Verb::Definition.new(
         "fuzzer.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Fuzzer, available: sendable.call(in_fuzzer_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # JWT workbench read-mode panes (INPUT-read, DECODED, OUTPUT, ATTACKS). Tagged
       # :input for select-line (the token pane is the one with a fine selection); send-to
@@ -99,7 +110,7 @@ module Gori
         Verb::Scope::Jwt, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "jwt.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, JWT, …)",
-        Verb::Scope::Jwt, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Jwt, available: sendable.call(in_jwt_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       in_issues_notes = ->(ctx : Verb::ExecContext) { ctx.issues_notes_read_mode? }
       r.register Verb::Definition.new(
@@ -111,7 +122,7 @@ module Gori
         Verb::Scope::IssuesDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "issue.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::IssuesDetail, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::IssuesDetail, available: sendable.call(in_issues_notes), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # Verb::Scope::ProjectDesc, not Body — see project.copy in verbs/core.cr for why the
       # description pane stopped borrowing the History list's scope. The read-mode flag itself
@@ -130,7 +141,7 @@ module Gori
         Verb::Scope::ProjectDesc, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "project.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::ProjectDesc, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::ProjectDesc, available: sendable.call(in_project_desc), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # The Rewriter's PREVIEW OUTPUT, tagged `:preview` — the tab is multi-pane, and its rule
       # list already spends `x` on "Enable/disable" (see verbs/rewriter.cr for why every list
@@ -149,7 +160,7 @@ module Gori
         Verb::Scope::Rewriter, available: in_sel, mnemonic: 'v', section: :preview) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "rewriter.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Rewriter, available: in_sel, mnemonic: 'S', section: :preview) { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Rewriter, available: sendable.call(in_rewriter_out), mnemonic: 'S', section: :preview) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         # `^Y` and the wider gate: the INPUT pane is an EDITOR, where a bare `y` is a literal
         # character that replaces the selection, so Copy has to be reachable by chord there too.
@@ -171,7 +182,7 @@ module Gori
         Verb::Scope::Comparer, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "comparer.send-to", "Send selection to…", "Send the selected diff rows to another tool (Decoder, …)",
-        Verb::Scope::Comparer, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Comparer, available: sendable.call(in_comparer_diff), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "comparer.copy", "Copy", "Copy the selected diff rows as unified text, or the whole diff if nothing is selected",
         Verb::Scope::Comparer, [Verb::Chord.new("y")],
@@ -192,7 +203,7 @@ module Gori
         Verb::Scope::Intercept, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "intercept.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Intercept, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Intercept, available: sendable.call(in_icept_preview), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         # Bare `y` stays chordless for the reason above (the queue spends the letters), but `^Y`
         # IS registered and the gate is the WIDER `intercept_copyable?`: the held-bytes editor
@@ -216,7 +227,7 @@ module Gori
         Verb::Scope::OastCallbacks, available: in_sel, mnemonic: 'v', section: :detail) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "oast.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::OastCallbacks, available: in_sel, mnemonic: 'S', section: :detail) { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::OastCallbacks, available: sendable.call(in_oast_detail), mnemonic: 'S', section: :detail) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "oast.copy-callback", "Copy callback", "Copy the selected callback text, or the whole callback if nothing is selected",
         Verb::Scope::OastCallbacks,
@@ -242,7 +253,7 @@ module Gori
         Verb::Scope::ProbeDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "probe.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::ProbeDetail, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::ProbeDetail, available: sendable.call(in_probe_detail), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "probe.copy", "Copy", "Copy the selection, or the whole focused pane if nothing is selected",
         Verb::Scope::ProbeDetail, [Verb::Chord.new("y")],
@@ -264,7 +275,7 @@ module Gori
         Verb::Scope::Sequencer, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "sequence.send-to", "Send selection to…", "Send the selected rows to another tool (Decoder, …)",
-        Verb::Scope::Sequencer, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Sequencer, available: sendable.call(in_seq_analysis), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "sequence.copy", "Copy", "Copy the selected analysis rows, or the whole entropy report if nothing is selected",
         Verb::Scope::Sequencer, [Verb::Chord.new("y")],
@@ -285,7 +296,7 @@ module Gori
         Verb::Scope::Miner, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "mine.send-to", "Send selection to…", "Send the selected rows to another tool (Decoder, …)",
-        Verb::Scope::Miner, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Miner, available: sendable.call(in_miner_detail), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "mine.copy", "Copy", "Copy the selected finding rows, or the whole finding if nothing is selected",
         Verb::Scope::Miner, [Verb::Chord.new("y")],
@@ -301,7 +312,7 @@ module Gori
         Verb::Scope::HistoryDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "detail.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::HistoryDetail, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::HistoryDetail, available: sendable.call(in_detail_nav), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
     end
   end
 end

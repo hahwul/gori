@@ -200,6 +200,79 @@ describe "the digit family — focus-state matrix" do
     end
   end
 
+  it "is text in the Decoder CHAIN field, where every converter name carries a digit" do
+    # The regression #1050 left behind, and the one that blocked a whole loop: the CHAIN has
+    # no READ mode — every printable goes to `edit_chain` the moment the pane is focused —
+    # but the default gate answers for the INPUT editor alone, so `6` in `base64` jumped to
+    # the Fuzzer and took the half-typed chain with it. `base32`, `sha256`, `rot13`, `md5`,
+    # `utf16`: no chain worth typing is digit-free.
+    TuiContract.with_session("digit-decoder-chain") do |session|
+      host = TuiContract::Host.new(session)
+      host.tab = :decoder
+      ctl = DecoderController.new(host)
+      ctl.pane_advance(1) # INPUT ▸ CHAIN
+      ctl.body_takes_text?.should be_true
+
+      "base64".each_char { |ch| ctl.handle_body_key(TuiContract.plain(ch)) }
+      ctl.chain_spec.should eq("base64") # the character landed; the tab did not change
+    end
+  end
+
+  it "is text in the Evidence `/` filter" do
+    # Same class as History's and Issues' query bars, and it was missed the same way: the
+    # controller has a filter bar and no override, so `evidence:26` jumped two tabs.
+    TuiContract.with_session("digit-evidence") do |session|
+      host = TuiContract::Host.new(session)
+      host.tab = :evidence
+      ctl = EvidenceController.new(host)
+      ctl.body_takes_text?.should be_false
+      ctl.view.start_query
+      ctl.body_takes_text?.should be_true
+
+      ctl.handle_body_key(TuiContract.plain('6')).should be_true
+      ctl.view.query.should eq("6")
+    end
+  end
+
+  it "is text in the Help `/` search" do
+    TuiContract.with_session("digit-help") do |session|
+      host = TuiContract::Host.new(session)
+      host.tab = :help
+      ctl = HelpController.new(host)
+      ctl.body_takes_text?.should be_false
+      ctl.handle_body_key(TuiContract.plain('/')).should be_true
+      ctl.body_takes_text?.should be_true
+      # `body_badge` is the controller's own public answer to "a search is running"; the
+      # typed character is read off the view, which owns the query string.
+      ctl.handle_body_key(TuiContract.plain('6')).should be_true
+      ctl.body_badge.should eq(:editor)
+    end
+    # …and the character itself, at the seam that holds it (HelpView#search_query).
+    view = HelpView.new
+    view.handle_search_key(TuiContract.plain('/'), :shortcuts).should be_true
+    "utf16".each_char { |ch| view.handle_search_key(TuiContract.plain(ch), :shortcuts) }
+    view.search_query.should eq("utf16")
+  end
+
+  it "is text in the Fuzzer SNI row even when the mode badge dropped the field out of INS" do
+    # The TARGET card's second row takes characters whenever it is the active field —
+    # `FuzzerController#edit_target` routes to `edit_sni` before it consults the mode — so
+    # a click on the mode badge could leave a field swallowing letters while the gate said
+    # "navigation". RepeaterView's `pane_insert?` already read it this way.
+    TuiContract.with_session("digit-fuzz-sni") do |session|
+      host = TuiContract::Host.new(session)
+      host.tab = :fuzzer
+      ctl = FuzzerController.new(host)
+      ctl.fuzz_new
+      v = ctl.current_view.not_nil!
+      v.focus_pane(:target)
+      v.toggle_sni_field # ^S → the SNI row, in INS
+      ctl.body_takes_text?.should be_true
+      v.exit_target_insert! # what the mode-badge click does, without closing the row
+      ctl.body_takes_text?.should be_true
+    end
+  end
+
   it "is navigation in Notes' READ mode, and text in INS" do
     TuiContract.with_session("digit-notes") do |session|
       host = TuiContract::Host.new(session)

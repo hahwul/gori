@@ -293,12 +293,18 @@ module Gori::Tui
       reg = @host.session.registry
       filt = Hotkeys.binding_label(reg, "issues.filter", "/")
       nnew = Hotkeys.binding_label(reg, "issues.new", "n")
-      # Named in every state the chord can FIRE from, which is every list state — `command_scope`
-      # answers Scope::Issues for the marks state and both preview focuses too, and only an open
-      # detail (or the `/` bar, which claims every key) leaves it. Naming it in the default branch
-      # alone would rebuild the gap #899 closed elsewhere: a destructive key nothing on screen
-      # advertises, in the three states an operator actually triages from.
+      # ⇧X is now named in the MARKS state only — see the note under `export` below for why it
+      # left the three list lines, and the marks branch for why "clear ALL" has to stay said
+      # there in words.
       clear = Hotkeys.binding_label(reg, "issues.clear", "⇧X")
+      # ⇧E is the one key the triage loop ENDS on, and the strip named it nowhere at any
+      # width — the space menu was its only advertisement, which cost `Space E` every time.
+      # It takes ⇧X's slot rather than joining it: these lines are already the longest on the
+      # tab, and of the two, the destructive one is the one with somewhere else to live (the
+      # space menu's WIPE group, where a delete is read deliberately rather than reached for).
+      # That reverses #899's call for this list alone; ⇧X stays named in the MARKS state
+      # below, where "clear ALL" is the sentence that keeps the two meanings apart.
+      export = Hotkeys.binding_label(reg, "issues.export-key", "⇧E")
       if @issues.detail_open?
         # Dropped whole when there is nowhere to step — see DrillIn::Host's `step_available?`.
         step = @issues.step_available? ? "{issue.next-item}/{issue.prev-item} issue · " : ""
@@ -316,7 +322,7 @@ module Gori::Tui
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
       elsif @issues.preview_enabled? && @issues.preview_focus == :preview
-        "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs"
+        "↑/↓ scroll preview · ↹ list · ↵ open full · #{export} export · space cmds · esc tabs"
       elsif @issues.mark_count > 0
         # Marks re-point what `space` acts on AND take over esc (handle_body_key shadows
         # issues.leave while a set is live), so the standing "esc tabs" hint would be wrong.
@@ -327,9 +333,9 @@ module Gori::Tui
         mark = Hotkeys.binding_label(reg, "issues.mark-toggle", "t")
         "#{@issues.mark_count} marked · #{mark} mark · ⇧↑/⇧↓ range · space acts on marks · #{clear} clear ALL · esc drops marks"
       elsif @issues.preview_enabled?
-        "↑/↓ move · ↵ open · ↹ preview · #{filt} filter · #{nnew} new · #{clear} clear · space cmds · esc tabs"
+        "↑/↓ move · ↵ open · ↹ preview · #{filt} filter · #{nnew} new · #{export} export · space cmds · esc tabs"
       else
-        "↑/↓ move · ↵ open · #{filt} filter · #{nnew} new · #{clear} clear · space cmds · esc tabs"
+        "↑/↓ move · ↵ open · #{filt} filter · #{nnew} new · #{export} export · space cmds · esc tabs"
       end
     end
 

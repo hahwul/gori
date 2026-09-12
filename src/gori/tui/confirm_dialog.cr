@@ -78,7 +78,7 @@ module Gori::Tui
     # names the verb it stands for rather than a generic "confirm" the button never says.
     def hint : String
       lit = @selected == :confirm ? @confirm_label : @cancel_label
-      "←/→ choose · ↵ #{lit} · y #{@confirm_label} · n/esc #{@cancel_label}"
+      "←/→ choose · ↵ #{lit} · #{CONFIRM_KEY} #{@confirm_label} · #{CANCEL_KEY}/esc #{@cancel_label}"
     end
 
     # ←/→ or Tab move between the buttons; `y` confirms, `n`/esc cancels, ↵ acts on the
@@ -290,8 +290,28 @@ module Gori::Tui
       lines.max_of { |l| Screen.display_width(l) }
     end
 
+    # The keys that press the buttons — the same two `handle_key` answers to and `hint` names.
+    CONFIRM_KEY = 'y'
+    CANCEL_KEY  = 'n'
+
+    # A button wears its accelerator: `[y] open`, `[n] stay`. The two words alone were not the
+    # keys that press them — an operator reading `open` / `stay` reaches for `o` and `s`, and
+    # both do nothing — and on the one card raised UNDER a fresh toast (ISSUE CREATED) the hint
+    # line that would have said so was not on screen for the frame the decision is made on.
+    def self.button_text(label : String, key : Char) : String
+      "[#{key}] #{label}"
+    end
+
     private def button_row_width : Int32
-      btn_width(@confirm_label) + 4 + btn_width(@cancel_label)
+      btn_width(confirm_text) + 4 + btn_width(cancel_text)
+    end
+
+    private def confirm_text : String
+      ConfirmDialog.button_text(@confirm_label, CONFIRM_KEY)
+    end
+
+    private def cancel_text : String
+      ConfirmDialog.button_text(@cancel_label, CANCEL_KEY)
     end
 
     private def btn_width(label : String) : Int32
@@ -300,8 +320,8 @@ module Gori::Tui
 
     private def render_buttons(screen : Screen, box : Rect) : Nil
       confirm_rect, cancel_rect = button_rects(box)
-      render_button(screen, confirm_rect.x, confirm_rect.y, @confirm_label, @selected == :confirm, @danger)
-      render_button(screen, cancel_rect.x, cancel_rect.y, @cancel_label, @selected == :cancel, false)
+      render_button(screen, confirm_rect.x, confirm_rect.y, confirm_text, @selected == :confirm, @danger)
+      render_button(screen, cancel_rect.x, cancel_rect.y, cancel_text, @selected == :cancel, false)
     end
 
     # Inverts render_buttons' x/y placement: the {confirm, cancel} button rects
@@ -310,8 +330,8 @@ module Gori::Tui
     def button_rects(box : Rect) : {Rect, Rect}
       x = box.x + (box.w - button_row_width) // 2
       y = box.bottom - 3
-      confirm = Rect.new(x, y, btn_width(@confirm_label), 1)
-      cancel = Rect.new(confirm.right + 4, y, btn_width(@cancel_label), 1)
+      confirm = Rect.new(x, y, btn_width(confirm_text), 1)
+      cancel = Rect.new(confirm.right + 4, y, btn_width(cancel_text), 1)
       {confirm, cancel}
     end
 

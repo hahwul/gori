@@ -73,8 +73,10 @@ The tab bar is **nine numbered slots**, and the numbers are the primary way to m
 
 These work from **everywhere** — the tab bar, the sub-tab strip, a list body, a drill-in
 detail, a read-only pane — with one exception: while a field is taking text (an editor in
-INS, a `/` query bar, a line prompt, a picker's filter, the CVSS scorer), a digit is a
-character. It is the same rule `Space` follows: where `Space` types a space, `3` types a 3.
+INS, a `/` query bar or search, a line prompt, a picker's filter, the CVSS scorer, the
+Decoder's CHAIN field), a digit is a character. It is the same rule `Space` follows: where
+`Space` types a space, `3` types a 3 — which is what makes `base64`, `sha256` and `rot13`
+typeable into a conversion chain.
 
 The bar paints the numbers by default (**Preferences → Layout → Tab numbers**, `settings:layout`).
 The far-right pill reads `0:+12` — the key, and how many tabs are behind it.

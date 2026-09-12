@@ -510,12 +510,21 @@ module Gori::Tui
         # ` ‹ list ` chip came to point at a key that did nothing.
         nx, pv = step_key_labels
         step = @history.step_available? ? "#{nx}/#{pv} flow · " : ""
+        # `^R repeater` in BOTH detail lines. It fires from either level — the strip ladder
+        # declines every ctrl chord and the body ladder does too, so the keymap gets it — and
+        # it was named in neither, at 132 columns or at 240. The measured cost was two keys:
+        # the operator walked ↑/← back to the LIST to reach the one key that already worked
+        # where they were standing.
         if @history.detail_strip_focus?
-          return "←/→ panes · ↓/↵ enter · #{step}↑/← list · ↹ pane · space cmds · esc back"
+          return "←/→ panes · ↓/↵ enter · #{step}↑/← list · #{repeater} repeater · ↹ pane · space cmds · esc back"
         end
         nav = @history.detail_navigable? ? "↑/↓ move · ←/→ caret" : "↑/↓ scroll"
         dy = Hotkeys.binding_label(reg, "detail.copy", "y")
-        return "#{nav} · ⇧arrows select · #{dy} copy · #{step}↑ strip · ↹ pane · space cmds · esc back"
+        # `x select` beside the copy token. It is the key that makes the selection the space
+        # menu's `S Send selection to…` acts on, and it lived only in the menu: the route from
+        # a response to the Decoder began with a key nothing on screen named.
+        dx = Hotkeys.binding_label(reg, "detail.select-line", "x")
+        return "#{nav} · ⇧arrows select · #{dx} select · #{dy} copy · #{repeater} repeater · #{step}↑ strip · ↹ pane · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:
