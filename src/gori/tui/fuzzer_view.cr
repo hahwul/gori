@@ -605,10 +605,15 @@ module Gori::Tui
       @template_mode == InputMode::Insert
     end
 
+    # `editing_sni?` rides along on :target the way RepeaterView's does: the SNI row takes
+    # characters whenever it is the active field (`FuzzerController#edit_target` routes to
+    # `edit_sni` before it consults the mode at all), and clicking the TARGET mode badge
+    # while that row is open drops `@target_mode` to READ without closing it — which left
+    # a field still swallowing letters while the shell believed a digit was the tab bar's.
     def pane_insert?(pane : Symbol) : Bool
       case pane
       when :template then template_insert? || chain_pane_active?
-      when :target   then target_insert?
+      when :target   then target_insert? || editing_sni?
       else                false
       end
     end

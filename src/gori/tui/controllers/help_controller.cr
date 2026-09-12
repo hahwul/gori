@@ -75,6 +75,12 @@ module Gori::Tui
       @help.searching? ? :editor : :body
     end
 
+    # …and for the same reason the badge says `editor`, the digit family stands down while
+    # it is open: `/` then `^1` or `base64` is a search for a key, not a tab jump.
+    def body_takes_text? : Bool
+      @help.searching?
+    end
+
     # PageUp/PageDown/Home/End over the (long) Help cheat-sheet. move() clamps the top;
     # the bottom is clamped at render (clamp_scroll), so the large Home/End magnitude is
     # safe and lands on the last page.
