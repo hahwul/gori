@@ -31,9 +31,26 @@ describe "the Evidence tab's source navigation" do
   it "refuses with the reason instead of opening an unrelated tab" do
     open_source = runner_evidence_code[/def evidence_open_source.*?\n  end/m].not_nil!
     open_source.should contain("evidence_source_reused?(meta)")
-    open_source.should contain("the original repeater tab is gone (its id was reused)")
+    # The sentence itself is a constant now: the Issues detail's `s` (#1038 follow-up) asks
+    # the same question about the same rows, and two surfaces spelling one refusal twice is
+    # how they come to disagree about it.
+    open_source.should contain("EVIDENCE_SOURCE_REUSED")
+    Gori::Tui::Runner::EVIDENCE_SOURCE_REUSED
+      .should eq("the original repeater tab is gone (its id was reused)")
     # …and the refusal comes FIRST: `navigate_link_ref` would otherwise have already jumped.
     open_source.index("evidence_source_reused?").not_nil!
       .should be < open_source.index("navigate_link_ref").not_nil!
+  end
+
+  # The Issues detail's `s` on a FROZEN row is the same guard, in the same order, against the
+  # same reused id — it is the one place outside the Evidence tab that navigates to a frozen
+  # copy's source.
+  it "guards the Issues detail's `s` with the same predicate, ahead of the jump" do
+    goto = runner_evidence_code[/def issue_goto_link.*?\n  end/m].not_nil!
+    goto.should contain("evidence_source_reused?(m)")
+    goto.should contain("EVIDENCE_SOURCE_REUSED")
+    goto.should contain("evidence_source_alive?(m)")
+    goto.index("evidence_source_reused?").not_nil!
+      .should be < goto.index("navigate_link_ref").not_nil!
   end
 end

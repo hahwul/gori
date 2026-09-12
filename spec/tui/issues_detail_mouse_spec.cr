@@ -164,8 +164,9 @@ describe "clicking the Issues detail" do
     with_session do |host, session|
       detail_controller(host, session.store) do |ctl|
         body = related_body(ctl.view)
-        # A single press only selects: `issue.open-link` crosses tabs, so it is the second
-        # press that runs it (the Sitemap/Activity/Discover rule).
+        # A single press only selects: `issue.open-link` opens a modal over the detail (and,
+        # on a session row, crosses tabs), so it is the second press that runs it — the
+        # Sitemap/Activity/Discover rule.
         ctl.handle_click(AREA, body.x + 1, body.y + 1).should be_true
         host.issue_link_opens.should eq(0)
 

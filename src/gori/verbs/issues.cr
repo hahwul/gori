@@ -261,8 +261,24 @@ module Gori
         Verb::Scope::IssuesDetail, mnemonic: 'l') { |ctx| ctx.issue_links; nil }
 
       r.register Verb::Definition.new(
-        "issue.open-link", "Open linked item", "Open the selected related URL in its tab",
+        "issue.open-link", "Show related exchange", "Show the selected related row's request/response in place",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("enter")], hidden: true) { |ctx| ctx.issue_open_link; nil }
+
+      # The other half of ↵ (#1038 follow-up): ↵ SHOWS the row's exchange, `s` GOES to where
+      # it lives. Two keys, one action each — the grammar the Evidence tab already has
+      # (`↵ open · s source`), where a RELATED row used to answer ↵ two different ways
+      # depending on a badge two columns to its left.
+      #
+      # Offered on every row a cursor can sit on: each kind HAS a source tab, and one that is
+      # pruned, closed or (a Repeater id) reused is answered with the reason. `s` is free as a
+      # bare chord in this scope — the `'s'` here is `issue.set-severity`'s SPACE-MENU
+      # mnemonic, a different thing — and it shadows the Global scope-lens `s` the way
+      # Comparer's swap and the Evidence tab's own source key already do (verb/conflicts.cr).
+      # Its menu key is spelled `g` (go) for that same reason: `s` in the menu is taken.
+      r.register Verb::Definition.new(
+        "issue.goto-link", "Go to source", "Open the selected related item in its own tab",
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("s")],
+        available: ->(ctx : Verb::ExecContext) { ctx.issue_related_goto? }, mnemonic: 'g') { |ctx| ctx.issue_goto_link; nil }
 
       # Frozen evidence (#1038). `f` on a LIVE History/Repeater row of RELATED copies its
       # current exchange into an immutable `issue_evidence` row — the answer to "what exact

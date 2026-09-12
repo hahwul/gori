@@ -5,10 +5,14 @@ require "../support/overlay_harness"
 
 include Gori::Tui
 
-# The read-only viewer for one frozen evidence row (#1038). What it must be: a card that
-# shows the copied bytes and the provenance that makes them evidence, that never commits
-# anything, and whose only action hands text OUT (the clipboard) rather than changing what
-# it holds. What it must not be: the History drill-in with its live-flow verbs.
+# The read-only viewer for one exchange (#1038). What it must be: a card that shows the bytes
+# and the provenance that makes them evidence, that never commits anything, and whose actions
+# hand OUT (the clipboard) or ADD (a freeze) rather than change what it shows. What it must
+# not be: the History drill-in with its live-flow verbs.
+#
+# It has two modes since the RELATED-row ↵ began showing exchanges in place: FROZEN over a
+# copy, LIVE over a source as it is now. Everything below the provenance is the same card;
+# what is pinned here is that the two never say each other's sentence.
 
 private def meta(*, status : Int32? = 200, error : String? = nil, resp_sha : String? = "b" * 64,
                  bytes : Int64 = 120_i64, req_trunc = false) : Gori::Store::IssueEvidenceMeta
@@ -22,6 +26,20 @@ private def evidence(m = meta, *, body : Bytes? = "welcome".to_slice,
   Gori::Store::IssueEvidence.new(m,
     "POST /login HTTP/1.1\r\nHost: acme.test\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n".to_slice,
     "u=a&p=b".to_slice, resp_head, body)
+end
+
+# The same exchange as `evidence`, as a LIVE snapshot: what `Evidence.snapshot_for` hands ↵
+# on a RELATED row that has not been frozen. Same bytes, no row id, no moment of copying.
+private def live_snapshot(*, drifted = false) : Gori::Evidence::Snapshot
+  Gori::Evidence::Snapshot.new(
+    source_kind: Gori::Store::LinkRefKind::Flow, source_id: 12_i64,
+    method: "POST", url: "https://acme.test/login", protocol: "HTTP/1.1",
+    status: 200, duration_us: 4_200_i64, error: nil,
+    request_head: "POST /login HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+    request_body: "u=a&p=b".to_slice,
+    response_head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+    response_body: "welcome".to_slice,
+    request_drifted: drifted)
 end
 
 private def key(k : Termisu::Input::Key, char : Char? = nil) : Termisu::Event::Key
@@ -142,12 +160,103 @@ describe Gori::Tui::EvidenceViewer do
     v = EvidenceViewer.new(evidence(body: big))
     v.show(:response)
     v.lines.last.map(&.text).join.should eq(EvidenceViewer::TRUNCATED_NOTE)
-    v.evidence.response_body.not_nil!.size.should eq(big.size)
+    v.snapshot.response_body.not_nil!.size.should eq(big.size)
   end
 
   it "flags a capture-time truncation on the provenance line" do
     v = EvidenceViewer.new(evidence(meta(req_trunc: true)))
     v.provenance_line.map(&.text).join.should contain("request body truncated at capture")
     OverlayHarness.new(v, area: Rect.new(0, 0, 160, 30)).rendered?("request body truncated at capture").should be_true
+  end
+
+  # --- LIVE mode ------------------------------------------------------------
+  #
+  # ↵ on a LIVE RELATED row shows the source AS IT IS NOW. The card carries the same bytes a
+  # freeze would copy (it is built by the same `Evidence.snapshot_for`), and every place the
+  # frozen card says "frozen" this one has to say the opposite — the copy does not exist yet
+  # and retention or the next send can still take these bytes away.
+  it "titles a live view by its source and never claims a frozen row" do
+    v = EvidenceViewer.new(live_snapshot)
+    h = OverlayHarness.new(v)
+    h.assert_chrome(OverlayKind::Evidence, "LIVE hist #12")
+    v.live?.should be_true
+    v.frozen?.should be_false
+    v.meta.should be_nil
+    h.rendered?("not frozen").should be_true
+    h.rendered?("FROZEN EVIDENCE").should be_false
+    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    h.commits.should eq(0)
+  end
+
+  it "says the provenance is the present tense, and that nothing has been kept" do
+    v = EvidenceViewer.new(live_snapshot)
+    h = OverlayHarness.new(v, area: Rect.new(0, 0, 160, 30))
+    line = v.provenance_line.map(&.text).join
+    line.should contain("hist #12 · as it is now · not frozen · 200 · HTTP/1.1 · 4.2ms")
+    line.should_not contain("frozen 20")
+    h.rendered?("live copy — retention or the next send can change it").should be_true
+    h.rendered?("read-only copy").should be_false
+    # The hashes are computed off the bytes on screen — there is no row to read them from.
+    v.hashes_line.should start_with("sha256 req ")
+  end
+
+  # A Repeater tab edited since its stored response is showing two halves that never happened
+  # together. The freeze gate asks about that before writing a copy, so a FROZEN card can
+  # never be drifted — but a LIVE one is looking straight at it and must say so.
+  it "names request drift on a live repeater, where a frozen card can never have any" do
+    v = EvidenceViewer.new(live_snapshot(drifted: true))
+    v.provenance_line.map(&.text).join
+      .should contain("request edited since this response — not one exchange")
+    EvidenceViewer.new(evidence).provenance_line.map(&.text).join
+      .should_not contain("not one exchange")
+  end
+
+  it "offers `f` only while live, and only when someone is listening for it" do
+    v = EvidenceViewer.new(live_snapshot)
+    v.hint.should_not contain("f freeze")
+    froze = 0
+    v.on_freeze = -> { froze += 1; nil }
+    v.hint.should contain("f freeze")
+    h = OverlayHarness.new(v, area: Rect.new(0, 0, 160, 30))
+    h.rendered?("f freezes it").should be_true
+    h.press(Termisu::Input::Key::LowerF, 'f').should eq(:open)
+    froze.should eq(1)
+
+    # `f` on the frozen card is inert — there is nothing left to freeze, and the card must not
+    # advertise a key that would write a second copy of what it is already showing.
+    frozen = EvidenceViewer.new(evidence)
+    frozen.on_freeze = -> { froze += 1; nil }
+    frozen.hint.should_not contain("f freeze")
+    OverlayHarness.new(frozen).press(Termisu::Input::Key::LowerF, 'f').should eq(:open)
+    froze.should eq(1)
+  end
+
+  # What `f` lands as: the same card, same pane, same scroll, now able to name a row.
+  it "flips to FROZEN in place when the copy lands, without closing" do
+    v = EvidenceViewer.new(live_snapshot)
+    h = OverlayHarness.new(v)
+    v.show(:response)
+    v.frozen_as(evidence)
+    h.open?.should be_true
+    v.frozen?.should be_true
+    v.title.should eq("FROZEN EVIDENCE #42")
+    v.pane.should eq(:response)
+    h.rendered?("issues #7").should be_true
+    h.rendered?("read-only copy — the live hist is unchanged").should be_true
+    h.rendered?("not frozen").should be_false
+  end
+
+  it "shows and copies a live exchange's bytes through the same panes" do
+    v = EvidenceViewer.new(live_snapshot)
+    copied = [] of String
+    v.on_copy = ->(t : String) { copied << t; nil }
+    h = OverlayHarness.new(v)
+    h.rendered?("POST /login HTTP/1.1").should be_true
+    h.press(Termisu::Input::Key::LowerY, 'y')
+    copied[0].should end_with("\r\n\r\nu=a&p=b")
+    v.show(:response)
+    h.rendered?("welcome").should be_true
+    h.press(Termisu::Input::Key::LowerY, 'y')
+    copied[1].should end_with("welcome")
   end
 end

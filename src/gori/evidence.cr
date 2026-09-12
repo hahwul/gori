@@ -105,6 +105,31 @@ module Gori
       end
     end
 
+    # A FROZEN row read back as the copy it is. The stored bytes and provenance ARE a
+    # snapshot — `freeze_evidence` wrote one — so the read-only viewer can hold a single
+    # shape whether it was handed a persisted row or a live exchange, and the hashes it
+    # shows for a frozen row still come from the row (`IssueEvidenceMeta`), never recomputed
+    # here. Nothing resolves back through the source; this is a projection of the copy.
+    def self.to_snapshot(ev : Store::IssueEvidence) : Snapshot
+      m = ev.meta
+      Snapshot.new(
+        source_kind: m.source_kind,
+        source_id: m.source_id,
+        method: m.method,
+        url: m.url,
+        protocol: m.protocol,
+        status: m.status,
+        duration_us: m.duration_us,
+        error: m.error,
+        request_head: ev.request_head,
+        request_body: ev.request_body,
+        response_head: ev.response_head,
+        response_body: ev.response_body,
+        request_truncated: m.request_truncated?,
+        response_truncated: m.response_truncated?,
+      )
+    end
+
     # Which link kinds a snapshot can be taken from. A fuzz or miner session has no single
     # exchange — it is a template plus a run — so those links stay live-only.
     def self.freezable?(kind : Store::LinkRefKind) : Bool

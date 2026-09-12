@@ -961,6 +961,10 @@ private class FakeContext < ExecContext
     @calls << :issue_open_link
   end
 
+  def issue_goto_link : Nil
+    @calls << :issue_goto_link
+  end
+
   def issue_freeze_link : Nil
     @calls << :issue_freeze_link
   end
@@ -978,6 +982,10 @@ private class FakeContext < ExecContext
   end
 
   def issue_related_freezable? : Bool
+    false
+  end
+
+  def issue_related_goto? : Bool
     false
   end
 
