@@ -69,10 +69,10 @@ module Gori
       # `f` is freeze in evidence contexts and find on the sub-tab strip, and folding is a
       # session-rare toggle rather than a loop key.
       #
-      # The letter stays 'z' and does NOT become 'f': `comparer.find-subtab` holds 'f' in this
-      # scope's :tab section, COMMON renders inside that view, and `validate_menu_keys!` would
-      # raise at boot. The strip's `f` IS the find tier, so the collision is the rule working
-      # rather than an accident to route around.
+      # The letter stays 'z' and does NOT become 'f': `comparer.find-subtab` holds 'f' in the
+      # SUB-TABS bucket, which #1055 renders from EVERY focus level beside COMMON, so a 'f'
+      # here would raise in `validate_menu_keys!` at boot. The strip's `f` IS the find tier, so
+      # the collision is the rule working rather than an accident to route around.
       r.register Verb::Definition.new(
         "comparer.toggle-fold", "Fold unchanged",
         "Collapse the runs of identical lines, keeping context around each change",
