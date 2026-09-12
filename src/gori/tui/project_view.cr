@@ -2389,15 +2389,18 @@ module Gori::Tui
       end
     end
 
-    # SCOPE card: title + the lens state riding the top border (right), then the rule
-    # list / inline add-row inside.
+    # SCOPE card: the lens state rides the top border (right), then the rule list / inline
+    # add-row inside. No TITLE on the border — the chip strip one row above already names the
+    # pane that is showing, and a card that repeats it said "Scope" twice in two rows. Every
+    # sub-tab card in this tab is titleless for that reason; the OVERVIEW band's cards keep
+    # theirs, since nothing above them names those.
     private def render_scope_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "SCOPE", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
       n = @scope.rules.size
       # An ACTIVE lens is the one card meta that shouts — it changes what every other tab
       # shows — so this one passes its own fg rather than taking `border_meta`'s muted default.
-      Frame.border_meta(screen, rect, "SCOPE", "lens:#{@scope.enabled? ? "on" : "off"} · #{n}",
+      Frame.border_meta(screen, rect, "", "lens:#{@scope.enabled? ? "on" : "off"} · #{n}",
         fg: @scope.active? ? Theme.text_bright : Theme.muted)
       render_scope_list(screen, rect.inset(1, 1), focused)
     end
@@ -2448,15 +2451,17 @@ module Gori::Tui
       screen.text(px, y, rule.pattern, fg, bg, width: {inner.right - px, 1}.max) if inner.right > px
     end
 
-    # HOST OVERRIDES card: title + count chip riding the top border, then the entry list
-    # / inline add-row inside. A DISTINCT pane from SCOPE (own card, focus, action menu).
+    # HOST OVERRIDES card: count chip riding the top border (no title — see render_scope_card),
+    # then the entry list / inline add-row inside. A DISTINCT pane from SCOPE (own card, focus,
+    # action menu).
     private def render_overrides_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "HOST OVERRIDES", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
       n = @host_overrides.size
       # `project`, against Settings' near-identically titled HOSTNAME OVERRIDES — these are
       # layered OVER those, and a bare count said nothing about which list you are editing.
-      Frame.border_meta(screen, rect, "HOST OVERRIDES", "project · #{n}",
+      # Empty title: the meta only needs the left stop it implies, and there is none to clear.
+      Frame.border_meta(screen, rect, "", "project · #{n}",
         fg: n > 0 ? Theme.text_bright : Theme.muted)
       render_overrides_list(screen, rect.inset(1, 1), focused)
     end
@@ -2562,11 +2567,11 @@ module Gori::Tui
 
     private def render_env_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "ENVIRONMENT", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
       n = @env_items.size
       # `project`, against the identically-titled GLOBAL card in Settings → Env that these
       # vars are layered OVER. See `EnvOverlay#render`.
-      Frame.border_meta(screen, rect, "ENVIRONMENT", "project · prefix #{Settings.env_prefix} · #{n}")
+      Frame.border_meta(screen, rect, "", "project · prefix #{Settings.env_prefix} · #{n}")
       render_env_list(screen, rect.inset(1, 1), focused)
     end
 
@@ -2650,11 +2655,11 @@ module Gori::Tui
       return if rect.w < 2 || rect.h < 2
       ins = focused && desc_insert_mode?
       border = Frame.pane_border(focused)
-      Frame.card(screen, rect, "DESCRIPTION", bg: Theme.bg, border: border)
+      Frame.card(screen, rect, bg: Theme.bg, border: border)
       # The REAL mode, always drawn — `Frame.mode_badge`'s contract. `project_controller`
       # hit-tests the bare `desc_insert_mode?`, so gating the draw on focus left a live
       # target on a border with nothing on it. Focus is carried by the border colour above.
-      Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 14, desc_insert_mode?)
+      Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 2, desc_insert_mode?)
       inner = rect.inset(1, 1)
       # Nothing written yet: the shared onboarding card instead of the void an empty TextArea
       # paints. Not in INSERT — the operator came here to type, and a "no description yet"
@@ -2690,7 +2695,7 @@ module Gori::Tui
     # visible. Network rows show their project/global source; the schema row shows what loaded.
     private def render_settings_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "PROJECT SETTINGS", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
       inner = rect.inset(1, 1)
       return if inner.h <= 0 || inner.w <= 0
       # Scrolled, not clipped: every selected row remains visible on a short terminal.
@@ -2871,8 +2876,8 @@ module Gori::Tui
 
     private def render_activity_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "ACTIVITY", bg: Theme.bg, border: Frame.pane_border(focused))
-      Frame.border_meta(screen, rect, "ACTIVITY", activity_meta,
+      Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.border_meta(screen, rect, "", activity_meta,
         fg: @act_rows.empty? ? Theme.muted : Theme.text_bright)
       render_activity_body(screen, rect, rect.inset(1, 1), focused)
     end

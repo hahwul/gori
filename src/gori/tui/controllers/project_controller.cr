@@ -205,7 +205,7 @@ module Gori::Tui
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       # Chip strip FIRST: it sits inside this tab's body rect (under the OVERVIEW band), so a
       # chip click reads as a body click unless it's claimed here. It lands on the STRIP, not
-      # in the card — clicking "DESCRIPTION" selects the sub-tab, it doesn't open the editor.
+      # in the card — clicking "Description" selects the sub-tab, it doesn't open the editor.
       if chip = @project_view.strip_chip_at(rect, mx, my)
         jump_subtab(ProjectView::PANES.index(chip) || 0)
         @host.request_focus(:subtabs)
@@ -268,7 +268,7 @@ module Gori::Tui
         @project_view.focus_pane(:desc)
         # NOR/INS chip on the DESCRIPTION card border toggles insert (same as ↵ / esc).
         if desc = @project_view.desc_card_rect(rect)
-          if Frame.mode_badge_hit(mx, my, desc.y, desc.right - 1, desc.x + 14,
+          if Frame.mode_badge_hit(mx, my, desc.y, desc.right - 1, desc.x + 2,
                @project_view.desc_insert_mode?)
             if @project_view.desc_insert_mode?
               @project_view.exit_desc_insert!

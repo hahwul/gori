@@ -93,7 +93,10 @@ module Gori::Tui
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :extract, body_focused)
       _, body = sub_layout(rect)
-      Frame.card(screen, body, "EXTRACT RULES", bg: Theme.bg, border: Frame.pane_border(body_focused))
+      # No border TITLE: the sub-strip immediately above reads `Extract`. The `Rules` pane keeps
+      # its `MATCH & REPLACE` title because that names what the rules DO — it is not the chip
+      # said twice, which is the only thing being dropped here.
+      Frame.card(screen, body, bg: Theme.bg, border: Frame.pane_border(body_focused))
       inner = body.inset(1, 1)
       return if inner.empty?
       if rules.empty?
@@ -117,7 +120,8 @@ module Gori::Tui
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :bindings, body_focused)
       _, body = sub_layout(rect)
-      Frame.card(screen, body, "BINDINGS", bg: Theme.bg, border: Frame.pane_border(body_focused))
+      # No border TITLE — the sub-strip above already reads `Bindings`. See render_extract.
+      Frame.card(screen, body, bg: Theme.bg, border: Frame.pane_border(body_focused))
       inner = body.inset(1, 1)
       return if inner.empty?
       if rows.empty?

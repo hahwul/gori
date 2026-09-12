@@ -912,6 +912,15 @@ module Gori::Tui
       end
     end
 
+    # The border run the CALLBACKS card carries instead of a title: the window's count, plus the
+    # eviction caveat when there is one. `Frame.border_meta` draws NOTHING when its run will not
+    # fit — where the retired card TITLE was merely clipped — so a narrow pane falls back to the
+    # bare count. Losing the caveat to width is survivable; losing the number with it would be
+    # the silent cap this pane exists to make visible.
+    private def draw_callback_meta(screen : Screen, rect : Rect, count : String, capped : String) : Nil
+      Frame.border_meta(screen, rect, "", count) if Frame.border_meta(screen, rect, "", capped).nil?
+    end
+
     private def render_callback_table(screen : Screen, rect : Rect, focused : Bool) : Nil
       ordered = ordered_callbacks
       filtering = !@filter.value.strip.empty?
@@ -920,9 +929,13 @@ module Gori::Tui
       # new" in the one tab whose whole job is evidence. Name the window, the total behind it,
       # and where the rest went.
       held = @evicted > 0 ? "#{@callbacks.size} of #{@callbacks.size + @evicted}" : @callbacks.size.to_s
-      title = filtering ? "CALLBACKS (#{ordered.size}/#{held})" : "CALLBACKS (#{held})"
-      title += " · #{@evicted} older kept in the project DB" if @evicted > 0
-      Frame.card(screen, rect, title, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
+      # No `CALLBACKS` on the border: the sub-tab chip one row above already says it, and the
+      # word was printed twice within five rows. What was fused to it — the count and the
+      # eviction caveat — is the part that carries information, so it moves to the border meta.
+      count = filtering ? "#{ordered.size}/#{held}" : held
+      capped = @evicted > 0 ? "#{count} · #{@evicted} older kept in the project DB" : count
+      Frame.card(screen, rect, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
+      draw_callback_meta(screen, rect, count, capped)
       inner = rect.inset(1, 1)
       if ordered.empty?
         # A FILTERED miss keeps its line. The card explains how the tab works, and an operator
@@ -1083,8 +1096,10 @@ module Gori::Tui
     end
 
     private def render_providers(screen : Screen, rect : Rect, focused : Bool) : Nil
-      Frame.card(screen, rect, "PROVIDERS", border: Frame.pane_border(focused), bg: Theme.bg)
-      Frame.border_meta(screen, rect, "PROVIDERS", @providers.size.to_s)
+      # No border TITLE: the sub-tab strip one row above already reads `Providers`, and a card
+      # repeating it printed the word twice in two rows. The count still rides the border.
+      Frame.card(screen, rect, border: Frame.pane_border(focused), bg: Theme.bg)
+      Frame.border_meta(screen, rect, "", @providers.size.to_s)
       inner = rect.inset(1, 1)
       if @providers.empty?
         screen.text(inner.x + 1, inner.y, "no providers — press a to add one (interactsh is prefilled)", Theme.muted, Theme.bg, width: inner.w - 2)

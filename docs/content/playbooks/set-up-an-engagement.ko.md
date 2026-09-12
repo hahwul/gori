@@ -27,7 +27,7 @@ gori run project create "Acme API" --description="staging engagement"
 
 ## 2. 스코프 그리기 {#2-draw-your-scope}
 
-**Project** 탭을 열고 **SCOPE** 카드로 이동한 뒤 `↓` 또는 `Enter`로 안으로 들어갑니다. 스코프는 **include**와 **exclude** 규칙의 목록이며, 각 규칙은 **host**, **string**, 또는 **regex**로 매칭합니다. 대상에 대한 include를 하나 추가하고, 관심 없는 노이즈를 exclude로 걸러 냅니다:
+**Project** 탭을 열고 **Scope** 서브탭으로 이동한 뒤 `↓` 또는 `Enter`로 안으로 들어갑니다. 스코프는 **include**와 **exclude** 규칙의 목록이며, 각 규칙은 **host**, **string**, 또는 **regex**로 매칭합니다. 대상에 대한 include를 하나 추가하고, 관심 없는 노이즈를 exclude로 걸러 냅니다:
 
 ```bash
 gori run project scope add --kind=include --type=host  --pattern=api.example.com
@@ -36,7 +36,7 @@ gori run project scope add --kind=exclude --type=regex --pattern='\.(css|js|png|
 
 스코프는 **허용 목록(allowlist)**으로 평가됩니다. include 규칙 중 하나 이상이 매칭하고 exclude 규칙이 하나도 매칭하지 않을 때 플로우가 스코프 안에 듭니다. 이 정의가 다음 두 단계를 좌우합니다.
 
-**체크포인트.** `gori run project scope`(또는 SCOPE 카드)에 두 규칙이 모두 나열됩니다. 아직 걸러지거나 차단되는 것은 없습니다. 경계를 서술했을 뿐입니다.
+**체크포인트.** `gori run project scope`(또는 Scope 서브탭)에 두 규칙이 모두 나열됩니다. 아직 걸러지거나 차단되는 것은 없습니다. 경계를 서술했을 뿐입니다.
 
 ## 3. 스코프 렌즈로 시야 좁히기 {#3-focus-your-view-with-the-scope-lens}
 
@@ -60,7 +60,7 @@ gori run project sandbox on
 
 ## 5. DNS를 건드리지 않고 호스트 리다이렉트 (선택) {#5-redirect-a-host-without-touching-dns-optional}
 
-대상의 이름이 공개 DNS가 아닌 다른 곳(스테이징 서버, 로컬 인스턴스)으로 해석되어야 한다면, **Project → HOST OVERRIDES** 카드에 **host override**를 추가하세요. TCP 다이얼 대상만 바꿀 뿐, SNI·인증서 이름·`Host` 헤더는 원래 이름 그대로라 서버는 평범한 요청으로 봅니다:
+대상의 이름이 공개 DNS가 아닌 다른 곳(스테이징 서버, 로컬 인스턴스)으로 해석되어야 한다면, **Project → Host overrides** 서브탭에 **host override**를 추가하세요. TCP 다이얼 대상만 바꿀 뿐, SNI·인증서 이름·`Host` 헤더는 원래 이름 그대로라 서버는 평범한 요청으로 봅니다:
 
 ```bash
 gori run project host-override add --host=api.example.com --ip=10.0.0.1

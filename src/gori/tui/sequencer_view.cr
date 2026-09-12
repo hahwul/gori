@@ -705,9 +705,11 @@ module Gori::Tui
     end
 
     private def render_config(screen : Screen, rect : Rect, focused : Bool) : Nil
-      Frame.card(screen, rect, "SEQUENCER", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
+      # No border TITLE — see MinerView#render_summary: the tab bar and the sub-tab strip above
+      # already name this tab. SAMPLES/ANALYSIS below keep theirs; those name panes.
+      Frame.card(screen, rect, border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       chord, name = @running ? {"^X", "STOP"} : {"^R", "RUN"}
-      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + "SEQUENCER".size + 4, chord, name, @running)
+      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + 2, chord, name, @running)
       x = rect.x + 2
       y = rect.y + 1
       # Guarded like every line below it: on a 1-2 row card `rect.y + 1` is the bottom
@@ -1014,7 +1016,7 @@ module Gori::Tui
       cfg, _, _ = pane_rects(rect)
       return nil if cfg.empty?
       chord, name = @running ? {"^X", "STOP"} : {"^R", "RUN"}
-      Frame.right_badge_hit(mx, my, cfg.y, cfg.right - 1, cfg.x + "SEQUENCER".size + 4,
+      Frame.right_badge_hit(mx, my, cfg.y, cfg.right - 1, cfg.x + 2,
         [{:run, chord, name}] of {Symbol, String, String})
     end
   end

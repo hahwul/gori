@@ -130,9 +130,10 @@ describe "ProjectView DESCRIPTION scrolling" do
       view.desc_scroll(100) # wheel to the bottom
       b2 = MemoryBackend.new(120, 30)
       view.render(Screen.new(b2), rect, focused: true)
-      b2.contains?("desc40").should be_true      # the tail scrolled into view
-      b2.contains?("desc01").should be_false     # the head scrolled off
-      b2.contains?("DESCRIPTION").should be_true # the card frame is intact (content stayed bounded)
+      b2.contains?("desc40").should be_true       # the tail scrolled into view
+      b2.contains?("desc01").should be_false      # the head scrolled off
+      b2.contains?("╭").should be_true            # the card frame is intact (content stayed bounded)
+      b2.contains?("DESCRIPTION").should be_false # the chip strip names the pane; the card does not
     end
   end
 end
@@ -353,10 +354,11 @@ describe "ProjectView PROJECT SETTINGS pane" do
       view.focus_pane(:settings) # the body shows one card at a time now
       b = MemoryBackend.new(120, 30)
       view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
-      # The card title follows the chip, not the first thing that was ever put in the card:
-      # it holds the scope lens, the sandbox, the network fields and (#823) the project's
+      # The card carries NO border title — the chip strip one row above already names the pane,
+      # and repeating it shouted the same word twice in two rows. What identifies this pane is
+      # its content: the scope lens, the sandbox, the network fields and (#823) the project's
       # `.proto` schema path.
-      b.contains?("PROJECT SETTINGS").should be_true
+      b.contains?("PROJECT SETTINGS").should be_false
       # The chip strip still names every sub-tab. Title Case since the strips were unified:
       # four of the six in gori already read `Findings`/`Callbacks`/`Sitemap`, and this one
       # shouted while the Rewriter's whispered — the renderer draws labels verbatim.
