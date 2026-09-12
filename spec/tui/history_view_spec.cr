@@ -240,6 +240,48 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # SIZE and DUR are memoized on their VALUE, like TIME and TYPE beside them — the reason the
+  # key is the value and never the row is that a captured flow is drawn PENDING first and
+  # settles later. A row-keyed memo would keep painting "—" for a response that has landed.
+  it "re-reads SIZE and DUR once a pending row's response lands" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = false
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/settling", http_version: "HTTP/1.1",
+          head: "GET /settling HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        view = HistoryView.new
+        view.reload(store)
+
+        draw = -> do
+          backend = MemoryBackend.new(120, 12)
+          view.render_list(Screen.new(backend), Rect.new(0, 0, 120, 12))
+          (0...12).map { |y| backend.row(y) }.join("\n")
+        end
+
+        # Pending: no response, so both cells are the em dash.
+        pending = draw.call
+        pending.should contain("—")
+        pending.should_not contain("3.5KB")
+
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+          body: "x".to_slice, content_type: "text/plain",
+          body_size: 3_600_i64, duration_us: 42_000_i64))
+        view.reload(store)
+
+        settled = draw.call
+        settled.should contain("3.5KB")
+        settled.should contain("42ms")
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
   it "loads a preview detail for the selected flow" do
     prev = Gori::Settings.history_preview
     begin

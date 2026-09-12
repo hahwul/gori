@@ -1336,7 +1336,7 @@ module Gori::Tui
 
     private def sync_preview(it : Interceptor::Item) : Nil
       win = detail_window_for(it)
-      @preview.source(win.total, ->(i : Int32) { Highlight.plain(win.line_at(i)) })
+      @preview.source(win.total, ->(i : Int32) { win.plain_at(i) })
     end
 
     # Scroll the read-only preview so a held body taller than the pane is fully readable WITHOUT

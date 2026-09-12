@@ -284,6 +284,24 @@ describe "Gori::Tui::ReadPane soft wrap" do
     b.fg_at(9, 1).should eq(Theme.text)
   end
 
+  # `styled_at` is resolved ONCE PER LOGICAL LINE, not once per drawn row — the same rule the
+  # plain `line_at` has always had, and the more important of the two since styling tokenises
+  # the line where materialising it only slices. A 4 KB JSON line filling a wrapped Intercept
+  # preview was being re-tokenised once per visual row, every frame.
+  it "resolves styled_at once per logical line however many rows it wraps to" do
+    text = "z" * 200 # 5 visual rows at w=40
+    pane = Gori::Tui::ReadPane.new(wrap: true)
+    pane.source(2, ->(_i : Int32) { text })
+    calls = [] of Int32
+    styled = ->(i : Int32) do
+      calls << i
+      Highlight::Line{Highlight::Span.new(text, Theme.text)}
+    end
+    render_wrapped(pane, w: 40, h: 8, styled_at: styled)
+    # 8 rows drawn: 5 from line 0 and 3 from line 1 — two resolutions, not eight.
+    calls.should eq([0, 1])
+  end
+
   # A single grapheme cluster wider than the pane still gets a row of its own — `Wrap.layout`
   # places a cluster whole or moves it whole, so it can never be cut in half.
   it "keeps a wide cluster whole across the break" do

@@ -218,6 +218,13 @@ module Gori::Tui
       @time_memo = {} of Int64 => String
       @mime_memo = {} of String => String
       @path_memo = {} of Int64 => String
+      # SIZE and DUR join them on the same argument, and they are the two that cost the most:
+      # `Fmt.size`/`Fmt.dur` pick a unit, divide into a Float64, round and interpolate — two
+      # fresh Strings per row per frame, which on a 50-row list was 42% of everything the row
+      # loop allocated. Keyed on the VALUE for the same reason the three above are: a pending
+      # row draws `—` and reads the real answer the moment its response lands.
+      @size_memo = {} of Int64 => String
+      @dur_memo = {} of Int64 => String
       @color_rev = 0_u64
       @detail = nil.as(Store::FlowDetail?)
       # How many FROZEN copies of the open flow exist (#1038) — the detail's marker, which
@@ -3183,14 +3190,27 @@ module Gori::Tui
     # lands. The unit is picked from the ROUNDED magnitude so a value just under a
     # boundary (e.g. 1023.6 KB) rolls up to the next unit ("1.0MB") instead of the
     # misleading "1024KB".
+    #
+    # Through the memo, like the timestamp and the MIME label beside it: the value is a
+    # frozen field of a settled flow, so this is the same String every frame it is drawn.
+    # `nil` short-circuits rather than taking a key, so the pending rows of a live capture
+    # never fill the map with one entry for "no response yet".
     private def fmt_size(bytes : Int64?) : String
-      Fmt.size(bytes)
+      return "—" unless bytes
+      @size_memo.fetch(bytes) do
+        @size_memo.clear if @size_memo.size >= @max_rows
+        @size_memo[bytes] = Fmt.size(bytes)
+      end
     end
 
     # Compact request→response latency (ms/s/m/h), bounded to ≤6 cols. "—" until the
     # response lands; a minute/hour tier keeps very slow flows from overflowing.
     private def fmt_dur(us : Int64?) : String
-      Fmt.dur(us)
+      return "—" unless us
+      @dur_memo.fetch(us) do
+        @dur_memo.clear if @dur_memo.size >= @max_rows
+        @dur_memo[us] = Fmt.dur(us)
+      end
     end
 
     # Compact response MIME — the useful subtype (json/html/png/js…), params dropped.

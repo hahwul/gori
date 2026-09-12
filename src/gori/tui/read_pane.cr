@@ -486,13 +486,21 @@ module Gori::Tui
       # downcased copy of the WHOLE logical line, so computing it inside the row loop would
       # downcase a viewport-filling line once per drawn row. Built only while a query is live.
       cached_lower = ""
+      # …and the STYLED line, which had been left out of that rule even though it is the more
+      # expensive of the two providers: `styled_at` tokenises the line where `line_at` only
+      # materialises it, and `draw_row` was calling it once per DRAWN ROW. A wrapped 4 KB JSON
+      # line filling the viewport was therefore re-tokenised ~`rect.h` times per frame — the
+      # exact multiplication `TextArea#styled_line` already memoises away for its own draw.
+      # Only the per-row SLICE of it is row-specific, and that stays in `draw_row`.
+      cached_styled = nil.as(Highlight::Line?)
       rows.each_with_index do |vr, i|
         if vr.li != cached_li
           cached_li = vr.li
           cached_line = @line_at.call(vr.li)
           cached_lower = @search_hl.empty? ? "" : cached_line.downcase
+          cached_styled = styled_at.try(&.call(vr.li))
         end
-        draw_row(screen, rect, rect.y + i, vr, cached_line, gw, cw, focused, styled_at, fg, bg)
+        draw_row(screen, rect, rect.y + i, vr, cached_line, gw, cw, focused, cached_styled, fg, bg)
         # Between the text and the chrome ON PURPOSE: the band goes OVER the drawn glyphs (it
         # is what makes a match findable at a glance) and UNDER the caret/selection, so the
         # match the ^F prompt just jumped to still shows where the cursor sits inside it.
@@ -538,11 +546,13 @@ module Gori::Tui
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
     end
 
-    # One drawn row: its gutter cell and its slice of `plain`, coloured through `styled_at` when
-    # the caller supplied one. The chrome (band + caret) goes over the top of it separately.
+    # One drawn row: its gutter cell and its slice of `plain`, coloured through `styled` when
+    # the caller supplied a `styled_at` provider. `styled` is the WHOLE logical line, already
+    # resolved once by the caller (see the memo in `render`) — this only slices it to the row.
+    # The chrome (band + caret) goes over the top of it separately.
     private def draw_row(screen : Screen, rect : Rect, y : Int32, vr : Wrap::Row, plain : String,
                          gw : Int32, cw : Int32, focused : Bool,
-                         styled_at : (Int32 -> Highlight::Line)?, fg : Color, bg : Color) : Nil
+                         styled : Highlight::Line?, fg : Color, bg : Color) : Nil
       if gw > 0
         # The line number rides the FIRST visual row of a logical line and nothing else (Burp
         # style). A continuation row gets a blank of the same width rather than no write at all,
@@ -554,8 +564,7 @@ module Gori::Tui
         end
       end
       whole = vr.a == 0 && vr.b >= plain.size
-      if styled_at
-        sl = styled_at.call(vr.li)
+      if sl = styled
         # Char offsets, not columns: `Wrap::Layout` decided the break by walking clusters and
         # handed back char indices, so slicing by column here would re-derive it with a second
         # measure — and the colours would land off the glyphs they belong to.

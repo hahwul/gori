@@ -42,9 +42,15 @@ begin
       method: method, target: target, http_version: "HTTP/1.1",
       head: "#{method} #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil,
       source: Gori::FlowSource::Kind::Proxy))
+    # Sizes and durations VARY per row on purpose: they are the two cells whose formatter
+    # divides, rounds and interpolates, and a fixture where every row carried the same
+    # response would let one memo entry stand in for four hundred. These are still stable
+    # per row ACROSS frames — which is the property the memo actually trades on.
     store.update_response(Gori::Store::CapturedResponse.new(
-      flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
-      body: "{}".to_slice, content_type: TYPES[i % TYPES.size]))
+      flow_id: id, status: 200 + (i % 5) * 100, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+      body: "{}".to_slice, content_type: TYPES[i % TYPES.size],
+      body_size: (37_i64 + i * 911) % 4_000_000,
+      duration_us: (1_200_i64 + i * 7_919) % 90_000_000))
   end
   view = HistoryView.new
   view.reload(store)
