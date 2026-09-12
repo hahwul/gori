@@ -123,6 +123,11 @@ module Gori::Tui
     end
 
     # --- input ---
+    # The FINDINGS `/` filter bar (a RowFilter, like Miner's and Authorize's).
+    def body_takes_text? : Bool
+      querying?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return handle_empty_key(ev) if @view.empty?
       if ev.key.space? && !ev.ctrl? && !ev.alt?

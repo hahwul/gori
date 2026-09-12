@@ -334,6 +334,12 @@ module Gori::Tui
     # layout is active. Runs BEFORE the Body keymap, so the esc branch shadows
     # body.to-menu ONLY while marks are set — with none set, esc still pops to the tab bar.
     # (The QL bar claims every key ahead of this while it's up, so filter-esc is unaffected.)
+    # The `/` query bar. The shell routes its keys itself (handle_query_key, above the digit
+    # arm), but the gate has to agree with it or a typed `3` would jump tabs on its way there.
+    def body_takes_text? : Bool
+      @history.querying?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return false if @host.overlay == :detail
       return false if ev.ctrl? || ev.alt?

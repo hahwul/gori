@@ -27,7 +27,9 @@ module Gori::Tui
     Confirm
     Browser
     Choice
-    TabsMore
+    # The `0` key's Go-to picker (TabGotoPicker) — the type-to-filter list over the whole tab
+    # catalog that replaced the ⋯ dropdown's `TabsMore`.
+    TabGoto
     ComparerPick
     RepeaterSubtab
     Links

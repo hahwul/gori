@@ -25,7 +25,16 @@ module Gori::Settings
   DEFAULT_ISSUES_PREVIEW       = false
   DEFAULT_HISTORY_LIST_ORDER   = "newest" # "newest" | "oldest" — list sort direction
   DEFAULT_SITEMAP_EXPAND_DEPTH = -1       # -1 = all
-  DEFAULT_TAB_NUMBERS          = false    # paint `1:`…`9:` on the tab bar (the 1-9 jump's targets)
+  # On: the tab bar is nine NUMBERED slots and `1`-`9` is the primary way to move between
+  # them, so the bar has to spell the keys it answers to. Kept as a setting (settings:layout)
+  # for an operator who wants the names alone back.
+  DEFAULT_TAB_NUMBERS = true # paint `1:`…`9:` on the tab bar (the 1-9 jump's targets)
+  # On: the tab bar is capped at nine NUMBERED SLOTS — settings:tabs refuses a tenth ✓ and a
+  # layout saved by an older build is truncated to its first nine (the rest stay reachable
+  # behind `0`). Off: the bar is unbounded and scrolls with `‹`/`›` as it used to, the digits
+  # still reach its first nine tabs, and `0` still opens the Go-to picker. Default ON, because
+  # a tab the numbers cannot reach is a tab the bar cannot teach.
+  DEFAULT_TAB_SLOTS = true
   # Statusline (settings:statusline): opt-in bottom row that runs a command on an
   # interval and shows its (ANSI-coloured) stdout. Off by default; no cost until enabled.
   DEFAULT_STATUSLINE_ENABLED  = false
@@ -96,6 +105,7 @@ module Gori::Settings
   class_property history_list_order : String = DEFAULT_HISTORY_LIST_ORDER
   class_property sitemap_expand_depth : Int32 = DEFAULT_SITEMAP_EXPAND_DEPTH
   class_property? tab_numbers : Bool = DEFAULT_TAB_NUMBERS # tab bar shows `N:` before the first nine tabs
+  class_property? tab_slots : Bool = DEFAULT_TAB_SLOTS     # tab bar is capped at nine numbered slots
   # Statusline (settings:statusline). command is run via `/bin/sh -c` on statusline_interval
   # seconds; its stdout (first line) is rendered at the very bottom of the TUI.
   class_property? statusline_enabled : Bool = DEFAULT_STATUSLINE_ENABLED
@@ -166,6 +176,7 @@ module Gori::Settings
       self.sitemap_expand_depth = normalize_sitemap_depth(d)
     end
     self.tab_numbers = load_bool_h(o, "tab_numbers", tab_numbers?)
+    self.tab_slots = load_bool_h(o, "tab_slots", tab_slots?)
   end
 
   # Whether the statusline row is actually LIVE — enabled AND given something to run.
@@ -271,6 +282,7 @@ module Gori::Settings
     self.history_list_order = DEFAULT_HISTORY_LIST_ORDER
     self.sitemap_expand_depth = DEFAULT_SITEMAP_EXPAND_DEPTH
     self.tab_numbers = DEFAULT_TAB_NUMBERS
+    self.tab_slots = DEFAULT_TAB_SLOTS
   end
 
   # Omit layout when every pref is factory default (quiet install; merge-safe section).
@@ -280,7 +292,8 @@ module Gori::Settings
            issues_preview == DEFAULT_ISSUES_PREVIEW &&
            history_list_order == DEFAULT_HISTORY_LIST_ORDER &&
            sitemap_expand_depth == DEFAULT_SITEMAP_EXPAND_DEPTH &&
-           tab_numbers? == DEFAULT_TAB_NUMBERS
+           tab_numbers? == DEFAULT_TAB_NUMBERS &&
+           tab_slots? == DEFAULT_TAB_SLOTS
       j.field "layout" do
         j.object do
           j.field "history_preview", history_preview
@@ -289,6 +302,7 @@ module Gori::Settings
           j.field "history_list_order", history_list_order
           j.field "sitemap_expand_depth", sitemap_expand_depth
           j.field "tab_numbers", tab_numbers?
+          j.field "tab_slots", tab_slots?
         end
       end
     end

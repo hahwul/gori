@@ -339,6 +339,12 @@ module Gori::Tui
     end
 
     # --- keys ---
+    # The rules sub-tab's preview INPUT pane is a real editor (it holds an HTTP message, which
+    # cannot be typed without spaces — or digits). Everything else here is a list.
+    def body_takes_text? : Bool
+      @sub == :rules && @focus == :preview_in
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return handle_sub_key(ev) unless @sub == :rules
       case @focus

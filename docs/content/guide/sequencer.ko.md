@@ -14,7 +14,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
   <figcaption>캡처한 플로우를 <strong>Sequencer</strong>로 보내면 session cookie를 자동으로 감지하고, 수집을 시작하기 전에 샘플 크기와 concurrency를 설정할 수 있습니다.</figcaption>
 </figure>
 
-**Sequencer** 탭은 기본적으로 숨겨져 있습니다. 탭 바의 `⋯` 메뉴나 커맨드 팔레트(`Ctrl-P` → **Go to Sequencer**)에서 드러내세요.
+**Sequencer** 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "seq"를 입력하거나 커맨드 팔레트(`Ctrl-P` → **Go to Sequencer**)를 쓰세요. Preferences → **Network & Tabs** → **Tabs**에서 아홉 슬롯 중 하나를 내줄 수도 있습니다.
 
 ## 토큰을 넣는 두 가지 방법 {#two-ways-to-feed-it}
 

@@ -1263,6 +1263,22 @@ module Gori::Tui
       false
     end
 
+    # The focused body pane is TAKING TEXT — an editor in insert mode, a query/filter bar, a
+    # field being typed into. The shell asks this before claiming the digit family
+    # (`Runner#text_input_active?`): `1`-`9` are the tab bar's slots everywhere EXCEPT where a
+    # bare printable is a character, which is the same set of places `space` is a literal.
+    #
+    # Defaults to `editor_captures_tab?` — very nearly the same question, asked for Tab — so a
+    # controller whose only text pane is a real editor needs no override. The ones that DO
+    # override have a text pane Tab does not capture: a single-line field, a READ/INS split
+    # where Tab is a focus move, or a `/` query bar the controller owns rather than the shell.
+    #
+    # Getting this wrong is quiet in one direction and loud in the other: too broad and a digit
+    # stops jumping in some pane; too narrow and a digit stops TYPING in a field. Prefer true.
+    def body_takes_text? : Bool
+      editor_captures_tab?
+    end
+
     def handle_editor_tab(ev : Termisu::Event::Key) : Bool
       false
     end

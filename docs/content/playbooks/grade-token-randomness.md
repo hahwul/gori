@@ -13,7 +13,7 @@ A predictable session cookie, CSRF token, or reset code is one an attacker can f
 
 ## 1. Point the Sequencer at a token
 
-The Sequencer tab is hidden by default. It's a workbench you reach for occasionally, not part of the daily loop. Reveal it from the tab-bar `⋯` menu, or with `Ctrl-P` → **Go to Sequencer**.
+The Sequencer tab is off the bar by default. It's a workbench you reach for occasionally, not part of the daily loop — press **`0`** and type "seq", or `Ctrl-P` → **Go to Sequencer**.
 
 Feed it from a captured flow: in **History**, select the flow whose response sets the token, then `Space` → **Send to Sequencer**. gori auto-detects the likely session cookie and drops you on the **CONFIG** pane. Press `c` to reconfigure the token location if the guess is wrong: pick one of Cookie, Header, Regex, Position, or JSONPath.
 

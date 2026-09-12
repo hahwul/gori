@@ -381,6 +381,16 @@ module Gori::Tui
     # Returns false when the key should fall through to the shell keymap (rebindable
     # verbs + Global breath). READ panes own structure (nav, i/↵ INS, space menu, and
     # pane-local `x`); command letters like `y`/`d`/`p` and unmatched bare keys defer.
+    # The pane's own INS/READ mode, asked of the view (`pane_insert?` also answers true for the
+    # request pane's HEX editor and its gRPC field form). Broader than `editor_captures_tab?`,
+    # which is false on the single-line TARGET/SNI field — where a digit is very much a
+    # character, ports being what they are.
+    def body_takes_text? : Bool
+      v = current_view
+      return false unless v
+      v.pane_insert?(v.focus)
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       if ev.ctrl? && key.lower_p?

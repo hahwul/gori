@@ -12,8 +12,12 @@ module Gori::Tui
   # the FULL catalog (hidden tabs too, so they can be re-enabled), reconciled against
   # Settings.tab_prefs. The Runner persists the committed copy via Settings.save.
   #
-  #   ✓ Project      ▎ selected, shown
-  #   · Miner           hidden
+  #   1 ✓ Project    ▎ selected, in slot 1
+  #   2 ✓ Target
+  #   · Miner          off the bar — reachable with `0`, not with a digit
+  #
+  # The bar is NINE numbered slots (`Chrome::MAX_SLOTS`), so the tenth ✓ is refused the way
+  # hiding the last one is, and the numbers renumber live as ⇧K/⇧J reorder.
   class TabsOverlay < Overlay
     # Injected at the open-site (Runner#open_settings): ^P leaves the modal stack for the
     # command palette, `r` raises the reset confirm, and a refused hide reports through the
@@ -40,7 +44,19 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ select · space show/hide · ⇧K/⇧J reorder · r reset · ↵ save · esc cancel"
+      # The `0` clause is INFORMATION, not a key this card takes (the modal owns its own
+      # keys): it is the answer to "where did the tab I just hid go", asked at the exact
+      # moment the operator hides one.
+      "↑/↓ select · space show/hide · ⇧K/⇧J reorder · r reset · ↵ save · esc cancel · 0 reaches hidden tabs"
+    end
+
+    # The row's slot number, or nil for a hidden tab. The bar is nine numbered slots and the
+    # digit is how you reach one, so the editor has to show the arrangement it is editing —
+    # a ✓ alone said "on the bar" without saying WHERE, and reordering renumbers live.
+    def slot_of(i : Int32) : Int32?
+      return nil unless @items[i]?.try(&.[2])
+      n = @items[0...i].count { |(_, _, v)| v } + 1
+      n <= Chrome::MAX_SLOTS ? n : nil # with the cap off the bar runs past the nine digits
     end
 
     # ↑/↓ move the selection and ⇧↑/⇧↓ reorder the selected tab; ↵ saves+applies, esc
@@ -72,7 +88,7 @@ module Gori::Tui
     # visibility, behind the injected confirm.
     private def handle_char(c : Char) : Nil
       case c
-      when ' '      then on_toast.try(&.call("keep at least one tab visible")) unless toggle_selected
+      when ' '      then on_toast.try(&.call(toggle_refusal)) unless toggle_selected
       when 'k'      then select_move(-1)
       when 'K'      then move_selected(-1)
       when 'j'      then select_move(1)
@@ -153,14 +169,26 @@ module Gori::Tui
       @items.count { |(_, _, v)| v }
     end
 
-    # Flip show/hide of the selected tab. Refuses (false) to hide the last visible one
-    # so the bar can never go empty; the caller toasts the refusal.
+    # Flip show/hide of the selected tab. Refuses (false) at BOTH ends: the last visible one
+    # (the bar can never go empty) and the tenth ✓ (the bar is nine numbered slots — see
+    # `Chrome::MAX_SLOTS`). The caller toasts whichever refusal fired.
     def toggle_selected : Bool
       return false unless item = @items[@selected]?
       sym, label, vis = item
       return false if vis && visible_count <= 1
+      return false if !vis && Settings.tab_slots? && visible_count >= Chrome::MAX_SLOTS
       @items[@selected] = {sym, label, !vis}
       true
+    end
+
+    # Why the space just refused — the two ends read nothing alike, and "keep at least one tab
+    # visible" on a full bar would send the operator looking for a tab they had lost.
+    private def toggle_refusal : String
+      if (item = @items[@selected]?) && !item[2]
+        "#{Chrome::MAX_SLOTS} tabs on the bar is the cap — hide one first"
+      else
+        "keep at least one tab visible"
+      end
     end
 
     # Move the selected row by ±1 (no wrap); selection follows the moved row so a
@@ -211,7 +239,7 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, "TAB BAR", border: Theme.border_focus)
-      meta = "#{visible_count}/#{@items.size} shown"
+      meta = Settings.tab_slots? ? "#{visible_count}/#{Chrome::MAX_SLOTS} slots · 0 go to" : "#{visible_count} shown · 0 go to"
       Frame.border_meta(screen, box, "TAB BAR", meta, bg: Theme.panel)
 
       list_top = box.y + 2
@@ -231,9 +259,15 @@ module Gori::Tui
       bg = sel ? Theme.accent_bg : Theme.panel
       screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
       screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      screen.cell(box.x + 3, py, vis ? '✓' : '·', vis ? Theme.accent : Theme.muted, bg)
+      # `1 ✓ Project` — the slot number leads, because the number is what the operator will
+      # press. A hidden row leaves the column blank rather than drawing a placeholder: the `·`
+      # in the next column already says "off the bar".
+      if slot = slot_of(i)
+        screen.text(box.x + 3, py, slot.to_s, Theme.accent, bg)
+      end
+      screen.cell(box.x + 5, py, vis ? '✓' : '·', vis ? Theme.accent : Theme.muted, bg)
       fg = vis ? (sel ? Theme.text_bright : Theme.text) : Theme.muted
-      screen.text(box.x + 5, py, label, fg, bg, width: box.w - 7)
+      screen.text(box.x + 7, py, label, fg, bg, width: {box.w - 9, 1}.max)
     end
 
     # Row index under (mx,my) — inverts render's windowed layout (list at box.y+2, scrolled

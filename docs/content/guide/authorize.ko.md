@@ -9,7 +9,7 @@ group = "워크벤치"
 
 접근 제어 결함은 대부분 하나의 세션만 보고 있으면 드러나지 않습니다. 관리자로 로그인한 상태에서 `/admin/users`가 목록을 돌려주면 다 정상으로 보입니다. *익명* 클라이언트가 무엇을 받는지, 읽기 전용 사용자는, 옆 테넌트는 어떤지 물어본 적이 없기 때문입니다. **Authorize**가 그것을 묻습니다. 이미 캡처해 둔 요청을 여러 아이덴티티로 재전송하고, 각 응답을 기준선(baseline)과 비교합니다. 기준선이 받은 것을 그대로 받는 아이덴티티가 있다면 인가 우회일 가능성이 높습니다. Burp의 Autorize / Auth Analyzer, AuthMatrix에 해당하는 gori의 도구입니다.
 
-**Authorize** 탭은 기본적으로 숨겨져 있습니다. 탭 바의 `⋯` 메뉴, 커맨드 팔레트(`Ctrl-P` → **Go to Authorize**), 또는 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs**에서 표시할 수 있습니다.
+**Authorize** 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "auth"를 입력하거나, 커맨드 팔레트(`Ctrl-P` → **Go to Authorize**)를 쓰거나, Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs**에서 아홉 슬롯 중 하나를 내주세요.
 
 ## 아이덴티티란 {#what-an-identity-is}
 

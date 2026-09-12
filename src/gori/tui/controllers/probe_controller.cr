@@ -304,6 +304,11 @@ module Gori::Tui
 
     # Detail scroll + list preview Tab focus. List nav is verb-driven; when detail is
     # closed we claim Tab (preview) only. When open, ↑/↓ scroll the detail pane.
+    # The findings `/` query bar.
+    def body_takes_text? : Bool
+      querying?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       if rules_tab?

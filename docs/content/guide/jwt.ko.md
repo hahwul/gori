@@ -14,7 +14,7 @@ group = "워크벤치"
   <figcaption><strong>JWT</strong> 탭은 토큰을 실시간으로 디코드하고(header, payload, signature), 바로 보낼 수 있는 공격 페이로드(alg:none, weak-secret, header injection)를 나열합니다.</figcaption>
 </figure>
 
-어디서든(예: **History** 상세 패널, **Notes** 등) 토큰을 선택하고 `Space` → **Send to JWT**를 누르면 그 토큰으로 새 워크벤치 서브탭을 채웁니다. 세션은 휘발성이라 디스크에는 아무것도 기록되지 않습니다. 탭을 숨겼다면 탭 바의 `⋯` 메뉴, 커맨드 팔레트(`Ctrl-P` → **Go to JWT**), 또는 Preferences에서 다시 드러내세요.
+어디서든(예: **History** 상세 패널, **Notes** 등) 토큰을 선택하고 `Space` → **Send to JWT**를 누르면 그 토큰으로 새 워크벤치 서브탭을 채웁니다. 세션은 휘발성이라 디스크에는 아무것도 기록되지 않습니다. 이 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "jwt"를 입력하거나, 커맨드 팔레트(`Ctrl-P` → **Go to JWT**)를 쓰거나, Preferences에서 슬롯을 내주세요.
 
 ## 두 개의 렌즈 {#two-lenses}
 

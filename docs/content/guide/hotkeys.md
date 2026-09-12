@@ -60,6 +60,48 @@ A row's chord shows `(unbound)` when nothing is bound. The `●` marker means yo
 
 Two actions may share a key only if they fire in **different** places. That's by design (`s` is "scope lens" almost everywhere but "swap" on the Comparer tab, `c` is "toggle capture" everywhere except the Intercept queue where it cycles the catch direction). The editor blocks only a **same-place** collision, because there the keymap could keep just one of them.
 
+## The Digit Family {#digits}
+
+The tab bar is **nine numbered slots**, and the numbers are the primary way to move:
+
+| Key | Action |
+|-----|--------|
+| `1`–`9` | Jump to slot N on the tab bar |
+| `0` | **Go to tab…** — a type-to-filter list of all 21 tabs, the nine slots and the hidden ones |
+| `⇧1`–`⇧9` | Jump to sub-tab N of the active tab |
+| `⇧0` | **Find sub-tab…** — the same picker `f` opens from the strip |
+
+These work from **everywhere** — the tab bar, the sub-tab strip, a list body, a drill-in
+detail, a read-only pane — with one exception: while a field is taking text (an editor in
+INS, a `/` query bar, a line prompt, a picker's filter, the CVSS scorer), a digit is a
+character. It is the same rule `Space` follows: where `Space` types a space, `3` types a 3.
+
+The bar paints the numbers by default (**Preferences → Layout → Tab numbers**, `settings:layout`).
+The far-right pill reads `0:+12` — the key, and how many tabs are behind it.
+
+### Nine slots, and the tenth tab
+
+`settings:tabs` refuses a tenth ✓ and says so; hide one first. A layout saved by an older
+build (the bar used to be unbounded) is truncated to its **first nine, in your own order**,
+and gori names the folded tabs once on the launch that does it.
+
+One tab can still ride past the ninth slot: a hidden tab you jumped to with `0` sits at the
+far right of the bar, **without a number**, until you leave it. It is where you are standing,
+not a slot you arranged — and no digit points at it.
+
+If you want the old unbounded bar back, turn off **Preferences → Layout → Tab bar slots**.
+The bar then scrolls with `‹` `›` again, `1`–`9` still reach its first nine tabs, and `0`
+still reaches every tab.
+
+### Keyboard layouts
+
+A terminal speaking the **kitty keyboard protocol** reports `⇧3` as `3` plus a shift flag,
+and gori binds that. Every other terminal sends the shifted digit as a **character** — `#` on
+a US layout — which gori folds back onto `⇧3`. On a **non-US layout** that character is a
+different one, so `⇧1`–`⇧9` work where your terminal reports the shift modifier and not
+otherwise. Both fallbacks are always live: **`f`** on the sub-tab strip opens the same picker
+`⇧0` does, and `Ctrl-1`…`Ctrl-9` is the alias for `⇧1`–`⇧9` on terminals that deliver it.
+
 ## Reserved Keys
 
 Some keys can't be rebound because the terminal or gori needs them:
@@ -67,7 +109,7 @@ Some keys can't be rebound because the terminal or gori needs them:
 - **Quit**: `Ctrl-C`, `Ctrl-D`.
 - **Indistinguishable from named keys**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **Structural**: `Enter`, `Esc`, `Tab`, `Backspace`, `Space` (the space-menu leader), and a bare `:` (the command line).
-- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close the sub-tab, or every marked one), `Ctrl-Z` (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **Reveal whitespace**, **New repeater request**, and **New fuzz session** aren't listed in the editor. Their key is fixed.
+- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close the sub-tab, or every marked one), `Ctrl-Z` (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab — the **alias** for `⇧1`–`⇧9`, see [The digit family](#digits)). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **Reveal whitespace**, **New repeater request**, and **New fuzz session** aren't listed in the editor. Their key is fixed.
 
   You can't move an individual key out of that family, but you *can* give the whole family a second modifier; see [Command modifier](#command-modifier) below.
 
@@ -85,7 +127,7 @@ Today the per-OS defaults are identical: in a terminal, `Ctrl`+letter chords rea
 
 The chord family listed under *Reserved keys* is fixed because a hardcoded guard runs before the keymap. That's a problem when your terminal never delivers the Ctrl form at all:
 
-- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals**: there is no control character for it, so the sub-tab jumps simply never arrive. You never need it: on a sub-tab strip, **`f`** lists and searches every open sub-tab, from whichever chip you are standing on. (The **`⌕`** at the strip's left edge opens the same list; click it, or press `←` from the first chip.)
+- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals**: there is no control character for it, so the sub-tab jumps simply never arrive. You never need it: **`⇧1`–`⇧9`** is the primary sub-tab jump (see [The digit family](#digits)), and on a sub-tab strip **`f`** lists and searches every open sub-tab, from whichever chip you are standing on. (The **`⌕`** at the strip's left edge opens the same list; click it, or press `←` from the first chip.)
 - **A multiplexer eats the chord first.** tmux's default prefix is `Ctrl-B`, which gori also uses for reveal-whitespace.
 
 **Preferences → Editor & Keys → Keys → Command modifier** (`Ctrl-,`), or **`settings:keys`** in the palette, switches that family between `Ctrl` and `Option (⌥)`. It is an **alias, not a swap**: with Option selected, `⌥P` opens the palette *and* `^P` still does. Only the advertised form changes: status hints, the Help tab and the palette all start showing `⌥P`, `⌥N`, `⌥1-9`.
@@ -128,7 +170,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 ## Limitations
 
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
-- Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family, structural keys (`esc`, `↵`, arrows, `↹`), and a pane-local letter such as `x` in an editor.
+- Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias), structural keys (`esc`, `↵`, arrows, `↹`), and a pane-local letter such as `x` in an editor.
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
 - Pane-local keys that share a letter (Repeater response `x` = hex vs request/target `x` = select line) stay controller-owned so both meanings can coexist.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).

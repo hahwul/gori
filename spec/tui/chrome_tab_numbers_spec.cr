@@ -27,6 +27,33 @@ describe "Chrome tab-bar numbers" do
     numbered[9][1].w.should eq(plain[9][1].w) # the tenth carries no number — no digit reaches it
   end
 
+  it "paints the `0:` pill in the same two tones as a numbered tab" do
+    # The pill is the one chip on the row whose whole job is to teach a key, and it used to
+    # paint that key in a flat `Theme.muted` — so the bar said "the number is the lesser half
+    # of a label" nine times and unsaid it in the tenth position.
+    backend = MemoryBackend.new(260, 1)
+    Chrome.render_menu(Screen.new(backend), rect, active_tab: :history, focused: true,
+      numbered: true, hidden_count: 12)
+    row = backend.row(0)
+    x = row.index(Chrome.more_label(12)).not_nil!
+    backend.fg_at(x, 0).should eq(Chrome.menu_number_ink)     # `0`, a step dimmer
+    backend.fg_at(x + 1, 0).should eq(Chrome.menu_number_ink) # `:`, same run
+    backend.fg_at(x + 2, 0).should eq(Theme.muted)            # `+12`, the label half
+  end
+
+  it "drops to one bold ink once the pill holds focus" do
+    # A dimmed run inside the solid gold fill would read the number as secondary on the one
+    # chip the operator is standing on — the active tab does not split either.
+    backend = MemoryBackend.new(260, 1)
+    Chrome.render_menu(Screen.new(backend), rect, active_tab: :history, focused: true,
+      numbered: true, hidden_count: 12, more_focused: true)
+    row = backend.row(0)
+    x = row.index(Chrome.more_label(12)).not_nil!
+    ink = Theme.ink_on(Theme.focus_gold)
+    backend.fg_at(x, 0).should eq(ink)
+    backend.fg_at(x + 2, 0).should eq(ink)
+  end
+
   it "paints the number on the bar and dims it beside the name" do
     backend = MemoryBackend.new(260, 1)
     Chrome.render_menu(Screen.new(backend), rect, active_tab: :history, focused: true, numbered: true)

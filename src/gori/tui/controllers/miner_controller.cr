@@ -118,6 +118,11 @@ module Gori::Tui
     end
 
     # --- input ---
+    # The RESULTS `/` filter bar.
+    def body_takes_text? : Bool
+      querying?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
       if v.nil?

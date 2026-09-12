@@ -84,6 +84,14 @@ class FakeExecContext < Gori::Verb::ExecContext
     @subtab_search_tab_count
   end
 
+  def subtab_jump(n : Int32) : Nil
+    rec(:subtab_jump, n)
+  end
+
+  def open_tab_goto : Nil
+    rec(:open_tab_goto)
+  end
+
   def repeater_toggle_http2 : Nil
     rec(:repeater_toggle_http2)
   end

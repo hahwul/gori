@@ -9,7 +9,7 @@ group = "Workbenches"
 
 The **Cookie** tab is a workbench for framework signed session cookies: **Flask** (itsdangerous), **Rack**, and **Django**. Decode one into its parts, verify a candidate signing secret or brute-force it from a wordlist, then edit the session and re-sign it. It goes further than the [Decoder](/guide/decoder/)'s read-only `cookie-decode` / `flask-decode` / `rack-decode` / `django-decode` converters, which only show you the parts.
 
-Select a cookie anywhere (a **History** detail pane, **Notes**, …) and `Space` → **Send to Cookie** to seed a new workbench sub-tab with it. Sessions are ephemeral: nothing is written to disk. If you have hidden the tab, reveal it again from the tab-bar `⋯` menu, the command palette (`Ctrl-P` → **Go to Cookie**), or Preferences.
+Select a cookie anywhere (a **History** detail pane, **Notes**, …) and `Space` → **Send to Cookie** to seed a new workbench sub-tab with it. Sessions are ephemeral: nothing is written to disk. The tab is off the bar by default: press **`0`** and type "cookie", use the command palette (`Ctrl-P` → **Go to Cookie**), or give it a slot in Preferences.
 
 ## Two Lenses
 

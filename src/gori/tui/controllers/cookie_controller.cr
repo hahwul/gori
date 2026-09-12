@@ -343,6 +343,17 @@ module Gori::Tui
     end
 
     # --- key handling ---
+    # Every pane `route_pane` sends characters to — the INPUT editor in INS, plus the PAYLOAD,
+    # OPTS (salt) and SECRET fields. DECODED / OUTPUT are read-only.
+    def body_takes_text? : Bool
+      s = cur
+      case s.pane
+      when :input                   then s.input_mode == InputMode::Insert
+      when :payload, :opts, :secret then true
+      else                               false
+      end
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char

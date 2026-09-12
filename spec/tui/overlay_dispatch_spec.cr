@@ -27,7 +27,7 @@ end
 # controllers compare `@host.overlay` against these symbols, and every symbol handed to
 # from_sym now RAISES if it is not a member (it used to be a silent no-op).
 private EXPECTED_OVERLAY_SYMS = {
-  :none, :detail, :palette, :issue_new, :confirm, :browser, :choice, :tabs_more,
+  :none, :detail, :palette, :issue_new, :confirm, :browser, :choice, :tab_goto,
   :comparer_pick, :repeater_subtab, :links, :link_pick, :preferences,
   :settings, :tabs, :hosts, :env, :hotkeys, :help, :notifications, :passthrough, :listeners, :agents, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
@@ -129,6 +129,10 @@ private MIGRATED_KINDS = [
   OverlayKind::Retest,
   # …and the one-field card its assertion is typed into, born on the seam too.
   OverlayKind::RetestAssert,
+  # TabGoto — the `0` key's Go-to picker. It took the place of the tab bar's ⋯ dropdown
+  # (`TabsMore`), which was the LAST unmigrated member of MODAL_OVERLAYS beside the palette;
+  # the picker is an Overlay, so it rides the object seam like everything else here.
+  OverlayKind::TabGoto,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and

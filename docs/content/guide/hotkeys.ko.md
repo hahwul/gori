@@ -60,6 +60,47 @@ Ctrl-P  → settings:hotkeys
 
 두 동작은 **다른** 위치에서 발생할 때만 키를 공유할 수 있습니다. 이는 의도된 동작입니다(`s`는 거의 모든 곳에서 "scope 렌즈"지만 Comparer 탭에서는 "swap", `c`는 Intercept 큐에서 catch 방향을 순환하는 것을 제외하면 어디서나 "toggle capture"). 에디터는 **같은 위치**의 충돌만 막습니다. 거기서는 키맵이 둘 중 하나만 남길 수 있기 때문입니다.
 
+## 숫자 키 패밀리 {#digits}
+
+탭 바는 **번호가 매겨진 아홉 개의 슬롯**이고, 탭을 옮겨 다니는 기본 수단은 그 숫자입니다.
+
+| 키 | 동작 |
+|----|------|
+| `1`–`9` | 탭 바의 N번 슬롯으로 점프 |
+| `0` | **Go to tab…** — 21개 탭 전체(슬롯 아홉 개 + 숨은 탭)를 타이핑으로 걸러 고르는 목록 |
+| `⇧1`–`⇧9` | 현재 탭의 N번 서브탭으로 점프 |
+| `⇧0` | **Find sub-tab…** — 스트립의 `f`가 여는 것과 같은 피커 |
+
+이 키들은 **어디서나** 동작합니다 — 탭 바, 서브탭 스트립, 리스트 본문, 드릴인 상세, 읽기 전용
+페인. 예외는 하나뿐입니다. 필드가 텍스트를 받는 동안(INS 상태의 에디터, `/` 쿼리 바, 한 줄
+프롬프트, 피커의 필터, CVSS 계산기)에는 숫자가 문자입니다. `Space`와 같은 규칙입니다.
+`Space`가 공백을 입력하는 자리에서는 `3`도 3을 입력합니다.
+
+바는 기본적으로 번호를 그립니다(**Preferences → Layout → Tab numbers**, `settings:layout`).
+맨 오른쪽 알약은 `0:+12`로 읽힙니다 — 키, 그리고 그 뒤에 몇 개가 있는지.
+
+### 아홉 슬롯, 그리고 열 번째 탭
+
+`settings:tabs`는 열 번째 ✓를 거부하고 그 이유를 알려줍니다. 하나를 먼저 숨기세요. 이전
+빌드가 저장한 레이아웃(예전 바에는 상한이 없었습니다)은 **사용자 자신의 순서대로 앞의 아홉
+개**로 잘리고, 잘린 탭 이름을 그 실행에서 한 번 알려줍니다.
+
+한 탭만은 아홉 번째 슬롯 너머에 설 수 있습니다. `0`으로 점프해 간 숨은 탭은 그 탭을 떠날
+때까지 바의 맨 오른쪽에 **번호 없이** 놓입니다. 사용자가 배치한 슬롯이 아니라 지금 서 있는
+자리이고, 어떤 숫자도 그것을 가리키지 않습니다.
+
+상한 없는 예전 바를 되돌리려면 **Preferences → Layout → Tab bar slots**를 끄세요. 바는 다시
+`‹` `›`로 스크롤하고, `1`–`9`는 여전히 앞의 아홉 탭에 닿고, `0`은 여전히 모든 탭에 닿습니다.
+
+### 키보드 레이아웃
+
+**kitty 키보드 프로토콜**을 쓰는 터미널은 `⇧3`을 `3` + shift 플래그로 보고하고, gori는 그것을
+바인딩합니다. 다른 터미널은 시프트된 숫자를 **문자**로 보냅니다 — US 레이아웃에서는 `#` —
+그래서 gori가 그것을 다시 `⇧3`으로 접습니다. **비(非)US 레이아웃**에서는 그 문자가 달라지므로,
+`⇧1`–`⇧9`는 터미널이 shift 모디파이어를 보고하는 경우에만 동작합니다. 대체 수단은 항상 살아
+있습니다. 서브탭 스트립의 **`f`**는 `⇧0`과 같은 피커를 열고, `Ctrl-1`…`Ctrl-9`는 그것을
+전달하는 터미널에서 `⇧1`–`⇧9`의 별칭입니다.
+
 ## 예약된 키 {#reserved-keys}
 
 일부 키는 터미널이나 gori가 필요로 하므로 재지정할 수 없습니다.
@@ -67,7 +108,7 @@ Ctrl-P  → settings:hotkeys
 - **종료**: `Ctrl-C`, `Ctrl-D`.
 - **명명된 키와 구별 불가**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, `Space`(space 메뉴 리더), 그리고 맨 `:`(명령줄).
-- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **Reveal whitespace**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
+- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab — `⇧1`–`⇧9`의 **별칭**입니다. [숫자 키 패밀리](#digits) 참고). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **Reveal whitespace**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
 
   `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다. 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
 
@@ -85,7 +126,7 @@ Ctrl-P  → settings:hotkeys
 
 *예약된 키*에 나열된 키 조합 패밀리는 키맵보다 먼저 하드코딩된 가드가 소비하기 때문에 고정입니다. 문제는 **터미널이 Ctrl 형태를 아예 전달하지 않는** 경우입니다.
 
-- **`Ctrl-1`…`Ctrl-9`는 상당수 터미널에서 전달 불가**입니다. 대응하는 제어 문자가 없어서 서브탭 점프가 애초에 도착하지 않습니다. 없어도 됩니다. 서브탭 스트립에서는 어느 칩에 있든 **`f`**로 열려 있는 서브탭 전체를 나열·검색할 수 있습니다. (스트립 왼쪽 끝의 **`⌕`**도 같은 목록을 엽니다. 클릭하거나, 첫 칩에서 `←`를 누르면 됩니다.)
+- **`Ctrl-1`…`Ctrl-9`는 상당수 터미널에서 전달 불가**입니다. 대응하는 제어 문자가 없어서 서브탭 점프가 애초에 도착하지 않습니다. 없어도 됩니다. 서브탭 점프의 기본 키는 **`⇧1`–`⇧9`**이고([숫자 키 패밀리](#digits)), 서브탭 스트립에서는 어느 칩에 있든 **`f`**로 열려 있는 서브탭 전체를 나열·검색할 수 있습니다. (스트립 왼쪽 끝의 **`⌕`**도 같은 목록을 엽니다. 클릭하거나, 첫 칩에서 `←`를 누르면 됩니다.)
 - **멀티플렉서가 먼저 먹습니다.** tmux의 기본 프리픽스는 `Ctrl-B`인데, gori도 reveal-whitespace로 씁니다.
 
 **Preferences → Editor & Keys → Keys → Command modifier**(`Ctrl-,`), 또는 팔레트의 **`settings:keys`**에서 이 패밀리를 `Ctrl`과 `Option (⌥)` 사이에서 고를 수 있습니다. 이는 **교체가 아니라 별칭 추가**입니다. Option을 고르면 `⌥P`로도 팔레트가 열리고 `^P`도 그대로 동작합니다. 바뀌는 것은 *표시*뿐입니다. 상태 힌트, Help 탭, 팔레트가 모두 `⌥P`, `⌥N`, `⌥1-9`로 표시됩니다.

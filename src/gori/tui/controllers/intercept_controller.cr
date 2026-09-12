@@ -91,6 +91,13 @@ module Gori::Tui
       end
     end
 
+    # The held-message editor — TEXT or HEX — plus the catch-condition bar. The hex editor
+    # matters most here: its whole alphabet is `0`-`9a`-`f`, so a digit claimed for the tab bar
+    # would be a byte the operator could not type.
+    def body_takes_text? : Bool
+      @intercept.text_editing? || @intercept.hex_editing? || @intercept.querying?
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       if ev.ctrl? && key.lower_p?

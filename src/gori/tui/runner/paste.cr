@@ -130,7 +130,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # JWT input, the Fuzzer target. The sub-tab filter row reports through its own predicate.
   private def paste_runs_as_commands? : Bool
     return false unless @overlay.none? || @overlay.detail?
-    return false if modal_overlay? # palette / ⋯ menu / any migrated modal
+    return false if modal_overlay? # palette / any migrated modal
     return false if @space_menu_open || copy_as_shown? || send_to_shown?
     return false if @goto_open || @search_open || @rename_open || @tag_edit_open
     return false if @tabs[@active_tab]?.try(&.subtab_filter_editing?)

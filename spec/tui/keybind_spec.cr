@@ -178,14 +178,26 @@ describe Gori::Tui::Keybind do
       chord(Key::Minus).should eq(Chord.new("-"))
     end
 
-    it "does NOT synthesise shift for a shifted-symbol key (only ascii_uppercase? triggers it)" do
-      # '!' is not ascii_uppercase?, so shift stays whatever the modifier said —
-      # here None. The contract keys shift off letter case, not symbol shiftiness.
-      chord(Key::Exclaim).should eq(Chord.new("!", shift: false))
+    it "folds a shifted DIGIT back onto shift+digit, whichever way the terminal spells it" do
+      # `⇧1`-`⇧9` jump to a sub-tab and `⇧0` finds one, and the two ways a keypress arrives do
+      # not look alike: a kitty-protocol terminal sends `1` WITH shift, every other terminal
+      # sends `!` with no modifier at all. Both must reach ONE chord, or the binding works on
+      # half the terminals — the same normalisation a typed capital already gets.
+      chord(Key::Exclaim).should eq(Chord.new("1", shift: true))
+      chord(Key::Num1, Mod::Shift).should eq(Chord.new("1", shift: true))
     end
 
-    it "carries a real shift modifier on a symbol key without touching the key name" do
-      chord(Key::Exclaim, Mod::Shift).should eq(Chord.new("!", shift: true))
+    it "folds the whole US shifted-digit row, `)` included" do
+      Keybind::SHIFTED_DIGITS.each do |punct, digit|
+        Keybind.from_event(Termisu::Event::Key.new(Key.from_char(punct), Mod::None, punct))
+          .should eq(Chord.new(digit.to_s, shift: true))
+      end
+    end
+
+    it "leaves the shifted digit alone once a modifier owns it" do
+      # ^1-9 is the sub-tab alias and a CLAIMED chord; folding `!` onto it would be a
+      # different key entirely. Only the bare form is a shifted digit.
+      chord(Key::Exclaim, Mod::Ctrl).should eq(Chord.new("1", ctrl: true, shift: true))
     end
   end
 

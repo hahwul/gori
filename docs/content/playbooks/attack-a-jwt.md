@@ -13,7 +13,7 @@ A JWT is only as trustworthy as the server's check of its signature. This playbo
 
 ## 1. Send a token to the JWT tab
 
-The **JWT** tab is in the default tab set (hide it from Preferences if you never touch tokens, and reveal it again from the tab-bar `⋯` menu or `Ctrl-P` → **Go to JWT**). Find the token: open the captured flow in **History**, select the token text after `Bearer ` in the request detail, and `Space` → **Send to JWT**. That seeds a new JWT sub-tab and decodes the token live into its **header**, **payload**, and **signature** on the Decode lens.
+The **JWT** tab is off the bar by default — press **`0`** and type "jwt", or `Ctrl-P` → **Go to JWT**; give it one of the nine slots in Preferences if you live in tokens. Find the token: open the captured flow in **History**, select the token text after `Bearer ` in the request detail, and `Space` → **Send to JWT**. That seeds a new JWT sub-tab and decodes the token live into its **header**, **payload**, and **signature** on the Decode lens.
 
 The decode shows what the token *claims*; it never checks the signature, so a token that decodes cleanly is not necessarily one the server trusts. That is the question the rest of this playbook answers.
 

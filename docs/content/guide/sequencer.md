@@ -14,7 +14,7 @@ If a session cookie, CSRF token, password-reset code, or API key is predictable,
   <figcaption>Sending a captured flow to the <strong>Sequencer</strong> auto-detects the session cookie and lets you set the sample size and concurrency before collecting.</figcaption>
 </figure>
 
-The **Sequencer** tab is hidden by default. Reveal it from the tab-bar `⋯` menu or the command palette (`Ctrl-P` → **Go to Sequencer**).
+The **Sequencer** tab is off the bar by default. Press **`0`** and type "seq", or use the command palette (`Ctrl-P` → **Go to Sequencer**); give it one of the nine slots in Preferences → **Network & Tabs** → **Tabs**.
 
 ## Two Ways to Feed It
 

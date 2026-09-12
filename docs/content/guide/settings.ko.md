@@ -70,7 +70,7 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 |------|------|
 | **Theme** | 오프너: 테마 선택기(내장 테마와 직접 만든 테마) |
 | **Display** | Default detail pane, History list time, Line numbers, Wrap long lines, Preview body limit (KiB), Resource meter, Terminal title |
-| **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth, Tab numbers |
+| **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth, Tab numbers, Tab bar slots |
 | **Companion** | Companion (Miss Ring), Placement, Motion, Notices |
 
 Theme 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 팔레트 스와치가 함께 표시됩니다. [테마 가이드](/ko/guide/themes/)를 참고하세요.
@@ -104,7 +104,7 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 | 섹션 | 필드 |
 |------|------|
 | **Network** | Bind IP, Bind Port, Proxy protocol, Proxy host, Proxy port, Proxy TLS CA, Verify proxy TLS, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules(읽기 전용), Outbound TLS(읽기 전용), Hostname overrides(오프너) |
-| **Tabs** | 오프너: 상단 탭 바 표시/숨김과 순서 변경 |
+| **Tabs** | 오프너: 탭 바의 번호 슬롯 아홉 개 표시/숨김과 순서 변경 (열 번째 ✓는 거부됩니다 — 하나를 먼저 숨기세요. 바 밖의 탭도 `0`으로 계속 접근할 수 있습니다) |
 
 여기의 Network는 **전역 기본값**입니다. 프로젝트는 **Project** 탭에서 자체 바인드 주소, 포트, 업스트림을 고정할 수 있고 그 프로젝트에서는 그쪽이 우선합니다. 전체 우선순위는 [설정](/ko/getting-started/configuration/#network)을 참고하세요.
 

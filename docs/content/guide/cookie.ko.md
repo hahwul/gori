@@ -9,7 +9,7 @@ group = "워크벤치"
 
 **Cookie** 탭은 프레임워크가 서명한 세션 쿠키를 위한 워크벤치입니다: **Flask**(itsdangerous), **Rack**, **Django**. 쿠키를 파트로 디코드하고, 후보 서명 secret을 검증하거나 워드리스트로 브루트포스한 뒤, 세션을 편집해 재서명합니다. 파트를 보여주기만 하는 [Decoder](/ko/guide/decoder/)의 읽기 전용 `cookie-decode` / `flask-decode` / `rack-decode` / `django-decode` 컨버터보다 한 걸음 더 나아갑니다.
 
-어디서든(예: **History** 상세 패널, **Notes** 등) 쿠키를 선택하고 `Space` → **Send to Cookie**를 누르면 그 쿠키로 새 워크벤치 서브탭을 채웁니다. 세션은 휘발성이라 디스크에는 아무것도 기록되지 않습니다. 탭을 숨겼다면 탭 바의 `⋯` 메뉴, 커맨드 팔레트(`Ctrl-P` → **Go to Cookie**), 또는 Preferences에서 다시 드러내세요.
+어디서든(예: **History** 상세 패널, **Notes** 등) 쿠키를 선택하고 `Space` → **Send to Cookie**를 누르면 그 쿠키로 새 워크벤치 서브탭을 채웁니다. 세션은 휘발성이라 디스크에는 아무것도 기록되지 않습니다. 이 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "cookie"를 입력하거나, 커맨드 팔레트(`Ctrl-P` → **Go to Cookie**)를 쓰거나, Preferences에서 슬롯을 내주세요.
 
 ## 두 개의 렌즈 {#two-lenses}
 
