@@ -29,6 +29,14 @@ class Gori::Tui::RepeaterView
     @req_read.move(req_editor, dr, dc, selecting: selecting)
   end
 
+  # READ-mode top / bottom of the request buffer (`editor.top` / `editor.bottom`). The whole
+  # request is ONE editor even when the column is split into sub-panes — `request_read_lines`
+  # is `req_editor`'s snapshot — so the buffer edges are the editor's own, not a sub-pane's.
+  def request_read_to_edge(dir : Int32) : Nil
+    return if request_insert? || request_hex?
+    @req_read.to_edge(req_editor, dir)
+  end
+
   def request_read_lines : Array(String)
     req_editor.lines_snapshot
   end

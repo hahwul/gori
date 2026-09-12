@@ -391,6 +391,44 @@ class FakeExecContext < Gori::Verb::ExecContext
     editor_focused
   end
 
+  # --- Verb::Scope::Editor (verbs/editor.cr). `editor_pane` is the wider gate — a text editor
+  # pane has focus, READ **or** INS — and `editor_read_mode` the narrower READ half the bare
+  # -letter editor verbs hang off; set both to exercise `editor.insert` and friends.
+  property? editor_pane : Bool = false
+  property? editor_read_mode : Bool = false
+
+  def editor_enter_insert : Nil
+    rec(:editor_enter_insert)
+  end
+
+  def editor_append_insert : Nil
+    rec(:editor_append_insert)
+  end
+
+  def editor_exit_insert : Nil
+    rec(:editor_exit_insert)
+  end
+
+  def editor_undo : Nil
+    rec(:editor_undo)
+  end
+
+  def editor_to_top : Nil
+    rec(:editor_to_top)
+  end
+
+  def editor_to_bottom : Nil
+    rec(:editor_to_bottom)
+  end
+
+  def editor_goto_line : Nil
+    rec(:editor_goto_line)
+  end
+
+  def editor_find : Nil
+    rec(:editor_find)
+  end
+
   getter send_to_opened : Bool = false
 
   def send_to_open : Nil

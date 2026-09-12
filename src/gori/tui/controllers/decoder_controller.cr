@@ -629,7 +629,7 @@ module Gori::Tui
 
     def insert_key_refusal : String?
       return nil unless cur.pane == :output
-      "OUTPUT is read-only — i edits the INPUT (↹ up); intercept toggles from the tab bar"
+      keys("OUTPUT is read-only — {editor.insert} edits the INPUT (↹ up); intercept toggles from the tab bar")
     end
 
     # Focus the CHAIN field and surface the converter list (used by ↓ from INPUT and ↑
@@ -663,9 +663,9 @@ module Gori::Tui
         keys("↑/↓ move · ⇧arrows select · #{y} copy · ^F find · ↑-top chain · space cmds · {decoder.mode} mode · esc sub-tabs")
       when :input
         if s.input_mode == InputMode::Insert
-          keys("type to edit · ⇧arrows select · ^Y copy · ^F find · esc read · ↓ chain · {decoder.clear} clear · {decoder.mode} mode · ^N new · ^W close · ↑ sub-tabs")
+          keys("type to edit · ⇧arrows select · ^Y copy · {editor.find} find · esc read · ↓ chain · {decoder.clear} clear · {decoder.mode} mode · ^N new · ^W close · ↑ sub-tabs")
         else
-          keys("i/↵ edit · ⇧arrows select · #{y} copy · ^F find · space cmds · ↓/↹ chain · {decoder.mode} mode · ^N new · esc sub-tabs")
+          keys("{editor.insert}/↵ edit · ⇧arrows select · #{y} copy · {editor.find} find · space cmds · ↓/↹ chain · {decoder.mode} mode · ^N new · esc sub-tabs")
         end
       else
         ""
@@ -889,8 +889,7 @@ module Gori::Tui
       key = ev.key
       selecting = ev.shift?
       case
-      when key.enter? then s.input_mode = InputMode::Insert
-      when c == 'i'   then s.input_mode = InputMode::Insert
+      when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
         # A ⇧↑ on the first line extends the selection to its start rather than leaving the
         # pane (same for ⇧↓ below): a selection in progress is never a focus gesture.
@@ -912,8 +911,59 @@ module Gori::Tui
       when key.page_up?   then s.input_read.move(s.input, -s.input.page_rows, 0, selecting: selecting)
       when key.page_down? then s.input_read.move(s.input, s.input.page_rows, 0, selecting: selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # x/y + Global breath → keymap
+        return false # i INSERT, x/y + Global breath → keymap
       end
+      true
+    end
+
+    # --- Verb::Scope::Editor — the INPUT pane (OUTPUT is read-only, CHAIN is a field) ---
+    def editor_pane? : Bool
+      cur.pane == :input
+    end
+
+    def editor_enter_insert : Bool
+      return false unless editor_pane?
+      cur.input_mode = InputMode::Insert
+      true
+    end
+
+    def editor_append_insert : Bool
+      return false unless editor_pane?
+      s = cur
+      s.input_read.move(s.input, 0, 1)
+      editor_enter_insert
+    end
+
+    def editor_exit_insert : Bool
+      return false unless editor_pane?
+      commit
+      cur.input_mode = InputMode::Read
+      true
+    end
+
+    # READ-mode undo. The read cursor has to adopt the caret `undo` restored, since READ
+    # paints from `input_read` rather than from the editor's own caret.
+    def editor_undo : Bool
+      return false unless editor_read_mode?
+      s = cur
+      s.input.undo
+      s.input_read.sync_from(s.input)
+      touch
+      true
+    end
+
+    def editor_to_top : Bool
+      editor_input_edge(-1)
+    end
+
+    def editor_to_bottom : Bool
+      editor_input_edge(1)
+    end
+
+    private def editor_input_edge(dir : Int32) : Bool
+      return false unless editor_read_mode?
+      s = cur
+      s.input_read.to_edge(s.input, dir)
       true
     end
 

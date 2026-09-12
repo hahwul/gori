@@ -9,32 +9,47 @@ module Gori
       def initialize(@by_scope : Hash(Scope, Hash(Chord, String)))
       end
 
-      # Build the lookup table, layering OS-profile and user overrides over each verb's
-      # base chords (verbs/*.cr). Per verb the precedence is: user override (if the id is
-      # present) wins → OS-profile override → the verb's declared chords. A user override
-      # of [] yields NO chords, so the verb is UNBOUND (its press falls through).
+      # Build the lookup table, layering user overrides, the editor KEYSET and the OS profile
+      # over each verb's base chords (verbs/*.cr). See `effective_chords` for the precedence.
       def self.build(registry : Registry,
                      os : OsProfile::Os = OsProfile.active,
-                     overrides : Hash(String, Array(Chord)) = NO_OVERRIDES) : Keymap
+                     overrides : Hash(String, Array(Chord)) = NO_OVERRIDES,
+                     keyset : Keyset::Kind = Keyset.active) : Keymap
         by_scope = Hash(Scope, Hash(Chord, String)).new
         registry.each do |verb|
-          effective_chords(verb, os, overrides).each do |chord|
+          effective_chords(verb, os, overrides, keyset).each do |chord|
             (by_scope[verb.scope] ||= {} of Chord => String)[chord] = verb.id
           end
         end
         new(by_scope)
       end
 
-      # The chords that actually bind `verb` under `os` + `overrides` (user > OS > base),
-      # with the verb's PINNED chords (see `pinned_chords`) always kept.
+      # The chords that actually bind `verb`, with the verb's PINNED chords (see
+      # `pinned_chords`) always kept. Precedence, most specific first:
+      #
+      #   1. the USER's own rebind    — settings:keys, per verb
+      #   2. the editor KEYSET        — `vim` respells the editor family as a bundle
+      #   3. the OS PROFILE           — per-platform divergence (ships empty)
+      #   4. the verb's declared chords
+      #
+      # Each layer REPLACES rather than merges, so an override of `[]` yields NO chords and
+      # the verb is UNBOUND (its press falls through). The order is what makes a keyset a
+      # better DEFAULT rather than a ceiling: pick `vim` and then move one key, and that key
+      # stays moved — the keyset row for it is simply never consulted.
       def self.effective_chords(verb : Definition,
                                 os : OsProfile::Os = OsProfile.active,
-                                overrides : Hash(String, Array(Chord)) = NO_OVERRIDES) : Array(Chord)
+                                overrides : Hash(String, Array(Chord)) = NO_OVERRIDES,
+                                keyset : Keyset::Kind = Keyset.active) : Array(Chord)
         if overrides.has_key?(verb.id)
           # The override replaces the REBINDABLE half only. Order matters: the user's chord
           # stays first, because `binding_for` advertises `.first?` — the row, the palette
           # column and every hint strip must show what the operator just bound, not the pin.
           return (overrides[verb.id] + pinned_chords(verb)).uniq
+        end
+        # Same rule for a keyset row, and for the same reason: a keyset that moved `y` must
+        # not carry INS's `^Y` off with it and leave that pane with no way to copy at all.
+        if ks = Keyset.overrides_for(keyset)[verb.id]?
+          return (ks + pinned_chords(verb)).uniq
         end
         OsProfile.overrides_for(os)[verb.id]? || verb.chords
       end
@@ -82,7 +97,16 @@ module Gori
 
       # Verb id bound to `chord` in `scope` (or globally), if any.
       def lookup(chord : Chord, scope : Scope) : String?
-        @by_scope[scope]?.try(&.[chord]?) || @by_scope[Scope::Global]?.try(&.[chord]?)
+        lookup_in(chord, scope) || lookup_in(chord, Scope::Global)
+      end
+
+      # Verb id bound to `chord` in EXACTLY `scope` — no Global fallback. What a caller
+      # walking a SCOPE CHAIN needs: the Runner consults `Scope::Editor` (the focus
+      # dimension), then the active tab's scope, then Global, and has to be able to ask each
+      # link on its own so an unavailable verb in one link does not hide the next. #lookup is
+      # this plus the Global tail, kept for the callers that only ever wanted the pair.
+      def lookup_in(chord : Chord, scope : Scope) : String?
+        @by_scope[scope]?.try(&.[chord]?)
       end
     end
   end

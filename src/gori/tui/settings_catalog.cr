@@ -76,7 +76,7 @@ module Gori::Tui
       # Hotkeys rebinds individual actions. Neither belongs in Editor — that section is
       # text-editing prefs.
       Section.new(:keys, "settings.keys", "Keys",
-        "Pick the modifier for gori's built-in shortcuts (^P ^N ^W ^1-9)", :editor, :form),
+        "Pick the modifier for gori's built-in shortcuts (^P ^N ^W ^1-9) and the editor keyset (helix-ish / vim-ish)", :editor, :form),
       # Mouse sits beside Keys, not in Editor: both configure INPUT, and the Mouse toggle spent
       # its life as a lone row under "Editor" — the one heading an operator looking for pointer
       # behaviour would not open. It brings the drag-release mode with it.

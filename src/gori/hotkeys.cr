@@ -21,12 +21,25 @@ module Gori
     #     space menu can TEACH them beside the rows it draws; the keymap never gets to see
     #     them, which is exactly what this list means.
     #   app.quit/app.back   — deliberately palette-only (single-key quit is a footgun)
+    #   editor.exit-insert  esc — every editor's INS ladder answers esc itself, upstream of
+    #     the keymap, and always will: esc is how you get OUT of a pane that is swallowing
+    #     every printable, so it cannot be routed through a table the pane is not consulting.
+    #     Registered anyway so Help, the palette and the space menu can name it (the reason
+    #     view.reveal-ws is registered), and listed here so the editor never offers to move it.
+    #   editor.undo/find/goto-line  ^Z ^F ^G — the same shape as view.reveal-ws's ^B: a
+    #     hardcoded guard (the nine INS ladders for ^Z, Runner#handle_key for ^F/^G) answers
+    #     the Ctrl form before the keymap, so moving it here would change nothing. They are
+    #     registered for the chord a keyset gives them instead — `vim` puts find on `/` and
+    #     undo on `u`, which DO reach the keymap because nothing claims a bare letter in an
+    #     editor pane. A per-verb user rebind is refused for the same reason the ^B one is;
+    #     the way to respell the editor family is the keyset.
     FIXED_IDS = {"view.reveal-ws", "app.quit", "app.back", "app.palette",
                  "repeater.new", "fuzz.new", "decoder.new", "jwt.new", "cookie.new",
                  "notes.new", "comparer.new",
                  "repeater.close-subtab", "fuzz.close-subtab", "mine.close-subtab",
                  "sequence.close-subtab", "decoder.close", "jwt.close", "cookie.close",
-                 "notes.close", "comparer.close-subtab"}
+                 "notes.close", "comparer.close-subtab",
+                 "editor.exit-insert", "editor.undo", "editor.find", "editor.goto-line"}
 
     # Chords consumed by a hardcoded handler BEFORE the keymap is consulted, so binding ANY
     # verb to one would be silently shadowed — the editor refuses them on top of the
@@ -88,10 +101,26 @@ module Gori
       Verb::Chord.new(chord.key, alt: true)
     end
 
-    # Build the dispatch keymap from the registry under the persisted OS profile + user
-    # overrides. Replaces the bare Verb::Keymap.build at its call sites.
+    # Build the dispatch keymap from the registry under the persisted OS profile, editor
+    # keyset and user overrides. Replaces the bare Verb::Keymap.build at its call sites.
     def self.build_keymap(registry : Verb::Registry) : Verb::Keymap
-      Verb::Keymap.build(registry, Verb::OsProfile.resolve(Settings.keymap_os), rebindable_overrides(registry))
+      Verb::Keymap.build(registry, Verb::OsProfile.resolve(Settings.keymap_os),
+        rebindable_overrides(registry), Verb::Keyset.resolve(Settings.editor_keyset))
+    end
+
+    # Selectable editor keysets (the Settings.editor_keyset domain) and what settings:keys
+    # calls each one. See Gori::Verb::Keyset for the tables.
+    KEYSETS = Verb::Keyset::NAMES
+
+    KEYSET_LABELS = {
+      "helix" => "helix-ish (default)",
+      "vim"   => "vim-ish",
+    }
+
+    # Clamped on READ as well as on parse, the same defence #command_modifier applies:
+    # nothing downstream should have to reason about an unknown keyset, whatever put it there.
+    def self.editor_keyset : String
+      Settings.normalize_editor_keyset(Settings.editor_keyset)
     end
 
     # The user overrides that actually reach the dispatch keymap: chord_overrides minus
@@ -183,10 +212,12 @@ module Gori
     # since a user only turns the alias on when Ctrl isn't reaching gori.
     def self.binding_for(registry : Verb::Registry, id : String,
                          overrides : Hash(String, Array(Verb::Chord)) = rebindable_overrides(registry),
-                         profile : String = Settings.keymap_os) : Verb::Chord?
+                         profile : String = Settings.keymap_os,
+                         keyset : String = editor_keyset) : Verb::Chord?
       verb = registry[id]?
       return nil unless verb
-      chord = Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), overrides).first?
+      chord = Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), overrides,
+        Verb::Keyset.resolve(keyset)).first?
       return chord unless chord && alias_active?
       alt_twin(chord) || chord
     end
@@ -263,8 +294,9 @@ module Gori
     # Effective binding as a status/Help token, or `fallback` when unbound / unknown.
     def self.binding_label(registry : Verb::Registry, id : String, fallback : String,
                            overrides : Hash(String, Array(Verb::Chord)) = rebindable_overrides(registry),
-                           profile : String = Settings.keymap_os) : String
-      if chord = binding_for(registry, id, overrides, profile)
+                           profile : String = Settings.keymap_os,
+                           keyset : String = editor_keyset) : String
+      if chord = binding_for(registry, id, overrides, profile, keyset)
         display_label(chord)
       else
         fallback
@@ -290,27 +322,30 @@ module Gori
     # blank, which is what `spec/hotkeys_spec.cr` / the Help spec check for.
     def self.expand(registry : Verb::Registry, template : String,
                     overrides : Hash(String, Array(Verb::Chord))? = nil,
-                    profile : String = Settings.keymap_os) : String
+                    profile : String = Settings.keymap_os,
+                    keyset : String = editor_keyset) : String
       return template unless template.valid_encoding? && template.includes?('{')
       # Only the DEFAULT overrides are memoizable: a caller handing in its own working set
       # (the hotkey editor previewing an unsaved rebind) is asking about a keymap that has no
-      # revision yet.
+      # revision yet. The keyset needs no key of its own — `Settings.editor_keyset=` bumps
+      # `keymap_revision`, which the key already carries.
       if overrides
-        return expand_uncached(registry, template, overrides, profile)
+        return expand_uncached(registry, template, overrides, profile, keyset)
       end
       key = {template, registry.object_id, Settings.keymap_revision, profile}
       if hit = @@expand_memo[key]?
         return hit
       end
       @@expand_memo.clear if @@expand_memo.size >= EXPAND_MEMO_CAP
-      @@expand_memo[key] = expand_uncached(registry, template, rebindable_overrides(registry), profile)
+      @@expand_memo[key] = expand_uncached(registry, template, rebindable_overrides(registry), profile, keyset)
     end
 
     private def self.expand_uncached(registry : Verb::Registry, template : String,
-                                     overrides : Hash(String, Array(Verb::Chord)), profile : String) : String
+                                     overrides : Hash(String, Array(Verb::Chord)), profile : String,
+                                     keyset : String) : String
       template.gsub(VERB_TOKEN_RE) do |token|
         id = $1
-        if chord = binding_for(registry, id, overrides, profile) || default_for(registry, id, profile)
+        if chord = binding_for(registry, id, overrides, profile, keyset) || default_for(registry, id, profile, keyset)
           display_label(chord)
         else
           token
@@ -318,19 +353,24 @@ module Gori
       end
     end
 
-    # The PRIMARY default chord for `id` under `profile` with NO user overrides — what a
-    # row reverts to on "reset". `profile` is a Settings.keymap_os string.
-    def self.default_for(registry : Verb::Registry, id : String, profile : String) : Verb::Chord?
+    # The PRIMARY default chord for `id` under `profile` + `keyset` with NO user overrides —
+    # what a row reverts to on "reset". The keyset belongs in the answer: under `vim`,
+    # resetting Select line puts it back on `⇧V`, not on the `x` the verb file declares.
+    def self.default_for(registry : Verb::Registry, id : String, profile : String,
+                         keyset : String = editor_keyset) : Verb::Chord?
       verb = registry[id]?
       return nil unless verb
-      Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile)).first?
+      Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), Verb::Keymap::NO_OVERRIDES,
+        Verb::Keyset.resolve(keyset)).first?
     end
 
     # First conflict for a proposed (id, chord) against the working `overrides`, or nil.
     def self.conflict(registry : Verb::Registry, id : String, chord : Verb::Chord,
                       overrides : Hash(String, Array(Verb::Chord)),
-                      profile : String = Settings.keymap_os) : Verb::Conflicts::Conflict?
-      Verb::Conflicts.detect(registry, Verb::OsProfile.resolve(profile), overrides, id, chord)
+                      profile : String = Settings.keymap_os,
+                      keyset : String = editor_keyset) : Verb::Conflicts::Conflict?
+      Verb::Conflicts.detect(registry, Verb::OsProfile.resolve(profile), overrides, id, chord,
+        Verb::Keyset.resolve(keyset))
     end
 
     # Decoder the editor's working copy (verb-id → Chord? where nil = unbound) into the

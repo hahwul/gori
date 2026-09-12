@@ -233,6 +233,12 @@ module Gori::Tui
       @read.adopt_editor_selection(current.area)
     end
 
+    # READ-mode top / bottom of the note (`editor.top` / `editor.bottom`).
+    def read_to_edge(dir : Int32) : Nil
+      return if insert_mode?
+      @read.to_edge(current.area, dir)
+    end
+
     def read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return if insert_mode?
       @read.move(current.area, dr, dc, selecting: selecting)

@@ -1963,6 +1963,39 @@ describe Gori::Settings do
     end
   end
 
+  it "round-trips the editor keyset in the same block as the bindings" do
+    dir = File.tempname("gori-settings-keyset")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.editor_keyset = "vim"
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should contain(%("keyset": "vim"))
+
+      Gori::Settings.editor_keyset = "helix"
+      Gori::Settings.load
+      Gori::Settings.editor_keyset.should eq("vim")
+
+      # Unknown name → the shipped keyset, not an editor with no keys.
+      File.write(Gori::Settings.path, %({"hotkeys":{"os":"auto","keyset":"emacs"}}))
+      Gori::Settings.load
+      Gori::Settings.editor_keyset.should eq("helix")
+
+      # A hotkeys block written before keysets existed keeps the in-memory value, the way
+      # `command_modifier` does — it is read only WHEN PRESENT.
+      Gori::Settings.editor_keyset = "vim"
+      File.write(Gori::Settings.path, %({"hotkeys":{"os":"linux"}}))
+      Gori::Settings.load
+      Gori::Settings.editor_keyset.should eq("vim")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.keymap_os = "auto"
+      Gori::Settings.editor_keyset = Gori::Settings::DEFAULT_EDITOR_KEYSET
+    end
+  end
+
   it "omits the hotkeys block entirely when untouched (auto + default modifier + no overrides)" do
     dir = File.tempname("gori-settings-nohotkeys")
     Dir.mkdir_p(dir)

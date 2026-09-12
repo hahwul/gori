@@ -195,7 +195,9 @@ describe "the digit family — focus-state matrix" do
       host.tab = :decoder
       ctl = DecoderController.new(host)
       ctl.body_takes_text?.should be_false
-      ctl.handle_body_key(TuiContract.plain('i')) # READ → INS, the pane's own key
+      # `i` is `editor.insert` (Verb::Scope::Editor), resolved by the shell and dispatched
+      # into this seam — the pane no longer claims the letter itself.
+      ctl.editor_enter_insert.should be_true
       ctl.body_takes_text?.should be_true
     end
   end

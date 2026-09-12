@@ -87,7 +87,11 @@ module Gori
       #     the check to the nav primitives.
       #   • All three OS profiles are swept via Keymap.effective_chords, because
       #     OsProfile.overrides_for SUBSTITUTES chords per verb — a collision can exist
-      #     on a profile this binary wasn't built for.
+      #     on a profile this binary wasn't built for. Every editor KEYSET is swept for the
+      #     same reason and with more at stake: a keyset SUBSTITUTES a bundle of chords at
+      #     once (`vim` moves fifteen select-line verbs onto `⇧V` in one go), so a verb that
+      #     later claims one of those letters in one of those scopes would shadow silently,
+      #     and only for the operators who picked that keyset.
       #   • Conflicts.detect is NOT reused: that path answers "is this one proposed
       #     user chord free?" and its allowances belong to the editor. This is a strict
       #     boot-time sweep over defaults. Cross-scope reuse stays legal here too
@@ -98,21 +102,28 @@ module Gori
       # dozen verb-file comments have been standing in for until now.
       def validate_chords! : Nil
         OsProfile::Os.each do |os|
-          seen = Hash(Scope, Hash(Chord, String)).new { |h, k| h[k] = {} of Chord => String }
-          each do |v|
-            Keymap.effective_chords(v, os).each do |chord|
-              if chord.key.size == 1 && chord.key[0].ascii_uppercase?
-                raise Gori::Error.new(
-                  "dead capital chord: '#{chord.label}' on #{v.id} in #{v.scope} can never fire " \
-                  "(Keybind.from_event normalises a typed capital to shift+lowercase — " \
-                  "spell it Chord.new(#{chord.key.downcase.inspect}, shift: true))")
-              end
-              if prior = seen[v.scope][chord]?
-                raise Gori::Error.new(
-                  "chord collision: '#{chord.label}' claimed by both #{prior} and #{v.id} in #{v.scope} (#{os} profile)")
-              end
-              seen[v.scope][chord] = v.id
+          Keyset::Kind.each do |ks|
+            validate_chords_for!(os, ks)
+          end
+        end
+      end
+
+      private def validate_chords_for!(os : OsProfile::Os, keyset : Keyset::Kind) : Nil
+        seen = Hash(Scope, Hash(Chord, String)).new { |h, k| h[k] = {} of Chord => String }
+        each do |v|
+          Keymap.effective_chords(v, os, Keymap::NO_OVERRIDES, keyset).each do |chord|
+            if chord.key.size == 1 && chord.key[0].ascii_uppercase?
+              raise Gori::Error.new(
+                "dead capital chord: '#{chord.label}' on #{v.id} in #{v.scope} can never fire " \
+                "(Keybind.from_event normalises a typed capital to shift+lowercase — " \
+                "spell it Chord.new(#{chord.key.downcase.inspect}, shift: true))")
             end
+            if prior = seen[v.scope][chord]?
+              raise Gori::Error.new(
+                "chord collision: '#{chord.label}' claimed by both #{prior} and #{v.id} in #{v.scope} " \
+                "(#{os} profile, #{Keyset.name_of(keyset)} keyset)")
+            end
+            seen[v.scope][chord] = v.id
           end
         end
       end

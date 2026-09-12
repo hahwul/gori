@@ -2574,3 +2574,100 @@ What a later SCHEMA fold would need, in the order it would have to answer them:
   (`Links.dedupe_issue_flow`), because it lists REMOVABLE pointers and the primary is a column
   — removing its row there would delete an `entity_links` row and change nothing on screen. A
   fold is exactly what would make the primary removable, and that card is where it would show.
+### 2026-09-12: the editor keys are verbs, and the focus dimension is a scope at the head of the chain
+
+Eleven text-editor panes answered `i`, `↵`, `x`, `y` and `b` with a hand-rolled arm in their
+controller's `handle_body_key`, which the Runner dispatches *before* the keymap. So those keys
+were not rebindable, did not appear in the hotkey editor as anything that worked, and silently
+shadowed whatever the keymap held for the same letter — including chords the verbs beside them
+already declared. `repeater.select-line` had carried `x` since it was written and could never
+fire; `project.select-line` and `project.copy` had their chords REMOVED to stop advertising a
+rebind that moved nothing; the Repeater response carried a bare `b` that aliased the global
+`^B` in one pane and nowhere else. KEY_AUDIT §1.4/§2d/§2e is the full list.
+
+The root cause is one sentence: **`Keymap#lookup` is keyed by `Scope` alone, and a `Scope` names
+a TAB.** The Repeater binds one scope across a request EDITOR and a read-only RESPONSE, so
+"`↵` starts typing here, `↵` re-sends there" was not a thing two chords could say, and the
+second meaning had to be hand-rolled. Every arm in the audit is a pane disambiguating itself
+because the table could not.
+
+The fix is a **scope CHAIN** rather than a second key in the table. `Verb::Scope::Editor` is
+consulted first, then the active tab's scope, then Global, each link gated by `available?`
+(`Runner#resolve_verb_id`). Editor joins the chain only while a text-editor pane holds focus —
+`TabController#editor_pane?`, which every editing controller answers — and drops out the moment
+focus leaves. Two properties follow, and they are the whole argument for the chain over the
+alternatives:
+
+- **The tab keeps its vocabulary.** Editor sits AHEAD of the tab scope, not instead of it, so
+  `{repeater.copy}`, the Notes sub-tab keys and the Global breath keys all still resolve behind
+  it. A per-pane scope that REPLACED the tab's would have cost every editor pane the rest of
+  its tab.
+- **The read-only pane beside an editor is not an editor pane**, so Editor is absent from the
+  chain there. That is what lets `↵` be `editor.insert` in the Repeater request and
+  `repeater.send-enter` in the response with two ordinary chords — the exact case the keymap
+  could not express — and it keeps `insert_key_refusal` meaningful, since the pane that refuses
+  `i` is by definition the pane the Editor scope is not on.
+
+The alternative considered was an `available:` gate reading the focused pane, which is what
+`read_edit.cr` already does for `x`/`y`. It works for a verb that exists once per tab and does
+not scale to a verb that should exist ONCE: `editor.insert` would have become nine near-identical
+registrations, and a keyset respelling the family would have had to name all nine.
+
+**Editor is a KEYMAP scope, not a MENU scope.** The space menu renders exactly one `Scope`, and
+an EDITOR bucket merged into the eight tab menus has no collision-free set of mnemonics — the
+letters free across all eight are `G I J Q U W X Z b j u z`, and `SpaceMenu#verb_for` is a
+first-match find, so a clash makes one entry silently unreachable. The editor family is
+discoverable instead through the hint strips (which name it with `{editor.insert}` tokens, so a
+rebind reaches them), the Help sheet's verb rows, and `settings:keys`.
+
+What did NOT become a verb, and why: **`esc`** and **`^Z`/`^F`/`^G`** are registered but sit in
+`Hotkeys::FIXED_IDS`, because a hardcoded handler answers each before the keymap and always
+must — `esc` is how you leave a pane that is swallowing every printable, and the three Ctrl
+chords are guard-claimed (`CLAIMED_CTRL_LETTERS`). They are declared so Help can name them and
+so a keyset has a row to give a second, bare spelling. **⇧arrow selection** stays structural:
+`Keybind.from_event` encodes it, but the extend-selection semantics live inside `TextArea` /
+`ReadPane` motion, not in a chord. And **nothing that edits was added** — no delete-line, no
+open-line, no join. A READ-mode pane is a caret, a selection and a copy; naming keys for
+operations that do not exist would make the keyset a promise the editors cannot keep.
+
+### 2026-09-12: an editor keyset is a mapping, and the order is user > keyset > profile > default
+
+Vim users stumble on exactly one gesture in gori's editors: READ mode is helix-shaped, so `x`
+selects the line and `y` then copies the selection, where the same hand wants `V` then `y`.
+Everything else in the pane — `i` in, `esc` out, `y` copies, ⇧arrows extend — gori already
+spells the way vim does.
+
+So the answer is a **keyset**: a named bundle of key overrides for the small, fixed set of
+editor verbs, which is precisely what `OsProfile::OVERRIDES` already is, one layer up. It is
+NOT an emulation, and the distinction is load-bearing rather than modest. An emulation implies
+an operator-pending grammar (`d` waiting for a motion), registers, counts and text objects,
+and gori's READ pane has none of those to drive — a `ReadPane` is a caret, a selection and a
+copy. `Verb::Keyset::VIM` therefore contains only rows that RESPELL a verb that already
+exists, and the things it cannot offer are named in `docs/content/guide/hotkeys.md` rather
+than approximated: `gg`/`dd`/`yy` (a `Chord` is one keystroke), `:42` (`Verb::Reserved` keeps
+bare `:` for the command line), and delete (there is no delete-line in a READ pane to bind).
+
+**The order is `user > keyset > OS profile > declared`** (`Keymap.effective_chords`), and that
+ranking is the feature. A keyset placed ABOVE a per-verb rebind would mean picking `vim`
+silently undid work the operator did in `settings:keys`; below it, a keyset is a better
+DEFAULT that a single rebind can still overrule. It is also why `Hotkeys.default_for` — what
+the editor's "reset" row reverts to — takes the keyset: reverting to the `x` a verb file
+declares would hand a `vim` operator a key their keyset does not use, from a button labelled
+"default". Each layer REPLACES rather than merges, and a keyset row keeps `pinned_chords` for
+the same reason a user override does: nothing may carry `^Y` off with `y` and leave a pane
+with no way to copy in INS.
+
+Two safety properties, both checked rather than argued. `Registry#validate_chords!` now sweeps
+the full (OS profile × keyset) matrix, because a keyset substitutes a BUNDLE at once —
+`vim` moves fifteen select-line verbs onto `⇧V` in one step — so a verb that later claimed one
+of those letters in one of those scopes would shadow silently and only for the operators who
+picked that keyset. And `spec/verb/keyset_spec.cr` sweeps the vim bare letters (`u` `/` `a`
+`g` `⇧G`) against the eight scopes an editor pane can belong to: the Editor scope sits ahead
+of the tab scope, which `validate_chords!` cannot see, so a hit there is a DISPLACEMENT that
+must be documented rather than discovered. Today there are none — every one of those letters
+is free in every editor-capable tab scope.
+
+What the keyset deliberately leaves alone: the enable/disable `x` on the four rule lists (that
+`x` is a state change, not a selection — KEY_AUDIT F4), and `intercept.select-line`, which
+ships keyless because the Intercept queue spends nearly every letter. A keyset respells keys;
+it does not hand one to a pane whose author decided against it.

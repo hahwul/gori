@@ -257,6 +257,13 @@ module Gori::Tui
       return "↹/esc tabs · ^N new" unless v
       reg = @host.session.registry
       y = Hotkeys.binding_label(reg, "repeater.copy", "y")
+      # `i` (INSERT), `^Z`, `^G` and `^F` are `Scope::Editor` verbs now, so the footer reads
+      # them off the effective keymap like every other key it names — a rebind, or a keyset
+      # that respells the editor family, reaches this strip without a second edit here.
+      ins = Hotkeys.binding_label(reg, "editor.insert", "i")
+      undo = Hotkeys.binding_label(reg, "editor.undo", "^Z")
+      goto = Hotkeys.binding_label(reg, "editor.goto-line", "^G")
+      find = Hotkeys.binding_label(reg, "editor.find", "^F")
       send = Hotkeys.binding_label(reg, "repeater.send", "^R")
       hex = Hotkeys.binding_label(reg, "repeater.toggle-hex", "^X")
       sni = Hotkeys.binding_label(reg, "repeater.toggle-sni", "^S")
@@ -287,7 +294,7 @@ module Gori::Tui
         return ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · ^F find · #{send} send · ↹ pane · ⇧↹ back · esc tabs" : grpc_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · #{find} find · #{send} send · ↹ pane · ⇧↹ back · esc tabs" : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
@@ -295,11 +302,11 @@ module Gori::Tui
         if v.target_insert?
           v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · ⇧↹ back · esc read"
         else
-          "i/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · ⇧↹ back · esc tabs"
+          "#{ins}/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · ⇧↹ back · esc tabs"
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · ⇧↹ back · esc tabs"
+        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · #{find} find · ↵/#{send} send · ↹ pane · ⇧↹ back · esc tabs"
       when :request
         if v.request_insert?
           # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
@@ -314,12 +321,15 @@ module Gori::Tui
           # when they have just typed `^R` into the body, and at 132 columns they were the two
           # past the cut. Every other token here describes editing, which is what the operator
           # is already doing.
-          "esc read · ↹ text · type to edit · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^G goto · ^F find · #{hex} hex"
+          #
+          # `^Z` stays a LITERAL here while READ names `{editor.undo}`: this is the INS ladder's
+          # own guard, which answers before the keymap and is not what a keyset moves.
+          "esc read · ↹ text · type to edit · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · #{goto} goto · #{find} find · #{hex} hex"
         else
           # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
           # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
           back = v.ws_http_only? ? keys(" · {repeater.toggle-http2} websocket") : ""
-          "i/↵ edit · #{read_common} · #{marks} · ^G goto · ^F find · #{hex} hex#{back} · ↹ pane · ⇧↹ back · esc tabs"
+          "#{ins}/↵ edit · #{read_common} · #{marks} · #{undo} undo · #{goto} goto · #{find} find · #{hex} hex#{back} · ↹ pane · ⇧↹ back · esc tabs"
         end
       else
         ""
@@ -1248,6 +1258,72 @@ module Gori::Tui
     def insert_key_refusal : String?
       return nil unless (v = current_view) && v.focus == :response
       "the response is read-only — i edits the REQUEST (↹ up); intercept toggles from the tab bar"
+    end
+
+    # --- Verb::Scope::Editor (the REQUEST and TARGET panes; the response is read-only) ---
+    # The response deliberately stays OUT: it is a `ReadPane`, `i` is refused on it above, and
+    # keeping it out of the Editor scope is what lets `↵` mean INSERT in the request and SEND
+    # in the response with two ordinary chords instead of the hand-rolled arms that used to be
+    # here (KEY_AUDIT §1.4).
+    def editor_pane? : Bool
+      return false unless v = current_view
+      v.focus == :request || v.focus == :target
+    end
+
+    def editor_enter_insert : Bool
+      return false unless v = current_view
+      case v.focus
+      when :request then v.enter_request_insert!
+      when :target  then v.enter_target_insert!
+      else               return false
+      end
+      true
+    end
+
+    # One column right, then INSERT. The read cursor writes its position back to the editor
+    # caret (`TextReadState#apply`), so the step is what INS resumes from.
+    def editor_append_insert : Bool
+      return false unless v = current_view
+      case v.focus
+      when :request then v.request_read_move(0, 1)
+      when :target  then v.target_read_move(1)
+      else               return false
+      end
+      editor_enter_insert
+    end
+
+    def editor_exit_insert : Bool
+      return false unless v = current_view
+      case v.focus
+      when :request then v.exit_request_insert!
+      when :target  then v.exit_target_insert!
+      else               return false
+      end
+      true
+    end
+
+    # Request only: the target is a one-line field with no undo stack, and `edit_undo` is the
+    # same entry point the INS-side `^Z` guard uses.
+    def editor_undo : Bool
+      return false unless (v = current_view) && v.focus == :request
+      v.edit_undo
+      true
+    end
+
+    def editor_to_top : Bool
+      editor_read_edge(-1)
+    end
+
+    def editor_to_bottom : Bool
+      editor_read_edge(1)
+    end
+
+    # The target is a single line, so it has no buffer edge to jump to and says so by
+    # returning false rather than pretending the key did something.
+    private def editor_read_edge(dir : Int32) : Bool
+      return false unless (v = current_view) && v.focus == :request
+      v.request_read_to_edge(dir)
+      true
     end
 
     # --- sub-tab nav (the shell's shared strip machinery drives these for Repeater) ---
@@ -2845,17 +2921,18 @@ module Gori::Tui
       true
     end
 
-    # READ request: structure stays local; command letters defer to the keymap so
-    # `y` (copy) and Global breath keys rebind / fire through the same path as History.
-    # `x` stays local — select-line here vs response hex (same letter, pane-local).
+    # READ request: STRUCTURE stays local (caret motion, page, the pane ring); every COMMAND
+    # letter defers to the keymap. `i`/`↵` (INSERT) and `x` (select line) used to be arms here
+    # and are now `editor.insert` / `editor.insert-enter` in `Scope::Editor` and
+    # `repeater.select-line` in `Scope::Repeater` — the chord `repeater.select-line` has
+    # carried since read_edit.cr was written, and which this arm made dead (KEY_AUDIT §2d).
     private def handle_repeater_request_read(ev : Termisu::Event::Key, view : RepeaterView) : Bool
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       c = ev.char || key.to_char
       selecting = ev.shift?
       case
-      when key.enter?               then view.enter_request_insert!
-      when c == 'i'                 then view.enter_request_insert!
+      when key.enter? then return false # editor.insert-enter
       when word_step?(ev)           then view.request_read_move(0, key.left? ? -1 : 1, selecting: selecting)
       when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
       when key.down?, key.lower_j?  then view.request_read_move(1, 0, selecting: selecting)
@@ -2866,7 +2943,7 @@ module Gori::Tui
       when key.home?                then view.edit_home(selecting)
       when key.end?                 then view.edit_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # x select-line, y copy, Global c/i/s, …
+        return false # i INSERT, x select-line, y copy, Global c/i/s, …
       end
       true
     end
@@ -2877,8 +2954,7 @@ module Gori::Tui
       c = ev.char || key.to_char
       selecting = ev.shift?
       case
-      when key.enter?               then view.enter_target_insert!
-      when c == 'i'                 then view.enter_target_insert!
+      when key.enter? then return false # editor.insert-enter
       when key.up?, key.lower_k?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
       when key.down?, key.lower_j?  then view.pane_advance(1)
       when key.left?, key.lower_h?  then view.target_read_move(-1, selecting: selecting)
@@ -2886,7 +2962,7 @@ module Gori::Tui
       when key.home?                then view.target_home(selecting)
       when key.end?                 then view.target_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # x select-line, y copy, Global c/i/s, …
+        return false # i INSERT, x select-line, y copy, Global c/i/s, …
       end
       true
     end
@@ -2923,8 +2999,12 @@ module Gori::Tui
       end
     end
 
-    # Response/Diff pane: structure + pane-local `x`/`b` stay here; `d`/`p`/`y` and other
-    # bare letters defer to the keymap (rebindable verbs + Global breath).
+    # Response/Diff pane: STRUCTURE stays here, every bare letter defers to the keymap
+    # (rebindable verbs + Global breath). `x` is `repeater.select-line` and `↵` is
+    # `repeater.send-enter`, both in `Scope::Repeater` — this pane is read-only, so
+    # `Scope::Editor` is NOT in the chain here and `↵` cannot collide with the request
+    # pane's INSERT. The bare `b` that shadowed the global `^B` reveal in this one pane is
+    # gone (KEY_AUDIT §2e).
     private def handle_repeater_response(ev : Termisu::Event::Key, view : RepeaterView) : Bool
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
@@ -2939,7 +3019,7 @@ module Gori::Tui
       # was transcript-specific: `resp_drawn_source` reports a decoration offset of 0 for a
       # transcript (only DIFF has one), so the caret columns are the row's own columns.
       case
-      when key.enter?               then repeater_send
+      when key.enter? then return false # repeater.send-enter
       when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : resp_nav_step(view, -1, 0, selecting, nav)
       when key.down?, key.lower_j?  then resp_nav_step(view, 1, 0, selecting, nav)
       when key.left?, key.lower_h?  then resp_nav_step(view, 0, -1, selecting, nav)
@@ -2965,11 +3045,10 @@ module Gori::Tui
       when key.home? then return view.resp_line_edge(-1, selecting: selecting)
       when key.end?  then return view.resp_line_edge(1, selecting: selecting)
       when transcript
-        # Transcript: no d/x/p tools; still let Global breath / copy through.
+        # Transcript: no d/p tools; still let Global breath / copy / select-line through.
         return false if c && !ev.ctrl? && !ev.alt? && !c.control?
-      when key.lower_b? then @host.toggle_reveal # bare `b` (Global reveal is ^B)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # x select-line, ⇧D diff, p pretty, y copy, Global c/i/s, …
+        return false # x select-line, d diff, p pretty, y copy, Global c/i/s, …
       end
       true
     end

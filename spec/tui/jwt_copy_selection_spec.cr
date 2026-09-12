@@ -205,7 +205,9 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
       with_jwt_copy_controller do |ctl|
         ctl.jwt_from_text(TOKEN)
         s = ctl.@sessions[ctl.@idx]
-        ctl.handle_body_key(key(Termisu::Input::Key::LowerI, :none, 'i')) # READ → INS
+        # `i` is `editor.insert` in `Verb::Scope::Editor` now, not a controller arm — the
+        # shell resolves the chord and calls this seam (see verbs/editor.cr).
+        ctl.editor_enter_insert.should be_true
         s.input_mode.should eq(InputMode::Insert)
         5.times { ctl.handle_body_key(key(Termisu::Input::Key::Right, :shift)) }
 

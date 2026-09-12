@@ -108,6 +108,18 @@ module Gori::Tui
       @cursor.sync(editor.cy, editor.cx)
     end
 
+    # READ-mode top / bottom of the buffer (`dir < 0` = first line). Routed through the
+    # EDITOR's own `to_buffer_start`/`to_buffer_end` rather than a big `move` step: those two
+    # already exist (⌃Home/⌃End in INS — `TextArea#handle_motion_key`), they land on the
+    # right column, and `sync_from` pulls the result back onto the read cursor. So this adds a
+    # spelling for a motion the editors have, not a motion.
+    def to_edge(editor : TextArea, dir : Int32) : Nil
+      return if editor.lines_snapshot.empty?
+      dir < 0 ? editor.to_buffer_start : editor.to_buffer_end
+      @cursor.clear_selection
+      sync_from(editor)
+    end
+
     # Leaving INSERT: carry the editor's own ⇧arrow selection over to this mode, so `esc`
     # then `y` copies what was selected while typing.
     #

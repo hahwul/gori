@@ -212,7 +212,10 @@ module Gori
       end
       r.register Verb::Definition.new(
         "project.copy", "Copy", "Copy the selected description text, or the whole description if nothing is selected, to the clipboard",
-        Verb::Scope::ProjectDesc, [Verb::Chord.new("y", ctrl: true)],
+        # Bare `y` beside the pinned `^Y`, the shape every other Copy verb has. It was
+        # ctrl-only because `ProjectController#handle_desc_read` claimed the letter itself and
+        # the chord could never fire; that arm is gone (KEY_AUDIT §2e).
+        Verb::Scope::ProjectDesc, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
         available: in_project_desc_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # Match & Replace now lives in the Rewriter tab; this palette entry jumps there
