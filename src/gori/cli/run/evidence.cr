@@ -78,15 +78,8 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           abort "gori run evidence freeze: no issue with id #{iid}" unless store.get_issue(iid)
-          snap = Evidence.snapshot_for(store, kind, rid)
+          snap = freeze_snapshot(store, kind, rid, allow_drift)
           abort "gori run evidence freeze: #{snap}" if snap.is_a?(String)
-          # REFUSED by default, where the TUI asks: this command is what a script calls, and a
-          # script cannot look at the tab. `--allow-drift` is the operator saying they already
-          # know — the copy is still written, still labelled evidence, and the sentence names
-          # the flag so nobody has to find it.
-          if drift = Evidence.drift_refusal(snap, allow_drift, "--allow-drift")
-            abort "gori run evidence freeze: #{drift}"
-          end
           id, status = store.freeze_evidence(iid, snap, link: link)
           case status
           in .issue_gone? then abort "gori run evidence freeze: issue ##{iid} was deleted before the copy was written"
@@ -107,6 +100,20 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # The copy to write, or the sentence to refuse with — `Evidence.snapshot_for`'s
+      # refusals plus the drift gate, answered together so the command asks once.
+      #
+      # Drift is REFUSED by default here where the TUI asks: this command is what a script
+      # calls, and a script cannot look at the tab. `--allow-drift` is the operator saying
+      # they already know — the copy is still written and still labelled evidence, and the
+      # sentence names the flag so nobody has to go looking for it.
+      private def self.freeze_snapshot(store : Store, kind : Store::LinkRefKind, id : Int64,
+                                       allow_drift : Bool) : Evidence::Snapshot | String
+        snap = Evidence.snapshot_for(store, kind, id)
+        return snap if snap.is_a?(String)
+        Evidence.drift_refusal(snap, allow_drift, "--allow-drift") || snap
       end
 
       private def self.cmd_evidence_list(args : Array(String)) : Nil

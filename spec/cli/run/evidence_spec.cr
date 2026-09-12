@@ -10,6 +10,11 @@ module Gori::CLI::Run
     resolve_freeze_ends(issue_id, ref_s, ref_id)
   end
 
+  def self.freeze_snapshot_for_spec(store : Gori::Store, kind : Gori::Store::LinkRefKind,
+                                    id : Int64, allow_drift : Bool) : Gori::Evidence::Snapshot | String
+    freeze_snapshot(store, kind, id, allow_drift)
+  end
+
   def self.evidence_line_for_spec(m : Gori::Store::IssueEvidenceMeta) : String
     evidence_line(m)
   end
@@ -51,13 +56,23 @@ describe "gori run evidence freeze --allow-drift" do
         request_sha256: Gori::Evidence.request_digest(req.to_slice))
       store.update_repeater(rid, "https://acme.test", "GET /v1?debug=1 HTTP/1.1\r\n\r\n".to_slice, false, true, nil)
 
-      snap = Gori::Evidence.snapshot_for(store, Gori::Store::LinkRefKind::Repeater, rid).as(Gori::Evidence::Snapshot)
-      snap.request_drifted?.should be_true
-      msg = Gori::Evidence.drift_refusal(snap, false, "--allow-drift").not_nil!
+      # What the command resolves before it writes anything: a sentence, not a snapshot.
+      msg = Gori::CLI::Run.freeze_snapshot_for_spec(store, Gori::Store::LinkRefKind::Repeater, rid, false)
+        .as(String)
       msg.should contain(Gori::Evidence::DRIFT_REFUSAL)
       msg.should contain("send the tab again, or pass --allow-drift")
-      # …and the flag is what lifts it, rather than a second spelling of "yes".
-      Gori::Evidence.drift_refusal(snap, true, "--allow-drift").should be_nil
+      # …and the flag is what lifts it, rather than a second spelling of "yes". The copy that
+      # comes back then still carries the drift — gori said what the bytes are, it did not fix them.
+      snap = Gori::CLI::Run.freeze_snapshot_for_spec(store, Gori::Store::LinkRefKind::Repeater, rid, true)
+        .as(Gori::Evidence::Snapshot)
+      snap.request_drifted?.should be_true
+
+      # A tab whose request still matches resolves to its copy either way.
+      same = store.insert_repeater("https://acme.test", req.to_slice, false, true, nil, 0)
+      store.update_repeater_response(same, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 1_i64,
+        request_sha256: Gori::Evidence.request_digest(req.to_slice))
+      Gori::CLI::Run.freeze_snapshot_for_spec(store, Gori::Store::LinkRefKind::Repeater, same, false)
+        .should be_a(Gori::Evidence::Snapshot)
     end
   end
 
@@ -65,8 +80,9 @@ describe "gori run evidence freeze --allow-drift" do
     body = freeze_code
     gate = body[/private def self\.cmd_evidence_freeze.*?\n      end/m].not_nil!
     # Inside the method body, and BEFORE `freeze_evidence`: a refusal that lands after the
-    # write is not a refusal.
-    gate.index("Evidence.drift_refusal").not_nil!
+    # write is not a refusal. `abort` calls `exit`, so this is the one half of the command
+    # an example cannot drive — see the header.
+    gate.index("freeze_snapshot(store, kind, rid, allow_drift)").not_nil!
       .should be < gate.index("store.freeze_evidence").not_nil!
     gate.should contain("--allow-drift")
     gate.should contain("allow_drift = true")

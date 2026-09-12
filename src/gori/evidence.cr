@@ -178,10 +178,6 @@ module Gori
       resp_head = nil if resp_head && resp_head.empty?
       status = resp_head.try { |h| Proxy::Codec::Http1.parse_response_head(h).status }
       status = nil if status == 0
-      # Over `rec.request` whole, which is head + body as the split above produced them — the
-      # same bytes, and therefore the same digest, as this Snapshot's own `request_sha256`.
-      sent = rec.response_request_sha256
-      drifted = !sent.nil? && !sent.empty? && sent != request_digest(rec.request)
       Snapshot.new(
         source_kind: Store::LinkRefKind::Repeater,
         source_id: rec.id,
@@ -195,8 +191,20 @@ module Gori
         request_body: req_body,
         response_head: resp_head,
         response_body: resp_head ? rec.response_body : nil,
-        request_drifted: drifted,
+        request_drifted: drifted?(rec),
       )
+    end
+
+    # Does the row's request still hash to the one that produced its stored outcome? Over
+    # `rec.request` whole, which is head + body as `from_repeater` splits them — the same
+    # bytes, and therefore the same digest, as the Snapshot's own `request_sha256`.
+    #
+    # An absent or empty digest is NOT RECORDED and answers false: a pre-V28 response, and
+    # an unknown must not be reported as a mismatch.
+    def self.drifted?(rec : Store::RepeaterRecord) : Bool
+      sent = rec.response_request_sha256
+      return false if sent.nil? || sent.empty?
+      sent != request_digest(rec.request)
     end
 
     # What the headless surfaces refuse a DRIFTED Repeater snapshot with (#1038), beside

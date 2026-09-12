@@ -21,17 +21,19 @@ describe "repeater response digest schema V28" do
   it "migrates a V27 project, leaving an existing response's digest NULL rather than guessing" do
     path = File.tempname("gori-repeater-v28", ".db")
     db = build_v27_repeater_db(path)
-    store = nil.as(Gori::Store?)
-    begin
+    legacy = begin
       db.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, " \
               "auto_content_length, position, response_head, response_body, response_duration_us) " \
               "VALUES (1, 1, 'https://legacy.test', ?, 0, 1, 0, ?, ?, 9)",
         "GET /admin HTTP/1.1\r\nHost: legacy.test\r\n\r\n".to_slice,
         "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ok".to_slice)
-      legacy = db.scalar("SELECT last_insert_rowid()").as(Int64)
+      db.scalar("SELECT last_insert_rowid()").as(Int64)
+    ensure
       db.close
+    end
 
-      store = Gori::Store.open(path)
+    store = Gori::Store.open(path)
+    begin
       store.@db.scalar("PRAGMA user_version").as(Int64).should eq(Gori::Store::Schema::VERSION.to_i64)
 
       rec = store.get_repeater_full(legacy).not_nil!
@@ -42,8 +44,7 @@ describe "repeater response digest schema V28" do
       # must keep working, with the docs' "freeze right after the send" still its only rule.
       Gori::Evidence.from_repeater(rec).not_nil!.request_drifted?.should be_false
     ensure
-      store.try(&.close)
-      db.close rescue nil
+      store.close
       File.delete?(path)
       File.delete?("#{path}-wal")
       File.delete?("#{path}-shm")
