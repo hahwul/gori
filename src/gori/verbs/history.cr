@@ -685,9 +685,13 @@ module Gori
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
       # The RESULTS pane's three lenses. They were raw `key.lower_o?` arms in the controller —
       # no palette row, no space-menu row, and the hotkey editor offered the letters as free.
+      # MENU-ONLY since the key audit's F2. `o` is the `↵` alias — "open this row's own
+      # detail" — in Body, Discover, Sitemap and the Project feed, and cycling a sort column is
+      # not that in any reading. A sort order is set once and read for the rest of the run,
+      # which is the L3 price tier the key budget names.
       r.register Verb::Definition.new(
         "fuzz.sort", "Cycle sort", "RESULTS: cycle the sort column (index → status → length → …)",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("o")], available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
+        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
       r.register Verb::Definition.new(
         "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
         Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, mnemonic: 'm', section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }

@@ -17,8 +17,9 @@ describe "keys the hint names are chords the keymap knows" do
     keymap.lookup(Gori::Verb::Chord.new("p"), Gori::Verb::Scope::Discover).should eq("discover.pause")
   end
 
-  it "Fuzzer results: o / m / v" do
-    keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::Fuzzer).should eq("fuzz.sort")
+  it "Fuzzer results: m / v (sort is menu-only since F2 took `o` back for ↵)" do
+    keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::Fuzzer).should be_nil
+    Gori::Verbs.registry["fuzz.sort"].menu_key.should eq('o')
     keymap.lookup(Gori::Verb::Chord.new("m"), Gori::Verb::Scope::Fuzzer).should eq("fuzz.matched")
     keymap.lookup(Gori::Verb::Chord.new("v"), Gori::Verb::Scope::Fuzzer).should eq("fuzz.dist")
   end

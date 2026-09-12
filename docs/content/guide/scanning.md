@@ -41,7 +41,7 @@ Blind SSRF tests only the first URL-shaped value across the query, form fields a
 
 Severities run `info`, `low`, `medium`, `high`, `critical`. Headless `gori run probe` runs passive checks by default, and pass `--active` to also run active checks.
 
-Findings are grouped by check and host, so one row can stand for dozens of hits. Open it and the **AFFECTED URLS** list is the evidence: `↑`/`↓` walk it and `Enter` opens the flow that URL was captured on, in the same detail view History uses. `o` opens the finding's sample flow, `r` sends it to the Repeater, and `y` copies the selected URLs (or all of them).
+Findings are grouped by check and host, so one row can stand for dozens of hits. Open it and the **AFFECTED URLS** list is the evidence: `↑`/`↓` walk it and `Enter` opens the flow that URL was captured on, in the same detail view History uses. `s` goes to the source — the finding's sample flow, in History — `r` sends it to the Repeater, and `y` copies the selected URLs (or all of them).
 
 Run analysis headless. By default it reads what's already captured (History + Repeater responses) and sends nothing, or pass `--active` to send probe requests:
 

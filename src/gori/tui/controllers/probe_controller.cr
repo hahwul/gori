@@ -167,7 +167,7 @@ module Gori::Tui
           # `↵ open` and `o flow` are two different destinations and both belong here — the
           # caret's own affected URL, and the issue's sample evidence. The Issues detail names
           # the same pair for the same reason (`↵ open` over its related links, `o flow`).
-          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · #{step}{probe.open-flow} flow · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
+          keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · #{step}{probe.open-flow} source · {probe.repeater-flow} repeater · ↹ description · space cmds · ←/esc back")
         end
       elsif @probe.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -178,7 +178,7 @@ module Gori::Tui
       elsif @probe.preview_enabled?
         "↑/↓ move · ↵ open · ↹ preview · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
       else
-        keys("↑/↓ move · ↵ open · {probe.open-evidence} flow · {probe.repeater-evidence} repeater · {probe.promote-selected} promote · {probe.dismiss-selected} dismiss · {probe.delete-selected} delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds")
+        keys("↑/↓ move · ↵ open · {probe.open-evidence} source · {probe.repeater-evidence} repeater · {probe.promote-selected} promote · {probe.dismiss-selected} dismiss · {probe.delete-selected} delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds")
       end
     end
 

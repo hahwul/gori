@@ -56,11 +56,20 @@ module Gori
       r.register Verb::Definition.new(
         "diff.copy", "Copy", "Copy the selected row — endpoint, verdict, and what moved — as one line",
         Verb::Scope::Diff, [Verb::Chord.new("y")], available: rows_shown, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+      # `↵`/`→`, and an explicit 'o' menu letter where the dropped chord used to derive it.
+      # `o` is the `↵` ALIAS in the four scopes that keep it ("open this row's own detail");
+      # here it opened a DIFFERENT tab, which is the split the key audit's F2 closes.
+      #
+      # `→` rather than nothing beside `↵`: a lone `enter` would make this verb rebindable
+      # (`Hotkeys.rebindable?` counts chords) and a bare `enter` default is refused as
+      # terminal-reserved, which is the trade the comment above spells out. `→` is also the
+      # app's own drill-in grammar — it goes one layer deeper, which is exactly what handing
+      # the pair to the Comparer is — so the alias pair costs no bare letter at all.
       r.register Verb::Definition.new(
         "diff.to-comparer", "Compare the two captures",
         "Send this endpoint's capture from each side to the Comparer for the byte-level diff",
-        Verb::Scope::Diff, [Verb::Chord.new("o"), Verb::Chord.new("enter")],
-        available: rows_shown, group: :send) { |ctx| ctx.diff_to_comparer; nil }
+        Verb::Scope::Diff, [Verb::Chord.new("enter"), Verb::Chord.new("right")],
+        available: rows_shown, mnemonic: 'o', group: :send) { |ctx| ctx.diff_to_comparer; nil }
 
       # The retest's EXIT. ⇧F is History's and OAST's `issue.create` chord deliberately —
       # "file what I'm looking at" is one gesture across the app, and `Keymap#lookup` is

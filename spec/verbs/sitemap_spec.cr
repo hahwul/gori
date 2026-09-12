@@ -71,10 +71,12 @@ describe "Gori::Verbs.register_sitemap" do
     verb.chords.should eq([typed_chord("o")])
     verb.hidden?.should be_false # else it reaches neither the space menu nor Help
     verb.menu_key.should eq('o') # what for_scope+SpaceMenu need to render a row
-    # Same chord as the sibling that makes the same jump, so `o` means one thing. (The Issues
-    # detail had a third; it went when the primary flow became RELATED's first row, where `s`
-    # opens it like every other row's source.)
-    r["probe.open-flow"].chords.should eq([typed_chord("o")])
+    # `o` on the Sitemap is the `↵` ALIAS — "open this row's own detail" — which is the one
+    # meaning the key audit's F2 left it. Probe's sample-flow jump is not that: it opens a
+    # DIFFERENT tab, so it moved to `s` = go to source with the Evidence tab and the Issues
+    # detail's RELATED card, and `o` is unbound in both Probe scopes.
+    r["sitemap.open-flow"].chords.should eq([typed_chord("o")])
+    r["probe.open-flow"].chords.should eq([typed_chord("s")])
   end
 
   # The space menu filters on available? while validate_menu_keys! does not, so an entry can

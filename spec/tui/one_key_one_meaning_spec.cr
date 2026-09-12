@@ -32,9 +32,48 @@ describe "one key, one meaning" do
   end
 
   it "the scope lens has one key — the Global `s` — and no ⇧S twin" do
-    {Gori::Verb::Scope::Body, Gori::Verb::Scope::Sitemap, Gori::Verb::Scope::Probe}.each do |scope|
+    {Gori::Verb::Scope::Body, Gori::Verb::Scope::Sitemap}.each do |scope|
       keymap.lookup(Gori::Verb::Chord.new("s", shift: true), scope).should be_nil
       keymap.lookup(Gori::Verb::Chord.new("s"), scope).should eq("scope.toggle-lens")
+    end
+    # Probe is the ONE tab that shadows it, and deliberately: `s` = go to source is the
+    # meaning #1051 settled and F2 grew, and the lens is `probe.scope-toggle` in the menu
+    # there — reachable where its effect is visible, which is the trade that scope spells out.
+    keymap.lookup(Gori::Verb::Chord.new("s", shift: true), Gori::Verb::Scope::Probe).should be_nil
+    keymap.lookup(Gori::Verb::Chord.new("s"), Gori::Verb::Scope::Probe).should eq("probe.open-evidence")
+    Gori::Verbs.registry["probe.scope-toggle"].menu_key.should eq('s')
+  end
+
+  # `s` means GO TO SOURCE — the Evidence tab's grammar, which #1051 gave the Issues detail's
+  # RELATED card and F2 gives Probe. `o` is left as the `↵` alias it is in the four scopes
+  # where it opens the row's OWN detail, and is bound nowhere else.
+  it "`s` goes to the tab the row lives in, and `o` is only ever ↵'s alias" do
+    {Gori::Verb::Scope::Evidence     => "evidence.source",
+     Gori::Verb::Scope::IssuesDetail => "issue.goto-link",
+     Gori::Verb::Scope::Probe        => "probe.open-evidence",
+     Gori::Verb::Scope::ProbeDetail  => "probe.open-flow",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("s"), scope).should eq(id), scope.to_s
+    end
+    {Gori::Verb::Scope::Body            => "body.open",
+     Gori::Verb::Scope::Discover        => "discover.open-flow",
+     Gori::Verb::Scope::Sitemap         => "sitemap.open-flow",
+     Gori::Verb::Scope::ProjectActivity => "activity.open",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("o"), scope).should eq(id), scope.to_s
+    end
+    # …and in three of the four it is literally `↵`'s alias. The Sitemap is the standing
+    # exception the audit names: `↵`/`→` EXPAND a tree node there, so `o` is the only key
+    # that opens the row's own flow rather than a second spelling of one.
+    {"body.open", "discover.open-flow", "activity.open"}.each do |id|
+      Gori::Verbs.registry[id].chords.map(&.key).should contain("enter"), id
+    end
+    Gori::Verbs.registry["sitemap.open-flow"].chords.map(&.key).should_not contain("enter")
+    # Every other scope: `o` is unbound.
+    Gori::Verb::Scope.each do |scope|
+      next if {Gori::Verb::Scope::Body, Gori::Verb::Scope::Discover, Gori::Verb::Scope::Sitemap,
+               Gori::Verb::Scope::ProjectActivity}.includes?(scope)
+      keymap.lookup(Gori::Verb::Chord.new("o"), scope).should be_nil, scope.to_s
     end
   end
 

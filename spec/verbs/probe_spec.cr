@@ -24,7 +24,7 @@ describe "Gori::Verbs.register_probe" do
        "probe.mode"              => "m",
        "probe.dismiss-selected"  => "c",
        "probe.toggle-closed"     => "a",
-       "probe.open-evidence"     => "o",
+       "probe.open-evidence"     => "s", # go to source (F2) — `o` is the ↵ alias, not a jump
        "probe.repeater-evidence" => "r",
        "probe.promote-selected"  => "p",
        "probe.delete-selected"   => "d",
@@ -88,7 +88,7 @@ describe "Gori::Verbs.register_probe" do
 
   describe "the issue detail" do
     it "mirrors the list's actions on the same keys, in the ProbeDetail scope" do
-      {"probe.open-flow"     => {:probe_open_flow, "o"},
+      {"probe.open-flow"     => {:probe_open_flow, "s"},
        "probe.repeater-flow" => {:probe_repeater_flow, "r"},
        "probe.promote"       => {:probe_promote, "p"},
        "probe.dismiss"       => {:probe_dismiss, "c"},
@@ -101,9 +101,9 @@ describe "Gori::Verbs.register_probe" do
       verb_intents(r, "probe.close").should eq([:probe_close])
     end
 
-    # ↵ over the AFFECTED URLS list. `o` reaches the group's ONE sample flow, so before this
+    # ↵ over the AFFECTED URLS list. `s` reaches the group's ONE sample flow, so before this
     # every other URL in a group of up to 50 was a dead row in the pane that listed it.
-    it "opens the caret's affected URL on ↵, distinct from the sample flow on `o`" do
+    it "opens the caret's affected URL on ↵, distinct from the sample flow on `s`" do
       r["probe.open-affected"].scope.should eq(Gori::Verb::Scope::ProbeDetail)
       # ↵/l/→ mirrors probe.close's esc/h/← in the same scope: ← leaves the detail, → goes
       # deeper. The aliases also keep a bare `enter` — structurally reserved — off the
@@ -111,9 +111,10 @@ describe "Gori::Verbs.register_probe" do
       r["probe.open-affected"].chords.should eq([typed_chord("enter"),
                                                  typed_chord("l"), typed_chord("right")])
       verb_intents(r, "probe.open-affected").should eq([:probe_open_affected])
-      # A menu key of its own: `o` is taken by the sample flow, and the space menu is the one
-      # place both are listed side by side.
+      # A menu key of its own: `o` is the sample flow's MENU letter (its chord is `s`), and
+      # the space menu is the one place both are listed side by side.
       r["probe.open-affected"].menu_key.should eq('u')
+      r["probe.open-flow"].menu_key.should eq('o')
       r["probe.open-flow"].chords.map(&.key).should_not contain("enter")
     end
   end

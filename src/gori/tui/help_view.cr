@@ -277,7 +277,11 @@ module Gori::Tui
         # what the list holds as well as what the keys do.
         Item.new("RELATED row 1", "the flow the issue was filed from — {issue.goto-link} opens it in History"),
         Item.new("in RELATED", "↵ view the row's exchange (a fuzz/miner session: open it) · {issue.goto-link} source · {issue.freeze-link} freeze · {issue.repeater-flow} repeater"),
-        Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {scope.toggle-lens} scope · {probe.clear} clear issues · space cmds"),
+        # `space → s scope`, NOT `{scope.toggle-lens} scope`: `s` on this tab is
+        # `probe.open-evidence` (go to source) since the key audit's F2, so the Global lens is
+        # the menu entry `probe.scope-toggle` here. The token would have printed the Global
+        # chord and been wrong on the one tab this row is about.
+        Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · space → s scope · {probe.clear} clear issues"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here
