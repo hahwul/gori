@@ -155,6 +155,57 @@ end
 # deep crashed with `JSON::Error: Nesting of 100 is too deep`. Output.sitemap_json now
 # hand-emits the tree (no builder, no artificial ceiling) — a security tool must keep the
 # whole endpoint tree rather than truncate it.
+# `add` reuses a node's already-stamped `path` as the accumulator for its children instead of
+# rebuilding the prefix chain per endpoint. Every node's `path` must still be its own full path
+# from the host root — that string is the durable tag key and the retest diff's endpoint key —
+# and a second target walking the SAME prefix must land on the SAME nodes.
+describe "Gori::Sitemap.add path stamping across shared prefixes" do
+  it "stamps every node on a shared prefix exactly once and identically" do
+    prefix = ["api", "v2", "orgs", "7", "projects", "3"]
+    targets = ["/api/v2/orgs/7/projects/3/issues", "/api/v2/orgs/7/projects/3/members",
+               "/api/v2/orgs/7/settings", "/api/v2/orgs/7"]
+    hosts = Gori::Sitemap.build(targets.map { |t| {"h", "GET", t} })
+    node = hosts.first
+    acc = ""
+    prefix.each do |seg|
+      node = node.children.find! { |c| c.label == seg }
+      acc = "#{acc}/#{seg}"
+      node.path.should eq(acc)
+    end
+    node.children.map(&.label).sort!.should eq(["issues", "members"])
+    node.children.each do |c|
+      c.path.should eq("#{acc}/#{c.label}")
+    end
+    # The shared prefix is ONE chain, not one per target.
+    hosts.first.children.size.should eq(1)
+    Gori::Sitemap.node_path(targets[0]).should eq("/api/v2/orgs/7/projects/3/issues")
+  end
+
+  it "agrees with node_path for every target, query and trailing slash included" do
+    targets = ["/a/b/c", "/a/b/c/", "/a/b/c?x=1", "/", "/?q=1", "//dup/a", "/a/b/c%20d"]
+    hosts = Gori::Sitemap.build(targets.map { |t| {"h", "GET", t} })
+    seen = [] of String
+    Gori::Sitemap.post_order(hosts.first) { |n| seen << n.path unless n.path.empty? }
+    targets.each { |t| seen.should contain(Gori::Sitemap.node_path(t)) }
+  end
+
+  it "stamps the full prefix on a target cut at MAX_DEPTH, reached second" do
+    deep = String.build { |io| (Gori::Sitemap::MAX_DEPTH + 5).times { |i| io << "/s" << i } }
+    shallow = String.build { |io| 4.times { |i| io << "/s" << i } }
+    # The shallow target stamps the first four nodes; the deep one must extend from them.
+    hosts = Gori::Sitemap.build([{"h", "GET", shallow}, {"h", "GET", deep}])
+    node = hosts.first
+    acc = ""
+    Gori::Sitemap::MAX_DEPTH.times do |i|
+      node = node.children.find! { |c| c.label == "s#{i}" }
+      acc = "#{acc}/s#{i}"
+      node.path.should eq(acc)
+    end
+    node.truncated.should be_true
+    node.children.should be_empty
+  end
+end
+
 describe Gori::CLI::Output do
   describe ".sitemap_json (deep tree)" do
     it "serializes a path well past the builder's 100-level nesting cap without crashing" do
