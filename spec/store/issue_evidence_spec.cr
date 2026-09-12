@@ -254,4 +254,44 @@ describe "Store#freeze_evidence (V26)" do
       store.evidence_count_for(Gori::Store::LinkRefKind::Repeater, reused).should eq(1)
     end
   end
+
+  # The same reuse, asked from the other end: the Evidence tab's `s` opens the live object a
+  # copy came FROM, and "a row with that id exists" was the wrong question there too — it
+  # navigated to the successor tab and presented it as the original.
+  it "denies a frozen copy its source once a new Repeater tab has inherited the id" do
+    with_store do |store|
+      rid = store.insert_repeater("https://acme.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "a".to_slice, nil, 1_i64, request_sha256: nil)
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      snap = Gori::Evidence.from_repeater(store.get_repeater_full(rid).not_nil!).not_nil!
+      eid, status = store.freeze_evidence(issue, snap)
+      status.ok?.should be_true
+      meta = store.get_evidence_meta(eid).not_nil!
+      store.evidence_source_alive?(meta).should be_true
+
+      store.delete_repeater(rid).should be_true
+      store.evidence_source_alive?(meta).should be_false # nothing under the id at all
+
+      sleep 2.milliseconds
+      reused = store.insert_repeater("https://other.test", "GET /b HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      reused.should eq(rid)
+      store.get_repeater(reused).should_not be_nil       # the id resolves…
+      store.evidence_source_alive?(meta).should be_false # …to a tab this copy never came from
+    end
+  end
+
+  it "keeps a flow source alive while the capture is there, and only while it is" do
+    with_store do |store|
+      fid = store.insert_flow(captured("/live"))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        fid, 200, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ok".to_slice, duration_us: 1_i64))
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      eid, _ = store.freeze_evidence(issue, flow_snapshot(store, fid))
+      meta = store.get_evidence_meta(eid).not_nil!
+      store.evidence_source_alive?(meta).should be_true
+      store.flush
+      store.clear_flows.should be_true
+      store.evidence_source_alive?(meta).should be_false
+    end
+  end
 end

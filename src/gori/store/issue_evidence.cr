@@ -189,6 +189,27 @@ module Gori
         kind.label, source_id).as(Int64).to_i
     end
 
+    # Is the LIVE object a frozen copy came from still the one it was copied from? The Evidence
+    # tab's `s` (open original source) asks this, and "a row with that id exists" is not the
+    # same question — for the same reason `evidence_count_for` guards its COUNT: `repeaters.id`
+    # has no AUTOINCREMENT, so a tab opened after the source tab was closed can inherit its id
+    # while the copy (deliberately) outlives the close. Navigating there would present an
+    # unrelated tab as "the original". A copy is always taken from a tab that already exists,
+    # so the source is alive only when the row's `created_at` is at or before the copy's; a
+    # newer row under the same id is a successor. Flow ids never return (both prune paths
+    # delete from the bottom), so a flow needs only to exist.
+    def evidence_source_alive?(meta : IssueEvidenceMeta) : Bool
+      case meta.source_kind
+      when .flow?
+        !flow_row(meta.source_id).nil?
+      when .repeater?
+        @db.scalar("SELECT COUNT(*) FROM repeaters WHERE id = ? AND created_at <= ?",
+          meta.source_id, meta.created_at).as(Int64) > 0
+      else
+        false
+      end
+    end
+
     # Bytes the project's evidence currently holds against `Evidence::QUOTA_BYTES`.
     def evidence_bytes : Int64
       @db.scalar("SELECT COALESCE(SUM(bytes), 0) FROM issue_evidence").as(Int64)

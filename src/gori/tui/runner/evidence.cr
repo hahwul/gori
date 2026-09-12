@@ -107,13 +107,23 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     evidence_controller.view.selected.try(&.issue_ids.empty?) == false
   end
 
+  # `s` (open original source) is offered only when the live object this copy came FROM is
+  # still that object — `Store#evidence_source_alive?`, the predicate `evidence_count_for`'s
+  # marker already counted by. Existence alone was the bug: a Repeater id is reused, so after
+  # closing the source tab and opening another, `s` navigated to an unrelated tab and
+  # presented it as the original.
   def evidence_source_available? : Bool
     meta = evidence_controller.view.selected || return false
-    case meta.source_kind
-    when .flow?     then !@session.store.flow_row(meta.source_id).nil?
-    when .repeater? then !@session.store.get_repeater(meta.source_id).nil?
-    else                 false
-    end
+    @session.store.evidence_source_alive?(meta)
+  end
+
+  # A source id that now belongs to a DIFFERENT, newer Repeater tab than the one frozen from.
+  # Distinguished from "gone" because the two need different sentences: `navigate_link_ref`
+  # already says "repeater session gone" for an id with no row at all, and that sentence would
+  # be a lie about an id whose row is right there — it is simply not this copy's tab.
+  private def evidence_source_reused?(meta : Store::IssueEvidenceMeta) : Bool
+    meta.source_kind.repeater? && !@session.store.get_repeater(meta.source_id).nil? &&
+      !@session.store.evidence_source_alive?(meta)
   end
 
   def evidence_open : Nil
@@ -157,8 +167,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_evidence_issue_picker("OPEN LINKED ISSUE", ids) { |id| open_evidence_issue(id) }
   end
 
+  # The availability gate above normally keeps this verb off the key and out of the menu, so
+  # the refusal here is the RACE: a peer instance (the project is one shared SQLite file) can
+  # close the source tab and open a successor between the menu being built and the press.
   def evidence_open_source : Nil
     meta = evidence_controller.view.selected || return
+    return (@toast = "the original repeater tab is gone (its id was reused)") if evidence_source_reused?(meta)
     navigate_link_ref(meta.source_kind, meta.source_id)
   end
 
