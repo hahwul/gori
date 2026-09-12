@@ -27,7 +27,7 @@ Creating a name that already exists just reopens it, so this is safe to re-run.
 
 ## 2. Draw your scope
 
-Open the **Project** tab, arrow to the **SCOPE** card, and press `↓` or `Enter` to drop into it. Scope is a list of **include** and **exclude** rules, each matching by **host**, **string**, or **regex**. Add an include for your target, then exclude the noise you don't care about:
+Open the **Project** tab, arrow to the **Scope** sub-tab, and press `↓` or `Enter` to drop into it. Scope is a list of **include** and **exclude** rules, each matching by **host**, **string**, or **regex**. Add an include for your target, then exclude the noise you don't care about:
 
 ```bash
 gori run project scope add --kind=include --type=host  --pattern=api.example.com
@@ -36,7 +36,7 @@ gori run project scope add --kind=exclude --type=regex --pattern='\.(css|js|png|
 
 Scope is evaluated as an **allowlist**: a flow is in scope when at least one include rule matches and no exclude rule does. That definition drives the next two steps.
 
-**Checkpoint.** `gori run project scope` (or the SCOPE card) lists both rules. Nothing is filtered or blocked yet; you've only described the boundary.
+**Checkpoint.** `gori run project scope` (or the Scope sub-tab) lists both rules. Nothing is filtered or blocked yet; you've only described the boundary.
 
 ## 3. Focus your view with the scope lens
 
@@ -60,7 +60,7 @@ Because scope is an allowlist, **a sandbox with no include rule blocks everythin
 
 ## 5. Redirect a host without touching DNS (optional)
 
-If your target's name has to resolve somewhere other than public DNS (a staging box, a local instance), add a **host override** in the **Project → HOST OVERRIDES** card. It changes only the TCP dial target; the SNI, certificate name, and `Host` header stay the original name, so the server sees an ordinary request:
+If your target's name has to resolve somewhere other than public DNS (a staging box, a local instance), add a **host override** in the **Project → Host overrides** sub-tab. It changes only the TCP dial target; the SNI, certificate name, and `Host` header stay the original name, so the server sees an ordinary request:
 
 ```bash
 gori run project host-override add --host=api.example.com --ip=10.0.0.1

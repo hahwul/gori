@@ -78,14 +78,17 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, rules : Array(Store::ColorRule),
                sel : Int32, scroll : Int32, enabled_count : Int32, focused : Bool) : Nil
       return if rect.w < 6 || rect.h < LIST_MIN_H
-      Frame.card(screen, rect, "COLORMARKER", bg: Theme.bg, border: Frame.pane_border(focused))
+      # No border TITLE: this card IS the tab, and the tab bar two rows above already names it —
+      # `COLORMARKER` inside the body frame printed the word a second time. The enabled/global
+      # tally stays: that is the part of the border that carries information.
+      Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
       meta = "#{enabled_count}/#{rules.size} enabled"
       # How many come from the global library, so the split stays legible when the list is
       # scrolled past the `G` rows. Only when there ARE any — a project with none should not
       # pay border width to be told "0 global".
       globals = rules.count(&.global?)
       meta = "#{globals} global · #{meta}" if globals > 0
-      Frame.border_meta(screen, rect, "COLORMARKER", meta)
+      Frame.border_meta(screen, rect, "", meta)
       inner = rect.inset(1, 1)
       return if inner.empty?
 

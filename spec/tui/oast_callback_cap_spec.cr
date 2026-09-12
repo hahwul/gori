@@ -260,9 +260,11 @@ describe "Gori::Tui::OastController — the callback buffer is a bounded window"
     with_oast_controller do |controller, host, _session, sid|
       flood(controller, sid, OastController::CALLBACK_CAP + 50)
 
-      # Standing marker in the card title: the count must not read as "this is all there is".
+      # Standing marker on the card border: the count must not read as "this is all there is".
+      # The card carries no `CALLBACKS` title any more — the sub-tab chip above it names the
+      # pane — so the count and its caveat are what the border has to say.
       pane = callbacks_pane(controller)
-      pane.should contain("CALLBACKS (#{OastController::CALLBACK_CAP} of #{OastController::CALLBACK_CAP + 50})")
+      pane.should contain("#{OastController::CALLBACK_CAP} of #{OastController::CALLBACK_CAP + 50}")
       pane.should contain("50 older kept in the project DB")
 
       # And a one-time note, because the callbacks that get evicted are the ones that arrived
@@ -365,6 +367,21 @@ describe "Gori::Tui::OastController — the CALLBACKS table on a narrow pane" do
         head.should_not contain("SOURCPROVIDER")       # (w=#{w})
         # …and nothing on any row may reach the pane's last column, which is the card border.
         rows.each { |r| r[w - 1].should_not eq('D') } # (w=#{w})
+      end
+    end
+  end
+
+  # The eviction caveat is long, and `Frame.border_meta` draws NOTHING rather than truncate when
+  # its run will not fit — where the retired card TITLE was merely clipped. Losing the caveat on
+  # a narrow pane is acceptable; losing the COUNT with it is the silent cap this whole file
+  # exists to prevent, so the draw falls back to the bare count at every width that has room.
+  it "keeps the count on a narrow pane, where the eviction caveat cannot fit" do
+    with_oast_controller do |controller, _host, _session, sid|
+      flood(controller, sid, OastController::CALLBACK_CAP + 50)
+      held = "#{OastController::CALLBACK_CAP} of #{OastController::CALLBACK_CAP + 50}"
+      (40..90).each do |w| # 40 is `Layout.usable?`'s floor; the caveat stops fitting well above it
+        top = callbacks_pane_at(controller, w, 20).find(&.includes?(held))
+        top.should_not be_nil # (w=#{w}) the window's size survived the width
       end
     end
   end
