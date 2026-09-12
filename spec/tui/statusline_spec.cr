@@ -282,15 +282,20 @@ end
 private STATUSLINE_CA_ROOT = File.tempname("gori-statusline-ca")
 Spec.after_suite { FileUtils.rm_rf(STATUSLINE_CA_ROOT) }
 
-private def with_statusline_session(&)
+# Yields a live Session and a controller wired to it. The controller is STOPPED on the way
+# out: its worker fiber outlives the example otherwise, parked on a channel receive with a
+# reference to a Session this block is about to close.
+private def with_statusline_controller(&)
   root = File.tempname("gori-statusline-sess")
   Dir.mkdir_p(root)
   project = Gori::ProjectRegistry.new(root).temp("statusline")
   session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
     Gori::Proxy::Tls::CertAuthority.load_or_create(STATUSLINE_CA_ROOT), Gori::Verbs.registry, project)
+  ctl = StatuslineController.new(session, Gori::Tui::Jobs.new)
   begin
-    yield session, Gori::Tui::Jobs.new
+    yield ctl, session
   ensure
+    ctl.stop
     session.close
     FileUtils.rm_rf(root) if Dir.exists?(root)
   end
@@ -311,12 +316,12 @@ end
 describe Gori::Tui::StatuslineController do
   it "hands the script a context describing the live session" do
     with_statusline_settings do
-      with_statusline_session do |session, jobs|
+      with_statusline_controller do |ctl, session|
         Gori::Settings.statusline_enabled = true
         Gori::Settings.statusline_command = "cat"
         Gori::Settings.statusline_interval = 1
         Gori::Settings.statusline_timeout = 10
-        ctx = JSON.parse(drive_statusline(StatuslineController.new(session, jobs)))
+        ctx = JSON.parse(drive_statusline(ctl))
 
         ctx["version"].as_i.should eq(1)
         ctx["project"].as_s.should eq(session.project.name)
@@ -349,12 +354,11 @@ describe Gori::Tui::StatuslineController do
   # interval) and `@rendered` cannot suppress the repaint.
   it "re-reads the session's modes on every run" do
     with_statusline_settings do
-      with_statusline_session do |session, jobs|
+      with_statusline_controller do |ctl, session|
         Gori::Settings.statusline_enabled = true
         Gori::Settings.statusline_command = "cat"
         Gori::Settings.statusline_interval = 1
         Gori::Settings.statusline_timeout = 10
-        ctl = StatuslineController.new(session, jobs)
         JSON.parse(drive_statusline(ctl))["scope"]["sandbox"].as_bool.should be_false
 
         session.scope.enable_sandbox
@@ -376,12 +380,11 @@ describe Gori::Tui::StatuslineController do
   # that verdict to the render seam — `failed?` is what Chrome.render_statusline colours on.
   it "reports a failing command as its own failure, and recovers when the command is fixed" do
     with_statusline_settings do
-      with_statusline_session do |session, jobs|
+      with_statusline_controller do |ctl, _session|
         Gori::Settings.statusline_enabled = true
         Gori::Settings.statusline_command = "exit 3"
         Gori::Settings.statusline_interval = 1
         Gori::Settings.statusline_timeout = 10
-        ctl = StatuslineController.new(session, jobs)
         drive_statusline(ctl).should eq("⋯ (exit 3)")
         ctl.failed?.should be_true
 

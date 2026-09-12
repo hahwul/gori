@@ -41,6 +41,11 @@ want() { case " $ONLY " in *" $1 "*) return 0;; *) return 1;; esac; }
 
 [ -x "$GORI" ] || { echo "gori binary not found/executable at $GORI (run 'shards build' first)"; exit 1; }
 command -v tmux >/dev/null || { echo "tmux is required"; exit 1; }
+# The statusline scene's command IS a jq program. Without jq that scene still "succeeds":
+# the child exits 127, the row captures as `⋯ (exit 127)` — in the caution colour, which
+# reads as a deliberate warning in the SVG — and that gets committed as the documented
+# picture of the feature. Refuse up front instead.
+command -v jq >/dev/null || { echo "jq is required (the statusline scene's command is a jq program)"; exit 1; }
 
 WORK="$(mktemp -d)"
 export GORI_HOME="$WORK/home"

@@ -220,8 +220,8 @@ module Gori::Tui
   # back through a latest-wins channel. Everything that touches Session/Store/Settings
   # happens on the main fiber (in `tick`); the worker only touches Process + channels.
   #
-  # INVARIANT (mirrors Jobs): @segments / @running / @last_run are mutated ONLY on the
-  # main fiber, from `tick`. The worker never touches them.
+  # INVARIANT (mirrors Jobs): @segments / @failed / @running / @last_run are mutated ONLY on
+  # the main fiber, from `tick`. The worker never touches them.
   class StatuslineController
     getter segments : Array(Ansi::Segment)
     # Whether the row currently shows gori's own marker instead of the script's output.

@@ -497,14 +497,14 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | 프록시가 실제로 리스닝 중인 주소 |
 | `upstream` | string | **캐치올** 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. [업스트림 규칙](#upstream-rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
 | `upstream_rules` | integer | 적용 중인 [업스트림 규칙](#upstream-rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
-| `scope.active` / `scope.rules` | bool / integer | [스코프](/ko/guide/proxy/#scope) 필터가 켜져 있는지, 그리고 규칙이 몇 개인지 |
+| `scope.active` / `scope.rules` | bool / integer | [스코프](/ko/guide/proxy/#scope) 필터가 실제로 작동 중인지 — 렌즈가 켜져 있고 **동시에** 규칙이 하나 이상 — 그리고 규칙이 몇 개인지 |
 | `scope.sandbox` | bool | [Sandbox](/ko/guide/proxy/#sandbox)가 스코프 밖 목적지를 기록만 안 하는 게 아니라 아예 차단하고 있는지 |
 | `intercept.enabled` | bool | catch가 켜져 있는지. 켜져 있는 동안 실제 클라이언트가 붙잡혀 있음 |
 | `intercept.queued` | integer | 지금 결정을 기다리는 메시지 수 |
 | `intercept.direction` | string | `both` · `requestonly` · `responseonly` — 어느 쪽 다리를 붙잡는지 |
-| `probe` | string | [스캐너](/ko/guide/scanning/#probe-the-scanner) 모드: `off` · `passive` · `active` |
+| `probe` | string | [스캐너](/ko/guide/scanning/#probe-the-scanner) 모드: `off` · `passive` · `active` · `aggressive` |
 | `issues` | integer | 이 프로젝트에 기록된 이슈 수 |
-| `jobs.running` | integer | 진행 중인 백그라운드 작업 수 (fuzz · mine · discover 등) |
+| `jobs.running` | integer | 진행 중인 백그라운드 작업 수 (fuzz · mine · discover 등) — 활동 칩이 세는 바로 그 장부라, 전송 중인 Repeater 요청은 포함되지 않음 |
 | `jobs.label` | string \| null | 상태 바의 활동 칩이 말하는 문구, 예: `"fuzzing 1"`. 실행 중인 게 없으면 `null` |
 
 `scope`부터 아래는 이미 캡처한 것이 아니라 **gori가 다음에 무엇을 할지**를 설명합니다. 상단 바의 칩들이 나르는 바로 그 사실이라, 위를 올려다보지 않고도 "intercept가 아직 켜져 있나?"를 statusline이 답할 수 있습니다. 필드는 추가만 되었고 `version`은 `1` 그대로입니다. 이전 컨텍스트에 맞춰 쓴 스크립트는 똑같이 동작합니다.

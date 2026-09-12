@@ -34,7 +34,8 @@ shards build                       # ensure ./bin/gori exists
 docs/tools/tui-capture/capture.sh  # writes docs/static/images/tui/*.svg
 ```
 
-Requirements: `bash`, `tmux`, `python3`, `curl`, `sqlite3`.
+Requirements: `bash`, `tmux`, `python3`, `curl`, `sqlite3`, `jq` (the statusline scene's
+command is a jq program).
 
 Set `ONLY` to shoot a subset of the three groups (`scenes themes readme`):
 

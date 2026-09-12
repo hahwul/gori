@@ -499,14 +499,14 @@ Each run receives a JSON context on stdin describing the live session, so script
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | The address the proxy is actually listening on |
 | `upstream` | string | The **catch-all** upstream proxy address/URI, or empty when connecting directly. A destination matched by an [upstream rule](#upstream-rules) routes elsewhere; this field does not reflect that |
 | `upstream_rules` | integer | Number of [upstream rules](#upstream-rules) in effect. Non-zero means routing is per-destination and `upstream` alone does not describe where traffic goes |
-| `scope.active` / `scope.rules` | bool / integer | Whether [scope](/guide/proxy/#scope) filtering is on, and how many rules it holds |
+| `scope.active` / `scope.rules` | bool / integer | Whether [scope](/guide/proxy/#scope) filtering is actually in force — the lens is on **and** at least one rule exists — and how many rules there are |
 | `scope.sandbox` | bool | Whether the [Sandbox](/guide/proxy/#sandbox) is blocking out-of-scope destinations outright, rather than merely not recording them |
 | `intercept.enabled` | bool | Whether catch is on. Real clients are held while it is |
 | `intercept.queued` | integer | Messages waiting for a decision right now |
 | `intercept.direction` | string | `both`, `requestonly` or `responseonly` — which leg is caught |
-| `probe` | string | The [scanner](/guide/scanning/#probe-the-scanner) mode: `off`, `passive` or `active` |
+| `probe` | string | The [scanner](/guide/scanning/#probe-the-scanner) mode: `off`, `passive`, `active` or `aggressive` |
 | `issues` | integer | Issues recorded in this project |
-| `jobs.running` | integer | Background jobs in flight (fuzz, mine, discover, …) |
+| `jobs.running` | integer | Background jobs in flight (fuzz, mine, discover, …) — the same book the activity chip counts, so an in-flight Repeater send is not one |
 | `jobs.label` | string \| null | What the status bar's activity chip says, e.g. `"fuzzing 1"`; `null` when nothing is running |
 
 Everything from `scope` down describes what gori is *set to do next* rather than what it has already captured — the same facts the top bar's chips carry, so a statusline can answer "is intercept still on?" without you looking up. The fields are additive and `version` stays `1`: a script written against an earlier context reads identically.

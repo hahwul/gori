@@ -134,6 +134,15 @@ describe Gori::Tui::Ansi do
     Ansi.parse("\e[38:2::255:0:0mred")[0].fg.should eq(Color.rgb(255, 0, 0))
     Ansi.parse("\e[38:2:255:0:0mred")[0].fg.should eq(Color.rgb(255, 0, 0))
     Ansi.parse("\e[48:2::0:0:255mblue")[0].bg.should eq(Color.rgb(0, 0, 255))
+    Ansi.parse("\e[38:2:1:2:3:4mx")[0].fg.should eq(Color.rgb(2, 3, 4)) # colour-space 1, then rgb
+  end
+
+  # T.416 allows tolerance parameters AFTER the blue. Counting from the RIGHT — the obvious
+  # shortcut for accepting both spellings — reads this red as rgb(0, 0, 1): a confident black,
+  # the exact failure the `;`-only reader was fixed for.
+  it "ignores tolerance parameters trailing an ITU truecolor group" do
+    Ansi.parse("\e[38:2::255:0:0:1mx")[0].fg.should eq(Color.rgb(255, 0, 0))
+    Ansi.parse("\e[38:2::255:0:0:1:2mx")[0].fg.should eq(Color.rgb(255, 0, 0))
   end
 
   it "reads ITU sub-parameter 256-colour" do

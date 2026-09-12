@@ -211,23 +211,28 @@ module Gori::Tui
     end
 
     # The colour a `38:…` / `48:…` sub-parameter group carries, or nil when it carries none.
-    #
-    # `38:2` is accepted both with and without the colour-space slot — `38:2::r:g:b` is what
-    # the standard says and `38:2:r:g:b` is what several emitters actually write — by taking
-    # the LAST three arguments as r/g/b rather than counting from the left.
     private def self.subparam_color(sub : Array(String)) : Color?
       args = sub[1..]
       case args[0]?.try(&.to_i?)
-      when 5
-        (n = args[1]?.try(&.to_i?)) ? Color.ansi256(clamp255(n)) : nil
-      when 2
-        # `args` is [mode, (colour-space)?, r, g, b], so four entries is the floor: without it
-        # `38:2:1:2` would read its own MODE digit as red and answer a colour for a group that
-        # never carried one.
-        return nil if args.size < 4
-        rgb = args[-3..].compact_map(&.to_i?)
-        rgb.size == 3 ? Color.rgb(clamp255(rgb[0]), clamp255(rgb[1]), clamp255(rgb[2])) : nil
+      when 5 then (n = args[1]?.try(&.to_i?)) ? Color.ansi256(clamp255(n)) : nil
+      when 2 then truecolor_subparam(args)
       end
+    end
+
+    # `38:2` in its two live spellings. T.416 writes [2, colour-space, r, g, b] and may append
+    # tolerance parameters after the blue; several emitters drop the colour-space slot entirely
+    # and write [2, r, g, b]. Counted FROM THE LEFT on an explicit arity switch, because the
+    # obvious shortcut — take the last three — reads `38:2::255:0:0:1` (red, plus a tolerance)
+    # as rgb(0, 0, 1), a confident black. Fewer than four arguments carries no colour at all:
+    # `38:2:1:2` would otherwise read its own mode digit as red.
+    private def self.truecolor_subparam(args : Array(String)) : Color?
+      rgb = case args.size
+            when 0, 1, 2, 3 then return nil
+            when 4          then args[1..3] # [2, r, g, b] — colour-space slot omitted
+            else                 args[2..4] # [2, cs, r, g, b, (tolerance…)]
+            end.map(&.to_i?)
+      return nil unless rgb.all? { |v| v }
+      Color.rgb(clamp255(rgb[0].as(Int32)), clamp255(rgb[1].as(Int32)), clamp255(rgb[2].as(Int32)))
     end
 
     private def self.clamp255(v : Int32) : Int32
