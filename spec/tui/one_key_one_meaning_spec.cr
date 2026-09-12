@@ -55,6 +55,19 @@ describe "one key, one meaning" do
       .should eq("intercept.copy")
   end
 
+  # `x` = select line was a registered chord in both scopes AND a raw controller arm doing
+  # the same thing first, so the verb showed in the Hotkeys editor and a rebind moved
+  # nothing. The arms are gone; these are the bindings the letter actually reaches.
+  it "`x` selects the line through the keymap, not through a controller arm" do
+    keymap.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::Repeater)
+      .should eq("repeater.select-line")
+    keymap.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::IssuesDetail)
+      .should eq("issue.select-line")
+    # The Sequencer's `c` was the third of the same shape — one arm, one identical verb.
+    keymap.lookup(Gori::Verb::Chord.new("c"), Gori::Verb::Scope::Sequencer)
+      .should eq("sequence.configure")
+  end
+
   it "History's hidden nav verbs are gated to History, not to every Body-scope tab" do
     ctx = FakeExecContext.new
     ctx.current_tab = :help
@@ -88,6 +101,37 @@ describe "TabController#insert_key_refusal" do
           controller.insert_key_refusal.should be_nil
         else
           controller.insert_key_refusal # never raises on a tab without such a pane
+        end
+      end
+    end
+  end
+
+  # The other half of the keymap-ownership example above: a chord the registry owns is only
+  # live if the controller HANDS THE KEY BACK. All three of these bodies swallow whatever
+  # they do not name, so each had to decline its letter explicitly when its arm came out.
+  it "hands `x` and `c` back to the keymap instead of swallowing them" do
+    TuiContract.with_session("select-line-fallthrough") do |session|
+      store = session.store
+      store.insert_issue("reflected param", Gori::Store::Severity::Medium, "acme.test", nil)
+      TuiContract.each_controller(session) do |controller, _host|
+        case controller
+        when RepeaterController
+          controller.repeater_new
+          v = controller.current_view.not_nil!
+          {:request, :target, :response}.each do |pane|
+            v.focus_pane(pane)
+            controller.repeater_read_mode?.should be_true, pane.to_s
+            controller.handle_body_key(TuiContract.plain('x')).should be_false, pane.to_s
+          end
+        when IssuesController
+          controller.view.reload(store)
+          controller.view.open_detail(store).should be_true
+          controller.view.focus_notes!
+          controller.issues_notes_read_mode?.should be_true
+          controller.handle_detail_key(TuiContract.plain('x')).should be_false
+          # The Sequencer's `c` is the third of the shape and its decline is named in
+          # `handle_body_key`; standing a session up here would mean starting a real
+          # collection, so the keymap example above is what pins that one.
         end
       end
     end

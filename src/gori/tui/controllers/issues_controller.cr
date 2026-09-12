@@ -693,15 +693,16 @@ module Gori::Tui
       when key.left?                         then notes_read_left(ev, selecting)
       when key.right?                        then @issues.notes_read_move(0, 1, selecting: selecting)
       when @issues.notes_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
-      # `x` carries its own modifier guard rather than the method taking one at the top:
-      # `notes_read_motion_key` above is the shared editor set, which OWNS ⌃←/⌥← (word
-      # motion), so an early `return false if ev.ctrl?` would cost the pane those. Bare only,
-      # because `ev.char` falls back to `key.to_char` — without this `^X` ran select-line,
-      # shadowing the `x` that a rebind of `issue.select-line` moves. `y` below stays
-      # modifier-blind on purpose: its Ctrl form IS `issue.copy`'s pinned `^Y`, and taking
-      # the same action is what that chord is for in this pane.
-      when !ev.ctrl? && !ev.alt? && c == 'x' then @issues.notes_select_line
-      when c == 'y'                          then issues_notes_copy
+      # `x` is NOT claimed here: `issue.select-line` is a plain chord gated on
+      # `issues_notes_read_mode?`, which is exactly this pane, so the `return false` below
+      # hands the letter to the keymap and a rebind of that verb moves the live key. The arm
+      # that stood here called `notes_select_line` directly, which is why a rebind moved
+      # nothing — and it needed its own bare-only guard (`ev.char` falls back to
+      # `key.to_char`, so `^X` reached it) that the keymap does not need.
+      #
+      # `y` DOES stay claimed, and stays modifier-blind: its Ctrl form IS `issue.copy`'s
+      # pinned `^Y`, and taking the same action is what that chord is for in this pane.
+      when c == 'y' then issues_notes_copy
       else
         return false
       end

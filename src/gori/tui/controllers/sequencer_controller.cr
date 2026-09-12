@@ -127,15 +127,18 @@ module Gori::Tui
       end
       c = ev.char || ev.key.to_char
       return true if dispatch_chord(chord_action(ev, c), v, c)
-      if c == 'c' && !ev.ctrl? && !ev.alt? && v.focus != :detail
-        @host.reconfigure_sequence
-        return true
-      end
       return false if (ev.ctrl? || ev.alt?) && !ev.key.escape? # ^R/^X → keymap verb
-      # ⇧E → sequence.export, dispatched by the keymap. The line below swallows every key
-      # this body does not itself use, so a SHIFTED chord (which is neither ctrl nor alt)
-      # never reaches the keymap unless it is declined here by name.
+      # ⇧E → sequence.export and bare `c` → sequence.configure, both dispatched by the
+      # keymap. The line below swallows every key this body does not itself use, so a key
+      # the keymap owns never reaches it unless it is declined here BY NAME.
+      #
+      # `c` used to be an arm that called `reconfigure_sequence` directly. The verb's own
+      # chord could therefore never fire: it showed in the Hotkeys editor, and a rebind of
+      # `sequence.configure` moved nothing. The `:detail` test comes along because that is
+      # the one focus where the arm did not run, and the swallow below is what has always
+      # made `c` inert there.
       return false if c == 'E'
+      return false if c == 'c' && !ev.ctrl? && !ev.alt? && v.focus != :detail
       ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
       true
     end
