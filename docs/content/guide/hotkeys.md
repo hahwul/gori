@@ -106,6 +106,11 @@ The tab bar is **nine numbered slots**, and the numbers are the primary way to m
 | `⇧1`–`⇧9` | Jump to sub-tab N of the active tab |
 | `⇧0` | **Find sub-tab…** — the same picker `f` opens from the strip |
 
+<figure class="tui-shot">
+  <img src="/images/tui/tab-goto.svg" alt="gori Go to tab card: a filter bar over the whole tab catalog, the nine tabs on the bar wearing the digits 1 to 9 and everything else wearing none, each row followed by a line saying what that tab is for">
+  <figcaption><code>0</code> opens the whole catalog. The nine on the bar wear the digit that reaches them; the rest wear none — that is the only difference being off the bar makes.</figcaption>
+</figure>
+
 These work from **everywhere** — the tab bar, the sub-tab strip, a list body, a drill-in
 detail, a read-only pane — with one exception: while a field is taking text (an editor in
 INS, a `/` query bar or search, a line prompt, a picker's filter, the CVSS scorer, the

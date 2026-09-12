@@ -85,6 +85,13 @@ showcase_alt_jwt = "gori JWT tab with a decoded token header beside a list of si
 showcase_alt_sequencer = "gori Sequencer overlay configuring a token-randomness run: token type, cookie name, sample count and concurrency"
 showcase_alt_probe = "gori Probe tab listing passive and active scan checks with their findings"
 showcase_alt_issues = "gori Issues tab listing triaged findings with severity and status columns"
+showcase_alt_notes = "gori Notes tab: two project notes as sub-tabs, with an engagement checklist open in the editor"
+showcase_goto_aria = "Tabs behind the 0 key"
+showcase_sum_oast = "out-of-band callbacks, caught live"
+showcase_sum_sequencer = "token randomness, sampled and analysed"
+showcase_sum_decoder = "encode, decode and hash, in a chain"
+showcase_sum_jwt = "read, verify and forge JSON web tokens"
+showcase_goto_rest = "<code>0</code> reaches every tab — Miner, Cookie, Comparer, Rewriter, Colormarker, Authorize, Evidence and Help are back there too."
 showcase_note = "Every request your client makes lands in <strong>History</strong> as a flow, one keystroke from Repeater, the Fuzzer, or an issue."
 
 path_start_kicker = "Start"

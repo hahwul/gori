@@ -38,9 +38,11 @@
    img.dataset.darkSrc, so the swap rewrites that too — a tab picked under the
    light theme loads the light twin directly (falling back to dark if a shot
    has no light capture), and a later theme toggle still resolves correctly.
-   The strip carries the TUI's full tab order, so it scrolls on narrow
-   viewports: the picked tab is scrolled into view, and ←/→ walks the row the
-   way the same keys walk tabs in gori itself.
+   The strip is the TUI's bar: nine numbered slots and the `0:Tabs` stop. The
+   stop opens the same list the `0` key opens, and picking a tab from it lands
+   that tab on the far right of the strip WITHOUT a number, exactly as gori
+   force-shows an off-bar tab you jumped to. ←/→ walks the row the way the same
+   keys walk tabs in gori itself, and the picked tab is scrolled into view.
 
    Swapping `src` directly blanks the frame until the new capture decodes —
    the jank this used to show on a cold cache. So a click decodes FIRST and
@@ -51,8 +53,16 @@
   var img = document.getElementById("showcaseShot");
   if (!tabs || !img) return;
 
+  var goto_ = document.getElementById("showcaseGoto");
+  var more = document.getElementById("showcaseMore");
+  var temp = document.getElementById("showcaseTemp");
+
   var base = img.getAttribute("src").replace(/\/images\/tui\/.*$/, "");
-  var buttons = tabs.querySelectorAll("button[data-shot]");
+  /* Every shot button, the `0` list included — preload and the pressed-state
+     sweep both want all of them. ←/→ walks the strip alone (see `step`). */
+  var buttons = document.querySelectorAll(
+    "#showcaseTabs button[data-shot], #showcaseGoto button[data-shot]"
+  );
   /* Monotonic click id: a slow decode that resolves after a later click must
      not overwrite the newer capture. */
   var seq = 0;
@@ -95,11 +105,38 @@
     window.addEventListener("load", function () { setTimeout(preload, 400); });
   }
 
+  /* A tab picked out of the `0` list rides the far right of the strip without a
+     number until another tab is picked — the temporary tenth tab, which is what
+     gori itself draws for an off-bar tab you jumped to. */
+  function forceShow(btn) {
+    if (!temp) return;
+    if (!btn || btn.parentNode !== goto_) {
+      temp.hidden = true;
+      temp.removeAttribute("data-shot");
+      return;
+    }
+    var name = btn.querySelector("b");
+    temp.textContent = name ? name.textContent : btn.textContent.trim();
+    temp.setAttribute("data-shot", btn.getAttribute("data-shot"));
+    temp.setAttribute("data-alt", btn.getAttribute("data-alt") || "");
+    temp.hidden = false;
+  }
+
+  function closeGoto(focusMore) {
+    if (!goto_ || goto_.hidden) return;
+    goto_.hidden = true;
+    if (more) more.setAttribute("aria-expanded", "false");
+    if (focusMore && more) more.focus();
+  }
+
   function show(btn, focus) {
     var mine = ++seq;
     for (var i = 0; i < buttons.length; i++) {
       buttons[i].setAttribute("aria-pressed", buttons[i] === btn ? "true" : "false");
     }
+    if (btn !== temp) forceShow(btn);
+    if (temp) temp.setAttribute("aria-pressed", temp.hidden ? "false" : "true");
+    closeGoto(false);
 
     var light = isLight();
     var dark = srcFor(btn.getAttribute("data-shot"), false);
@@ -142,10 +179,14 @@
     });
   }
 
+  /* ←/→ walk the STRIP — the nine slots plus whichever tab the `0` list put at
+     the end — not the list behind the stop. The stop itself is not a tab, so
+     the arrows stop at the last chip rather than landing on it. */
   function step(from, delta) {
-    for (var i = 0; i < buttons.length; i++) {
-      if (buttons[i] !== from) continue;
-      var next = buttons[i + delta];
+    var row = tabs.querySelectorAll("button[data-shot]:not([hidden])");
+    for (var i = 0; i < row.length; i++) {
+      if (row[i] !== from) continue;
+      var next = row[i + delta];
       if (next) show(next, true);
       return;
     }
@@ -156,6 +197,39 @@
     buttons[i].addEventListener("keydown", function (e) {
       if (e.key === "ArrowRight") { step(this, 1); e.preventDefault(); }
       else if (e.key === "ArrowLeft") { step(this, -1); e.preventDefault(); }
+    });
+  }
+
+  if (temp) {
+    temp.addEventListener("click", function () { show(this, false); });
+    temp.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight") { step(this, 1); e.preventDefault(); }
+      else if (e.key === "ArrowLeft") { step(this, -1); e.preventDefault(); }
+    });
+  }
+
+  if (more && goto_) {
+    more.addEventListener("click", function () {
+      var open = goto_.hidden;
+      goto_.hidden = !open;
+      more.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) {
+        var first = goto_.querySelector("button[data-shot]");
+        if (first) first.focus();
+      }
+    });
+    /* esc closes it and hands focus back to the key that opened it, like the
+       card in the TUI; a click anywhere else closes it too. */
+    goto_.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { closeGoto(true); e.preventDefault(); }
+    });
+    more.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { closeGoto(true); e.preventDefault(); }
+    });
+    document.addEventListener("click", function (e) {
+      if (goto_.hidden) return;
+      if (goto_.contains(e.target) || more.contains(e.target)) return;
+      closeGoto(false);
     });
   }
 })();
