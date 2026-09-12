@@ -93,7 +93,7 @@ module Gori
             puts(JSON.build { |j| j.object { MCP::Serialize.evidence_meta(j, meta); j.field "linked", link } })
           else
             puts "Frozen evidence ##{id} on issue ##{iid} from #{meta.source_label}#{link ? " (linked)" : ""}: " \
-                 "#{Evidence.label(meta)} → #{meta.status || (meta.error ? "error" : "no response")}, #{meta.bytes} bytes"
+                 "#{Evidence.label(meta)} → #{meta.status || (meta.error ? "error" : "no response")}, #{evidence_bytes_text(meta.bytes)}"
             puts "  sha256 req #{meta.request_sha256}"
             puts "  sha256 res #{meta.response_sha256 || "— (no response)"}"
           end
@@ -330,6 +330,19 @@ module Gori
         v.to_i64? || abort("gori run evidence: invalid #{flag} #{v.inspect} (expected an integer)")
       end
 
+      # `34567 bytes (33.8kB)` — BOTH spellings wherever a size is printed in text mode. The
+      # raw count stays first and unchanged because a script greps this line (`awk` on the
+      # field before `bytes`), and the human reading it should not have to divide by 1024 twice
+      # to learn the copy is small. `Output.human_size` is the CLI's own formatter, so a size
+      # here reads the way `run project` and `run ls` already spell one — deliberately not
+      # identical to the TUI's `Fmt.size` in the last half-cell of a unit (the rule the two
+      # share is the unit choice, not the rendering; see `human_size`). Under 1 kB there is no
+      # second spelling to give: `512 bytes (512B)` says nothing twice, so the suffix drops.
+      private def self.evidence_bytes_text(bytes : Int64) : String
+        return "#{bytes} bytes" if bytes < 1024
+        "#{bytes} bytes (#{CLI::Output.human_size(bytes)})"
+      end
+
       # `#12  hist #3  2026-09-11T05:02:33Z  POST acme.test/login → 200  34567 bytes  sha256 req a1b2… res c3d4…`
       # — one row per copy, the provenance the RELATED card shows plus the hash prefixes.
       private def self.evidence_line(m : Store::IssueEvidenceMeta) : String
@@ -340,7 +353,7 @@ module Gori
         tail = notes.empty? ? "" : "  (#{notes.join(", ")} at capture)"
         linked = m.issue_ids.empty? ? "orphaned" : m.issue_ids.map { |id| "##{id}" }.join(",")
         "##{m.id}  #{m.source_label}  #{MCP::Serialize.unix_micros_iso(m.created_at)}  " \
-        "#{Issues::Export.one_line(Evidence.label(m))} → #{outcome}  #{m.bytes} bytes  " \
+        "#{Issues::Export.one_line(Evidence.label(m))} → #{outcome}  #{evidence_bytes_text(m.bytes)}  " \
         "sha256 req #{m.request_sha256[0, 12]}… res #{m.response_sha256.try { |h| "#{h[0, 12]}…" } || "—"}  " \
         "issues #{linked}#{tail}"
       end
@@ -370,7 +383,7 @@ module Gori
           end
           io << " · " << (m.protocol.try { |p| Issues::Export.one_line(p) } || "?")
           m.duration_us.try { |d| io << " · " << d << "µs" }
-          io << " · " << m.bytes << " bytes\n"
+          io << " · " << evidence_bytes_text(m.bytes) << "\n"
           io << "sha256:   req " << m.request_sha256 << "\n"
           io << "          res " << (m.response_sha256 || "— (no response)") << "\n"
           io << "note:     request body truncated at capture\n" if m.request_truncated?
