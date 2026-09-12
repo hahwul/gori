@@ -82,9 +82,39 @@ describe "TabController#insert_key_refusal" do
           controller.insert_key_refusal.should be_nil
           controller.focus_last # OUTPUT
           controller.insert_key_refusal.not_nil!.should contain("read-only")
+        when IssuesController
+          # The LIST has no editor beside it, so Global `i` (toggle intercept) must still
+          # reach the keymap from here.
+          controller.insert_key_refusal.should be_nil
         else
           controller.insert_key_refusal # never raises on a tab without such a pane
         end
+      end
+    end
+  end
+
+  # IssuesDetail claimed bare `i` from ANY detail focus and dropped into the notes editor, so
+  # the Global intercept toggle vanished on this tab with nothing said — the one silent member
+  # of a family that was taught to speak five tabs ago. RELATED is a read-only pane beside an
+  # editor; it answers like one now.
+  it "refuses `i` from RELATED and stays quiet once NOTES has focus" do
+    TuiContract.with_session("issues-related-i") do |session|
+      store = session.store
+      store.insert_issue("reflected param", Gori::Store::Severity::Medium, "acme.test", nil)
+      TuiContract.each_controller(session) do |controller, _host|
+        next unless controller.is_a?(IssuesController)
+        controller.view.reload(store)
+        controller.view.open_detail(store).should be_true
+        controller.view.notes_focused?.should be_false
+        refusal = controller.insert_key_refusal.not_nil!
+        refusal.should contain("read-only")
+        refusal.should contain("intercept")
+        # …and the detail handler must HAND the key back, or the runner never reaches the
+        # refusal it just produced.
+        controller.handle_detail_key(TuiContract.plain('i')).should be_false
+
+        controller.view.focus_notes!
+        controller.insert_key_refusal.should be_nil
       end
     end
   end
