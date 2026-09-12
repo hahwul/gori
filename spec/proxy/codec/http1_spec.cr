@@ -6,6 +6,55 @@ private def bytes(str : String) : Bytes
   str.to_slice
 end
 
+# An IO whose `peek` hands back at most `window` bytes — the shape a socket's read buffer has
+# when a head arrives in more than one segment. `pos` is how much the reader CONSUMED, which
+# is what pins "no over-read" independently of what came back.
+private class WindowedIO < IO
+  getter pos = 0
+
+  def initialize(@data : Bytes, @window : Int32)
+  end
+
+  def peek : Bytes
+    @data[@pos, Math.min(@window, @data.size - @pos)]
+  end
+
+  def skip(bytes_count : Int) : Nil
+    @pos += bytes_count
+  end
+
+  def read(slice : Bytes) : Int32
+    n = Math.min(slice.size, @data.size - @pos)
+    @data[@pos, n].copy_to(slice[0, n])
+    @pos += n
+    n
+  end
+
+  def write(slice : Bytes) : Nil
+    raise NotImplementedError.new("write")
+  end
+end
+
+# An IO with no `peek` at all (the base `IO#peek` returns nil), like `PrefixIO`: the reader
+# must fall back to the byte-at-a-time loop and answer identically.
+private class NoPeekIO < IO
+  getter pos = 0
+
+  def initialize(@data : Bytes)
+  end
+
+  def read(slice : Bytes) : Int32
+    n = Math.min(slice.size, @data.size - @pos)
+    @data[@pos, n].copy_to(slice[0, n])
+    @pos += n
+    n
+  end
+
+  def write(slice : Bytes) : Nil
+    raise NotImplementedError.new("write")
+  end
+end
+
 describe Gori::Proxy::Codec::Http1 do
   describe ".parse_request_head" do
     it "parses request-line and headers as projections" do
@@ -154,6 +203,107 @@ describe Gori::Proxy::Codec::Http1 do
 
     it "returns nil on clean EOF" do
       Http1.read_head(IO::Memory.new("")).should be_nil
+    end
+
+    # The read loop consumes whatever `IO#peek` is already holding rather than one byte at a
+    # time (bench/head_read_bench.cr: it is most of the codec's per-head cost). Everything
+    # below pins what that must not change — chiefly that it still stops ON the terminator,
+    # because an over-read swallows the body's first octets and misframes the next message.
+    describe "bulk (peeked) consumption" do
+      raw = "GET / HTTP/1.1\r\nHost: a\r\nX: 1\r\n\r\n"
+
+      it "stops exactly on the terminator at every peek window, including a straddled CRLFCRLF" do
+        # A window of 1..4 splits the CRLFCRLF itself, which is the one thing a per-chunk scan
+        # can miss: the terminator's earlier bytes are in `buf`, not in the chunk being scanned.
+        [1, 2, 3, 4, 5, 7, 13, raw.bytesize].each do |window|
+          io = WindowedIO.new("#{raw}BODYBYTES".to_slice, window)
+          String.new(Http1.read_head(io).not_nil!).should eq(raw)
+          io.pos.should eq(raw.bytesize) # nothing over-read: the body is untouched
+        end
+      end
+
+      it "reads a head with no peek support one byte at a time, identically" do
+        io = NoPeekIO.new("#{raw}BODYBYTES".to_slice)
+        String.new(Http1.read_head(io).not_nil!).should eq(raw)
+        io.pos.should eq(raw.bytesize)
+      end
+
+      it "drops an oversized head that never terminates, and keeps one that fits exactly" do
+        big = "GET / HTTP/1.1\r\n#{"X: y\r\n" * 40}"
+        Http1.read_head(WindowedIO.new(big.to_slice, 8), 64).should be_nil
+        exact = "GET / HTTP/1.1\r\n\r\n"
+        String.new(Http1.read_head(WindowedIO.new(exact.to_slice, 8), exact.bytesize).not_nil!).should eq(exact)
+      end
+
+      it "returns what arrived when the peer EOFs mid-head, as the byte-at-a-time loop did" do
+        partial = "GET / HTTP/1.1\r\n"
+        String.new(Http1.read_head(WindowedIO.new(partial.to_slice, 4)).not_nil!).should eq(partial)
+        Http1.read_head(WindowedIO.new(Bytes.new(0), 4)).should be_nil
+      end
+    end
+
+    # `detect_non_http` (#729) decides on the FIRST non-blank byte and the loop stops there, so
+    # `ClientConn#record_non_http` files the octet that decided and not whatever else happened
+    # to be buffered behind it. The bulk path has to truncate at that byte for the same reason.
+    describe "with detect_non_http" do
+      it "stops on the deciding byte even when the whole preface is already buffered" do
+        a, b = UNIXSocket.pair
+        begin
+          a.write(Bytes[0x10, 0x0c, 0x00, 0x04, 0x4d, 0x51, 0x54, 0x54]) # MQTT CONNECT
+          a.flush
+          head = Http1.read_head(b, deadline: 5.seconds, timeout_sock: b, detect_non_http: true).not_nil!
+          head.should eq(Bytes[0x10])
+          Http1.looks_like_http_request?(head).should be_false
+        ensure
+          a.close; b.close
+        end
+      end
+
+      it "keeps reading past the blank line RFC 7230 §3.5 permits before deciding" do
+        a, b = UNIXSocket.pair
+        begin
+          a.write("\r\n".to_slice)
+          a.write(Bytes[0x16, 0x03, 0x01]) # a TLS ClientHello after the blank line
+          a.flush
+          head = Http1.read_head(b, deadline: 5.seconds, timeout_sock: b, detect_non_http: true).not_nil!
+          head.should eq(Bytes[0x0d, 0x0a, 0x16])
+        ensure
+          a.close; b.close
+        end
+      end
+
+      # "\r\n\r\n" is a COMPLETE head by RFC 7230 §3.5's leading-empty-line rule: it terminates
+      # on its fourth octet, so whatever follows is the next message's business and was never
+      # read. A bulk scan that looked past it would reject the connection as non-HTTP over a
+      # byte the reader is not entitled to have seen.
+      it "stops on a terminator that completes before any byte could be judged" do
+        a, b = UNIXSocket.pair
+        begin
+          a.write("\r\n\r\n".to_slice)
+          a.write(Bytes[0x10, 0x0c]) # MQTT, on the far side of a head that is already over
+          a.flush
+          head = Http1.read_head(b, deadline: 5.seconds, timeout_sock: b, detect_non_http: true).not_nil!
+          String.new(head).should eq("\r\n\r\n")
+          Http1.looks_like_http_request?(head).should be_true # undecided, not a refusal
+        ensure
+          a.close; b.close
+        end
+      end
+
+      it "reads a real head whole, terminator and all, and leaves the body" do
+        a, b = UNIXSocket.pair
+        begin
+          a.write("GET / HTTP/1.1\r\nHost: a\r\n\r\nBODY".to_slice)
+          a.flush
+          head = Http1.read_head(b, deadline: 5.seconds, timeout_sock: b, detect_non_http: true).not_nil!
+          String.new(head).should eq("GET / HTTP/1.1\r\nHost: a\r\n\r\n")
+          buf = Bytes.new(4)
+          b.read_fully(buf)
+          String.new(buf).should eq("BODY") # nothing over-read
+        ensure
+          a.close; b.close
+        end
+      end
     end
   end
 

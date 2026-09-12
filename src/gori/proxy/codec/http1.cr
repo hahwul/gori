@@ -8,10 +8,12 @@ require "./message"
 # plus best-effort parsed projections. We never reject malformed input (P7);
 # we flag `malformed?` and keep the original octets.
 #
-# `read_head` is the one IO boundary: it scans an IO byte-by-byte up to and
-# including CRLFCRLF. Reading byte-by-byte (served from the socket's read
-# buffer) means we stop exactly at the body boundary — there is no "over-read"
-# to thread through keep-alive loops or the CONNECT->TLS handoff.
+# `read_head` is the one IO boundary: it consumes an IO up to and including
+# CRLFCRLF and not one octet further — no "over-read" to thread through
+# keep-alive loops or the CONNECT->TLS handoff. It takes what the transport's
+# read buffer is already holding (`IO#peek`) and consumes exactly the prefix
+# that belongs to the head, falling back to a byte at a time for an IO with no
+# `peek`; see `consume_peeked` for why the bulk form is worth the scan.
 module Gori::Proxy::Codec::Http1
   CRLF      = "\r\n"
   CRLF_CRLF = "\r\n\r\n".to_slice
@@ -66,10 +68,14 @@ module Gori::Proxy::Codec::Http1
     buf = IO::Memory.new(512) # presized: covers a typical head without regrowing
     begin
       while buf.bytesize < max_bytes
-        byte = io.read_byte
-        break if byte.nil? # EOF
-        buf.write_byte(byte)
-        break if head_complete?(buf, byte)
+        if chunk = io.peek
+          break if chunk.empty? # EOF
+          break if consume_peeked(io, buf, chunk, max_bytes)[0]
+        else
+          taken = consume_byte(io, buf)
+          break if taken.nil? # EOF
+          break if taken[0]
+        end
       end
     rescue ex : IO::TimeoutError
       # `read_head` raises `HeadTimeout` and nothing else, from EITHER path. That uniformity is
@@ -95,7 +101,7 @@ module Gori::Proxy::Codec::Http1
     # Non-HTTP detection (#729): a binary-preface protocol (MQTT/AMQP/TLS-in-TLS) never sends
     # CRLFCRLF, so waiting for one blocks to the deadline with nothing recorded. The decision is
     # made on the FIRST non-blank byte and never revisited — see `looks_like_http_request?` for
-    # why it is only that byte — so the per-byte cost is one comparison until it fires, and zero
+    # why it is only that byte — so it costs one scan for that byte until it fires, and nothing
     # after. Gated on `detect_non_http` because this same deadline path also reads RESPONSE heads
     # (`safe_read_head`), where the first byte is the caller's business and not a request line.
     settled = !detect_non_http
@@ -104,19 +110,16 @@ module Gori::Proxy::Codec::Http1
         if hs = head_started
           arm_remaining(sock, deadline - (Time.instant - hs))
         end
-        byte = io.read_byte
-        break if byte.nil?            # EOF
-        head_started ||= Time.instant # start the head clock at the first received byte
-        buf.write_byte(byte)
-        unless settled
-          # A leading CR/LF is a permitted empty line (RFC 7230 §3.5), not a verdict: keep
-          # reading until a real first byte arrives, then decide once.
-          unless byte == 0x0a_u8 || byte == 0x0d_u8
-            settled = true
-            break if !Http1.looks_like_http_request?(buf.to_slice)
-          end
+        if chunk = io.peek
+          break if chunk.empty? # EOF
+          taken = consume_peeked(io, buf, chunk, max_bytes, settled)
+        else
+          taken = consume_byte(io, buf, settled)
+          break if taken.nil? # EOF
         end
-        break if head_complete?(buf, byte)
+        head_started ||= Time.instant # start the head clock at the first received byte
+        stop, settled = taken
+        break if stop
       end
     rescue ex : IO::TimeoutError
       # One conversion point for BOTH clocks that can fire in here, because the caller cannot
@@ -131,6 +134,119 @@ module Gori::Proxy::Codec::Http1
       sock.read_timeout = saved_timeout # restore the baseline for the following body read
     end
     finalize_head(buf, max_bytes)
+  end
+
+  # Move the bytes of `chunk` (a VIEW into `io`'s own read buffer) that belong to this head
+  # into `buf`, consume exactly those from `io`, and say whether the read loop is done with
+  # them. Returns `{stop?, settled?}`; the plain path ignores the second half.
+  #
+  # ## Why a chunk at all
+  #
+  # Both loops used to run one `io.read_byte` per octet. That is correct and it is what keeps
+  # the reader from over-reading past the body boundary — but on the DEADLINE path (which is
+  # the one every proxied request and response head actually takes, see `ClientConn`) it also
+  # re-read the clock once per octet to re-arm the drip-feed bound. At ~17 ns a `Time.instant`
+  # that is ~8 µs for a 471-byte request head, i.e. most of the codec's per-request cost, spent
+  # asking how long bytes that had ALREADY ARRIVED took to arrive. `IO#peek` hands back what
+  # the socket's buffer is already holding, so the clock is read once per FILL instead: the
+  # deadline is still checked before every read that can block, which is the only place a
+  # drip-feed can hide. `bench/head_read_bench.cr` measures both paths.
+  #
+  # Consumption stays exact. `io.skip` advances only over the bytes copied here, so a head
+  # that ends mid-chunk leaves the body's first octet unread, exactly as the byte-at-a-time
+  # loop did. An `IO` with no `peek` (`PrefixIO`, a test double) returns nil and keeps the
+  # original loop — so the legs that wrap one, chiefly `ClientConn#read_head_within`'s
+  # 100-continue response head, still read a byte at a time. `Bytes.empty` back from `peek`
+  # is EOF and nothing else: `IO::Buffered#peek` blocks to fill first (Crystal 1.21).
+  #
+  # It does so, note, WITHOUT consulting `read_buffering?`, which `#read_byte` honours — so on
+  # a socket with read buffering turned off this would fill the user-space buffer where the
+  # old loop did not. Nothing in gori turns it off, and leftovers stay readable through the
+  # same wrapper either way, but the contract above now leans on that.
+  private def self.consume_peeked(io : IO, buf : IO::Memory, chunk : Bytes, max_bytes : Int32,
+                                  settled : Bool = true) : {Bool, Bool}
+    avail = Math.min(chunk.size, max_bytes - buf.bytesize)
+    chunk = chunk[0, avail]
+    stop = false
+    take = avail
+    unless settled
+      # A leading CR/LF is a permitted empty line (RFC 7230 §3.5), not a verdict. The verdict
+      # byte is the first that is neither, and the byte-at-a-time loop stopped ON it when the
+      # answer was "not HTTP" — `record_non_http` files the bytes read, so taking the rest of
+      # the chunk would change what gets recorded.
+      if v = first_verdict_byte(chunk)
+        settled = true
+        unless looks_like_http_request?(chunk[v, 1])
+          take = v + 1
+          stop = true
+        end
+      end
+    end
+    # Ordered, not either/or, because the byte loop asked both questions per octet and the
+    # terminator won whenever it came first: a head of nothing but blank lines ("\r\n\r\n")
+    # COMPLETES on its fourth byte, so the octet after it — the one the verdict scan above
+    # reaches — was never read, let alone judged. `head_end <= take` keeps that order.
+    if (head_end = scan_head_end(buf, chunk)) && head_end <= take
+      take = head_end
+      stop = true
+    end
+    buf.write(chunk[0, take])
+    io.skip(take)
+    {stop, settled}
+  end
+
+  # The no-`peek` fallback, one byte at a time: the same two questions `consume_peeked` asks of
+  # a whole buffer, so the two paths answer identically. nil is EOF. `PrefixIO` and the spec
+  # doubles are the IOs that land here.
+  private def self.consume_byte(io : IO, buf : IO::Memory, settled : Bool = true) : {Bool, Bool}?
+    byte = io.read_byte
+    return nil if byte.nil?
+    buf.write_byte(byte)
+    unless settled
+      # A leading CR/LF is a permitted empty line (RFC 7230 §3.5), not a verdict: keep
+      # reading until a real first byte arrives, then decide once.
+      unless byte == 0x0a_u8 || byte == 0x0d_u8
+        settled = true
+        return {true, settled} unless looks_like_http_request?(buf.to_slice)
+      end
+    end
+    {head_complete?(buf, byte), settled}
+  end
+
+  # Index in `chunk` of the first byte that is neither CR nor LF — the octet
+  # `looks_like_http_request?` decides on — or nil while the chunk is all blank-line bytes.
+  private def self.first_verdict_byte(chunk : Bytes) : Int32?
+    i = 0
+    while i < chunk.size
+      b = chunk.unsafe_fetch(i)
+      return i unless b == 0x0a_u8 || b == 0x0d_u8
+      i += 1
+    end
+    nil
+  end
+
+  # How many bytes of `chunk` end the head, counting the CRLFCRLF — or nil when the head does
+  # not finish inside it. `buf` holds what has already been taken, so the terminator is found
+  # even when it STRADDLES the boundary between a previous read and this one. Only a LF can
+  # complete it, so the scan is a memchr per candidate rather than a walk.
+  private def self.scan_head_end(buf : IO::Memory, chunk : Bytes) : Int32?
+    taken = buf.to_slice
+    pos = 0
+    while rel = chunk.index(0x0a_u8, pos)
+      return rel + 1 if head_byte(taken, chunk, rel - 1) == 0x0d_u8 &&
+                        head_byte(taken, chunk, rel - 2) == 0x0a_u8 &&
+                        head_byte(taken, chunk, rel - 3) == 0x0d_u8
+      pos = rel + 1
+    end
+    nil
+  end
+
+  # The head byte at `chunk` index `i`, reaching back into the already-taken `buf` for a
+  # negative index; 0 (never a terminator byte) before the head's first octet.
+  private def self.head_byte(taken : Bytes, chunk : Bytes, i : Int32) : UInt8
+    return chunk.unsafe_fetch(i) if i >= 0
+    back = taken.size + i
+    back >= 0 ? taken.unsafe_fetch(back) : 0_u8
   end
 
   # Shrink `sock`'s read_timeout toward what is LEFT of the head deadline, raising when it is
@@ -507,6 +623,28 @@ module Gori::Proxy::Codec::Http1
     line[start, stop - start]
   end
 
+  # `line` with the octets `String#strip` counts as ASCII whitespace taken off both ends, as a
+  # VIEW. Wider than `trim_ows` on purpose: this exists to make `strip` a no-op on the result,
+  # so it has to match `Char#ascii_whitespace?` exactly (VT and FF included), not the RFC's OWS.
+  # Never trims a UTF-8 continuation octet — every byte in the set is below 0x80.
+  private def self.trim_ascii_ws(line : Bytes) : Bytes
+    start = 0
+    stop = line.size
+    while stop > start && ascii_ws?(line.unsafe_fetch(stop - 1))
+      stop -= 1
+    end
+    while start < stop && ascii_ws?(line.unsafe_fetch(start))
+      start += 1
+    end
+    line[start, stop - start]
+  end
+
+  # SP / HTAB / LF / VT / FF / CR — `Char#ascii_whitespace?`, which is what `String#strip`
+  # removes from an ASCII string.
+  private def self.ascii_ws?(b : UInt8) : Bool
+    b == 0x20_u8 || (b >= 0x09_u8 && b <= 0x0d_u8)
+  end
+
   # SP / HTAB / CR / LF — the terminator and the optional whitespace around a field-value.
   private def self.ows?(b : UInt8) : Bool
     b == 0x20_u8 || b == 0x09_u8 || b == 0x0d_u8 || b == 0x0a_u8
@@ -737,7 +875,15 @@ module Gori::Proxy::Codec::Http1
       line = raw[pos, line_end - pos]
       if colon = line.index(0x3a_u8) # ':'
         name = String.new(line[0, colon])
-        value = String.new(line[colon + 1, line.size - colon - 1]).strip
+        # Trim the BYTES, then `strip` the String that survives. `String#strip` returns `self`
+        # when there is nothing left to take off, so the common header — every one of them
+        # carries the SP after its colon — now costs ONE String instead of a full-width one
+        # plus its stripped copy. `strip` still runs, because it
+        # also removes the Unicode whitespace a byte scan cannot see, and this projection feeds
+        # the framing lookups: answering differently from `strip` there is a desync, not a
+        # rounding error. `trim_ascii_ws` takes exactly the octets `strip` treats as ASCII
+        # whitespace, so what reaches `strip` is what it would have produced anyway.
+        value = String.new(trim_ascii_ws(line[colon + 1, line.size - colon - 1])).strip
         list << Header.new(name, value)
       end
       break if crlf.nil? # last line, no trailing CRLF

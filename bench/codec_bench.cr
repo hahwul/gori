@@ -55,6 +55,24 @@ def simulate_response_parse
   resp.headers.get?("Content-Type")
 end
 
+# The framing decision runs once per request and once per response, on the same head the
+# parse above produced: `Body.request_framing` / `Body.response_framing` are what say how many
+# body bytes to read, so they are on the path for every message, body or no body.
+REQ  = Http1.parse_request_head(REQ_HEAD)
+RESP = Http1.parse_response_head(RESP_HEAD)
+
+CHUNKED_HEAD = ("HTTP/1.1 200 OK\r\n" +
+                "Content-Type: text/html\r\n" +
+                "Transfer-Encoding: chunked\r\n" +
+                "Connection: keep-alive\r\n\r\n").to_slice
+CHUNKED = Http1.parse_response_head(CHUNKED_HEAD)
+
+Benchmark.ips do |x|
+  x.report("Body.request_framing (no body)") { Body.request_framing(REQ) }
+  x.report("Body.response_framing (CL)") { Body.response_framing(RESP, "GET") }
+  x.report("Body.response_framing (chunked)") { Body.response_framing(CHUNKED, "GET") }
+end
+
 Benchmark.ips do |x|
   x.report("read_head (req, from IO::Memory)") do
     Http1.read_head(IO::Memory.new(REQ_HEAD))
