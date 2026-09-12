@@ -43,6 +43,19 @@ private def seed_issue(store : Gori::Store, title : String,
   id
 end
 
+private def seed_frozen(store : Gori::Store, issue_id : Int64, target : String) : Int64
+  fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil,
+    source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    fid, 500, "HTTP/1.1 500 Boom\r\n\r\n".to_slice, "stack".to_slice, duration_us: 9_i64))
+  eid, status = store.freeze_evidence(issue_id, Gori::Evidence.from_flow(store.get_flow(fid).not_nil!))
+  status.ok?.should be_true
+  eid
+end
+
 describe "IssuesController#issues_clear" do
   it "empties the project past a danger confirm that names the total" do
     with_issues_tab do |ctl, host, store|
@@ -111,6 +124,56 @@ describe "IssuesController#issues_clear" do
       # A fresh issue is handed that same rowid — and inherits nothing.
       again = seed_issue(store, "next one")
       store.list_links(Gori::Store::LinkOwnerKind::Issue, again).should be_empty
+    end
+  end
+
+  # The dialog used to say the frozen evidence "goes too". It does not: `clear_issues` drops
+  # `evidence_issue_links` and leaves every `issue_evidence` row standing (#1039), so the
+  # confirm has to make the same promise the per-issue delete already makes — the memberships
+  # go, the archived bytes stay, orphaned, in the Evidence tab.
+  it "promises the frozen copies survive the wipe, and they do" do
+    with_issues_tab do |ctl, host, store|
+      a = seed_issue(store, "sqli")
+      b = seed_issue(store, "xss")
+      seed_frozen(store, a, "/one")
+      seed_frozen(store, b, "/two")
+      store.count_evidence_links.should eq(2)
+      ctl.view.reload(store)
+
+      ctl.issues_clear
+      _, message = host.confirms.first
+      message.should contain("2 frozen evidence links are removed")
+      message.should contain("the archived copies stay in the Evidence tab")
+      message.should_not contain("frozen evidence go")
+      message.should contain("This can't be undone.")
+
+      # …and the store agrees with the sentence: memberships gone, copies still there.
+      store.count_evidence_links.should eq(0)
+      store.count_evidence.should eq(2)
+    end
+  end
+
+  # Singular, and nothing at all when the project has no frozen copies: a line about zero
+  # links in a modal is noise the operator has to read past to reach "can't be undone".
+  it "leaves the frozen line out entirely when there is no frozen evidence" do
+    with_issues_tab do |ctl, host, store|
+      seed_issue(store, "finding")
+      ctl.view.reload(store)
+
+      ctl.issues_clear
+      _, message = host.confirms.first
+      message.should_not contain("frozen")
+    end
+  end
+
+  it "says it in the singular for one link" do
+    with_issues_tab do |ctl, host, store|
+      seed_frozen(store, seed_issue(store, "sqli"), "/one")
+      ctl.view.reload(store)
+
+      ctl.issues_clear
+      _, message = host.confirms.first
+      message.should contain("1 frozen evidence link is removed; the archived copy stays in the Evidence tab")
     end
   end
 

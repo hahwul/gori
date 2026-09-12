@@ -198,6 +198,14 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM issue_evidence").as(Int64).to_i
     end
 
+    # Every issue↔evidence membership in the project — the number the Issues tab's ⇧X confirm
+    # names, since `clear_issues` drops the whole table unqualified. Links, not copies: one
+    # snapshot shared by two issues loses two memberships and still keeps its bytes. One
+    # COUNT over an index-covered table, so the confirm costs a single query at press time.
+    def count_evidence_links : Int32
+      @db.scalar("SELECT COUNT(*) FROM evidence_issue_links").as(Int64).to_i
+    end
+
     private EVIDENCE_META_COLS = "id, COALESCE((SELECT group_concat(issue_id, ',') FROM " \
                                  "(SELECT issue_id FROM evidence_issue_links WHERE evidence_id = issue_evidence.id ORDER BY issue_id)), ''), " \
                                  "created_at, source_kind, source_id, method, url, protocol, " \
