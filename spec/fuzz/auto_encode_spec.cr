@@ -202,6 +202,36 @@ describe "fuzz auto URL-encoding" do
     off = F::AutoEncode.build(F::Template.parse(QUERY), [] of F::Processor, false)
     off.apply(raw, nil).should be(raw)
   end
+  # The encode is skipped — not re-derived — when it has nothing to write, and "nothing to
+  # write" has to mean the SAME bytes, not merely similar ones. `Encode#apply(:url)` hands
+  # back its receiver for an all-unreserved payload and `AutoEncode#apply` then hands back the
+  # caller's array, so a wordlist sweep allocates neither; the examples below pin both halves
+  # against the stdlib call they replace, so a wrong predicate shows up as a wire difference
+  # rather than as a quietly un-encoded payload.
+  it "returns the payload itself when percent-encoding is the identity" do
+    enc = F::Encode.new(:url)
+    %w[admin config v2 a.b-c_d~e 0123456789 AZaz].each do |plain|
+      enc.apply(plain).should be(plain)
+      enc.apply(plain).should eq URI.encode_www_form(plain, space_to_plus: false)
+    end
+    # Anything with a reserved byte, a space or a non-ASCII byte still takes the stdlib path.
+    ["a b", "x=1&y=2", "<script>", "100%", "caf\u00e9", "/etc/passwd"].each do |dirty|
+      enc.apply(dirty).should eq URI.encode_www_form(dirty, space_to_plus: false)
+      enc.apply(dirty).should_not be(dirty)
+    end
+  end
+
+  it "keeps the caller's array when no encoded position changed, and copies when one does" do
+    ae = F::AutoEncode.build(F::Template.parse(QUERY), [] of F::Processor, true)
+    plain = ["admin"]
+    ae.apply(plain, nil).should be(plain)
+
+    dirty = ["a b"]
+    out = ae.apply(dirty, nil)
+    out.should eq ["a%20b"]
+    out.should_not be(dirty)
+    dirty.should eq ["a b"] # the input array is never written through
+  end
 end
 
 describe Gori::Fuzz::Template do

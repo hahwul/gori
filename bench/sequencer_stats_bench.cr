@@ -5,6 +5,21 @@
 # sample can reach Config::GOAL_CEILING = 50,000 tokens, so several passes over it — and any
 # unpresized array sized to total_bytes — are paid repeatedly.
 #
+# What the timings found, and what the current shape answers:
+#
+#   1. FOUR of the bit tests each walked the whole symbol bitstream on their own — and
+#      Monobit and Runs each called `bits.count(1_u8)` for the SAME count. 6.4M elements
+#      traversed four times, 82 ms of a 153 ms report. `Stats::BitScan` is that walk, once.
+#   2. The per-symbol-bit bias scan asked `min_len × bps` questions per token where only the
+#      SYMBOL in each column matters; a `min_len × (charset + 1)` tally answers all of them
+#      with one increment per column per token (23 ms → 0.5 ms at bps 4). Bounded on both
+#      sides — see `symbol_bit_ones` — so a corpus of few but very long tokens, where the
+#      table would be the report's largest allocation, keeps the direct walk.
+#   3. `block_phi` (Approx entropy) indexed its circular window as `(i + m - 1) % n` — an
+#      integer division per bit, twice per report — where only the last m-1 windows wrap.
+#   4. The hex branch of `detect_sequential` called `t.chars` (and then sliced it) per token
+#      to read 16 bytes, and both of its shape guards built a char iterator per token.
+#
 # Build: crystal build bench/sequencer_stats_bench.cr -o bin/sequencer_stats_bench --release
 # Run:   bin/sequencer_stats_bench
 require "benchmark"

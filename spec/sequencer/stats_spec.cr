@@ -577,6 +577,56 @@ describe Gori::Sequencer::Stats do
     report.effective_entropy.should be_close(96.0, 0.001) # 24 hex chars × 4 bits; the prefix adds 0
   end
 
+  # `symbol_bit_ones` counts per COLUMN above `charset + 1` tokens and asks each token
+  # directly below that, because under the threshold the expansion costs more than the direct
+  # walk (and the tally would be the report's largest allocation on a corpus of few but very
+  # long tokens). Both branches answer the same question, so both are pinned here against a
+  # bias that can be written down: a two-symbol alphabet is bps = 1, so column p's bit IS its
+  # character and its bias is |ones(p) / n - 0.5|.
+  it "reports the same per-bit bias whether the sample is tallied per column or per token" do
+    wide = Array.new(16) { |i| "%04b" % i } # 16 tokens ≥ charset+1 → the per-column tally
+    S.analyze(wide).bit_bias.should eq([0.0, 0.0, 0.0, 0.0])
+
+    narrow = ["0011", "0101"] # 2 tokens < charset+1 → the direct walk
+    S.analyze(narrow).bit_bias.should eq([0.5, 0.0, 0.0, 0.5])
+  end
+
+  # Monobit, Runs, Long run and Cusum all read ONE walk of the symbol bitstream (`BitScan`).
+  # A two-symbol alphabet makes that bitstream the token TEXT itself — bps = 1, and the
+  # alphabet indices of '0' and '1' are 0 and 1 — so each row can be checked against a count
+  # taken here rather than against one of the others. A fused scan that miscounted a run
+  # boundary, reset the longest-run tracker on the wrong byte or dropped the sign of the
+  # cusum walk would move exactly one of these four and nothing else.
+  it "reads Monobit, Runs, Long run and Cusum off one and the same bitstream" do
+    rng = Random.new(99_u64)
+    tokens = Array.new(300) { String.build { |io| 64.times { io << (rng.rand(2) == 1 ? '1' : '0') } } }
+    report = S.analyze(tokens)
+
+    bits = tokens.join.to_slice.map { |b| b == '1'.ord.to_u8 ? 1 : 0 }
+    ones = bits.count(1)
+    runs = 1 + (1...bits.size).count { |i| bits[i] != bits[i - 1] }
+    longest = 0
+    cur = 0
+    prev = -1
+    bits.each do |b|
+      cur = b == prev ? cur + 1 : 1
+      prev = b
+      longest = cur if cur > longest
+    end
+    walk = 0
+    excursion = 0
+    bits.each do |b|
+      walk += b == 1 ? 1 : -1
+      excursion = walk.abs if walk.abs > excursion
+    end
+
+    row = ->(name : String) { report.tests.find { |t| t.name == name }.not_nil! }
+    row.call("Monobit").detail.should eq("ones #{((ones.to_f / bits.size) * 100).round(1)}%")
+    row.call("Runs").value.should eq(runs.to_s)
+    row.call("Long run").value.should eq(longest.to_s)
+    row.call("Cusum").value.should eq("z=#{excursion}")
+  end
+
   it "handles a large single-byte corpus and invalid-UTF-8 bytes without raising" do
     large = S.analyze(Array.new(5000, "x" * 40)) # bps 0 → no symbol-bit allocation
     large.charset_size.should eq(1)
