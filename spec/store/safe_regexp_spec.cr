@@ -141,6 +141,16 @@ describe Gori::SafeRegexp do
       fast_answer("(?i)-", "/api/v1".to_slice).should be_false
     end
 
+    it "hands the not-a-literal sentinel straight back to PCRE2" do
+      # `NOT_LITERAL` is what `Slot` carries for every pattern PCRE2 owns, and its needle is
+      # EMPTY. Nothing in the callback asks `literal_match?` about it — `FN` checks the needle
+      # first — but this is a public entry point, and a zero-length needle in the anchor walk
+      # would start its cursor one byte BEFORE the haystack.
+      hay = "abc".to_slice
+      Gori::SafeRegexp.literal_match?(hay.to_unsafe, hay.size, Gori::SafeRegexp::NOT_LITERAL)
+        .should be_nil
+    end
+
     it "matches at the very start and when the needle IS the haystack" do
       # The anchor starts at `m - 1`, so an off-by-one there loses a match that begins at 0.
       fast_answer("abc", "abc".to_slice).should be_true

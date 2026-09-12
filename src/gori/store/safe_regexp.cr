@@ -201,6 +201,12 @@ module Gori
     # since it started reading `value_bytes` instead of `value_text`.
     def self.literal_match?(hay : Pointer(UInt8), len : Int32, lit : Literal) : Bool?
       m = lit.needle.size
+      # `NOT_LITERAL` and nothing else carries an empty needle — `extract_literal` refuses a
+      # match-all rather than producing one — and `nil` is what that sentinel MEANS: this
+      # cannot answer, PCRE2 must. `FN` never asks (it checks the needle first), but this is a
+      # public entry point and the sentinel is the value `Slot` carries for every non-literal
+      # pattern, so answering it here is what keeps a zero-length needle out of the walk.
+      return nil if m == 0
       # A needle longer than the haystack cannot match even under folding, so this needs no
       # deferral either: `ſ`/`K` make a MATCHED REGION longer than the needle, never shorter.
       return false if m > len
@@ -286,10 +292,14 @@ module Gori
     # The first index >= `from` holding `want`, or -1. `memchr` over the raw pointer: the
     # haystack is SQLite's own buffer, and wrapping it in a `Slice` or a `String` to reach
     # `index` would be an allocation per row on the hottest path this file has.
+    #
+    # Total over its Int32 input rather than trusting the caller: a negative `from` would
+    # otherwise read BEFORE the buffer, and `SizeT` (not `UInt64`) is what the binding takes,
+    # so the length still narrows on a 32-bit target.
     private def self.index_of(hay : Pointer(UInt8), len : Int32, from : Int32,
                               want : UInt8) : Int32
-      return -1 if from >= len
-      found = LibC.memchr(hay + from, want.to_i32, (len - from).to_u64)
+      return -1 unless 0 <= from < len
+      found = LibC.memchr(hay + from, want.to_i32, LibC::SizeT.new(len - from))
       found.null? ? -1 : (found.as(Pointer(UInt8)) - hay).to_i32
     end
 
