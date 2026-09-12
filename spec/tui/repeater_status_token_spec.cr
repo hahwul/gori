@@ -33,7 +33,7 @@ describe "RepeaterView#status_token" do
     store = Gori::Store.open(path)
     begin
       id = store.insert_repeater("https://h.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-      store.update_repeater_response(id, "HTTP/1.1 502 Bad Gateway\r\n\r\n".to_slice, nil, nil, 5_i64)
+      store.update_repeater_response(id, "HTTP/1.1 502 Bad Gateway\r\n\r\n".to_slice, nil, nil, 5_i64, request_sha256: nil)
       row = store.repeaters.first
 
       view = RepeaterView.new

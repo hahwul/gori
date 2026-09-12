@@ -22,7 +22,7 @@ private def seeded_500(store) : Int64
     false, true, nil, 0)
   store.update_repeater_response(id,
     "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n".to_slice,
-    %({"error":"boom"}).to_slice, nil, 42_i64)
+    %({"error":"boom"}).to_slice, nil, 42_i64, request_sha256: nil)
   id
 end
 
@@ -144,7 +144,7 @@ describe "MCP repeater last_response_body" do
   it "caps the body and names the cursor that serves the rest" do
     with_store_env do |store|
       id = store.insert_repeater("https://api.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-      store.update_repeater_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, ("x" * 5000).to_slice, nil, 1_i64)
+      store.update_repeater_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, ("x" * 5000).to_slice, nil, 1_i64, request_sha256: nil)
       s = call_json(store, "get_repeater_context",
         %({"id":#{id},"include_response_body":true,"max_body_bytes":100}))["sessions"][0]
       s["last_response_body"].as_s.size.should eq(100)
@@ -167,7 +167,7 @@ describe "MCP repeater last_response_body" do
       12.times do |i|
         rid = store.insert_repeater("https://api.test/#{i}", "GET /#{i} HTTP/1.1\r\n\r\n".to_slice,
           false, true, nil, i)
-        store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice, nil, 1_i64)
+        store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice, nil, 1_i64, request_sha256: nil)
       end
       got = call_json(store, "get_repeater_context", %({"include_response_body":true}))
       got["sessions"].as_a.count { |s| s["last_response_body"]? }.should eq(10)

@@ -337,7 +337,16 @@ migrations in `src/gori/store/schema.cr`.
   so retention and the next send cannot reach it. Issue membership is mutable and
   many-to-many (`evidence_issue_links`); the bytes and hashes are neither. A snapshot whose
   last Issue link is removed is KEPT as an orphan, findable in the project-wide archive, and
-  only its own explicit delete removes it.
+  only its own explicit delete removes it. A Repeater freeze also reports REQUEST DRIFT: the
+  row's request is mutable and its response is not rewritten with it, so `repeaters` keeps a
+  SHA-256 of the request each send went out with and `Evidence.from_repeater` compares it
+  against the request the row holds at freeze time. Decided THEN, from two digests, rather
+  than stored on the snapshot — a frozen copy is a statement about its own bytes, and a
+  `drifted` column on it would be a statement about a live row that can change afterwards
+  (and could not even be recomputed once the tab is closed). Over the SAVED request bytes,
+  not the wire: the send seam expands `$NAME` and overlays the active slot, so a wire digest
+  would call every tab using either one drifted. A NULL digest is NOT RECORDED, never a
+  verdict, so a response persisted before the column existed keeps freezing as it did.
 - **Retest**: an Issue's REPRODUCIBLE check — ordered `issue_retest_steps` (each a Repeater
   session, a role, and at most one assertion) plus a bounded `issue_retest_runs` history and
   its per-step rows. Kept OUT of `entity_links`, deliberately: a link answers what material

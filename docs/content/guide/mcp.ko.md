@@ -182,7 +182,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `minimize_repeater` | Repeater 요청을 같은 응답이 재현되는 최소 형태로 줄임 |
 | `create_issue` / `update_issue` / `delete_issue` | 이슈 기록, 갱신, 삭제 |
 | `add_link` / `remove_link` | 이슈나 노트의 증거 포인터 연결 / 해제 |
-| `freeze_evidence` / `link_evidence` / `unlink_evidence` / `delete_evidence` | 플로우나 Repeater 탭의 *현재* 교환을 이슈의 변경 불가 증거로 복사(다음 전송과 보존 정리가 건드리지 못함. 기본값 `link:true`는 live 링크도 같은 트랜잭션에 기록)하고, 스냅샷을 바꾸지 않은 채 이슈 연결을 변경하거나 사본 하나를 삭제. 응답이 취약점을 확인해 줄 때 동결하고 재테스트 뒤에 다시 동결하세요 |
+| `freeze_evidence` / `link_evidence` / `unlink_evidence` / `delete_evidence` | 플로우나 Repeater 탭의 *현재* 교환을 이슈의 변경 불가 증거로 복사(다음 전송과 보존 정리가 건드리지 못함. 기본값 `link:true`는 live 링크도 같은 트랜잭션에 기록)하고, 스냅샷을 바꾸지 않은 채 이슈 연결을 변경하거나 사본 하나를 삭제. 응답이 취약점을 확인해 줄 때 동결하고 재테스트 뒤에 다시 동결하세요. 저장된 응답이 도착한 뒤 요청이 수정된 탭은 거부됩니다 — 둘은 한 교환이 아니므로 다시 보내거나 `allow_drift:true`로 어긋난 쌍을 그대로 남기세요 |
 | `add_retest_step` / `update_retest_step` / `move_retest_step` / `remove_retest_step` | 리테스트 구성: Repeater 세션, 역할(`setup` / `baseline` / `variant` / `control` / `cleanup`), 그리고 기대 결과 하나(`status:2xx`, `json:data.role=admin`, `json-absent:…`, `body:same` / `body:diff`). 세션은 복사되지 않으며, 단계는 실행 시점에 탭이 들고 있는 요청을 그대로 보냅니다 |
 | `run_retest` | 프로젝트 스코프와 Sandbox 게이트를 거쳐 실행하고 `pass` / `fail` / `inconclusive` / `blocked` 판정과 단계별 행을 반환합니다(`pass`가 아니면 `isError`). 상태를 바꾸는 메서드가 포함된 배치는 정확한 요청 수와 함께 거부되며 `confirm:true`가 필요합니다. gori가 전송을 거부하면 그 뒤는 모두 건너뛰고 cleanup도 `allow_cleanup:true` 없이는 보내지 않습니다. 모든 전송은 History에 `src:retest`로 기록됩니다 |
 | `clear_retest_steps` / `delete_retest_run` | Issue 리테스트의 모든 단계를 지우거나(실행 기록은 유지 — 검사를 다시 짠다고 실행이 없던 일이 되지는 않습니다), 실행 요약과 결과 행 하나를 지웁니다. 단계와 각 전송이 기록한 History 플로우는 그대로 남습니다: `delete_retest_run`이 지우는 것은 보고이지 증거가 아닙니다 |

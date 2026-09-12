@@ -32,14 +32,14 @@ module Gori
     # (potentially multi-MB) response on each cross-session commit.
     def repeaters : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only, tls_preset, response_request_sha256 FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
             tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
-            tls_preset: rs.read(String?))
+            tls_preset: rs.read(String?), response_request_sha256: rs.read(String?))
         end
       end
       list
@@ -67,7 +67,8 @@ module Gori
     def get_repeater_full(id : Int64) : RepeaterRecord?
       @db.query(
         "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, " \
-        "response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only, tls_preset " \
+        "response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only, tls_preset, " \
+        "response_request_sha256 " \
         "FROM repeaters WHERE id = ?", id) do |rs|
         if rs.move_next
           return RepeaterRecord.new(
@@ -75,7 +76,7 @@ module Gori
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
             tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
-            tls_preset: rs.read(String?))
+            tls_preset: rs.read(String?), response_request_sha256: rs.read(String?))
         end
       end
       nil
@@ -219,10 +220,24 @@ module Gori
     # completes. `head` is the response head bytes (empty on error), `error` is set
     # only when the send failed. Via exec_task (writer connection), so this DOES
     # bump the TUI data_version poll; Repeater reconcile soft-syncs around it.
-    def update_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?, duration_us : Int64) : Nil
+    #
+    # `request_sha256` (V28) is `Evidence.request_digest` of the SAVED request bytes this
+    # row held when the send went out — the request half of the pair this response completes.
+    # Every send surface saves the tab BEFORE it dials (the TUI's `save_repeater_tab`, and
+    # the CLI/MCP which send what the row already holds), so that digest is the row's own
+    # request at that instant; a later edit changes the request and not the response, which
+    # is exactly what `Evidence.from_repeater` reports as drift.
+    #
+    # KEYWORD-ONLY and WITHOUT a default, for the reason `Repeater::Result`'s tail states: a
+    # silently-defaulted nil here is a response whose request cannot be checked, and the
+    # failure mode is a freeze that says nothing rather than an error anyone sees. nil is
+    # still passable — and is the honest value for a caller that genuinely does not know the
+    # bytes — but it has to be written down.
+    def update_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
+                                 duration_us : Int64, *, request_sha256 : String?) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE repeaters SET response_head = ?, response_body = ?, response_error = ?, response_duration_us = ?, updated_at = ? WHERE id = ?",
-          head, body, error, duration_us, now_us, id)
+        c.exec("UPDATE repeaters SET response_head = ?, response_body = ?, response_error = ?, response_duration_us = ?, response_request_sha256 = ?, updated_at = ? WHERE id = ?",
+          head, body, error, duration_us, request_sha256, now_us, id)
         nil
       }
     end

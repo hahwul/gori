@@ -24,18 +24,18 @@ private def seed(store) : Nil
     false, true, nil, 0)
   store.set_repeater_name(a, "users")
   store.set_repeater_tags(a, "idor auth")
-  store.update_repeater_response(a, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "{}".to_slice, nil, 12_i64)
+  store.update_repeater_response(a, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "{}".to_slice, nil, 12_i64, request_sha256: nil)
 
   b = store.insert_repeater("https://shop.test/cart", "POST /cart HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
     false, true, nil, 1)
   store.set_repeater_name(b, "cart")
   store.set_repeater_tags(b, "idor")
-  store.update_repeater_response(b, "HTTP/1.1 403 Forbidden\r\n\r\n".to_slice, nil, nil, 9_i64)
+  store.update_repeater_response(b, "HTTP/1.1 403 Forbidden\r\n\r\n".to_slice, nil, nil, 9_i64, request_sha256: nil)
 
   c = store.insert_repeater("https://shop.test/admin", "DELETE /admin HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
     false, true, nil, 2)
   store.set_repeater_name(c, "admin")
-  store.update_repeater_response(c, Bytes.empty, nil, "connection refused", 3_i64)
+  store.update_repeater_response(c, Bytes.empty, nil, "connection refused", 3_i64, request_sha256: nil)
 
   d = store.insert_repeater("https://shop.test/new", "GET /new HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
     false, true, nil, 3)

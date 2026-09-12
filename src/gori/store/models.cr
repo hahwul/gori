@@ -1485,12 +1485,21 @@ module Gori
       # still means today. PER TAB, so two tabs against one host can dial two different
       # ClientHellos; a reopened tab sends the one it was saved with.
       getter tls_preset : String?
+      # SHA-256 of the request that was SENT to get `response_head` (Schema V28) — the saved
+      # request bytes as this row held them at that moment, hashed the way
+      # `Evidence::Snapshot#request_sha256` hashes them.
+      #
+      # The row's request is mutable and its response is not rewritten with it, so this is the
+      # only thing that can say whether the pair still describes one exchange. nil = NOT
+      # RECORDED (a response persisted before V28, or by a projection that does not select the
+      # column), which is an unknown rather than a verdict — see `Evidence.from_repeater`.
+      getter response_request_sha256 : String?
 
       def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,
                      @response_head = nil, @response_body = nil, @response_error = nil,
                      @response_duration_us = nil, @name = nil, @sni = nil,
                      @tags = nil, @ws_keep_key = false, @ws_http_only = false,
-                     @tls_preset = nil)
+                     @tls_preset = nil, @response_request_sha256 = nil)
       end
     end
 

@@ -831,7 +831,7 @@ describe Gori::MCP::Server do
           "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice,
           false, true, nil, 0)
         good = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n"
-        store.update_repeater_response(rid, good.to_slice, Bytes.empty, nil, 42_i64)
+        store.update_repeater_response(rid, good.to_slice, Bytes.empty, nil, 42_i64, request_sha256: nil)
 
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{rid},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
         resp = mcp_drive(store, call, verify_upstream: false)[0]
@@ -855,7 +855,7 @@ describe Gori::MCP::Server do
           "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice,
           false, true, nil, 0)
         store.update_repeater_response(rid,
-          "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n".to_slice, Bytes.empty, nil, 42_i64)
+          "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n".to_slice, Bytes.empty, nil, 42_i64, request_sha256: nil)
 
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{rid},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
         resp = mcp_drive(store, call, verify_upstream: false)[0]

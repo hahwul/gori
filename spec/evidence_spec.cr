@@ -5,9 +5,11 @@ require "./spec_helper"
 # "whatever the last send left", and a tab that was never sent has no exchange to freeze.
 
 private def repeater(request : String, *, http2 = false, head : String? = nil,
-                     body : String? = nil, error : String? = nil, target = "https://acme.test") : Gori::Store::RepeaterRecord
+                     body : String? = nil, error : String? = nil, target = "https://acme.test",
+                     sent : String? = nil) : Gori::Store::RepeaterRecord
   Gori::Store::RepeaterRecord.new(7_i64, target, request.to_slice, http2, true, nil, 0,
-    head.try(&.to_slice), body.try(&.to_slice), error, error ? nil : 12_i64)
+    head.try(&.to_slice), body.try(&.to_slice), error, error ? nil : 12_i64,
+    response_request_sha256: sent.try { |t| Gori::Evidence.request_digest(t.to_slice) })
 end
 
 private def evidence_filter_meta(id : Int64, issues : Array(Int64), method : String, url : String,
@@ -39,6 +41,59 @@ describe Gori::Evidence do
       snap.bytes.should eq(snap.request_head.size + 7 + snap.response_head.not_nil!.size + 2)
       snap.request_sha256.should eq(Digest::SHA256.hexdigest("POST /api/x HTTP/1.1\nHost: acme.test\n\n{\"a\":1}"))
       snap.response_sha256.should eq(Digest::SHA256.hexdigest("HTTP/1.1 201 Created\r\nX: y\r\n\r\n{}"))
+    end
+
+    it "reports DRIFT when the saved request no longer hashes to what produced the response" do
+      # The failure this exists for: send, edit the request, freeze. The row then holds an
+      # edited request beside the earlier send's response and nothing in the bytes says so.
+      snap = Gori::Evidence.from_repeater(repeater(
+        "GET /admin HTTP/1.1\r\nHost: acme.test\r\n\r\n",
+        head: "HTTP/1.1 200 OK\r\n\r\n", body: "ok",
+        sent: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n")).not_nil!
+      snap.request_drifted?.should be_true
+    end
+
+    it "reports NO drift when the request still hashes to what produced the response" do
+      req = "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n"
+      snap = Gori::Evidence.from_repeater(repeater(req, head: "HTTP/1.1 200 OK\r\n\r\n",
+        body: "ok", sent: req)).not_nil!
+      snap.request_drifted?.should be_false
+      # The digest the send side stores IS this snapshot's own request hash — the two are
+      # computed over the same bytes, which is what makes the comparison mean anything.
+      Gori::Evidence.request_digest(req.to_slice).should eq(snap.request_sha256)
+    end
+
+    it "leaves drift FALSE when the digest was never recorded — an unknown is not an accusation" do
+      # A response persisted before Schema V28 (or by a gori that did not record it). The
+      # request may well have been edited since; nothing here can tell, and guessing "drifted"
+      # would refuse every pre-upgrade freeze on a surface that cannot explain why.
+      snap = Gori::Evidence.from_repeater(repeater("GET /x HTTP/1.1\r\n\r\n",
+        head: "HTTP/1.1 200 OK\r\n\r\n", body: "ok")).not_nil!
+      snap.request_drifted?.should be_false
+    end
+
+    it "reports drift on an ERRORED send too — that error was the other request's" do
+      # `from_repeater` already admits an errored send as evidence of the error. The claim it
+      # makes ("these bytes could not be delivered") is about the request that was sent, so an
+      # edit since invalidates it exactly as it invalidates a response.
+      Gori::Evidence.from_repeater(repeater("GET /x HTTP/1.1\r\n\r\n", head: "",
+        error: "connection refused", sent: "GET /y HTTP/1.1\r\n\r\n")).not_nil!
+        .request_drifted?.should be_true
+    end
+
+    it "names the fix and the surface's own override, or nothing when there is nothing to refuse" do
+      req = "GET /a HTTP/1.1\r\n\r\n"
+      drifted = Gori::Evidence.from_repeater(repeater(req, head: "HTTP/1.1 200 OK\r\n\r\n",
+        sent: "GET /b HTTP/1.1\r\n\r\n")).not_nil!
+      clean = Gori::Evidence.from_repeater(repeater(req, head: "HTTP/1.1 200 OK\r\n\r\n", sent: req)).not_nil!
+
+      msg = Gori::Evidence.drift_refusal(drifted, false, "--allow-drift").not_nil!
+      msg.should contain("edited after this response was received")
+      msg.should contain("send the tab again, or pass --allow-drift")
+      Gori::Evidence.drift_refusal(drifted, false, "allow_drift:true").not_nil!.should contain("allow_drift:true")
+      # The override, and a snapshot that never drifted, are both "nothing to say".
+      Gori::Evidence.drift_refusal(drifted, true, "--allow-drift").should be_nil
+      Gori::Evidence.drift_refusal(clean, false, "--allow-drift").should be_nil
     end
 
     it "refuses a tab that has never been sent — there is no exchange to freeze" do

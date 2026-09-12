@@ -77,7 +77,7 @@ describe "get_response_body_chunk completeness" do
     with_store do |store|
       rid = store.insert_repeater("https://acme.test", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
         false, true, nil, 0)
-      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "hello".to_slice, nil, 1_i64)
+      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "hello".to_slice, nil, 1_i64, request_sha256: nil)
 
       page = chunk(tools_for(store), %({"repeater_id":#{rid},"offset":0,"limit":64}))
       page["complete"].as_bool.should be_true

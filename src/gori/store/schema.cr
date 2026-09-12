@@ -1368,8 +1368,33 @@ module Gori
         "CREATE INDEX idx_issue_retest_run_steps_run ON issue_retest_run_steps (run_id, position, id)",
       ]
 
+      # `repeaters.response_request_sha256` — the SHA-256 of the tab's SAVED request as it
+      # stood when the response beside it was written (#1038).
+      #
+      # A `repeaters` row holds the tab's CURRENT request and its LAST response, and nothing
+      # tied the two together: edit the request after a send and the row reads as one
+      # exchange that never happened. That is tolerable for a workbench tab — the pane shows
+      # what it shows — and NOT tolerable for frozen evidence, whose whole promise is the
+      # request and the response of ONE exchange. This column is what lets a freeze tell the
+      # two apart: `update_repeater_response` writes the digest of the request that was sent
+      # beside the response, and `Evidence.from_repeater` compares it against the digest of
+      # the request the row holds now.
+      #
+      # Over the SAVED request bytes (`repeaters.request`), not the wire: the send seam
+      # expands `$NAME` bindings and overlays the active session slot, so a wire digest would
+      # differ from the stored request on every tab that uses either and report drift on all
+      # of them.
+      #
+      # NULL on every row written before this column, and NULL means NOT RECORDED — not "no
+      # drift" and not "drifted". `from_repeater` leaves `request_drifted` false there: an
+      # unknown is not an accusation, and the docs' "freeze right after the send" is still
+      # the rule for a response persisted by an older gori.
+      V28 = [
+        "ALTER TABLE repeaters ADD COLUMN response_request_sha256 TEXT",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

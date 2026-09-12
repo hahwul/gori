@@ -5,10 +5,14 @@ require "../support/mcp_harness"
 # the fix is the workflow the copy exists for, so the write has to be reachable from here —
 # and the read has to hand back the bytes the way get_flow does, redacted by default.
 
-private def sent_repeater(store, body = "stack") : Int64
-  rid = store.insert_repeater("https://acme.test", "GET /v1 HTTP/1.1\r\nHost: acme.test\r\nAuthorization: Bearer s3cret\r\n\r\n".to_slice,
-    false, true, nil, 0)
-  store.update_repeater_response(rid, "HTTP/1.1 500 Boom\r\nContent-Type: text/plain\r\n\r\n".to_slice, body.to_slice, nil, 9_i64)
+private REPEATER_REQ = "GET /v1 HTTP/1.1\r\nHost: acme.test\r\nAuthorization: Bearer s3cret\r\n\r\n"
+
+private def sent_repeater(store, body = "stack", request = REPEATER_REQ) : Int64
+  rid = store.insert_repeater("https://acme.test", request.to_slice, false, true, nil, 0)
+  # As every send surface persists it (Schema V28): the digest of the request that produced
+  # this response, so a later edit to the row reads as the drift it is.
+  store.update_repeater_response(rid, "HTTP/1.1 500 Boom\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+    body.to_slice, nil, 9_i64, request_sha256: Gori::Evidence.request_digest(request.to_slice))
   rid
 end
 
@@ -60,7 +64,7 @@ describe "MCP frozen evidence" do
       eid = mcp_ok_json(tools, "freeze_evidence",
         %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid},"link":false}))["evidence"]["id"].as_i64
       store.list_links(Gori::Store::LinkOwnerKind::Issue, iid).should be_empty
-      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "fixed".to_slice, nil, 5_i64)
+      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "fixed".to_slice, nil, 5_i64, request_sha256: nil)
 
       full = mcp_ok_json(tools, "get_evidence", %({"id":#{eid}}))
       full["status"].as_i.should eq(500)
@@ -87,6 +91,37 @@ describe "MCP frozen evidence" do
       r = tools.call("freeze_evidence", JSON.parse(%({"issue_id":999,"ref_kind":"flow","ref_id":#{fid}})))
       r.error_code.should eq("NOT_FOUND")
       store.count_evidence.should eq(0)
+    end
+  end
+
+  it "refuses a tab edited since its response, and freezes the mismatched pair on allow_drift" do
+    with_store do |store|
+      rid = sent_repeater(store)
+      iid = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      tools = tools_for(store)
+      # The failure sequence: send, edit the request, freeze. The row now holds an edited
+      # request beside the earlier send's response, and nothing in the bytes says so.
+      store.update_repeater(rid, "https://acme.test",
+        "GET /v1?debug=1 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, false, true, nil)
+
+      r = tools.call("freeze_evidence", JSON.parse(%({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid}})))
+      r.is_error.should be_true
+      r.error_code.should eq("CONFIRM_REQUIRED")
+      r.text.should contain("edited after this response was received")
+      r.text.should contain("allow_drift:true")
+      store.count_evidence.should eq(0) # refused means nothing written
+
+      # The override is the agent saying it already knows. The copy is still written, and the
+      # bytes in it are still what the row holds — gori said what they are, it did not fix them.
+      ev = mcp_ok_json(tools, "freeze_evidence",
+        %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{rid},"allow_drift":true}))["evidence"]
+      ev["status"].as_i.should eq(500)
+      store.count_evidence.should eq(1)
+
+      # A tab whose request still matches is not asked about at all.
+      clean = sent_repeater(store)
+      mcp_ok_json(tools, "freeze_evidence",
+        %({"issue_id":#{iid},"ref_kind":"repeater","ref_id":#{clean}}))["frozen"].as_bool.should be_true
     end
   end
 
