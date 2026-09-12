@@ -243,8 +243,9 @@ module Gori::Tui
         return "type to filter · ↵ keep · esc clear" if @filter_editing
         keys("↑/↓ select · ‹/› provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds")
       else
-        # `t on/off` and `↵/e edit` — the vocabulary the three sibling rule lists use. Toggle was
-        # `t` here alone, and ↵ has always opened the editor without the hint saying so.
+        # `t on/off` and `↵/e edit` — the vocabulary all four rule lists use since the key
+        # audit's F4 moved the toggle off `x` (which is select-line everywhere). ↵ has always
+        # opened the editor without the hint saying so.
         keys("↑/↓ select · {oast.add-provider} add · ↵/{oast.edit-provider} edit · {oast.toggle-provider} on/off · {oast.delete-provider} delete · space cmds · esc sub-tabs")
       end
     end
@@ -501,7 +502,7 @@ module Gori::Tui
       listener = listener_for(prov.key)
       return @host.status("not listening with #{prov.name}") unless listener
       stop_listener(listener)
-      @host.status("stopped listening with #{prov.name} — session kept, resume it with `r`")
+      @host.status("stopped listening with #{prov.name} — session kept, resume it with ⇧R")
     end
 
     # Stop every live listener on a project-level exit (leave project / quit). A listener

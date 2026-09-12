@@ -45,7 +45,7 @@ With interactsh, gori generates an RSA key pair locally, registers the public ke
 
 The callbacks that matter most arrive late: a stored payload that only fires when someone opens a back-office page, a webhook a nightly job replays, an injection behind a queue. So a listener outlives the session that started it.
 
-`Ctrl-X` stops polling but **keeps the registration**, and so does quitting gori or leaving the project. The payloads you already planted keep resolving. Press `r` to open **RESUME LISTENER**, pick a saved session, and gori starts polling it again. Every callback the provider buffered while you were away lands on the next poll, and the session's existing callbacks are still there under it.
+`Ctrl-X` stops polling but **keeps the registration**, and so does quitting gori or leaving the project. The payloads you already planted keep resolving. Press `Shift-R` to open **RESUME LISTENER**, pick a saved session, and gori starts polling it again. Every callback the provider buffered while you were away lands on the next poll, and the session's existing callbacks are still there under it.
 
 | Key | In the picker |
 |-----|---------------|
@@ -63,8 +63,8 @@ No surface resumes on its own. Opening a project, binding an MCP server, or star
 | Key | Action |
 |-----|--------|
 | `Ctrl-R` | Start listening (register a payload and begin polling) |
-| `Ctrl-X` | Stop polling (the session is kept; resume it with `r`) |
-| `r` | Resume a saved listener |
+| `Ctrl-X` | Stop polling (the session is kept; resume it with `Shift-R`) |
+| `Shift-R` | Resume a saved listener |
 | `g` | Get / copy the current payload (asks which provider on **All**) |
 | `←` / `→` | Cycle the provider the bar acts on |
 | `y` | Copy the current payload (on the list), or the selected callback (inside its `↵` detail) |

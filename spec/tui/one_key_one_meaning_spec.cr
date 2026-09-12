@@ -160,6 +160,32 @@ describe "one key, one meaning" do
     end
   end
 
+  # `r` was "send this to the Repeater" in five scopes, Run on the Diff, Resume on OAST and
+  # Refresh on the Project feed. The majority has a real loop behind it and wins; `^R` already
+  # owns Run in nine scopes, so the Diff's Run joins them and the other two give the letter up.
+  it "`r` sends to the Repeater, and `^R` runs" do
+    {Gori::Verb::Scope::Body        => "history.repeater",
+     Gori::Verb::Scope::Evidence    => "evidence.repeater",
+     Gori::Verb::Scope::Probe       => "probe.repeater-evidence",
+     Gori::Verb::Scope::ProbeDetail => "probe.repeater-flow",
+     Gori::Verb::Scope::Sitemap     => "sitemap.repeater",
+    }.each do |scope, id|
+      # History's is `^R` by an older decision that outranks this one (hotkeys.md names it);
+      # the rest are the bare letter.
+      expected = scope == Gori::Verb::Scope::Body ? nil : id
+      keymap.lookup(Gori::Verb::Chord.new("r"), scope).should eq(expected), scope.to_s
+    end
+    ctrl_r = Gori::Verb::Chord.new("r", ctrl: true)
+    keymap.lookup(ctrl_r, Gori::Verb::Scope::Diff).should eq("diff.run")
+    keymap.lookup(ctrl_r, Gori::Verb::Scope::Body).should eq("history.repeater")
+    # The two that gave it up.
+    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::OastCallbacks).should be_nil
+    keymap.lookup(Gori::Verb::Chord.new("r", shift: true), Gori::Verb::Scope::OastCallbacks)
+      .should eq("oast.sessions")
+    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::ProjectActivity).should be_nil
+    Gori::Verbs.registry["activity.refresh"].chords.should be_empty
+  end
+
   it "History's hidden nav verbs are gated to History, not to every Body-scope tab" do
     ctx = FakeExecContext.new
     ctx.current_tab = :help

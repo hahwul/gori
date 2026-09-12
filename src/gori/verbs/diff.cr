@@ -32,9 +32,14 @@ module Gori
         "diff.swap", "Swap A ⇄ B", "Swap the two snapshots — a diff reads before → after",
         Verb::Scope::Diff, [Verb::Chord.new("s")]) { |ctx| ctx.diff_swap; nil }
 
+      # `^R`, the Run chord in the nine other scopes that have one — Authorize, Body,
+      # Discover, Fuzzer, the History detail, Miner, OAST, Repeater and Sequencer. This was
+      # the ONE Run on a bare letter, and the letter it was on is the one bare `r` earns
+      # everywhere else: "send this to the Repeater" (key audit, F6). The menu keeps 'r',
+      # spelled out because a ctrl chord derives no menu letter.
       r.register Verb::Definition.new(
         "diff.run", "Run the diff", "Re-read both projects and rebuild the report",
-        Verb::Scope::Diff, [Verb::Chord.new("r")]) { |ctx| ctx.diff_run; nil }
+        Verb::Scope::Diff, [Verb::Chord.new("r", ctrl: true)], mnemonic: 'r') { |ctx| ctx.diff_run; nil }
 
       # A lens, not a filter bar: the five verdicts are a closed set, so a ring is the whole
       # vocabulary. The COUNTS on the header always cover all five whatever the lens shows.

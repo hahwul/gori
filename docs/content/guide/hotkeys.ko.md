@@ -39,6 +39,7 @@ Ctrl-P  → settings:hotkeys
 - **`x`는 줄을 선택하고, `t`는 행의 플래그를 뒤집습니다.** `x`는 열네 개 스코프에서 "이 줄 선택"이고, 네 곳(Colormarker·Match & Replace·Probe **RULES** 목록·OAST providers)에서만 "이 규칙 활성/비활성"이었습니다. 이제 그 넷은 `t`에 응답합니다. `t`는 History·Issues·Sitemap·Intercept 큐에서 이미 **표시(mark)**를 뜻하고, 규칙 목록에는 표시가 없으므로 충돌하지 않습니다. 덕분에 Rewriter의 토글도 손으로 짠 컨트롤러 키를 벗어나 평범한 재지정 가능 코드가 되었습니다.
 - space 메뉴는 INS의 대체 수단이 **아닙니다**. 텍스트 에디터가 키를 먼저 소비하므로 그곳에서 `Space`는 그냥 문자입니다. 타이핑 중에도 닿아야 하는 동작에는 Ctrl 코드가 필요하고, 니모닉만으로는 부족합니다. (Repeater/Fuzzer의 디코더 체인 편집기가 `Ctrl-Y`를 Copy에 넘겨준 뒤 space 메뉴만이 아니라 `Ctrl-Q`에 실린 이유가 이것입니다.)
 - **History → Repeater**와 **Repeater 전송**은 **`Ctrl-R`**로 유지됩니다(동일한 근육 기억). History→Repeater를 맨 글자 `r`로 옮기지 마세요.
+- **`r`는 Repeater로 보내고, `Ctrl-R`는 실행합니다.** 맨 `r`는 보낼 플로우가 있는 다섯 스코프에서 "이 행을 Repeater로 보내기"이고, 그 밖에서는 아무것도 아닙니다. Diff의 Run은 `Ctrl-R`로 옮겼고(아홉 스코프에서 이미 Run을 맡고 있습니다), OAST의 Resume listener는 `Shift-R`로, 프로젝트 ACTIVITY 피드의 Refresh는 `Space` 메뉴 항목이 되었습니다 — 진입할 때·피어가 쓸 때·폴링할 때 이미 다시 읽으므로, 새로고침 키가 필요한 피드라면 아예 키가 없는 편이 낫습니다. 하위 탭 스트립의 `r`=이름 변경은 다른 계층이라 영향이 없습니다.
 - Match & Replace와 알림은 키 없이(팔레트 / 배지) 제공됩니다. Global 키 조합을 원하면 재지정하세요.
 
 ## 편집 {#editing}
