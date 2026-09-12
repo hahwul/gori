@@ -717,7 +717,7 @@ module Gori::Tui
         # (No room even for that: no stop is drawn, and `0` still works.)
         more = Rect.new(px, rect.y, pill_w, 1)
         area = Rect.new(rect.x, rect.y, {px - 1 - rect.x, 0}.max, 1)
-        segs, start, tabs_end = pack_segments(area, tabs, labels, widths, active_idx)
+        segs, start, _ = pack_segments(area, tabs, labels, widths, active_idx)
       end
 
       # The free run past the stop — RESERVED, not spare. Nothing draws here yet; it is where
