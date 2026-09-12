@@ -45,7 +45,7 @@ describe "Chrome tab-bar numbers" do
     # `0:+12` counted a drawer of leftovers. `0` opens all twenty-one tabs, the nine on the bar
     # included, so the pill says what the key does rather than how many tabs are behind it —
     # and it no longer disappears when that count is zero.
-    Chrome.more_label.should eq("0:tabs")
+    Chrome.more_label.should eq("0:Tabs") # capitalised like the tabs it opens
   end
 
   it "drops to one bold ink once the pill holds focus" do

@@ -39,7 +39,7 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 탭 바는 **번호가 매겨진 아홉 개의 슬롯**이고, 새 설치는 실제로 작업하는 루프로 그 슬롯을 채웁니다.
 
 ```text
-1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:tabs
+1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:Tabs
 ```
 
 `1`–`9`로 슬롯에 점프하고, 나머지 열두 개는 **`0`**으로 갑니다 — 카탈로그 전체를 타이핑으로

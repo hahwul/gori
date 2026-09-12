@@ -112,7 +112,7 @@ describe "the digit family — focus-state matrix" do
     end
   end
 
-  it "is navigation on the tab bar, the 0:tabs stop and the sub-tab strip" do
+  it "is navigation on the tab bar, the 0:Tabs stop and the sub-tab strip" do
     # These three are `@focus != :body`, and the gate asks the controller only for `:body` —
     # so the answer is structural rather than per-controller. Pinned on the predicate itself:
     # the `@focus == :body` clause IS the rule, and dropping it would make a Repeater session

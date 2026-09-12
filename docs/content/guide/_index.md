@@ -40,7 +40,7 @@ The tab bar is **nine numbered slots**, and a fresh install fills them with the 
 actually work in:
 
 ```text
-1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:tabs
+1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:Tabs
 ```
 
 Press `1`–`9` to jump to a slot and **`0`** to reach any of the other twelve — a type-to-filter

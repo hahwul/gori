@@ -309,16 +309,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # (TABS level) — clicking a tab selects the tab, it does not drill into the body.
   private def click_menu(rect : Rect, mx : Int32, my : Int32) : Nil
     tabs, _, slots = effective_bar
-    # The far-right `0:tabs` pill opens the Go-to picker — the same card the `0` key and the
-    # bar's own far-right stop open.
-    if (mb = Chrome.more_button_rect(rect)) && mb.contains?(mx, my)
+    # ONE geometry for the whole row: the pill and the segments come from the same pass the
+    # render used, so a click can never land on a tab the bar drew somewhere else.
+    geo = Chrome.menu_geometry(rect, @active_tab, tabs: tabs,
+      intercept_count: @session.interceptor.pending_count,
+      numbered: Settings.tab_numbers?, slots: slots)
+    # The `0:Tabs` pill opens the Go-to picker — the same card the `0` key and the bar's own
+    # far-right stop open.
+    if (mb = geo.more) && mb.contains?(mx, my)
       focus_pane(:menu) # land on the bar (clears any stale overlay / saves edits)
       open_tab_goto
       return
     end
-    seg = Chrome.menu_segments(rect, @active_tab, tabs: tabs,
-      intercept_count: @session.interceptor.pending_count,
-      numbered: Settings.tab_numbers?, slots: slots).find { |(_, r)| r.contains?(mx, my) }
+    seg = geo.segments.find { |(_, r)| r.contains?(mx, my) }
     if seg
       seg[0] == @active_tab ? focus_pane(:menu) : focus_tab(seg[0], focus: :menu)
     else
@@ -351,7 +354,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     true # consume any click on the strip row, even between chips
   end
 
-  # Clicking the ⌕ pill opens the picker, like the tab bar's `0:tabs` stop opens the
+  # Clicking the ⌕ pill opens the picker, like the tab bar's `0:Tabs` stop opens the
   # hidden-tabs menu. ORDER IS LOAD-BEARING: focus_pane clears @overlay, so opening first
   # would have the focus hop close the picker it just opened.
   private def open_subtab_find_from_click : Nil

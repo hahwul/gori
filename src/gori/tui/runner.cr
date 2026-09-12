@@ -294,7 +294,7 @@ module Gori::Tui
       @active_overlay = nil.as(Overlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
-      @menu_more = false               # tab-bar focus is on the far-right `0:tabs` stop (only meaningful when @focus == :menu)
+      @menu_more = false               # tab-bar focus is on the far-right `0:Tabs` stop (only meaningful when @focus == :menu)
       # Sub-tab strip focus is on the left-edge ⌕ affordance rather than a chip. A HINT
       # only — `subtab_find_focused?` is the truth, and it re-derives the answer from the
       # live frame. That matters: `@focus` is assigned raw at twenty-odd sites across
@@ -2933,7 +2933,7 @@ module Gori::Tui
       when .palette? then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
       when .detail?  then history_controller.body_hint(:body)
       else
-        # Focus on the far-right `0:tabs` stop: ↵/↓ opens the Go-to picker, same as the key.
+        # Focus on the far-right `0:Tabs` stop: ↵/↓ opens the Go-to picker, same as the key.
         return "↵/↓ go to tab… · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         #
@@ -4226,7 +4226,7 @@ module Gori::Tui
       decoder_controller.commit if @active_tab == :decoder && @focus == :body && pane != :body
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
       @focus = pane
-      @menu_more = false # any focus change lands on a real tab, not the `0:tabs` stop
+      @menu_more = false # any focus change lands on a real tab, not the `0:Tabs` stop
       # Unconditional, INCLUDING pane == :subtabs. This is what keeps entering a tab landing
       # on chip 1: `enter_content` descends through here, so the strip is always entered at
       # a session, never at the ⌕ affordance. Reaching the affordance is always a deliberate
@@ -4237,7 +4237,7 @@ module Gori::Tui
     end
 
     # Descend from the tab menu (↓/↵/j on the tab bar). When focus is on the far-right
-    # far-right `0:tabs` stop, ↓/↵ opens the Go-to picker instead. Otherwise: tabs
+    # far-right `0:Tabs` stop, ↓/↵ opens the Go-to picker instead. Otherwise: tabs
     # with a navigable sub-tab strip (Repeater/Notes/Decoder) land on the STRIP first so
     # ←/→ can switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
     # the body. (`focus_pane`'s guard would otherwise route an absent strip to the menu,
@@ -4338,10 +4338,10 @@ module Gori::Tui
       view_focus_resume if @focus == :body
     end
 
-    # ←/→ on the tab bar. → past the last visible tab lands on the far-right `0:tabs`
+    # ←/→ on the tab bar. → past the last visible tab lands on the far-right `0:Tabs`
     # affordance rather than wrapping; ← steps back off it onto
     # the last tab. Everywhere else these are plain cycle_tab(±1). (`[`/`]` keep the
-    # from-anywhere wrap via cycle_tab — the `0:tabs` stop is menu-bar-only.)
+    # from-anywhere wrap via cycle_tab — the `0:Tabs` stop is menu-bar-only.)
     def menu_right : Nil
       return if @menu_more
       # No `&& hidden_tab_count > 0` guard: the pill is drawn whatever the layout (`0` opens
@@ -4355,7 +4355,7 @@ module Gori::Tui
     end
 
     def menu_left : Nil
-      # ← off the `0:tabs` stop steps back onto the bar; otherwise cycle left. The
+      # ← off the `0:Tabs` stop steps back onto the bar; otherwise cycle left. The
       # LEFTMOST tab is a hard stop — no wrap to the far end (mirrors menu_right's
       # no-wrap at the right edge). A stray ← on Project used to jump to the last tab,
       # which was almost always accidental, so the left edge is now inert.
@@ -4395,7 +4395,7 @@ module Gori::Tui
     end
 
     # The `0` key: a type-to-filter picker over the WHOLE tab catalog — the nine numbered
-    # slots and everything settings:tabs keeps off the bar. It is also what the `0:tabs` pill's
+    # slots and everything settings:tabs keeps off the bar. It is also what the `0:Tabs` pill's
     # click and the bar's far-right stop (↵/↓) open, so the key, the pill and the stop are one
     # gesture rather than three.
     #
@@ -4444,7 +4444,7 @@ module Gori::Tui
     # Tab (+1) / Shift-Tab (-1) move focus one step around the ring: from the tab
     # bar into the body's first/last pane, between panes, then back to the bar.
     private def focus_advance(dir : Int32) : Nil
-      @menu_more = false # the ring lands on a tab / body pane, never the `0:tabs` stop
+      @menu_more = false # the ring lands on a tab / body pane, never the `0:Tabs` stop
       if @focus == :menu
         @focus = :body
         dir > 0 ? view_focus_first : view_focus_last

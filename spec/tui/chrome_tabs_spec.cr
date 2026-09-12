@@ -186,33 +186,50 @@ describe "Chrome.hidden_tabs" do
   end
 end
 
-describe "Chrome.more_button_rect" do
+describe "Chrome.menu_geometry" do
+  nine = Chrome.visible_tabs([] of {String, Bool})
+
   # The pill used to vanish when nothing was off the bar — a `0` key with nothing on screen
   # pointing at it, on the one row whose job is to teach its own digits. `0` opens the whole
   # catalog whatever the layout, so the stop is unconditional too.
   it "is drawn even when every tab is on the bar" do
-    Chrome.more_button_rect(Rect.new(0, 0, 80, 1)).should_not be_nil
+    Chrome.menu_geometry(Rect.new(0, 0, 80, 1), :project).more.should_not be_nil
   end
 
-  it "reserves a right-anchored pill sized to the label" do
-    rect = Rect.new(0, 0, 80, 1)
-    mb = Chrome.more_button_rect(rect).not_nil!
-    mb.right.should eq(rect.right)             # flush to the right edge
-    mb.w.should eq(Chrome.more_label.size + 2) # padded pill
+  # The stop FOLLOWS the tabs. Pinned to the right edge it left the row with two anchors and a
+  # void between them that grew with the terminal — 46 empty columns at 160, 87 at 200.
+  it "sets the stop two columns past the last tab on a wide row" do
+    rect = Rect.new(0, 0, 200, 1)
+    geo = Chrome.menu_geometry(rect, :project, tabs: nine)
+    last = geo.segments.last[1]
+    mb = geo.more.not_nil!
+    mb.x.should eq(last.right + Chrome::STOP_GAP)
+    mb.w.should eq(Chrome.more_label.size + 2) # padded pill, like a tab segment
+    mb.right.should be < rect.right            # …and nowhere near the far edge
   end
 
-  it "is nil on a row too narrow to host the button" do
-    Chrome.more_button_rect(Rect.new(0, 0, 4, 1)).should be_nil
+  # The free run past the stop is RESERVED, not spare: it comes back as a rect so whoever
+  # claims it (a readout, the palette key) inherits this same geometry.
+  it "hands back the free run past the stop" do
+    rect = Rect.new(0, 0, 200, 1)
+    geo = Chrome.menu_geometry(rect, :project, tabs: nine)
+    mb = geo.more.not_nil!
+    geo.trailing.x.should eq(mb.right + 1)
+    geo.trailing.right.should eq(rect.right)
+    geo.trailing.w.should be > 0 # 200 columns leaves a lot of it
   end
-end
 
-describe "Chrome.menu_segments" do
-  it "keeps tab segments clear of the reserved `0` button region" do
-    rect = Rect.new(0, 0, 80, 1)
-    tabs = Chrome.visible_tabs([] of {String, Bool})
-    mb = Chrome.more_button_rect(rect).not_nil!
-    segs = Chrome.menu_segments(rect, :project, tabs: tabs)
-    segs.each { |(_, seg)| seg.right.should be <= mb.x } # no segment overlaps the button
+  it "pins the stop to the right edge once the strip stops fitting beside it" do
+    rect = Rect.new(0, 0, 80, 1) # nine tabs do not fit in eighty columns
+    geo = Chrome.menu_geometry(rect, :project, tabs: nine)
+    mb = geo.more.not_nil!
+    mb.right.should eq(rect.right)
+    geo.trailing.w.should eq(0)
+    geo.segments.each { |(_, seg)| seg.right.should be <= mb.x } # no segment overlaps it
+  end
+
+  it "draws no stop on a row too narrow to host one" do
+    Chrome.menu_geometry(Rect.new(0, 0, 4, 1), :project).more.should be_nil
   end
 end
 

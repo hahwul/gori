@@ -114,9 +114,13 @@ Decoder's CHAIN field), a digit is a character. It is the same rule `Space` foll
 typeable into a conversion chain.
 
 The bar paints the numbers by default (**Preferences → Layout → Tab numbers**, `settings:layout`).
-The far-right pill reads `0:tabs` — the key, and what it opens. It is there whatever your
-layout is: `0` reaches the whole catalog, the nine on the bar included, so there is nothing
-for it to count and no layout that makes it disappear.
+The pill just past the last tab reads `0:Tabs` — the key, and what it opens. It sits two
+columns after the ninth slot rather than pinned to the right edge, so the order `→` walks and
+the order you read are the same one; only when the strip stops fitting beside it does it pin
+right and let the tabs scroll. It is there whatever your layout is: `0` reaches the whole
+catalog, the nine on the bar included, so there is nothing for it to count and no layout that
+makes it disappear. The run to the right of it is left free on purpose — a place for a readout
+that is not a tab.
 
 ### Nine slots, and the tenth tab
 
