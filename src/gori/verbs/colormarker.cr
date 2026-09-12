@@ -37,9 +37,13 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.copy", "Copy", "Copy the selected rule's match filter (the QL that paints the row)",
         Verb::Scope::Colormarker, [Verb::Chord.new("y")], available: on_rule, mnemonic: 'y', section: :rules) { |ctx| ctx.read_copy; nil }
+      # `t` — "flip this row's flag", the meaning `t` already carries as MARK in History,
+      # Issues, the Sitemap and the Intercept queue. It was `x`, which is "select this line"
+      # in fourteen scopes; a rule list has no marks, so `t` collides with nothing and `x` is
+      # left meaning one thing everywhere (key audit, F4).
       r.register Verb::Definition.new(
         "colormarker.toggle", "Enable/disable", "Toggle the selected rule on or off in THIS project",
-        Verb::Scope::Colormarker, [Verb::Chord.new("x")], available: on_rule, mnemonic: 'x', section: :rules) { |ctx| ctx.colormarker_toggle; nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("t")], available: on_rule, mnemonic: 't', section: :rules) { |ctx| ctx.colormarker_toggle; nil }
       r.register Verb::Definition.new(
         "colormarker.delete", "Delete rule", "Delete the selected rule (confirms first)",
         Verb::Scope::Colormarker, [Verb::Chord.new("d")], available: on_rule, mnemonic: 'd', section: :rules,
@@ -72,9 +76,13 @@ module Gori
       on_global_rule = ->(ctx : Verb::ExecContext) do
         ctx.current_tab == :colormarker && ctx.colormarker_rule_list_focused? && ctx.colormarker_global_rule_selected?
       end
+      # MENU-ONLY since the key audit's F7. `s` is the Global scope lens, and a scoped chord
+      # always beats the Global fallback — so this rule list quietly cost an operator the lens
+      # key for an action they use when they file a rule, not while they triage. The letter
+      # stays in the menu, where it is reached after `space` and shadows nothing.
       r.register Verb::Definition.new(
         "colormarker.scope", "Global/project", "Move the selected rule between this project and the global library",
-        Verb::Scope::Colormarker, [Verb::Chord.new("s")], available: on_rule, mnemonic: 's', section: :rules) { |ctx| ctx.colormarker_scope_toggle; nil }
+        Verb::Scope::Colormarker, available: on_rule, mnemonic: 's', section: :rules) { |ctx| ctx.colormarker_scope_toggle; nil }
       r.register Verb::Definition.new(
         "colormarker.toggle-default", "Enable/disable everywhere",
         "Flip a GLOBAL rule's default — the state every project without an override follows",

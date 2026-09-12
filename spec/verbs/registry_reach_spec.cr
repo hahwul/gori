@@ -55,8 +55,10 @@ describe "rule-list keys" do
     r["colormarker.edit"].chords.should contain(plain.call("e"))
     r["colormarker.edit"].chords.should contain(plain.call("enter"))
     r["colormarker.delete"].chords.should contain(plain.call("d"))
-    r["colormarker.toggle"].chords.should contain(plain.call("x"))
-    r["colormarker.scope"].chords.should contain(plain.call("s"))
+    r["colormarker.toggle"].chords.should contain(plain.call("t")) # F4: `t` flips a row flag
+    # F7: menu-only, so the Global `s` (scope lens) is not shadowed on this tab.
+    r["colormarker.scope"].chords.should be_empty
+    r["colormarker.scope"].menu_key.should eq('s')
     r["colormarker.toggle-default"].chords.should be_empty # menu-only: ⇧X is the wipe chord elsewhere
     r["colormarker.move-down"].chords.should contain(shift.call("j"))
     r["colormarker.move-up"].chords.should contain(shift.call("k"))
@@ -250,29 +252,40 @@ end
 describe "Rewriter rule keys" do
   r = Gori::Verbs.registry
 
-  it "binds every rule action except toggle" do
+  it "binds every rule action, and leaves the two that shadow a Global key to the menu" do
     plain = ->(k : String) { typed_chord(k) }
     r["rewriter.add"].chords.should contain(plain.call("a"))
     r["rewriter.edit"].chords.should contain(plain.call("e"))
     r["rewriter.delete"].chords.should contain(plain.call("d"))
-    r["rewriter.scope"].chords.should contain(plain.call("s"))
     r["rewriter.move-up"].chords.should contain(typed_chord("k", shift: true))
     r["rewriter.toggle-default"].chords.should be_empty # menu-only: ⇧X is the wipe chord elsewhere
+    # global ⇄ project is menu-only since the key audit's F7: `s` is the Global scope lens,
+    # and a scoped chord always beats the Global fallback, so this list quietly cost an
+    # operator the lens key for an action used when a rule is FILED, not while triaging.
+    r["rewriter.scope"].chords.should be_empty
+    r["rewriter.scope"].menu_key.should eq('s')
   end
 
-  it "leaves `x` to the controller, because the KEYMAP has no focus dimension" do
-    # `rewriter.select-line` binds bare `x` in this same SCOPE for the preview pane. Two
-    # `section:`s never render together so the space menu is fine with `x` meaning two
-    # things — but `Keymap#lookup` is keyed by scope alone and returns ONE id, so a chord on
-    # `rewriter.toggle` would shadow one of them. `RewriterController#handle_list_key` runs
-    # only when the LIST has focus, which is the disambiguation the keymap cannot express.
-    r["rewriter.toggle"].chords.should be_empty
+  it "takes a REAL chord on `t`, because F4 moved the toggle off `x` entirely" do
+    # This verb had no chord at all, and the reason was structural: `rewriter.select-line`
+    # binds bare `x` in this same SCOPE for the preview pane, `Keymap#lookup` is keyed by
+    # scope alone and returns ONE id, so a chord on `rewriter.toggle` shadowed one of them —
+    # which is why the toggle was hand-rolled in `RewriterController#handle_list_key` and `x`
+    # was not rebindable here.
+    #
+    # On `t` the two never meet, so the verb is an ordinary chord with an ordinary gate: the
+    # `available:` lambda asks `rewriter_rule_list_focused?`, which is exactly the pane the
+    # deleted arm ran in.
+    r["rewriter.toggle"].chords.should eq([typed_chord("t")])
+    r["rewriter.toggle"].menu_key.should eq('t')
     r["rewriter.select-line"].chords.should contain(typed_chord("x"))
-    r["rewriter.toggle"].menu_key.should eq('x') # still the letter, in its own section
     r["rewriter.select-line"].section.should eq(:preview)
     r["rewriter.toggle"].section.should eq(:rules)
-    # Colormarker COULD take the chord: it has no read pane, so nothing else claims `x`.
-    r["colormarker.toggle"].chords.should contain(typed_chord("x"))
+    # …and the other three rule lists say it the same way.
+    {"colormarker.toggle", "probe-rules.toggle", "oast.toggle-provider"}.each do |id|
+      r[id].chords.should eq([typed_chord("t")]), id
+      r[id].menu_key.should eq('t'), id
+    end
   end
 end
 

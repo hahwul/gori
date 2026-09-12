@@ -90,7 +90,7 @@ module Gori::Tui
         Item.new("^R", "send the flow to Repeater", "history.repeater"),
         Item.new("⇧I", "send the flow to the Fuzzer", "history.fuzz"),
         Item.new("⇧F", "create an issue", "issue.create"),
-        Item.new("f", "follow newest", "history.toggle-follow"),
+        Item.new("space → f", "follow newest — the ⌁follow chip on the filter bar toggles it too", "history.toggle-follow"),
         Item.new("/", "filter (query language — see the Query page)", "history.query"),
         Item.new("y", "copy flow", "history.copy"),
         Item.new("space → Y", "copy as… — urls · hosts · cURL · raw · req+res pair"),
@@ -222,7 +222,7 @@ module Gori::Tui
         Item.new("{oast.listen} · {oast.stop}", "start listening · stop"),
         Item.new("↑/↓ · ↵", "callbacks: select · open detail"),
         Item.new("space → p", "promote a callback to an Issue", "oast.promote"),
-        Item.new("space → a", "add a provider · e edit · x enable/disable"),
+        Item.new("space → a", "add a provider · e edit · t enable/disable"),
         # Two copies, opposite directions of one interaction: the payload gori SENT (list) and
         # what came BACK (detail). Only the detail's can be a chord — `validate_chords!` allows
         # one `y` per scope — so the list's is named by its space-menu letter.
@@ -242,9 +242,9 @@ module Gori::Tui
         Item.new("{comparer.pick-a} · {comparer.pick-b}", "pick flow A · flow B"),
         Item.new("←/→", "compare requests ⟷ responses"),
         Item.new("{comparer.next-change} · {comparer.prev-change}", "next · previous CHANGED row (the same pair the drill-ins step with)"),
-        Item.new("{comparer.toggle-fold}", "fold the unchanged runs, keeping context"),
+        Item.new("space → z", "fold the unchanged runs, keeping context", "comparer.toggle-fold"),
         Item.new("⇧←/→", "h-scroll both columns (long lines)"),
-        Item.new("s", "swap A ⇄ B", "comparer.swap"),
+        Item.new("w", "swap A ⇄ B", "comparer.swap"),
         Item.new("^N / ^W · r", "new / close / rename comparison sub-tab"),
         Item.new("Send to Comparer", "from History (space menu) — fills the active sub-tab"),
       ]},
@@ -277,7 +277,11 @@ module Gori::Tui
         # what the list holds as well as what the keys do.
         Item.new("RELATED row 1", "the flow the issue was filed from — {issue.goto-link} opens it in History"),
         Item.new("in RELATED", "↵ view the row's exchange (a fuzz/miner session: open it) · {issue.goto-link} source · {issue.freeze-link} freeze · {issue.repeater-flow} repeater"),
-        Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {scope.toggle-lens} scope · {probe.clear} clear issues · space cmds"),
+        # `space → s scope`, NOT `{scope.toggle-lens} scope`: `s` on this tab is
+        # `probe.open-evidence` (go to source) since the key audit's F2, so the Global lens is
+        # the menu entry `probe.scope-toggle` here. The token would have printed the Global
+        # chord and been wrong on the one tab this row is about.
+        Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · space → s scope · {probe.clear} clear issues"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here
@@ -329,7 +333,7 @@ module Gori::Tui
       {"REWRITER", [
         Item.new("{rewriter.add} · ↵/e", "add a Match & Replace rule · edit the selected one"),
         Item.new("x · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("{rewriter.scope} · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere"),
+        Item.new("space → s · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere", "rewriter.scope"),
         Item.new("G / P column", "global (every project) or project · G* = this project overrides its default"),
         Item.new("{rewriter.move-down} / {rewriter.move-up}", "reorder within a scope — globals apply first, then project rules"),
         Item.new("[ / ]", "switch sub-tab: rules · extract · bindings"),
@@ -343,7 +347,7 @@ module Gori::Tui
       {"COLORMARKER", [
         Item.new("{colormarker.add} · ↵/e", "add a History row-colour rule · edit the selected one"),
         Item.new("{colormarker.toggle} · {colormarker.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("{colormarker.scope} · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere"),
+        Item.new("space → s · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere", "colormarker.scope"),
         Item.new("{colormarker.move-down} / {colormarker.move-up}", "reorder — the FIRST enabled match paints the row, the rest are skipped"),
         Item.new("style", "full = tint the whole row · strip = one colour cell ahead of TIME"),
         Item.new("when:", "host: path: method: scheme: status: proto: — ↹ completes · no header:/size:/dur:"),

@@ -3695,7 +3695,7 @@ module Gori::Tui
     #
     # Right cluster: a scope-lens chip (always shown so the `s` toggle is discoverable) and,
     # when filtering, the row count. The scope lens is a filter too, so it lives on the filter
-    # bar next to the QL query. The `f:follow` toggle shares the scope chip's accent/muted dress
+    # bar next to the QL query. The `⌁follow` toggle shares the scope chip's accent/muted dress
     # so the two read as one cluster, and the mark chip joins them rather than being placed by
     # hand afterwards.
     #
@@ -3713,8 +3713,13 @@ module Gori::Tui
       end
       scope_on = @scope.try(&.active?) == true
       chips << (scope_on ? {:scope, "s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "s scope:off", Theme.muted})
-      chips << {:follow, "f:follow", @follow ? Theme.accent : Theme.muted}
-      # LEFT of `f:follow` — the chain draws rightmost-first, so it is pushed after it. Always
+      # `⌁follow`, and NOT `f:follow`: the key audit's F3 took the bare `f` back for the two
+      # tiers it settles into (freeze in evidence contexts, find on the sub-tab strip), so
+      # follow is `space → f` now. A chip that still printed `f:` would name a key nothing
+      # answers. The chip stays CLICKABLE and stays accent-when-on, which is the discoverability
+      # the `s scope` chip beside it is carrying for its own toggle.
+      chips << {:follow, "⌁follow", @follow ? Theme.accent : Theme.muted}
+      # LEFT of `⌁follow` — the chain draws rightmost-first, so it is pushed after it. Always
       # shown, like the scope chip and for the same reason: a mode nothing advertises is a mode
       # nobody finds. Accent when a view is narrowing, muted `v:all` when none is, so the key is
       # visible before it is ever used. Lowercase like every chip beside it — the view's own name

@@ -15,10 +15,17 @@ module Gori
         Verb::Scope::Comparer, [Verb::Chord.new("b")],
         available: in_comparer) { |ctx| ctx.comparer_pick(:b); nil }
 
+      # `w` — sWap. It was `s`, and `s` is the Global scope lens: a scoped chord always beats
+      # the Global fallback, so this tab silently cost an operator the lens key. `s` reduces to
+      # two meanings now (key audit, F7): GO TO SOURCE where a row has one, and the Global lens
+      # everywhere it is not shadowed. `w` is free in this scope and names the action.
+      #
+      # The MENU letter stays 's': a space-menu letter is its own keyspace (it is reached after
+      # `space`), and `w` there is Close in every workbench menu in the app.
       r.register Verb::Definition.new(
         "comparer.swap", "Swap A ⇄ B", "Swap the two flows being compared",
-        Verb::Scope::Comparer, [Verb::Chord.new("s")],
-        available: in_comparer) { |ctx| ctx.comparer_swap; nil }
+        Verb::Scope::Comparer, [Verb::Chord.new("w")],
+        available: in_comparer, mnemonic: 's') { |ctx| ctx.comparer_swap; nil }
 
       r.register Verb::Definition.new(
         "comparer.toggle-pane", "Compare requests/responses",
@@ -58,11 +65,18 @@ module Gori
         Verb::Scope::Comparer, [Verb::Chord.new("p", shift: true)],
         available: in_diff, mnemonic: 'G') { |ctx| ctx.comparer_jump_change(-1); nil }
 
+      # MENU-ONLY since the key audit's F3, for the reason `history.toggle-follow` carries:
+      # `f` is freeze in evidence contexts and find on the sub-tab strip, and folding is a
+      # session-rare toggle rather than a loop key.
+      #
+      # The letter stays 'z' and does NOT become 'f': `comparer.find-subtab` holds 'f' in the
+      # SUB-TABS bucket, which #1055 renders from EVERY focus level beside COMMON, so a 'f'
+      # here would raise in `validate_menu_keys!` at boot. The strip's `f` IS the find tier, so
+      # the collision is the rule working rather than an accident to route around.
       r.register Verb::Definition.new(
         "comparer.toggle-fold", "Fold unchanged",
         "Collapse the runs of identical lines, keeping context around each change",
-        Verb::Scope::Comparer, [Verb::Chord.new("f")],
-        available: in_diff, mnemonic: 'z') { |ctx| ctx.comparer_toggle_fold; nil }
+        Verb::Scope::Comparer, available: in_diff, mnemonic: 'z') { |ctx| ctx.comparer_toggle_fold; nil }
 
       # Sub-tab strip / space menu (session multi-pair workspace).
       r.register Verb::Definition.new(

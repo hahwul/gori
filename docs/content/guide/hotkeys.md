@@ -35,9 +35,41 @@ Rules of thumb:
 - **Copy is the worked example of that rule.** `y` copies in READ, and `Ctrl-Y` copies in **INS as well**, in every text box. In INS a bare `y` is a literal character, and typing it over a `Shift`+arrows selection *replaces* the selection, so the copy reflex needs a chord that survives typing. Both are the same verb (`*.copy`), so a rebind moves the READ letter and **`Ctrl-Y` stays where it is**: it is pinned, in every scope, including through an explicit unbind. Unbinding `y` is a statement about READ mode, and it must not quietly leave a text pane with no way at all to copy what you just selected.
 - **Every list that holds something worth copying binds `y`.** A pane that shows bytes, a row, or a line of record and answers nothing to `y` is a gap, not a design: the Intercept queue, the Evidence archive, the Project ACTIVITY feed and the OAST callback detail each had one and each now answers the letter. Where two copies live in one place and mean opposite things — OAST's list copies the payload gori *sent*, its detail copies what came *back* — only one can hold the chord (a scope has no focus dimension in the keymap), and the other keeps its space-menu letter.
 - **`/` filters the list you are looking at.** Every list long enough to scroll answers it, including the three rule lists that did not: Colormarker, Match & Replace and the Probe **RULES** sub-tab (~40 built-in rules across three sections). The bar is a **lens** — it hides rows, it never disables one — and `Esc` clears it. The one thing it changes is reordering: on the two lists where order decides which rule wins, a move is refused while a query is held, because a filtered list is not the order the rule engine holds.
+- **`f` has two tiers and one exception.** It is **freeze** in every evidence context (an Issue's RELATED card, the evidence viewer) and **find** on the sub-tab strip — a different tier, which cannot collide. History's follow and the Comparer's fold-unchanged are `Space` menu entries instead; both are session-rare toggles, which is what L3 is for. The exception is the **Intercept queue**, where `f` forwards the held request and `⇧F` forwards them all: that is the tab's own loop key and its `f`/`⇧F` family is internally coherent, so it is documented rather than moved — the same call `Ctrl-R` gets for History → Repeater.
+- **`x` selects a line; `t` flips a row's flag.** `x` means "select this line" in fourteen scopes, and it was "enable/disable this rule" in four (Colormarker, Match & Replace, the Probe **RULES** list and the OAST providers). Those four now answer `t`, which is what `t` already means as **mark** in History, Issues, the Sitemap and the Intercept queue — a rule list has no marks, so nothing collides, and the Rewriter's toggle stops being a hand-rolled controller key and becomes an ordinary rebindable chord.
+- **`s` goes to the source, or flips the scope lens.** Those are its only two meanings. `s` opens the tab a row lives in — the Evidence archive, an Issue's RELATED card, and the Probe list and detail — and everywhere it is not one of those, it is the Global scope lens. What it stopped meaning: swap A ⇄ B on the Comparer and the Diff (now **`w`**), and global ⇄ project on the Colormarker and Match & Replace rule lists (now `Space` menu entries, so the lens is no longer shadowed there). One shadow is left and named: the Project **ACTIVITY** feed's `s` cycles the source chip, because that pane's `/` bar is a free-text query and does not parse `source:` / `level:` / `actor:` to fold the three chips into.
 - The space menu is **not** an INS fallback: text editors swallow keys upstream, so `Space` stays a literal character there. An action that has to be reachable while typing needs a Ctrl chord, and a mnemonic alone is not enough. (This is why `Ctrl-Q`, not the space menu alone, carries the Repeater/Fuzzer decoder-chain editor after it gave `Ctrl-Y` up to Copy.)
 - **History → Repeater** and **Repeater send** stay on **`Ctrl-R`** (same muscle memory). Do not move History→Repeater to bare `r`.
+- **`r` sends to the Repeater; `Ctrl-R` runs.** Bare `r` is "send this row to the Repeater" in the five scopes that have a flow to send, and nothing elsewhere: the Diff's Run moved to `Ctrl-R` (which already owns Run in nine scopes), OAST's Resume listener moved to `Shift-R`, and the Project ACTIVITY feed's Refresh is a `Space` menu entry — a feed with a refresh key probably wants none at all, since it already re-reads on entry, on a peer's write and on the poll. The sub-tab strip's `r` = rename is a different tier and is unaffected.
 - Match & Replace and Notifications ship keyless (palette / badge); rebind them if you want a Global chord.
+
+## One bare letter, one question {#grammar}
+
+Bare letters are settled per **question**, not per tab. An action takes one of these only if it
+answers that letter's question; anything else starts at L3 (the space menu).
+
+| Key | Means |
+|-----|-------|
+| `Enter` | show this row in place |
+| `o` | open this row's own detail (`Enter`'s alias; on the Sitemap `Enter` expands, so `o` is the only one) |
+| `s` | go to the tab this row lives in — else the scope lens |
+| `d` | delete / dismiss the selected row |
+| `y` | copy |
+| `t` | flip this row's flag (mark, or a rule's on/off) |
+| `a` | add a row here |
+| `e` | edit the selected row |
+| `/` | filter this list |
+| `f` | freeze (evidence) · find (the sub-tab strip) |
+| `r` | send this to the Repeater |
+| `Ctrl-R` | run |
+| `w` | swap A ⇄ B |
+| `x` | select this line |
+| `Shift-X` | clear this tab (asks first) |
+| `Space` | this tab's command menu |
+
+Three exceptions are deliberate, each a tab's own loop key: **Intercept** `f` forwards (and
+`Shift-F` forwards all), **History → Repeater** and **Repeater send** stay on `Ctrl-R`, and the
+Project **ACTIVITY** feed's `s` cycles the source chip.
 
 ## Editing {#editing}
 
@@ -61,7 +93,7 @@ A row's chord shows `(unbound)` when nothing is bound. The `●` marker means yo
 
 ## Conflicts
 
-Two actions may share a key only if they fire in **different** places. That's by design (`s` is "scope lens" almost everywhere but "swap" on the Comparer tab, `c` is "toggle capture" everywhere except the Intercept queue where it cycles the catch direction). The editor blocks only a **same-place** collision, because there the keymap could keep just one of them.
+Two actions may share a key only if they fire in **different** places. That's by design (`s` is "scope lens" almost everywhere but "go to source" on Probe, `c` is "toggle capture" everywhere except the Intercept queue where it cycles the catch direction). The editor blocks only a **same-place** collision, because there the keymap could keep just one of them.
 
 ## The Digit Family {#digits}
 

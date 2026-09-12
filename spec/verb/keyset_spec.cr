@@ -69,21 +69,28 @@ describe Gori::Verb::Keyset do
     Keyset::VIM.has_key?("intercept.select-line").should be_false
   end
 
-  it "leaves the ENABLE/DISABLE-rule `x` alone, which is a different verb wearing one letter" do
-    # Four rule lists spend bare `x` on "turn this rule on/off", not on "select this line"
-    # (KEY_AUDIT F4 — the one genuine split in what `x` means). A vim operator asking for
-    # VISUAL-LINE is not asking for those to move, and moving them would put a state change
-    # on ⇧V in four scopes.
+  it "has no ENABLE/DISABLE-rule `x` left to leave alone — the letter means one thing" do
+    # This example used to name three verbs. Four rule lists spent bare `x` on "turn this rule
+    # on/off" rather than on "select this line", which is the split KEY_AUDIT F4 named and has
+    # now settled: all four toggles are `t` ("flip this row's flag", which is what `t` means as
+    # MARK in History, Issues, the Sitemap and the Intercept queue), and a rule list has no
+    # marks for it to collide with.
+    #
+    # It matters HERE, and not only to the key grammar. The keyset's whole premise is that `x`
+    # is one question, so `⇧V` can answer it everywhere: while those three held the letter, a
+    # vim operator's ⇧V was a state change on three tabs, and on a fourth — the Rewriter, whose
+    # toggle was a CONTROLLER arm because `x` was claimed twice in one scope — `⇧V` fell
+    # through to that arm instead of selecting a line at all. F4 removes both, so the sweep
+    # below is empty by construction and `Keyset::SELECT_LINE_IDS` covers the letter whole.
     toggles = r.select { |v| v.chords.includes?(Chord.new("x")) && !v.id.ends_with?("select-line") }
-    # Three, not four: the Rewriter's rule list toggles with a CONTROLLER arm rather than a
-    # chord, because `x` is claimed twice in Scope::Rewriter (select-line in the preview,
-    # toggle in the list) and the keymap has no way to say so. That is KEY_AUDIT F4, which
-    # this change does not settle — and until it does, `⇧V` in the Rewriter rules list falls
-    # through to the arm, exactly as `x` does under helix.
-    toggles.map(&.id).sort!.should eq(%w[
-      colormarker.toggle oast.toggle-provider probe-rules.toggle
-    ].sort)
-    toggles.each { |v| Keyset::VIM.has_key?(v.id).should be_false }
+    toggles.map(&.id).should be_empty
+    # …and the four that gave the letter up are on `t`, with the Rewriter's a real chord now
+    # rather than the arm the keymap could not express.
+    %w[colormarker.toggle oast.toggle-provider probe-rules.toggle rewriter.toggle].each do |id|
+      r[id].chords.should eq([Chord.new("t")]), id
+      Keyset::VIM.has_key?(id).should be_false, id
+    end
+    Keyset::SELECT_LINE_IDS.should contain("rewriter.select-line")
   end
 
   it "spells the vim table the way the docs say" do

@@ -41,9 +41,15 @@ module Gori
         "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 size:>10000 body~regex …)",
         Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history, group: :view) { |ctx| ctx.history_query; nil }
 
+      # MENU-ONLY since the key audit's F3. `f` carried six unrelated meanings across the tabs
+      # and settles into two TIERS: **freeze** in every evidence context (the Issues detail and
+      # the evidence card already agreed), and **find** on the sub-tab strip, which is a
+      # different tier and cannot collide. Follow is a session-rare toggle — flipped once and
+      # left — which is the L3 price the key budget names, so it keeps the 'f' letter in the
+      # menu and gives up the bare key.
       r.register Verb::Definition.new(
         "history.toggle-follow", "Toggle follow", "Follow newest flows (tail) on/off",
-        Verb::Scope::Body, [Verb::Chord.new("f")], available: in_history, group: :view) { |ctx| ctx.toggle_follow; nil }
+        Verb::Scope::Body, available: in_history, mnemonic: 'f', group: :view) { |ctx| ctx.toggle_follow; nil }
 
       # `v` is a bare-key (L1) claim, argued the same way `t` is below. A view is the answer to
       # "what am I looking at", asked every time the operator returns to the tab and every time
@@ -685,9 +691,13 @@ module Gori
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
       # The RESULTS pane's three lenses. They were raw `key.lower_o?` arms in the controller —
       # no palette row, no space-menu row, and the hotkey editor offered the letters as free.
+      # MENU-ONLY since the key audit's F2. `o` is the `↵` alias — "open this row's own
+      # detail" — in Body, Discover, Sitemap and the Project feed, and cycling a sort column is
+      # not that in any reading. A sort order is set once and read for the rest of the run,
+      # which is the L3 price tier the key budget names.
       r.register Verb::Definition.new(
         "fuzz.sort", "Cycle sort", "RESULTS: cycle the sort column (index → status → length → …)",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("o")], available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
+        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
       r.register Verb::Definition.new(
         "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
         Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, mnemonic: 'm', section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }

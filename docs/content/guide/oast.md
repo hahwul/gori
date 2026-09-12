@@ -27,7 +27,7 @@ A callback is proof the target reached a server it shouldn't have. The absence o
 
 ## Providers
 
-Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `x` enable / disable, `d` delete); a public preset auto-fills the server host when you pick its type.
+Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `t` enable / disable, `d` delete); a public preset auto-fills the server host when you pick its type.
 
 The bar above the callbacks table selects which provider `g` and `Ctrl-R` act on; `←` / `→` cycle it (the bar draws the pick as `‹ name ›`), and **All** shows every provider's callbacks at once. Getting a payload or starting a listener needs one provider, so on **All** with two or more providers enabled, `g` and `Ctrl-R` open a picker card; pick a row with `↵` and the bar follows. With a single enabled provider there is nothing to ask, and the action just runs.
 
@@ -45,7 +45,7 @@ With interactsh, gori generates an RSA key pair locally, registers the public ke
 
 The callbacks that matter most arrive late: a stored payload that only fires when someone opens a back-office page, a webhook a nightly job replays, an injection behind a queue. So a listener outlives the session that started it.
 
-`Ctrl-X` stops polling but **keeps the registration**, and so does quitting gori or leaving the project. The payloads you already planted keep resolving. Press `r` to open **RESUME LISTENER**, pick a saved session, and gori starts polling it again. Every callback the provider buffered while you were away lands on the next poll, and the session's existing callbacks are still there under it.
+`Ctrl-X` stops polling but **keeps the registration**, and so does quitting gori or leaving the project. The payloads you already planted keep resolving. Press `Shift-R` to open **RESUME LISTENER**, pick a saved session, and gori starts polling it again. Every callback the provider buffered while you were away lands on the next poll, and the session's existing callbacks are still there under it.
 
 | Key | In the picker |
 |-----|---------------|
@@ -63,14 +63,14 @@ No surface resumes on its own. Opening a project, binding an MCP server, or star
 | Key | Action |
 |-----|--------|
 | `Ctrl-R` | Start listening (register a payload and begin polling) |
-| `Ctrl-X` | Stop polling (the session is kept; resume it with `r`) |
-| `r` | Resume a saved listener |
+| `Ctrl-X` | Stop polling (the session is kept; resume it with `Shift-R`) |
+| `Shift-R` | Resume a saved listener |
 | `g` | Get / copy the current payload (asks which provider on **All**) |
 | `←` / `→` | Cycle the provider the bar acts on |
 | `y` | Copy the current payload (on the list), or the selected callback (inside its `↵` detail) |
 | `Shift-F` | File the selected callback as an Issue |
 | `/` | Filter the callback list |
-| `a` / `e` / `x` / `d` | Providers sub-tab: add / edit / enable or disable / delete |
+| `a` / `e` / `t` / `d` | Providers sub-tab: add / edit / enable or disable / delete |
 
 ## Filing a Callback
 

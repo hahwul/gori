@@ -7,7 +7,7 @@ require "../../src/gori/tui/controllers/sitemap_controller"
 
 include Gori::Tui
 
-# Clicking the filter bar (#-): the chips right of the query — `v:` / `f:follow` / `s scope` on
+# Clicking the filter bar (#-): the chips right of the query — `v:` / `⌁follow` / `s scope` on
 # History, `g:fold` / `s scope` on the Target tree — are the toggles their chords are, and the
 # field left of them opens for editing like `/`.
 #
@@ -195,7 +195,7 @@ describe "HistoryView — filter bar chips are clickable" do
     view = HistoryView.new
     history_bar(view).should eq({
       :view   => "v:all",
-      :follow => "f:follow",
+      :follow => "⌁follow",
       :scope  => "s scope:off",
     })
   end
@@ -220,8 +220,8 @@ describe "HistoryView — filter bar chips are clickable" do
     # dropped chip would leave live cells on chrome nobody painted.
     view = HistoryView.new
     hits = history_bar(view, w: 26)
-    hits.has_key?(:view).should be_false # "v:all" no longer fits left of f:follow
-    hits[:follow].should eq("f:follow")
+    hits.has_key?(:view).should be_false # "v:all" no longer fits left of ⌁follow
+    hits[:follow].should eq("⌁follow")
   end
 end
 
@@ -277,7 +277,7 @@ describe "HistoryController — clicking the filter bar" do
       rect = Rect.new(0, 0, 110, 16)
       was = ctrl.view.follow?
 
-      ctrl.handle_click(rect, bar_col(ctrl, rect, "f:follow"), 1).should be_true
+      ctrl.handle_click(rect, bar_col(ctrl, rect, "⌁follow"), 1).should be_true
       ctrl.view.follow?.should eq(!was)
 
       ctrl.handle_click(rect, bar_col(ctrl, rect, "scope:"), 1)
@@ -302,7 +302,7 @@ describe "HistoryController — clicking the filter bar" do
     # query text: clicking the field you are typing in must not close it.
     with_controllers do |ctrl, _sitemap, host|
       rect = Rect.new(0, 0, 110, 16)
-      col = bar_col(ctrl, rect, "f:follow")
+      col = bar_col(ctrl, rect, "⌁follow")
       was = ctrl.view.follow?
       ctrl.view.start_query
       ctrl.handle_click(rect, col, 1).should be_true

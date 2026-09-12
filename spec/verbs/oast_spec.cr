@@ -49,11 +49,14 @@ describe "Gori::Verbs.register_oast" do
   end
 
   # Resume is the action that makes a persisted session mean anything, so it must be reachable
-  # by reflex, not only from the space menu. `r` is free in the Callbacks body (the controller
-  # deliberately does not claim it) and ^R/^X stay the pair for start/stop.
-  it "puts resume on a plain `r`, beside the ^R/^X pair" do
-    r["oast.sessions"].chords.should eq([typed_chord("r")])
-    r["oast.sessions"].menu_key.should eq('r')
+  # by reflex, not only from the space menu — but NOT on a plain `r`, which is "send this to
+  # the Repeater" in the five scopes that have a flow to send (key audit, F6). ^R/^X stay the
+  # pair for start/stop, and the shift is the honest place for a once-a-sitting action.
+  it "puts resume on ⇧R, beside the ^R/^X pair" do
+    r["oast.sessions"].chords.should eq([shift_chord('R')])
+    r["oast.sessions"].menu_key.should eq('r') # menu_key skips shift chords — explicit
+    # …and bare `r` is bound nowhere in this scope now.
+    Gori::Verb::Keymap.build(r).lookup(typed_chord("r"), Gori::Verb::Scope::OastCallbacks).should be_nil
   end
 
   # ⇧F is History's `issue.create` chord: "file what I'm looking at" is one gesture across the

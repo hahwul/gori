@@ -32,9 +32,48 @@ describe "one key, one meaning" do
   end
 
   it "the scope lens has one key — the Global `s` — and no ⇧S twin" do
-    {Gori::Verb::Scope::Body, Gori::Verb::Scope::Sitemap, Gori::Verb::Scope::Probe}.each do |scope|
+    {Gori::Verb::Scope::Body, Gori::Verb::Scope::Sitemap}.each do |scope|
       keymap.lookup(Gori::Verb::Chord.new("s", shift: true), scope).should be_nil
       keymap.lookup(Gori::Verb::Chord.new("s"), scope).should eq("scope.toggle-lens")
+    end
+    # Probe is the ONE tab that shadows it, and deliberately: `s` = go to source is the
+    # meaning #1051 settled and F2 grew, and the lens is `probe.scope-toggle` in the menu
+    # there — reachable where its effect is visible, which is the trade that scope spells out.
+    keymap.lookup(Gori::Verb::Chord.new("s", shift: true), Gori::Verb::Scope::Probe).should be_nil
+    keymap.lookup(Gori::Verb::Chord.new("s"), Gori::Verb::Scope::Probe).should eq("probe.open-evidence")
+    Gori::Verbs.registry["probe.scope-toggle"].menu_key.should eq('s')
+  end
+
+  # `s` means GO TO SOURCE — the Evidence tab's grammar, which #1051 gave the Issues detail's
+  # RELATED card and F2 gives Probe. `o` is left as the `↵` alias it is in the four scopes
+  # where it opens the row's OWN detail, and is bound nowhere else.
+  it "`s` goes to the tab the row lives in, and `o` is only ever ↵'s alias" do
+    {Gori::Verb::Scope::Evidence     => "evidence.source",
+     Gori::Verb::Scope::IssuesDetail => "issue.goto-link",
+     Gori::Verb::Scope::Probe        => "probe.open-evidence",
+     Gori::Verb::Scope::ProbeDetail  => "probe.open-flow",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("s"), scope).should eq(id), scope.to_s
+    end
+    {Gori::Verb::Scope::Body            => "body.open",
+     Gori::Verb::Scope::Discover        => "discover.open-flow",
+     Gori::Verb::Scope::Sitemap         => "sitemap.open-flow",
+     Gori::Verb::Scope::ProjectActivity => "activity.open",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("o"), scope).should eq(id), scope.to_s
+    end
+    # …and in three of the four it is literally `↵`'s alias. The Sitemap is the standing
+    # exception the audit names: `↵`/`→` EXPAND a tree node there, so `o` is the only key
+    # that opens the row's own flow rather than a second spelling of one.
+    {"body.open", "discover.open-flow", "activity.open"}.each do |id|
+      Gori::Verbs.registry[id].chords.map(&.key).should contain("enter"), id
+    end
+    Gori::Verbs.registry["sitemap.open-flow"].chords.map(&.key).should_not contain("enter")
+    # Every other scope: `o` is unbound.
+    Gori::Verb::Scope.each do |scope|
+      next if {Gori::Verb::Scope::Body, Gori::Verb::Scope::Discover, Gori::Verb::Scope::Sitemap,
+               Gori::Verb::Scope::ProjectActivity}.includes?(scope)
+      keymap.lookup(Gori::Verb::Chord.new("o"), scope).should be_nil, scope.to_s
     end
   end
 
@@ -91,6 +130,83 @@ describe "one key, one meaning" do
      Gori::Verb::Scope::Sitemap   => "sitemap.mark-all",
     }.each do |scope, id|
       keymap.lookup(Gori::Verb::Chord.new("t", shift: true), scope).should eq(id), scope.to_s
+    end
+  end
+
+  # `x` = select this line in fourteen scopes and "enable/disable this rule" in four. The
+  # majority wins (it is also the INS-adjacent gesture), and the rule toggles take `t` —
+  # "flip this row's flag", which is what `t` means as MARK in History, Issues, the Sitemap
+  # and the Intercept queue. A rule list has no marks, so nothing collides.
+  it "`x` selects a line and `t` flips a row's flag, in every scope that binds either" do
+    {Gori::Verb::Scope::Colormarker   => "colormarker.toggle",
+     Gori::Verb::Scope::OastProviders => "oast.toggle-provider",
+     Gori::Verb::Scope::ProbeRules    => "probe-rules.toggle",
+     Gori::Verb::Scope::Rewriter      => "rewriter.toggle",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("t"), scope).should eq(id), scope.to_s
+    end
+    # `t` is mark in the four list scopes that have marks — one letter, one question.
+    {Gori::Verb::Scope::Body      => "history.mark-toggle",
+     Gori::Verb::Scope::Issues    => "issues.mark-toggle",
+     Gori::Verb::Scope::Sitemap   => "sitemap.mark-toggle",
+     Gori::Verb::Scope::Intercept => "intercept.mark-toggle",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("t"), scope).should eq(id), scope.to_s
+    end
+    # …and no scope binds `x` to anything but select-line now.
+    Gori::Verb::Scope.each do |scope|
+      next unless id = keymap.lookup(Gori::Verb::Chord.new("x"), scope)
+      id.should end_with("select-line"), "#{scope}: x = #{id}"
+    end
+  end
+
+  # `r` was "send this to the Repeater" in five scopes, Run on the Diff, Resume on OAST and
+  # Refresh on the Project feed. The majority has a real loop behind it and wins; `^R` already
+  # owns Run in nine scopes, so the Diff's Run joins them and the other two give the letter up.
+  it "`r` sends to the Repeater, and `^R` runs" do
+    {Gori::Verb::Scope::Body        => "history.repeater",
+     Gori::Verb::Scope::Evidence    => "evidence.repeater",
+     Gori::Verb::Scope::Probe       => "probe.repeater-evidence",
+     Gori::Verb::Scope::ProbeDetail => "probe.repeater-flow",
+     Gori::Verb::Scope::Sitemap     => "sitemap.repeater",
+    }.each do |scope, id|
+      # History's is `^R` by an older decision that outranks this one (hotkeys.md names it);
+      # the rest are the bare letter.
+      expected = scope == Gori::Verb::Scope::Body ? nil : id
+      keymap.lookup(Gori::Verb::Chord.new("r"), scope).should eq(expected), scope.to_s
+    end
+    ctrl_r = Gori::Verb::Chord.new("r", ctrl: true)
+    keymap.lookup(ctrl_r, Gori::Verb::Scope::Diff).should eq("diff.run")
+    keymap.lookup(ctrl_r, Gori::Verb::Scope::Body).should eq("history.repeater")
+    # The two that gave it up.
+    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::OastCallbacks).should be_nil
+    keymap.lookup(Gori::Verb::Chord.new("r", shift: true), Gori::Verb::Scope::OastCallbacks)
+      .should eq("oast.sessions")
+    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::ProjectActivity).should be_nil
+    Gori::Verbs.registry["activity.refresh"].chords.should be_empty
+  end
+
+  # `s` had seven meanings and shadowed the Global scope lens in all of them. It reduces to
+  # two: GO TO SOURCE where a row has one, and the Global lens everywhere it is not shadowed.
+  it "`s` means go-to-source or the Global lens, and `w` swaps A ⇄ B" do
+    sources = {"evidence.source", "issue.goto-link", "probe.open-evidence", "probe.open-flow"}
+    Gori::Verb::Scope.each do |scope|
+      next unless id = keymap.lookup(Gori::Verb::Chord.new("s"), scope)
+      next if id == "scope.toggle-lens" # the Global L2 breath key, unshadowed
+      next if sources.includes?(id)
+      # The ONE remaining shadow, and it is named rather than swept: the Project ACTIVITY
+      # feed's `s` cycles the source chip. Folding it into the `/` bar (F8's proposal) needs
+      # that bar to parse `source:`/`level:`/`actor:`, and it is a plain free-text query
+      # handed to `events_recent(query:)` — the chips are separate SQL parameters.
+      id.should eq("activity.filter-source"), "#{scope}: s = #{id}"
+    end
+    # Swap moved off `s` to `w` in both scopes that had it.
+    keymap.lookup(Gori::Verb::Chord.new("w"), Gori::Verb::Scope::Comparer).should eq("comparer.swap")
+    keymap.lookup(Gori::Verb::Chord.new("w"), Gori::Verb::Scope::Diff).should eq("diff.swap")
+    # …and the two rule lists' global ⇄ project toggles are menu entries.
+    {"colormarker.scope", "rewriter.scope"}.each do |id|
+      Gori::Verbs.registry[id].chords.should be_empty, id
+      Gori::Verbs.registry[id].menu_key.should eq('s'), id
     end
   end
 

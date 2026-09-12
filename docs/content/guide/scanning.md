@@ -41,7 +41,7 @@ Blind SSRF tests only the first URL-shaped value across the query, form fields a
 
 Severities run `info`, `low`, `medium`, `high`, `critical`. Headless `gori run probe` runs passive checks by default, and pass `--active` to also run active checks.
 
-Findings are grouped by check and host, so one row can stand for dozens of hits. Open it and the **AFFECTED URLS** list is the evidence: `↑`/`↓` walk it and `Enter` opens the flow that URL was captured on, in the same detail view History uses. `o` opens the finding's sample flow, `r` sends it to the Repeater, and `y` copies the selected URLs (or all of them).
+Findings are grouped by check and host, so one row can stand for dozens of hits. Open it and the **AFFECTED URLS** list is the evidence: `↑`/`↓` walk it and `Enter` opens the flow that URL was captured on, in the same detail view History uses. `s` goes to the source — the finding's sample flow, in History — `r` sends it to the Repeater, and `y` copies the selected URLs (or all of them).
 
 Run analysis headless. By default it reads what's already captured (History + Repeater responses) and sends nothing, or pass `--active` to send probe requests:
 
@@ -169,7 +169,7 @@ Two more tools round out analysis:
 
 The Comparer diffs two **messages**. Retesting asks the same question one level up (*what changed since the last engagement?*), and that is the **Diff** sub-tab under **Target**, next to the Sitemap whose folding it keys on.
 
-Slots hold **projects**, not flows: `a` picks the baseline (the earlier engagement), `b` defaults to the project you have open, `s` swaps them, and `r` re-runs the read. Nothing is sent; both sides are captured traffic. Rows are endpoints, and `↵` (or `o`) hands the selected endpoint's capture from *each* side to the Comparer for the byte-level answer.
+Slots hold **projects**, not flows: `a` picks the baseline (the earlier engagement), `b` defaults to the project you have open, `w` swaps them, and `Ctrl-R` re-runs the read. Nothing is sent; both sides are captured traffic. Rows are endpoints, and `↵` (or `→`) hands the selected endpoint's capture from *each* side to the Comparer for the byte-level answer.
 
 **Endpoint identity is the whole game.** Two engagements never capture the same identifiers, so a diff keyed on literal paths reports every row twice (once removed, once added) and tells you nothing. Endpoints are therefore keyed by the same folded template the Sitemap draws: `/users/{uuid}`, `/items/{n}`, `/search` with its query variants folded on. The fold runs over the union of both sides, so a route that met the fold threshold on only one side still matches itself on the other.
 

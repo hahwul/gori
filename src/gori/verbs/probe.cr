@@ -17,8 +17,8 @@ module Gori
         [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.probe_move(-1); nil }
 
       # open carries an explicit 'v' mnemonic — its primary chord is enter/l, which would
-      # otherwise front the space menu with the unintuitive 'l'. 'o' is reserved for
-      # open-evidence (parity with the detail scope).
+      # otherwise front the space menu with the unintuitive 'l'. 'o' is the MENU letter of
+      # open-evidence (parity with the detail scope); its chord is `s`, see below.
       r.register Verb::Definition.new(
         "probe.open", "Open issue", "View the selected issue's detail", Verb::Scope::Probe,
         [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'v', group: :view) { |ctx| ctx.probe_open; nil }
@@ -69,9 +69,20 @@ module Gori
         Verb::Scope::Probe, mnemonic: 'h', group: :triage) { |ctx| ctx.probe_dismiss_host; nil }
 
       # Detail-parity actions on the selected row (no need to drill in first).
+      #
+      # `s` — GO TO SOURCE, the grammar #1051 settled and the Evidence tab has always had:
+      # `↵` shows the row in place, `s` goes to the tab it lives in. `o` used to carry it,
+      # which made `o` mean "open the row's own detail" on four tabs and "open something else
+      # on a different tab" on three. It is `↵`'s alias now and nothing more, so it is unbound
+      # here — `↵`/`l`/`→` already open the issue.
+      #
+      # The chord shadows the Global `s` (scope lens) on this tab, which is why
+      # `probe.scope-toggle` below is a menu entry: the lens stays reachable where its effect
+      # is visible. The MENU letter stays 'o' — a space-menu letter is its own keyspace, it is
+      # reached after `space`, and these letters are stable action identities.
       r.register Verb::Definition.new(
-        "probe.open-evidence", "Open evidence", "Open the selected issue's sample flow in History",
-        Verb::Scope::Probe, [Verb::Chord.new("o")], group: :view) { |ctx| ctx.probe_open_flow; nil }
+        "probe.open-evidence", "Go to source", "Open the selected issue's sample flow in History",
+        Verb::Scope::Probe, [Verb::Chord.new("s")], mnemonic: 'o', group: :view) { |ctx| ctx.probe_open_flow; nil }
 
       r.register Verb::Definition.new(
         "probe.repeater-evidence", "Repeater evidence", "Send the selected issue's sample flow to Repeater",
@@ -163,8 +174,9 @@ module Gori
         mnemonic: 'u') { |ctx| ctx.probe_open_affected; nil }
 
       r.register Verb::Definition.new(
-        "probe.open-flow", "Open evidence", "Open the sample flow's request/response in History",
-        Verb::Scope::ProbeDetail, [Verb::Chord.new("o")]) { |ctx| ctx.probe_open_flow; nil }
+        # `s` = go to source here too, for the reason `probe.open-evidence` gives one scope up.
+        "probe.open-flow", "Go to source", "Open the sample flow's request/response in History",
+        Verb::Scope::ProbeDetail, [Verb::Chord.new("s")], mnemonic: 'o') { |ctx| ctx.probe_open_flow; nil }
 
       r.register Verb::Definition.new(
         "probe.repeater-flow", "Repeater evidence", "Send the sample flow to the Repeater tab",
@@ -186,15 +198,18 @@ module Gori
       # Nav (↑/↓, j/k) + Esc→strip are controller-claimed; these are the actions. edit/delete are
       # gated to a selected CUSTOM rule (built-ins can't be edited/removed, only toggled).
       probe_custom = ->(ctx : Verb::ExecContext) { ctx.probe_custom_rule_selected? }
-      # `x` alone, and the space-menu key is `x` too — the same letter the Rewriter and
-      # Colormarker rule lists use for the same action, where it used to be `t` here.
+      # `t` — "flip this row's flag", the meaning `t` already carries as MARK in History,
+      # Issues, the Sitemap and the Intercept queue, and the letter the Rewriter, Colormarker
+      # and OAST provider lists spell this action with since the key audit's F4. It was `x`,
+      # which is "select this line" in fourteen scopes; a rule list has no marks, so `t`
+      # collides with nothing.
       #
       # ↵ is deliberately NOT bound: it toggles in no other rule list. Eight of them (rewrite,
       # colour, extract, scope, host, env, and the two global editors) open the editor on ↵,
       # so a reflex carried from any of them silently disabled a scanning rule here.
       r.register Verb::Definition.new(
         "probe-rules.toggle", "Toggle rule", "Enable or disable the selected rule",
-        Verb::Scope::ProbeRules, [Verb::Chord.new("x")], mnemonic: 'x') { |ctx| ctx.probe_rule_toggle; nil }
+        Verb::Scope::ProbeRules, [Verb::Chord.new("t")], mnemonic: 't') { |ctx| ctx.probe_rule_toggle; nil }
       r.register Verb::Definition.new(
         "probe-rules.add", "Add custom rule", "Open the popup to add a custom match rule",
         Verb::Scope::ProbeRules, [Verb::Chord.new("a")]) { |ctx| ctx.probe_rule_add; nil }

@@ -24,7 +24,7 @@ describe "Gori::Verbs.register_probe" do
        "probe.mode"              => "m",
        "probe.dismiss-selected"  => "c",
        "probe.toggle-closed"     => "a",
-       "probe.open-evidence"     => "o",
+       "probe.open-evidence"     => "s", # go to source (F2) — `o` is the ↵ alias, not a jump
        "probe.repeater-evidence" => "r",
        "probe.promote-selected"  => "p",
        "probe.delete-selected"   => "d",
@@ -44,7 +44,7 @@ describe "Gori::Verbs.register_probe" do
       # The bare `x` it is a shift away from lives in a DIFFERENT scope, so the two can never
       # resolve on one keystroke (`ProbeController#command_scope` answers ProbeRules there).
       r["probe-rules.toggle"].scope.should eq(Gori::Verb::Scope::ProbeRules)
-      r["probe-rules.toggle"].chords.should eq([typed_chord("x")])
+      r["probe-rules.toggle"].chords.should eq([typed_chord("t")]) # F4: `t` flips a row flag
 
       r["probe.open"].chords.first.should eq(typed_chord("enter"))
       r["probe.open"].menu_key.should eq('v')        # 'o' is reserved for open-evidence
@@ -88,7 +88,7 @@ describe "Gori::Verbs.register_probe" do
 
   describe "the issue detail" do
     it "mirrors the list's actions on the same keys, in the ProbeDetail scope" do
-      {"probe.open-flow"     => {:probe_open_flow, "o"},
+      {"probe.open-flow"     => {:probe_open_flow, "s"},
        "probe.repeater-flow" => {:probe_repeater_flow, "r"},
        "probe.promote"       => {:probe_promote, "p"},
        "probe.dismiss"       => {:probe_dismiss, "c"},
@@ -101,9 +101,9 @@ describe "Gori::Verbs.register_probe" do
       verb_intents(r, "probe.close").should eq([:probe_close])
     end
 
-    # ↵ over the AFFECTED URLS list. `o` reaches the group's ONE sample flow, so before this
+    # ↵ over the AFFECTED URLS list. `s` reaches the group's ONE sample flow, so before this
     # every other URL in a group of up to 50 was a dead row in the pane that listed it.
-    it "opens the caret's affected URL on ↵, distinct from the sample flow on `o`" do
+    it "opens the caret's affected URL on ↵, distinct from the sample flow on `s`" do
       r["probe.open-affected"].scope.should eq(Gori::Verb::Scope::ProbeDetail)
       # ↵/l/→ mirrors probe.close's esc/h/← in the same scope: ← leaves the detail, → goes
       # deeper. The aliases also keep a bare `enter` — structurally reserved — off the
@@ -111,9 +111,10 @@ describe "Gori::Verbs.register_probe" do
       r["probe.open-affected"].chords.should eq([typed_chord("enter"),
                                                  typed_chord("l"), typed_chord("right")])
       verb_intents(r, "probe.open-affected").should eq([:probe_open_affected])
-      # A menu key of its own: `o` is taken by the sample flow, and the space menu is the one
-      # place both are listed side by side.
+      # A menu key of its own: `o` is the sample flow's MENU letter (its chord is `s`), and
+      # the space menu is the one place both are listed side by side.
       r["probe.open-affected"].menu_key.should eq('u')
+      r["probe.open-flow"].menu_key.should eq('o')
       r["probe.open-flow"].chords.map(&.key).should_not contain("enter")
     end
   end
@@ -123,10 +124,10 @@ describe "Gori::Verbs.register_probe" do
       ctx = FakeExecContext.new
       r["probe-rules.toggle"].available?(ctx).should be_true
       r["probe-rules.add"].available?(ctx).should be_true
-      # `x` for the chord AND the menu key — the letter the Rewriter and Colormarker rule
-      # lists already use for this action, where this one used to say `t` in the menu.
-      r["probe-rules.toggle"].chords.should eq([typed_chord("x")])
-      r["probe-rules.toggle"].menu_key.should eq('x')
+      # `t` for the chord AND the menu key — "flip this row's flag", the letter all four rule
+      # lists spell this action with since the key audit's F4 took `x` back for select-line.
+      r["probe-rules.toggle"].chords.should eq([typed_chord("t")])
+      r["probe-rules.toggle"].menu_key.should eq('t')
       # ↵ belongs to EDIT here, as it does in every other rule list in gori. Bound to toggle,
       # it meant a reflex carried from any of them silently disabled a scanning rule.
       r["probe-rules.toggle"].chords.map(&.key).should_not contain("enter")
