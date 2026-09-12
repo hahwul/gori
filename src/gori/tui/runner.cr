@@ -1600,6 +1600,13 @@ module Gori::Tui
       # the flip to the typing. The named keys (arrows, ↵, esc, ↹) and every modified chord
       # stay silent: those are navigation, legitimately unbound in some scopes (`space` is a
       # named key too, so the leader below is never named here).
+      # A bare printable the TAB BAR does not bind but the tab's body does: name the `↵` that
+      # gets there, rather than "nothing bound here" one row above a header advertising the
+      # very key that was pressed (F10).
+      if @focus == :menu && (below = body_scope_verb(chord))
+        status(Runner.enter_first_hint(chord, below.title, strip: subtabs_shown?))
+        return
+      end
       if hint = Runner.unbound_key_hint(chord)
         status(Hotkeys.expand(@session.registry, hint))
         return
@@ -2373,6 +2380,23 @@ module Gori::Tui
       @toast = verb.call(self) || @toast if verb
     end
 
+    # The verb `chord` would fire if the body had focus, or nil. Deliberately NOT gated on
+    # `available?`: this answers "is there something here one level down", and a verb that is
+    # momentarily unavailable (an empty list, nothing selected) is still the reason the key is
+    # not the tab bar's. Bare printables only — a modified chord on the bar is deliberate.
+    private def body_scope_verb(chord : Verb::Chord) : Verb::Definition?
+      return nil if chord.ctrl || chord.alt || chord.key.size != 1
+      scope = @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body
+      return nil if scope == Verb::Scope::Sidebar
+      id = @keymap.lookup(chord, scope)
+      return nil if id.nil?
+      verb = @session.registry[id]?
+      # A Global binding is not "one level down" — it fires from the bar too, so it would
+      # already have run above.
+      return nil if verb.nil? || verb.scope == Verb::Scope::Global
+      verb
+    end
+
     private def current_scope : Verb::Scope
       case @overlay
       when .palette?
@@ -2428,6 +2452,23 @@ module Gori::Tui
     def self.unbound_key_hint(chord : Verb::Chord) : String?
       return nil if chord.ctrl || chord.alt || chord.key.size != 1
       "‹#{Hotkeys.display_label(chord)}› — nothing bound here · space menu · {tab.help} help"
+    end
+
+    # …and the same line for a key that IS bound — one level down. On the tab bar `/` answered
+    # "nothing bound here" from one row above a list header that reads `/ filter`: true about
+    # the SIDEBAR scope and useless, because the key the operator wanted was `↵` and nothing
+    # said so. The letter deliberately does not fall through (that is the tab bar's own
+    # decision, see the `1-9 slots` hint); it is ANSWERED instead.
+    #
+    # `verb` names what the key does down there, so the line teaches the pair rather than just
+    # refusing: `‹/› — press ↵ to enter the list, then / filter`.
+    # `where` is what one `↵` from the bar actually reaches — the list itself, or the sub-tab
+    # strip above it on the workbench tabs, where the body is one more ↵ down. Naming the
+    # wrong one would repeat the defect this fixes in miniature.
+    def self.enter_first_hint(chord : Verb::Chord, verb : String, strip : Bool = false) : String
+      key = Hotkeys.display_label(chord)
+      where = strip ? "↵↵ to enter the body" : "↵ to enter the list"
+      "‹#{key}› — press #{where}, then #{key} #{verb.downcase}"
     end
 
     # The strip line for `message`: led by `spinner` / ✓ / ✗ when `kinded` names this same

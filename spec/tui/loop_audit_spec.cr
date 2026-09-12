@@ -309,6 +309,27 @@ describe "the core-loop hints" do
     end
   end
 
+  describe "F10 — `/` on the tab bar answers with the key that gets you there" do
+    it "names ↵ and the verb, instead of \"nothing bound here\"" do
+      line = Runner.enter_first_hint(Gori::Verb::Chord.new("/"), "Filter")
+      line.should eq("‹/› — press ↵ to enter the list, then / filter")
+    end
+
+    it "counts the sub-tab strip, which is one more ↵ down" do
+      Runner.enter_first_hint(Gori::Verb::Chord.new("d"), "Diff", strip: true)
+        .should eq("‹d› — press ↵↵ to enter the body, then d diff")
+    end
+
+    it "is reached only for a key the tab bar itself does not bind" do
+      # The answer is a REFUSAL with directions, not a fall-through: the letter still does
+      # nothing here, which is the tab bar's own decision.
+      runner_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
+      body = runner_src[/private def body_scope_verb.*?\n    end/m].not_nil!
+      body.should contain("Verb::Scope::Global") # a Global binding already fired above
+      body.should contain("chord.ctrl || chord.alt")
+    end
+  end
+
   describe "F8 — Compare goes to the Comparer, like every sibling Send verb" do
     comparer_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "comparer.cr"))
 
