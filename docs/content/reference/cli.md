@@ -1125,7 +1125,7 @@ Refused, rather than warned: an unknown field (`hsot:` — left alone it becomes
 
 `preview` reports how many recent flows the condition **matches** and how many it would actually **paint**. The two differ whenever an earlier enabled rule already claims the row — which is why `preview` takes `--scope` as well: every global rule resolves before every project one, so no project rule can claim a row from a `--scope=global` candidate. `update`, `rm` (`delete`), `enable`, `disable` and `move` take a rule id from the list, and `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default).
 
-The tab is **hidden by default**; show it from `settings:tabs`, next to Rewriter. See [Proxy & History](/guide/proxy/) for the interactive editor.
+The tab is **off the bar by default**; `0` opens it, or `settings:tabs` gives it a slot next to Rewriter. See [Proxy & History](/guide/proxy/) for the interactive editor.
 
 #### colormarker color
 

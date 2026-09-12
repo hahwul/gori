@@ -55,7 +55,7 @@ module Gori::Tui
         Item.new("↹ / ⇧↹", "focus ring: tab bar ↔ panes"),
         Item.new("↵ / ↓", "enter the tab body"),
         Item.new("1-9", "jump to slot N on the tab bar — the bar is nine numbered slots"),
-        Item.new("0", "go to ANY tab — a type-to-filter list of the slots and the hidden ones", "nav.goto"),
+        Item.new("0", "go to ANY tab — a type-to-filter list of all 21, with a line on what each is for", "nav.goto"),
         Item.new("⇧1-9", "jump to sub-tab N of the active tab (on a non-US layout see ^1-9 / f)"),
         Item.new("⇧0", "find a sub-tab — the same picker `f` opens from the strip", "subtab.find"),
         # Seventeen surfaces bind j/k and no hint anywhere named them, so a whole navigation
@@ -353,7 +353,7 @@ module Gori::Tui
         Item.new("when:", "host: path: method: scheme: status: proto: — ↹ completes · no header:/size:/dur:"),
         Item.new("↹ · ↓ past list", "CUSTOM COLORS pane — a add · ↵/e edit · d delete (name + #hex)"),
         Item.new("custom colour", "a global name the picker offers everywhere; its hex is absolute, not theme-relative"),
-        Item.new("hidden by default", "settings:tabs shows it, next to Rewriter"),
+        Item.new("off the bar by default", "`0` opens it; settings:tabs gives it a slot, next to Rewriter"),
       ]},
       {"OVERLAYS", [
         Item.new("palette / settings", "↑/↓ · ↵ · esc"),

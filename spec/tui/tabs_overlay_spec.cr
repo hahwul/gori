@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 include Gori::Tui
 
@@ -37,6 +38,46 @@ describe TabsOverlay do
     o.to_prefs.should_not eq(default)
     o.reset_to_defaults
     o.to_prefs.should eq(default) # back to the canonical catalog order/visibility
+  end
+
+  # The number IS the state. A `✓` beside a number said it twice, and the `·` it paired with on
+  # an off-bar row said a third thing that was false — that the tab was switched off, when `0`
+  # opens it either way. The one mark left is the `✓` for an UNCAPPED bar past the ninth slot,
+  # where a tab is on the bar but there is no digit left to print.
+  it "lets the slot number carry the state, with one ink for every label" do
+    o = TabsOverlay.new
+    box = o.overlay_box(Rect.new(0, 0, 60, 40)).not_nil!
+    backend = MemoryBackend.new(60, 40)
+    o.render(Screen.new(backend), Rect.new(0, 0, 60, 40))
+
+    first = box.y + 2
+    backend.row(first)[box.x + 3].should eq('1') # slot 1
+    backend.row(first).should_not contain("✓")   # …and nothing restating it
+    off = (0...o.entry_count).find { |i| o.slot_of(i).nil? }.not_nil!
+    backend.row(first + off)[box.x + 3].should eq(' ') # off the bar: an empty column
+    backend.fg_at(box.x + 6, first + off).should eq(Theme.text)
+    backend.fg_at(box.x + 6, first + off).should_not eq(Theme.muted)
+  end
+
+  it "marks an on-bar tab past the ninth slot, where no digit is left to print" do
+    slots = Gori::Settings.tab_slots?
+    begin
+      Gori::Settings.tab_slots = false # the unbounded bar: more visible tabs than there are digits
+      o = TabsOverlay.new
+      o.entry_count.times do |i| # put the whole catalog on the bar — no cap to refuse it
+        o.set_selected(i)
+        o.toggle_selected unless o.to_prefs[i][1]
+      end
+      tenth = (0...o.entry_count).find { |i| o.slot_of(i).nil? }.not_nil!
+      tenth.should eq(Chrome::MAX_SLOTS) # the tenth row is the first past the digits
+      o.to_prefs[tenth][1].should be_true
+      backend = MemoryBackend.new(60, 40)
+      box = o.overlay_box(Rect.new(0, 0, 60, 40)).not_nil!
+      o.render(Screen.new(backend), Rect.new(0, 0, 60, 40))
+      backend.row(box.y + 2 + tenth)[box.x + 3].should eq('✓')
+    ensure
+      Gori::Settings.tab_slots = slots
+    end
   end
 
   it "does not offer Evidence before the project has its first snapshot" do

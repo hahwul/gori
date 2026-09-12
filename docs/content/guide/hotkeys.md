@@ -102,7 +102,7 @@ The tab bar is **nine numbered slots**, and the numbers are the primary way to m
 | Key | Action |
 |-----|--------|
 | `1`–`9` | Jump to slot N on the tab bar |
-| `0` | **Go to tab…** — a type-to-filter list of all 21 tabs, the nine slots and the hidden ones |
+| `0` | **Go to tab…** — a type-to-filter list of all 21 tabs, each with a line on what it is for |
 | `⇧1`–`⇧9` | Jump to sub-tab N of the active tab |
 | `⇧0` | **Find sub-tab…** — the same picker `f` opens from the strip |
 
@@ -114,15 +114,17 @@ Decoder's CHAIN field), a digit is a character. It is the same rule `Space` foll
 typeable into a conversion chain.
 
 The bar paints the numbers by default (**Preferences → Layout → Tab numbers**, `settings:layout`).
-The far-right pill reads `0:+12` — the key, and how many tabs are behind it.
+The far-right pill reads `0:tabs` — the key, and what it opens. It is there whatever your
+layout is: `0` reaches the whole catalog, the nine on the bar included, so there is nothing
+for it to count and no layout that makes it disappear.
 
 ### Nine slots, and the tenth tab
 
-`settings:tabs` refuses a tenth ✓ and says so; hide one first. A layout saved by an older
+`settings:tabs` refuses a tenth tab and says so; take one off the bar first. A layout saved by an older
 build (the bar used to be unbounded) is truncated to its **first nine, in your own order**,
 and gori names the folded tabs once on the launch that does it.
 
-One tab can still ride past the ninth slot: a hidden tab you jumped to with `0` sits at the
+One tab can still ride past the ninth slot: an off-bar tab you jumped to with `0` sits at the
 far right of the bar, **without a number**, until you leave it. It is where you are standing,
 not a slot you arranged — and no digit points at it.
 

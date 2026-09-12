@@ -39,7 +39,7 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 탭 바는 **번호가 매겨진 아홉 개의 슬롯**이고, 새 설치는 실제로 작업하는 루프로 그 슬롯을 채웁니다.
 
 ```text
-1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:+12
+1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:tabs
 ```
 
 `1`–`9`로 슬롯에 점프하고, 나머지 열두 개는 **`0`**으로 갑니다 — 카탈로그 전체를 타이핑으로
@@ -49,8 +49,8 @@ JWT, Comparer, Rewriter)과 특수 워크벤치(Miner, Sequencer, Cookie, Colorm
 스냅숏이 생긴 뒤에만 목록에 나타납니다. 그전에는 보관할 것이 없기 때문입니다.
 
 아홉 개의 구성은 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs** 또는 팔레트의
-`settings:tabs`에서 바꿉니다. `space`로 표시/숨김, `⇧K`/`⇧J`로 순서 변경이고, 슬롯 번호는 그
-자리에서 다시 매겨집니다. 열 번째 ✓는 거부됩니다 — 하나를 먼저 숨기세요. (상한 없는 예전
+`settings:tabs`에서 바꿉니다. `space`로 바에 올리거나 내리고, `⇧K`/`⇧J`로 순서를 바꾸면 슬롯
+번호는 그 자리에서 다시 매겨집니다. 열 번째는 거부됩니다 — 하나를 먼저 내리세요. (상한 없는 예전
 바를 원하면 **Layout → Tab bar slots**를 끄세요. `0`은 어느 쪽이든 그대로 동작합니다.)
 
 탭은 아니지만 전역적으로 작동하는 렌즈들도 있습니다. **capture**(`c`), **intercept**(`i`),

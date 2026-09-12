@@ -567,7 +567,7 @@ The same rules are scriptable headless: `gori run rewriter` (list / add / rm / e
 
 Marks are for the set you are working on right now. A **colour rule** is standing: it says "any 5xx on this engagement is red" once, and every matching row stays red as traffic arrives. Same idea as ZAP's neonmarker, driven by a condition rather than a tag.
 
-The tab is **hidden by default**; show it from `settings:tabs`, where it sits next to Rewriter.
+The tab is **off the bar by default**; `0` opens it, and `settings:tabs` gives it a slot next to Rewriter.
 
 Each rule carries a condition, a colour, and a style:
 

@@ -187,28 +187,31 @@ describe "Chrome.hidden_tabs" do
 end
 
 describe "Chrome.more_button_rect" do
-  it "is nil when nothing is hidden" do
-    Chrome.more_button_rect(Rect.new(0, 0, 80, 1), hidden_count: 0).should be_nil
+  # The pill used to vanish when nothing was off the bar — a `0` key with nothing on screen
+  # pointing at it, on the one row whose job is to teach its own digits. `0` opens the whole
+  # catalog whatever the layout, so the stop is unconditional too.
+  it "is drawn even when every tab is on the bar" do
+    Chrome.more_button_rect(Rect.new(0, 0, 80, 1)).should_not be_nil
   end
 
-  it "reserves a right-anchored pill sized to the ⋯ label when tabs are hidden" do
+  it "reserves a right-anchored pill sized to the label" do
     rect = Rect.new(0, 0, 80, 1)
-    mb = Chrome.more_button_rect(rect, hidden_count: 2).not_nil!
-    mb.right.should eq(rect.right)                # flush to the right edge
-    mb.w.should eq(Chrome.more_label(2).size + 2) # padded pill
+    mb = Chrome.more_button_rect(rect).not_nil!
+    mb.right.should eq(rect.right)             # flush to the right edge
+    mb.w.should eq(Chrome.more_label.size + 2) # padded pill
   end
 
   it "is nil on a row too narrow to host the button" do
-    Chrome.more_button_rect(Rect.new(0, 0, 4, 1), hidden_count: 3).should be_nil
+    Chrome.more_button_rect(Rect.new(0, 0, 4, 1)).should be_nil
   end
 end
 
 describe "Chrome.menu_segments" do
-  it "keeps tab segments clear of the reserved ⋯ button region" do
+  it "keeps tab segments clear of the reserved `0` button region" do
     rect = Rect.new(0, 0, 80, 1)
     tabs = Chrome.visible_tabs([] of {String, Bool})
-    mb = Chrome.more_button_rect(rect, hidden_count: 1).not_nil!
-    segs = Chrome.menu_segments(rect, :project, tabs: tabs, hidden_count: 1)
+    mb = Chrome.more_button_rect(rect).not_nil!
+    segs = Chrome.menu_segments(rect, :project, tabs: tabs)
     segs.each { |(_, seg)| seg.right.should be <= mb.x } # no segment overlaps the button
   end
 end

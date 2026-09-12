@@ -6,18 +6,24 @@ require "./overlay"
 require "../settings"
 
 module Gori::Tui
-  # Overlay editor for the top tab bar (settings:tabs): which tabs show and their
-  # order. Edits a WORKING COPY — committed on ↵, discarded on esc — like the
-  # settings:* family, so the live bar underneath stays put while you edit. Rows are
-  # the FULL catalog (hidden tabs too, so they can be re-enabled), reconciled against
+  # Overlay editor for the top tab bar (settings:tabs): which tabs sit on the bar and in what
+  # order. Edits a WORKING COPY — committed on ↵, discarded on esc — like the settings:*
+  # family, so the live bar underneath stays put while you edit. Rows are the FULL catalog
+  # (the off-bar ones too, so they can be traded back in), reconciled against
   # Settings.tab_prefs. The Runner persists the committed copy via Settings.save.
   #
-  #   1 ✓ Project    ▎ selected, in slot 1
-  #   2 ✓ Target
-  #   · Miner          off the bar — reachable with `0`, not with a digit
+  #   1  Project    ▎ selected, in slot 1
+  #   2  Target
+  #      Miner        off the bar — reachable with `0`, not with a digit
   #
-  # The bar is NINE numbered slots (`Chrome::MAX_SLOTS`), so the tenth ✓ is refused the way
-  # hiding the last one is, and the numbers renumber live as ⇧K/⇧J reorder.
+  # THE NUMBER IS THE STATE. A `✓` beside a number said the same thing twice, and the `·` it
+  # paired with on an off-bar row said a third thing that was not true — that the tab was
+  # switched off, when `0` opens it either way. A row is on the bar exactly when it wears a
+  # slot; the only other mark is the `✓` for a tab riding an UNCAPPED bar past the ninth slot,
+  # where there is no digit left to print.
+  #
+  # The bar is NINE numbered slots (`Chrome::MAX_SLOTS`), so the tenth is refused the way
+  # taking the last one off is, and the numbers renumber live as ⇧K/⇧J reorder.
   class TabsOverlay < Overlay
     # Injected at the open-site (Runner#open_settings): ^P leaves the modal stack for the
     # command palette, `r` raises the reset confirm, and a refused hide reports through the
@@ -44,15 +50,15 @@ module Gori::Tui
     end
 
     def hint : String
-      # The `0` clause is INFORMATION, not a key this card takes (the modal owns its own
-      # keys): it is the answer to "where did the tab I just hid go", asked at the exact
-      # moment the operator hides one.
-      "↑/↓ select · space show/hide · ⇧K/⇧J reorder · r reset · ↵ save · esc cancel · 0 reaches hidden tabs"
+      # The `0` answer — "where does a tab go when I take it off the bar" — moved to the
+      # card's border meta, where it reads as a fact about the card rather than as one more
+      # key in a row of keys this modal actually takes.
+      "↑/↓ select · space put on the bar / take off · ⇧K/⇧J reorder · r reset · ↵ save · esc cancel"
     end
 
-    # The row's slot number, or nil for a hidden tab. The bar is nine numbered slots and the
-    # digit is how you reach one, so the editor has to show the arrangement it is editing —
-    # a ✓ alone said "on the bar" without saying WHERE, and reordering renumbers live.
+    # The row's slot number, or nil when the tab is off the bar (or on an uncapped bar past
+    # the ninth slot). The bar is nine numbered slots and the digit is how you reach one, so
+    # the editor shows the arrangement it is editing — and reordering renumbers live.
     def slot_of(i : Int32) : Int32?
       return nil unless @items[i]?.try(&.[2])
       n = @items[0...i].count { |(_, _, v)| v } + 1
@@ -169,9 +175,9 @@ module Gori::Tui
       @items.count { |(_, _, v)| v }
     end
 
-    # Flip show/hide of the selected tab. Refuses (false) at BOTH ends: the last visible one
-    # (the bar can never go empty) and the tenth ✓ (the bar is nine numbered slots — see
-    # `Chrome::MAX_SLOTS`). The caller toasts whichever refusal fired.
+    # Put the selected tab on the bar, or take it off. Refuses (false) at BOTH ends: the last
+    # one on the bar (the bar can never go empty) and a tenth (the bar is nine numbered slots —
+    # see `Chrome::MAX_SLOTS`). The caller toasts whichever refusal fired.
     def toggle_selected : Bool
       return false unless item = @items[@selected]?
       sym, label, vis = item
@@ -181,13 +187,13 @@ module Gori::Tui
       true
     end
 
-    # Why the space just refused — the two ends read nothing alike, and "keep at least one tab
-    # visible" on a full bar would send the operator looking for a tab they had lost.
+    # Why the space just refused — the two ends read nothing alike, and "the bar needs at least
+    # one tab" on a full bar would send the operator looking for a tab they had lost.
     private def toggle_refusal : String
       if (item = @items[@selected]?) && !item[2]
-        "#{Chrome::MAX_SLOTS} tabs on the bar is the cap — hide one first"
+        "#{Chrome::MAX_SLOTS} tabs on the bar is the cap — take one off first"
       else
-        "keep at least one tab visible"
+        "the bar needs at least one tab"
       end
     end
 
@@ -200,8 +206,8 @@ module Gori::Tui
       @selected = j
     end
 
-    # Serialize the working copy back to Settings shape — ALL rows (incl. hidden) so a
-    # hidden tab's position survives for when it's re-shown.
+    # Serialize the working copy back to Settings shape — ALL rows (the off-bar ones too) so an
+    # off-bar tab's position survives for when it is traded back in.
     def to_prefs : Array({String, Bool})
       @items.map { |(sym, _, vis)| {sym.to_s, vis} }
     end
@@ -239,7 +245,7 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, "TAB BAR", border: Theme.border_focus)
-      meta = Settings.tab_slots? ? "#{visible_count}/#{Chrome::MAX_SLOTS} slots · 0 go to" : "#{visible_count} shown · 0 go to"
+      meta = Settings.tab_slots? ? "#{visible_count}/#{Chrome::MAX_SLOTS} slots · 0 opens every tab" : "#{visible_count} on the bar · 0 opens every tab"
       Frame.border_meta(screen, box, "TAB BAR", meta, bg: Theme.panel)
 
       list_top = box.y + 2
@@ -259,15 +265,18 @@ module Gori::Tui
       bg = sel ? Theme.accent_bg : Theme.panel
       screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
       screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      # `1 ✓ Project` — the slot number leads, because the number is what the operator will
-      # press. A hidden row leaves the column blank rather than drawing a placeholder: the `·`
-      # in the next column already says "off the bar".
+      # `1  Project` — the slot number IS the state, because the number is what the operator
+      # will press. An off-bar row leaves the column blank; the `✓` appears only for a tab on
+      # an UNCAPPED bar past the ninth slot, where being on the bar is true but no digit is
+      # left to say so. Labels are one ink either way: an off-bar tab is one `0` from open, so
+      # dimming it would be the card saying something the app does not do.
       if slot = slot_of(i)
         screen.text(box.x + 3, py, slot.to_s, Theme.accent, bg)
+      elsif vis
+        screen.cell(box.x + 3, py, '✓', Theme.accent, bg)
       end
-      screen.cell(box.x + 5, py, vis ? '✓' : '·', vis ? Theme.accent : Theme.muted, bg)
-      fg = vis ? (sel ? Theme.text_bright : Theme.text) : Theme.muted
-      screen.text(box.x + 7, py, label, fg, bg, width: {box.w - 9, 1}.max)
+      screen.text(box.x + 6, py, label, sel ? Theme.text_bright : Theme.text, bg,
+        width: {box.w - 8, 1}.max)
     end
 
     # Row index under (mx,my) — inverts render's windowed layout (list at box.y+2, scrolled

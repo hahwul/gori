@@ -33,12 +33,19 @@ describe "Chrome tab-bar numbers" do
     # of a label" nine times and unsaid it in the tenth position.
     backend = MemoryBackend.new(260, 1)
     Chrome.render_menu(Screen.new(backend), rect, active_tab: :history, focused: true,
-      numbered: true, hidden_count: 12)
+      numbered: true)
     row = backend.row(0)
-    x = row.index(Chrome.more_label(12)).not_nil!
+    x = row.index(Chrome.more_label).not_nil!
     backend.fg_at(x, 0).should eq(Chrome.menu_number_ink)     # `0`, a step dimmer
     backend.fg_at(x + 1, 0).should eq(Chrome.menu_number_ink) # `:`, same run
-    backend.fg_at(x + 2, 0).should eq(Theme.muted)            # `+12`, the label half
+    backend.fg_at(x + 2, 0).should eq(Theme.muted)            # `tabs`, the label half
+  end
+
+  it "names the whole catalog, not a count of what is off the bar" do
+    # `0:+12` counted a drawer of leftovers. `0` opens all twenty-one tabs, the nine on the bar
+    # included, so the pill says what the key does rather than how many tabs are behind it —
+    # and it no longer disappears when that count is zero.
+    Chrome.more_label.should eq("0:tabs")
   end
 
   it "drops to one bold ink once the pill holds focus" do
@@ -46,9 +53,9 @@ describe "Chrome tab-bar numbers" do
     # chip the operator is standing on — the active tab does not split either.
     backend = MemoryBackend.new(260, 1)
     Chrome.render_menu(Screen.new(backend), rect, active_tab: :history, focused: true,
-      numbered: true, hidden_count: 12, more_focused: true)
+      numbered: true, more_focused: true)
     row = backend.row(0)
-    x = row.index(Chrome.more_label(12)).not_nil!
+    x = row.index(Chrome.more_label).not_nil!
     ink = Theme.ink_on(Theme.focus_gold)
     backend.fg_at(x, 0).should eq(ink)
     backend.fg_at(x + 2, 0).should eq(ink)

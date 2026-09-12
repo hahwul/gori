@@ -40,7 +40,7 @@ The tab bar is **nine numbered slots**, and a fresh install fills them with the 
 actually work in:
 
 ```text
-1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:+12
+1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:tabs
 ```
 
 Press `1`–`9` to jump to a slot and **`0`** to reach any of the other twelve — a type-to-filter
@@ -51,8 +51,8 @@ Sequencer, Cookie, Colormarker, Authorize) and Help, which `?` opens from anywhe
 snapshot — there is nothing to archive before that.
 
 Rearrange the nine in Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**, or
-`settings:tabs` in the palette: `space` shows/hides, `⇧K`/`⇧J` reorder, and the slot numbers
-renumber as you go. A tenth ✓ is refused — hide one first. (If you would rather have the old
+`settings:tabs` in the palette: `space` puts a tab on the bar or takes it off, `⇧K`/`⇧J`
+reorder, and the slot numbers renumber as you go. A tenth is refused — take one off first. (If you would rather have the old
 unbounded bar, turn off **Layout → Tab bar slots**; `0` keeps working either way.)
 
 Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope

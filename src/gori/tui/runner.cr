@@ -294,7 +294,7 @@ module Gori::Tui
       @active_overlay = nil.as(Overlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
-      @menu_more = false               # tab-bar focus is on the far-right `0:+N` stop (only meaningful when @focus == :menu)
+      @menu_more = false               # tab-bar focus is on the far-right `0:tabs` stop (only meaningful when @focus == :menu)
       # Sub-tab strip focus is on the left-edge ⌕ affordance rather than a chip. A HINT
       # only — `subtab_find_focused?` is the truth, and it re-derives the answer from the
       # live frame. That matters: `@focus` is assigned raw at twenty-odd sites across
@@ -2660,11 +2660,11 @@ module Gori::Tui
       Chrome.render_rule(screen, layout.rule)
       # One reconcile per frame: the menu strip, the off-bar count AND the slot numbers all
       # derive from the same tab reconcile — split_tabs computes them in a single pass.
-      vis_tabs, hid_tabs, slots = effective_bar
+      vis_tabs, _, slots = effective_bar
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
-        hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more,
+        more_focused: @focus == :menu && @menu_more,
         numbered: Settings.tab_numbers?, slots: slots)
       render_body(screen, layout.body)
       render_companion(screen, layout.body)
@@ -2714,11 +2714,11 @@ module Gori::Tui
         listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
         authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
       Chrome.render_rule(screen, layout.rule)
-      vis_tabs, hid_tabs, slots = effective_bar
+      vis_tabs, _, slots = effective_bar
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
-        hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more,
+        more_focused: @focus == :menu && @menu_more,
         numbered: Settings.tab_numbers?, slots: slots)
       body = layout.body
       # A message may carry wire bytes or newlines (an IndexError's does not, a parser's may):
@@ -2921,7 +2921,7 @@ module Gori::Tui
       when .palette? then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
       when .detail?  then history_controller.body_hint(:body)
       else
-        # Focus on the far-right `0:+N` stop: ↵/↓ opens the Go-to picker, same as the key.
+        # Focus on the far-right `0:tabs` stop: ↵/↓ opens the Go-to picker, same as the key.
         return "↵/↓ go to tab… · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         #
@@ -2930,7 +2930,7 @@ module Gori::Tui
         # keypress lands on one of them — and both change what the PROXY does, from a tab that
         # shows neither: `i` starts holding every request, `c` stops recording entirely. They
         # were the only unadvertised keys at this focus with an effect outside the current tab.
-        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · 1-9 slots · 0 go to · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · q projects · ^D quit") if @focus == :menu
+        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · 1-9 slots · 0 all tabs · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · q projects · ^D quit") if @focus == :menu
         if @focus == :subtabs
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really
@@ -4214,7 +4214,7 @@ module Gori::Tui
       decoder_controller.commit if @active_tab == :decoder && @focus == :body && pane != :body
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
       @focus = pane
-      @menu_more = false # any focus change lands on a real tab, not the `0:+N` stop
+      @menu_more = false # any focus change lands on a real tab, not the `0:tabs` stop
       # Unconditional, INCLUDING pane == :subtabs. This is what keeps entering a tab landing
       # on chip 1: `enter_content` descends through here, so the strip is always entered at
       # a session, never at the ⌕ affordance. Reaching the affordance is always a deliberate
@@ -4225,7 +4225,7 @@ module Gori::Tui
     end
 
     # Descend from the tab menu (↓/↵/j on the tab bar). When focus is on the far-right
-    # far-right `0:+N` stop, ↓/↵ opens the Go-to picker instead. Otherwise: tabs
+    # far-right `0:tabs` stop, ↓/↵ opens the Go-to picker instead. Otherwise: tabs
     # with a navigable sub-tab strip (Repeater/Notes/Decoder) land on the STRIP first so
     # ←/→ can switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
     # the body. (`focus_pane`'s guard would otherwise route an absent strip to the menu,
@@ -4326,13 +4326,16 @@ module Gori::Tui
       view_focus_resume if @focus == :body
     end
 
-    # ←/→ on the tab bar. → past the last visible tab lands on the far-right `0:+N`
-    # affordance (when tabs are hidden) rather than wrapping; ← steps back off it onto
+    # ←/→ on the tab bar. → past the last visible tab lands on the far-right `0:tabs`
+    # affordance rather than wrapping; ← steps back off it onto
     # the last tab. Everywhere else these are plain cycle_tab(±1). (`[`/`]` keep the
-    # from-anywhere wrap via cycle_tab — the `0:+N` stop is menu-bar-only.)
+    # from-anywhere wrap via cycle_tab — the `0:tabs` stop is menu-bar-only.)
     def menu_right : Nil
       return if @menu_more
-      if last_visible_tab? && hidden_tab_count > 0
+      # No `&& hidden_tab_count > 0` guard: the pill is drawn whatever the layout (`0` opens
+      # the whole catalog, not a drawer of leftovers), and a stop you can see but cannot walk
+      # to is worse than no stop.
+      if last_visible_tab?
         @menu_more = true
       else
         cycle_tab(1)
@@ -4340,7 +4343,7 @@ module Gori::Tui
     end
 
     def menu_left : Nil
-      # ← off the `0:+N` stop steps back onto the bar; otherwise cycle left. The
+      # ← off the `0:tabs` stop steps back onto the bar; otherwise cycle left. The
       # LEFTMOST tab is a hard stop — no wrap to the far end (mirrors menu_right's
       # no-wrap at the right edge). A stray ← on Project used to jump to the last tab,
       # which was almost always accidental, so the left edge is now inert.
@@ -4349,12 +4352,6 @@ module Gori::Tui
       elsif !first_visible_tab?
         cycle_tab(-1)
       end
-    end
-
-    # The tabs off the bar right now — what the `0:+N` pill counts. The active tab is
-    # force-shown on the bar, so it's never listed here.
-    private def hidden_tabs_now : Array({Symbol, String})
-      effective_bar[1]
     end
 
     private def available_tabs(tabs : Array({Symbol, String})) : Array({Symbol, String})
@@ -4377,10 +4374,6 @@ module Gori::Tui
       end
     end
 
-    private def hidden_tab_count : Int32
-      hidden_tabs_now.size
-    end
-
     private def last_visible_tab? : Bool
       effective_tabs.last?.try(&.first) == @active_tab
     end
@@ -4390,7 +4383,7 @@ module Gori::Tui
     end
 
     # The `0` key: a type-to-filter picker over the WHOLE tab catalog — the nine numbered
-    # slots and everything settings:tabs keeps off the bar. It is also what the `0:+N` pill's
+    # slots and everything settings:tabs keeps off the bar. It is also what the `0:tabs` pill's
     # click and the bar's far-right stop (↵/↓) open, so the key, the pill and the stop are one
     # gesture rather than three.
     #
@@ -4399,11 +4392,25 @@ module Gori::Tui
     # no filter, could not reach a tab that WAS on the bar, and carried a key table of its own.
     # One component fewer is part of the point.
     def open_tab_goto : Nil
-      tabs, _, slots = effective_bar
-      slot_of = {} of Symbol => Int32
+      tabs, off_bar, slots = effective_bar
       numbered = Chrome.numbered_slots(slots)
-      tabs.each_with_index { |(sym, _), i| slot_of[sym] = i + 1 if i < numbered }
-      rows = Chrome::TABS.map { |(sym, label)| TabGotoPicker::Row.new(sym, label, slot_of[sym]?) }
+      # Rows come from the BAR, not from the catalog: the strip in its own order (so the digits
+      # read 1, 2, 3 down the card even after ⇧K/⇧J rearranged them) and then everything off
+      # it. The two lists are disjoint and together are the whole catalog, so every tab appears
+      # exactly once — and `effective_bar`'s filtering comes along, which is how Evidence stops
+      # being offered here while the project has no snapshot to open.
+      rows = tabs.map_with_index do |(sym, label), i|
+        TabGotoPicker::Row.new(sym, label, i < numbered ? i + 1 : nil, Chrome.tab_summary(sym))
+      end
+      # Disjoint in every ordinary layout, but not in ONE: `effective_bar` substitutes a bare
+      # Project strip when an Evidence-only layout lands in a project with no archive, and
+      # Project is in the off-bar list at that moment. A tab listed twice is a tab whose second
+      # row does nothing — cheap to rule out over twenty-one entries.
+      on_bar = tabs.map(&.first)
+      off_bar.each do |(sym, label)|
+        next if on_bar.includes?(sym)
+        rows << TabGotoPicker::Row.new(sym, label, nil, Chrome.tab_summary(sym))
+      end
       picker = TabGotoPicker.new(rows)
       # Opens on the ACTIVE tab, like the sub-tab picker on the active chip: ↵ with no query
       # stays put, and ↑/↓ walk out from where the operator is standing.
@@ -4425,7 +4432,7 @@ module Gori::Tui
     # Tab (+1) / Shift-Tab (-1) move focus one step around the ring: from the tab
     # bar into the body's first/last pane, between panes, then back to the bar.
     private def focus_advance(dir : Int32) : Nil
-      @menu_more = false # the ring lands on a tab / body pane, never the `0:+N` stop
+      @menu_more = false # the ring lands on a tab / body pane, never the `0:tabs` stop
       if @focus == :menu
         @focus = :body
         dir > 0 ? view_focus_first : view_focus_last

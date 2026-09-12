@@ -102,15 +102,15 @@ describe "C5 · TabsOverlay on the Overlay seam" do
     ov.to_prefs[2].should eq(before[1])
   end
 
-  it "refuses to hide the last visible tab and reports the refusal as a toast" do
+  it "refuses to take the last tab off the bar and reports the refusal as a toast" do
     ov = TabsOverlay.new
     toasts = [] of String
     ov.on_toast = ->(m : String) { toasts << m; nil }
     leave_one_visible(ov)
     h = OverlayHarness.new(ov)
     h.press(SPACE, ' ').should eq(:open)
-    toasts.should eq(["keep at least one tab visible"])
-    ov.to_prefs.count { |(_, vis)| vis }.should eq(1) # the hide really was refused
+    toasts.should eq(["the bar needs at least one tab"])
+    ov.to_prefs.count { |(_, vis)| vis }.should eq(1) # the take-off really was refused
   end
 
   it "keeps the modal up while r raises the shell's reset confirm" do
