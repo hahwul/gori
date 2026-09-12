@@ -45,14 +45,19 @@ abstract class Gori::Verb::ExecContext
   # sitting next to it.
   abstract def issue_set_cvss : Nil
   abstract def issue_edit_notes : Nil
-  abstract def issues_notes_read_mode? : Bool       # detail open, notes not in INS (gates y/copy)
-  abstract def issues_copy : Nil                    # copy selection from issue notes (READ)
-  abstract def issues_copy_all : Nil                # copy all issue notes (space menu)
-  abstract def issue_edit_title : Nil               # rename + set severity via the form overlay
-  abstract def issue_open_flow : Nil                # open the linked flow's detail in History
-  abstract def issue_repeater_flow : Nil            # send the linked flow to Repeater
-  abstract def issue_links : Nil                    # open the links overlay for the open issue
-  abstract def issue_open_link : Nil                # open the selected related item in its tab (a FROZEN row: the read-only viewer)
+  abstract def issues_notes_read_mode? : Bool # detail open, notes not in INS (gates y/copy)
+  abstract def issues_copy : Nil              # copy selection from issue notes (READ)
+  abstract def issues_copy_all : Nil          # copy all issue notes (space menu)
+  abstract def issue_edit_title : Nil         # rename + set severity via the form overlay
+  abstract def issue_open_flow : Nil          # open the linked flow's detail in History
+  abstract def issue_repeater_flow : Nil      # send the linked flow to Repeater
+  abstract def issue_links : Nil              # open the links overlay for the open issue
+  # ↵ SHOWS the selected RELATED row's exchange in place (a read-only viewer over the frozen
+  # copy, or over the live source as it is now); `s` GOES to the tab it lives in. One key,
+  # one action — ↵ used to mean "open a modal" on a frozen row and "teleport" on a live one.
+  abstract def issue_open_link : Nil                # show the selected related item's exchange in place
+  abstract def issue_goto_link : Nil                # open the selected related item's source in its own tab
+  abstract def issue_related_goto? : Bool           # a RELATED row is selected (every kind has a source)
   abstract def issue_link_move(delta : Int32) : Nil # move selection in the RELATED list
   # Frozen evidence (#1038). `issue_freeze_link` copies the selected LIVE related row's
   # current exchange into an immutable `issue_evidence` row; `issue_evidence_delete` drops

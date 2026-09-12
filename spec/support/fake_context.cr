@@ -406,6 +406,9 @@ class FakeExecContext < Gori::Verb::ExecContext
   # The Issues detail's RELATED cursor, as the two evidence gates (#1038) read it.
   property? issue_related_freezable : Bool = false
   property? issue_related_frozen : Bool = false
+  # A RELATED row is under the cursor — `issue.goto-link`'s gate, which does not care which
+  # KIND of row it is (every one has a source tab).
+  property? issue_related_goto : Bool = false
 
   # Does the open issue have a retest card to open (#1036)? Settable so both sides of
   # `issue.retest`'s gate can be exercised.

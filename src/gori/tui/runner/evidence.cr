@@ -71,6 +71,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     !issues_controller.view.selected_evidence.nil?
   end
 
+  # `s` is offered on EVERY row a RELATED cursor can sit on. Each kind has a source tab, and
+  # a source that is pruned, closed or (a Repeater id) reused is a sentence `issue_goto_link`
+  # says — not a key that silently does nothing, which is what a tighter gate would make of
+  # it on exactly the rows an operator most needs an answer about.
+  def issue_related_goto? : Bool
+    !issues_controller.view.selected_related.nil?
+  end
+
   # --- Issues detail: RELATED row ------------------------------------------
 
   # `f` / space → Freeze as evidence on the open issue's selected RELATED row. The verb is
@@ -87,15 +95,53 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
-  # ↵ on a FROZEN row: the read-only viewer over the detail. A LIVE row keeps the
-  # navigation `issue.open-link` has always done.
+  # ↵ on a RELATED row SHOWS that row's exchange, in place, whatever kind of row it is;
+  # `s` (`issue_goto_link`) is what goes to the tab it lives in.
+  #
+  # It used to be one key with two behaviours in one list — a LIVE row teleported to
+  # History/Repeater/Fuzzer/Miner, a FROZEN row opened a modal — so what ↵ did depended on a
+  # badge two columns to the left. The Evidence tab already has the grammar this should be
+  # (`↵ open · s source`), and RELATED now matches it.
+  #
+  # A fuzz or miner row is the one honest exception: a session is a template plus a run, with
+  # no single exchange to show, so ↵ there opens the session and the hint says `↵ open
+  # session` instead of `↵ view`. A stale row keeps the sentence it has always answered with.
   def issue_open_link : Nil
-    if m = issues_controller.view.selected_evidence
-      open_evidence_viewer(m.id)
-    elsif res = issues_controller.view.selected_resolved_link
-      navigate_link_ref(res.link.ref_kind, res.link.ref_id)
-    else
+    row = issues_controller.view.selected_related
+    unless row
       @toast = "no related link selected"
+      return
+    end
+    if m = row.frozen
+      open_evidence_viewer(m.id)
+    elsif res = row.live
+      if res.stale? || !Evidence.freezable?(res.link.ref_kind)
+        navigate_link_ref(res.link.ref_kind, res.link.ref_id)
+      else
+        open_live_evidence_viewer(res)
+      end
+    end
+  end
+
+  # `s` on a RELATED row: the row's SOURCE, in its own tab — today's ↵ for a live row, and
+  # for a frozen one the Evidence tab's `s`, id-reuse guard included.
+  def issue_goto_link : Nil
+    row = issues_controller.view.selected_related
+    unless row
+      @toast = "no related link selected"
+      return
+    end
+    if m = row.frozen
+      # An id ALONE is not the source: `repeaters.id` is reused, so a tab opened after the
+      # source tab was closed can inherit its id while the copy outlives the close (#1048).
+      return (@toast = EVIDENCE_SOURCE_REUSED) if evidence_source_reused?(m)
+      unless @session.store.evidence_source_alive?(m)
+        @toast = "the original #{m.source_label} is gone — the frozen copy is all there is"
+        return
+      end
+      navigate_link_ref(m.source_kind, m.source_id)
+    elsif res = row.live
+      navigate_link_ref(res.link.ref_kind, res.link.ref_id)
     end
   end
 
@@ -149,6 +195,85 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_overlay(viewer)
   end
 
+  # The same card over a LIVE ref, built from `Evidence.snapshot_for` — the builder the
+  # freeze itself uses, so what ↵ shows and what `f` would keep are the same bytes by
+  # construction rather than by two code paths agreeing.
+  #
+  # NOT the History drill-in, even for a flow that has a live id to hand it: reading must not
+  # put a row of verbs that delete and send one keystroke from the reader. The argument is
+  # `evidence_viewer.cr`'s own, and it is the same argument for both modes of the card.
+  private def open_live_evidence_viewer(res : Links::Resolved) : Nil
+    kind, id = res.link.ref_kind, res.link.ref_id
+    snap = Evidence.snapshot_for(@session.store, kind, id)
+    if snap.is_a?(String)
+      @toast = live_view_refusal(kind, id, snap)
+      return
+    end
+    viewer = EvidenceViewer.new(snap)
+    viewer.on_copy = ->(_text : String) {
+      clean, count = sanitized_snapshot(snap)
+      text = snapshot_pane_text(clean, viewer.pane)
+      written = Clipboard.copy(text)
+      marked = count ? " · SANITIZED (#{count})" : ""
+      # `frozen?` rather than a captured word: `f` can flip this card mid-session, and the
+      # toast must name what the operator is now looking at.
+      kindw = viewer.frozen? ? "frozen" : "live"
+      @toast = "copied #{kindw} #{viewer.pane} (#{written}b)#{marked}#{Clipboard.note(written, text)}"
+      nil
+    }
+    viewer.on_freeze = -> { freeze_from_live_viewer(viewer, snap, res) }
+    open_overlay(viewer)
+  end
+
+  # `f` inside a LIVE viewer: the bytes on screen become a copy on the open issue and the
+  # card flips to FROZEN without closing — the row it was opened from is already linked, so
+  # nothing is linked a second time (`issue_freeze_link`'s own call).
+  #
+  # `after` puts the viewer back, because a copy over `LARGE_BYTES` or a drifted Repeater
+  # raises a confirm over it; on the path where nothing displaced the card, re-opening it is
+  # a no-op write of what the shell already holds.
+  private def freeze_from_live_viewer(viewer : EvidenceViewer, snap : Evidence::Snapshot,
+                                      res : Links::Resolved) : Nil
+    issue = issues_controller.view.detail_issue || return
+    back = -> { open_overlay(viewer) }
+    freeze_into_issue(issue.id, [snap], link: false, after: back) do |ids, refusal|
+      refresh_issue_evidence(issue.id, ids.last?)
+      refresh_evidence_markers
+      refresh_evidence_availability
+      if id = ids.last?
+        @session.store.get_evidence(id).try { |ev| viewer.frozen_as(ev) }
+      end
+      @toast = refusal || "frozen as evidence ##{ids.last?} (#{Fmt.size(snap.bytes)}) — the live #{res.tag} row stays live"
+    end
+  end
+
+  # What ↵ says when the row resolves but has no exchange to show yet. `Runner.new` owns a
+  # terminal and appears nowhere under spec/, so the sentence itself is built by the
+  # class-level seam below and this half only answers the two questions that need the
+  # session: is the source still there, and which key is `issue.goto-link` bound to.
+  private def live_view_refusal(kind : Store::LinkRefKind, id : Int64, sentence : String) : String
+    source = kind.repeater? ? !@session.store.get_repeater(id).nil? : !@session.store.flow_row(id).nil?
+    Runner.live_view_refusal(kind, id, sentence, source,
+      Hotkeys.binding_label(@session.registry, "issue.goto-link", "s"))
+  end
+
+  # `Evidence.snapshot_for`'s refusals are written for a FREEZE ("…then freeze the
+  # exchange"), and ↵ here is a READ. The FACT comes back verbatim from that one builder —
+  # three surfaces say it and they must not drift — and only the ADVICE is re-pointed at the
+  # key this path actually has.
+  #
+  # Only when the source is still there for `s` to open. "no flow with id 12 — it may have
+  # been pruned" is the other shape `snapshot_for` answers with, and a row that is gone has
+  # nothing behind either key: offering one would be the lie `evidence_source_reused?` exists
+  # to prevent one surface over.
+  def self.live_view_refusal(kind : Store::LinkRefKind, id : Int64, sentence : String,
+                             source : Bool, goto_key : String) : String
+    return sentence unless source
+    fact = sentence.partition(" — ")[0]
+    where = kind.repeater? ? "the tab" : "it in History"
+    "#{fact} — #{goto_key} opens #{where}"
+  end
+
   # --- project-wide Evidence tab -------------------------------------------
 
   def selected_evidence_id : Int64?
@@ -168,6 +293,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     meta = evidence_controller.view.selected || return false
     @session.store.evidence_source_alive?(meta)
   end
+
+  # One sentence for both surfaces that can be asked for a frozen row's source — the Evidence
+  # tab's `s` and the Issues detail's.
+  EVIDENCE_SOURCE_REUSED = "the original repeater tab is gone (its id was reused)"
 
   # A source id that now belongs to a DIFFERENT, newer Repeater tab than the one frozen from.
   # Distinguished from "gone" because the two need different sentences: `navigate_link_ref`
@@ -224,7 +353,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # close the source tab and open a successor between the menu being built and the press.
   def evidence_open_source : Nil
     meta = evidence_controller.view.selected || return
-    return (@toast = "the original repeater tab is gone (its id was reused)") if evidence_source_reused?(meta)
+    return (@toast = EVIDENCE_SOURCE_REUSED) if evidence_source_reused?(meta)
     navigate_link_ref(meta.source_kind, meta.source_id)
   end
 
@@ -376,6 +505,23 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     clean = Store::IssueEvidence.new(ev.meta, request.head, request.body,
       ev.response_head.nil? ? nil : response.head, response.body)
     {clean, request.count + response.count}
+  end
+
+  # The live card's half of `sanitized_evidence` — same ambient #1035 policy, same two
+  # messages, over the shape a live exchange comes in. A LIVE copy has to pass the policy for
+  # the same reason a frozen one does: the clipboard leaves the project either way.
+  private def sanitized_snapshot(snap : Evidence::Snapshot) : {Evidence::Snapshot, Int32?}
+    matcher = Redact::Policy.ambient(@session.store) || return {snap, nil}
+    request = Redact::Wire.message(snap.request_head, snap.request_body, matcher)
+    response = Redact::Wire.message(snap.response_head, snap.response_body, matcher)
+    clean = snap.copy_with(request_head: request.head, request_body: request.body,
+      response_head: snap.response_head.nil? ? nil : response.head, response_body: response.body)
+    {clean, request.count + response.count}
+  end
+
+  private def snapshot_pane_text(snap : Evidence::Snapshot, pane : Symbol) : String
+    head, body = pane == :request ? {snap.request_head.as(Bytes?), snap.request_body} : {snap.response_head, snap.response_body}
+    EvidenceViewer.pane_text(head, body)
   end
 
   private def evidence_pane_text(ev : Store::IssueEvidence, pane : Symbol) : String

@@ -2401,3 +2401,43 @@ alternative beats echoing a secret into a transcript on a guess.
 `spec/cli/run/stdin_terminal_spec.cr` drives both arms against real file descriptors (an
 `IO.pipe`, a redirect, and a `/dev/ptmx` master) and sweeps `src/gori/cli/` for a direct STDIN
 read that carries neither the explicit guard nor an implicit road's own `STDIN.tty?` check.
+
+### 2026-09-12: ↵ shows the exchange in place, and a second key navigates
+
+Refines: [P1](#p1), [P4](#p4). The Issues detail's RELATED card (#1038 follow-up).
+
+RELATED lists two kinds of row and `↵` used to answer them two different ways: a LIVE row
+teleported to History/Repeater/Fuzzer/Miner, a FROZEN row opened a read-only card over the
+detail. One key, two behaviours, in one list — and which one you got depended on a badge two
+columns to the left of the cursor. The project-wide Evidence tab already had the right
+grammar, `↵ open · s source`, so RELATED takes it: **↵ SHOWS the row's exchange in place, `s`
+GOES to the tab it lives in.** Each key does one thing on every row.
+
+A LIVE row is shown through an `Evidence::Snapshot` of the source as it is now, on the same
+card the frozen copy uses — not through the History drill-in, even for a flow that has a live
+id to hand it. The argument is the one already written above `EvidenceViewer`: the drill-in's
+verbs act on a live id (delete it, link it, probe it, send it to the Repeater), every one of
+them would have to be gated behind "you are only reading", and one missed gate is an operator
+deleting the flow they thought they were reading. ↵ on a RELATED row is a READ; reading must
+not put destructive verbs one keystroke from the reader. The card's one action, `f`, only
+ever ADDS — it freezes what is on screen onto the open issue and flips the title to
+`FROZEN EVIDENCE #N` without closing.
+
+The snapshot comes from `Evidence.snapshot_for`, the builder the freeze itself uses, so what ↵
+shows and what `f` would keep are the same bytes by construction rather than by two code paths
+agreeing. Its refusal sentences are written for a freeze ("…then freeze the exchange"); ↵ keeps
+the FACT verbatim from that one builder and re-points only the advice at the key this path has
+(`s`), and only when the source is still there for `s` to open.
+
+A LIVE view says so everywhere the frozen one says "frozen": the title (`LIVE hist #12`), the
+provenance line (`as it is now · not frozen`), the border slot, and the chip strip (`live copy
+— retention or the next send can change it`). It also names REQUEST DRIFT, which a frozen card
+can never carry because the freeze gate asks about it first — a live card is looking straight
+at a Repeater tab whose request was edited after its stored response, and not saying so would
+be the card presenting two halves as one exchange.
+
+**Fuzz and miner rows are the honest exception.** A session is a template plus a run and has
+no single exchange to put on a card, so ↵ there navigates, and the hint token swaps to
+`↵ open session` rather than promising a view that cannot exist. It is read off
+`Evidence.freezable?` — the same predicate the freeze gate and the `f` token read — so the
+three cannot disagree about which rows have an exchange.

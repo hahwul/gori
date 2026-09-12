@@ -6,7 +6,9 @@ include Gori::Tui
 # The Issues detail's RELATED card once frozen evidence (#1038) shares it with live links.
 # The two are different kinds of answer to "what backs this issue" — a live row is a
 # pointer that can go stale, a frozen row is the bytes — and the card must say which is
-# which, keep one cursor over both, and hand the Runner the right half for ↵.
+# which, keep one cursor over both, and hand the Runner the right half for ↵ and `s`.
+#
+# What those two keys DO with the half they are handed is issues_related_enter_spec's.
 
 private def captured(target : String) : Gori::Store::CapturedRequest
   Gori::Store::CapturedRequest.new(
@@ -50,7 +52,8 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       rows[1].frozen?.should be_true
       rows[1].frozen.not_nil!.id.should eq(eid)
 
-      # The cursor opens on the live row: ↵ there navigates, and there is no evidence under it.
+      # The cursor opens on the live row: ↵ there shows the flow as it is now (the LIVE half of
+      # the same viewer — see issues_related_enter_spec), and there is no evidence under it.
       view.selected_resolved_link.not_nil!.link.ref_id.should eq(live)
       view.selected_evidence.should be_nil
       view.links_at_bottom?.should be_false

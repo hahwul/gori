@@ -311,11 +311,7 @@ module Gori::Tui
           # the selected RELATED item (`issue.open-link`), so naming it as the way into the
           # notes editor was wrong about one of the two keys it listed.
           #
-          # `f freeze` is named only when the verb is offered — a FROZEN, stale, fuzz or miner
-          # row has nothing to freeze, and `Hotkeys.expand` never consults a gate — the same
-          # drop-the-token rule `step` follows a line up.
-          freeze = related_freezable? ? "{issue.freeze-link} freeze · " : ""
-          keys("↑/↓ links · ↵ open · #{freeze}↹/↓ notes · i edit · #{step}{issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+          related_hint(step)
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↓ list · ? reference · ↵ apply · esc clear"
@@ -337,12 +333,38 @@ module Gori::Tui
       end
     end
 
+    # The detail's strip while the RELATED card owns the keyboard. Three of its tokens are
+    # read off the row under the cursor rather than printed unconditionally:
+    #
+    #   * `f freeze` — named only when the verb is offered. A FROZEN, stale, fuzz or miner row
+    #     has nothing to freeze, and `Hotkeys.expand` never consults a gate; the same
+    #     drop-the-token rule `step` follows.
+    #   * `s source` — the same rule: with no RELATED row under the cursor there is nothing to
+    #     go to, and the verb refuses.
+    #   * `↵ view` / `↵ open session` — ↵ SHOWS the row's exchange in place, on every kind that
+    #     has one. A fuzz or miner row has none (a session is a template plus a run), so there ↵
+    #     opens the session and the token says which of the two it is about to do.
+    private def related_hint(step : String) : String
+      freeze = related_freezable? ? "{issue.freeze-link} freeze · " : ""
+      goto = @issues.selected_related ? "{issue.goto-link} source · " : ""
+      open = related_session? ? "↵ open session" : "↵ view"
+      keys("↑/↓ links · #{open} · #{goto}#{freeze}↹/↓ notes · i edit · #{step}{issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
+    end
+
     # The RELATED cursor sits on a live flow/repeater row that still resolves — the gate
     # `issue.freeze-link` is registered with (`Runner#issue_related_freezable?`), read here
     # for the hint so the strip cannot promise a key the verb refuses.
     private def related_freezable? : Bool
       res = @issues.selected_resolved_link || return false
       !res.stale? && Evidence.freezable?(res.link.ref_kind)
+    end
+
+    # A LIVE fuzz/miner row — the one RELATED kind whose ↵ navigates rather than showing an
+    # exchange, because a session has none to show. Read off the same `Evidence.freezable?`
+    # the Runner branches on, so the strip and the key cannot disagree.
+    private def related_session? : Bool
+      res = @issues.selected_resolved_link || return false
+      !Evidence.freezable?(res.link.ref_kind)
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
