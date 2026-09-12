@@ -4347,6 +4347,11 @@ module Gori::Tui
       # No `&& hidden_tab_count > 0` guard: the pill is drawn whatever the layout (`0` opens
       # the whole catalog, not a drawer of leftovers), and a stop you can see but cannot walk
       # to is worse than no stop.
+      #
+      # The converse — walking to a stop that was NOT drawn — is ruled out by the frame, not
+      # by a check here: `menu_layout` drops the pill only when the menu row is under nine
+      # columns, and `Layout.usable?` has already refused to draw anything under 40×8, which
+      # leaves that row 36. A check would need this key handler to re-derive the row's rect.
       if last_visible_tab?
         @menu_more = true
       else
