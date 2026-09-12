@@ -103,9 +103,13 @@ module Gori
       r.register Verb::Definition.new(
         "cookie.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Cookie, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
+      # Listed with no selection too, acting on the line under the cursor — see the `sendable`
+      # note in verbs/read_edit.cr for why every `S` reads this way now.
       r.register Verb::Definition.new(
         "cookie.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, JWT, …)",
-        Verb::Scope::Cookie, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Cookie,
+        available: ->(ctx : Verb::ExecContext) { in_sel.call(ctx) || in_cookie_read.call(ctx) },
+        mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
     end
   end
 end

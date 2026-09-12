@@ -2064,15 +2064,21 @@ module Gori::Tui
       !@send_picker.nil?
     end
 
-    # "Send selection to X" (space → S): capture the focused pane's current selection
-    # and open a centered picker of string-handling destinations (Decoder for now).
-    # Gated upstream by read_selection_active?, so a selection is normally present; if
-    # it came back empty the verb just no-ops with a toast rather than opening an empty
-    # send.
+    # "Send selection to X" (space → S): capture the focused pane's current selection — or,
+    # with nothing selected, the line under the cursor, which is the same fallback `y` takes
+    # (`read_selection_text` → each pane's `*_copy_text`) — and open a centered picker of
+    # string-handling destinations.
+    #
+    # The verb is listed in the menu either way (#F17): gated on a live selection it was
+    # invisible until one existed, and nothing on screen named the `x` that makes one, so the
+    # only route from a response to the Decoder / JWT / Cookie / Sequencer was one you had to
+    # already know. An empty payload — an empty pane — still no-ops with a toast.
     def send_to_open : Nil
       payload = read_selection_text
       if payload.empty?
-        @toast = "nothing selected to send"
+        # With no selection this verb sends the line under the cursor (#F17), so an empty
+        # payload now means an empty PANE, not an empty selection.
+        @toast = "nothing under the cursor to send"
         return
       end
       sp = SendPicker.new("Send selection to", payload, SendMenu.destinations)
@@ -5086,8 +5092,18 @@ module Gori::Tui
       notes.copy repeater.copy decoder.copy issue.copy project.copy fuzzer.copy detail.copy
     ]
 
+    # The `S` verbs, which are listed whether or not anything is selected (#F17) and send the
+    # line under the cursor when nothing is. Their registered title names the selection case,
+    # so the MENU says which one this press would be.
+    READ_SEND_VERBS = %w[
+      notes.send-to repeater.send-to decoder.send-to fuzzer.send-to jwt.send-to cookie.send-to
+      issue.send-to project.send-to rewriter.send-to comparer.send-to intercept.send-to
+      oast.send-to probe.send-to sequence.send-to mine.send-to detail.send-to
+    ]
+
     def space_menu_title(verb_id : String) : String?
       return "Copy selection" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
+      return "Send line to…" if READ_SEND_VERBS.includes?(verb_id) && !read_selection_active?
       history_mark_menu_title(verb_id) || intercept_mark_menu_title(verb_id) ||
         sitemap_mark_menu_title(verb_id) || issues_mark_menu_title(verb_id) ||
         subtab_mark_menu_title(verb_id)

@@ -520,7 +520,11 @@ module Gori::Tui
         end
         nav = @history.detail_navigable? ? "↑/↓ move · ←/→ caret" : "↑/↓ scroll"
         dy = Hotkeys.binding_label(reg, "detail.copy", "y")
-        return "#{nav} · ⇧arrows select · #{dy} copy · #{repeater} repeater · #{step}↑ strip · ↹ pane · space cmds · esc back"
+        # `x select` beside the copy token. It is the key that makes the selection the space
+        # menu's `S Send selection to…` acts on, and it lived only in the menu: the route from
+        # a response to the Decoder began with a key nothing on screen named.
+        dx = Hotkeys.binding_label(reg, "detail.select-line", "x")
+        return "#{nav} · ⇧arrows select · #{dx} select · #{dy} copy · #{repeater} repeater · #{step}↑ strip · ↹ pane · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:

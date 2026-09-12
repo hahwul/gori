@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/tui_contract"
 require "../support/fake_host"
+require "../support/fake_context"
 require "../support/memory_backend"
 require "file_utils"
 require "../../src/gori/tui/controllers/history_controller"
@@ -41,6 +42,17 @@ private class DetailHost < FakeHost
 end
 
 describe "the core-loop hints" do
+  describe "F17 — the History detail strip names the key that makes a selection" do
+    it "says `x select`, which until now lived only in the space menu" do
+      TuiContract.with_session("hint-f17") do |session|
+        host = DetailHost.new(session)
+        ctl = HistoryController.new(host)
+        ctl.view.set_detail_focus(:body)
+        ctl.body_hint(:body).should contain("x select")
+      end
+    end
+  end
+
   describe "F6 — the History DETAIL strip names the key that leaves for the Repeater" do
     it "says `^R repeater` at BOTH detail levels, where it has always worked" do
       TuiContract.with_session("hint-f6") do |session|
@@ -268,6 +280,32 @@ describe "the core-loop hints" do
         v.focus_pane(:response)
         ctl.body_hint(:body).should contain("esc tabs")
       end
+    end
+  end
+
+  describe "F17 — `S Send selection to…` is listed before there is a selection" do
+    reg = Gori::Verbs.registry
+    send_ids = Gori::Tui::Runner::READ_SEND_VERBS
+
+    it "is available in a read pane with nothing selected, on every tab that offers it" do
+      # The gate is the pane being READABLE, not a live selection — with none, the payload is
+      # the line under the cursor (the fallback `y` already takes).
+      ctx = FakeExecContext.new
+      ctx.selection_active = false
+      send_ids.each do |id|
+        reg[id]?.should_not be_nil, "#{id} is gone — F17's list rotted"
+      end
+      # One worked example end to end: the History detail, where the walk got stuck.
+      ctx.current_tab = :history
+      ctx.detail_navigable = true
+      reg["detail.send-to"].available?(ctx).should be_true
+      ctx.detail_navigable = false
+      reg["detail.send-to"].available?(ctx).should be_false # nothing readable, nothing to send
+    end
+
+    it "names in the MENU which of the two it would send" do
+      # The registered title is the selection case; the menu flips it when there is none.
+      reg["detail.send-to"].title.should eq("Send selection to…")
     end
   end
 
