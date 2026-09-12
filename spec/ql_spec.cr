@@ -36,7 +36,7 @@ describe Gori::QL do
 
   it "compiles AND-ed terms with parameterised values" do
     f = Gori::QL.parse("host:acme status:>=500")
-    f.sql.should eq("(lower(host) LIKE ? ESCAPE '\\' AND status >= ?)")
+    f.sql.should eq("((host) LIKE ? ESCAPE '\\' AND status >= ?)")
     f.args.should eq(["%acme%", 500])
   end
 
@@ -60,7 +60,7 @@ describe Gori::QL do
 
   it "escapes LIKE metacharacters so % and _ match literally" do
     f = Gori::QL.parse("host:ac%e_")
-    f.sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+    f.sql.should eq("((host) LIKE ? ESCAPE '\\')")
     f.args.should eq(["%ac\\%e\\_%"]) # the user's % and _ are backslash-escaped
   end
 
@@ -69,7 +69,7 @@ describe Gori::QL do
     # change from the AST compiler; the predicate is identical). Every other clause
     # shape is byte-for-byte what the old flat parser emitted.
     f = Gori::QL.parse("method:get OR -host:cdn")
-    f.sql.should eq("(upper(method) = ? OR NOT (lower(host) LIKE ? ESCAPE '\\'))")
+    f.sql.should eq("(upper(method) = ? OR NOT ((host) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["GET", "%cdn%"])
   end
 
@@ -83,7 +83,7 @@ describe Gori::QL do
     # just the value after the ':', so the prefix isn't silently dropped (and a typo
     # surfaces as a no-match rather than masquerading as a successful host filter).
     f = Gori::QL.parse("hosst:acme.test")
-    f.sql.should eq("((lower(method) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\' OR lower(target) LIKE ? ESCAPE '\\'))")
+    f.sql.should eq("(((method) LIKE ? ESCAPE '\\' OR (host) LIKE ? ESCAPE '\\' OR (target) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["%hosst:acme.test%", "%hosst:acme.test%", "%hosst:acme.test%"])
   end
 
@@ -378,7 +378,7 @@ describe Gori::QL do
     # must fall back to a free-text LIKE search, NOT compile to the never-match clause
     # (the validity guard only applies to real regex fields).
     f = Gori::QL.parse("foo~[")
-    f.sql.should eq("((lower(method) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\' OR lower(target) LIKE ? ESCAPE '\\'))")
+    f.sql.should eq("(((method) LIKE ? ESCAPE '\\' OR (host) LIKE ? ESCAPE '\\' OR (target) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["%foo~[%", "%foo~[%", "%foo~[%"])
   end
 
@@ -855,7 +855,7 @@ describe "Gori::Store#search (QL)" do
   end
 
   # A substring field folds BOTH sides — needle and haystack — and folding is only a fold if it
-  # covers the whole alphabet. SQLite's built-in `lower()` is ASCII-only, so `lower(target) LIKE
+  # covers the whole alphabet. SQLite's own LIKE fold is ASCII-only, so `target LIKE
   # '%überweisung%'` left the haystack's `Ü` uppercase and answered nothing; a non-ASCII needle
   # takes `gori_ci_contains` (Crystal's `downcase.includes?` as a UDF) instead.
   it "folds a non-ASCII needle on both sides for path:, url: and free text" do
@@ -885,7 +885,7 @@ describe "Gori::Store#search (QL)" do
     end
   end
 
-  # The ASCII needle keeps the native `lower(col) LIKE ?` path, so the LIKE-metacharacter
+  # The ASCII needle keeps the native `col LIKE ?` path, so the LIKE-metacharacter
   # escaping that path depends on must still hold over real rows, not just in the compiled SQL.
   it "still treats a literal % / _ in the needle literally" do
     with_store do |store|
@@ -1102,7 +1102,7 @@ describe "Gori::Store#search (QL)" do
     # and it is what the QL reference documents. Pinned so a future change is deliberate.
     it "drops a bad numeric term inside a NOT group and negates the survivor" do
       dropped = Gori::QL.parse("NOT (host:x AND size:>bogus)")
-      dropped.sql.should eq("(NOT (lower(host) LIKE ? ESCAPE '\\'))")
+      dropped.sql.should eq("(NOT ((host) LIKE ? ESCAPE '\\'))")
       dropped.args.should eq(["%x%"])
       dropped.sql.should eq(Gori::QL.parse("NOT host:x").sql) # bad token vanished entirely
       # analyze still SURFACES the drop even when nested under NOT
@@ -1110,7 +1110,7 @@ describe "Gori::Store#search (QL)" do
     end
 
     it "collapses an OR whose only other term dropped (the OR does nothing)" do
-      Gori::QL.parse("host:x OR size:>bogus").sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+      Gori::QL.parse("host:x OR size:>bogus").sql.should eq("((host) LIKE ? ESCAPE '\\')")
     end
 
     # The asymmetry that makes this LOOK inconsistent: an INVALID REGEX does NOT drop —
@@ -1120,7 +1120,7 @@ describe "Gori::Store#search (QL)" do
     # hard-errors on in the MCP layer.
     it "keeps an invalid-regex term as a never-match clause inside NOT (does not drop)" do
       f = Gori::QL.parse("NOT (host:x AND body~[bad)")
-      f.sql.should eq("(NOT ((lower(host) LIKE ? ESCAPE '\\' AND 0)))")
+      f.sql.should eq("(NOT (((host) LIKE ? ESCAPE '\\' AND 0)))")
       f.args.should eq(["%x%"])
     end
   end
@@ -1130,16 +1130,16 @@ describe "Gori::Store#search (QL)" do
     # binds tighter, so the two queries below are genuinely different predicates.
     it "binds AND tighter than OR unless parenthesised" do
       loose = Gori::QL.parse("host:a OR host:b status:301")
-      loose.sql.should eq("(lower(host) LIKE ? ESCAPE '\\' OR " \
-                          "(lower(host) LIKE ? ESCAPE '\\' AND status = ?))")
+      loose.sql.should eq("((host) LIKE ? ESCAPE '\\' OR " \
+                          "((host) LIKE ? ESCAPE '\\' AND status = ?))")
       grouped = Gori::QL.parse("(host:a OR host:b) status:301")
-      grouped.sql.should eq("((lower(host) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\') " \
+      grouped.sql.should eq("(((host) LIKE ? ESCAPE '\\' OR (host) LIKE ? ESCAPE '\\') " \
                             "AND status = ?)")
     end
 
     it "negates a whole group with NOT" do
       f = Gori::QL.parse("NOT (host:a OR host:b)")
-      f.sql.should eq("(NOT ((lower(host) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\')))")
+      f.sql.should eq("(NOT (((host) LIKE ? ESCAPE '\\' OR (host) LIKE ? ESCAPE '\\')))")
       f.args.should eq(["%a%", "%b%"])
     end
 
@@ -1149,7 +1149,7 @@ describe "Gori::Store#search (QL)" do
 
     it "keeps a quoted value in one term, spaces included" do
       f = Gori::QL.parse(%(host:"my host"))
-      f.sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+      f.sql.should eq("((host) LIKE ? ESCAPE '\\')")
       f.args.should eq(["%my host%"])
     end
 
@@ -1178,7 +1178,7 @@ describe "Gori::Store#search (QL)" do
 
     it "drops an unrecognised src: value instead of guessing, like proto:/status:" do
       Gori::QL.analyze("src:browser").ignored.should_not be_empty
-      Gori::QL.parse("src:browser host:a").sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+      Gori::QL.parse("src:browser host:a").sql.should eq("((host) LIKE ? ESCAPE '\\')")
     end
 
     it "matches a pre-V17 flow in NEITHER direction" do
@@ -1214,7 +1214,7 @@ describe "Gori::Store#search (QL)" do
       # Regression guard: `path:/a(b)` parsed as one token before the grammar grew
       # parens, and must keep doing so.
       f = Gori::QL.parse("path:/a(b)")
-      f.sql.should eq("(lower(target) LIKE ? ESCAPE '\\')")
+      f.sql.should eq("((target) LIKE ? ESCAPE '\\')")
       f.args.should eq(["%/a(b)%"])
     end
   end

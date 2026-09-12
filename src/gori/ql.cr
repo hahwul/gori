@@ -1208,9 +1208,16 @@ module Gori
     # A case-insensitive substring test on `expr`, picking the folding implementation by what
     # the NEEDLE contains.
     #
-    # `lower(col) LIKE ?` folds the haystack with SQLite's built-in `lower()`, which is
-    # ASCII-only, while `like` folds the needle with Crystal's full-Unicode `downcase`. For a
-    # needle carrying a non-ASCII letter the two never meet: a captured `/Überweisung` was
+    # `LIKE` folds the haystack ITSELF: with `case_sensitive_like` at its default OFF (this
+    # store never turns it on), SQLite compares through `sqlite3UpperToLower`, the same
+    # ASCII-only table its `lower()` uses — so the `lower(col)` this used to wrap the column
+    # in was a second fold of an already-folded comparison, paying a per-row `String`
+    # allocation inside SQLite for an answer that could not differ. Dropping it is 2.7x on the
+    # scanning filters (`host:`/`path:`/`url:`/a bare word, 9.0ms → 3.3ms over 100k flows;
+    # bench/history_filter_bench). `like` still folds the NEEDLE with Crystal's full-Unicode
+    # `downcase`, which is why the needle side is decided here at all.
+    #
+    # For a needle carrying a non-ASCII letter the two never meet: a captured `/Überweisung` was
     # unreachable by `path:` in EVERY spelling, and `InterceptFilter` — the in-memory
     # implementation of this same predicate — matched the row while History did not. Those
     # needles go through `gori_ci_contains` (Crystal's `downcase.includes?` as a UDF), which is
@@ -1218,13 +1225,13 @@ module Gori
     #
     # An ASCII needle keeps the native LIKE, because the UDF costs a Crystal callback and two
     # String allocations PER ROW and both forms full-scan either way: measured over 100k flows,
-    # `host:` answers in 7ms through LIKE and 71ms through the UDF, and History recompiles this
+    # `host:` answers in 3ms through LIKE and 71ms through the UDF, and History recompiles this
     # filter on every keystroke (P6 — never stall the data path). Every ASCII character folds
     # identically in the two implementations, so the fast path is exact for the needles that
     # take it. The residue it accepts: a haystack character that folds INTO ASCII under Unicode
-    # but not under `lower()` (`İ`→`i`, `K`→`k`, `ſ`→`s`) stays unreachable by an ASCII needle.
-    # All three columns are NOT NULL, so the arms cannot disagree under `NOT` the way a NULL
-    # haystack would (`NOT (NULL)` drops the row, `NOT (0)` keeps it).
+    # but not under LIKE's ASCII fold (`İ`→`i`, `K`→`k`, `ſ`→`s`) stays unreachable by an
+    # ASCII needle. All three columns are NOT NULL, so the arms cannot disagree under `NOT` the
+    # way a NULL haystack would (`NOT (NULL)` drops the row, `NOT (0)` keeps it).
 
     # :nodoc: — internal, but NOT private: `Store#events_recent` narrows the #124 event feed
     # through this same predicate, so the Activity pane's `/` bar and History's `msg:` agree on
@@ -1233,7 +1240,7 @@ module Gori
     # comment block attached to the definition, and the rationale above is its own block.
     def self.contains_cond(expr : String, value : String) : {String, Array(DB::Any)}
       return {"gori_ci_contains(#{expr}, ?)", [value] of DB::Any} unless value.ascii_only?
-      {"lower(#{expr}) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      {"(#{expr}) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
     end
 
     def self.like(value : String) : DB::Any

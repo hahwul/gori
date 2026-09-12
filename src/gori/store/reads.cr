@@ -634,8 +634,10 @@ module Gori
         end
       else
         # Prefix match only (trailing %); escape LIKE metacharacters in the typed prefix.
+        # No `lower(host)` around the column: LIKE folds ASCII itself (see QL.contains_cond),
+        # and wrapping it only added a per-row allocation to a keystroke-rate query.
         pat = "#{QL.like_escape(prefix.downcase)}%"
-        controlled_query("SELECT DISTINCT host FROM flows WHERE lower(host) LIKE ? ESCAPE '\\' ORDER BY host LIMIT ?",
+        controlled_query("SELECT DISTINCT host FROM flows WHERE host LIKE ? ESCAPE '\\' ORDER BY host LIMIT ?",
           [pat, lim] of DB::Any, control) do |rs|
           rs.each { hosts << rs.read(String) }
         end
