@@ -100,12 +100,17 @@ describe "the freeze drift confirm" do
     # Expressed as the SHAPE rather than a textual order: the byte-cost question lives inside
     # the `cost` proc, and `cost` is what the drift gate runs on accept — so drift cannot be
     # second without the gate losing its argument.
-    freeze.should contain("gate_request_drift(snaps, cost, after: after)")
+    freeze.should contain("gate_request_drift(snaps, cost, after: after, declined: declined)")
     freeze[/cost = -> \{.*?\}/m].not_nil!.should contain("confirm_freeze_cost")
-    # The "+ New issue…" arm of the picker goes through the same gate rather than round-tripping
-    # the operator's typed title only to refuse afterwards.
-    form = body[/private def open_issue_form_for_freeze.*?\n  end/m].not_nil!
-    form.should contain("gate_request_drift(snaps, cost, declined: back)")
+    # The two "+ New issue…" arms (the picker's create row and History's Add issue) go through
+    # the same gate rather than round-tripping the operator's typed title only to refuse
+    # afterwards — `with_freeze_gates` is the one place that shape lives now.
+    form = body[/private def with_freeze_gates.*?\n  end/m].not_nil!
+    form.should contain("gate_request_drift(copies, cost, declined: plain)")
+    # A decline no longer abandons the act (#1038): the link is the primary write, so the
+    # form still opens — with no copies. `plain` is that, and it is what BOTH gates decline to.
+    form.should contain("plain = -> { open.call([] of Evidence::Snapshot) }")
+    form[/cost = -> \{.*?\}/m].not_nil!.should contain("declined: plain")
 
     gate = body[/private def gate_request_drift.*?\n  end/m].not_nil!
     # A decline restores exactly once, on exactly one path — `declined` then `after`, the

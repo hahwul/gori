@@ -132,45 +132,41 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # ↵ on the link picker. The two create rows hand off — "+ New issue…" to the NEW ISSUE
-  # form, "+ New note…" to a blank note — and every other row takes the link directly.
+  # form, "+ New note…" to a blank note — and a note row takes the link directly.
   # A create row arms on_close rather than opening the next modal here, because that
   # modal claims @overlay and the shell's close would tear it straight back down;
   # on_close runs after the drop, so the hand-off is the last write (see Overlay).
   #
-  # In the picker's freeze mode (#1038) both hand-offs go through on_close as well — the
-  # create row for the reason above, and an existing issue because the freeze may raise a
-  # byte-cost confirm. The picker's own on_close (put the History drill-in back) is folded
-  # into the hand-off as `back`, so the operator still lands where they linked from.
+  # An ISSUE row rides on_close for the same reason (#1038): ↵ there freezes the refs that
+  # have an exchange, and a gate raises a confirm. The picker's own on_close (put the History
+  # drill-in back) is folded into that hand-off as `back`, so the operator still lands where
+  # they linked from. A note takes the pointer alone — a note owns no evidence.
   private def link_picked(lp : LinkPicker, refs : Array({Store::LinkRefKind, Int64}),
-                          snaps : Array(Evidence::Snapshot) = [] of Evidence::Snapshot) : Bool
+                          snaps : Array(LinkSnapshot)) : Bool
     back = lp.on_close || -> { }
     if kind = lp.selected_create
       # The filter doubles as the new issue's title: type it, ↵, and the form is filled.
       typed = lp.query.strip
-      lp.on_close = if lp.freeze?
-                      -> { open_issue_form_for_freeze(refs, snaps, typed, back) }
-                    elsif kind.issue?
-                      -> { open_issue_form_for_link(refs, typed) }
+      lp.on_close = if kind.issue?
+                      -> { open_issue_form_freezing(refs, snaps, typed) }
                     else
                       -> { create_note_and_link(refs) }
                     end
       return true
     end
     if row = lp.selected_row
-      if lp.freeze?
-        # `link_picker_rows(issues_only: true)` built this list, so `row.kind` is Issue.
-        issue_id = row.id
-        lp.on_close = -> { link_and_freeze(issue_id, snaps, back) }
-      elsif commit_links_to_owner(row.kind, row.id, refs) && refs.size == 1
+      # The toast names WHICH owner took the link, built from the owner's IDENTITY rather
+      # than the row's display label — `3:` there is a sub-tab position, not an id.
+      case row.kind
+      in .issue?
+        issue_id, owner = row.id, "issue ##{row.id}: #{link_title_snip(row.name)}"
+        lp.on_close = -> { link_and_freeze(issue_id, owner, snaps, back) }
+      in .note?
         # commit_links_to_owner already reported the counts for a batch; the single case
-        # names WHICH owner took the link. One list now holds both kinds, so a bare
-        # "linked" no longer says what was picked. Built from the owner's IDENTITY, not
-        # from the row's display label — `3:` there is a sub-tab position, not an id.
-        owner = case row.kind
-                in .issue? then "issue ##{row.id}: #{link_title_snip(row.name)}"
-                in .note?  then "note #{link_title_snip(row.name)}"
-                end
-        @toast = "linked to #{owner}"
+        # names the note.
+        if commit_links_to_owner(row.kind, row.id, refs) && refs.size == 1
+          @toast = "linked to note #{link_title_snip(row.name)}"
+        end
       end
     end
     true
@@ -182,8 +178,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # filter box, and it WINS over the flow-derived title: the operator naming the issue is
   # more specific than "GET /path".
   #
-  # `snapshots` (#1038) are the copies the LINK & FREEZE picker took before opening the
-  # form; the form writes them once the issue exists.
+  # `snapshots` (#1038) are the copies taken before the form opened — by the link picker, or
+  # by History's Add issue; the form writes them once the issue exists.
   private def open_issue_form_for_link(refs : Array({Store::LinkRefKind, Int64}), typed : String = "",
                                        snapshots : Array(Evidence::Snapshot) = [] of Evidence::Snapshot) : Nil
     ref = refs.first
@@ -353,9 +349,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Every attachable owner on one list: issues first (the usual destination for evidence),
   # then the open notes. `detail` is scan context AND filter fodder — an issue's host and
   # status, a note's first line — so `issue pending h.test` narrows without leaving the card.
-  #
-  # `issues_only` is the LINK & FREEZE mode's list (#1038): a note owns no evidence.
-  private def link_picker_rows(issues_only : Bool = false) : Array(LinkPicker::Row)
+  private def link_picker_rows : Array(LinkPicker::Row)
     rows = @session.store.issues.map do |f|
       # Joined from the parts that are actually there: an issue filed from a Repeater/Fuzz
       # session carries no host, and "#{nil} · open" renders as a dangling "· open".
@@ -363,7 +357,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       LinkPicker::Row.new(Store::LinkOwnerKind::Issue, f.id,
         "##{f.id} [#{f.severity.label}] #{f.title}", f.title, detail)
     end
-    return rows if issues_only
     doc = Notes.load(@session.store)
     doc.notes.each_with_index do |entry, i|
       # "untitled", not "note N": `name` is what the toast says after the kind word, and

@@ -24,32 +24,32 @@ describe "Gori::Verbs.register_links" do
     ids = [] of String
     r.each { |d| ids << d.id if d.id.starts_with?("link.") }
     ids.sort.should eq(
-      ["link.fuzzer.attach", "link.history-detail.attach", "link.history-detail.freeze",
-       "link.history.attach", "link.history.freeze",
-       "link.miner.attach", "link.repeater.attach", "link.repeater.freeze"])
+      ["link.fuzzer.attach", "link.history-detail.attach",
+       "link.history.attach", "link.miner.attach", "link.repeater.attach"])
   end
 
-  it "offers Link & freeze beside Link on the same gate, and only where one exchange exists" do
-    # A freeze copies ONE request/response pair (#1038). A flow and a Repeater tab have one;
-    # a fuzz or miner session is a template plus a run, so neither gets the verb.
-    {"link.history.freeze"        => Gori::Verb::Scope::Body,
-     "link.history-detail.freeze" => Gori::Verb::Scope::HistoryDetail,
-     "link.repeater.freeze"       => Gori::Verb::Scope::Repeater,
-    }.each do |id, scope|
-      r[id].scope.should eq(scope)
-      r[id].menu_key.should eq('Z')
-      r[id].title.should eq("Link & freeze…")
-      verb_intents(r, id).should eq([:link_attach_freeze])
+  it "has NO freeze twin any more — Link… freezes, and the picker says so per row" do
+    # The `Z` pair (#1038) is gone: offering both made the operator answer "pointer or
+    # bytes?" at the moment of filing, which is a question about the storage model asked
+    # while their attention is on the finding — and the answer was almost always "bytes".
+    # The remaining verb's DESCRIPTION has to carry that, because it is what the palette
+    # and the menu show before the card opens.
+    ids = [] of String
+    r.each { |d| ids << d.id if d.id.includes?("freeze") }
+    ids.should eq(["issue.freeze-link"]) # the RELATED row's `f`, which is a different act
+
+    r.each do |d|
+      d.title.should_not eq("Link & freeze…") if d.id.starts_with?("link.")
     end
-    ctx = FakeExecContext.new
-    ctx.current_tab = :history
-    r["link.history.freeze"].available?(ctx).should be_false
-    ctx.link_flow = 9_i64
-    r["link.history.freeze"].available?(ctx).should be_true
-    ctx.current_tab = :repeater
-    r["link.repeater.freeze"].available?(ctx).should be_false
-    ctx.link_repeater = 3_i64
-    r["link.repeater.freeze"].available?(ctx).should be_true
+    {"link.history.attach", "link.history-detail.attach", "link.repeater.attach"}.each do |id|
+      r[id].description.should contain("freezing")
+      r[id].menu_key.should eq('k')
+    end
+    # Not the Miner or the Fuzzer: a template plus a run is not one exchange
+    # (`Evidence.freezable?`), so their descriptions must not promise a copy.
+    {"link.miner.attach", "link.fuzzer.attach"}.each do |id|
+      r[id].description.should_not contain("freez")
+    end
   end
 
   it "gates on the LINK id, not the selection — a flow with no row cannot be linked" do

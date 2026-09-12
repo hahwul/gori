@@ -7,6 +7,14 @@ module Gori
       EVIDENCE_LINK_HELP = "See also — attach flow/repeater/fuzz/miner evidence to an issue:\n" \
                            "  gori run links add --owner=issue --id=ISSUE_ID --ref=repeater --ref-id=REPEATER_ID"
 
+      # `links add` is a POINTER and stays one (#1038). The TUI's "Link…" decides for the
+      # operator and freezes by default, because it has one in front of it and a hint line to
+      # say so; the headless surfaces stay mechanism-named, because an agent or a script
+      # composes verbs and a verb that silently did two things is a worse contract. So say
+      # which verb does both rather than making the caller discover it.
+      ADD_KEEPS_NO_BYTES = "\nA pointer only. For a flow or repeater whose bytes must survive, use\n" \
+                           "`gori run evidence freeze --link` (it links too)."
+
       @[Subcommand("links", help: [
         {"links", "List/add/delete an issue's or note's evidence links"},
       ])]
@@ -116,7 +124,9 @@ module Gori
       end
 
       private def self.cmd_links_mutate(args : Array(String), *, add : Bool) : Nil
-        verb = add ? "add" : "delete"
+        # One branch for all three words this flag changes, rather than a ternary per use:
+        # the parser body is already at the cyclomatic ceiling the lint gate holds.
+        verb, action, tail = add ? {"add", "Attach", ADD_KEEPS_NO_BYTES} : {"delete", "Detach", ""}
         db_path : String? = nil
         project_name : String? = nil
         owner_s = "issue"
@@ -127,7 +137,7 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run links #{verb} --owner=issue|note --id=N --ref=KIND --ref-id=M\n\n" \
-                     "#{add ? "Attach" : "Detach"} an evidence pointer. --ref is flow|repeater|fuzz|miner."
+                     "#{action} an evidence pointer. --ref is flow|repeater|fuzz|miner.#{tail}"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }

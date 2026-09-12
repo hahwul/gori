@@ -5,6 +5,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # evidence come from the first flow; the rest ride along as extra_flow_ids and are linked
   # after the insert — so marking 5 flows and pressing ⇧F files one finding with five samples,
   # not five issues.
+  #
+  # And the bytes go with it (#1038). This is the most-used filing path in the program, so it
+  # follows the same rule "Link…" does: what proved the finding is COPIED, not only pointed
+  # at. The copies are taken and their gates answered BEFORE the form opens — the operator is
+  # about to spend a minute on a title, and an exchange can change underneath it — then handed
+  # to the form, which writes them once the issue exists. A pending flow is attached exactly
+  # as it is today; it simply has no bytes to keep.
   def issue_create : Nil
     ids = history_target_flow_ids
     return if ids.empty?
@@ -20,8 +27,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     row = primary.try { |id| @session.store.flow_row(id) }
     row ||= ids.each.compact_map { |id| @session.store.flow_row(id) }.first?
     return (@toast = "no flows left to file an issue for") unless row
-    open_issue_form(IssueForm.new("#{row.method} #{row.target}", row.host, row.id,
-      extra_flow_ids: ids.reject(row.id)))
+    extra = ids.reject(row.id)
+    refs = ([row.id] + extra).map { |id| {Store::LinkRefKind::Flow, id} }
+    with_freeze_gates(evidence_snapshots(refs).compact_map(&.snapshot), "a new issue") do |copies|
+      open_issue_form(IssueForm.new("#{row.method} #{row.target}", row.host, row.id,
+        extra_flow_ids: extra, snapshots: copies))
+    end
   end
 
   def issues_new : Nil

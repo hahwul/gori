@@ -347,6 +347,19 @@ migrations in `src/gori/store/schema.cr`.
   not the wire: the send seam expands `$NAME` and overlays the active slot, so a wire digest
   would call every tab using either one drifted. A NULL digest is NOT RECORDED, never a
   verdict, so a response persisted before the column existed keeps freezing as it did.
+  ONE verb files it. "Link…" and "Link & freeze…" used to sit side by side, which made the
+  operator answer "pointer or bytes?" at the moment of FILING — a question about the storage
+  model, asked when their attention is on the finding, and whose answer was almost always
+  "bytes". So `↵` on an ISSUE row freezes whenever the ref has an exchange, the link is the
+  primary act (a refusal, a declined gate or the quota changes what is KEPT, never whether the
+  link happened), and the refusal is NAMED in the same toast. The TUI is the surface with an
+  operator and a hint line, so it can decide by default; the headless surfaces stay
+  MECHANISM-named — `links add` / `add_link` are pointers, `evidence freeze --link` /
+  `freeze_evidence` are pointer-plus-copy — because an agent or a script composes verbs and a
+  verb that silently did two things would be a worse contract than two that each do one.
+  Probe's automatic issue filing does NOT freeze: a snapshot is the operator saying "these
+  bytes proved it", and an unconfirmed finding filed by a rule has not said that, nor should
+  it spend a bounded budget to guess.
 - **Retest**: an Issue's REPRODUCIBLE check — ordered `issue_retest_steps` (each a Repeater
   session, a role, and at most one assertion) plus a bounded `issue_retest_runs` history and
   its per-step rows. Kept OUT of `entity_links`, deliberately: a link answers what material

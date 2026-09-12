@@ -144,7 +144,8 @@ module Gori
         tool j, "add_link",
           "Attach an evidence pointer from an Issue or Note to a Flow / Repeater tab / " \
           "Fuzz or Miner run. Idempotent — re-linking the same pair returns " \
-          "already_linked:true rather than erroring or duplicating." do |s|
+          "already_linked:true rather than erroring or duplicating. A pointer only: for a " \
+          "flow or repeater whose bytes must survive, use freeze_evidence (it links too)." do |s|
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
           s.field "ref_kind", enumprop("which workbench entity the link points at", LINK_REFS), required: true

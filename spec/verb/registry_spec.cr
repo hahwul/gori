@@ -1023,10 +1023,6 @@ private class FakeContext < ExecContext
     @calls << :link_attach
   end
 
-  def link_attach_freeze : Nil
-    @calls << :link_attach_freeze
-  end
-
   def link_flow_id : Int64?
     nil
   end

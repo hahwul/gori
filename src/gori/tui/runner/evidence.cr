@@ -3,10 +3,62 @@ require "../../redact/wire"
 
 # Frozen issue evidence (#1038) — reopens Gori::Tui::Runner (see tui/runner.cr for the
 # event loop, Host facade, overlays, and rendering). Every entry point that freezes an
-# exchange lands here: the Issues detail's RELATED row, the LINKS card's `f`, the
-# "Link & freeze…" picker from History / the History detail / the Repeater, and the
-# "+ New issue…" row of that picker. One snapshot builder, one confirm, one write.
+# exchange lands here: the Issues detail's RELATED row, the LINKS card's `f`, the LINK
+# picker from History / the History detail / the Repeater, its "+ New issue…" row, and
+# History's "Add issue". One snapshot builder, one pair of gates, one write.
+#
+# There is no "Link & freeze…" verb any more. Choosing between a pointer and the bytes made
+# the operator understand an implementation detail (a link is mutable, retention and the next
+# send can hollow it out) at the moment of FILING, and the answer was almost always "keep the
+# bytes" — so ↵ on an issue freezes whenever the ref has an exchange, and says so when it
+# cannot. The link is the primary act: a refusal, a declined gate or a quota wall changes what
+# is KEPT, never whether the link happened, and the toast accounts for both halves.
 class Gori::Tui::Runner < Gori::Verb::ExecContext
+  # One ref, and either the copy of its exchange or the sentence that says why there is none
+  # — `Evidence.snapshot_for`'s own words, the ones the CLI and MCP print. A ref with no
+  # exchange is NOT dropped from the set the way the old freeze picker dropped it: it still
+  # gets its link, and the refusal is what the toast names it with.
+  record LinkSnapshot,
+    kind : Store::LinkRefKind,
+    id : Int64,
+    snapshot : Evidence::Snapshot?,
+    refusal : String? do
+    def ref : {Store::LinkRefKind, Int64}
+      {@kind, @id}
+    end
+  end
+
+  # What one ↵ on the link picker did, and the single sentence it reports. A class-level
+  # record because `Runner.new` owns a terminal and appears nowhere under spec/ — this is
+  # the seam the spec drives, the way `Runner.drift_confirm_message` is.
+  record LinkOutcome,
+    owner : String,
+    refs : Int32,
+    linked : Int32,
+    gone : Int32,
+    frozen : Array(Int64),
+    bytes : Int64,
+    refusal : String? do
+    def toast : String
+      parts = [head]
+      parts << "#{@refs - @gone - @linked} already linked" if @refs > 1 && @refs - @gone > @linked
+      parts << "#{@gone} no longer available" if @gone > 0
+      if @frozen.size == 1
+        parts << "frozen as evidence ##{@frozen[0]} (#{Fmt.size(@bytes)})"
+      elsif @frozen.size > 1
+        parts << "#{@frozen.size} frozen (#{Fmt.size(@bytes)})"
+      end
+      # NAMED, never swallowed: "linked" on its own would read as if the bytes were kept.
+      parts << "not frozen: #{@refusal}" if @refusal
+      parts.join(" · ")
+    end
+
+    private def head : String
+      return "already linked to #{@owner}" if @linked.zero? && @gone.zero?
+      @refs == 1 ? "linked to #{@owner}" : "linked #{@linked} flows to #{@owner}"
+    end
+  end
+
   # --- the two gates the IssuesDetail verbs read ---------------------------
 
   # A LIVE History/Repeater row under the RELATED cursor that still resolves.
@@ -365,53 +417,99 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
-  # --- the LINK & FREEZE picker ---------------------------------------------
+  # --- ↵ on an issue row of the LINK picker ---------------------------------
 
-  def link_attach_freeze : Nil
-    link_attach(freeze: true)
-  end
-
-  # ↵ on an existing issue in the picker's freeze mode. Runs from the picker's `on_close`
-  # (a large copy raises a confirm, and the shell would tear down a modal opened from
-  # inside the picker's own commit), so `back` restores the History drill-in the pick was
-  # made from, exactly as the picker's own `on_close` did before it was replaced. The
-  # snapshots were taken BEFORE the picker opened (`link_attach`), so nothing the operator
-  # picked can be discarded here for want of an exchange.
-  private def link_and_freeze(issue_id : Int64, snaps : Array(Evidence::Snapshot), back : Proc(Nil)) : Nil
-    freeze_into_issue(issue_id, snaps, link: true, after: back) do |ids, refusal|
-      refresh_issue_evidence(issue_id, nil)
-      refresh_evidence_markers
-      done = if ids.size == 1 && snaps.size == 1
-               "linked to issue ##{issue_id} and frozen as evidence ##{ids[0]} (#{Fmt.size(snaps[0].bytes)})"
-             else
-               "linked & frozen #{ids.size} of #{snaps.size} on issue ##{issue_id}"
-             end
-      @toast = refusal ? "#{done} · #{refusal}" : done
+  # The one-verb path (#1038). Runs from the picker's `on_close` (a gate raises a confirm, and
+  # the shell would tear down a modal opened from inside the picker's own commit), so `back`
+  # restores the History drill-in the pick was made from. The snapshots were taken BEFORE the
+  # picker opened (`link_attach`) — an exchange that changes while the card is up is exactly
+  # the race a freeze exists to close.
+  #
+  # Every ref is linked either way. Only the ones that HAVE an exchange ride the freeze, and a
+  # declined gate falls back to the plain link rather than abandoning the operator's act: they
+  # answered "don't keep these bytes", not "don't file this link".
+  private def link_and_freeze(issue_id : Int64, owner : String,
+                              snaps : Array(LinkSnapshot), back : Proc(Nil)) : Nil
+    copies = snaps.compact_map(&.snapshot)
+    none = [] of Int64
+    if copies.empty?
+      finish_link(issue_id, owner, snaps, none, nil)
+      back.call
+      return
+    end
+    declined = -> { finish_link(issue_id, owner, snaps, none, FREEZE_DECLINED) }
+    freeze_into_issue(issue_id, copies, link: true, after: back, declined: declined) do |ids, refusal|
+      finish_link(issue_id, owner, snaps, ids, refusal)
     end
   end
 
-  # "+ New issue…" in freeze mode: the byte cost is asked about BEFORE the form opens, so
-  # the form's commit — which already chains the open-vs-stay confirm — never has to raise a
-  # second one. The snapshots were taken when the picker opened and are handed to the form;
-  # an exchange that changes while the operator types the title is exactly the race a
-  # freeze exists to close. A declined confirm runs `back`, so the History drill-in the pick
-  # came from is put back rather than left torn down with nothing on screen.
-  private def open_issue_form_for_freeze(refs : Array({Store::LinkRefKind, Int64}), snaps : Array(Evidence::Snapshot),
-                                         typed : String, back : Proc(Nil)) : Nil
-    open_form = -> { open_issue_form_for_link(refs, typed, snapshots: snaps) }
-    total = snaps.sum(&.bytes)
+  FREEZE_DECLINED = "you chose not to keep the bytes"
+
+  # Close the act and report it ONCE. The copies `write_frozen` managed carry their own link
+  # (`freeze_evidence(link: true)`, one transaction); every other ref — never freezable, past
+  # the refusal that stopped the batch, or frozen not at all — is linked here, so a quota wall
+  # or a declined gate can never leave the operator with nothing.
+  private def finish_link(issue_id : Int64, owner : String, snaps : Array(LinkSnapshot),
+                          frozen : Array(Int64), refusal : String?) : Nil
+    # `write_frozen` writes in order and stops at the first refusal, so the first `frozen.size`
+    # freezable refs are the ones already linked; the rest still need their row.
+    kept = 0
+    plain = snaps.reject do |s|
+      next false unless s.snapshot
+      kept += 1
+      kept <= frozen.size
+    end
+    live = plain.select { |s| !s.kind.flow? || !@session.store.flow_row(s.id).nil? }
+    linked = frozen.size + @session.store.add_links(Store::LinkOwnerKind::Issue, issue_id, live.map(&.ref))
+    refresh_link_owners(Store::LinkOwnerKind::Issue, issue_id)
+    refresh_issue_evidence(issue_id, frozen.size == 1 ? frozen[0] : nil)
+    refresh_evidence_markers unless frozen.empty?
+    bytes = snaps.compact_map(&.snapshot)[0, frozen.size].sum(&.bytes)
+    @toast = LinkOutcome.new(owner, snaps.size, linked, plain.size - live.size,
+      frozen, bytes, refusal || unfrozen_reason(plain)).toast
+  end
+
+  # Why the refs that were not frozen were not. The FIRST refusal stands for the set — they
+  # are nearly always the same sentence (a marked page of pending flows), and a toast is one
+  # line. nil when there is nothing to explain.
+  private def unfrozen_reason(plain : Array(LinkSnapshot)) : String?
+    plain.each { |s| s.refusal.try { |r| return r } }
+    nil
+  end
+
+  # "+ New issue…": the gates are answered BEFORE the form opens, so the form's commit —
+  # which already chains the open-vs-stay confirm — never has to raise a second modal, and
+  # the operator is not asked to type a title only to have the answer thrown away. A declined
+  # gate opens the form anyway, with no copies: the issue and its link are still wanted.
+  private def open_issue_form_freezing(refs : Array({Store::LinkRefKind, Int64}),
+                                       snaps : Array(LinkSnapshot), typed : String) : Nil
+    with_freeze_gates(snaps.compact_map(&.snapshot), "a new issue") do |copies|
+      open_issue_form_for_link(refs, typed, snapshots: copies)
+    end
+  end
+
+  # The drift question then the byte cost, then `open` with whatever survived them — the same
+  # order and the same chaining `freeze_into_issue` uses, for callers that open a FORM instead
+  # of writing (the two "+ New issue…" paths: the link picker's create row and History's Add
+  # issue). Both gates open a modal and return, so `open` runs from their `on_close`.
+  private def with_freeze_gates(copies : Array(Evidence::Snapshot), dest : String,
+                                &open : Array(Evidence::Snapshot) -> Nil) : Nil
+    plain = -> { open.call([] of Evidence::Snapshot) }
+    return plain.call if copies.empty?
+    full = -> { open.call(copies) }
+    total = copies.sum(&.bytes)
     cost = -> {
       if total >= Evidence::LARGE_BYTES
-        confirm_freeze_cost(total, snaps.size, "a new issue", open_form, declined: back)
+        confirm_freeze_cost(total, copies.size, dest, full, declined: plain)
       else
-        open_form.call
+        full.call
       end
       nil
     }
     # BEFORE the byte cost, which is the same order `freeze_into_issue` uses: "these bytes are
     # not one exchange" has to be answered before "these bytes cost 3 MB", or the operator
     # pays attention to the size of a copy they would not have taken.
-    gate_request_drift(snaps, cost, declined: back)
+    gate_request_drift(copies, cost, declined: plain)
   end
 
   # --- shared core ----------------------------------------------------------
@@ -427,30 +525,33 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     snap
   end
 
-  # The batch form, for the History list's marked set: refs that cannot be frozen are
-  # skipped and counted rather than aborting the rest (#442's rule) — the last refusal is
-  # the toast, and the caller's summary names the count. Capped like every other per-flow
-  # batch verb — each copy is a blocking write on the render loop.
-  private def evidence_snapshots(refs : Array({Store::LinkRefKind, Int64})) : Array(Evidence::Snapshot)
-    snaps = [] of Evidence::Snapshot
-    if refs.size > 1
-      # Refused whole above the cap (the toast is set there), never silently trimmed.
-      return snaps unless batch_within_cap(refs.map { |_, id| id }, "freeze")
+  # The batch form, for the History list's marked set. Every ref comes back (#1038) — with
+  # its copy, or with the sentence that says why it has none — because the LINK is the act
+  # and a ref with no exchange still gets one. Capped like every other per-flow batch verb:
+  # each copy is a blocking write on the render loop. Above the cap nothing is frozen and
+  # everything is still linked, which is one transaction whatever the count.
+  private def evidence_snapshots(refs : Array({Store::LinkRefKind, Int64})) : Array(LinkSnapshot)
+    capped = refs.size > 1 && batch_within_cap(refs.map { |_, id| id }, "freezing").nil?
+    refs.map do |kind, id|
+      # A fuzz or miner session was never a candidate (`Evidence.freezable?`), so it carries NO
+      # refusal — only a missing copy. The operator did not ask for bytes there, and a toast
+      # explaining that a mining run is a template plus a run would ride every single link
+      # made from those two tabs.
+      next LinkSnapshot.new(kind, id, nil, nil) unless Evidence.freezable?(kind)
+      next LinkSnapshot.new(kind, id, nil, FREEZE_CAPPED) if capped
+      res = Evidence.snapshot_for(@session.store, kind, id)
+      res.is_a?(String) ? LinkSnapshot.new(kind, id, nil, res) : LinkSnapshot.new(kind, id, res, nil)
     end
-    refs.each do |kind, id|
-      if snap = evidence_snapshot(kind, id)
-        snaps << snap
-      end
-    end
-    snaps
   end
+
+  FREEZE_CAPPED = "freezing is capped at #{BATCH_SUBTAB_CAP} flows"
 
   # Confirm-if-large, then write every snapshot, then `yield` the ids written and the
   # refusal that stopped the batch, if one did (never called when nothing was written and
   # nothing refused). `after` runs on EVERY exit — declined confirm included — and is where
   # a caller puts the modal back where it was.
   private def freeze_into_issue(issue_id : Int64, snaps : Array(Evidence::Snapshot), *,
-                                link : Bool, after : Proc(Nil)? = nil,
+                                link : Bool, after : Proc(Nil)? = nil, declined : Proc(Nil)? = nil,
                                 &done : Array(Int64), String? -> Nil) : Nil
     total = snaps.sum(&.bytes)
     write = -> {
@@ -460,14 +561,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     }
     cost = -> {
       if total >= Evidence::LARGE_BYTES
-        confirm_freeze_cost(total, snaps.size, "issue ##{issue_id}", write, after: after)
+        confirm_freeze_cost(total, snaps.size, "issue ##{issue_id}", write, after: after, declined: declined)
       else
         write.call
         after.try(&.call)
       end
       nil
     }
-    gate_request_drift(snaps, cost, after: after)
+    gate_request_drift(snaps, cost, after: after, declined: declined)
   end
 
   # The drift question (#1038), raised BEFORE the byte cost and only when a snapshot needs
@@ -570,6 +671,23 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       log_evidence_frozen(issue_id, id, snap)
     end
     {ids, nil}
+  end
+
+  # The tail every "issue created" toast carries when the form was opened holding copies
+  # (#1038) — the link picker's "+ New issue…" and History's "Add issue" alike. Written now
+  # that there is an issue to own them; the links were filed with the insert, so `link: false`
+  # and no second row. Empty when the form carried nothing, which is every other create path
+  # (`issues_new`, the retest Diff's file-and-stay).
+  private def write_form_snapshots(issue_id : Int64, form : IssueForm) : String
+    return "" if form.snapshots.empty?
+    frozen, refusal = write_frozen(issue_id, form.snapshots, false)
+    refresh_evidence_markers
+    parts = [] of String
+    parts << (frozen.size == 1 ? "frozen as evidence ##{frozen[0]}" : "#{frozen.size} frozen") unless frozen.empty?
+    # The refusal rides the SAME toast: a "created and linked" line alone would read as
+    # success for copies that were never written.
+    parts << "not frozen: #{refusal}" if refusal
+    parts.empty? ? "" : " · #{parts.join(" · ")}"
   end
 
   private def freeze_refusal(issue_id : Int64, status : Store::FreezeStatus) : String
