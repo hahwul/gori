@@ -381,9 +381,6 @@ module Gori::Discover
       BINARY_EXT.includes?(path[(dot + 1)..].downcase)
     end
 
-    # Resolve `href` (from a page at `base`) into an absolute http(s) URL, or nil for
-    # non-http / fragment-only / unparseable. Handles absolute, scheme-relative (//h/p),
-    # absolute-path (/p), and relative (p, ../p) forms with dot-segment normalization.
     # Answers `s.downcase`, returning `s` ITSELF when lowering it would change nothing — which
     # is the common href, since a link is written lowercase. `resolve` lowers every href it is
     # handed only to test a handful of scheme prefixes and to feed `scheme_prefixed?`, so that
@@ -398,6 +395,9 @@ module Gori::Discover
       s
     end
 
+    # Resolve `href` (from a page at `base`) into an absolute http(s) URL, or nil for
+    # non-http / fragment-only / unparseable. Handles absolute, scheme-relative (//h/p),
+    # absolute-path (/p), and relative (p, ../p) forms with dot-segment normalization.
     def self.resolve(base : Parts, href : String) : String?
       h = href.strip
       return nil if h.empty?
