@@ -13,13 +13,19 @@ require "../../src/gori/tui/export_overlay"
 
 include Gori::Tui
 
-# The hints a measured walk through the core loop caught either LYING or missing — one
-# example per finding, each pinned on the string the operator actually reads.
+# What a measured walk through the core loop (History → Repeater → Link → Issue → export)
+# found wrong, one example per finding, each pinned on the thing the operator actually reads
+# or presses.
 #
-# A strip is the only teacher gori has for a key that has no button: every one of these was
-# a key that worked, from a pane whose strip did not name it, or a token that named an act
-# other than the one ↵ was about to perform. They are grouped by finding id so the walk that
-# found them and the example that holds them shut can be read together.
+# Most of them are hints. A strip is the only teacher gori has for a key that has no button,
+# and every one of these was a key that worked from a pane whose strip did not name it, or a
+# token that named an act other than the one ↵ was about to perform. The rest are a verb that
+# filled a tab without going there, and a refusal that named no way forward. They are grouped
+# by finding id so the walk that found them and the example that holds them shut can be read
+# together.
+#
+# Two of the findings live in `Runner`, which owns a terminal and appears nowhere under spec/,
+# so they are read from source the way spec/tui/digit_family_spec.cr reads the dispatch order.
 
 # History keeps the drill-in's OPEN state in the shell, so the controller has to be told.
 private class DetailHost < FakeHost
@@ -226,6 +232,30 @@ describe "the core-loop hints" do
       dlg = ConfirmDialog.new("ISSUE CREATED", "issue #21 created and linked.",
         confirm_label: "open", cancel_label: "stay", danger: false)
       dlg.hint.should eq("←/→ choose · ↵ open · y open · n/esc stay")
+    end
+  end
+
+  describe "F8 — Compare goes to the Comparer, like every sibling Send verb" do
+    comparer_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "comparer.cr"))
+
+    it "navigates once BOTH slots are filled" do
+      body = comparer_src[/private def comparer_add_pair.*?\n  end/m]
+      body.should_not be_nil, "comparer_add_pair is gone — this scan rotted before the rule did"
+      body.not_nil!.should contain("goto_tab(:comparer)")
+    end
+
+    it "stays put on a ONE-slot fill, where the next thing to do is mark the other flow" do
+      {"comparer_add_selected", "comparer_add_repeater", "comparer_add_sitemap",
+       "comparer_add_fuzz"}.each do |name|
+        body = comparer_src[Regex.new("  def #{name}.*?\n  end", Regex::Options::MULTILINE)]
+        body.should_not be_nil, "#{name} is gone"
+        body.not_nil!.should_not contain("goto_tab"), "#{name} navigates off a half-filled diff"
+      end
+    end
+
+    it "never points at the palette for a tab the Go-to picker reaches" do
+      comparer_src.should_not contain("(^P)")
+      comparer_src.should contain("open Comparer (0)")
     end
   end
 
