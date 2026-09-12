@@ -886,6 +886,82 @@ describe Gori::Scope do
   end
 end
 
+# The per-request evaluators reduce the url and the host ONCE for a whole rule walk instead of
+# once per rule — `url_down` only when a `string` rule can read it (nothing else does), and the
+# host through `HostPattern.normalize`. Both are allocation changes and neither may move a
+# verdict, so these pin the verdicts across the shapes the two reductions touch: a scope with no
+# string rule (where `url_down` is now the raw url), a mixed-case url against a string rule, and
+# the host spellings `normalize` folds.
+describe "Gori::Scope hot-path reductions" do
+  it "keeps a string rule case-insensitive when the url arrives mixed-case" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "string", "/LogOut")
+      scope.enable
+      # The rule pattern and the url differ in case on BOTH sides; only `url_down` can bridge it.
+      scope.in_scope_url?("https://acme.test/LOGOUT", "acme.test").should be_false
+      scope.in_scope_url?("https://acme.test/logout", "acme.test").should be_false
+      scope.excluded?("https://acme.test/LogOut?x=1", "acme.test").should be_true
+      scope.in_scope_url?("https://acme.test/dashboard", "acme.test").should be_true
+    end
+  end
+
+  it "a HOST-only scope (no string rule) judges a mixed-case url exactly as before" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "*.acme.test")
+      scope.add("exclude", "host", "telemetry.acme.test")
+      scope.enable
+      scope.enable_sandbox
+      # Nothing here reads url_down, so the url goes through un-lowered — the verdict is the
+      # host's either way, whatever case the path arrived in.
+      scope.in_scope_url?("https://API.Acme.Test/Admin", "API.Acme.Test").should be_true
+      scope.in_scope_url?("https://API.Acme.Test/Admin", "api.acme.test").should be_true
+      scope.sandbox_blocks?("https://Telemetry.Acme.Test/Beacon", "Telemetry.Acme.Test").should be_true
+      scope.sandbox_blocks?("https://api.acme.test/x", "api.acme.test").should be_false
+      scope.matching_include_id("https://API.Acme.Test/x", "API.Acme.Test").should_not be_nil
+    end
+  end
+
+  it "folds the host spellings HostPattern.normalize folds, at every gate" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.add("include", "host", "[::1]")
+      scope.enable
+      scope.enable_sandbox
+      # bracketed/bare IPv6, a trailing root dot and mixed case are one host to every gate.
+      ["ACME.test", "acme.test.", "api.ACME.test."].each do |h|
+        scope.in_scope_url?("http://#{h}/x", h).should be_true
+        scope.may_match_host?(h).should be_true
+        scope.sandbox_blocks_host?(h).should be_false
+        scope.host_in_scope?(h).should be_true
+      end
+      # NOT "[::1]." — `bare` peels a bracket pair only when the string ENDS with `]`, so the
+      # dotted-bracketed spelling keeps its brackets and matches nothing. Long-standing, and
+      # unchanged by hoisting the reduction: the old per-rule path computed the same string.
+      ["::1", "[::1]", "::1."].each do |h|
+        scope.may_match_host?(h).should be_true
+        scope.sandbox_blocks_host?(h).should be_false
+      end
+      scope.may_match_host?("evil.test").should be_false
+      scope.sandbox_blocks_host?("evil.test").should be_true
+    end
+  end
+
+  it "a REGEX rule stays case-SENSITIVE — it never read url_down" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "regex", "/admin(/|$)")
+      scope.enable
+      scope.in_scope_url?("http://acme.test/admin", "acme.test").should be_false
+      scope.in_scope_url?("http://acme.test/ADMIN", "acme.test").should be_true
+    end
+  end
+end
+
 # A host rule matches the BARE host, so a pattern carrying a scheme/path/userinfo/whitespace
 # can never fire — the same silent-dead-rule failure the :PORT check prevents, reached by the
 # same mistake (pasting a URL where a host goes). Only the port shape was checked, so

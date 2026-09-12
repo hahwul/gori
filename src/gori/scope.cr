@@ -90,9 +90,21 @@ module Gori
       # byte-identical to the 2-arg form. `url` (unlowered) is kept for the regex subject,
       # which scrubs but must not case-fold.
       def matches?(url : String, host : String, url_down : String) : Bool
+        matches?(url, host, url_down, nil)
+      end
+
+      # Same match again, but the caller ALSO supplies the host already reduced to the form
+      # `HostPattern::Compiled#matches_bare?` compares against (`HostPattern.normalize`).
+      # `host_match?` did that reduction itself — a lowercased copy plus a bracket/root-dot
+      # peel — once per HOST RULE, and a Scope evaluation runs every include and every
+      # exclude against the SAME host, so a scope with a handful of host rules re-normalized
+      # it that many times on every proxied request and every CONNECT. The evaluators
+      # normalize once and pass it here; nil keeps the 3-arg form (and the specs that call
+      # it) normalizing per rule, which is the same string either way.
+      def matches?(url : String, host : String, url_down : String, host_bare : String?) : Bool
         case @match_type
         when "host"
-          host_match?(host)
+          host_bare ? host_match_bare?(host_bare) : host_match?(host)
         when "string"
           url_down.includes?(@pattern_down)
         when "regex"
@@ -122,6 +134,11 @@ module Gori
       private def host_match?(host : String) : Bool
         !!@host_pattern.try(&.matches?(host))
       end
+
+      # The same test against an ALREADY-normalized host (see the 4-arg `matches?`).
+      private def host_match_bare?(host_bare : String) : Bool
+        !!@host_pattern.try(&.matches_bare?(host_bare))
+      end
     end
 
     getter rules : Array(Rule)
@@ -140,10 +157,18 @@ module Gori
     # a consistent {rules, includes, excludes} triple. `assign_rules` is the one writer.
     @includes : Array(Rule)
     @excludes : Array(Rule)
+    # Does ANY rule read `url_down`? Only a `string` rule does — `host` and `regex` ignore the
+    # argument entirely — so when no rule is one, `url.downcase` is a whole-URL copy minted per
+    # request for a value nothing reads. A host-only scope is the ordinary shape of an
+    # engagement, so that was the common case paying it. Derived in `assign_rules` beside the
+    # partition and read under the SAME @mutex, so the flag can never describe a rule list
+    # other than the one being walked.
+    @string_rules : Bool
 
     def initialize(@store : Store, @rules : Array(Rule), @enabled : Bool, @sandbox : Bool = false)
       @includes = @rules.select(&.include?)
       @excludes = @rules.select(&.exclude?)
+      @string_rules = @rules.any? { |r| r.match_type == "string" }
       # @rules/@enabled are read on the PROXY hot path (in_scope_url?/may_match_host?/
       # filter/active?) while the TUI fiber mutates them (add/remove/update/toggle).
       # Guard every cross-fiber access with a mutex — only the TUI mutates, so its own
@@ -226,10 +251,11 @@ module Gori
     # short-circuits its own inactive case before calling, so it never reaches the guard.
     private def host_in_scope_unlocked?(host : String) : Bool
       return false if @rules.empty?
+      bare = HostPattern.normalize(host) # once for the whole walk, not once per host rule
       inc_ok = @includes.empty? ||
-               @includes.any? { |r| r.host_type? && r.matches?("", host) } ||
+               @includes.any? { |r| r.host_type? && r.matches?("", host, "", bare) } ||
                @includes.any? { |r| !r.host_type? }
-      excluded = @excludes.any? { |r| r.host_type? && r.matches?("", host) }
+      excluded = @excludes.any? { |r| r.host_type? && r.matches?("", host, "", bare) }
       inc_ok && !excluded
     end
 
@@ -257,8 +283,16 @@ module Gori
     # scanner (Discover) applies in every containment mode, INDEPENDENT of includes and the
     # display lens. (matches_url? requires includes; this asks only "is it carved out?".)
     def excluded?(url : String, host : String) : Bool
-      url_down = url.downcase # once, OUTSIDE the hot-path lock — see Rule#matches?(_, _, url_down)
-      @mutex.synchronize { @excludes.any? { |r| r.matches?(url, host, url_down) } }
+      @mutex.synchronize do
+        return false if @excludes.empty?
+        # Both reductions happen ONCE for the whole walk — see Rule#matches?(_, _, _, _).
+        # They read @string_rules, which is swapped with @excludes, so they sit inside the
+        # lock with it rather than ahead of it; the section still has no yield point, and on
+        # the single-threaded scheduler (no -Dpreview_mt) nothing else can run inside it.
+        url_down = url_down_unlocked(url)
+        bare = HostPattern.normalize(host)
+        @excludes.any? { |r| r.matches?(url, host, url_down, bare) }
+      end
     end
 
     # The id of the first INCLUDE rule that matches — the audit trail the active-sender gate
@@ -268,8 +302,12 @@ module Gori
     # url once, like the allowlist evaluators, and reads under @mutex rather than off the bare
     # getter. @includes keeps @rules order, so the first match is the same rule as before.
     def matching_include_id(url : String, host : String) : Int64?
-      url_down = url.downcase
-      @mutex.synchronize { @includes.find { |r| r.matches?(url, host, url_down) }.try(&.id) }
+      @mutex.synchronize do
+        return nil if @includes.empty?
+        url_down = url_down_unlocked(url) # see `excluded?` for why both sit inside the lock
+        bare = HostPattern.normalize(host)
+        @includes.find { |r| r.matches?(url, host, url_down, bare) }.try(&.id)
+      end
     end
 
     # The ALLOWLIST evaluation (callers hold @mutex): true ⇔ at least one INCLUDE rule
@@ -281,9 +319,10 @@ module Gori
     # through — it's the whole internet minus a few hosts.
     private def allowlisted_unlocked?(url : String, host : String) : Bool
       return false if @includes.empty?
-      url_down = url.downcase
-      @includes.any? { |r| r.matches?(url, host, url_down) } &&
-        @excludes.none? { |r| r.matches?(url, host, url_down) }
+      url_down = url_down_unlocked(url)
+      bare = HostPattern.normalize(host)
+      @includes.any? { |r| r.matches?(url, host, url_down, bare) } &&
+        @excludes.none? { |r| r.matches?(url, host, url_down, bare) }
     end
 
     # Pure Burp evaluation (includes empty ⇒ match all; then carve excludes). Shared by
@@ -291,9 +330,10 @@ module Gori
     # requires that); still guards empty for defense-in-depth.
     private def matches_url_unlocked?(url : String, host : String) : Bool
       return false if @rules.empty?
-      url_down = url.downcase
-      inc_ok = @includes.empty? || @includes.any? { |r| r.matches?(url, host, url_down) }
-      inc_ok && @excludes.none? { |r| r.matches?(url, host, url_down) }
+      url_down = url_down_unlocked(url)
+      bare = HostPattern.normalize(host)
+      inc_ok = @includes.empty? || @includes.any? { |r| r.matches?(url, host, url_down, bare) }
+      inc_ok && @excludes.none? { |r| r.matches?(url, host, url_down, bare) }
     end
 
     # Conservative HOST-level check behind `Interceptor#intercepts_host?`, made BEFORE any
@@ -343,9 +383,10 @@ module Gori
     # host_in_scope_unlocked? but with the allowlist's empty-includes ⇒ false rule.
     private def host_allowlisted_unlocked?(host : String) : Bool
       return false if @includes.empty?
-      inc_ok = @includes.any? { |r| r.host_type? && r.matches?("", host) } ||
+      bare = HostPattern.normalize(host) # once for the whole walk — see host_in_scope_unlocked?
+      inc_ok = @includes.any? { |r| r.host_type? && r.matches?("", host, "", bare) } ||
                @includes.any? { |r| !r.host_type? }
-      excluded = @excludes.any? { |r| r.host_type? && r.matches?("", host) }
+      excluded = @excludes.any? { |r| r.host_type? && r.matches?("", host, "", bare) }
       inc_ok && !excluded
     end
 
@@ -797,6 +838,14 @@ module Gori
       @rules = fresh
       @includes = fresh.select(&.include?)
       @excludes = fresh.select(&.exclude?)
+      @string_rules = fresh.any? { |r| r.match_type == "string" }
+    end
+
+    # The `url_down` the rule walk should be handed (callers hold @mutex). `url` itself when
+    # no `string` rule exists: every other match type ignores the argument, so the verdict is
+    # byte-identical and the copy is skipped. See @string_rules.
+    private def url_down_unlocked(url : String) : String
+      @string_rules ? url.downcase : url
     end
 
     # Flag writers: the in-memory field is swapped under @mutex (the hot path reads it
