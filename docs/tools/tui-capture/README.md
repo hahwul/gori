@@ -63,6 +63,16 @@ is not hypothetical: the Decoder scene shipped a picture of the OAST tab for
 three weeks after OAST went visible. When the catalog changes, read the tab
 strip back out of a capture and fix the numbers.
 
+`statusline.svg` is the one scene that edits `settings.json` before firing: the statusline
+ships off, so there is nothing to photograph until a command is configured. It runs last in
+`shoot_all` and puts the plain settings back, and it shoots the same History screen as the
+first scene on purpose — the picture is about the extra row at the bottom, so the rest of
+the frame has to be something the reader already recognises. Its command is a `jq` program
+built inside `write_statusline_settings`; it deliberately prints only fields that come
+straight off the live session (capture state, project, bind address, flow count, probe mode,
+catch-all upstream), so `SCENES=statusline` gives the same row whether or not the Issues
+scene has run first and promoted findings.
+
 `readme.svg` is its own shot (`shoot_readme`), not part of the doc set: the
 repo README renders one image edge to edge with no sidebar, so it uses a much
 wider 180x38 pane and tops the throwaway project up with extra traffic first.

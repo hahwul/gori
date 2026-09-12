@@ -438,11 +438,16 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 
 An opt-in extra row at the very bottom of the TUI (Preferences → **General** → **Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row. Think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from `settings.json` until you change it.
 
+<figure class="tui-shot">
+  <img src="/images/tui/statusline.svg" alt="gori History tab with a statusline row along the very bottom, below the status bar, showing the project name, capture state, flow count and scope state in coloured segments produced by a shell command">
+  <figcaption>The <strong>statusline</strong> is the last row, under the status bar: one line of your own shell command's output, refreshed on a timer.</figcaption>
+</figure>
+
 ```json
 {
   "statusline": {
     "enabled": true,
-    "command": "printf 'proj:%s flows:%s' \"$(jq -r .project)\" \"$(jq -r .flows)\"",
+    "command": "jq -r '\"\\(.project) · \\(.flows) flows\"'",
     "interval": 3,
     "timeout": 10
   }
@@ -460,9 +465,11 @@ The command's stdout is parsed for ANSI/SGR colour escapes (16-colour, 256-colou
 
 `timeout` is deliberately separate from `interval`. Runs never overlap (gori launches the next one only after the previous has finished), so a script slower than `interval` simply refreshes as fast as it can rather than being killed on every run. A run that does exceed `timeout` is terminated and the row reads `⋯ (timed out)`.
 
-A command that fails without printing anything reports its exit status instead of leaving the row blank: `⋯ (exit 127)` for a command that was not found, `⋯ (killed)` for one a signal ended. A command that exits cleanly having printed nothing leaves the row empty, which is a legitimate thing for a script to do. stderr is discarded either way.
+A command that fails without printing anything reports its exit status instead of leaving the row blank: `⋯ (exit 127)` for a command that was not found, `⋯ (killed)` for one a signal ended. A command that exits cleanly having printed nothing leaves the row empty, which is a legitimate thing for a script to do. stderr is discarded either way. Every one of these markers is drawn in the caution colour rather than in body text, so a statusline that has stopped working never reads as one reporting bad news.
 
 Edits take effect immediately: saving a new `command`, `interval` or `timeout` re-runs the command on the next frame instead of waiting out the current interval.
+
+#### The context on stdin {#statusline-context}
 
 Each run receives a JSON context on stdin describing the live session, so scripts can display proxy state without querying gori:
 
@@ -474,7 +481,12 @@ Each run receives a JSON context on stdin describing the live session, so script
   "flows": 1234,
   "proxy": { "host": "127.0.0.1", "port": 8070, "addr": "127.0.0.1:8070" },
   "upstream": "",
-  "upstream_rules": 0
+  "upstream_rules": 0,
+  "scope": { "active": true, "rules": 2, "sandbox": false },
+  "intercept": { "enabled": false, "queued": 0, "direction": "both" },
+  "probe": "passive",
+  "issues": 7,
+  "jobs": { "running": 1, "label": "fuzzing 1" }
 }
 ```
 
@@ -487,6 +499,44 @@ Each run receives a JSON context on stdin describing the live session, so script
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | The address the proxy is actually listening on |
 | `upstream` | string | The **catch-all** upstream proxy address/URI, or empty when connecting directly. A destination matched by an [upstream rule](#upstream-rules) routes elsewhere; this field does not reflect that |
 | `upstream_rules` | integer | Number of [upstream rules](#upstream-rules) in effect. Non-zero means routing is per-destination and `upstream` alone does not describe where traffic goes |
+| `scope.active` / `scope.rules` | bool / integer | Whether [scope](/guide/proxy/#scope) filtering is on, and how many rules it holds |
+| `scope.sandbox` | bool | Whether the [Sandbox](/guide/proxy/#sandbox) is blocking out-of-scope destinations outright, rather than merely not recording them |
+| `intercept.enabled` | bool | Whether catch is on. Real clients are held while it is |
+| `intercept.queued` | integer | Messages waiting for a decision right now |
+| `intercept.direction` | string | `both`, `requestonly` or `responseonly` — which leg is caught |
+| `probe` | string | The [scanner](/guide/scanning/#probe-the-scanner) mode: `off`, `passive` or `active` |
+| `issues` | integer | Issues recorded in this project |
+| `jobs.running` | integer | Background jobs in flight (fuzz, mine, discover, …) |
+| `jobs.label` | string \| null | What the status bar's activity chip says, e.g. `"fuzzing 1"`; `null` when nothing is running |
+
+Everything from `scope` down describes what gori is *set to do next* rather than what it has already captured — the same facts the top bar's chips carry, so a statusline can answer "is intercept still on?" without you looking up. The fields are additive and `version` stays `1`: a script written against an earlier context reads identically.
+
+**stdin is read once.** It is a pipe, not a file, so the first command that consumes it gets everything and the second gets nothing — `"$(jq -r .project)" "$(jq -r .flows)"` silently prints an empty flow count. Read the whole context with one `jq` (as above), or capture it first:
+
+```sh
+ctx=$(cat); printf '%s · %s flows' "$(echo "$ctx" | jq -r .project)" "$(echo "$ctx" | jq -r .flows)"
+```
+
+#### Examples {#statusline-examples}
+
+Each of these is one line and goes straight into `command` — the settings form's field is one line too. `\u001b` is how `jq` spells the escape character; the colours are optional.
+
+```sh
+# Project, capture state and counts, with a green dot while capture is on.
+jq -r '(if .capturing then "\u001b[32m●" else "\u001b[31m○" end) + "\u001b[0m \(.project)  \(.flows) flows  \(.issues) issues"'
+```
+
+```sh
+# Loud about the modes that change what the next request does — each shown only when it is on.
+jq -r '[ (select(.intercept.enabled) | "\u001b[33mINTERCEPT \(.intercept.queued)\u001b[0m"), (select(.scope.sandbox) | "\u001b[31mSANDBOX\u001b[0m"), (select(.jobs.running > 0) | .jobs.label) ] | join("  ")'
+```
+
+```sh
+# gori on the left, the machine on the right: the proxy endpoint and the current git branch.
+printf '%s | %s' "$(jq -r '"\(.project)@\(.proxy.addr)"')" "$(git branch --show-current 2>/dev/null)"
+```
+
+A command that backgrounds work (`curl … &`) must clean up after itself: gori kills the `/bin/sh` it started, and cannot reach anything that shell forked — it shares gori's own process group, so signalling the group would take gori down with it. A timed-out run is sent `SIGTERM` before `SIGKILL`, so a `trap … TERM` around `cmd & wait` gets to tidy up; the simpler answer is to bound the command itself (`curl --max-time 2`, `timeout 2 …`).
 
 ### display
 
