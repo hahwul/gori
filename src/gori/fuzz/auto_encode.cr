@@ -99,12 +99,25 @@ module Gori::Fuzz
     #
     # Returns `payloads` ITSELF when nothing applies, so a run with no encoded position
     # renders byte-for-byte the request it always did, with no extra allocation.
+    #
+    # And when every encoded position's payload encodes to ITSELF — an ordinary wordlist word
+    # in a query position, which is most requests of most sweeps — there is equally nothing to
+    # copy, so the array is duplicated lazily, on the first value that actually changes. The
+    # caller (`Generator#emit`) only reads the result, and the no-op return was already the
+    # contract above; this widens the same answer to the case where the encode ran and was the
+    # identity. `same?`, not `==`: `Encode#apply` returns the receiver on its fast path, so
+    # object identity is exactly "nothing to write" and costs no comparison of the bytes.
     def apply(payloads : Array(String), active : Int32?) : Array(String)
       return payloads if none?
       return payloads if active && !@positions.includes?(active)
-      payloads.map_with_index do |v, k|
-        (active.nil? || active == k) && @positions.includes?(k) ? ENCODER.apply(v) : v
+      encoded = nil.as(Array(String)?)
+      payloads.each_with_index do |v, k|
+        next unless (active.nil? || active == k) && @positions.includes?(k)
+        out = ENCODER.apply(v)
+        next if out.same?(v)
+        (encoded ||= payloads.dup)[k] = out
       end
+      encoded || payloads
     end
   end
 end

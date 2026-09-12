@@ -58,6 +58,13 @@ module Gori::Sequencer
     # max excursion that small over that many bits is not a near-miss — see `cusum_p`.
     CUSUM_MAX_TERMS = 10_000
 
+    # Int32 entries (1 MiB) the per-symbol-bit bias pass may use as scratch before it stops
+    # tallying per column and asks each token directly instead. The band this bounds is the
+    # one that shape is FOR — many short tokens, where the table is a few kilobytes — and a
+    # corpus of few but very long tokens falls out of it on the `min_len` side. See
+    # `symbol_bit_ones`.
+    BIAS_TALLY_MAX = 1 << 18
+
     enum Verdict
       Pass
       Warn
@@ -256,20 +263,12 @@ module Gori::Sequencer
       # Per-symbol-bit bias over the fixed window (feeds the chart + a test). Anchored to the
       # same end as the per-position pass above — a suffix-aligned corpus measured from the
       # start would score every column's bias against bytes from different logical fields.
-      window_bits = min_len * bps
-      ones_at = Array(Int32).new(window_bits, 0)
-      if bps > 0
-        usable.each do |t|
-          sl = t.to_slice
-          (0...min_len).each do |p|
-            v = idx_of.unsafe_fetch(sl[aligned_from_end ? sl.size - min_len + p : p])
-            (0...bps).each { |k| ones_at[p * bps + k] += 1 if (v >> (bps - 1 - k)) & 1 == 1 }
-          end
-        end
-      end
-      bit_bias = ones_at.map { |c| (c.to_f / n - 0.5).abs }
+      ones_at = symbol_bit_ones(usable, min_len, bps, idx_of, charset_size, aligned_from_end)
+      bit_bias = ones_at.map { |ones| (ones.to_f / n - 0.5).abs }
 
       bits = symbol_bits(region_bytes, idx_of, bps)
+      # Monobit / Runs / Long run / Cusum all read this ONE walk of the bitstream — see `BitScan`.
+      bit_scan = scan_bits(bits)
       sym_seq = symbol_seq(region_bytes, idx_of)
       # Over the WHOLE tokens, not the region: whether one value follows another is a property
       # of the value an operator was issued, and a counter hidden behind a constant prefix is
@@ -281,10 +280,10 @@ module Gori::Sequencer
       tests << TestRow.new("Sequential", seq ? "detected" : "none", seq_detail,
         seq ? Verdict::Fail : Verdict::Pass)
       tests << structure_test(constant_positions, min_len, aligned_from_end)
-      tests << gate_bits(monobit_test(bits, small), pow2)
+      tests << gate_bits(monobit_test(bit_scan, small), pow2)
       tests << gate_bits(poker_test(bits, small), pow2)
-      tests << gate_bits(runs_test(bits, small), pow2)
-      tests << gate_bits(longrun_test(bits, small), pow2)
+      tests << gate_bits(runs_test(bit_scan, small), pow2)
+      tests << gate_bits(longrun_test(bit_scan, small), pow2)
       tests << chi_square_test(gcounts, present, total_bytes, small)
       tests << serial_test(sym_seq, small)
       tests << compression_test(region_bytes, total_bytes, charset_size, small)
@@ -295,7 +294,7 @@ module Gori::Sequencer
       # through the stream (the monobit total stays balanced), Approx entropy a repeating block
       # structure (frequencies stay uniform), Spectral a periodicity — the signature of an LCG
       # or a time-seeded counter, which passes every frequency-and-runs test there is.
-      tests << gate_bits(cusum_test(bits, small), pow2)
+      tests << gate_bits(cusum_test(bit_scan, small), pow2)
       tests << gate_bits(approx_entropy_test(bits, small), pow2)
       tests << gate_bits(spectral_test(bits, small), pow2)
 
@@ -427,10 +426,65 @@ module Gori::Sequencer
         dups > 0 ? Verdict::Fail : Verdict::Pass)
     end
 
-    private def self.monobit_test(bits : Array(UInt8), small : Bool) : TestRow
+    # Everything four of the bit tests read off the symbol bitstream, collected in ONE pass.
+    #
+    # Monobit, Runs, Long run and Cusum are each a single linear walk of the same
+    # multi-megabit array, and they were four of them: Monobit and Runs BOTH called
+    # `bits.count(1_u8)` (the same count, twice), Long run walked it again for the longest
+    # identical stretch and Cusum a fourth time for the random walk's largest excursion. On a
+    # 50,000-token sample that is 6.4M elements traversed four times — 82 ms of the report's
+    # 153, re-paid on every TUI throttle tick and every MCP `sequence_results` poll (P6).
+    # None of the four needs anything the others compute, so the scan is hoisted here and each
+    # test keeps its own guards, thresholds and wording over the numbers it already used
+    # (measured, `bench/sequencer_stats_bench.cr`).
+    record BitScan,
+      size : Int32,
+      ones : Int64,
+      runs : Int64,
+      longest : Int32,
+      excursion : Int32
+
+    # `prev = 2_u8` (never a bit value) is `longrun_test`'s own opener, kept so the first
+    # element starts a run of 1; `runs` counts TRANSITIONS + 1, which is what
+    # `(1...size).each { runs += 1 if bits[i] != bits[i - 1] }` computed.
+    private def self.scan_bits(bits : Array(UInt8)) : BitScan
       n = bits.size
+      ones = 0_i64
+      runs = n > 0 ? 1_i64 : 0_i64
+      longest = 0
+      cur = 0
+      prev = 2_u8
+      walk = 0
+      excursion = 0
+      ptr = bits.to_unsafe
+      i = 0
+      while i < n
+        b = ptr[i]
+        if b == 1_u8
+          ones += 1
+          walk += 1
+        else
+          walk -= 1
+        end
+        if b == prev
+          cur += 1
+        else
+          runs += 1 unless i == 0
+          cur = 1
+          prev = b
+        end
+        longest = cur if cur > longest
+        a = walk.abs
+        excursion = a if a > excursion
+        i += 1
+      end
+      BitScan.new(n, ones, runs, longest, excursion)
+    end
+
+    private def self.monobit_test(scan : BitScan, small : Bool) : TestRow
+      n = scan.size
       return insufficient("Monobit", "#{n} bits") if n < 100
-      ones = bits.count(1_u8).to_i64
+      ones = scan.ones
       z = (2.0 * ones - n) / Math.sqrt(n.to_f)
       p = two_sided(z)
       TestRow.new("Monobit", "z=#{fmt(z)}", "ones #{pct(ones.to_f / n)}", grade(p, small))
@@ -450,14 +504,13 @@ module Gori::Sequencer
       TestRow.new("Poker", "X=#{fmt(x)}", "df 15", grade(p, small))
     end
 
-    private def self.runs_test(bits : Array(UInt8), small : Bool) : TestRow
-      n = bits.size
+    private def self.runs_test(scan : BitScan, small : Bool) : TestRow
+      n = scan.size
       return insufficient("Runs", "#{n} bits") if n < 100
-      ones = bits.count(1_u8).to_i64
+      ones = scan.ones
       zeros = n - ones
       return TestRow.new("Runs", "constant", "all bits identical", Verdict::Fail) if ones == 0 || zeros == 0
-      runs = 1_i64
-      (1...bits.size).each { |i| runs += 1 if bits[i] != bits[i - 1] }
+      runs = scan.runs
       mu = 2.0 * ones * zeros / n + 1.0
       variance = 2.0 * ones * zeros * (2.0 * ones * zeros - n) / (n.to_f * n * (n - 1))
       return insufficient("Runs", "#{runs} runs") if variance <= 0
@@ -466,21 +519,10 @@ module Gori::Sequencer
       TestRow.new("Runs", "#{runs}", "expected #{mu.round(0).to_i}", grade(p, small))
     end
 
-    private def self.longrun_test(bits : Array(UInt8), small : Bool) : TestRow
-      n = bits.size
+    private def self.longrun_test(scan : BitScan, small : Bool) : TestRow
+      n = scan.size
       return insufficient("Long run", "#{n} bits") if n < 100
-      longest = 0
-      cur = 0
-      prev = 2_u8
-      bits.each do |b|
-        if b == prev
-          cur += 1
-        else
-          cur = 1
-          prev = b
-        end
-        longest = cur if cur > longest
-      end
+      longest = scan.longest
       exp = Math.log2(n.to_f)
       verdict = if longest >= 2.5 * exp
                   small ? Verdict::Warn : Verdict::Fail
@@ -574,16 +616,10 @@ module Gori::Sequencer
     # largest absolute excursion. A generator whose bias appears only partway through the stream
     # — a counter that rolls over, a pool that degrades once it drains — keeps a balanced ONES
     # TOTAL and sails through Monobit while walking far off zero here.
-    private def self.cusum_test(bits : Array(UInt8), small : Bool) : TestRow
-      n = bits.size
+    private def self.cusum_test(scan : BitScan, small : Bool) : TestRow
+      n = scan.size
       return insufficient("Cusum", "#{n} bits") if n < 100
-      s = 0
-      z = 0
-      bits.each do |b|
-        s += b == 1_u8 ? 1 : -1
-        a = s.abs
-        z = a if a > z
-      end
+      z = scan.excursion
       # A walk that never leaves zero is not a near-miss — it is a perfectly alternating stream.
       return TestRow.new("Cusum", "z=0", "walk never leaves 0", small ? Verdict::Warn : Verdict::Fail) if z == 0
       p = cusum_p(z, n)
@@ -634,15 +670,30 @@ module Gori::Sequencer
     # φ^(m): Σ π ln π over the 2^m block patterns of the CIRCULARLY extended bitstream (the
     # last m-1 bits wrap onto the first), so all n windows exist and the two φ values are
     # comparable. A flat 2^m counter array, rolled with a shift-and-mask.
+    #
+    # The wrap is split out of the loop rather than expressed as `(i + m - 1) % n`. `m` is at
+    # most APEN_M_MAX+1 and `n` at least APEN_MIN_BITS, so only the LAST m-1 windows wrap at
+    # all — the modulo was an integer division per bit, twice per report, over a stream that
+    # reaches 6.4M bits. Identical indices, and so identical counts.
     private def self.block_phi(bits : Array(UInt8), m : Int32) : Float64
       n = bits.size
       counts = Array(Int32).new(1 << m, 0)
+      cp = counts.to_unsafe
+      bp = bits.to_unsafe
       mask = (1 << m) - 1
       v = 0
-      (0...(m - 1)).each { |i| v = ((v << 1) | bits.unsafe_fetch(i)) & mask }
-      n.times do |i|
-        v = ((v << 1) | bits.unsafe_fetch((i + m - 1) % n)) & mask
-        counts[v] += 1
+      (0...(m - 1)).each { |i| v = ((v << 1) | bp[i]) & mask }
+      straight = n - (m - 1)
+      i = 0
+      while i < straight
+        v = ((v << 1) | bp[i + m - 1]) & mask
+        cp[v] += 1
+        i += 1
+      end
+      while i < n
+        v = ((v << 1) | bp[i + m - 1 - n]) & mask
+        cp[v] += 1
+        i += 1
       end
       total = n.to_f
       s = 0.0
@@ -763,11 +814,24 @@ module Gori::Sequencer
 
     # ── sequential detection ────────────────────────────────────────────────────────
 
+    # The two shape guards below, over BYTES rather than characters. `each_char` on a String
+    # allocates an iterator per token and decodes UTF-8 to answer a question about ASCII, and
+    # this runs once per token on a sample that reaches 50,000. The answers are the same: a
+    # multi-byte character has no byte in either ASCII range, so a token carrying one is
+    # rejected by the byte test exactly where the char test rejected it.
+    private def self.decimal_byte?(b : UInt8) : Bool
+      b >= 0x30_u8 && b <= 0x39_u8
+    end
+
+    private def self.hex_byte?(b : UInt8) : Bool
+      decimal_byte?(b) || (b >= 0x61_u8 && b <= 0x66_u8) || (b >= 0x41_u8 && b <= 0x46_u8)
+    end
+
     private def self.detect_sequential(tokens : Array(String)) : {Bool, String}
       n = tokens.size
       return {false, "n/a"} if n < 3
       # Numeric fast path — incrementing/decrementing counters.
-      if tokens.all? { |t| !t.empty? && t.size <= 18 && t.each_char.all?(&.ascii_number?) }
+      if tokens.all? { |t| !t.empty? && t.bytesize <= 18 && t.to_slice.all? { |b| decimal_byte?(b) } }
         vals = tokens.map(&.to_i64)
         inc = (1...vals.size).all? { |i| vals[i] > vals[i - 1] }
         dec = (1...vals.size).all? { |i| vals[i] < vals[i - 1] }
@@ -801,7 +865,7 @@ module Gori::Sequencer
       # general path despite being a textbook sequential counter. Decoding nibbles first
       # keeps the magnitude linear in the counter's real value, matching the numeric fast
       # path's precision for decimal tokens above.
-      if tokens.all? { |t| !t.empty? && t.each_char.all? { |c| c.ascii_number? || ('a'..'f').includes?(c) || ('A'..'F').includes?(c) } }
+      if tokens.all? { |t| !t.empty? && t.to_slice.all? { |b| hex_byte?(b) } }
         skip = common_prefix_len(tokens)
         xs = Array(Float64).new(n, &.to_f)
         ys = tokens.map { |t| hex_leading_value(t, skip) }
@@ -915,13 +979,22 @@ module Gori::Sequencer
     # (0-15) instead of using the character's raw ASCII byte — see the hex path in
     # `detect_sequential` for why the distinction matters. Window widened to 16 chars (64
     # bits of hex) to match `leading_value`'s 8-BYTE window at one hex digit per nibble.
+    #
+    # Over the token's own BYTES, the same reason `hex_span_values` gives one method up: this
+    # is called once per token on a sample that reaches 50,000, and `t.chars` allocated a
+    # full Array(Char) — then `chars[start, 16]` a second one — per token, ~13 MB of garbage
+    # on a 50k×32 hex corpus for a 16-byte read. Only tokens the hex guard in
+    # `detect_sequential` already accepted reach here, so every byte is an ASCII hex digit and
+    # the byte window and the char window are the same window.
     private def self.hex_leading_value(t : String, skip : Int32 = 0) : Float64
       v = 0.0
-      chars = t.chars
-      start = {skip, chars.size}.min
-      chars[start, {16, chars.size - start}.min].each do |c|
-        nibble = c.ascii_number? ? (c.ord - '0'.ord) : (c.downcase.ord - 'a'.ord + 10)
-        v = v * 16.0 + nibble
+      sl = t.to_slice
+      i = {skip, sl.size}.min
+      stop = {i + 16, sl.size}.min
+      while i < stop
+        b = sl.unsafe_fetch(i)
+        v = v * 16.0 + (b <= 0x39_u8 ? (b - 0x30_u8).to_i32 : ((b | 0x20_u8) - 0x61_u8).to_i32 + 10)
+        i += 1
       end
       v
     end
@@ -948,6 +1021,103 @@ module Gori::Sequencer
     end
 
     # ── shared numeric helpers ──────────────────────────────────────────────────────
+
+    # How many tokens carry a 1 in each bit of the fixed `min_len × bps` symbol-bit window —
+    # the per-symbol-bit bias that feeds the chart and `bit_bias_test`. Anchored to whichever
+    # end `aligned_positions` chose: a suffix-aligned corpus measured from the start would
+    # score every column's bias against bytes from different logical fields.
+    #
+    # Counted per (COLUMN, SYMBOL) first, then expanded to per-bit once. Asking the question a
+    # bit at a time walked `min_len × bps` of them per token — 6.4M bounds-checked increments
+    # on a 50,000-token hex sample, 23 ms of a 153 ms report — when the answer depends only on
+    # WHICH SYMBOL stands in each column. The tally costs one increment per column per token (a
+    # quarter of that at hex's bps 4, a sixth at base64's 6) and the expansion is
+    # `min_len × (charset + 1) × bps`, thousands of ops rather than millions.
+    #
+    # Keyed on the ALPHABET INDEX rather than the raw byte, so the table is
+    # `min_len × (charset + 1)` — 17 slots per column for hex, 65 for base64 — instead of
+    # `min_len × 256`. The window is read over whole tokens, so a corpus of long tokens (a
+    # multi-KB JWT) would otherwise pay a kilobyte of scratch per token BYTE on a report the
+    # TUI re-runs on a throttle. `BIAS_TALLY_MAX` is the far end of the same worry.
+    #
+    # The extra slot is for a byte with NO alphabet index. `idx_of` is -1 for a byte that
+    # appears only in a constant column — those bytes are cut from the variable region the
+    # alphabet was built from — and -1 shifts to all-ones, so such a byte counts toward every
+    # bit, exactly as the per-bit form did. A constant column contributes the same count to all
+    # of its bits either way, which `bit_bias_test` then skips by `const_mask`.
+    private def self.symbol_bit_ones(usable : Array(String), min_len : Int32, bps : Int32,
+                                     idx_of : Array(Int32), charset_size : Int32,
+                                     from_end : Bool) : Array(Int32)
+      ones_at = Array(Int32).new(min_len * bps, 0)
+      return ones_at if bps <= 0
+      slots = charset_size + 1 # …+ the "absent from the alphabet" bucket
+      # The tally only pays where its two terms are the small ones, and BOTH can stop being
+      # so. Its table and its expansion are `min_len × slots`, independent of the sample size:
+      # with fewer tokens than slots the expansion alone already costs more than asking every
+      # token directly, and with very long tokens `min_len` carries the table past everything
+      # else the report allocates (measured on 300 × 200 KB byte-soup tokens: a 205 MB scratch
+      # array for no gain in time). Outside the band, ask directly — the same increments, in
+      # the shape the count-per-column form is an optimization OF.
+      if usable.size < slots || min_len.to_i64 * slots > BIAS_TALLY_MAX
+        return bit_ones_per_token(usable, ones_at, min_len, bps, idx_of, from_end)
+      end
+      col_counts = Array(Int32).new(min_len * slots, 0)
+      cc = col_counts.to_unsafe
+      ix = idx_of.to_unsafe
+      usable.each do |t|
+        sl = t.to_slice
+        sp = sl.to_unsafe + (from_end ? sl.size - min_len : 0)
+        p = 0
+        while p < min_len
+          v = ix[sp[p]]
+          cc[p * slots + (v < 0 ? charset_size : v)] += 1
+          p += 1
+        end
+      end
+      oa = ones_at.to_unsafe
+      p = 0
+      while p < min_len
+        row = p * slots
+        s = 0
+        while s < slots
+          count = cc[row + s]
+          expand_bit_ones(oa, p * bps, s == charset_size ? -1 : s, bps, count) if count > 0
+          s += 1
+        end
+        p += 1
+      end
+      ones_at
+    end
+
+    # `symbol_bit_ones` asked one token at a time — the form the per-column tally is an
+    # optimization OF, and the one that stays right where the tally's own two terms stop being
+    # the small ones. Fills and returns `ones_at`.
+    private def self.bit_ones_per_token(usable : Array(String), ones_at : Array(Int32),
+                                        min_len : Int32, bps : Int32, idx_of : Array(Int32),
+                                        from_end : Bool) : Array(Int32)
+      oa = ones_at.to_unsafe
+      usable.each do |t|
+        sl = t.to_slice
+        sp = sl.to_unsafe + (from_end ? sl.size - min_len : 0)
+        p = 0
+        while p < min_len
+          expand_bit_ones(oa, p * bps, idx_of.unsafe_fetch(sp[p]), bps, 1)
+          p += 1
+        end
+      end
+      ones_at
+    end
+
+    # Add `count` to each of the `bps` bit slots of one column whose symbol index is `v`,
+    # MSB-first — the same bit order `symbol_bits` writes the bitstream in.
+    private def self.expand_bit_ones(oa : Pointer(Int32), at : Int32, v : Int32,
+                                     bps : Int32, count : Int32) : Nil
+      k = 0
+      while k < bps
+        oa[at + k] += count if (v >> (bps - 1 - k)) & 1 == 1
+        k += 1
+      end
+    end
 
     # The symbol bitstream over the variable region: each byte → its alphabet index → `bps` bits
     # (MSB-first). Empty when the alphabet has ≤ 1 symbol (no bits to test).

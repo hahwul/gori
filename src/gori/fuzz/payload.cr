@@ -387,12 +387,27 @@ module Gori::Fuzz
 
     def apply(s : String) : String
       case @kind
-      when :url     then URI.encode_www_form(s, space_to_plus: false)
+      when :url     then url(s)
       when :url_all then String.build { |io| s.to_slice.each { |b| io << '%' << b.to_s(16).rjust(2, '0').upcase } }
       when :base64  then Base64.strict_encode(s)
       when :hex     then s.to_slice.hexstring
       else               s
       end
+    end
+
+    # `URI.encode_www_form(s, space_to_plus: false)`, minus the allocation when the answer is
+    # `s`. That call copies EVERY payload through a `String.build` even when it has nothing to
+    # escape, and since `--auto` (`Fuzz::AutoEncode`) made this the default for every
+    # query/form position, that is one throwaway String per request of every sweep — and most
+    # of a wordlist is `admin` / `config` / `v2`, which encode to themselves.
+    #
+    # The predicate is `URI.unreserved?`, the SAME one `encode_www_form` passes down to
+    # `URI.encode`: with `space_to_plus: false` a byte is copied verbatim there iff
+    # `char.ascii? && URI.unreserved?(byte)`, and an unreserved byte is ASCII by construction.
+    # So an all-unreserved payload is byte-for-byte `s`, and anything else takes the same
+    # stdlib path it always did.
+    private def url(s : String) : String
+      s.to_slice.all? { |b| URI.unreserved?(b) } ? s : URI.encode_www_form(s, space_to_plus: false)
     end
   end
 
