@@ -530,4 +530,62 @@ describe Gori::Discover::Url do
       U.binary_asset?("/a/thing.").should be_false
     end
   end
+
+  # `template_key` writes the folded path straight into one builder, `canonical_query` stops
+  # re-joining a pair it already holds, and `resolve` lowers an href only when lowering it
+  # would change something. All three are allocation shapes; none may move a byte of the keys
+  # `@seen`/`@templates` dedupe on, so these pin the edges each one touches.
+  describe "key building (allocation-shape rewrites)" do
+    it "folds a path with empty, trailing and mixed-case segments the same way" do
+      {"/a/1/b"            => "http://h/a/{n}/b",
+       "/"                 => "http://h/",
+       "/a/"               => "http://h/a/",
+       "/API/Users/42"     => "http://h/api/users/{n}",
+       "/a/2026-07-19/b"   => "http://h/a/{date}/b",
+       "/a/deadbeefcafe/b" => "http://h/a/{hex}/b"}.each do |path, want|
+        U.template_key(U.parse("http://h#{path}").not_nil!).should eq(want)
+      end
+      # `parse_path` collapses `//`, so only a hand-built Parts reaches the empty-segment
+      # branch — the one the old `split.map.join` spelled as `seg.empty? ? seg : fold(seg)`.
+      U.template_key(U::Parts.new("http", "h", 80, "//a//1", nil)).should eq("http://h//a//{n}")
+    end
+
+    it "keeps the non-default port in every key it belonged in" do
+      p = U.parse("https://h:8443/a/1?b=2&a=1").not_nil!
+      U.visit_key(p).should eq("https://h:8443/a/1?a=1&b=2")
+      U.template_key(p).should eq("https://h:8443/a/{n}?a&b")
+      # `gate_url` is the scope question, not a key: it carries the query VERBATIM (order and
+      # all) and drops the port, which is the INCLUDE spelling every allowlist consumer sees (#407).
+      U.gate_url(p).should eq("https://h/a/1?b=2&a=1")
+    end
+
+    it "normalizes a VALUELESS query key to `k=` in visit_key, as it always has" do
+      U.visit_key(U.parse("http://h/s?flag&b=2").not_nil!).should eq("http://h/s?b=2&flag=")
+      U.visit_key(U.parse("http://h/s?a=").not_nil!).should eq("http://h/s?a=")
+      U.template_key(U.parse("http://h/s?flag&b=2").not_nil!).should eq("http://h/s?b&flag")
+      # An `=` inside the VALUE belongs to the value, not a second pair.
+      U.visit_key(U.parse("http://h/s?a=1=2").not_nil!).should eq("http://h/s?a=1=2")
+      U.template_key(U.parse("http://h/s?a=1=2").not_nil!).should eq("http://h/s?a")
+    end
+
+    it "resolve answers identically whatever case the scheme or the href arrives in" do
+      base = U.parse("https://app.test/shop/catalog/index.html").not_nil!
+      {"MAILTO:a@b"           => nil,
+       "JavaScript:alert(1)"  => nil,
+       "Data:text/html,x"     => nil,
+       "FTP://other.test/x"   => nil,
+       "HTTPS://Other.test/X" => "HTTPS://Other.test/X",
+       "//Other.test/X"       => "https://Other.test/X",
+       "Product/1234"         => "https://app.test/shop/catalog/Product/1234",
+       "/Account/Orders"      => "https://app.test/Account/Orders"}.each do |href, want|
+        U.resolve(base, href).should eq(want)
+      end
+    end
+
+    it "resolve still refuses a non-ASCII scheme-looking href without raising" do
+      base = U.parse("https://app.test/a/b").not_nil!
+      U.resolve(base, "caf\xE9/x").should eq("https://app.test/a/caf\xE9/x")
+      U.resolve(base, "wss://other.test/x").should be_nil
+    end
+  end
 end
