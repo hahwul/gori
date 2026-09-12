@@ -67,7 +67,7 @@ module Gori::Tui
         if @project_view.activity_querying?
           "type to filter · ↵ keep · esc clear"
         else
-          keys("↑/↓ select · ↵ open · {activity.filter-source} source · {activity.filter-level} level · {activity.filter-actor} actor · {activity.find} filter · {activity.clear} clear · space cmds · esc sub-tabs")
+          keys("↑/↓ select · ↵ open · {activity.copy} copy · {activity.filter-source} source · {activity.filter-level} level · {activity.filter-actor} actor · {activity.find} filter · {activity.clear} clear · space cmds · esc sub-tabs")
         end
       when :settings
         settings_hint

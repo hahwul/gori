@@ -8,6 +8,7 @@ abstract class Gori::Verb::ExecContext
   abstract def evidence_compare : Nil
   abstract def evidence_open_issue : Nil
   abstract def evidence_open_source : Nil
+  abstract def evidence_copy : Nil
   abstract def evidence_export : Nil
   abstract def evidence_duplicate_repeater : Nil
   abstract def evidence_link_issue : Nil

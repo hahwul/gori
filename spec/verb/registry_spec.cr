@@ -844,6 +844,10 @@ private class FakeContext < ExecContext
     @calls << :activity_clear
   end
 
+  def activity_copy : Nil
+    @calls << :activity_copy
+  end
+
   def activity_find : Nil
     @calls << :activity_find
   end
@@ -1009,7 +1013,7 @@ private class FakeContext < ExecContext
     false
   end
 
-  {% for name in %w[evidence_open evidence_filter evidence_compare evidence_open_issue evidence_open_source evidence_export evidence_duplicate_repeater evidence_link_issue evidence_unlink_issue evidence_delete] %}
+  {% for name in %w[evidence_open evidence_filter evidence_compare evidence_open_issue evidence_open_source evidence_copy evidence_export evidence_duplicate_repeater evidence_link_issue evidence_unlink_issue evidence_delete] %}
     def {{ name.id }} : Nil
       @calls << :{{ name.id }}
     end

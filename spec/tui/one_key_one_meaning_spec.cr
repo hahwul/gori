@@ -38,6 +38,23 @@ describe "one key, one meaning" do
     end
   end
 
+  # `y` is the app's copy letter: 24 scopes bound it and four did not — Intercept answered only
+  # `^Y`, the Evidence archive and the Project ACTIVITY feed answered nothing at all, and the
+  # OAST callback detail copied from a raw controller arm the keymap could not see. All four
+  # are real chords now, so the reflex lands and the Hotkeys editor can move every one of them.
+  it "`y` copies on every list that has something to copy" do
+    {Gori::Verb::Scope::Intercept       => "intercept.copy",
+     Gori::Verb::Scope::Evidence        => "evidence.copy",
+     Gori::Verb::Scope::ProjectActivity => "activity.copy",
+     Gori::Verb::Scope::OastCallbacks   => "oast.copy-callback",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("y"), scope).should eq(id), scope.to_s
+    end
+    # `^Y` stays pinned beside the letter wherever a pane can be typed into.
+    keymap.lookup(Gori::Verb::Chord.new("y", ctrl: true), Gori::Verb::Scope::Intercept)
+      .should eq("intercept.copy")
+  end
+
   it "History's hidden nav verbs are gated to History, not to every Body-scope tab" do
     ctx = FakeExecContext.new
     ctx.current_tab = :help

@@ -215,6 +215,10 @@ module Gori::Tui
         Item.new("↑/↓ · ↵", "callbacks: select · open detail"),
         Item.new("space → p", "promote a callback to an Issue", "oast.promote"),
         Item.new("space → a", "add a provider · e edit · x enable/disable"),
+        # Two copies, opposite directions of one interaction: the payload gori SENT (list) and
+        # what came BACK (detail). Only the detail's can be a chord — `validate_chords!` allows
+        # one `y` per scope — so the list's is named by its space-menu letter.
+        Item.new("{oast.copy-callback} · space → y", "detail: copy the callback · list: copy the last generated payload URL"),
         Item.new("payload", "insert an OAST payload into the focused editor (space → O)", "oast.insert-payload"),
       ]},
       {"SEQUENCER", [
@@ -270,7 +274,11 @@ module Gori::Tui
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here
         # rather than left to the space menu. Link/unlink are menu-only (space → k · u).
-        Item.new("Evidence", "↑/↓ ↵ open · {evidence.filter} filter · {evidence.compare} compare · {evidence.issue} issue · {evidence.source} source · {evidence.repeater} repeater · {evidence.delete} delete · space cmds"),
+        #
+        # No `↑/↓` on this one row: it is the longest on the Shortcuts page and sits against
+        # `HelpPopupOverlay::MAX_W` (help_popup_overlay_spec measures it), so the list arrows —
+        # the one thing on the row that is true of every list in the app — are what comes off.
+        Item.new("Evidence", "↵ open · {evidence.copy} copy · {evidence.filter} filter · {evidence.compare} compare · {evidence.issue} issue · {evidence.source} source · {evidence.repeater} repeater · {evidence.delete} delete · space cmds"),
         # The drill-in STEP, keyed by the chord like the Comparer's pair rather than folded into
         # the two tab rows above — both sit within a few columns of the popup's width cap
         # (help_popup_overlay_spec), and a row that trails off into `…` is worse than no row.
@@ -293,8 +301,8 @@ module Gori::Tui
         # ACTIVITY is a Project sub-tab, so its keys hang off the row above rather than earning
         # a section — but `⇧X` there deletes the durable audit trail, which is the one key on
         # this tab that must be named somewhere the operator can read before pressing it.
-        Item.new("  activity", "{activity.filter-source} source · {activity.filter-level} level · {activity.filter-actor} actor · {activity.find} filter · ↵ open · {activity.clear} clear the feed"),
-        Item.new("Intercept", "↵/e edit · {intercept.forward} fwd · {intercept.drop} drop · {intercept.forward-all} all · {intercept.direction} catch · {intercept.filter} condition · {intercept.toggle} on/off"),
+        Item.new("  activity", "{activity.filter-source} source · {activity.filter-level} level · {activity.filter-actor} actor · {activity.find} filter · ↵ open · {activity.copy} copy · {activity.clear} clear the feed"),
+        Item.new("Intercept", "↵/e edit · {intercept.forward} fwd · {intercept.drop} drop · {intercept.forward-all} all · {intercept.copy} copy · {intercept.direction} catch · {intercept.filter} condition · {intercept.toggle} on/off"),
       ]},
       {"DECODER", [
         Item.new("i / ↵", "enter INS on INPUT · esc back to READ"),

@@ -3035,6 +3035,19 @@ module Gori::Tui
       message.scrub.gsub(/\s+/, " ").strip
     end
 
+    # What `y` puts on the clipboard: the event as one line of plain text. A pure function of
+    # the row, like `activity_target`, so it is spec-able without a Runner.
+    #
+    # The columns the pane DROPS when it is narrow (source, actor) are always present here —
+    # a line pasted into a ticket has no pane width to excuse an absent field — and the stamp
+    # is the full date, because `act_stamp`'s bare `HH:MM:SS` only reads as today on the day
+    # it is read. The message is `act_one_line`, so a multi-line event is one row of text
+    # rather than a paste that breaks whatever it lands in.
+    def self.act_copy_line(row : Store::EventRow) : String
+      at = Time.unix(row.created_at // 1_000_000).to_local.to_s("%Y-%m-%d %H:%M:%S")
+      "#{at} · #{row.level} · #{row.source} · #{act_actor_label(row.actor)} · #{act_one_line(row.message)}"
+    end
+
     # The three-state filter bar, the grammar the OAST callbacks list already uses: the input
     # while editing, the committed query, and the field names when idle.
     private def render_activity_filter_bar(screen : Screen, rect : Rect) : Nil

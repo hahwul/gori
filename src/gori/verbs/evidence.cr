@@ -30,6 +30,16 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { selected.call(ctx) && ctx.evidence_source_available? },
         group: :view) { |ctx| ctx.evidence_open_source; nil }
 
+      # `y` — the copy every other list scope binds, on the one tab the audit found without
+      # it. Bare `y` is free across Scope::Evidence (o/`/`/c/i/s/⇧E/r/d are its claims), and
+      # `copy-as` keeps the shifted `Y` menu letter beside it, exactly as History pairs them.
+      # Both ends go through the ambient #1035 body policy; `copy` writes the whole exchange,
+      # which is what the card's `y` does for the pane it happens to be showing.
+      r.register Verb::Definition.new(
+        "evidence.copy", "Copy", "Copy the frozen request and response as text, through the project's body-redaction policy",
+        Verb::Scope::Evidence, [Verb::Chord.new("y")],
+        available: selected, mnemonic: 'y', group: :copy) { |ctx| ctx.evidence_copy; nil }
+
       r.register Verb::Definition.new(
         "evidence.copy-as", "Copy as…", "Copy the frozen request/response through the project's body-redaction policy",
         Verb::Scope::Evidence, available: selected, mnemonic: 'Y', group: :copy) { |ctx| ctx.copy_as_open; nil }
