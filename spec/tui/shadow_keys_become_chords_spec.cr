@@ -6,10 +6,10 @@ require "../spec_helper"
 describe "keys the hint names are chords the keymap knows" do
   keymap = Gori::Verb::Keymap.build(Gori::Verbs.registry)
 
-  it "OAST providers: a / e / x / d" do
+  it "OAST providers: a / e / t / d" do
     keymap.lookup(Gori::Verb::Chord.new("a"), Gori::Verb::Scope::OastProviders).should eq("oast.add-provider")
     keymap.lookup(Gori::Verb::Chord.new("e"), Gori::Verb::Scope::OastProviders).should eq("oast.edit-provider")
-    keymap.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::OastProviders).should eq("oast.toggle-provider")
+    keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::OastProviders).should eq("oast.toggle-provider")
     keymap.lookup(Gori::Verb::Chord.new("d"), Gori::Verb::Scope::OastProviders).should eq("oast.delete-provider")
   end
 

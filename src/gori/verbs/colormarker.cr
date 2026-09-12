@@ -37,9 +37,13 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.copy", "Copy", "Copy the selected rule's match filter (the QL that paints the row)",
         Verb::Scope::Colormarker, [Verb::Chord.new("y")], available: on_rule, mnemonic: 'y', section: :rules) { |ctx| ctx.read_copy; nil }
+      # `t` — "flip this row's flag", the meaning `t` already carries as MARK in History,
+      # Issues, the Sitemap and the Intercept queue. It was `x`, which is "select this line"
+      # in fourteen scopes; a rule list has no marks, so `t` collides with nothing and `x` is
+      # left meaning one thing everywhere (key audit, F4).
       r.register Verb::Definition.new(
         "colormarker.toggle", "Enable/disable", "Toggle the selected rule on or off in THIS project",
-        Verb::Scope::Colormarker, [Verb::Chord.new("x")], available: on_rule, mnemonic: 'x', section: :rules) { |ctx| ctx.colormarker_toggle; nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("t")], available: on_rule, mnemonic: 't', section: :rules) { |ctx| ctx.colormarker_toggle; nil }
       r.register Verb::Definition.new(
         "colormarker.delete", "Delete rule", "Delete the selected rule (confirms first)",
         Verb::Scope::Colormarker, [Verb::Chord.new("d")], available: on_rule, mnemonic: 'd', section: :rules,

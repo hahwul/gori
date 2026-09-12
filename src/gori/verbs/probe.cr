@@ -198,15 +198,18 @@ module Gori
       # Nav (↑/↓, j/k) + Esc→strip are controller-claimed; these are the actions. edit/delete are
       # gated to a selected CUSTOM rule (built-ins can't be edited/removed, only toggled).
       probe_custom = ->(ctx : Verb::ExecContext) { ctx.probe_custom_rule_selected? }
-      # `x` alone, and the space-menu key is `x` too — the same letter the Rewriter and
-      # Colormarker rule lists use for the same action, where it used to be `t` here.
+      # `t` — "flip this row's flag", the meaning `t` already carries as MARK in History,
+      # Issues, the Sitemap and the Intercept queue, and the letter the Rewriter, Colormarker
+      # and OAST provider lists spell this action with since the key audit's F4. It was `x`,
+      # which is "select this line" in fourteen scopes; a rule list has no marks, so `t`
+      # collides with nothing.
       #
       # ↵ is deliberately NOT bound: it toggles in no other rule list. Eight of them (rewrite,
       # colour, extract, scope, host, env, and the two global editors) open the editor on ↵,
       # so a reflex carried from any of them silently disabled a scanning rule here.
       r.register Verb::Definition.new(
         "probe-rules.toggle", "Toggle rule", "Enable or disable the selected rule",
-        Verb::Scope::ProbeRules, [Verb::Chord.new("x")], mnemonic: 'x') { |ctx| ctx.probe_rule_toggle; nil }
+        Verb::Scope::ProbeRules, [Verb::Chord.new("t")], mnemonic: 't') { |ctx| ctx.probe_rule_toggle; nil }
       r.register Verb::Definition.new(
         "probe-rules.add", "Add custom rule", "Open the popup to add a custom match rule",
         Verb::Scope::ProbeRules, [Verb::Chord.new("a")]) { |ctx| ctx.probe_rule_add; nil }

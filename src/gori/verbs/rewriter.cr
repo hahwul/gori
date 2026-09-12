@@ -44,16 +44,19 @@ module Gori
       r.register Verb::Definition.new(
         "rewriter.edit", "Edit rule", "Edit the selected rule in the popup editor",
         Verb::Scope::Rewriter, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: has_rule, mnemonic: 'e', section: :rules) { |ctx| ctx.rewriter_edit; nil }
-      # The ONE rule verb with no chord, and the reason the whole list used to be hand-rolled:
-      # `rewriter.select-line` (read_edit.cr) already binds bare `x` in this SCOPE for the
-      # preview pane. Two `section:`s never render together, so the space menu is fine with
-      # `x` meaning two things — but `Keymap#lookup` is keyed by scope alone and returns ONE
-      # id, so a second `x` here would simply shadow one of them (keymap_spec catches it).
-      # The keymap has no focus dimension; `RewriterController` does, so `x` stays there.
-      # Colormarker could take `x` because it has no read pane at all.
+      # A REAL chord since the key audit's F4, and the reason it could not be one before is
+      # exactly what F4 dissolves: `rewriter.select-line` (read_edit.cr) binds bare `x` in this
+      # SCOPE for the preview pane, `Keymap#lookup` is keyed by scope alone and returns ONE id,
+      # so a second `x` here simply shadowed one of them — which is why this list hand-rolled
+      # its toggle in the controller and `x` was not rebindable here at all.
+      #
+      # On `t` the two no longer meet: `t` is "flip this row's flag" (mark, in History, Issues,
+      # the Sitemap and the Intercept queue), `x` is "select this line" in fourteen scopes, and
+      # a rule list has no marks. The `available:` gate is the focus disambiguator the arm used
+      # to be — `rewriter_rule_list_focused?` is true for exactly the pane that arm ran in.
       r.register Verb::Definition.new(
         "rewriter.toggle", "Enable/disable", "Toggle the selected rule on or off in THIS project",
-        Verb::Scope::Rewriter, available: has_rule, mnemonic: 'x', section: :rules) { |ctx| ctx.rewriter_toggle; nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("t")], available: has_rule, mnemonic: 't', section: :rules) { |ctx| ctx.rewriter_toggle; nil }
       r.register Verb::Definition.new(
         "rewriter.delete", "Delete rule", "Delete the selected rule (confirms first)",
         Verb::Scope::Rewriter, [Verb::Chord.new("d")], available: has_rule, mnemonic: 'd', section: :rules,

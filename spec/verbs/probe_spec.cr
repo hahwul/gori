@@ -44,7 +44,7 @@ describe "Gori::Verbs.register_probe" do
       # The bare `x` it is a shift away from lives in a DIFFERENT scope, so the two can never
       # resolve on one keystroke (`ProbeController#command_scope` answers ProbeRules there).
       r["probe-rules.toggle"].scope.should eq(Gori::Verb::Scope::ProbeRules)
-      r["probe-rules.toggle"].chords.should eq([typed_chord("x")])
+      r["probe-rules.toggle"].chords.should eq([typed_chord("t")]) # F4: `t` flips a row flag
 
       r["probe.open"].chords.first.should eq(typed_chord("enter"))
       r["probe.open"].menu_key.should eq('v')        # 'o' is reserved for open-evidence
@@ -124,10 +124,10 @@ describe "Gori::Verbs.register_probe" do
       ctx = FakeExecContext.new
       r["probe-rules.toggle"].available?(ctx).should be_true
       r["probe-rules.add"].available?(ctx).should be_true
-      # `x` for the chord AND the menu key — the letter the Rewriter and Colormarker rule
-      # lists already use for this action, where this one used to say `t` in the menu.
-      r["probe-rules.toggle"].chords.should eq([typed_chord("x")])
-      r["probe-rules.toggle"].menu_key.should eq('x')
+      # `t` for the chord AND the menu key — "flip this row's flag", the letter all four rule
+      # lists spell this action with since the key audit's F4 took `x` back for select-line.
+      r["probe-rules.toggle"].chords.should eq([typed_chord("t")])
+      r["probe-rules.toggle"].menu_key.should eq('t')
       # ↵ belongs to EDIT here, as it does in every other rule list in gori. Bound to toggle,
       # it meant a reflex carried from any of them silently disabled a scanning rule.
       r["probe-rules.toggle"].chords.map(&.key).should_not contain("enter")

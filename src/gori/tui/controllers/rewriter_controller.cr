@@ -434,13 +434,15 @@ module Gori::Tui
     end
 
     # The extract sub-tab has no verbs of its own (`rewriter.add`'s chord is claimed in this
-    # SCOPE by the rules list), so its add/delete keys are whatever `rewriter.add` and
-    # `rewriter.delete` are bound to — which is exactly what its strip names for them
-    # (`body_hint` spells `{rewriter.add} add`). They used to be the literal `a`/`d`, so a
-    # rebind reached the strip and not the key under it.
+    # SCOPE by the rules list), so its add/on-off/delete keys are whatever `rewriter.add`,
+    # `rewriter.toggle` and `rewriter.delete` are bound to — which is exactly what its strip
+    # names for them (`body_hint` spells `{rewriter.add} add`). They used to be the literal
+    # `a`/`x`/`d`, so a rebind reached the strip and not the key under it.
     private def handle_extract_chord(ev : Termisu::Event::Key) : Bool
       if chord_of?(ev, "rewriter.add")
         extract_add
+      elsif chord_of?(ev, "rewriter.toggle")
+        extract_toggle
       elsif chord_of?(ev, "rewriter.delete")
         extract_delete
       else
@@ -449,9 +451,10 @@ module Gori::Tui
       true
     end
 
-    # Edit and on/off stay literal: the strip names them literally too (`rewriter.edit` is
-    # a two-chord verb no rebind can move, and `x` is the pane-local toggle on every rule
-    # list) — and so does the bindings sub-tab's `d`, which clears a value, not a rule.
+    # Edit stays literal — `rewriter.edit` is a two-chord verb no rebind can move — and so
+    # does the bindings sub-tab's `d`, which clears a value, not a rule. On/off is NOT literal
+    # any more: it follows `rewriter.toggle`'s chord through `handle_extract_chord` below, the
+    # way add and delete already followed theirs.
     private def handle_sub_action_key(key : Termisu::Input::Key, c : Char?) : Bool
       if @sub == :bindings
         return false unless c == 'd'
@@ -460,7 +463,6 @@ module Gori::Tui
       end
       case
       when key.enter?, c == 'e' then extract_edit
-      when c == 'x'             then extract_toggle
       else                           return false
       end
       true
@@ -477,15 +479,8 @@ module Gori::Tui
       when key.up?, c == 'k'   then move_up
       when key.down?, c == 'j' then list_down
       when key.escape?         then @host.request_focus(:menu)
-      when c == 'x'
-        # The one action still dispatched here, and not an oversight: `rewriter.select-line`
-        # binds bare `x` in this same SCOPE for the preview pane, and `Keymap#lookup` is keyed
-        # by scope alone — a chord on `rewriter.toggle` would shadow one of the two. The
-        # keymap has no focus dimension; this method only runs when the LIST has focus, so it
-        # is the disambiguator. (Trade-off: `x` alone is not rebindable here.)
-        rewriter_toggle
       else
-        # a/↵/e/d/⇧X/s/⇧J/⇧K defer to the central keymap, so the rule actions are
+        # a/↵/e/d/t/⇧X/s/⇧J/⇧K defer to the central keymap, so the rule actions are
         # REBINDABLE and dispatch through the same `available?` gate the space menu uses —
         # which is now focus-aware (`rewriter_rule_list_focused?`), because a chord has no
         # `section:` to keep it away from the preview panes the way the menu entries do.
@@ -1149,7 +1144,7 @@ module Gori::Tui
       return @filter.hint if list_filter_editing?
       case @sub
       when :extract
-        return keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.delete} delete · space cmds · esc tabs")
+        return keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · {rewriter.toggle} on/off · {rewriter.delete} delete · space cmds · esc tabs")
       when :bindings
         return "↹ section · ↑/↓ select · d clear · space cmds · esc tabs"
       end
@@ -1162,7 +1157,7 @@ module Gori::Tui
       when :preview_out
         keys("↑/↓ move · ⇧arrows select · {rewriter.copy} copy · {rewriter.select-line} line · space cmds · ← input · esc input")
       else
-        keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.filter} filter · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
+        keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · {rewriter.toggle} on/off · {rewriter.filter} filter · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
       end
     end
   end

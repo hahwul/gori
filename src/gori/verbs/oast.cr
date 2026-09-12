@@ -72,9 +72,11 @@ module Gori
         "oast.edit-provider", "Edit provider", "Edit the selected OAST provider",
         Verb::Scope::OastProviders, [Verb::Chord.new("e")], mnemonic: 'e') { |ctx| ctx.oast_edit_provider; nil }
 
+      # `t` — "flip this row's flag", the letter every rule list spells this action with since
+      # the key audit's F4. It was `x`, which is "select this line" in fourteen scopes.
       r.register Verb::Definition.new(
         "oast.toggle-provider", "Enable / disable", "Toggle the selected provider on or off",
-        Verb::Scope::OastProviders, [Verb::Chord.new("x")], mnemonic: 'x') { |ctx| ctx.oast_toggle_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("t")], mnemonic: 't') { |ctx| ctx.oast_toggle_provider; nil }
 
       r.register Verb::Definition.new(
         "oast.delete-provider", "Delete provider", "Delete the selected provider (keeps its callback history)",

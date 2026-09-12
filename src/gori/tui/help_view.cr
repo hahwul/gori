@@ -222,7 +222,7 @@ module Gori::Tui
         Item.new("{oast.listen} · {oast.stop}", "start listening · stop"),
         Item.new("↑/↓ · ↵", "callbacks: select · open detail"),
         Item.new("space → p", "promote a callback to an Issue", "oast.promote"),
-        Item.new("space → a", "add a provider · e edit · x enable/disable"),
+        Item.new("space → a", "add a provider · e edit · t enable/disable"),
         # Two copies, opposite directions of one interaction: the payload gori SENT (list) and
         # what came BACK (detail). Only the detail's can be a chord — `validate_chords!` allows
         # one `y` per scope — so the list's is named by its space-menu letter.

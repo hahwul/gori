@@ -243,7 +243,7 @@ module Gori::Tui
         return "type to filter · ↵ keep · esc clear" if @filter_editing
         keys("↑/↓ select · ‹/› provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds")
       else
-        # `x on/off` and `↵/e edit` — the vocabulary the three sibling rule lists use. Toggle was
+        # `t on/off` and `↵/e edit` — the vocabulary the three sibling rule lists use. Toggle was
         # `t` here alone, and ↵ has always opened the editor without the hint saying so.
         keys("↑/↓ select · {oast.add-provider} add · ↵/{oast.edit-provider} edit · {oast.toggle-provider} on/off · {oast.delete-provider} delete · space cmds · esc sub-tabs")
       end

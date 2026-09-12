@@ -133,6 +133,33 @@ describe "one key, one meaning" do
     end
   end
 
+  # `x` = select this line in fourteen scopes and "enable/disable this rule" in four. The
+  # majority wins (it is also the INS-adjacent gesture), and the rule toggles take `t` —
+  # "flip this row's flag", which is what `t` means as MARK in History, Issues, the Sitemap
+  # and the Intercept queue. A rule list has no marks, so nothing collides.
+  it "`x` selects a line and `t` flips a row's flag, in every scope that binds either" do
+    {Gori::Verb::Scope::Colormarker   => "colormarker.toggle",
+     Gori::Verb::Scope::OastProviders => "oast.toggle-provider",
+     Gori::Verb::Scope::ProbeRules    => "probe-rules.toggle",
+     Gori::Verb::Scope::Rewriter      => "rewriter.toggle",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("t"), scope).should eq(id), scope.to_s
+    end
+    # `t` is mark in the four list scopes that have marks — one letter, one question.
+    {Gori::Verb::Scope::Body      => "history.mark-toggle",
+     Gori::Verb::Scope::Issues    => "issues.mark-toggle",
+     Gori::Verb::Scope::Sitemap   => "sitemap.mark-toggle",
+     Gori::Verb::Scope::Intercept => "intercept.mark-toggle",
+    }.each do |scope, id|
+      keymap.lookup(Gori::Verb::Chord.new("t"), scope).should eq(id), scope.to_s
+    end
+    # …and no scope binds `x` to anything but select-line now.
+    Gori::Verb::Scope.each do |scope|
+      next unless id = keymap.lookup(Gori::Verb::Chord.new("x"), scope)
+      id.should end_with("select-line"), "#{scope}: x = #{id}"
+    end
+  end
+
   it "History's hidden nav verbs are gated to History, not to every Body-scope tab" do
     ctx = FakeExecContext.new
     ctx.current_tab = :help

@@ -27,7 +27,7 @@ A callback is proof the target reached a server it shouldn't have. The absence o
 
 ## Providers
 
-Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `x` enable / disable, `d` delete); a public preset auto-fills the server host when you pick its type.
+Each listener is a **provider**. Add one from the **Providers** sub-tab (`a` add, `e` edit, `t` enable / disable, `d` delete); a public preset auto-fills the server host when you pick its type.
 
 The bar above the callbacks table selects which provider `g` and `Ctrl-R` act on; `←` / `→` cycle it (the bar draws the pick as `‹ name ›`), and **All** shows every provider's callbacks at once. Getting a payload or starting a listener needs one provider, so on **All** with two or more providers enabled, `g` and `Ctrl-R` open a picker card; pick a row with `↵` and the bar follows. With a single enabled provider there is nothing to ask, and the action just runs.
 
@@ -70,7 +70,7 @@ No surface resumes on its own. Opening a project, binding an MCP server, or star
 | `y` | Copy the current payload (on the list), or the selected callback (inside its `↵` detail) |
 | `Shift-F` | File the selected callback as an Issue |
 | `/` | Filter the callback list |
-| `a` / `e` / `x` / `d` | Providers sub-tab: add / edit / enable or disable / delete |
+| `a` / `e` / `t` / `d` | Providers sub-tab: add / edit / enable or disable / delete |
 
 ## Filing a Callback
 

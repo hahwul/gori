@@ -27,7 +27,7 @@ group = "워크벤치"
 
 ## Providers {#providers}
 
-각 리스너가 하나의 **provider**입니다. **Providers** 서브탭에서 추가하세요(`a` 추가, `e` 편집, `x` 활성/비활성, `d` 삭제). public preset은 타입을 고를 때 서버 호스트를 자동으로 채워줍니다.
+각 리스너가 하나의 **provider**입니다. **Providers** 서브탭에서 추가하세요(`a` 추가, `e` 편집, `t` 활성/비활성, `d` 삭제). public preset은 타입을 고를 때 서버 호스트를 자동으로 채워줍니다.
 
 콜백 테이블 위의 바가 `g`와 `Ctrl-R`가 사용할 provider를 고릅니다. `←` / `→`로 순환하며(바에는 `‹ 이름 ›`으로 표시됩니다), **All**은 모든 provider의 콜백을 한 번에 보여줍니다. payload를 받거나 리스닝을 시작하려면 provider가 하나로 정해져야 하므로, **All** 상태에서 활성화된 provider가 둘 이상이면 `g`와 `Ctrl-R`가 선택 카드를 엽니다. `↵`로 고르면 바도 따라갑니다. 활성화된 provider가 하나뿐이면 물어볼 것이 없으니 바로 실행됩니다.
 
@@ -70,7 +70,7 @@ interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를
 | `y` | 목록에서는 현재 payload 복사, 콜백의 `↵` 상세 안에서는 그 콜백 복사 |
 | `Shift-F` | 선택한 콜백을 Issue로 등록 |
 | `/` | 콜백 목록 필터링 |
-| `a` / `e` / `x` / `d` | Providers 서브탭: 추가 / 편집 / 활성·비활성 / 삭제 |
+| `a` / `e` / `t` / `d` | Providers 서브탭: 추가 / 편집 / 활성·비활성 / 삭제 |
 
 ## 콜백을 Issue로 {#filing-a-callback}
 
