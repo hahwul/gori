@@ -21,19 +21,37 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 | **Repeater** | 요청 워크벤치 (WebSocket 및 gRPC 모드 포함) |
 | **Fuzzer** | 네 가지 공격 모드를 갖춘 Intruder 스타일 Fuzzer |
 | **Miner** | 숨은 파라미터 탐색 (기본 숨김) |
-| **OAST** | 블라인드 취약점을 위한 아웃오브밴드 콜백 리스너 |
+| **OAST** | 블라인드 취약점을 위한 아웃오브밴드 콜백 리스너 (기본은 `0` 뒤) |
 | **Sequencer** | 토큰 무작위성 / 예측 가능성 분석 (기본 숨김) |
-| **Decoder** | 인코드 / 디코드 / 해시 파이프라인 |
-| **JWT** | JSON Web Token 디코드, 재서명, 공격 (기본 숨김) |
+| **Decoder** | 인코드 / 디코드 / 해시 파이프라인 (기본은 `0` 뒤) |
+| **JWT** | JSON Web Token 디코드, 재서명, 공격 (기본은 `0` 뒤) |
 | **Cookie** | Flask / Rack / Django 세션 쿠키 디코드, 검증, 크랙, 재서명 (기본 숨김) |
-| **Comparer** | 두 플로우를 나란히 놓고 비교 |
-| **Rewriter** | 오가는 트래픽을 그 자리에서 재작성하는 Match & Replace 규칙 |
+| **Comparer** | 두 플로우를 나란히 놓고 비교 (기본은 `0` 뒤) |
+| **Rewriter** | 오가는 트래픽을 그 자리에서 재작성하는 Match & Replace 규칙 (기본은 `0` 뒤) |
 | **Colormarker** | 쿼리로 History 행 색을 칠하는 규칙 (기본 숨김) |
 | **Probe** | 패시브 및 light-touch 액티브 보안 스캐너 |
 | **Authorize** | 요청을 여러 아이덴티티로 재전송해 접근 제어 결함 탐지 (기본 숨김) |
 | **Issues** | 심각도와 상태로 결과 트리아지 |
 | **Evidence** | 동결된 요청/응답 스냅숏 보관함 (첫 스냅숏이 생기면 나타남) |
 | **Notes** | 프로젝트별 마크다운 노트 |
-| **Help** | 키 바인딩과 링크 |
+| **Help** | 키 바인딩과 링크 (기본은 `0` 뒤 — 어디서든 `?`로도 열림) |
 
-일부 탭(Miner, Sequencer, Cookie, Colormarker, Authorize)은 탭 바를 깔끔하게 유지하려고 새 설치에서 숨겨져 있습니다. 탭 바의 `⋯` 메뉴, 커맨드 팔레트, 또는 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs**에서 언제든 다시 표시할 수 있습니다. **Evidence**도 기본 숨김이며, 프로젝트에 첫 동결 스냅숏이 생긴 뒤에만 목록에 나타납니다. 그전에는 보관할 것이 없기 때문입니다. 탭은 아니지만 전역적으로 작동하는 렌즈들도 있습니다. **capture**(`c`), **intercept**(`i`), **scope 렌즈**(`s`)는 어디서든 토글할 수 있습니다.
+탭 바는 **번호가 매겨진 아홉 개의 슬롯**이고, 새 설치는 실제로 작업하는 루프로 그 슬롯을 채웁니다.
+
+```text
+1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:+12
+```
+
+`1`–`9`로 슬롯에 점프하고, 나머지 열두 개는 **`0`**으로 갑니다 — 카탈로그 전체를 타이핑으로
+거르는 목록입니다. `0` 뒤에 있는 탭은 상주하기보다 필요할 때 꺼내 쓰는 것들(OAST, Decoder,
+JWT, Comparer, Rewriter)과 특수 워크벤치(Miner, Sequencer, Cookie, Colormarker, Authorize),
+그리고 어디서든 `?`로 열리는 Help입니다. **Evidence**도 `0` 뒤에 있으며, 프로젝트에 첫 동결
+스냅숏이 생긴 뒤에만 목록에 나타납니다. 그전에는 보관할 것이 없기 때문입니다.
+
+아홉 개의 구성은 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs** 또는 팔레트의
+`settings:tabs`에서 바꿉니다. `space`로 표시/숨김, `⇧K`/`⇧J`로 순서 변경이고, 슬롯 번호는 그
+자리에서 다시 매겨집니다. 열 번째 ✓는 거부됩니다 — 하나를 먼저 숨기세요. (상한 없는 예전
+바를 원하면 **Layout → Tab bar slots**를 끄세요. `0`은 어느 쪽이든 그대로 동작합니다.)
+
+탭은 아니지만 전역적으로 작동하는 렌즈들도 있습니다. **capture**(`c`), **intercept**(`i`),
+**scope 렌즈**(`s`)는 어디서든 토글할 수 있습니다.

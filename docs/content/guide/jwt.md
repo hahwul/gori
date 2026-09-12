@@ -14,7 +14,7 @@ The **JWT** tab is a workbench for JSON Web Tokens: decode one, edit its claims 
   <figcaption>The <strong>JWT</strong> tab decodes a token live (header, payload, signature) and lists ready-to-send attack payloads: alg:none, weak-secret, and header injection.</figcaption>
 </figure>
 
-Select a token anywhere (a **History** detail pane, **Notes**, …) and `Space` → **Send to JWT** to seed a new workbench sub-tab with it. Sessions are ephemeral: nothing is written to disk. If you have hidden the tab, reveal it again from the tab-bar `⋯` menu, the command palette (`Ctrl-P` → **Go to JWT**), or Preferences.
+Select a token anywhere (a **History** detail pane, **Notes**, …) and `Space` → **Send to JWT** to seed a new workbench sub-tab with it. Sessions are ephemeral: nothing is written to disk. The tab is off the bar by default: press **`0`** and type "jwt", use the command palette (`Ctrl-P` → **Go to JWT**), or give it a slot in Preferences.
 
 ## Two Lenses
 

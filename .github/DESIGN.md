@@ -318,6 +318,47 @@ Width is measured, never assumed: `Screen.draw_width` reports the cells a string
 occupy, and views that draw per grapheme cluster sum the width per cluster so a wide
 character is never half-drawn.
 
+The tab bar is **nine numbered slots** (`Chrome::MAX_SLOTS`), and the digits are the primary
+way to move between them: `1`-`9` for a slot, `0` for everything else, `⇧1`-`⇧9` and `⇧0` for
+the same two gestures one level down on the sub-tab strip. Four consequences are load-bearing.
+
+`0` opens a **filtered picker**, not a dropdown. Nine slots against a twenty-one tab catalog
+leaves twelve tabs off the bar, and twelve is a list you type at rather than one you walk;
+the ⋯ dropdown it replaced had no filter, could not reach a tab that WAS on the bar, and
+carried a key table of its own. It is `FilterPickerOverlay`, the same card the sub-tab picker
+is, so "find me a tab" answers to one set of keys at both levels.
+
+The **temporary tenth tab is unnumbered**. Jumping to a hidden tab force-shows it at the far
+right of the bar; it is where the operator is standing rather than a slot they arranged, so it
+wears no `N:` and `nav.posN` never resolves to it. A digit painted on the bar and a digit in
+the keymap have to agree, or the bar lies about itself — hence `visible_slots` returns the
+strip AND the slot count rather than letting a caller infer one from the other.
+
+**Shifted digits are normalised in `Keybind`, not bound as punctuation.** A kitty-protocol
+terminal reports `⇧3` as `3` plus a shift flag; every other terminal sends `#`. Folding the
+punctuation onto `Chord.new("3", shift: true)` — exactly as a typed capital is folded onto
+shift+lowercase — keeps ONE chord in the keymap, one label in Help, and one rebind target.
+Binding the punctuation instead would have meant two bindings per key and a Help sheet that
+was right on half the terminals.
+
+**The default nine are chosen, not truncated to.** `DEFAULT_HIDDEN` names twelve tabs so the
+factory bar is Project · Target · History · Intercept · Repeater · Fuzzer · Probe · Issues ·
+Notes — capture, triage, record — and the cap never fires on a fresh install. `TABS` keeps its
+own order regardless: reconcile uses it to slot a newly-added tab beside its catalog
+neighbours in an existing config, so it must keep meaning "where this tab lives relative to
+the others", not "the default bar".
+
+An operator who saved their own layout keeps it, truncated by **position**: their first nine
+survive in their order, because that order is what their fingers learned, and re-deriving a
+"better" nine from a bar someone arranged is the shell overruling them. The fold is announced
+**once** (`Runner.settle_tab_slots` persists the truncated layout, so the notice cannot
+repeat) and NAMES the tabs that moved — a tab vanishing off the bar with no explanation is the
+one outcome this migration exists to prevent. A saved layout that is byte-identical to the
+pre-slots default is the exception: its owner never chose those fifteen tabs, so it is dropped
+rather than truncated and they simply get the new default. The cap is a setting
+(`Settings.tab_slots?`, default on); off, the bar is unbounded and scrolls as it used to,
+`1`-`9` still reach its first nine and `0` still reaches everything.
+
 <a id="s6"></a>
 
 ## §6 Data model

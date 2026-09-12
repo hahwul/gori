@@ -13,7 +13,7 @@ group = "워크벤치"
 
 ## 1. Sequencer를 토큰에 겨냥하기 {#1-point-the-sequencer-at-a-token}
 
-Sequencer 탭은 기본적으로 숨겨져 있습니다. 매일 쓰는 루프의 일부가 아니라 가끔 꺼내 쓰는 워크벤치입니다. 탭 바 `⋯` 메뉴나 `Ctrl-P` → **Go to Sequencer**로 드러냅니다.
+Sequencer 탭은 기본적으로 바 밖에 있습니다. 매일 쓰는 루프의 일부가 아니라 가끔 꺼내 쓰는 워크벤치입니다 — **`0`**을 누르고 "seq"를 입력하거나 `Ctrl-P` → **Go to Sequencer**를 쓰세요.
 
 캡처한 플로우로 먹입니다. **History**에서 응답이 토큰을 설정하는 플로우를 선택한 뒤 `Space` → **Send to Sequencer**를 누릅니다. gori가 유력한 세션 쿠키를 자동 감지하고 **CONFIG** 패널에 데려다 놓습니다. 추측이 틀렸다면 `c`로 토큰 위치를 다시 설정하세요. Cookie, Header, Regex, Position, JSONPath 중 하나를 고릅니다.
 

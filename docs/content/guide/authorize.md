@@ -9,7 +9,7 @@ group = "Workbenches"
 
 Most access-control bugs are invisible from one session. You are logged in as an admin, `/admin/users` returns the list, and everything looks correct, because you never asked what the *anonymous* client gets, or the read-only user, or the tenant next door. **Authorize** asks: it takes a request you already captured, replays it under several identities, and compares each response against a baseline. An identity that is served what the baseline was served is a likely authorization bypass. It is gori's counterpart to Burp's Autorize / Auth Analyzer and to AuthMatrix.
 
-The **Authorize** tab is hidden by default. Reveal it from the tab-bar `⋯` menu, the command palette (`Ctrl-P` → **Go to Authorize**), or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**.
+The **Authorize** tab is off the bar by default. Press **`0`** and type "auth", use the command palette (`Ctrl-P` → **Go to Authorize**), or give it one of the nine slots in Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**.
 
 ## What an Identity Is
 

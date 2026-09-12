@@ -416,7 +416,8 @@ TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 �
     "issues_preview": false,
     "history_list_order": "newest",
     "sitemap_expand_depth": -1,
-    "tab_numbers": false
+    "tab_numbers": true,
+    "tab_slots": true
   }
 }
 ```
@@ -428,7 +429,8 @@ TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 �
 | `issues_preview` | bool | `false` | Issues 목록 페이지가 선택한 이슈의 하단 요약을 표시 |
 | `history_list_order` | string | `"newest"` | 목록 정렬: `"newest"`(최신이 위) 또는 `"oldest"`(오래된 것이 위) |
 | `sitemap_expand_depth` | integer | `-1` | 재로딩 후 Sitemap 트리가 열리는 깊이: `-1` = 모두 펼침; `0`-`3` = 이 깊이보다 얕은 노드만 펼침 |
-| `tab_numbers` | bool | `false` | 탭 바의 처음 아홉 탭 앞에 `1:`…`9:`를 표시 — `1`-`9` 점프 키가 가리키는 위치입니다 |
+| `tab_numbers` | bool | `true` | 탭 바의 아홉 개 슬롯 앞에 `1:`…`9:`를 표시 — `1`-`9` 점프 키가 가리키는 위치입니다 |
+| `tab_slots` | bool | `true` | 탭 바를 번호가 매겨진 아홉 슬롯으로 제한: `settings:tabs`가 열 번째를 거부하고, 더 긴 저장 레이아웃은 앞의 아홉 개로 잘립니다(나머지는 `0`으로 계속 접근 가능). `false`면 상한 없이 `‹ ›`로 스크롤하던 예전 바로 돌아갑니다 |
 
 ### statusline {#statusline}
 

@@ -70,7 +70,7 @@ One thing survives on purpose: the global rule-id counters. A project can overri
 |---------|--------|
 | **Theme** | Opener: the theme picker (built-ins plus your own) |
 | **Display** | Default detail pane, History list time, Line numbers, Wrap long lines, Preview body limit (KiB), Resource meter, Terminal title |
-| **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth, Tab numbers |
+| **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth, Tab numbers, Tab bar slots |
 | **Companion** | Companion (Miss Ring), Placement, Motion, Notices |
 
 The Theme row previews the current theme inline, showing its name and a swatch of its palette. See the [Themes guide](/guide/themes/).
@@ -104,7 +104,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 | Section | Fields |
 |---------|--------|
 | **Network** | Bind IP, Bind Port, Proxy protocol, Proxy host, Proxy port, Proxy TLS CA, Verify proxy TLS, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules (read-only), Outbound TLS (read-only), Hostname overrides (opener) |
-| **Tabs** | Opener: show/hide and reorder the top tab bar |
+| **Tabs** | Opener: show/hide and reorder the tab bar's nine numbered slots (a tenth ✓ is refused — hide one first; everything off the bar stays reachable with `0`) |
 
 Network here is the **global default**. A project can pin its own bind address, port, and upstream from the **Project** tab, and those win for that project. See [Configuration](/getting-started/configuration/#network) for the full precedence order.
 

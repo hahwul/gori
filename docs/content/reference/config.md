@@ -418,7 +418,8 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
     "issues_preview": false,
     "history_list_order": "newest",
     "sitemap_expand_depth": -1,
-    "tab_numbers": false
+    "tab_numbers": true,
+    "tab_slots": true
   }
 }
 ```
@@ -430,7 +431,8 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 | `issues_preview` | bool | `false` | Issues list page shows a bottom summary of the selected issue |
 | `history_list_order` | string | `"newest"` | List sort: `"newest"` (newest at top) or `"oldest"` (oldest at top) |
 | `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`-`3` = expand only nodes shallower than this depth |
-| `tab_numbers` | bool | `false` | Paint `1:`…`9:` before the first nine tabs on the tab bar — the positions the `1`-`9` jump keys answer to |
+| `tab_numbers` | bool | `true` | Paint `1:`…`9:` before the nine slots on the tab bar — the positions the `1`-`9` jump keys answer to |
+| `tab_slots` | bool | `true` | Cap the tab bar at nine numbered slots: `settings:tabs` refuses a tenth, and a longer saved layout is truncated to its first nine (the rest stay reachable with `0`). `false` restores the unbounded, `‹ ›`-scrolling bar |
 
 ### statusline
 
