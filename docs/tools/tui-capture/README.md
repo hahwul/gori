@@ -34,8 +34,8 @@ shards build                       # ensure ./bin/gori exists
 docs/tools/tui-capture/capture.sh  # writes docs/static/images/tui/*.svg
 ```
 
-Requirements: `bash`, `tmux`, `python3`, `curl`, `sqlite3`, `jq` (the statusline scene's
-command is a jq program).
+Requirements: `bash`, `tmux`, `python3`, `curl`, `sqlite3`, `jq` (the statusline scenes'
+commands are jq programs).
 
 Set `ONLY` to shoot a subset of the three groups (`scenes themes readme`):
 
@@ -76,11 +76,29 @@ shot.
 ships off, so there is nothing to photograph until a command is configured. It runs last in
 `shoot_all` and puts the plain settings back, and it shoots the same History screen as the
 first scene on purpose — the picture is about the extra row at the bottom, so the rest of
-the frame has to be something the reader already recognises. Its command is a `jq` program
-built inside `write_statusline_settings`; it deliberately prints only fields that come
-straight off the live session (capture state, project, bind address, flow count, probe mode,
-catch-all upstream), so `SCENES=statusline` gives the same row whether or not the Issues
-scene has run first and promoted findings.
+the frame has to be something the reader already recognises.
+
+Its row is a SCRIPT, not a one-liner: `write_statusline_script` plants
+`$GORI_HOME/statusline.sh`, byte-identical to the one the guide prints under "When one line
+is not enough", and settings point at it. The row used to print the project, the bind
+address and the probe mode — each of them already a chip two rows above — so the hero
+picture argued against the feature it was selling. It now says what the chrome cannot: the
+life left in the token under test, a 5xx count, and the first unchecked task in the notes.
+
+`statusline-token.svg`, `statusline-errors.svg` and `statusline-todo.svg` are the gallery on
+the Statusline guide, and they are **strips**: one row, rendered with no window chrome
+(`run_strip` → `ansi2svg.py --tail 1`). Each is the row produced by the command printed above
+it on that page, so the commands live in `write_statusline_settings` — one place — rather than
+being retyped per scene. All three call `gori run` (jwt · history · notes), which is why the
+pane puts the built binary on PATH: the shot has to be of the command a reader would type,
+not of a path only this script knows. Only the token is staged (`write_demo_token` mints one
+an hour out into `$GORI_HOME`); the 5xx count and the notes come off the seeded project.
+
+Every palette pass starts from the same project: the seeded DB is snapshotted after
+seeding and restored at the top of each pass. Scenes mutate it — the Issues scene promotes
+findings — so without that the second pass photographed a project the first had already
+changed, and a strip counting anything the Issues scene touches disagreed with its own
+light twin.
 
 `readme.svg` is its own shot (`shoot_readme`), not part of the doc set: the
 repo README renders one image edge to edge with no sidebar, so it uses a much
@@ -105,4 +123,7 @@ the bottom or she covers live SIZE/DUR cells.
 ```bash
 tmux capture-pane -e -p > frame.ansi          # from any gori tmux session
 python3 ansi2svg.py frame.ansi frame.svg --title "gori · History"
+
+# just the last row, no window chrome — a strip
+python3 ansi2svg.py frame.ansi row.svg --tail 1 --pad 10 --aria "gori statusline row: …"
 ```

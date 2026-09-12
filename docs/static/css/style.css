@@ -2320,6 +2320,46 @@ kbd {
   font-size: 0.78rem;
   text-align: center;
 }
+/* preset cards (shortcodes/preset.html): a setting on top, a picture of what it
+   produces underneath. Stacked full width rather than gridded — the shot inside
+   one is a single terminal row, which stops being readable at half a column long
+   before the page runs out of room. */
+.preset-card {
+  margin: 1.5rem 0;
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+.preset-card-title {
+  margin-bottom: 0.75rem;
+  color: var(--heading);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+/* The card supplies the gap under the code; the wrapper's own bottom margin is
+   tuned for body copy and leaves the shot floating. */
+.preset-card-config pre,
+.preset-card-config .code-block {
+  max-width: 100%;
+  margin: 0 0 0.85rem;
+}
+/* Intrinsic width, not stretched: a strip is one terminal row, and scaling a
+   short row to the full card blows its glyphs up to banner size — three times
+   the type of the full-screen captures elsewhere on the page. */
+.preset-card-shot {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.preset-card-note {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 /* Gentle breakout on wide screens so the terminal text stays legible. */
 @media (min-width: 1180px) {
   .tui-shot {

@@ -58,7 +58,7 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 | **Statusline** | Statusline on/off, Command, Interval (s), Timeout (s) |
 | **Reset** | 액션: 모든 설정을 공장 기본값으로 되돌리기 |
 
-알림은 Miner, Fuzzer, Probe, Discover의 백그라운드 결과에서 발생합니다. [Statusline](/ko/reference/config/#statusline)은 셸 명령을 일정 간격으로 실행해 그 stdout를 맨 아래 줄에 표시합니다. 명령은 라이브 세션을 설명하는 [JSON 컨텍스트](/ko/reference/config/#statusline-context)를 stdin으로 받으며, 그대로 붙여 넣을 수 있는 [예시](/ko/reference/config/#statusline-examples)도 있습니다.
+알림은 Miner, Fuzzer, Probe, Discover의 백그라운드 결과에서 발생합니다. [Statusline](/ko/guide/statusline/)은 셸 명령을 일정 간격으로 실행해 그 stdout를 맨 아래 줄에 표시합니다. 명령은 라이브 세션을 설명하는 [JSON 컨텍스트](/ko/guide/statusline/#context)를 stdin으로 받으며, 그대로 붙여 넣을 수 있는 [프리셋](/ko/guide/statusline/#presets)도 있습니다.
 
 **Reset**은 한 섹션이 아니라 파일 전체입니다. `↵`(또는 `Ctrl-P` → **Settings: Reset**)로 확인을 거치면 `settings.json`이 갓 설치한 상태로 돌아가고, 테마·키맵·탭 바·목록과 미리보기 설정·프록시 바인드까지 즉시 반영됩니다. 같은 파일에 들어 있는 데이터도 함께 사라집니다. 전역 env 값, 호스트네임 오버라이드, OAST 프로바이더 토큰, 저장한 디코더 체인, 전역 Rewriter·Colormarker 규칙이 그렇습니다. 프로젝트와 캡처, 그리고 프로젝트가 고정한 바인드와 env는 그대로 남습니다.
 

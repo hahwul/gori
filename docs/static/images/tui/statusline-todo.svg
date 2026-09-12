@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="497" height="38" viewBox="0 0 497.0 38.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="gori statusline row: how many unchecked tasks the project notes hold, and the first of them">
+<rect x="0.5" y="0.5" width="496.0" height="37.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
+<text x="37.00" y="23.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">todo</text>
+<text x="82.00" y="23.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">2</text>
+<text x="100.00" y="23.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">·</text>
+<text x="118.00" y="23.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">re-test</text>
+<text x="190.00" y="23.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">#4</text>
+<text x="217.00" y="23.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">after</text>
+<text x="271.00" y="23.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">the</text>
+<text x="307.00" y="23.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">token</text>
+<text x="361.00" y="23.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">rotation</text>
+<text x="442.00" y="23.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">lands</text>
+</svg>

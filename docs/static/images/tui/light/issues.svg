@@ -73,55 +73,37 @@
 <text x="45.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1b1b1d" xml:space="preserve">▎</text>
 <text x="54.00" y="209.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#8a5d0a" font-weight="700" xml:space="preserve">MED</text>
 <text x="99.00" y="209.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">open</text>
-<text x="144.00" y="209.68" textLength="90.00" lengthAdjust="spacingAndGlyphs" fill="#111110" xml:space="preserve">Permissive</text>
-<text x="243.00" y="209.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#111110" xml:space="preserve">CORS</text>
-<text x="288.00" y="209.68" textLength="261.00" lengthAdjust="spacingAndGlyphs" fill="#111110" xml:space="preserve">(Access-Control-Allow-Origin:</text>
-<text x="558.00" y="209.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#111110" xml:space="preserve">*)</text>
-<text x="1044.00" y="209.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">api.github.com</text>
+<text x="144.00" y="209.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#111110" xml:space="preserve">Sensitive</text>
+<text x="234.00" y="209.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#111110" xml:space="preserve">parameter</text>
+<text x="324.00" y="209.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#111110" xml:space="preserve">in</text>
+<text x="351.00" y="209.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#111110" xml:space="preserve">URL</text>
+<text x="1053.00" y="209.68" textLength="117.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">httpbingo.org</text>
 <text x="1179.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="36.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="54.00" y="227.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#8a5d0a" font-weight="700" xml:space="preserve">MED</text>
 <text x="99.00" y="227.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">open</text>
 <text x="144.00" y="227.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Missing</text>
-<text x="216.00" y="227.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Content-Security-Policy</text>
-<text x="1071.00" y="227.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">example.com</text>
+<text x="216.00" y="227.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">or</text>
+<text x="243.00" y="227.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">disabled</text>
+<text x="324.00" y="227.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">HSTS</text>
+<text x="369.00" y="227.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">header</text>
+<text x="1053.00" y="227.68" textLength="117.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">httpbingo.org</text>
 <text x="1179.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="36.00" y="245.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="54.00" y="245.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#8a5d0a" font-weight="700" xml:space="preserve">MED</text>
 <text x="99.00" y="245.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">open</text>
-<text x="144.00" y="245.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Sensitive</text>
-<text x="234.00" y="245.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">parameter</text>
-<text x="324.00" y="245.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">in</text>
-<text x="351.00" y="245.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">URL</text>
-<text x="1053.00" y="245.68" textLength="117.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">httpbingo.org</text>
+<text x="144.00" y="245.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Missing</text>
+<text x="216.00" y="245.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">or</text>
+<text x="243.00" y="245.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">disabled</text>
+<text x="324.00" y="245.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">HSTS</text>
+<text x="369.00" y="245.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">header</text>
+<text x="1071.00" y="245.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">example.com</text>
 <text x="1179.00" y="245.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="36.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
-<text x="54.00" y="263.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#8a5d0a" font-weight="700" xml:space="preserve">MED</text>
-<text x="99.00" y="263.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">open</text>
-<text x="144.00" y="263.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Missing</text>
-<text x="216.00" y="263.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">or</text>
-<text x="243.00" y="263.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">disabled</text>
-<text x="324.00" y="263.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">HSTS</text>
-<text x="369.00" y="263.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">header</text>
-<text x="1053.00" y="263.68" textLength="117.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">httpbingo.org</text>
 <text x="1179.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="36.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
-<text x="54.00" y="281.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#8a5d0a" font-weight="700" xml:space="preserve">MED</text>
-<text x="99.00" y="281.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">open</text>
-<text x="144.00" y="281.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Missing</text>
-<text x="216.00" y="281.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">or</text>
-<text x="243.00" y="281.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">disabled</text>
-<text x="324.00" y="281.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">HSTS</text>
-<text x="369.00" y="281.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">header</text>
-<text x="1071.00" y="281.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">example.com</text>
 <text x="1179.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="36.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
-<text x="54.00" y="299.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#1b1b1d" font-weight="700" xml:space="preserve">LOW</text>
-<text x="99.00" y="299.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">open</text>
-<text x="144.00" y="299.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Missing</text>
-<text x="216.00" y="299.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">X-Content-Type-Options:</text>
-<text x="432.00" y="299.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">nosniff</text>
-<text x="1071.00" y="299.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">example.com</text>
 <text x="1179.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="36.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="1179.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
@@ -169,10 +151,10 @@
 <text x="909.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">q</text>
 <text x="927.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">p…</text>
 <text x="954.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">CPU</text>
-<text x="990.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">2%</text>
+<text x="990.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">3%</text>
 <text x="1017.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">MEM</text>
-<text x="1053.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">30M</text>
+<text x="1053.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">29M</text>
 <text x="1089.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">·</text>
-<text x="1107.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">07:06</text>
+<text x="1107.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">08:40</text>
 <text x="1161.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">PM</text>
 </svg>

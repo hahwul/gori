@@ -1,0 +1,19 @@
+{#- preset — one configuration card: what you set on top, a picture of what it
+    produces underneath. Written for the statusline presets, but nothing in it is
+    statusline-specific: any setting whose result is visible in a capture fits.
+
+    Block form. Arguments are title, src, alt and note; the BODY is the setting
+    itself, normally a fenced code block, and is rendered as Markdown — so it
+    picks up highlighting and the copy button like any other block on the page.
+    (No usage sample here: a literal tag inside a comment is still parsed, and a
+    shortcode template that shows its own call refuses to render. See
+    docs/content/guide/statusline.md for real calls.)
+
+    An `src` under /images/tui/ gets the light/dark swap the other captures get
+    (footer.html), so a strip only needs a twin under images/tui/light/. -#}
+<figure class="preset-card">
+  {% if title %}<figcaption class="preset-card-title">{{ title | e }}</figcaption>{% endif %}
+  <div class="preset-card-config">{{ body | markdownify }}</div>
+  {% if src %}<img class="preset-card-shot" src="{{ src | e }}" alt="{{ alt | default(value=title) | e }}">{% endif %}
+  {% if note %}<p class="preset-card-note">{{ note | e }}</p>{% endif %}
+</figure>

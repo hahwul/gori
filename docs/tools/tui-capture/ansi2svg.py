@@ -189,11 +189,24 @@ if __name__ == "__main__":
     ap.add_argument("--title", default=None)
     ap.add_argument("--aria", default=None, help="spoken label; defaults to --title")
     ap.add_argument("--fs", type=float, default=15.0)
+    ap.add_argument("--tail", type=int, default=0,
+                    help="render only the last N non-blank rows (a strip of the screen, "
+                         "e.g. the statusline). Pair with no --title for a bare row.")
+    ap.add_argument("--pad", type=float, default=18.0,
+                    help="padding around the rendered cells; a one-row strip wants less")
     a = ap.parse_args()
     with open(a.infile, "r", encoding="utf-8", errors="replace") as f:
         data = f.read()
     rows = parse(data)
-    svg = render(rows, a.title, fs=a.fs, aria=a.aria)
+    if a.tail > 0:
+        # Trim the trailing blank rows FIRST. A tmux pane is captured at its full
+        # height, so the rows after the TUI's last drawn line are blank padding —
+        # slicing before the trim would hand back a strip of empty cells and
+        # render's own trim would then leave nothing at all.
+        while rows and all(c.ch == " " for c in rows[-1]):
+            rows.pop()
+        rows = rows[-a.tail:]
+    svg = render(rows, a.title, fs=a.fs, aria=a.aria, pad=a.pad)
     with open(a.outfile, "w", encoding="utf-8") as f:
         f.write(svg)
     print(f"wrote {a.outfile} ({len(svg)} bytes)")
