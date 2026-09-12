@@ -427,13 +427,20 @@ module Gori
 
       # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
       # controller-owned on the response pane because plain `x` is also select-line
-      # on request/target READ — same letter, pane-local meaning). 'd'/'p' chords are
-      # free in COMMON ∪ :response (:request's 'd'/'p' are a different section for the
+      # on request/target READ — same letter, pane-local meaning). The 'p' chord is
+      # free in COMMON ∪ :response (:request's 'p' is a different section for the
       # space menu only; keymap last-wins is avoided because request toggles use
       # ctrl chords). Handlers no-op unless the response pane is focused.
+      #
+      # Diff is ⇧D and not bare `d`: `d` deletes or dismisses the selected row in the
+      # sixteen other scopes that bind it, and the Repeater was the one place where the
+      # reflex hit a display toggle instead. The chord is Chord.new("d", shift: true),
+      # NOT Chord.new("D") — Keybind.from_event normalises a typed capital to
+      # shift+lowercase. menu_key skips shift chords, so the mnemonic stays the plain
+      # 'd' this section has always read as, in the space menu where nothing is destroyed.
       r.register Verb::Definition.new(
         "repeater.toggle-diff", "Toggle diff", "Switch the response pane between the raw response and a diff against the previous one",
-        Verb::Scope::Repeater, [Verb::Chord.new("d")],
+        Verb::Scope::Repeater, [Verb::Chord.new("d", shift: true)],
         available: in_repeater, mnemonic: 'd', section: :response) { |ctx| ctx.repeater_toggle_resp_diff; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",

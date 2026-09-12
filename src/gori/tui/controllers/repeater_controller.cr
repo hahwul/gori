@@ -260,7 +260,7 @@ module Gori::Tui
       send = Hotkeys.binding_label(reg, "repeater.send", "^R")
       hex = Hotkeys.binding_label(reg, "repeater.toggle-hex", "^X")
       sni = Hotkeys.binding_label(reg, "repeater.toggle-sni", "^S")
-      diff = Hotkeys.binding_label(reg, "repeater.toggle-diff", "d")
+      diff = Hotkeys.binding_label(reg, "repeater.toggle-diff", "⇧D")
       pretty = Hotkeys.binding_label(reg, "repeater.toggle-pretty", "p")
       # The §-marker trio, named in both request footers. `^T` in particular was reachable
       # only by already knowing it: the border badge advertises MARK, not the key that makes

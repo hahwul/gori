@@ -128,7 +128,7 @@ module Gori::Tui
         Item.new("^V", "transport: HTTP/1.1 ↔ HTTP/2 · on a WebSocket tab, WS → h1 → h2 (send the handshake as plain HTTP)", "repeater.toggle-http2"),
         Item.new("space → g", "send group: %%%-split requests on one connection"),
         Item.new("↹", "cycle target → request → response"),
-        Item.new("d", "response: toggle diff", "repeater.toggle-diff"),
+        Item.new("⇧D", "response: toggle diff", "repeater.toggle-diff"),
         Item.new("p", "response: pretty bodies", "repeater.toggle-pretty"),
         Item.new("^X", "response: hex dump (pane-local)"),
         Item.new("⇧←/→", "response: scroll a long line sideways"),
