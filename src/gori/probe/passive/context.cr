@@ -1,4 +1,5 @@
 require "../../store"
+require "../../utf8"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
 require "./cache_control"
@@ -169,11 +170,19 @@ module Gori
         # Decoded, capped, scrubbed response body text — computed once and shared by the rules
         # that scan the body. nil when there is no body. Slices the shared `decoded_body` buffer
         # to its first BODY_CAP bytes.
+        #
+        # Every text getter here repairs through `Utf8.text`, not a bare `String#scrub`: scrub
+        # walks the body a CHARACTER at a time and returns `self` when there was nothing to fix,
+        # so a valid body — nearly all of them — pays a full decode to be told so, while
+        # `valid_encoding?` answers the same question with a byte DFA. Measured over this file's
+        # own worst case (bench/probe_passive_bench's 256 KiB JS bundle): 0.90ms → 0.10ms, and
+        # 0.69ms → 0.08ms over the 200 KiB HTML page. The repair itself is unchanged — an
+        # invalid body still ends up scrubbed, at ~5% for the second walk. See `Gori::Utf8`.
         def body_text : String?
           return @body_text if @body_text_done
           @body_text_done = true
           bytes = decoded_body
-          @body_text = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub : nil
+          @body_text = (bytes && !bytes.empty?) ? Utf8.text(bytes[0, {bytes.size, BODY_CAP}.min]) : nil
         end
 
         # Decoded, larger-capped (CLIENT_BODY_CAP), scrubbed body — computed once and shared by
@@ -184,7 +193,7 @@ module Gori
           @client_body_text_done = true
           return @client_body_text = nil unless html? || js?
           bytes = decoded_body
-          @client_body_text = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, CLIENT_BODY_CAP}.min]).scrub : nil
+          @client_body_text = (bytes && !bytes.empty?) ? Utf8.text(bytes[0, {bytes.size, CLIENT_BODY_CAP}.min]) : nil
         end
 
         # RAW executable JS fragments (inline <script> bodies for HTML, whole body for JS),
@@ -198,7 +207,11 @@ module Gori
         # so the DOM-XSS source->sink correlation never matches a sink or source that lived in a
         # string or comment. Memoised so the lex runs at most once per flow.
         def client_code : Array(String)
-          @client_code ||= client_scripts.map { |s| JsScan.strip(s) }
+          if c = @client_code
+            return c
+          end
+          build_client_views
+          @client_code || [] of String
         end
 
         # The fragments with ONLY comments blanked (string/template CONTENTS kept). The
@@ -206,7 +219,32 @@ module Gori
         # "message"/"__proto__" inside a live string is still seen, but the same keyword in a
         # commented-out example/debug line no longer false-matches. Memoised per flow.
         def client_scripts_nocomment : Array(String)
-          @client_scripts_nocomment ||= client_scripts.map { |s| JsScan.strip_comments(s) }
+          if c = @client_scripts_nocomment
+            return c
+          end
+          build_client_views
+          @client_scripts_nocomment || [] of String
+        end
+
+        # Both client views from ONE lex of each fragment (`JsScan.strip_both`), because on an
+        # HTML or JS flow both are live: DomXss/DomClobbering read client_code, PostMessage/
+        # PrototypePollution read client_scripts_nocomment. Two `map`s meant two full walks of
+        # the same scripts (bench/probe_passive_bench's 256 KiB bundle: 1.75ms for the pair,
+        # 2.92ms for its non-ASCII variant — see `JsScan.strip_both` for what fusing them buys).
+        # Whichever getter is asked first fills both, so the memos still make this at most once
+        # per flow; an operator who has disabled one of the two rule pairs pays the other view's
+        # emission (~8% of one walk), not a second walk.
+        private def build_client_views : Nil
+          scripts = client_scripts
+          code = Array(String).new(scripts.size)
+          kept = Array(String).new(scripts.size)
+          scripts.each do |s|
+            stripped, nocomment = JsScan.strip_both(s)
+            code << stripped
+            kept << nocomment
+          end
+          @client_code = code
+          @client_scripts_nocomment = kept
         end
 
         # --- region text for user-defined custom match rules ---------------------------------
@@ -225,7 +263,7 @@ module Gori
 
         # Raw request head (request line + headers) as scrubbed text.
         def request_head_text : String
-          @req_head_text ||= String.new(@detail.request_head).scrub
+          @req_head_text ||= Utf8.text(@detail.request_head)
         end
 
         # Decoded, capped, scrubbed request body text (nil when there is no body). A request body
@@ -238,7 +276,7 @@ module Gori
           if body && !body.empty?
             decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.request_head, body, BODY_CAP)
             bytes = decoded || body
-            @req_body_text = String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
+            @req_body_text = Utf8.text(bytes[0, {bytes.size, BODY_CAP}.min])
           end
           @req_body_text
         end
@@ -247,7 +285,7 @@ module Gori
         def response_head_text : String?
           return @resp_head_text if @resp_head_text_done
           @resp_head_text_done = true
-          @resp_head_text = @detail.response_head.try { |h| String.new(h).scrub }
+          @resp_head_text = @detail.response_head.try { |h| Utf8.text(h) }
         end
 
         # The "whole" region — head and body joined — memoized like every other region getter.

@@ -145,6 +145,25 @@ BIG_HTML_FLOW = flow("GET", "/docs", "text/html; charset=utf-8",
   ("GET /docs HTTP/1.1\r\nHost: app.example.com\r\n\r\n").to_slice, nil,
   HTML_RESP_HEAD, BIG_HTML_BODY)
 
+# A BINARY asset — an image, the single most common response shape in a real browse after the
+# document itself, and the one none of the fixtures above covers. It is deliberately NOT valid
+# UTF-8, which is the whole point: `Context#body_text` has to repair the bytes before any rule
+# hands them to PCRE, and repairing invalid bytes EXPANDS them (each becomes a 3-byte U+FFFD).
+# Half this generator's bytes happen to be ASCII and pass through, so the 64 KiB BODY_CAP prefix
+# scrubs to 102,612 bytes — a 1.57× blow-up here, and up to 3× on a body with no ASCII at all.
+# (The fixture is 180 KiB so the cap really bites; only its first 64 KiB is ever scanned.)
+# Nothing in the BODY can produce a detection — the two the fixture reports are header-only, the
+# nginx `Server:` fingerprint and missing HSTS — so the body scan is pure overhead on the fiber
+# the passive scan shares with the proxy, and it is invisible in any all-text fixture.
+BIN_BODY = Bytes.new(180 * 1024) { |i| ((i.to_u64 &* 2654435761_u64) >> 13).to_u8! }
+
+BIN_RESP_HEAD = ("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n" \
+                 "Server: nginx/1.24.0\r\nCache-Control: max-age=31536000\r\n\r\n").to_slice
+
+BIN_FLOW = flow("GET", "/static/hero.png", "image/png",
+  ("GET /static/hero.png HTTP/1.1\r\nHost: app.example.com\r\n\r\n").to_slice, nil,
+  BIN_RESP_HEAD, BIN_BODY)
+
 JS_RESP_HEAD = ("HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n" \
                 "Server: nginx/1.24.0\r\nCache-Control: max-age=31536000\r\n\r\n").to_slice
 
@@ -160,15 +179,18 @@ puts "Probe passive scan — full Passive.analyze per flow:"
 puts "  JSON POST body: #{JSON_BODY.size} bytes; HTML document: #{HTML_BODY.size} bytes"
 puts "  JS bundle: #{JS_BODY.size} bytes (at the CLIENT_BODY_CAP ceiling)"
 puts "  JS bundle + non-ASCII regex literal: #{JS_I18N_BODY.size} bytes"
+puts "  binary asset: #{BIN_BODY.size} bytes (invalid UTF-8 by construction)"
 puts "  (detections: json=#{Gori::Probe::Passive.analyze(JSON_FLOW).size}" \
      " html=#{Gori::Probe::Passive.analyze(HTML_FLOW).size}" \
      " js=#{Gori::Probe::Passive.analyze(JS_FLOW).size}" \
-     " js_i18n=#{Gori::Probe::Passive.analyze(JS_I18N_FLOW).size})"
+     " js_i18n=#{Gori::Probe::Passive.analyze(JS_I18N_FLOW).size}" \
+     " binary=#{Gori::Probe::Passive.analyze(BIN_FLOW).size})"
 
 Benchmark.ips do |x|
   x.report("JSON API POST flow ") { Gori::Probe::Passive.analyze(JSON_FLOW) }
   x.report("HTML document flow ") { Gori::Probe::Passive.analyze(HTML_FLOW) }
   x.report("HTML doc, 200 KiB  ") { Gori::Probe::Passive.analyze(BIG_HTML_FLOW) }
+  x.report("binary asset 180 KiB") { Gori::Probe::Passive.analyze(BIN_FLOW) }
   x.report("JS bundle flow     ") { Gori::Probe::Passive.analyze(JS_FLOW) }
   # Must stay in the SAME order of magnitude as the plain JS bundle. A large gap here means the
   # non-ASCII slow path is back.

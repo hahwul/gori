@@ -1,3 +1,4 @@
+require "../../utf8"
 require "./rule"
 require "./secrets"
 
@@ -55,11 +56,13 @@ module Gori
 
         # Scannable text for one frame, capped at MSG_CAP.
         #
-        # A TEXT frame is declared UTF-8, so `scrub` is the right repair and keeps the payload
-        # readable. A BINARY frame is not, and scrub is the wrong tool for it twice over: it
-        # EXPANDS each invalid byte to a 3-byte U+FFFD, so a 64 KiB frame would allocate ~192 KiB
-        # per message on the fiber the passive scan shares with the proxy, and it would do that
-        # for every frame of a chatty socket.
+        # A TEXT frame is declared UTF-8, so a scrub is the right repair and keeps the payload
+        # readable — through `Utf8.text`, which asks `valid_encoding?` first and only scrubs a
+        # frame that is really broken, so a chatty socket's valid frames skip the character walk.
+        # A BINARY frame is not, and scrub is the wrong tool for it twice over: it EXPANDS each
+        # invalid byte to a 3-byte U+FFFD, so a 64 KiB frame would allocate ~192 KiB per message
+        # on the fiber the passive scan shares with the proxy, and it would do that for every
+        # frame of a chatty socket.
         #
         # The projection below is size-preserving, always valid UTF-8, and LOSSLESS for the shapes
         # this rule matches: every pattern is pure ASCII, and mapping a non-ASCII byte to a space
@@ -68,7 +71,7 @@ module Gori
         private def payload_text(payload : Bytes, text_frame : Bool) : String?
           return nil if payload.empty?
           bytes = payload[0, {payload.size, MSG_CAP}.min]
-          return String.new(bytes).scrub if text_frame
+          return Utf8.text(bytes) if text_frame
           # Mapped over a byte slice rather than char-by-char into a String::Builder: the result is
           # ASCII by construction, so `String.new` on it is valid UTF-8 without a second pass, and
           # this skips one virtual IO dispatch per byte (a 64 KiB frame is 65_536 of them).
