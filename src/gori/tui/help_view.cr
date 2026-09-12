@@ -244,7 +244,7 @@ module Gori::Tui
         Item.new("{comparer.next-change} · {comparer.prev-change}", "next · previous CHANGED row (the same pair the drill-ins step with)"),
         Item.new("space → z", "fold the unchanged runs, keeping context", "comparer.toggle-fold"),
         Item.new("⇧←/→", "h-scroll both columns (long lines)"),
-        Item.new("s", "swap A ⇄ B", "comparer.swap"),
+        Item.new("w", "swap A ⇄ B", "comparer.swap"),
         Item.new("^N / ^W · r", "new / close / rename comparison sub-tab"),
         Item.new("Send to Comparer", "from History (space menu) — fills the active sub-tab"),
       ]},
@@ -333,7 +333,7 @@ module Gori::Tui
       {"REWRITER", [
         Item.new("{rewriter.add} · ↵/e", "add a Match & Replace rule · edit the selected one"),
         Item.new("x · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("{rewriter.scope} · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere"),
+        Item.new("space → s · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere", "rewriter.scope"),
         Item.new("G / P column", "global (every project) or project · G* = this project overrides its default"),
         Item.new("{rewriter.move-down} / {rewriter.move-up}", "reorder within a scope — globals apply first, then project rules"),
         Item.new("[ / ]", "switch sub-tab: rules · extract · bindings"),
@@ -347,7 +347,7 @@ module Gori::Tui
       {"COLORMARKER", [
         Item.new("{colormarker.add} · ↵/e", "add a History row-colour rule · edit the selected one"),
         Item.new("{colormarker.toggle} · {colormarker.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("{colormarker.scope} · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere"),
+        Item.new("space → s · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere", "colormarker.scope"),
         Item.new("{colormarker.move-down} / {colormarker.move-up}", "reorder — the FIRST enabled match paints the row, the rest are skipped"),
         Item.new("style", "full = tint the whole row · strip = one colour cell ahead of TIME"),
         Item.new("when:", "host: path: method: scheme: status: proto: — ↹ completes · no header:/size:/dur:"),

@@ -56,7 +56,9 @@ describe "rule-list keys" do
     r["colormarker.edit"].chords.should contain(plain.call("enter"))
     r["colormarker.delete"].chords.should contain(plain.call("d"))
     r["colormarker.toggle"].chords.should contain(plain.call("t")) # F4: `t` flips a row flag
-    r["colormarker.scope"].chords.should contain(plain.call("s"))
+    # F7: menu-only, so the Global `s` (scope lens) is not shadowed on this tab.
+    r["colormarker.scope"].chords.should be_empty
+    r["colormarker.scope"].menu_key.should eq('s')
     r["colormarker.toggle-default"].chords.should be_empty # menu-only: ⇧X is the wipe chord elsewhere
     r["colormarker.move-down"].chords.should contain(shift.call("j"))
     r["colormarker.move-up"].chords.should contain(shift.call("k"))
@@ -250,14 +252,18 @@ end
 describe "Rewriter rule keys" do
   r = Gori::Verbs.registry
 
-  it "binds every rule action except toggle" do
+  it "binds every rule action, and leaves the two that shadow a Global key to the menu" do
     plain = ->(k : String) { typed_chord(k) }
     r["rewriter.add"].chords.should contain(plain.call("a"))
     r["rewriter.edit"].chords.should contain(plain.call("e"))
     r["rewriter.delete"].chords.should contain(plain.call("d"))
-    r["rewriter.scope"].chords.should contain(plain.call("s"))
     r["rewriter.move-up"].chords.should contain(typed_chord("k", shift: true))
     r["rewriter.toggle-default"].chords.should be_empty # menu-only: ⇧X is the wipe chord elsewhere
+    # global ⇄ project is menu-only since the key audit's F7: `s` is the Global scope lens,
+    # and a scoped chord always beats the Global fallback, so this list quietly cost an
+    # operator the lens key for an action used when a rule is FILED, not while triaging.
+    r["rewriter.scope"].chords.should be_empty
+    r["rewriter.scope"].menu_key.should eq('s')
   end
 
   it "takes a REAL chord on `t`, because F4 moved the toggle off `x` entirely" do

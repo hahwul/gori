@@ -186,6 +186,30 @@ describe "one key, one meaning" do
     Gori::Verbs.registry["activity.refresh"].chords.should be_empty
   end
 
+  # `s` had seven meanings and shadowed the Global scope lens in all of them. It reduces to
+  # two: GO TO SOURCE where a row has one, and the Global lens everywhere it is not shadowed.
+  it "`s` means go-to-source or the Global lens, and `w` swaps A ⇄ B" do
+    sources = {"evidence.source", "issue.goto-link", "probe.open-evidence", "probe.open-flow"}
+    Gori::Verb::Scope.each do |scope|
+      next unless id = keymap.lookup(Gori::Verb::Chord.new("s"), scope)
+      next if id == "scope.toggle-lens" # the Global L2 breath key, unshadowed
+      next if sources.includes?(id)
+      # The ONE remaining shadow, and it is named rather than swept: the Project ACTIVITY
+      # feed's `s` cycles the source chip. Folding it into the `/` bar (F8's proposal) needs
+      # that bar to parse `source:`/`level:`/`actor:`, and it is a plain free-text query
+      # handed to `events_recent(query:)` — the chips are separate SQL parameters.
+      id.should eq("activity.filter-source"), "#{scope}: s = #{id}"
+    end
+    # Swap moved off `s` to `w` in both scopes that had it.
+    keymap.lookup(Gori::Verb::Chord.new("w"), Gori::Verb::Scope::Comparer).should eq("comparer.swap")
+    keymap.lookup(Gori::Verb::Chord.new("w"), Gori::Verb::Scope::Diff).should eq("diff.swap")
+    # …and the two rule lists' global ⇄ project toggles are menu entries.
+    {"colormarker.scope", "rewriter.scope"}.each do |id|
+      Gori::Verbs.registry[id].chords.should be_empty, id
+      Gori::Verbs.registry[id].menu_key.should eq('s'), id
+    end
+  end
+
   it "History's hidden nav verbs are gated to History, not to every Body-scope tab" do
     ctx = FakeExecContext.new
     ctx.current_tab = :help

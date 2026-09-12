@@ -15,10 +15,17 @@ module Gori
         Verb::Scope::Comparer, [Verb::Chord.new("b")],
         available: in_comparer) { |ctx| ctx.comparer_pick(:b); nil }
 
+      # `w` — sWap. It was `s`, and `s` is the Global scope lens: a scoped chord always beats
+      # the Global fallback, so this tab silently cost an operator the lens key. `s` reduces to
+      # two meanings now (key audit, F7): GO TO SOURCE where a row has one, and the Global lens
+      # everywhere it is not shadowed. `w` is free in this scope and names the action.
+      #
+      # The MENU letter stays 's': a space-menu letter is its own keyspace (it is reached after
+      # `space`), and `w` there is Close in every workbench menu in the app.
       r.register Verb::Definition.new(
         "comparer.swap", "Swap A ⇄ B", "Swap the two flows being compared",
-        Verb::Scope::Comparer, [Verb::Chord.new("s")],
-        available: in_comparer) { |ctx| ctx.comparer_swap; nil }
+        Verb::Scope::Comparer, [Verb::Chord.new("w")],
+        available: in_comparer, mnemonic: 's') { |ctx| ctx.comparer_swap; nil }
 
       r.register Verb::Definition.new(
         "comparer.toggle-pane", "Compare requests/responses",

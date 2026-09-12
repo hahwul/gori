@@ -1157,7 +1157,7 @@ module Gori::Tui
       when :preview_out
         keys("↑/↓ move · ⇧arrows select · {rewriter.copy} copy · {rewriter.select-line} line · space cmds · ← input · esc input")
       else
-        keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · {rewriter.toggle} on/off · {rewriter.filter} filter · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
+        keys("↹ section · ↑/↓ select · {rewriter.add} add · ↵/e edit · {rewriter.toggle} on/off · {rewriter.filter} filter · space → s global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
       end
     end
   end

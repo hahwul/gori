@@ -76,9 +76,13 @@ module Gori
       on_global_rule = ->(ctx : Verb::ExecContext) do
         ctx.current_tab == :colormarker && ctx.colormarker_rule_list_focused? && ctx.colormarker_global_rule_selected?
       end
+      # MENU-ONLY since the key audit's F7. `s` is the Global scope lens, and a scoped chord
+      # always beats the Global fallback — so this rule list quietly cost an operator the lens
+      # key for an action they use when they file a rule, not while they triage. The letter
+      # stays in the menu, where it is reached after `space` and shadows nothing.
       r.register Verb::Definition.new(
         "colormarker.scope", "Global/project", "Move the selected rule between this project and the global library",
-        Verb::Scope::Colormarker, [Verb::Chord.new("s")], available: on_rule, mnemonic: 's', section: :rules) { |ctx| ctx.colormarker_scope_toggle; nil }
+        Verb::Scope::Colormarker, available: on_rule, mnemonic: 's', section: :rules) { |ctx| ctx.colormarker_scope_toggle; nil }
       r.register Verb::Definition.new(
         "colormarker.toggle-default", "Enable/disable everywhere",
         "Flip a GLOBAL rule's default — the state every project without an override follows",

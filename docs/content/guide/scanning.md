@@ -169,7 +169,7 @@ Two more tools round out analysis:
 
 The Comparer diffs two **messages**. Retesting asks the same question one level up (*what changed since the last engagement?*), and that is the **Diff** sub-tab under **Target**, next to the Sitemap whose folding it keys on.
 
-Slots hold **projects**, not flows: `a` picks the baseline (the earlier engagement), `b` defaults to the project you have open, `s` swaps them, and `r` re-runs the read. Nothing is sent; both sides are captured traffic. Rows are endpoints, and `↵` (or `o`) hands the selected endpoint's capture from *each* side to the Comparer for the byte-level answer.
+Slots hold **projects**, not flows: `a` picks the baseline (the earlier engagement), `b` defaults to the project you have open, `w` swaps them, and `Ctrl-R` re-runs the read. Nothing is sent; both sides are captured traffic. Rows are endpoints, and `↵` (or `→`) hands the selected endpoint's capture from *each* side to the Comparer for the byte-level answer.
 
 **Endpoint identity is the whole game.** Two engagements never capture the same identifiers, so a diff keyed on literal paths reports every row twice (once removed, once added) and tells you nothing. Endpoints are therefore keyed by the same folded template the Sitemap draws: `/users/{uuid}`, `/items/{n}`, `/search` with its query variants folded on. The fold runs over the union of both sides, so a route that met the fold threshold on only one side still matches itself on the other.
 

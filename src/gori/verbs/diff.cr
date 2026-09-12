@@ -28,9 +28,16 @@ module Gori
         "diff.pick-b", "Pick newer (B)", "Choose the newer engagement (defaults to the open project)",
         Verb::Scope::Diff, [Verb::Chord.new("b")]) { |ctx| ctx.diff_pick(:b); nil }
 
+      # `w` — sWap. It was `s`, and `s` is the Global scope lens: a scoped chord always beats
+      # the Global fallback, so this tab silently cost an operator the lens key. `s` reduces to
+      # two meanings now (key audit, F7): GO TO SOURCE where a row has one, and the Global lens
+      # everywhere it is not shadowed. `w` is free in this scope and names the action.
+      #
+      # The MENU letter stays 's': a space-menu letter is its own keyspace (it is reached after
+      # `space`), and `w` there is Close in every workbench menu in the app.
       r.register Verb::Definition.new(
         "diff.swap", "Swap A ⇄ B", "Swap the two snapshots — a diff reads before → after",
-        Verb::Scope::Diff, [Verb::Chord.new("s")]) { |ctx| ctx.diff_swap; nil }
+        Verb::Scope::Diff, [Verb::Chord.new("w")], mnemonic: 's') { |ctx| ctx.diff_swap; nil }
 
       # `^R`, the Run chord in the nine other scopes that have one — Authorize, Body,
       # Discover, Fuzzer, the History detail, Miner, OAST, Repeater and Sequencer. This was
