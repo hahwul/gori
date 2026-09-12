@@ -210,29 +210,22 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     offer_open_created(:note, note_id)
   end
 
-  # After create-and-link from a workbench picker: offer to jump to the new
-  # owner, or stay on the caller tab. Default selection is stay (cancel) so a
-  # reflexive ↵ doesn't yank focus away mid-recon.
+  # After create-and-link a NOTE from a workbench picker: offer to jump to it, or stay on the
+  # caller tab. Default selection is stay (cancel) so a reflexive ↵ doesn't yank focus away
+  # mid-recon.
+  #
+  # The ISSUE half of this is gone (#F19). An issue filed by hand is read next in ~every case,
+  # so that path stopped asking: `Runner#open_filed_issue` opens the new issue's detail and the
+  # toast names the way back. A note is different in kind — it is a place to WRITE, filed
+  # mid-recon and returned to later — so the question is still a real one here.
   private def offer_open_created(kind : Symbol, id : Int64) : Nil
-    # Drop whatever raised this BEFORE the confirm goes up. The issue path arrives from
-    # inside the NEW ISSUE form's own on_commit, so `confirm` would otherwise capture
-    # that form as its `parent` and restore it on close — landing "stay" back on a
-    # filled-in create form for the issue that was just created, where a reflexive ↵
-    # files a duplicate. The note path already gets here with nothing held (it runs from
-    # the picker's on_close), so this is a no-op there.
+    # Drop whatever raised this BEFORE the confirm goes up, so the card's `parent` is not a
+    # modal that would be restored under "stay".
     leave_overlay
     # The card carries the standing toast as its first line, because the status row no longer
     # can: while a confirm is up that row holds the card's KEYS (see `Runner#status_line`).
-    # The toast is also the fuller sentence — it names the evidence that was frozen with the
-    # link, which the old fixed wording dropped.
     news = @toast
     case kind
-    when :issue
-      confirm("ISSUE CREATED",
-        "#{news || "issue ##{id} created and linked."}\nOpen it now, or stay here?",
-        confirm_label: "open", cancel_label: "stay", danger: false) do
-        navigate_to_created_issue(id)
-      end
     when :note
       confirm("NOTE CREATED",
         "#{news || "note created and linked."}\nOpen it now, or stay here?",
@@ -241,18 +234,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       end
     else
       @overlay = OverlayKind::None
-    end
-  end
-
-  private def navigate_to_created_issue(id : Int64) : Nil
-    @active_tab = :issues
-    @focus = :body
-    @overlay = OverlayKind::None
-    if issues_controller.view.open_by_id(@session.store, id)
-      @toast = "opened issue ##{id}"
-    else
-      issues_controller.view.reload(@session.store)
-      @toast = "issue ##{id} created"
     end
   end
 

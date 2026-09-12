@@ -192,16 +192,20 @@ describe "IssuesController#issues_clear" do
   end
 
   # Named where it can be read before it is pressed — the second obligation a destructive chord
-  # carries (guide/hotkeys). Every LIST state, because `command_scope` answers Scope::Issues in
-  # all of them; the marks state spells it `clear ALL`, which is the state where `space`/`d`
-  # act on the marked set and this key does not.
-  it "names the chord in the body hint, including while marks are set" do
+  # carries (guide/hotkeys). In the MARKS state, which is the one where `space`/`d` act on the
+  # marked set and this key does not: `clear ALL` is the sentence that keeps the two apart.
+  #
+  # It is NOT on the plain list lines any more (#F17's sibling, the loop audit's F7). `⇧E
+  # export` took that slot — the key the triage loop ends on, which the strip named nowhere at
+  # any width — and of the two, the destructive one is the one with somewhere else to live:
+  # the space menu's WIPE group, where a delete is read deliberately rather than reached for.
+  it "names the chord in the body hint wherever the two meanings could be confused" do
     with_issues_tab do |ctl, _host, store|
       seed_issue(store, "finding")
       ctl.view.reload(store)
-      hint = ctl.body_hint(:body)
-      hint.should contain("⇧X")
-      hint.should contain("clear")
+      plain = ctl.body_hint(:body)
+      plain.should_not contain("⇧X")
+      plain.should contain("⇧E export")
 
       ctl.view.mark_all
       marked = ctl.body_hint(:body)

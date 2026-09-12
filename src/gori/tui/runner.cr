@@ -1465,6 +1465,12 @@ module Gori::Tui
         return
       end
       if @active_tab == :issues && @overlay.none? && @focus == :body && issues_controller.view.detail_open?
+        # esc on an issue just filed by hand goes back where the form was opened (#F19),
+        # BEFORE the detail's own esc, which would close it into the Issues list. One shot:
+        # `return_to_filing_origin` spends the origin, so the next esc is the ordinary one.
+        if ev.key.escape? && !ev.ctrl? && !ev.alt?
+          return if return_to_filing_origin
+        end
         return if issues_controller.handle_detail_key(ev)
       end
       # History detail drill-in: shift+arrows select, space opens the action menu.
@@ -2219,6 +2225,74 @@ module Gori::Tui
       true
     end
 
+    # Where an issue was filed FROM, so the detail it opens into has a way back (#F19).
+    #
+    # An issue filed by hand is read next in ~every case, so the create no longer ASKS —
+    # it opens the issue and says how to return. The question that used to be here (an
+    # open/stay confirm) was one modal per filing, answered "open" nearly every time, on a
+    # card whose buttons and keys were different letters.
+    #
+    # `drill_in` is History's shell-held drill-in (`@overlay == :detail`), which is the one
+    # piece of the origin that does not live in a controller: the list's cursor, the open
+    # flow and the Repeater's sub-tab index all survive on their own, so restoring is a
+    # matter of pointing focus back at them.
+    record FilingOrigin, issue_id : Int64, tab : Symbol, focus : Symbol, drill_in : Bool, label : String
+
+    @filing_origin : FilingOrigin? = nil
+
+    # The tab's own name, as the bar spells it — the word the toast promises esc will take you
+    # back to, so it has to be the one on screen.
+    def self.filing_origin_label(tab : Symbol) : String
+      Chrome::TABS.find { |(sym, _)| sym == tab }.try(&.[1]) || tab.to_s
+    end
+
+    # What the create's toast ends with, and the state `esc` puts back. Both pure, because
+    # `Runner.new` owns a terminal: these are the halves of #F19 a spec can read.
+    def self.filing_return_hint(label : String) : String
+      " · esc returns to #{label}"
+    end
+
+    def self.filing_return_state(origin : FilingOrigin) : {Symbol, Symbol, OverlayKind}
+      {origin.tab, origin.focus, origin.drill_in ? OverlayKind::Detail : OverlayKind::None}
+    end
+
+    # Snapshot the origin and open the new issue in the Issues detail. Returns the clause the
+    # create's toast ends with — the way back, named — or "" when the issue could not be
+    # opened (a store that lost it), in which case nothing is recorded and nothing is claimed.
+    private def open_filed_issue(id : Int64) : String
+      origin_tab = @active_tab
+      origin_focus = @focus
+      drill_in = origin_tab == :history && !history_controller.view.detail_flow_id.nil?
+      label = Runner.filing_origin_label(origin_tab)
+      history_controller.cancel_searches if origin_tab == :history
+      @active_tab = :issues
+      @focus = :body
+      @overlay = OverlayKind::None
+      unless issues_controller.view.open_by_id(@session.store, id)
+        issues_controller.view.reload(@session.store)
+        return ""
+      end
+      # Filed FROM the Issues tab (its own `n`): there is nowhere to send esc back to, so the
+      # detail closes into the list the ordinary way and the toast promises nothing.
+      return "" if origin_tab == :issues
+      @filing_origin = FilingOrigin.new(id, origin_tab, origin_focus, drill_in, label)
+      Runner.filing_return_hint(label)
+    end
+
+    # `esc` on the detail of an issue that was just filed: back to exactly where the form was
+    # opened from. One shot — the origin is spent here, so a second esc closes the detail the
+    # ordinary way.
+    private def return_to_filing_origin : Bool
+      origin = @filing_origin
+      return false unless origin
+      return false unless issues_controller.view.detail_issue.try(&.id) == origin.issue_id
+      @filing_origin = nil
+      issues_controller.view.close_detail
+      @active_tab, @focus, @overlay = Runner.filing_return_state(origin)
+      @toast = "back to #{origin.label}"
+      true
+    end
+
     # The IssueForm's injected commit. Returns true when the shell should close the form.
     private def create_issue_from_form(form : IssueForm) : Bool
       title = form.issue_title.strip
@@ -2276,29 +2350,28 @@ module Gori::Tui
           # which is exactly where a marked set arrives, so reporting only the picker's own ref
           # would leave the N flows just attached unmentioned.
           msg = attached > 1 ? "issue ##{new_id} created and linked · #{attached} flows attached" : "issue ##{new_id} created and linked"
-          @toast = msg + write_form_snapshots(new_id, form)
-          # Ask open-vs-stay (default stay). FALSE, not true: offer_open_created has just
-          # put a confirm up, and "close the overlay" would be asking the shell to close a
-          # form it is no longer holding. close_active_overlay's identity check would make
-          # that inert anyway; saying false states the intent rather than relying on it.
-          offer_open_created(:issue, new_id)
-          return false
+          news = msg + write_form_snapshots(new_id, form)
+          # Open it (#F19) rather than asking. TRUE, so the shell drops the form: the issue
+          # is on screen behind it and there is no second modal to hand the overlay to.
+          @toast = news + open_filed_issue(new_id)
+          return true
         elsif form.stay_on_create?
           # Filed from a list the operator is still reading (the retest Diff): the create
           # must not move them off it, so the Issues list is refreshed IN PLACE and the
-          # toast names the id and whether evidence went with it. `offer_open_created`'s
-          # confirm is deliberately not raised here either — a retest sweep files row after
-          # row, and one modal per row is one modal too many.
+          # toast names the id and whether evidence went with it. It does NOT open the issue
+          # the way the two hand-filing paths above do (#F19) — a retest sweep files row
+          # after row, and being moved off the list between two of them is the interruption
+          # the old open/stay modal was, minus the question.
           issues_controller.view.reload(@session.store)
           msg = attached > 0 ? "issue ##{new_id} filed with its capture attached" : "issue ##{new_id} filed"
           @toast = msg + write_form_snapshots(new_id, form)
         else
-          history_controller.cancel_searches if @active_tab == :history
-          @active_tab = :issues
-          @focus = :body
-          issues_controller.view.reload(@session.store)
-          msg = attached > 1 ? "issue created with #{attached} flows attached" : "issue created"
-          @toast = msg + write_form_snapshots(new_id, form)
+          # The other hand-filed path (History's Add issue, and every form with no ref to
+          # link). It already landed on the Issues tab; now it lands on the ISSUE, with the
+          # way back named — the same act as the link path above, so the same ending.
+          msg = attached > 1 ? "issue ##{new_id} created with #{attached} flows attached" : "issue ##{new_id} created"
+          news = msg + write_form_snapshots(new_id, form)
+          @toast = news + open_filed_issue(new_id)
         end
       end
       true
@@ -2939,11 +3012,12 @@ module Gori::Tui
     # opposite case right — fresh action feedback while an older notice is still up.
     private def status_line : String?
       # A confirm card is a QUESTION, and its keys are letters nothing else on screen names —
-      # so the card's own hint takes this slot rather than a toast. The one that made it
-      # matter: ISSUE CREATED goes up in the same frame as "issue #21 created and linked",
-      # so the first ↵ was always pressed blind, and the line that explains it appeared only
-      # after some other key had cleared the toast. The news is not lost — `offer_open_created`
-      # puts the standing toast in the card, where it is read with the question.
+      # so the card's own hint takes this slot rather than a toast. The case that made it
+      # matter was NOTE CREATED (and ISSUE CREATED, before #F19 stopped asking that one): the
+      # card goes up in the same frame as its own creation toast, so the first ↵ was pressed
+      # blind and the line that explains it appeared only after some other key had cleared the
+      # toast. The news is not lost — `offer_open_created` puts the standing toast in the card,
+      # where it is read with the question.
       return nil if @overlay.confirm?
       toast = @toast
       notice = Settings.companion_in_bar? ? @companion.frame.try(&.bubble) : nil

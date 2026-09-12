@@ -218,9 +218,65 @@ describe "the core-loop hints" do
     end
   end
 
-  describe "F13 — the ISSUE CREATED card puts its keys on the buttons" do
+  describe "F19 — an issue filed by hand OPENS, and says how to get back" do
+    runner_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
+
+    it "names the origin tab the way the bar spells it" do
+      Runner.filing_origin_label(:history).should eq("History")
+      Runner.filing_origin_label(:repeater).should eq("Repeater")
+      Runner.filing_return_hint(Runner.filing_origin_label(:history))
+        .should eq(" · esc returns to History")
+    end
+
+    it "restores the History drill-in, not just the tab" do
+      origin = Runner::FilingOrigin.new(21_i64, :history, :body, true, "History")
+      Runner.filing_return_state(origin).should eq({:history, :body, Gori::Tui::OverlayKind::Detail})
+    end
+
+    it "restores a plain tab with no overlay" do
+      origin = Runner::FilingOrigin.new(21_i64, :repeater, :body, false, "Repeater")
+      Runner.filing_return_state(origin).should eq({:repeater, :body, Gori::Tui::OverlayKind::None})
+    end
+
+    # `Runner.new` owns a terminal and appears nowhere under spec/, so the wiring — which
+    # branches open the issue, and where esc is claimed — is read from source, the way
+    # spec/tui/digit_family_spec.cr reads the dispatch order.
+    it "opens the issue on both hand-filing branches and on NEITHER batch path" do
+      body = runner_src[/private def create_issue_from_form.*?\n    end/m].not_nil!
+      body.scan(/open_filed_issue\(new_id\)/).size.should eq(2) # the link_ref path and the plain one
+      stay = body[/elsif form\.stay_on_create\?.*?\n        else/m].not_nil!
+      stay.should_not contain("open_filed_issue"), "the retest sweep is moved off its list"
+    end
+
+    it "promises nothing when the issue was filed FROM the Issues tab" do
+      body = runner_src[/private def open_filed_issue.*?\n    end/m].not_nil!
+      body.should contain(%(return "" if origin_tab == :issues))
+    end
+
+    it "claims esc for the return BEFORE the detail's own esc" do
+      claim = runner_src.lines.index(&.includes?("return if return_to_filing_origin"))
+      detail = runner_src.lines.index(&.includes?("return if issues_controller.handle_detail_key(ev)"))
+      claim.should_not be_nil
+      detail.should_not be_nil
+      claim.not_nil!.should be < detail.not_nil!
+    end
+
+    it "spends the origin on one press, and only for the issue it was recorded for" do
+      body = runner_src[/private def return_to_filing_origin.*?\n    end/m].not_nil!
+      body.should contain("detail_issue.try(&.id) == origin.issue_id")
+      body.should contain("@filing_origin = nil")
+    end
+
+    it "leaves the open/stay question where it is still a question — a NOTE" do
+      links_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "links.cr"))
+      links_src.should_not contain("ISSUE CREATED")
+      links_src.should contain("NOTE CREATED")
+    end
+  end
+
+  describe "F13 — the confirm that remains puts its keys on the buttons" do
     it "draws `[y] open` and `[n] stay`, the letters that actually press them" do
-      dlg = ConfirmDialog.new("ISSUE CREATED", "issue #21 created and linked.\nOpen it now, or stay here?",
+      dlg = ConfirmDialog.new("NOTE CREATED", "note created and linked.\nOpen it now, or stay here?",
         confirm_label: "open", cancel_label: "stay", danger: false)
       backend = MemoryBackend.new(80, 20)
       screen = Screen.new(backend)
@@ -231,7 +287,7 @@ describe "the core-loop hints" do
     end
 
     it "still hit-tests the button it drew, accelerator included" do
-      dlg = ConfirmDialog.new("ISSUE CREATED", "issue #21 created and linked.",
+      dlg = ConfirmDialog.new("NOTE CREATED", "note created and linked.",
         confirm_label: "open", cancel_label: "stay", danger: false)
       area = Rect.new(0, 0, 80, 20)
       box = dlg.overlay_box(area)
@@ -241,9 +297,15 @@ describe "the core-loop hints" do
     end
 
     it "names every key in the hint, so the strip under it is answerable" do
-      dlg = ConfirmDialog.new("ISSUE CREATED", "issue #21 created and linked.",
+      dlg = ConfirmDialog.new("NOTE CREATED", "note created and linked.",
         confirm_label: "open", cancel_label: "stay", danger: false)
       dlg.hint.should eq("←/→ choose · ↵ open · y open · n/esc stay")
+    end
+
+    it "hands the status row to the card while one is up, so the keys are on the first frame" do
+      runner_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
+      body = runner_src[/private def status_line.*?\n    end/m].not_nil!
+      body.should contain("return nil if @overlay.confirm?")
     end
   end
 
