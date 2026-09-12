@@ -1681,8 +1681,15 @@ store.set_repeater_tags(ids[:repeater_ssrf], "ssrf oast")
 idor_resp_body = %({"id":2,"name":"Bob","email":"bob@demo.test","role":"admin","phone":"+1-555-0102"})
 idor_resp_head = "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/json\r\n" \
                  "Content-Length: #{idor_resp_body.bytesize}\r\n\r\n"
+#
+# `request_sha256` (V28) is the digest of the request these bytes answered — the same
+# `Evidence.request_digest` every send surface writes — so a seeded response is paired with
+# its request and `Evidence.from_repeater` reads the tab as UNDRIFTED until someone edits it.
+# A seeded nil would read as "a response whose request cannot be checked" and make the demo's
+# freeze say nothing, which is the one thing #1047 added the column to stop.
 store.update_repeater_response(ids[:repeater_idor], idor_resp_head.to_slice,
-  idor_resp_body.to_slice, nil, 34_000_i64)
+  idor_resp_body.to_slice, nil, 34_000_i64,
+  request_sha256: Evidence.request_digest(idor_req.to_slice))
 
 fuzz_template = replay_req("GET", "api.demo.test", "/v1/users/§1§",
   {"Authorization" => "Bearer #{jwt}"})
@@ -2675,20 +2682,25 @@ repeater_resp = ->(status : String, headers : String, body : String) {
 xss_body = "<!doctype html><html><head><title>Search — Demo Shop</title></head><body>" \
            "<h1>Results for <script>alert(1)</script></h1><p>0 products found.</p></body></html>\n"
 xss_head, xss_bytes = repeater_resp.call("200 OK", "Content-Type: text/html; charset=utf-8\r\n", xss_body)
-store.update_repeater_response(ids[:repeater_xss], xss_head, xss_bytes, nil, 61_000_i64)
+store.update_repeater_response(ids[:repeater_xss], xss_head, xss_bytes, nil, 61_000_i64,
+  request_sha256: Evidence.request_digest(xss_req.to_slice))
 
 # The OAuth tab, answered with a REFUSAL — a send that reached the origin and came back
 # 4xx is a different state from one that never connected, and the tab has to show both.
 token_body = %({"error":"invalid_grant","error_description":"refresh token expired"})
 token_head, token_bytes = repeater_resp.call("401 Unauthorized",
   "Content-Type: application/json\r\nWWW-Authenticate: Bearer error=\"invalid_grant\"\r\n", token_body)
-store.update_repeater_response(ids[:repeater_token], token_head, token_bytes, nil, 121_000_i64)
+store.update_repeater_response(ids[:repeater_token], token_head, token_bytes, nil, 121_000_i64,
+  request_sha256: Evidence.request_digest(token_req.to_slice))
 
 # …and the tab whose send never got an answer at all. `response_error` with an empty head
 # is the shape a dial failure leaves behind, and it is the one a demo can never produce by
 # running something.
+# (The digest rides along here too: the dial failed, but it failed on THESE request bytes,
+# and a row that says so stays readable as undrifted rather than uncheckable.)
 store.update_repeater_response(ids[:repeater_bound], Bytes.empty, nil,
-  "dial tcp: no route to host (api.demo.test:443)", 5_002_000_i64)
+  "dial tcp: no route to host (api.demo.test:443)", 5_002_000_i64,
+  request_sha256: Evidence.request_digest(bound_req.to_slice))
 
 # ## The History view library (#776)
 #
