@@ -77,6 +77,7 @@ module Gori::CLI
     when "export"          then run_settings_export(args[1..])
     when "import"          then run_settings_import(args[1..])
     when "sections"        then run_settings_sections(args[1..])
+    when "env-syntax"      then run_settings_env_syntax(args[1..])
     when "tls-fingerprint" then run_settings_tls_fingerprint(args[1..])
     else                        return false
     end
@@ -342,6 +343,7 @@ module Gori::CLI
 
     applicable, changed, unknown = Settings.import_preview(raw, sections)
     STDERR.puts "warning: unrecognised section(s) ignored: #{unknown.join(", ")}" unless unknown.empty?
+    report_env_syntax_change(root, applicable)
 
     # Over the sections that would ACTUALLY be applied, not over the file: `--sections network`
     # against a profile whose `rewriter` block happens to carry a hook arms nothing, so it must
@@ -381,6 +383,92 @@ module Gori::CLI
     # read "imported 0 section(s)" over a write that had just happened.
     applied = Settings.import_document(raw, sections)
     puts "imported #{applied.size} section(s) into #{Settings.path}#{applied.empty? ? "" : ": #{applied.join(", ")}"}"
+  end
+
+  # An imported `env.syntax` changes how every token ALREADY stored in this install is read —
+  # project env var names, Repeater drafts, rewrite-rule replacements, slot headers — and nothing
+  # rewrites them. The section list cannot carry that ("env" is equally true of a var table), so it
+  # is said on its own, on STDERR like the command notice beside it, on the dry run and the real
+  # one alike.
+  private def self.report_env_syntax_change(root : JSON::Any, applicable : Array(String)) : Nil
+    return unless applicable.includes?("env")
+    raw = root.as_h?.try(&.["env"]?).try(&.as_h?).try(&.["syntax"]?).try(&.as_s?)
+    return unless raw
+    incoming = Gori::Env::Syntax.parse?(raw.strip)
+    return if incoming.nil? || incoming == Settings.env_syntax
+    STDERR.puts "note: this profile sets env.syntax = #{env_syntax_label(incoming)} (this install " \
+                "reads #{env_syntax_label(Settings.env_syntax)}) — tokens already stored in your " \
+                "projects are NOT rewritten, so #{env_syntax_example(incoming)} becomes the " \
+                "spelling gori resolves"
+  end
+
+  # `gori settings env-syntax [bare|namespaced]` — read or set the token grammar.
+  #
+  # A GLOBAL setting, so it lives here and not under `gori run project env`: that one writes the
+  # project database, and this decides how the tokens in EVERY project are read.
+  private def self.run_settings_env_syntax(args : Array(String)) : Nil
+    parser = OptionParser.new do |p|
+      p.banner = "Usage: gori settings env-syntax [#{env_syntax_values}]"
+      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+      p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+    end
+    rest = stray_args(parser, args)
+    abort "gori settings env-syntax: one value at a time (got #{rest.size}: #{rest.join(", ")})" if rest.size > 1
+
+    Settings.load
+    unless want = rest[0]?
+      puts "#{env_syntax_label(Settings.env_syntax)}  (#{env_syntax_origin})"
+      puts "  #{env_syntax_example(Settings.env_syntax)}"
+      return
+    end
+    syntax = Gori::Env::Syntax.parse?(want.strip)
+    abort "gori settings env-syntax: unknown value #{want.inspect} (expected #{env_syntax_values})" unless syntax
+
+    # Refuse rather than write half an operator's file back — the same guard export and import use.
+    abort_on_degraded_settings!("env-syntax")
+    was = Settings.env_syntax
+    Settings.env_syntax = syntax
+    unless Settings.save
+      abort "gori settings env-syntax: applied for this process but could not be written to #{Settings.path}"
+    end
+    if was == syntax
+      puts "env syntax: #{env_syntax_label(syntax)} (unchanged)"
+      return
+    end
+    puts "env syntax: #{env_syntax_label(syntax)} — #{env_syntax_example(syntax)}"
+    # The one thing an operator has to know before the next send: a switch re-reads bytes that
+    # are already stored, it does not rewrite them.
+    puts "Stored tokens are NOT rewritten: project env var names, Repeater drafts, rewrite-rule " \
+         "replacements and session-slot headers keep their text, so anything spelled the other " \
+         "way is now a literal. Re-spell them, or switch back with " \
+         "`gori settings env-syntax #{env_syntax_label(was)}`."
+  end
+
+  private def self.env_syntax_values : String
+    Gori::Env::Syntax.values.join("|") { |s| env_syntax_label(s) }
+  end
+
+  private def self.env_syntax_label(s : Gori::Env::Syntax) : String
+    s.to_s.downcase
+  end
+
+  # What a token looks like in this grammar, spelled through `Env` so a non-default prefix shows.
+  private def self.env_syntax_example(s : Gori::Env::Syntax) : String
+    "#{Gori::Env.spell("KEY", Gori::Env::Namespace::Env, s)} / " \
+    "#{Gori::Env.spell("NAME", Gori::Env::Namespace::Bind, s)}"
+  end
+
+  # WHERE the current value came from. The absence of `env.syntax` in a file that loaded means
+  # bare (forever), and an operator reading `bare` needs to know which of those two they have.
+  private def self.env_syntax_origin : String
+    path = Settings.path
+    return "default — #{path} does not exist" unless File.exists?(path)
+    stated = begin
+      JSON.parse(File.read(path)).as_h?.try(&.["env"]?).try(&.as_h?).try(&.["syntax"]?).try(&.as_s?)
+    rescue
+      nil
+    end
+    stated ? "from #{path}" : "default — #{path} does not set env.syntax"
   end
 
   # The command-carrying rules this import would arm, one per line, argv included (#842).

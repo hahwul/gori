@@ -8,6 +8,35 @@ require "../dial_address"
 module Gori::Settings
   DEFAULT_ENV_PREFIX = "$"
 
+  # The grammar an install reads and writes tokens in. See `Gori::Env::Syntax`.
+  #
+  # The DEFAULT is bare and is what the ABSENCE of `env.syntax` means, forever: the tokens an
+  # existing install has are already written into project DBs, Repeater drafts, rewrite-rule
+  # replacements and slot headers, and gori does not rewrite those behind the operator. The
+  # absence rule is enforced in `Settings.load` and deliberately NOT in `parse_env` — see there.
+  DEFAULT_ENV_SYNTAX = Env::Syntax::Bare
+
+  # What a genuinely NEW home adopts (`adopt_env_syntax_for_new_home`). A class_property so the
+  # suite can pin it: every spec home is new, and without the pin ~1,000 bare `$TOKEN` fixtures
+  # would be read under the other grammar.
+  NEW_INSTALL_ENV_SYNTAX = Env::Syntax::Namespaced
+
+  class_property new_install_env_syntax : Env::Syntax = NEW_INSTALL_ENV_SYNTAX
+  @@env_syntax : Env::Syntax = DEFAULT_ENV_SYNTAX
+
+  def self.env_syntax : Env::Syntax
+    @@env_syntax
+  end
+
+  # Bumps the highlight revision like every other env write: a `TextArea`'s styled buffer, the
+  # `Highlight` span caches and `Rules#subst_snapshot` are all keyed on it, and the SPELLING of
+  # every token in every open editor just changed.
+  def self.env_syntax=(s : Env::Syntax) : Env::Syntax
+    @@env_syntax = s
+    Env.bump_highlight_rev
+    s
+  end
+
   # Global hostname overrides (a process-wide /etc/hosts): ordered {host (lowercased),
   # ip} pairs. Read LIVE by Upstream.dial (edits apply on the next flow); layered
   # UNDER each project's own HostOverrides, which wins on a host collision. Edited via
@@ -17,10 +46,25 @@ module Gori::Settings
   class_property env_vars : Array({String, String}) = [] of {String, String}
   class_property project_env_vars : Array({String, String}) = [] of {String, String}
 
+  # `syntax` is assigned ONLY when the key is present, and the "absence means bare" rule lives in
+  # `Settings.load` instead. That split is not cosmetic: `import_document` reuses `apply_sections`
+  # over a FILTERED document, so a theme-only profile import reaches this method with no `env`
+  # node at all — and a namespaced install would be flipped back to bare by an import that never
+  # mentioned env. An unknown value is a bad file rather than a new grammar: say so and stay bare.
   private def self.parse_env(node : JSON::Any?) : Nil
     return unless e = node.try(&.as_h?)
     if pref = e["prefix"]?.try(&.as_s?)
       self.env_prefix = pref.empty? ? Env::DEFAULT_PREFIX : pref
+    end
+    if raw = e["syntax"]?.try(&.as_s?)
+      if s = Env::Syntax.parse?(raw.strip)
+        self.env_syntax = s
+      else
+        self.env_syntax = DEFAULT_ENV_SYNTAX
+        note_load_warning("settings: env.syntax #{raw.inspect} is not one of " \
+                          "#{Env::Syntax.values.join('/', &.to_s.downcase)} — reading tokens as " \
+                          "#{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run")
+      end
     end
     self.env_vars = parse_env_vars(e["vars"]?)
   end
@@ -73,6 +117,11 @@ module Gori::Settings
     self.hostname_overrides = [] of {String, String}
   end
 
+  # `env_syntax` is deliberately NOT reset. It is not a preference: it decides how the tokens
+  # already stored in PROJECT DATABASES — env var names, Repeater drafts, rewrite-rule
+  # replacements, slot headers — are read, and a settings reset does not speak for those. Resetting
+  # it would silently reinterpret every one of them (the same argument that keeps `project_env_vars`
+  # and the `cli_*` overlay out of a factory reset).
   private def self.reset_env : Nil
     self.env_vars = [] of {String, String}
     self.env_prefix = DEFAULT_ENV_PREFIX
@@ -89,10 +138,16 @@ module Gori::Settings
     end
   end
 
+  # Omitted only when there is NOTHING to say — no vars, the default prefix AND the default
+  # grammar — so an untouched bare install still writes no `env` section at all and its
+  # settings.json diff stays empty. Once the section exists the grammar is ALWAYS written: a file
+  # that says `"vars"` but not `"syntax"` means bare by the absence rule, so a namespaced install
+  # omitting the key would silently downgrade itself on the next load.
   private def self.serialize_env(j : JSON::Builder) : Nil
-    unless env_vars.empty? && env_prefix == DEFAULT_ENV_PREFIX
+    unless env_vars.empty? && env_prefix == DEFAULT_ENV_PREFIX && env_syntax == DEFAULT_ENV_SYNTAX
       j.field "env" do
         j.object do
+          j.field "syntax", env_syntax.to_s.downcase
           j.field "prefix", env_prefix unless env_prefix == DEFAULT_ENV_PREFIX
           unless env_vars.empty?
             j.field "vars" do

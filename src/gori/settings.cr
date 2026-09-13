@@ -128,12 +128,30 @@ module Gori
         # could not be READ (`@@load_unreadable`: everything below is at a factory default over
         # a file whose contents nobody has seen).
         @@load_unreadable = File.exists?(path)
+        adopt_env_syntax_for_new_home
         return
       end
       root = load_root(raw)
-      return unless root # present but unparseable — kept a .corrupt copy, keep defaults
+      unless root
+        # present but unparseable — kept a .corrupt copy, keep defaults. The grammar is one of
+        # them, explicitly: a file nobody could read cannot be evidence for the newer one.
+        self.env_syntax = DEFAULT_ENV_SYNTAX
+        return
+      end
       begin
         apply_sections(root)
+        # THE absence rule, and the only place it lives (see `parse_env`): a settings file that
+        # was read IN FULL and does not name a grammar means bare. Assigned on every exit path
+        # because `load` runs repeatedly over DIFFERENT homes in one process (the project picker,
+        # `--config`, the spec suite), so "leave whatever is in memory" would leak the previous
+        # home's grammar into this one.
+        #
+        # Before the re-base below, so `@@loaded_raw` describes the state this actually left:
+        # bare is representable as ABSENCE, so a bare install still serializes no `syntax` key and
+        # `mine == base` stays the correct merge outcome for a section nobody touched.
+        unless root.as_h?.try(&.["env"]?).try(&.as_h?).try(&.has_key?("syntax"))
+          self.env_syntax = DEFAULT_ENV_SYNTAX
+        end
       rescue
         # A malformed individual section — keep whatever loaded so far, and remember that this
         # is only HALF the operator's file: every section below the raising line is at its
@@ -147,6 +165,7 @@ module Gori
         # there leaves nothing at a default — latching the flag for those would refuse every
         # save for the rest of the process over a file that was read in full.
         @@load_partial = true
+        self.env_syntax = DEFAULT_ENV_SYNTAX # see the absence rule above: half a file proves nothing
         note_load_warning("settings: #{path} could not be read in full — the sections gori did " \
                           "not reach are at their factory defaults, so this run will not overwrite that file")
         return
@@ -173,6 +192,43 @@ module Gori
       # position a first run is in. Swallowed, as it was before the partial-load guard
       # existed; `@@loaded_raw` staying nil already reports it through `load_degraded?`.
       nil
+    end
+
+    # There is no settings file. Decide which token grammar this home speaks — once, here, and
+    # write it down immediately so the decision is never re-derived.
+    #
+    # A GENUINELY NEW home adopts the namespaced grammar (`$ENV.KEY` / `$BIND.NAME`); anything
+    # else stays bare. "Anything else" is two cases and both matter:
+    #
+    #   * `@@load_unreadable` — a settings.json IS there and could not be read (EACCES on a file
+    #     a `sudo gori` left root-owned, a `--config` naming a directory). Its `env.syntax` may
+    #     well say bare, and adopting the other grammar would reinterpret every token in every
+    #     project of an install that has simply hit a permissions problem.
+    #   * `used_before?` — no settings file but a project database. That is an install whose
+    #     settings were deleted (or which has only ever been run with `--config`), and its
+    #     projects are full of bare `$KEY` drafts, rule replacements and slot headers.
+    #
+    # The write is what makes it stick: once `settings.json` carries `"syntax": "namespaced"`, a
+    # later `used_before?` (the operator's first project) cannot change the answer. A failed write
+    # is not fatal — the grammar still applies to this run, and the next start re-derives the same
+    # answer from the same empty home.
+    private def self.adopt_env_syntax_for_new_home : Nil
+      self.env_syntax = DEFAULT_ENV_SYNTAX
+      return if @@load_unreadable || used_before?
+      self.env_syntax = new_install_env_syntax
+      save unless env_syntax == DEFAULT_ENV_SYNTAX
+    end
+
+    # Whether this GORI_HOME has been used before, judged on the two artefacts that hold tokens:
+    # the default database and the per-project workspaces. Rescues to TRUE — the conservative
+    # direction, since guessing "new" for an existing install is the answer that reinterprets
+    # stored bytes.
+    private def self.used_before? : Bool
+      return true if File.exists?(Paths.default_db)
+      dir = Paths.projects_dir
+      Dir.exists?(dir) && !Dir.empty?(dir)
+    rescue
+      true
     end
 
     # Read each top-level section of a parsed settings document into the class properties.
@@ -971,10 +1027,17 @@ module Gori
     # (which would train the operator to ignore the notice on the export that matters).
     # Returns the sections rather than a Bool so the notice can name what is in the file
     # instead of reciting SECRET_SECTIONS at the operator.
+    # `env` counts only when it actually holds VARS. A namespaced install with no env var writes
+    # an `env` section carrying nothing but `{"syntax": "namespaced"}` — a grammar, not a
+    # credential — and firing the "this file holds secrets" notice over it is how an operator
+    # learns to ignore the notice on the export that matters.
     def self.exported_secret_sections(only : Array(String)? = nil) : Array(String)
       return [] of String unless list = only
       present = JSON.parse(serialize).as_h.keys
-      SECRET_SECTIONS.select { |s| list.includes?(s) && present.includes?(s) }
+      SECRET_SECTIONS.select do |s|
+        next false unless list.includes?(s) && present.includes?(s)
+        s == "env" ? !env_vars.empty? : true
+      end
     end
 
     def self.export_document(only : Array(String)? = nil) : String
