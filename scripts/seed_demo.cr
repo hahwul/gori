@@ -321,7 +321,6 @@ COOKIE_TS     = 1718787600_i64
 # bare `$token` on a namespaced machine is a literal, and the seeded tab would send it as one.
 # `Env.spell` is the only speller in the repo; loading the settings is what makes it answer
 # for this home rather than for the compiled-in default.
-Settings.load
 
 # A BUILD-time env var (`$ENV.API` / bare `$API`).
 def env_token(name : String) : String
@@ -334,6 +333,7 @@ def bind_token(name : String) : String
 end
 
 Paths.ensure_dirs
+Settings.load # after ensure_dirs: a brand-new home adopts a grammar and writes it
 registry = ProjectRegistry.new(Paths.projects_dir)
 
 # Fresh start: drop any existing "demo" project.

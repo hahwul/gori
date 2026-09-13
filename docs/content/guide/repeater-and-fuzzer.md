@@ -258,7 +258,7 @@ Every recorded flow says where it came from (the History **SRC** column, and `sr
 `src:fuzzer` / `src:gori` in a query), so a resend is never read back as traffic the target's
 client produced. See [Where a flow came from](/guide/proxy/#flow-source).
 
-A recorded flow, from either tool, is the request **as it went on the wire**: the active session slot's header overlay and any `$NAME` the send seam resolved are part of it, so replaying, comparing or scanning that flow reproduces the send rather than the draft or template it was assembled from. (A Fuzzer *row* still shows the rendered template, which is what "send to Repeater" seeds a tab from; the slot applies per send.)
+A recorded flow, from either tool, is the request **as it went on the wire**: the active session slot's header overlay and any `$BIND.NAME` the send seam resolved are part of it, so replaying, comparing or scanning that flow reproduces the send rather than the draft or template it was assembled from. (A Fuzzer *row* still shows the rendered template, which is what "send to Repeater" seeds a tab from; the slot applies per send.)
 
 ## Next Steps
 
