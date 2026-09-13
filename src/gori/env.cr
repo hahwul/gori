@@ -1006,8 +1006,13 @@ module Gori
       # BARE names (`owns: Bind`, unqualified): the answer indexes the declared-name list and the
       # binding table, both of which are keyed by bare name. The callers that PRINT it spell it
       # with `token_list(…, ns: Bind)`.
+      #
+      # `bind_resolvable: true` is this method's own question, and it is the OPPOSITE of
+      # `unresolved(deferred: nil)`'s: here the binding table is exactly the right judge ("this
+      # name is declared and still has no value"), because this scan runs ON the send seam that
+      # resolves BIND. One scanner, two callers, so the reading is passed rather than inferred.
       names = scan_unresolved(text.to_slice, vals, prefix, nil, verbatim,
-        owns: Owns::Bind, qualify_names: false, bind_vars: vals)
+        owns: Owns::Bind, qualify_names: false, bind_vars: vals, bind_resolvable: true)
       names.select { |n| declared.includes?(n) }
     end
 
@@ -1268,7 +1273,17 @@ module Gori
     # `deferred` names are skipped: a name an extract rule declares is not unresolved, it
     # is resolved LATER (see `unbound`). Without that, `$SESSION` in a Fuzzer template
     # would be refused at plan-build — leaving one syntax with two contradictory rules,
-    # which is the thing #525's shape exists to prevent. Pass `nil` to get every name back.
+    # which is the thing #525's shape exists to prevent.
+    #
+    # `deferred: nil` is the DIAL-TUPLE reading and it says something stronger than "report the
+    # declared names too": it says nothing in this text is deferred to a later pass at all. The
+    # callers passing it are a target, an SNI and a URL — bytes that go to the scope gate and to
+    # DNS, and that the paired `Env.expand` resolves with `resolve: Owns::Env` alone, never a
+    # binding. So under the namespaced grammar a `$BIND.X` is reported HERE whether or not it is
+    # bound: it resolves in no pass this text ever sees, and judging it against the live binding
+    # table said "resolved" about a host that then reached the resolver spelled `$BIND.HOST`.
+    # With `deferred` GIVEN (the request-body callers, whose bytes the send seam re-scans with
+    # `resolve: Owns::Bind`) a bound BIND name is genuinely resolved and stays unreported.
     #
     # Names come back QUALIFIED under the namespaced syntax (`"ENV.HOST"`, `"BIND.SESSION"`) —
     # a name that does not resolve in one namespace may well resolve in the other, so a bare
@@ -1278,7 +1293,10 @@ module Gori
                         deferred : Array(String)? = declared_bindings) : Array(String)
       return [] of String if prefix.empty?
       return [] of String unless text.byte_index(prefix) # same fast no-op as `expand`
-      scan_unresolved(text.to_slice, vars, prefix, deferred)
+      # `deferred: nil` means "nothing in this text is deferred to a later pass" — and the ENV
+      # pass this query pairs with (`expand`, `resolve: Owns::Env`) never resolves BIND. So a
+      # `$BIND.X` here is reported whether or not it is BOUND: see `bind_resolvable`.
+      scan_unresolved(text.to_slice, vars, prefix, deferred, bind_resolvable: !deferred.nil?)
     end
 
     # EVERY `$NAME` the text references, set or not, in first-appearance order.
@@ -1296,6 +1314,8 @@ module Gori
       return [] of String if prefix.empty?
       return [] of String unless text.byte_index(prefix)
       empty = {} of String => String
+      # The table is EMPTY, so `bind_resolvable` cannot change the answer either way: every ref
+      # is a miss and every ref is listed.
       scan_unresolved(text.to_slice, empty, prefix, nil,
         owns: ns ? ns.owns : Owns::All, qualify_names: ns.nil?, bind_vars: empty)
     end
@@ -1325,7 +1345,8 @@ module Gori
                                      syntax : Syntax = Settings.env_syntax,
                                      owns : Owns = Owns::All,
                                      qualify_names : Bool = true,
-                                     bind_vars : Hash(String, String)? = nil) : Array(String)
+                                     bind_vars : Hash(String, String)? = nil,
+                                     bind_resolvable : Bool = false) : Array(String)
       names = [] of String
       seen = Set(String).new
       n = bytes.size
@@ -1362,7 +1383,15 @@ module Gori
           i += found.width
           next
         end
-        if table_for(found.ns, vars, bind_vars).has_key?(found.name)
+        # `bind_resolvable` decides whether a BIND token may be answered by the live binding
+        # table at all. A scan whose caller has a LATER pass to hand the token to (a request
+        # body: `deferred` given, the send seam re-scans with `resolve: Owns::Bind`) says yes;
+        # a scan for bytes no binding pass will ever touch (`unresolved(deferred: nil)` on a
+        # target/SNI/URL) says no, and a bound `$BIND.HOST` is reported rather than blessed.
+        # Bare mode never reaches it: there is one namespace, `found.ns` is nil, and `vars` is
+        # the one table.
+        resolvable = bind_resolvable || !found.ns.try(&.bind?)
+        if resolvable && table_for(found.ns, vars, bind_vars).has_key?(found.name)
           i += found.width
           next
         end

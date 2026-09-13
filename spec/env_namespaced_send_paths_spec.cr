@@ -160,6 +160,32 @@ describe "Gori::Env — namespaced send seams" do
     end
   end
 
+  # The dial tuple, at the level an operator meets it: `gori run repeater create --target
+  # 'https://$BIND.HOST/'` then send. The binding is DECLARED and BOUND, which is exactly the
+  # case that used to pass the gate — `Env.unresolved(…, deferred: nil)` asked the live binding
+  # table, said "resolved", and `Env.expand` (the ENV pass) then left the bytes byte-exact, so
+  # `$BIND.HOST` reached `FlowRequest.parse_target` and the resolver. Refused by NAME now.
+  it "Repeater::Plan refuses a $BIND target and SNI even when the name is BOUND" do
+    with_send_env(declared: ["HOST"], bound: {"HOST" => "evil.example"}) do
+      wire = ["GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice]
+      bad_target = Gori::Repeater::PlanOptions.new(wire, target: "https://$BIND.HOST/")
+      expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::Plan.build(bad_target, ungated_outbound) }
+        .detail.should eq("$BIND.HOST")
+
+      bad_sni = Gori::Repeater::PlanOptions.new(wire, target: "https://t.test", sni: "$BIND.HOST")
+      expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::Plan.build(bad_sni, ungated_outbound) }
+        .detail.should eq("$BIND.HOST")
+
+      # The REQUEST half is untouched: a body token is not a dial tuple, it is re-scanned by the
+      # send seam, and a bound one resolves there.
+      ok = Gori::Repeater::PlanOptions.new(
+        ["GET /a HTTP/1.1\r\nHost: t.test\r\nAuth: $BIND.HOST\r\n\r\n".to_slice],
+        target: "https://t.test")
+      String.new(Gori::Repeater::Plan.build(ok, ungated_outbound).bytes)
+        .should contain("Auth: $BIND.HOST") # resolved at the seam, not at plan-build
+    end
+  end
+
   it "unbound reports a declared-but-unbound BIND name only, in bare-name form" do
     with_send_env(declared: ["SESSION", "CSRF"], bound: {"CSRF" => "c"}, vars: [{"HOST", "h"}]) do
       Gori::Env.unbound("Cookie: sid=$BIND.SESSION; c=$BIND.CSRF; h=$ENV.SESSION")

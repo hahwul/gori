@@ -61,6 +61,55 @@ describe "Gori::Env — namespaced queries" do
     end
   end
 
+  # THE dial-tuple rule. `deferred: nil` is not merely "report the declared names too": it says
+  # nothing in these bytes is deferred to a later pass at all — the callers passing it are a
+  # target, an SNI and a URL, resolved by `Env.expand` (`resolve: Owns::Env`) and by no binding
+  # pass, ever. So a BOUND `$BIND.HOST` is reported here too: judging it against the live binding
+  # table answered "resolved" while `expand` left the bytes untouched, and the host `$BIND.HOST`
+  # went to the scope gate and to the resolver.
+  it "reports a BOUND $BIND.X when nothing is deferred — no pass over a dial tuple resolves it" do
+    with_q(vars: [{"HOST", "h"}], declared: ["HOST"], bound: {"HOST" => "evil.example"}) do
+      Gori::Env.unresolved("https://$BIND.HOST/", deferred: nil).should eq(["BIND.HOST"])
+      # …and this is why: the paired ENV pass copies it through byte-exact, so the report is the
+      # only thing between those bytes and `Outbound.scope_url`.
+      Gori::Env.expand("https://$BIND.HOST/").should eq("https://$BIND.HOST/")
+      Gori::Env.token_list(Gori::Env.unresolved("https://$BIND.HOST/", deferred: nil))
+        .should eq("$BIND.HOST")
+    end
+  end
+
+  # The request-BODY reading is unchanged, and must be: those bytes ARE re-scanned by the send
+  # seam with `resolve: Owns::Bind`, so a declared name is deferred and a bound one is resolved.
+  it "keeps the deferring reading when `deferred` is given" do
+    with_q(vars: [{"HOST", "h"}], declared: ["HOST"], bound: {"HOST" => "s3cr3t"}) do
+      Gori::Env.unresolved("x=$BIND.HOST").should be_empty # declared ⇒ deferred
+      Gori::Env.unresolved("x=$BIND.HOST", deferred: [] of String)
+        .should be_empty # not declared, but BOUND
+      Gori::Env.unresolved("x=$BIND.NOPE", deferred: [] of String).should eq(["BIND.NOPE"])
+    end
+  end
+
+  # `unbound` asks the OPPOSITE question through the same scanner — "declared, and still no
+  # value" — and its answer may not move: it runs ON the seam that resolves BIND.
+  it "leaves `unbound` judging BIND against the live table" do
+    with_q(declared: ["SESSION", "CSRF"], bound: {"CSRF" => "c"}) do
+      Gori::Env.unbound("sid=$BIND.SESSION; c=$BIND.CSRF").should eq(["SESSION"])
+      # …and `token_names` still lists every ref, bound or not.
+      Gori::Env.token_names("sid=$BIND.SESSION; c=$BIND.CSRF").should eq(["BIND.SESSION", "BIND.CSRF"])
+    end
+  end
+
+  # The dial-tuple rule is NAMESPACED-only, and structurally so: bare mode has one namespace,
+  # `Found#ns` is nil there, and `vars` is the single table every token is judged against.
+  it "changes nothing in the BARE grammar: one namespace, one table" do
+    with_q(vars: [{"HOST", "h"}], declared: ["S"], bound: {"S" => "v"}) do
+      with_env_syntax(Gori::Env::Syntax::Bare) do
+        Gori::Env.unresolved("https://$HOST/", deferred: nil).should be_empty
+        Gori::Env.unresolved("https://$S/", deferred: nil).should eq(["S"])
+      end
+    end
+  end
+
   it "defers only a BIND name — an $ENV.X of the same name is a genuine env miss" do
     with_q(declared: ["SESSION"], bound: {} of String => String) do
       Gori::Env.unresolved("a=$ENV.SESSION b=$BIND.SESSION").should eq(["ENV.SESSION"])
