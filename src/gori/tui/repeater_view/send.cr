@@ -128,7 +128,12 @@ class Gori::Tui::RepeaterView
   # names `expand_wire` as what promotes it — shipping one inside a head is itself a
   # front-end/back-end desync primitive, i.e. a different test than the one on screen.
   private def expanded_text_to_bytes(text : String) : Bytes
-    wire = @evidence ? Env.expand_wire(text, operator_env_vars) : Env.expand_wire(text)
+    # `unescape: Owns::None` on the evidence branch, and it is not belt-and-braces. `Escape::Preserve`
+    # is a BARE-mode knob: under the namespaced grammar `unescape_set` ignores it and returns the
+    # pass's own `resolve` set, so this call consumed `$$ENV.X` — and a replay of captured bytes
+    # holding `$$ENV.PATH` shipped `$ENV.PATH`. An evidence path expands nothing the capture brought
+    # and unescapes nothing either: a `$$` in captured bytes is two bytes the origin sent.
+    wire = @evidence ? Env.expand_wire(text, operator_env_vars, unescape: Env::Owns::None) : Env.expand_wire(text)
     Repeater::FlowRequest.normalize_multipart_body(wire)
   end
 

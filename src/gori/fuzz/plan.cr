@@ -405,7 +405,11 @@ module Gori::Fuzz
       # not. nil — every other evidence caller — keeps the blanket skip.
       text =
         if options.evidence?
-          (vars = options.env_vars) ? String.new(Env.expand_wire(options.template, vars)) : options.template
+          # `unescape: Owns::None`: `Escape::Preserve` is a BARE-mode knob, and under the namespaced
+          # grammar `Env.unescape_set` ignores it and hands this pass its own `resolve` set — so a
+          # narrowed evidence expansion CONSUMED `$$ENV.X` and replayed `$ENV.X`. The narrowing is
+          # about the var TABLE; the escape belongs to the capture either way.
+          (vars = options.env_vars) ? String.new(Env.expand_wire(options.template, vars, unescape: Env::Owns::None)) : options.template
         else
           String.new(Env.expand_wire(options.template))
         end
