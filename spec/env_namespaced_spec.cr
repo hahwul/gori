@@ -170,6 +170,22 @@ describe "Gori::Env — namespaced grammar" do
     end
   end
 
+  # The sigil search in front of every scan is memchr-anchored (`contains_prefix?`). A MULTI-BYTE
+  # prefix is the case the anchor makes non-trivial: the first byte can occur many times without
+  # the whole prefix ever being there, and a near-miss must not read past the buffer.
+  it "may_contain_tokens? finds a multi-byte sigil, and is not fooled by its first byte" do
+    with_ns do
+      Gori::Env.may_contain_tokens?("a$%ENV.A", Gori::Env::Owns::All, "$%").should be_true
+      Gori::Env.may_contain_tokens?("$$$$ENV.A", Gori::Env::Owns::All, "$%").should be_false
+      # The prefix's first byte at the very last position: nothing left to compare against.
+      Gori::Env.may_contain_tokens?("ENV.A$", Gori::Env::Owns::All, "$%").should be_false
+      Gori::Env.may_contain_tokens?("", Gori::Env::Owns::All, "$%").should be_false
+      # …and the single-byte fast path still agrees with it.
+      Gori::Env.may_contain_tokens?("a%ENV.A", Gori::Env::Owns::All, "%").should be_true
+      Gori::Env.may_contain_tokens?("a$ENV.A", Gori::Env::Owns::All, "%").should be_false
+    end
+  end
+
   it "read_token_at answers the same grammar over bytes and over chars" do
     with_ns do
       text = "x $ENV.HOST"

@@ -1036,14 +1036,27 @@ module Gori
       names.select { |n| declared.includes?(n) }
     end
 
+    # Anchored on `Slice#index`, which is `memchr` for a `UInt8` slice — NOT a byte loop.
+    #
+    # This is the FIRST thing `may_contain_tokens?` asks, on every request and response body on
+    # every send path, and the loop it replaces ran `pb.each_with_index.all?` at every offset: an
+    # iterator pair allocated per byte of the body, to answer "is there a `$` in here". Bare mode
+    # on main asked `String#byte_index`, which is memchr; the byte-level rewrite lost that.
+    #
+    # The prefix is one byte on every install that has not changed it, so the single-byte case is
+    # the whole answer and gets no compare at all.
     private def self.contains_prefix?(bytes : Bytes, prefix : String) : Bool
       pb = prefix.to_slice
       return false if pb.empty? || pb.size > bytes.size
-      i = 0
+      head = pb[0]
+      return !bytes.index(head).nil? if pb.size == 1
       last = bytes.size - pb.size
+      i = 0
       while i <= last
-        return true if pb.each_with_index.all? { |b, j| bytes[i + j] == b }
-        i += 1
+        at = bytes.index(head, i)
+        return false unless at && at <= last
+        return true if bytes[at, pb.size] == pb
+        i = at + 1
       end
       false
     end
