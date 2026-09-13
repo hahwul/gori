@@ -71,11 +71,12 @@ module Gori
       left : Int32,
       backup : String?,
       global_hint : String? = nil,
-      error : String? = nil do
+      error : String? = nil,
+      bare_hints : Array(String) = [] of String do
       # Nothing moved and nothing needs saying: a database that had no token in the old grammar
       # got its marker and no backup. The surfaces use this to stay quiet on a fresh project.
       def quiet? : Bool
-        tokens.zero? && left.zero? && global_hint.nil? && error.nil?
+        tokens.zero? && left.zero? && global_hint.nil? && error.nil? && bare_hints.empty?
       end
 
       # THE line, on every surface. One sentence per project, counters first, the way back last.
@@ -102,8 +103,20 @@ module Gori
       def notices : Array(String)
         out = [] of String
         out << line unless tokens.zero? && left.zero? && error.nil?
+        out << bare_hint_line unless bare_hints.empty?
         global_hint.try { |h| out << h }
         out
+      end
+
+      # The one thing a re-spelling can neither fix nor ignore. A dial tuple is expanded once, with
+      # `Escape::Preserve`, and nothing unescapes it — so a literal `$id` in a target has no escaped
+      # spelling (`$$id` would reach the resolver as `$$id`). Going to bare, that `$id` starts
+      # resolving, and the honest answer is to name it rather than change the bytes or stay quiet.
+      def bare_hint_line : String
+        "project #{project}: #{EnvMigration.counted(bare_hints.size, "literal")} in a target or SNI " \
+        "(#{bare_hints.join(", ")}) now names a #{to.to_s.downcase} variable and will be " \
+        "substituted on the next dial — a dial tuple has no escape, so change the name or the " \
+        "variable if that is not what you meant"
       end
     end
 
@@ -177,6 +190,11 @@ module Gori
       property tokens = 0
       property rows = 0
       property left = 0
+      # Spellings a DIAL row carries that the target grammar will start resolving and no escape can
+      # protect (`EnvMigration::Kind#bare_resolution_hint?`). Not a counter and not a `left` row:
+      # the bytes are correct after the re-spelling, and this is the sentence about what they will
+      # now mean.
+      getter hints = [] of String
 
       def initialize(@project, @from, @to, @env_names, @bind_names, @prefix)
       end
@@ -198,14 +216,21 @@ module Gori
     # there is no token in it to re-spell.
     private def self.field(plan : Plan, bytes : Bytes, kind : Kind,
                            evidence : Bool = false) : Bytes?
+      # An EVIDENCE row is not scanned at all. The hint channel is the reason that matters now: a
+      # capture expands nothing, so a `$id` in one is neither re-spelled nor something to warn
+      # about, and collecting it would put a capture's bytes in a report about drafts.
+      return nil if evidence
       after, changes = rewrite(bytes, from: plan.from, to: plan.to,
-        env_names: plan.env_names, bind_names: plan.bind_names, kind: kind, prefix: plan.prefix)
-      return nil if changes.empty? || evidence
+        env_names: plan.env_names, bind_names: plan.bind_names, kind: kind, prefix: plan.prefix,
+        hints: plan.hints)
+      return nil if changes.empty?
       # The wire is the invariant (see `EnvMigration`). A text whose bytes the target grammar
       # cannot spell is LEFT and counted — a migration that ships different bytes than the
-      # operator's last send is worse than one that says it could not.
-      if kind.request? && !safe?(bytes, after, from: plan.from, to: plan.to,
-           env_names: plan.env_names, bind_names: plan.bind_names, prefix: plan.prefix)
+      # operator's last send is worse than one that says it could not. Asked of every kind that HAS
+      # a wire, each against its own pass list: a slot header value is seen by the binding seam
+      # alone and a dial tuple by the env pass alone.
+      if kind.has_wire? && !safe?(bytes, after, from: plan.from, to: plan.to,
+           env_names: plan.env_names, bind_names: plan.bind_names, kind: kind, prefix: plan.prefix)
         plan.left += 1
         return nil
       end
@@ -223,20 +248,21 @@ module Gori
 
     # Repeater tabs: the request blob, the dial tuple, and the sub-tab label.
     #
-    # `request` is `Kind::Request` — the send seam consumes its escape. `target`/`sni` are NOT: a
-    # dial tuple runs `Env.expand` once and is never re-scanned, so a `$$` there stays two bytes
-    # by design (see `Env::Escape`), which is `Kind::Display`'s rule. `name` is a label.
+    # `request` is `Kind::Request` — the send seam consumes its escape. `target`/`sni` are
+    # `Kind::Dial`: a dial tuple runs `Env.expand` ONCE, with `Escape::Preserve`, and is never
+    # re-scanned — so the ENV table is the only one that resolves there and nothing consumes a `$$`.
+    # `name` is `Kind::Display`: a label nothing ever expands.
     private def self.scan_repeaters(store : Store, plan : Plan) : Nil
       store.repeaters.each do |rec|
         evidence = !rec.flow_id.nil?
         if req = field(plan, rec.request, Kind::Request, evidence)
           plan.writes << repeater_request_write(rec, req)
         end
-        if target = text(plan, rec.target, Kind::Display, evidence)
+        if target = text(plan, rec.target, Kind::Dial, evidence)
           plan.writes << Write.new("UPDATE repeaters SET target = ? WHERE id = ?",
             [target.as(::DB::Any), rec.id.as(::DB::Any)])
         end
-        if sni = rec.sni.try { |s| text(plan, s, Kind::Display, evidence) }
+        if sni = rec.sni.try { |s| text(plan, s, Kind::Dial, evidence) }
           plan.writes << Write.new("UPDATE repeaters SET sni = ? WHERE id = ?",
             [sni.as(::DB::Any), rec.id.as(::DB::Any)])
         end
@@ -296,9 +322,12 @@ module Gori
       end
     end
 
-    # Session-slot header VALUES. `Kind::Request`: the overlay is resolved by
-    # `Env.expand_bindings_as` with `Escape::Consume`, so the escape is the send seam's exactly as
-    # in a request. Slot NAMES and claimed rule names are table keys and are left alone.
+    # Session-slot header VALUES. `Kind::Slot`: the escape is the send seam's exactly as in a
+    # request (`Env.expand_bindings_as`, `Escape::Consume`) — but that seam is the ONLY pass over
+    # these bytes and it resolves BIND alone, so an env-var name here was never a reference. Reading
+    # it as one re-spelled a literal `$API` into a `$ENV.API` that looks live and resolves in no
+    # pass this value ever sees. Slot NAMES and claimed rule names are table keys and are left
+    # alone.
     private def self.scan_slots(store : Store, plan : Plan) : Nil
       raw = store.setting(Store::SESSION_SLOTS_KEY)
       return unless raw
@@ -307,7 +336,7 @@ module Gori
       touched = false
       migrated = slots.map do |slot|
         headers = slot.set_headers.map do |(name, value)|
-          after = text(plan, value, Kind::Request)
+          after = text(plan, value, Kind::Slot)
           next {name, value} unless after
           touched = true
           {name, after}
@@ -350,12 +379,12 @@ module Gori
 
     private def self.scan_dial_tuple(plan : Plan, table : String, id : Int64, target : String,
                                      sni : String?, evidence : Bool) : Nil
-      if after = text(plan, target, Kind::Display, evidence)
+      if after = text(plan, target, Kind::Dial, evidence)
         plan.writes << Write.new("UPDATE #{table} SET target = ? WHERE id = ?",
           [after.as(::DB::Any), id.as(::DB::Any)])
       end
       if s = sni
-        if after = text(plan, s, Kind::Display, evidence)
+        if after = text(plan, s, Kind::Dial, evidence)
           plan.writes << Write.new("UPDATE #{table} SET sni = ? WHERE id = ?",
             [after.as(::DB::Any), id.as(::DB::Any)])
         end
@@ -430,7 +459,7 @@ module Gori
       # backup is already on disk. Built here because the ACTIVITY row below is written on THIS
       # connection and needs the same sentence the surfaces print.
       report = StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows, plan.left,
-        backup)
+        backup, bare_hints: plan.hints.uniq)
       applied = false
       ::DB.open("sqlite3:#{db_path}?busy_timeout=5000") do |db|
         db.using_connection do |conn|

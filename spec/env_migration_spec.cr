@@ -34,10 +34,10 @@ private BIND_NAMES = ["token", "both"]
 
 private def rewrite(text : String | Bytes, from : Gori::Env::Syntax, to : Gori::Env::Syntax,
                     kind : Gori::EnvMigration::Kind = Gori::EnvMigration::Kind::Request,
-                    prefix : String = "$")
+                    prefix : String = "$", hints : Array(String)? = nil)
   bytes = text.is_a?(String) ? text.to_slice : text
   after, changes = Gori::EnvMigration.rewrite(bytes, from: from, to: to,
-    env_names: ENV_NAMES, bind_names: BIND_NAMES, kind: kind, prefix: prefix)
+    env_names: ENV_NAMES, bind_names: BIND_NAMES, kind: kind, prefix: prefix, hints: hints)
   {after, changes}
 end
 
@@ -48,9 +48,9 @@ private def expect_rewrite(text : String, from : Gori::Env::Syntax, to : Gori::E
                            prefix : String = "$", wire_safe : Bool = true)
   after, _ = rewrite(text, from, to, kind, prefix)
   String.new(after).should eq(want)
-  return unless kind.request?
+  return unless kind.has_wire?
   Gori::EnvMigration.safe?(text.to_slice, after, from: from, to: to,
-    env_names: ENV_NAMES, bind_names: BIND_NAMES, prefix: prefix).should eq(wire_safe)
+    env_names: ENV_NAMES, bind_names: BIND_NAMES, kind: kind, prefix: prefix).should eq(wire_safe)
 end
 
 private BARE = Gori::Env::Syntax::Bare
@@ -134,6 +134,51 @@ describe Gori::EnvMigration do
       changes.size.should eq(1)
       changes[0].ambiguous.should be_true
       changes[0].ref.try(&.ns).should eq(Gori::Env::Namespace::Env)
+    end
+
+    # The bare grammar resolved a name by SHAPE, and the consumers of those bytes did not run the
+    # same passes in the same order. So "which namespace did this `$NAME` mean?" is the CONSUMER's
+    # question, and a house rule ("ENV first") answered it wrong for two of the four kinds: the
+    # failure is silent, because both spellings look right and only the wire carries the other
+    # value.
+    it "routes a name held in BOTH tables by the CONSUMER, not by a house rule" do
+      {
+        # a request: the ENV pass runs at plan-build, the binding pass at the seam — ENV ran first
+        Gori::EnvMigration::Kind::Request => "$ENV.both",
+        # display text: nothing expands it, so it follows the request spelling for consistency
+        Gori::EnvMigration::Kind::Display => "$ENV.both",
+        # a rule replacement: `Rules#substitute` resolves against `Env.display_vars`, which layers
+        # the BINDING values OVER the env vars — so the binding is what a bare rule injected
+        Gori::EnvMigration::Kind::Rule => "$BIND.both",
+        # a slot header value: `Env.expand_bindings_as` and nothing else, so BIND is all there is
+        Gori::EnvMigration::Kind::Slot => "$BIND.both",
+        # a dial tuple: one `Env.expand` with `resolve: Owns::Env`, so ENV is all there is
+        Gori::EnvMigration::Kind::Dial => "$ENV.both",
+      }.each do |kind, want|
+        after, changes = rewrite("$both", BARE, NS, kind)
+        String.new(after).should eq(want)
+        changes.size.should eq(1)
+        # The AMBIGUITY only exists where two readings did: a slot and a dial resolve one table.
+        changes[0].ambiguous.should eq(!(kind.slot? || kind.dial?))
+      end
+    end
+
+    # The other half of the same fact, and the one an operator can actually be hurt by: a name the
+    # consumer's own pass would NOT have resolved is not a token at all. Re-spelling it minted a
+    # reference that looks live and resolves in no pass those bytes ever see.
+    it "leaves a name the consumer's own pass never resolved as a bare literal" do
+      # `$id` is an env var. A slot header is resolved by the binding seam alone, so it shipped as
+      # four literal bytes before the switch and must ship the same four after.
+      after, changes = rewrite("$id", BARE, NS, Gori::EnvMigration::Kind::Slot)
+      changes.should be_empty
+      String.new(after).should eq("$id")
+      # …and a declared binding in the same header IS a token.
+      expect_rewrite("$token", BARE, NS, "$BIND.token", Gori::EnvMigration::Kind::Slot)
+      # A dial tuple is the mirror: `$token` resolves in no pass a target sees.
+      after, changes = rewrite("$token", BARE, NS, Gori::EnvMigration::Kind::Dial)
+      changes.should be_empty
+      String.new(after).should eq("$token")
+      expect_rewrite("https://$API/p", BARE, NS, "https://$ENV.API/p", Gori::EnvMigration::Kind::Dial)
     end
 
     it "drops the bare escape's second sigil, because the namespaced grammar does not consume it" do
@@ -231,6 +276,58 @@ describe Gori::EnvMigration do
       expect_rewrite("$id-$1", NS, BARE, "$$id-$1", Gori::EnvMigration::Kind::Rule)
       expect_rewrite("$1$2", NS, BARE, "$1$2", Gori::EnvMigration::Kind::Rule)
     end
+
+    # Only a grammar that CONSUMES an escape can spell one. Doubling the sigil in one that does not
+    # just adds a byte — and for DISPLAY text that byte is visible: an issue title reading
+    # `leaked $id` became `leaked $$id`, and a `$$` an operator typed became `$$$`.
+    it "never escapes display text, which is expanded by nothing" do
+      expect_rewrite("leaked $id", NS, BARE, "leaked $id", Gori::EnvMigration::Kind::Display)
+      expect_rewrite("$$id", NS, BARE, "$$id", Gori::EnvMigration::Kind::Display)
+      expect_rewrite("$$", NS, BARE, "$$", Gori::EnvMigration::Kind::Display)
+      # The TOKEN still follows the grammar: `mask_secrets` put it there, and the redaction stops
+      # reading as one if its spelling does not move.
+      expect_rewrite("leaked $ENV.id", NS, BARE, "leaked $id", Gori::EnvMigration::Kind::Display)
+    end
+
+    # A DIAL tuple is expanded — once, by the env pass, with `Escape::Preserve` — and nothing ever
+    # unescapes it. So `$$id` in a target reaches the resolver as `$$id`: there is no escaped
+    # spelling to write, and writing one shipped a host nobody asked for.
+    it "re-spells a dial tuple and NAMES the literal it cannot escape" do
+      hints = [] of String
+      after, changes = rewrite("https://$id/p", NS, BARE, Gori::EnvMigration::Kind::Dial,
+        hints: hints)
+      String.new(after).should eq("https://$id/p") # the bytes are left exactly as authored
+      changes.should be_empty
+      hints.should eq(["$id"]) # …and the operator is told they will now be substituted
+      # A token re-spells as usual, and earns no hint: it resolved before and resolves after.
+      hints.clear
+      expect_rewrite("https://$ENV.API", NS, BARE, "https://$API", Gori::EnvMigration::Kind::Dial)
+      rewrite("https://$ENV.API", NS, BARE, Gori::EnvMigration::Kind::Dial, hints: hints)
+      hints.should be_empty
+      # And a `$$` stays two bytes, because that is what it already was in both grammars.
+      expect_rewrite("https://$$API", NS, BARE, "https://$$API", Gori::EnvMigration::Kind::Dial)
+    end
+
+    # A slot header value resolves BIND alone, in both grammars. So the escape is owed to a declared
+    # binding and to nothing else: an env-only name was literal text before and after.
+    it "escapes only a BINDING in a slot header value" do
+      expect_rewrite("Bearer $BIND.token", NS, BARE, "Bearer $token", Gori::EnvMigration::Kind::Slot)
+      expect_rewrite("Bearer $token", NS, BARE, "Bearer $$token", Gori::EnvMigration::Kind::Slot)
+      expect_rewrite("$id", NS, BARE, "$id", Gori::EnvMigration::Kind::Slot)
+    end
+
+    # The round trip the two rules above buy: text that is not expanded, and a target whose escape
+    # cannot move, come back byte-for-byte.
+    it "round-trips display text and a target namespaced → bare → namespaced" do
+      {
+        Gori::EnvMigration::Kind::Display => "leaked $ENV.id / $BIND.token / $$id / $$ / $nope",
+        Gori::EnvMigration::Kind::Dial    => "https://$ENV.API:8443/$$API",
+      }.each do |kind, original|
+        down, _ = rewrite(original, NS, BARE, kind)
+        up, _ = rewrite(down, BARE, NS, kind)
+        String.new(up).should eq(original)
+      end
+    end
   end
 
   it "does nothing when the two grammars are the same" do
@@ -285,7 +382,10 @@ describe Gori::EnvMigration do
           .replacement.should eq("Bearer $BIND.token-$1")
 
         slots = Gori::SessionSlot.parse_json(store.setting(Gori::Store::SESSION_SLOTS_KEY))
-        slots[0].set_headers.should eq([{"Authorization", "Bearer $BIND.token"}, {"X-Key", "$ENV.API"}])
+        # `Kind::Slot`: `Env.expand_bindings_as` is the ONLY pass over a slot header value and it
+        # resolves BIND alone, so the declared binding is re-spelled and the env var name is NOT —
+        # it shipped as literal text before the switch and it ships the same literal text after.
+        slots[0].set_headers.should eq([{"Authorization", "Bearer $BIND.token"}, {"X-Key", "$API"}])
         slots[0].rules.should eq(["token"]) # a claimed rule NAME is a table key, not a token
 
         issue = store.issues.find { |i| i.id == issue_id }.not_nil!
@@ -403,6 +503,62 @@ describe Gori::EnvMigration do
     end
   end
 
+  # The `VACUUM INTO` backup is taken ONLY when the scan found a row to change. A database full of
+  # rows that hold no token gets the marker, no copy of itself, and nothing to say — otherwise every
+  # grammar switch would drop a second copy of every project beside it.
+  it "backs nothing up when a database has rows but no token in any of them" do
+    with_migration_home do |db_path|
+      with_open_store(db_path) do |store|
+        store.insert_repeater("https://api.example.com",
+          "GET /?$ne HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice, false, true, nil, 0)
+        store.insert_issue("nothing to see", Gori::Store::Severity::Low, nil, nil, notes: "plain")
+        store.flush
+      end
+      Gori::Settings.env_syntax = NS
+      report = with_open_store(db_path) do |store|
+        Gori::EnvMigration.reconcile(store, db_path, "demo")
+      end.not_nil!
+      report.quiet?.should be_true
+      report.backup.should be_nil
+      Dir.glob("#{db_path}.pre-*").should be_empty
+      with_open_store(db_path) do |store|
+        store.setting(Gori::Env::PROJECT_SYNTAX_KEY).should eq("namespaced")
+        # `$ne` is a Mongo operator in both grammars, and it is still `$ne`.
+        String.new(store.repeaters[0].request).should contain("GET /?$ne ")
+      end
+    end
+  end
+
+  # The one thing the opt-out can neither fix nor ignore: a dial tuple is expanded once with
+  # `Escape::Preserve` and never unescaped, so a LITERAL `$id` in a target has no escaped spelling.
+  # Going to bare it starts resolving, and the bytes are left as authored with the name said out loud.
+  it "names a target literal that the bare grammar will start resolving" do
+    with_migration_home do |db_path|
+      with_open_store(db_path) do |store|
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"id", "evil.example.com"}]))
+        store.set_setting(Gori::Env::PROJECT_SYNTAX_KEY, "namespaced")
+        store.insert_repeater("https://$id.example.com",
+          "GET / HTTP/1.1\r\nHost: x\r\n\r\n".to_slice, false, true, nil, 0)
+        store.flush
+      end
+      Gori::Settings.env_syntax = BARE
+      report = with_open_store(db_path) do |store|
+        Gori::EnvMigration.reconcile(store, db_path, "demo")
+      end.not_nil!
+      report.bare_hints.should eq(["$id"])
+      report.quiet?.should be_false
+      hint = report.notices.find(&.includes?("target or SNI")).not_nil!
+      hint.should contain("1 literal")
+      hint.should contain("$id")
+      hint.should contain("will be substituted on the next dial")
+      # The BYTES are exactly as the operator authored them — the hint is the whole remedy.
+      with_open_store(db_path) do |store|
+        store.repeaters[0].target.should eq("https://$id.example.com")
+      end
+    end
+  end
+
   # The opt-out direction, and the reason it is the lossy one: bare resolves a name by SHAPE, so a
   # `$id` that was inert under the namespaced grammar starts resolving. Every one gori can see gets
   # its escape.
@@ -430,6 +586,14 @@ describe Gori::EnvMigration do
         # escaped back or those four bytes stop being the payload.
         wire.should contain("X-C: $$id\r\n")
         store.setting(Gori::Env::PROJECT_SYNTAX_KEY).should eq("bare")
+
+        # DISPLAY text gets no escape, because nothing expands it — the sigil doubling that used to
+        # happen here was visible in the issue list.
+        issue = store.issues[0]
+        issue.title.should eq("leaked $id")
+        issue.notes.should eq("the body carried $id")
+        # …and a dial tuple gets none either: it is expanded, but nothing unescapes it.
+        store.repeaters.find { |r| r.flow_id.nil? }.not_nil!.target.should eq("https://$API")
       end
       Dir.glob("#{db_path}.pre-bare-*").size.should eq(1)
     end
