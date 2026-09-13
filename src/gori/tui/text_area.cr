@@ -2400,7 +2400,8 @@ module Gori::Tui
           ns_start -= 1
         end
         if ns_start < ns_end && (ns = Env::Namespace.parse?(line[ns_start...ns_end])) &&
-           ns_start - plen >= 0 && line[(ns_start - plen)...ns_start] == prefix
+           ns_start - plen >= 0 && line[(ns_start - plen)...ns_start] == prefix &&
+           live_sigil?(line, ns_start - plen, plen, prefix, syntax)
           ke = cx
           while ke < line.size && env_key_tail?(line[ke])
             ke += 1
@@ -2411,7 +2412,8 @@ module Gori::Tui
       end
       # STAGE A — a bare run behind the sigil: `$TO`, `$E`, a fully-typed `$SESSION`, or the
       # NAMESPACE run of a `$ENV.HOST` whose name the caret has not reached yet.
-      return nil unless ks - plen >= 0 && line[(ks - plen)...ks] == prefix
+      return nil unless ks - plen >= 0 && line[(ks - plen)...ks] == prefix &&
+                        live_sigil?(line, ks - plen, plen, prefix, syntax)
       run_end = cx
       while run_end < line.size && env_key_tail?(line[run_end])
         run_end += 1
@@ -2427,6 +2429,38 @@ module Gori::Tui
         end
       end
       EnvCaret.new(ks - plen, nil, line[ks...cx], line[ks...run_end], run_end, token_end, dot)
+    end
+
+    # Is the sigil at `sigil` the one a PASS would read as opening a reference — or is it half
+    # of an escape?
+    #
+    # Both stages above find a sigil by looking ONE character back, and `$` is a character that
+    # can precede itself: for `Host: $$ENV.HOST` the second sigil satisfied that test, so the
+    # peek printed the value and the dropdown opened while `Env.regions` painted the whole span
+    # as a non-token and the wire carried the literal `$ENV.HOST`. Display promising a
+    # substitution the send path does not make is the one thing this editor must never do.
+    #
+    # A single "is the previous character a sigil?" test is not enough, because the answer is
+    # decided by the RUN of sigils in front of the candidate and the two grammars consume that
+    # run differently (`Env.read_token_at`'s decision table, cross-checked against `Env.regions`
+    # in the spec):
+    #
+    #   * NAMESPACED — the escape is the whole `$$ENV.NAME`, so the sigil directly in front of a
+    #     namespace run always swallows it: `$$ENV.X` and `$$$ENV.X` both reach the wire as
+    #     literal text and neither carries a reference. Any preceding sigil ⇒ not live.
+    #   * BARE — the escape is the PAIR `$$`, consumed as a unit with nothing behind it read, so
+    #     an EVEN run leaves the candidate live (`$$$HOST` really does expand, and the painter
+    #     paints it) and an odd one makes it the escape's second half (`$$HOST` — the
+    #     pre-existing hole this closes).
+    private def live_sigil?(line : String, sigil : Int32, plen : Int32, prefix : String,
+                            syntax : Env::Syntax) : Bool
+      run = 0
+      at = sigil - plen
+      while at >= 0 && line[at...(at + plen)] == prefix
+        run += 1
+        at -= plen
+      end
+      syntax.namespaced? ? run.zero? : run.even?
     end
 
     # Recompute the row set for the token the caret sits in. Closes when there's no token, no
