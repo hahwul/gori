@@ -55,6 +55,8 @@ module Gori::CLI
     project : String,
     db_path : String,
     to : Env::Syntax,
+    env_names : Set(String),
+    bind_names : Set(String),
     rows : Array(MigrateRow),
     writes : Array(MigrateWrite) do
     def edits : Array(MigrateRow)
@@ -157,10 +159,13 @@ module Gori::CLI
       migrate_scan_workbenches(store, ctx)
       migrate_scan_issues(store, ctx)
       migrate_scan_notes(store, ctx)
+      # The two name tables travel with the plan: the GLOBAL rewrite rules are checked against
+      # the union across every project scanned, since one of them rewrites traffic in all of them.
+      MigratePlan.new(project.name, project.db_path, to, ctx.env_names, ctx.bind_names,
+        rows, writes)
     ensure
       store.close
     end
-    MigratePlan.new(project.name, project.db_path, to, rows, writes)
   end
 
   # The ENV table as the grammar being left resolved it: the global vars merged under this
@@ -439,6 +444,31 @@ module Gori::CLI
     end
   end
 
+  # GLOBAL rewrite rules live in settings.json, not in a project database — so they are outside
+  # what this command backs up and outside what it writes, and a `$SESSION` in one of them would
+  # otherwise go quiet with no line anywhere saying so. Reported, never rewritten: the backup is
+  # the reason (a project DB gets one, settings.json does not), and a rule that rewrites live
+  # traffic on every project is not a row to edit without one.
+  private def self.migrate_global_rule_rows(plans : Array(MigratePlan), from : Env::Syntax,
+                                            to : Env::Syntax) : Array(MigrateRow)
+    rows = [] of MigrateRow
+    return rows if Settings.rewriter_rules.empty?
+    env = plans.reduce(Set(String).new) { |acc, p| acc | p.env_names }
+    bind = plans.reduce(Set(String).new) { |acc, p| acc | p.bind_names }
+    Settings.rewriter_rules.each do |rule|
+      next if rule.replacement.empty?
+      _, changes = EnvMigration.rewrite(rule.replacement.to_slice, from: from, to: to,
+        env_names: env, bind_names: bind, kind: EnvMigration::Kind::Rule,
+        prefix: Settings.env_prefix)
+      next if changes.empty?
+      rows << MigrateRow.new("(global)", "settings.json rewriter",
+        migrate_row_label(rule.id, rule.name), changes,
+        note: "a GLOBAL rule is not in a project database — re-spell it in Settings → Match & " \
+              "Replace, or with `gori run rewriter --scope=global`")
+    end
+    rows
+  end
+
   # `12 "login"` — the id the row is addressed by, plus the label an operator recognises it as.
   private def self.migrate_row_label(id : Int64, name : String?) : String
     label = name.try(&.presence)
@@ -454,7 +484,7 @@ module Gori::CLI
                                         already : Bool = false) : Array(String)
     lines = [] of String
     edits = plans.flat_map(&.edits)
-    skips = plans.flat_map(&.skipped)
+    skips = plans.flat_map(&.skipped) + migrate_global_rule_rows(plans, from, to)
     verb = dry ? "would re-spell" : "re-spelled"
     lines << migrate_lossy_warning if to.bare?
     lines << migrate_not_idempotent_warning(from, to) if already
