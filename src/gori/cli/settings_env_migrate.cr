@@ -66,7 +66,7 @@ module Gori::CLI
     end
 
     def tokens : Int32
-      edits.sum { |r| r.changes.size }
+      edits.sum(&.changes.size)
     end
   end
 
@@ -94,19 +94,25 @@ module Gori::CLI
     to.bare? ? Env::Syntax::Namespaced : Env::Syntax::Bare
   end
 
+  # Two answers to "which project" is the one mistake with no repair — a wrapper is fixed by
+  # dropping a flag, and there is no equivalent for having migrated the wrong database.
+  private def self.migrate_refuse_target_mix!(project_name : String?, db_path : String?,
+                                              all : Bool) : Nil
+    if msg = Run.two_targets_error(project_name, db_path, "gori settings env-syntax")
+      abort msg
+    end
+    return unless all && (project_name.try(&.presence) || db_path.try(&.presence))
+    abort "gori settings env-syntax: --all-projects migrates every project under " \
+          "#{Paths.projects_dir}, so it cannot be combined with --project or --db"
+  end
+
   # Which databases to walk. Mirrors `gori run project env`'s resolver — `--db` wins, then
   # `--project`, then the most-recently-active one — with `--all-projects` as the third answer,
   # because a home whose projects were all written under one grammar is the case the migration
   # exists for.
   private def self.migrate_targets(project_name : String?, db_path : String?,
                                    all : Bool) : Array(Project)
-    if msg = Run.two_targets_error(project_name, db_path, "gori settings env-syntax")
-      abort msg
-    end
-    if all && (project_name.try(&.presence) || db_path.try(&.presence))
-      abort "gori settings env-syntax: --all-projects migrates every project under " \
-            "#{Paths.projects_dir}, so it cannot be combined with --project or --db"
-    end
+    migrate_refuse_target_mix!(project_name, db_path, all)
     if path = db_path.try(&.presence)
       unless File.exists?(path) && !File.directory?(path)
         abort "gori settings env-syntax: --db is not a readable file: #{path}"
@@ -453,7 +459,7 @@ module Gori::CLI
       lines << "#{dry ? "nothing to re-spell" : "nothing re-spelled"}: no stored " \
                "#{env_syntax_label(from)} token in #{migrate_project_list(plans)}"
     else
-      lines << "#{verb} #{migrate_count(edits.sum { |r| r.changes.size }, "token")} in " \
+      lines << "#{verb} #{migrate_count(edits.sum(&.changes.size), "token")} in " \
                "#{migrate_count(edits.size, "row")} of #{migrate_project_list(plans)} " \
                "(#{env_syntax_label(from)} → #{env_syntax_label(to)}):"
       lines.concat(migrate_table(edits))

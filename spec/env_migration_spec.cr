@@ -72,6 +72,33 @@ private def with_migration_home(&)
   end
 end
 
+# The project the store-level example migrates: one draft, one capture-backed tab, and every other
+# column the migration claims. Returns the ids it has to assert against.
+private def seed_migration_project(db_path : String) : {Int64, Int64, Int64, Int64}
+  store = Gori::Store.open(db_path)
+  begin
+    store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+      Gori::Env.serialize_vars([{"id", "sekrit-value"}, {"API", "api.example.com"}]))
+    store.insert_extract_rule("token", "", Gori::ExtractKind::Header, "set-cookie")
+    store.set_setting(Gori::Store::SESSION_SLOTS_KEY,
+      Gori::SessionSlot.serialize([Gori::SessionSlot.new("admin",
+        [{"Authorization", "Bearer $token"}, {"X-Key", "$API"}], [] of String, false, ["token"])]))
+    draft = "POST /q HTTP/1.1\r\nHost: $API\r\nX-A: $id\r\nX-B: $token\r\nX-C: $$id\r\n\r\n" \
+            "{\"q\":\"$id $ne\"}"
+    draft_id = store.insert_repeater("https://$API", draft.to_slice, false, true, nil, 0)
+    evidence_id = store.insert_repeater("https://api.example.com",
+      "GET /?$id HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice, false, true, 7_i64, 1)
+    rule_id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+      "Authorization", "Bearer $token-$1", name: "auth")
+    issue_id = store.insert_issue("leaked $id", Gori::Store::Severity::High, nil, nil,
+      notes: "the body carried $id")
+    store.flush
+    {draft_id, evidence_id, rule_id, issue_id}
+  ensure
+    store.close
+  end
+end
+
 describe Gori::EnvMigration do
   describe "bare → namespaced" do
     it "routes a name by which table holds it, and leaves the rest as bytes" do
@@ -206,31 +233,7 @@ describe Gori::EnvMigration do
   # One project, every column the migration claims, and the two it must not touch.
   it "migrates a project database and leaves evidence alone" do
     with_migration_home do |db_path|
-      draft_id = 0_i64
-      evidence_id = 0_i64
-      rule_id = 0_i64
-      issue_id = 0_i64
-      store = Gori::Store.open(db_path)
-      begin
-        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
-          Gori::Env.serialize_vars([{"id", "sekrit-value"}, {"API", "api.example.com"}]))
-        store.insert_extract_rule("token", "", Gori::ExtractKind::Header, "set-cookie")
-        store.set_setting(Gori::Store::SESSION_SLOTS_KEY,
-          Gori::SessionSlot.serialize([Gori::SessionSlot.new("admin",
-            [{"Authorization", "Bearer $token"}, {"X-Key", "$API"}], [] of String, false, ["token"])]))
-        draft = "POST /q HTTP/1.1\r\nHost: $API\r\nX-A: $id\r\nX-B: $token\r\nX-C: $$id\r\n\r\n" \
-                "{\"q\":\"$id $ne\"}"
-        draft_id = store.insert_repeater("https://$API", draft.to_slice, false, true, nil, 0)
-        evidence_id = store.insert_repeater("https://api.example.com",
-          "GET /?$id HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice, false, true, 7_i64, 1)
-        rule_id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
-          "Authorization", "Bearer $token-$1", name: "auth")
-        issue_id = store.insert_issue("leaked $id", Gori::Store::Severity::High, nil, nil,
-          notes: "the body carried $id")
-        store.flush
-      ensure
-        store.close
-      end
+      draft_id, evidence_id, rule_id, issue_id = seed_migration_project(db_path)
 
       io = IO::Memory.new
       Gori::CLI.migrate_env_syntax_for_migration_spec(NS, dry: true, db_path: db_path, io: io).should be_false

@@ -258,7 +258,7 @@ describe "gori settings env-syntax --migrate" do
 
   it "says so when there is nothing stored to re-spell" do
     with_migrate_db do |db_path|
-      with_migrate_store(db_path) { |store| store.flush }
+      with_migrate_store(db_path, &.flush)
       io = IO::Memory.new
       Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Namespaced, dry: true,
         db_path: db_path, io: io).should be_false

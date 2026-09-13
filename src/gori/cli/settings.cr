@@ -428,18 +428,10 @@ module Gori::CLI
     end
     rest = stray_args(parser, args)
     abort "gori settings env-syntax: one value at a time (got #{rest.size}: #{rest.join(", ")})" if rest.size > 1
-    # Said as its own sentence rather than silently ignored: `--dry-run` alone reads as "show me
-    # what this would do", and the thing it would do is the migration nobody asked for.
-    if !migrate && (dry || all || project_name || db_path)
-      abort "gori settings env-syntax: --dry-run / --project / --db / --all-projects only mean " \
-            "something with --migrate (without it the verb reads or sets the grammar and touches " \
-            "no project database)"
-    end
+    refuse_env_syntax_migrate_flags!(migrate, dry, all, project_name, db_path, rest[0]?)
 
     Settings.load
     unless want = rest[0]?
-      abort "gori settings env-syntax: --migrate needs the grammar to migrate TO " \
-            "(#{env_syntax_values})" if migrate
       env_syntax_read_lines.each { |line| puts line }
       return
     end
@@ -462,6 +454,22 @@ module Gori::CLI
       abort "gori settings env-syntax: applied for this process but could not be written to #{Settings.path}"
     end
     env_syntax_write_lines(was, syntax, migrated: migrate).each { |line| puts line }
+  end
+
+  # The migration's flags only mean something WITH `--migrate`, and `--migrate` only means
+  # something with a value to migrate TO. Said as its own sentence rather than ignored: a
+  # `--dry-run` that printed the grammar and exited 0 reads as "nothing would change".
+  private def self.refuse_env_syntax_migrate_flags!(migrate : Bool, dry : Bool, all : Bool,
+                                                    project_name : String?, db_path : String?,
+                                                    want : String?) : Nil
+    if !migrate && (dry || all || project_name || db_path)
+      abort "gori settings env-syntax: --dry-run / --project / --db / --all-projects only mean " \
+            "something with --migrate (without it the verb reads or sets the grammar and touches " \
+            "no project database)"
+    end
+    return unless migrate && want.nil?
+    abort "gori settings env-syntax: --migrate needs the grammar to migrate TO " \
+          "(#{env_syntax_values})"
   end
 
   # What `gori settings env-syntax` prints with no argument: the value, and WHERE it came from.
