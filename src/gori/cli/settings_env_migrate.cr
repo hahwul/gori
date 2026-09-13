@@ -450,11 +450,14 @@ module Gori::CLI
   # The table, the skips and the totals — pure, so the wording is spec-callable (every guard
   # around it ends in `abort`, which is not catchable).
   private def self.migrate_report_lines(plans : Array(MigratePlan), from : Env::Syntax,
-                                        to : Env::Syntax, dry : Bool) : Array(String)
+                                        to : Env::Syntax, dry : Bool,
+                                        already : Bool = false) : Array(String)
     lines = [] of String
     edits = plans.flat_map(&.edits)
     skips = plans.flat_map(&.skipped)
     verb = dry ? "would re-spell" : "re-spelled"
+    lines << migrate_lossy_warning if to.bare?
+    lines << migrate_not_idempotent_warning(from, to) if already
     if edits.empty?
       lines << "#{dry ? "nothing to re-spell" : "nothing re-spelled"}: no stored " \
                "#{env_syntax_label(from)} token in #{migrate_project_list(plans)}"
@@ -468,7 +471,49 @@ module Gori::CLI
       lines << "left untouched (#{migrate_count(skips.size, "row")}):"
       lines.concat(migrate_table(skips))
     end
+    lines << migrate_unbound_caveat(to) if edits.any? { |r| r.changes.any? { |c| c.ref.try(&.ns.bind?) } }
     lines
+  end
+
+  # The one thing the rewrite CANNOT keep byte-exact, said out loud.
+  #
+  # A binding resolves at SEND time out of a memory-only table, and a name with no value ships
+  # LITERALLY (`Env#unbound`). Its literal is its SPELLING, so a run that was sending the four
+  # bytes `$FOO` now sends `$BIND.FOO`. There is no migration that avoids it — the grammars spell
+  # the token differently, which is the whole feature — and the value on the wire is identical the
+  # moment the name is bound, which is the case the rewrite is FOR.
+  private def self.migrate_unbound_caveat(to : Env::Syntax) : String
+    "note: a binding with no value still ships LITERALLY, and its literal is now the " \
+    "#{env_syntax_label(to)} spelling — bind it (`--bind-from`, a send under its slot), or " \
+    "escape it if those bytes were the payload."
+  end
+
+  # `--migrate` states the grammar its rows are READ as rather than detecting it (nothing in a
+  # `$NAME` says which grammar wrote it), so running it twice re-spells its own output: a second
+  # `bare --migrate` escapes the `$API` the first one produced. That is only visible to an operator
+  # who is told, and the switch itself is the only evidence gori has — so the warning fires exactly
+  # when the install is ALREADY the target, which is both the "I switched last week and only now
+  # want my drafts moved" case the derivation exists for and the "I already ran this" case.
+  private def self.migrate_not_idempotent_warning(from : Env::Syntax, to : Env::Syntax) : String
+    "note: this install is already #{env_syntax_label(to)}, so the rows below are being read as " \
+    "#{env_syntax_label(from)}. That is right if you have not migrated them yet — but `--migrate` " \
+    "is not idempotent (a second run would re-spell its own output), so check the table before " \
+    "applying."
+  end
+
+  # FIRST, before the table, on the direction that cannot be made safe.
+  #
+  # bare resolves a name by SHAPE, so going back is not a re-spelling of gori's own bytes: it is a
+  # promise about every OTHER place a `$NAME` can come from. The rows in these databases get their
+  # escape; a request in a file, a HAR, a body piped into `--request-stdin`, a wordlist, a profile
+  # someone exported — gori cannot see those, and the moment the grammar is bare an env var whose
+  # name collides with a GraphQL variable resolves into a body nobody wrote it into. That is the
+  # collision the namespaces exist to remove, and this is the command that re-opens it.
+  private def self.migrate_lossy_warning : String
+    "warning: bare is the LOSSY direction. Only what is IN these databases can be escaped — a " \
+    "`$NAME` gori cannot see (a request in a file, a HAR, a body piped in, a wordlist, an " \
+    "exported profile) starts resolving the moment the grammar is bare, silently, and a GraphQL " \
+    "`$id` or a Mongo `$ne` in one of them puts a real credential on the wire."
   end
 
   private def self.migrate_table(rows : Array(MigrateRow)) : Array(String)
@@ -519,8 +564,9 @@ module Gori::CLI
                          "or pass --all-projects"
     end
     migrate_refuse_busy!(targets) unless dry
+    already = Settings.env_syntax == to
     plans = targets.map { |t| migrate_scan(t, from, to) }
-    migrate_report_lines(plans, from, to, dry).each { |line| io.puts line }
+    migrate_report_lines(plans, from, to, dry, already).each { |line| io.puts line }
     if dry
       io.puts "--dry-run wrote nothing. Re-run without it to apply, and to set the grammar to " \
               "#{env_syntax_label(to)}."
@@ -531,7 +577,7 @@ module Gori::CLI
       next if plan.writes.empty?
       wrote = true
       backup = migrate_apply!(plan)
-      io.puts "#{plan.project}: #{migrate_count(plan.writes.size, "row")} written — " \
+      io.puts "#{plan.project}: #{migrate_count(plan.writes.size, "update")} written — " \
               "backup at #{backup}"
     end
     io.puts "nothing to write — the stored tokens already read as #{env_syntax_label(to)}" unless wrote

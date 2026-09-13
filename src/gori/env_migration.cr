@@ -33,6 +33,11 @@ module Gori
   # `$` immediately followed by `id`'s VALUE, and the namespaced grammar has no spelling for that
   # (`$$ENV.id` is the escape, so the `$` and the token cannot sit side by side). `safe?` is the
   # check for it — the caller runs it and SKIPS the row rather than shipping different bytes.
+  #
+  # ONE difference is structural and is not a defect: a BINDING with no value ships literally, and
+  # its literal is its spelling, so a `$FOO` that went out as four bytes goes out as `$BIND.FOO`
+  # after the rewrite. `safe?` judges the RESOLVED wire (every name gets a sentinel value), which
+  # is the case a re-spelling exists for; the CLI says the other case out loud instead.
   module EnvMigration
     # WHICH grammar the text belongs to, which is a different question from which SYNTAX spells
     # its tokens. `$$` and `$1` mean different things in a request, in a rewrite rule's
