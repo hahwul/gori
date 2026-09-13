@@ -55,6 +55,27 @@ describe Gori::Tui::SpaceMenu do
     end
   end
 
+  # `s` is a busy mnemonic — the Activity pane's source filter is also `s` — and the Env pane's
+  # new grammar switch joins it. Different SCOPES, so neither shadows the other; a shared scope
+  # is how one set of letters silently swallows another (see the a/e/d note in verbs/env.cr).
+  it "keeps the Env pane's `s` out of the panes stacked around it" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :project
+    registry = Gori::Verbs.registry
+
+    env_menu = SpaceMenu.new(registry)
+    env_menu.open(Gori::Verb::Scope::Env, :common, ctx)
+    env_menu.verb_for('s').try(&.id).should eq("env.syntax")
+
+    [Gori::Verb::Scope::Project, Gori::Verb::Scope::HostOverrides,
+     Gori::Verb::Scope::ProjectActivity].each do |scope|
+      other = SpaceMenu.new(registry)
+      other.open(scope, :common, ctx)
+      other.entries.map(&.id).should_not contain("env.syntax")
+      other.verb_for('s').try(&.id).should_not eq("env.syntax")
+    end
+  end
+
   it "lists the Project description pane's own verbs under its own scope" do
     ctx = FakeExecContext.new
     ctx.current_tab = :project

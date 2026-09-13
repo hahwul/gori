@@ -27,13 +27,16 @@ describe "Gori::Verbs.register_env" do
     r["env.delete-var"].available?(ctx).should be_true
   end
 
-  it "leaves the GLOBAL prefix setting menu-only, out of the way of everyday edits" do
-    # The prefix sigil applies app-wide, not per project — a direct chord next to add/edit
-    # would read as another per-project field.
-    verb = r["env.edit-prefix"]
-    verb.chords.should be_empty
-    verb.menu_key.should eq('p')
-    verb.available?(FakeExecContext.new).should be_true
+  it "leaves the GLOBAL prefix and grammar settings menu-only, out of the way of everyday edits" do
+    # Neither applies per project — a direct chord next to add/edit would read as another
+    # per-project field, and `env.syntax` additionally reinterprets bytes already stored in
+    # project DBs, drafts and rule replacements. Not a key to hit while walking a list.
+    {"env.edit-prefix" => 'p', "env.syntax" => 's'}.each do |id, mnemonic|
+      verb = r[id]
+      verb.chords.should be_empty
+      verb.menu_key.should eq(mnemonic)
+      verb.available?(FakeExecContext.new).should be_true
+    end
   end
 
   it "routes each action to its own intent" do
@@ -41,6 +44,7 @@ describe "Gori::Verbs.register_env" do
      "env.edit-var"    => :env_edit_var,
      "env.delete-var"  => :env_delete_var,
      "env.edit-prefix" => :env_edit_prefix,
+     "env.syntax"      => :env_toggle_syntax,
     }.each { |id, intent| verb_intents(r, id).should eq([intent]) }
   end
 end

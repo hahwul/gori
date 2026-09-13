@@ -94,6 +94,27 @@ describe "Gori::Env.load_project" do
 end
 
 describe "ProjectView ENV pane" do
+  # The card's border is the only line on the tab that says which GRAMMAR these rows are read
+  # under: `ALPHA → 1` is identical whether the editors two tabs over resolve `$ALPHA` or
+  # `$ENV.ALPHA`. It used to print the sigil alone, which under the namespaced grammar is half
+  # an answer — and the half that reads as the spelling that does NOT resolve.
+  it "carries the live token spelling in its border meta, in both grammars" do
+    tmp_store do |store, project|
+      with_project_vars([{"ALPHA", "1"}, {"BETA", "2"}]) do
+        view = env_view(store, project)
+        rect = Rect.new(0, 0, 120, 30)
+        drawn = -> do
+          b = MemoryBackend.new(rect.w, rect.h)
+          view.render(Screen.new(b), rect, focused: true)
+          (0...rect.h).map { |r| b.row(r) }.join("\n")
+        end
+
+        with_env_syntax(Gori::Env::Syntax::Bare) { drawn.call.should contain("project · $KEY · 2") }
+        with_env_syntax(Gori::Env::Syntax::Namespaced) { drawn.call.should contain("project · $ENV.KEY · 2") }
+      end
+    end
+  end
+
   it "picks the row under the pointer while the prefix editor holds the first line" do
     tmp_store do |store, project|
       with_project_vars([{"ALPHA", "1"}, {"BETA", "2"}, {"GAMMA", "3"}]) do
