@@ -86,7 +86,7 @@ X-Api-Key: $ENV.API_KEY
 
 - Repeater 초안과 그 WebSocket 프레임, Fuzzer 템플릿, Miner·Sequencer 요청, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더, 마스킹이 이슈 제목·노트에 넣어 둔 토큰.
 - **캡처된 증거는 그대로 둡니다.** 캡처는 아무것도 확장하지 않으므로 그 안의 `$id`는 원본이 보낸 바이트입니다.
-- 먼저 데이터베이스 백업을 옆에 씁니다(`gori.db.pre-namespaced-<타임스탬프>`). 그리고 작업을 한 실행이 프로젝트마다 한 줄로 토큰 몇 개가 옮겨졌고 백업이 어디 있는지 알려줍니다. 전역 재작성 규칙은 `settings.json`에 있고 같은 처리를 받으며, `settings.json.pre-namespaced-<타임스탬프>` 복사본이 남습니다.
+- 먼저 데이터베이스 백업을 옆에 씁니다(`gori.db.pre-namespaced-<타임스탬프>`). 그리고 작업을 한 실행이 프로젝트마다 한 줄로 토큰 몇 개가 옮겨졌고 백업이 어디 있는지 알려줍니다. 전역 재작성 규칙은 `settings.json`에 있고 같은 시작에서 다시 적히며, `settings.json.pre-namespaced-<타임스탬프>` 복사본이 남습니다. 다만 *프로젝트* 변수나 extract 규칙 이름을 쓴 규칙은 직접 고치도록 이름만 알려 줍니다. 모든 프로젝트를 재작성하는 규칙을 한 프로젝트 안에서 다시 적을 수는 없기 때문입니다.
 
 ```bash
 gori settings env-syntax        # 지금 적용된 문법과 그 출처를 출력

@@ -426,6 +426,10 @@ module Gori::CLI
     abort "gori settings env-syntax: one value at a time (got #{rest.size}: #{rest.join(", ")})" if rest.size > 1
 
     Settings.load
+    # The load's OWN global-rule re-spelling, if this was the first start after the upgrade. Drained
+    # here — before the verb's own line — because whoever speaks first owns the report, and on this
+    # verb that is the load that just ran.
+    Settings.take_env_syntax_global_migration.try { |g| puts g.line }
     unless want = rest[0]?
       env_syntax_read_lines.each { |line| puts line }
       return

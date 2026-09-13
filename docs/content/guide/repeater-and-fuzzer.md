@@ -86,7 +86,7 @@ Namespaced is the grammar. A project written before namespaces existed is **re-s
 
 - Repeater drafts and their WebSocket frames, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot headers, and the tokens a masking pass wrote into issue titles and notes.
 - **Captured evidence is left exactly as it was.** A capture expands nothing, so its `$id` is a byte the origin sent.
-- A backup of the database is written beside it first — `gori.db.pre-namespaced-<timestamp>` — and the run that does the work prints one line per project saying how many tokens moved and where the backup is. Global rewrite rules live in `settings.json` and get the same treatment, with a `settings.json.pre-namespaced-<timestamp>` copy.
+- A backup of the database is written beside it first — `gori.db.pre-namespaced-<timestamp>` — and the run that does the work prints one line per project saying how many tokens moved and where the backup is. Global rewrite rules live in `settings.json` and are re-spelled by the same start, with a `settings.json.pre-namespaced-<timestamp>` copy; one that names a *project* var or an extract rule is named for you to fix instead, because a rule that rewrites every project cannot be re-spelled from inside one.
 
 ```bash
 gori settings env-syntax        # print the grammar in force, and where it came from
