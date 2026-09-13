@@ -1711,6 +1711,11 @@ module Gori
       # on a namespaced install, `$SESSION, $TOKEN` on a bare one (`Env.token_list` decides), so
       # the names an agent reads here are already in the spelling it has to write back.
       private def env_unresolved_error(detail : String?) : String
+        refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
+        if !refs.empty? && refs.all?(&.ns.gen?)
+          return "unresolved generator #{detail} — choose a registered token from " \
+                 "list_env.generators, or remove the token"
+        end
         "unresolved env #{detail} — #{env_unresolved_remedy(detail)}, or remove the token"
       end
 
@@ -1732,10 +1737,12 @@ module Gori
         bare = Settings.env_syntax.bare?
         env = bare || refs.empty? || refs.any?(&.ns.env?)
         bind = bare || refs.any?(&.ns.bind?)
+        gen = refs.any?(&.ns.gen?)
         parts = [] of String
         parts << "set it with the set_env_var tool" if env
         parts << "bind it by capturing it with the create_extract_rule tool (a binding has no " \
                  "setter — it is bound at send time from a response)" if bind
+        parts << "choose a registered token from list_env.generators" if gen
         parts.join(", or ")
       end
 

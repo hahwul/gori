@@ -48,12 +48,11 @@ module Gori
       getter? retried : Bool
 
       # The exact request bytes this exchange WROTE, when the sender that made it knows them
-      # and a consumer has to hold them — `Fuzz::Sender` sets it, because the bytes it sends
-      # are not the bytes it was handed: the send seam substitutes `$NAME` and writes the
-      # active session slot's header overlay, and `Fuzz::HistoryRecord` was recording flows
-      # from the pre-seam template (the Repeater half of that is `Repeater::Sender#wire`).
-      # nil everywhere else — the engines are handed final bytes and every other consumer
-      # already has them.
+      # and a consumer has to hold them. `Fuzz::Sender` sets it because its send seam substitutes
+      # bindings and writes the active session slot's header overlay before History records the
+      # request. `Discover::Sender` sets it because a `$GEN.*` header is deliberately different
+      # on the next reconstruction, while a finding's Exchange must retain the value the origin
+      # actually saw. The engines themselves are handed final bytes and leave it nil.
       getter wire : Bytes?
 
       # The tail is KEYWORD-ONLY (`*`), and that is load-bearing rather than a style choice.

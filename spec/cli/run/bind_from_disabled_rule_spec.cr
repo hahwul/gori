@@ -62,6 +62,16 @@ describe Gori::Bindings do
 end
 
 describe "gori run — a token declared by a DISABLED extract rule" do
+  it "lists registered generators for an unknown GEN token" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      msg = Gori::CLI::Run.env_unresolved_error_for_spec("$GEN.NOPE")
+      msg.should contain("unresolved generator $GEN.NOPE")
+      msg.should contain("$GEN.UUID")
+      msg.should contain("$GEN.RANDOM_HEX")
+      msg.should_not contain("project env set")
+    end
+  end
+
   it "names the rule and its enable command, and does NOT prescribe `project env set`" do
     with_store do |store|
       b = Gori::Bindings.load(store)

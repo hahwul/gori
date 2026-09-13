@@ -6,11 +6,11 @@ include Gori::Tui
 
 private alias Identity = Gori::Authorize::Identity
 
-# The ONE editor whose bytes run the BIND pass and nothing else: an Authorize identity's SET
-# headers are resolved by `Env.expand_bindings_as` on the replay path, and no `Env.expand` ever
-# walks them — in either grammar. So a `$ENV.UA` accepted from this dropdown would ship as seven
-# literal characters on every identity of every run, with nothing said about it, and the value
-# peek under the caret would have named the value it was not sending.
+# The ONE editor whose bytes run the send-time BIND/GEN pass and nothing else: an Authorize
+# identity's SET headers are resolved by `Env.expand_bindings_as` on the replay path, and no
+# build-time `Env.expand` ever walks them. So a `$ENV.UA` accepted from this dropdown would ship
+# as seven literal characters on every identity of every run, with nothing said about it, and the
+# value peek under the caret would have named the value it was not sending.
 #
 # ENV = {HOST, UA}; BIND = {SESSION}, genuinely bound through an extract rule so `vars_for(Bind)`
 # answers it.
@@ -64,12 +64,14 @@ private def painted(ov : AuthorizeIdentityOverlay, w = 100, h = 30) : String
 end
 
 describe "AuthorizeIdentityOverlay env completion" do
-  it "offers the BIND namespace only" do
+  it "offers the send-time BIND and GEN namespaces only" do
     with_env_fixture do
       with_env_syntax(Gori::Env::Syntax::Namespaced) do
         screen = painted(identity_form("Cookie: $"))
         screen.should contain("$BIND.")
         screen.should contain("session bindings")
+        screen.should contain("$GEN.")
+        screen.should contain("per-request generators")
         # No opener and no flattened row for a namespace this path never resolves.
         screen.should_not contain("$ENV.")
         screen.should_not contain("build-time env vars")
@@ -82,13 +84,26 @@ describe "AuthorizeIdentityOverlay env completion" do
   it "offers nothing for a partial only ENV could answer" do
     with_env_fixture do
       with_env_syntax(Gori::Env::Syntax::Namespaced) do
-        ov = identity_form("Cookie: $U")
-        painted(ov).should_not contain("UA")
+        ov = identity_form("Cookie: $H")
+        painted(ov).should_not contain("HOST")
         # …and the popup is really CLOSED, not merely empty on screen: ↹ reaches the form's row
         # navigation instead of being claimed by a list (`handle_key` routes the popup first).
         ov.handle_key(okey(Termisu::Input::Key::Tab))
         ov.selected.should eq(AuthorizeIdentityOverlay::SAVE_ROW)
-        ov.set_headers.should eq([{"Cookie", "$U"}])
+        ov.set_headers.should eq([{"Cookie", "$H"}])
+      end
+    end
+  end
+
+  it "offers a generator that shares its prefix with a withheld ENV name" do
+    with_env_fixture do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        ov = identity_form("Cookie: $U")
+        screen = painted(ov)
+        screen.should contain("$GEN.UUID")
+        screen.should_not contain("$ENV.UA")
+        ov.handle_key(okey(Termisu::Input::Key::Tab))
+        ov.set_headers.should eq([{"Cookie", "$GEN.UUID"}])
       end
     end
   end

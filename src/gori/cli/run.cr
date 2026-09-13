@@ -1188,6 +1188,11 @@ module Gori
       # on the FACT, not after the remedy — "...or remove the token for session #3" reads as
       # if the token were the session's.
       private def self.env_unresolved_error(detail : String?, where : String = "") : String
+        refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
+        if !refs.empty? && refs.all?(&.ns.gen?)
+          names = Env::GENERATOR_HINTS.keys.map { |name| Env.spell(name, Env::Namespace::Gen) }.join(", ")
+          return "unresolved generator #{detail}#{where} — use one of #{names}, or remove the token"
+        end
         hits, rest = split_disabled_rule_tokens(detail)
         return "unresolved env #{detail}#{where} — set it with `gori run project env set KEY value`, " \
                "or remove the token" if hits.empty?

@@ -114,6 +114,21 @@ end
 
 describe Gori::EnvMigration do
   describe "bare → namespaced" do
+    it "escapes generator spellings that were literal under bare" do
+      expect_rewrite("$GEN.UUID/$GEN.TIMESTAMP", BARE, NS,
+        "$$GEN.UUID/$$GEN.TIMESTAMP")
+      expect_rewrite("$GEN.NOPE", BARE, NS, "$GEN.NOPE")
+      expect_rewrite("$GEN.UUID", BARE, NS, "$$GEN.UUID", Gori::EnvMigration::Kind::Slot)
+      expect_rewrite("$GEN.UUID", BARE, NS, "$GEN.UUID", Gori::EnvMigration::Kind::Display)
+    end
+
+    it "preserves a real bare variable named GEN before a generator-like suffix" do
+      after, changes = Gori::EnvMigration.rewrite("$GEN.UUID".to_slice, from: BARE, to: NS,
+        env_names: ENV_NAMES + ["GEN"], bind_names: BIND_NAMES)
+      String.new(after).should eq("$ENV.GEN.UUID")
+      changes.size.should eq(1)
+    end
+
     it "routes a name by which table holds it, and leaves the rest as bytes" do
       # {text, expected} — one row per grammar fact, so a regression names the fact.
       {
@@ -293,6 +308,12 @@ describe Gori::EnvMigration do
       expect_rewrite("$ENV.id", NS, BARE, "$id")
       expect_rewrite("$BIND.token", NS, BARE, "$token")
       expect_rewrite("$ENV.id$BIND.token", NS, BARE, "$id$token")
+    end
+
+    it "keeps generator tokens namespaced because bare has no generator grammar" do
+      expect_rewrite("$GEN.UUID/$GEN.TIMESTAMP", NS, BARE,
+        "$GEN.UUID/$GEN.TIMESTAMP", wire_safe: false)
+      expect_rewrite("$$GEN.UUID", NS, BARE, "$$GEN.UUID")
     end
 
     it "escapes a literal the bare grammar WOULD resolve" do

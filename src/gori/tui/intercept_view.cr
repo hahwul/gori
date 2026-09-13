@@ -578,9 +578,10 @@ module Gori::Tui
       # `expand_bindings` after this the way there is on every Repeater/Fuzzer path — so this
       # pass is the last one and therefore the one that owes the operator the escape. ALL of
       # them, spelled as `Owns` rather than as `Escape::Consume`, because under the namespaced
-      # grammar there are two escapes to consume here (`$$ENV.X` and `$$BIND.X`) and the enum
-      # can only name one anonymous escape.
-      raw = Env.expand_wire(@editor.wire_text, unescape: Env::Owns::All)
+      # grammar there are three escapes to consume here (`$$ENV.X`, `$$BIND.X`, `$$GEN.X`) and
+      # the enum can only name one anonymous escape.
+      raw = Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
+        unescape: Env::Owns::All)
       # `@sync_content_length` (^L) — see its toggle. When it is OFF the operator's declared
       # value goes out as written. When it is on the rewrite has ALREADY been reflected into
       # the visible buffer by `reflect_content_length_in_editor`, so the call below is
@@ -679,8 +680,9 @@ module Gori::Tui
     # head shifts the line count, and the index would then overwrite an unrelated header.
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
-      return if @loaded_ws                                               # no head to update — see pending_edit
-      raw = Env.expand_wire(@editor.wire_text, unescape: Env::Owns::All) # see pending_edit
+      return if @loaded_ws # no head to update — see pending_edit
+      raw = Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
+        unescape: Env::Owns::All) # see pending_edit
       synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first

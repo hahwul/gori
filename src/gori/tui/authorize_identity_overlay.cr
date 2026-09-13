@@ -42,17 +42,16 @@ module Gori::Tui
       set_text = (identity.try(&.set_headers) || [] of {String, String})
         .map { |name, value| "#{name}: #{value}" }.join("\n")
       @editor = TextArea.new(set_text)
-      # The `$BIND.SESSION` completer, in the ONE editor where a slot's overlay headers are
-      # written — the tokens this form exists to carry. Deliberately WITHOUT `highlight: :request`
+      # The `$BIND.SESSION` / `$GEN.UUID` completer, in the ONE editor where a slot's overlay
+      # headers are written. Deliberately WITHOUT `highlight: :request`
       # on the render: these are header lines with no start line, and the request painter reads
       # line 0 as `METHOD path HTTP/1.1`, so `Cookie: x` would paint as a malformed verb.
       @editor.env_complete = true
-      # BIND only. These header values are resolved by `Env.expand_bindings_as` on the replay
-      # path and by NOTHING else — there is no `Env.expand` pass over a slot's overlay headers in
-      # either grammar — so an offered `$ENV.UA` would be accepted into bytes that go out as seven
-      # literal characters on every identity, with nothing said about it. The completer (and the
-      # peek behind it) is where that offer was made.
-      @editor.env_complete_namespaces = [Env::Namespace::Bind]
+      # BIND and GEN only. These header values are resolved by `Env.expand_bindings_as` on the
+      # replay path and by NOTHING else — there is no build-time `Env.expand` pass over a slot's
+      # overlay headers — so offering `$ENV.UA` would put literal bytes on the wire. The completer
+      # (and the peek behind it) is where that offer is constrained.
+      @editor.env_complete_namespaces = [Env::Namespace::Bind, Env::Namespace::Gen]
       @remove = TextField.new((identity.try(&.remove_headers) || [] of String).join(", "))
       @baseline = identity.try(&.baseline?) || false
       @taken = taken.map(&.downcase).to_set

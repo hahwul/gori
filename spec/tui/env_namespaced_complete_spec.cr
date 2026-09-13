@@ -86,11 +86,17 @@ describe "TextArea env completion (namespaced)" do
         rows[0].should contain("build-time env vars · 3")
         rows[1].should start_with("$BIND.")
         rows[1].should contain("session bindings · 1")
+        rows[2].should start_with("$GEN.")
+        rows[2].should contain("per-request generators · 6")
         # Then the token rows, sorted {name, namespace} — so the SAME NAME in two namespaces
         # lands adjacent, which is the pair an operator most needs to tell apart. Namespace is
         # the tie-break, not the primary key: grouping by namespace would scatter `id` and
         # `ENV.id` to opposite ends of a long list.
-        rows[2..].map(&.split(' ').first).should eq(["$ENV.HOST", "$BIND.SESSION", "$ENV.TOKEN", "$ENV.TOKEN2"])
+        # Generator rows stay behind their opener on a bare `$`, or they would fill the
+        # eight-row viewport and push the operator's own variables below the fold.
+        rows[3..].map(&.split(' ').first).should eq([
+          "$ENV.HOST", "$BIND.SESSION", "$ENV.TOKEN", "$ENV.TOKEN2",
+        ])
       end
     end
   end
@@ -119,6 +125,19 @@ describe "TextArea env completion (namespaced)" do
         # press `$` again to see what is inside the namespace they just chose.
         ta.env_completing?.should be_true
         labels_of(ta).should eq(["$ENV.HOST", "$ENV.TOKEN", "$ENV.TOKEN2"])
+      end
+    end
+  end
+
+  it "shows generator formats without minting preview values" do
+    with_env_fixture do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        ta = typed("$G")
+        tab(ta).should be_true
+        ta.text.should eq("$GEN.")
+        rows = rows_of(ta)
+        rows.find!(&.starts_with?("▎$GEN.ISO8601")).should contain("UTC RFC 3339 · per send")
+        rows.find!(&.starts_with?("$GEN.UUID")).should contain("UUID v4 · fresh per send")
       end
     end
   end
@@ -181,6 +200,7 @@ describe "TextArea env completion (namespaced)" do
         # Both namespaces, and a name that is a PREFIX of another: `$ENV.TOKEN2` is finished and
         # closes, while `$ENV.TOKEN` stays open because `TOKEN2` is still one ↹ away.
         typed("$BIND.SESSION").env_completing?.should be_false
+        typed("$GEN.UUID").env_completing?.should be_false
         typed("$ENV.TOKEN2").env_completing?.should be_false
         typed("$ENV.TOKEN").env_completing?.should be_true
         # Bare mode reaches the same rule through its own match builder.

@@ -1423,13 +1423,14 @@ module Gori
         case ns
         in Env::Namespace::Env  then env
         in Env::Namespace::Bind then bind
+        in Env::Namespace::Gen  then Env::EMPTY_VARS
         end
       end
 
       # Whether a name in this namespace can be DECLARED-but-unbound — the rule-scoped skip and
       # the boundary refusal both belong to the binding layer alone.
       def declarable?(ns : Env::Namespace?) : Bool
-        ns.nil? || ns.send_time?
+        ns.nil? || ns.declarable?
       end
 
       # Whether the BINDING half owns this name at all — an enabled extract rule declares it, the

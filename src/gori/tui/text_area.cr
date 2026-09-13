@@ -2649,7 +2649,10 @@ module Gori::Tui
       # typed `$ENV.` to filter (see `env_complete_namespaces=`).
       tables = {} of Env::Namespace => Hash(String, String)
       Env::Namespace.each do |ns|
-        tables[ns] = Env.vars_for(ns) if @env_complete_namespaces.includes?(ns)
+        next unless @env_complete_namespaces.includes?(ns)
+        # GEN has no stable value table: these strings are send-time format hints, which makes
+        # the popup useful without minting a nonce merely because the operator typed `$G`.
+        tables[ns] = ns.gen? ? Env::GENERATOR_HINTS : Env.vars_for(ns)
       end
       if fixed = tok.ns
         if table = tables[fixed]?
@@ -2668,7 +2671,11 @@ module Gori::Tui
         rows_out << EnvComplete::Match.new(:ns, spelled, spelled,
           "#{ns.description} · #{table.size}", tok.run_end + (tok.dot_follows ? 1 : 0))
       end
-      append_env_token_rows(rows_out, tables, pl, tok.token_end, prefix, syntax)
+      # Six fixed generators would otherwise fill the eight-row viewport on a bare `$` and
+      # push the operator's own ENV/BIND names below the fold. Their `$GEN.` opener is enough
+      # at that stage; typing any name prefix (`$U`) still searches them directly.
+      append_env_token_rows(rows_out, tables, pl, tok.token_end, prefix, syntax,
+        include_generators: !pl.empty?)
       rows_out
     end
 
@@ -2678,9 +2685,11 @@ module Gori::Tui
     private def append_env_token_rows(rows_out : Array(EnvComplete::Match),
                                       tables : Hash(Env::Namespace, Hash(String, String)),
                                       pl : String, replace_end : Int32, prefix : String,
-                                      syntax : Env::Syntax) : Nil
+                                      syntax : Env::Syntax,
+                                      include_generators : Bool = true) : Nil
       rows = [] of {String, Env::Namespace}
       tables.each do |ns, table|
+        next if ns.gen? && !include_generators
         table.each_key do |name|
           # The QUALIFIED key: a `$id` the capture arrived with is literal in THIS buffer, and
           # a set keyed by bare name alone would also withhold the other namespace's `id`.
@@ -2693,8 +2702,9 @@ module Gori::Tui
       rows.first(40).each do |row|
         name, ns = row
         spelled = Env.spell(name, ns, syntax, prefix)
+        hint = ns.gen? ? tables[ns][name] : env_value_preview(tables[ns][name]? || "", ns.secret?)
         rows_out << EnvComplete::Match.new(:token, spelled, spelled,
-          env_value_preview(tables[ns][name]? || "", ns.secret?), replace_end)
+          hint, replace_end)
       end
     end
 
@@ -2782,6 +2792,10 @@ module Gori::Tui
       # table holds — the same answer the dropdown gives (`env_complete_namespaces=`).
       return nil unless @env_complete_namespaces.includes?(ns)
       return nil if env_literal_names.includes?(Env.qualify(ns, name))
+      if ns.gen?
+        hint = Env.generator_hint?(name) || return nil
+        return {Env.spell(name, ns, syntax, prefix), hint}
+      end
       val = Env.vars_for(ns)[name]?
       return nil unless val
       # Masked per NAMESPACE rather than per name: a BIND value came off the wire, whatever

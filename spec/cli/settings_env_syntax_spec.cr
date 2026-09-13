@@ -138,6 +138,21 @@ describe "gori settings env-syntax" do
     end
   end
 
+  # The example is the one place the CLI enumerates the grammar, and a generator has no bare
+  # spelling: naming `$UUID` on a bare install would point at the env table.
+  it "names the generator in the namespaced example and in no bare one" do
+    with_cli_home do
+      lines = Gori::CLI.env_syntax_write_lines_for_spec(Gori::Env::Syntax::Bare,
+        Gori::Env::Syntax::Namespaced)
+      lines[0].should contain("$ENV.KEY / $BIND.NAME / $GEN.UUID")
+
+      back = Gori::CLI.env_syntax_write_lines_for_spec(Gori::Env::Syntax::Namespaced,
+        Gori::Env::Syntax::Bare)
+      back[0].should contain("$KEY / $NAME")
+      back[0].should_not contain("UUID")
+    end
+  end
+
   it "spells the example with the operator's own prefix" do
     with_cli_home do |dir|
       File.write(File.join(dir, "settings.json"), %({"env":{"syntax":"namespaced","prefix":"%"}}))

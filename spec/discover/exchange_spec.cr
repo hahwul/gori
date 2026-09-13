@@ -79,6 +79,16 @@ describe "Gori::Discover finding exchanges" do
     ex.duration_us.should eq(4200_i64)
   end
 
+  it "prefers the exact wire carried by the sender over reconstructing a generated head" do
+    cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 1, concurrency: 1, retries: 0)
+    sent = "GET / HTTP/1.1\r\nHost: t\r\nX-Request-ID: exact\r\n\r\n".to_slice
+    backend = HeaderBackend.new(->(_t : String) { resp(200, "ok").with_wire(sent) })
+    events = run_events("http://t/", %w[], cfg, backend)
+    ex = events.find { |e| e.finding.url == "http://t/" }.not_nil!.exchange.not_nil!
+
+    ex.request_head.should eq(sent)
+  end
+
   it "keeps nothing for the brute-force probes that missed" do
     # `/admin` hits (200 against a soft-404 baseline of 404s); `/login` does not. The miss is
     # the common case by three orders of magnitude on a wordlist sweep, and shipping its body
