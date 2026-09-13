@@ -78,8 +78,11 @@ module Gori
     #
     # The record is also throttled per {slot, name} until a surface drains it, so a predicate
     # that got there first would have SILENCED the log line at the seam that really sends.
+    # ONE generation for the whole identity, for `Bindings#overlay`'s reason: an identity whose
+    # SET headers use `$GEN.UUID` twice is one identity on one request, so it sends one value.
     def self.resolve_without_report(id : Identity) : Identity
-      id.resolve_values { |v| Env.expand_bindings_as(v, id.name, guard_boundary: true) }
+      gen = Env::Generation.new
+      id.resolve_values { |v| Env.expand_bindings_as(v, id.name, guard_boundary: true, generation: gen) }
     end
 
     def self.overlay_request(head : Bytes, body : Bytes?, id : Identity) : Bytes

@@ -421,11 +421,16 @@ module Gori
     # a slot header goes out as five literal bytes and the origin answers 401 — which the
     # operator reads as the session having been sent and rejected. See `Env.unbound_in_slot`
     # for why this seam can say so when a request BODY's `$id` cannot.
-    def overlay(wire : Bytes) : Bytes
+    # ONE generation for the whole overlay, and the send seam's own when it has one: a slot
+    # with `X-Request-Id: $GEN.UUID` and `X-Correlation-Id: $GEN.UUID` sends one id, not two,
+    # and it is the id the request's own text carries. Each header value is its own
+    # `expand_bindings` call, so without a shared context every header minted separately.
+    def overlay(wire : Bytes, generation : Env::Generation? = nil) : Bytes
       slots = @slots
       return wire unless slots
       Env.report_unbound_overlay(slots.active)
-      slots.overlay(wire) { |value| Env.expand_bindings(value, guard_boundary: true) }
+      gen = generation || Env::Generation.new
+      slots.overlay(wire) { |value| Env.expand_bindings(value, guard_boundary: true, generation: gen) }
     end
 
     # `Env::Layer#active_slot_name` — the READOUT half of the two methods above. nil is

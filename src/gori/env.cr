@@ -140,54 +140,59 @@ module Gori
 
     NAMESPACES = {"ENV" => Namespace::Env, "BIND" => Namespace::Bind, "GEN" => Namespace::Gen}
 
-    # Built-ins that mint a fresh value at the final send seam. Names encode every format
-    # choice the no-argument `$NS.NAME` grammar needs to make explicit.
-    GENERATOR_HINTS = {
-      "UUID"         => "UUID v4 · fresh per send",
-      "RANDOM"       => "UInt64 · fresh per send",
-      "RANDOM_HEX"   => "128-bit hex · fresh per send",
-      "TIMESTAMP"    => "Unix seconds · per send",
-      "TIMESTAMP_MS" => "Unix milliseconds · per send",
-      "ISO8601"      => "UTC RFC 3339 · per send",
-    }
-
     EMPTY_VARS = {} of String => String
 
-    # One request's generated values. A context is local to one expansion, so separate sends
-    # cannot reuse a nonce; the cache makes two `$GEN.UUID` references in that request agree.
+    # One request's generated values. A context is local to one expansion pass, so separate
+    # sends cannot reuse a nonce; the cache makes two `$GEN.UUID` references agree — including
+    # across the passes a single request is made of, when the seam passes ONE context to all of
+    # them (the head/body split, and the session-slot header overlay applied after it).
     class Generation
-      @values : Hash(String, String)
+      # Lazy, and `nil` until a generator actually resolves: a context is created per send on
+      # paths that expand every request, and the overwhelming majority of requests carry no
+      # `$GEN.` at all. An empty Hash allocated per send would be a cost paid by the runs that
+      # never use the feature.
+      @values : Hash(String, String)? = nil
       @now : Time? = nil
 
-      def initialize(values : Hash(String, String) = EMPTY_VARS)
-        @values = values.dup
+      def initialize(values : Hash(String, String)? = nil)
+        @values = values.dup unless values.nil? || values.empty?
       end
 
       def value?(name : String) : String?
-        return nil unless GENERATOR_HINTS.has_key?(name)
-        @values[name]? || begin
-          value = generate(name)
-          @values[name] = value
-          value
-        end
+        gen = GENERATORS[name]?
+        return nil unless gen
+        vals = (@values ||= {} of String => String)
+        vals[name]? || (vals[name] = gen.mint.call(self))
       end
 
-      private def generate(name : String) : String
-        case name
-        when "UUID"         then UUID.random.to_s
-        when "RANDOM"       then Random::Secure.rand(UInt64).to_s
-        when "RANDOM_HEX"   then Random::Secure.hex(16)
-        when "TIMESTAMP"    then now.to_unix.to_s
-        when "TIMESTAMP_MS" then now.to_unix_ms.to_s
-        when "ISO8601"      then now.to_rfc3339(fraction_digits: 3)
-        else                     raise "unregistered generator: #{name}"
-        end
-      end
-
-      private def now : Time
+      # The ONE instant this context pins, so `$GEN.TIMESTAMP` and `$GEN.ISO8601` in one request
+      # describe the same moment rather than two reads of the clock. Public because the catalog's
+      # minters below are plain procs and read it.
+      def now : Time
         @now ||= Time.utc
       end
     end
+
+    # One built-in: how every surface DESCRIBES it, and the value it mints. One record and not a
+    # hint table beside a `case`, because the hint table is what `list_env`, the completer and the
+    # deferral scan all read as "the catalog": a name in one and not the other would advertise a
+    # token that then raises at the send seam, inside the fiber that was sending.
+    record Generator, hint : String, mint : Proc(Generation, String)
+
+    # Built-ins that mint a fresh value at the final send seam. Names encode every format
+    # choice the no-argument `$NS.NAME` grammar needs to make explicit.
+    GENERATORS = {
+      "UUID"         => Generator.new("UUID v4 · fresh per send", ->(_g : Generation) { UUID.random.to_s }),
+      "RANDOM"       => Generator.new("UInt64 · fresh per send", ->(_g : Generation) { Random::Secure.rand(UInt64).to_s }),
+      "RANDOM_HEX"   => Generator.new("128-bit hex · fresh per send", ->(_g : Generation) { Random::Secure.hex(16) }),
+      "TIMESTAMP"    => Generator.new("Unix seconds · per send", ->(g : Generation) { g.now.to_unix.to_s }),
+      "TIMESTAMP_MS" => Generator.new("Unix milliseconds · per send", ->(g : Generation) { g.now.to_unix_ms.to_s }),
+      "ISO8601"      => Generator.new("UTC RFC 3339 · per send", ->(g : Generation) { g.now.to_rfc3339(fraction_digits: 3) }),
+    }
+
+    # The catalog as the NAME → FORMAT table the surfaces print, derived from the one above so
+    # the two cannot drift apart. Insertion order is the catalog's order.
+    GENERATOR_HINTS = GENERATORS.transform_values(&.hint)
 
     SEND_OWNS = Owns::Bind | Owns::Gen
 
@@ -574,7 +579,10 @@ module Gori
       # they are one question — WHICH SESSION are these bytes going out as — and splitting
       # them across two globals is how the overlay and the bindings would come to disagree
       # about it.
-      def overlay(wire : Bytes) : Bytes
+      # `generation` is the send seam's context, so a `$GEN.UUID` in a slot header and one in
+      # the request it rides on are ONE value — the overlay is a second expansion pass over the
+      # same request, not a second request.
+      def overlay(wire : Bytes, generation : Generation? = nil) : Bytes
         wire
       end
 
@@ -643,8 +651,8 @@ module Gori
     # HEADER-ONLY by construction (`SessionSlot.overlay_wire`), so the body is byte-exact and
     # Content-Length never moves. That is what makes it safe on bytes the operator did not
     # author — a captured replay, a fuzz template with its payload already spliced.
-    def self.overlay_slot(wire : Bytes) : Bytes
-      (l = @@layer) ? l.overlay(wire) : wire
+    def self.overlay_slot(wire : Bytes, generation : Generation? = nil) : Bytes
+      (l = @@layer) ? l.overlay(wire, generation) : wire
     end
 
     # ── a slot overlay's own unresolved references ────────────────────────────

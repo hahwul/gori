@@ -225,8 +225,11 @@ module Gori::Discover
     # receipt on top.
     def request_head(scheme : String, host : String, port : Int32, target : String) : Bytes
       wire = build_get(scheme, host, port, target, binding_headers)
-      wire = Gori::Env.expand_bindings(wire, resolve: Gori::Env::Owns::Gen) if @header_generators
-      Gori::Env.overlay_slot(wire)
+      # ONE generation across both passes (see `Repeater::Sender#wire`): a `$GEN.UUID` in a
+      # `--header` and one in the active slot's overlay are the same fetch.
+      gen = Gori::Env::Generation.new
+      wire = Gori::Env.expand_bindings(wire, resolve: Gori::Env::Owns::Gen, generation: gen) if @header_generators
+      Gori::Env.overlay_slot(wire, gen)
     end
 
     def close : Nil

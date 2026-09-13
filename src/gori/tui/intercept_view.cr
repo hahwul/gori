@@ -113,6 +113,12 @@ module Gori::Tui
       # `toggle_content_length_sync`. Session-wide rather than per-item: it is a property of
       # how the operator is working, and an intercept queue is transient anyway.
       @sync_content_length = true
+      # ONE generation per held item, shared by `pending_edit` and the Content-Length the
+      # editor DISPLAYS. A forward is one message, and a context per call minted a different
+      # `$GEN.RANDOM` for each: the pane then showed a Content-Length the socket never got —
+      # the display lie `reflect_content_length_in_editor` exists to end. Replaced when a
+      # different item loads, so the next forward still mints its own values.
+      @edit_generation = Env::Generation.new
       # Cached highlight of the selected held item's bytes (read-only detail pane).
       # Held bytes are immutable, so the item id + theme is the base cache key —
       # recomputed only when the selection/theme changes, not every render. The loaded
@@ -513,6 +519,7 @@ module Gori::Tui
       if @loaded_id != it.id
         @editor.set_text(String.new(it.raw))
         @editor_dirty = false # freshly loaded — not yet modified
+        @edit_generation = Env::Generation.new
       end
       @hex = nil # a text item never has one; clearing here is what keeps `text_editing?` honest
     end
@@ -581,7 +588,7 @@ module Gori::Tui
       # grammar there are three escapes to consume here (`$$ENV.X`, `$$BIND.X`, `$$GEN.X`) and
       # the enum can only name one anonymous escape.
       raw = Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
-        unescape: Env::Owns::All)
+        unescape: Env::Owns::All, generation: @edit_generation)
       # `@sync_content_length` (^L) — see its toggle. When it is OFF the operator's declared
       # value goes out as written. When it is on the rewrite has ALREADY been reflected into
       # the visible buffer by `reflect_content_length_in_editor`, so the call below is
@@ -682,7 +689,7 @@ module Gori::Tui
       return unless @editing && @editor_dirty && @sync_content_length
       return if @loaded_ws # no head to update — see pending_edit
       raw = Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
-        unescape: Env::Owns::All) # see pending_edit
+        unescape: Env::Owns::All, generation: @edit_generation) # see pending_edit
       synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first

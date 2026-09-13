@@ -138,6 +138,17 @@ describe "MCP list_env grammar report" do
       end
     end
 
+    it "explains a registered generator refused where nothing mints" do
+      with_store_env do |store|
+        with_env_syntax(Gori::Env::Syntax::Namespaced) do
+          msg = tools_for(store).env_unresolved_error_for_spec("$GEN.UUID")
+          msg.should contain("is a generator")
+          msg.should contain("before the request is framed")
+          msg.should_not contain("list_env.generators")
+        end
+      end
+    end
+
     it "names both remedies under the BARE grammar, where a name carries no namespace" do
       with_store_env do |store|
         tools = tools_for(store)

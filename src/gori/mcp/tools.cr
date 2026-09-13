@@ -1713,6 +1713,14 @@ module Gori
       private def env_unresolved_error(detail : String?) : String
         refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
         if !refs.empty? && refs.all?(&.ns.gen?)
+          # See the CLI's copy: a REGISTERED generator here is refused by POSITION, so pointing
+          # an agent back at the catalog it already spelled correctly would loop it.
+          if refs.all? { |r| Gori::Env.generator_hint?(r.name) }
+            return "#{detail} #{refs.size == 1 ? "is a generator" : "are generators"} — generators " \
+                   "mint at the send seam, in REQUEST text, and this value is resolved before the " \
+                   "request is framed, so the token would go out literally. Write the value here, " \
+                   "or remove the token"
+          end
           return "unresolved generator #{detail} — choose a registered token from " \
                  "list_env.generators, or remove the token"
         end

@@ -215,9 +215,13 @@ module Gori
       # itself; its answer travels back on `Repeater::Result#wire` because a fuzz ROW must keep
       # showing the template (see `Fuzz::Result#wire`). Two shapes, one rule: what is recorded
       # is what was written.
+      # ONE generation across both passes: the request's own `$GEN.UUID` and the active slot's
+      # header overlay are two expansions of ONE outbound request, and a context per pass would
+      # put two different ids on the same socket write.
       def wire(bytes : Bytes) : Bytes
-        bytes = Gori::Env.expand_bindings(bytes) if resolve_bindings?
-        Gori::Env.overlay_slot(bytes)
+        gen = Gori::Env::Generation.new
+        bytes = Gori::Env.expand_bindings(bytes, generation: gen) if resolve_bindings?
+        Gori::Env.overlay_slot(bytes, gen)
       end
 
       def send(bytes : Bytes) : Result

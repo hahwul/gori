@@ -22,6 +22,37 @@ private class GeneratorSpecLayer < Gori::Env::Layer
   end
 end
 
+# An `Outbound` that answers every gate the way the waived one does, and REMEMBERS what it was
+# asked about — the only way to see whether a gate judged the bytes that went on the wire.
+private class RecordingOutbound < Gori::Outbound
+  getter seen = [] of String
+
+  def initialize
+    super(nil, Gori::Outbound::Gate::Waived, Gori::Outbound::Reason::NoProject)
+  end
+
+  def sweep_block(scheme : String, host : String, target : String, port : Int32) : String?
+    @seen << target
+    nil
+  end
+end
+
+private UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/
+
+private def uuids_in(text : String) : Array(String)
+  text.scan(UUID_RE).map(&.[0])
+end
+
+private def with_layer(layer : Gori::Env::Layer?, &)
+  previous = Gori::Env.layer
+  Gori::Env.layer = layer
+  begin
+    yield
+  ensure
+    Gori::Env.layer = previous
+  end
+end
+
 private def with_generator_binding_layer(&)
   previous = Gori::Env.layer
   Gori::Env.layer = GeneratorSpecLayer.new
@@ -103,6 +134,73 @@ describe "Gori::Env generators" do
       Gori::Env.unresolved("x=$GEN.UUID").should be_empty
       Gori::Env.unresolved("x=$GEN.NOPE").should eq(["GEN.NOPE"])
       Gori::Env.unresolved("https://$GEN.UUID.test", deferred: nil).should eq(["GEN.UUID"])
+    end
+  end
+
+  # A request is ONE outbound message however many expansion passes build it: the request text,
+  # and the active slot's header overlay applied after it. A context per pass put a different id
+  # in each header of the same write.
+  it "shares one value across the request text and the active slot's header overlay" do
+    with_generators do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Gori::SessionSlot.new("admin",
+          set_headers: [{"X-Slot-A", "$GEN.UUID"}, {"X-Slot-B", "$GEN.UUID"}])])
+        bindings = Gori::Bindings.load(store, slots)
+        slots.activate("admin")
+        with_layer(bindings) do
+          outbound = ungated_outbound
+          begin
+            sender = Gori::Repeater::Sender.new(outbound, scheme: "http", host: "example.test",
+              port: 80, verify: false)
+            wire = String.new(sender.wire(
+              "GET / HTTP/1.1\r\nHost: example.test\r\nX-Draft: $GEN.UUID\r\n\r\n".to_slice))
+            ids = uuids_in(wire)
+            ids.size.should eq(3)
+            ids.uniq.size.should eq(1)
+          ensure
+            outbound.close
+          end
+        end
+      end
+    end
+  end
+
+  # Same rule for an Authorize identity, whose SET headers are resolved by their own pass.
+  it "shares one value across an Authorize identity's headers" do
+    with_generators do
+      id = Gori::Authorize::Identity.new("admin",
+        set_headers: [{"X-A", "$GEN.UUID"}, {"X-B", "$GEN.UUID"}])
+      resolved = Gori::Authorize.resolve_without_report(id)
+      ids = resolved.set_headers.map(&.[1])
+      ids.map(&.matches?(UUID_RE)).should eq([true, true])
+      ids.uniq.size.should eq(1)
+    end
+  end
+
+  # The group gate ran the send seam once to read each target and AGAIN to build the bytes.
+  # That is the same answer only while expansion is idempotent — a generated request line is
+  # exactly where it is not, and the gate then judged a URL the socket never got.
+  it "gates the pipeline on the bytes it will write" do
+    with_generators do
+      outbound = RecordingOutbound.new
+      begin
+        origin = Gori::Fuzz::Origin.new("http", "127.0.0.1", 1)
+        sender = Gori::Fuzz::Sender.new(origin, outbound, false, true)
+        reqs = ["GET /a?id=$GEN.UUID HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+                "GET /b?id=$GEN.UUID HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice]
+        results = sender.send_pipeline(reqs, timeout: 1.second)
+
+        # Nothing was sent (port 1 refuses), but every member was gated and wired.
+        wired = results.map { |r| String.new(r.wire.not_nil!) }
+        wired.map { |w| uuids_in(w).first }.uniq!.size.should eq(2) # one id per member
+        outbound.seen.size.should eq(2)
+        outbound.seen.each_with_index do |target, i|
+          target.should eq(wired[i].lines.first.split(' ')[1])
+        end
+      ensure
+        outbound.close
+      end
     end
   end
 
