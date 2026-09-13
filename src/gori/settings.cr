@@ -112,6 +112,20 @@ module Gori
       @@path_override || ENV["GORI_CONFIG"]?.presence || File.join(Paths.home_dir, "settings.json")
     end
 
+    # Was this process pointed at a settings file BY NAME (`gori --config PATH`, `$GORI_CONFIG`),
+    # rather than falling back to the one under GORI_HOME?
+    #
+    # It is the question "there is no file here" cannot be answered without. At the HOME-DERIVED
+    # default path, an absent settings.json is a DATE — a fresh home, or a headless install from
+    # before namespaces — and adopting the new grammar plus re-spelling the projects is the whole
+    # upgrade. At a path the operator TYPED, the same absence is a typo: the real settings.json is
+    # still sitting under GORI_HOME saying `bare`, and adopting namespaced off a misspelled
+    # `--config` would re-spell that install's project databases against a file gori never read —
+    # and the next ordinary run, reading the real `bare` again, would reverse it lossily.
+    def self.explicit_path? : Bool
+      !(@@path_override || ENV["GORI_CONFIG"]?.presence).nil?
+    end
+
     # Load persisted values into the class properties. Tolerant: a missing or
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
@@ -136,7 +150,9 @@ module Gori
         # could not be READ (`@@load_unreadable`: everything below is at a factory default over
         # a file whose contents nobody has seen).
         @@load_unreadable = File.exists?(path)
-        adopt_env_syntax_for_absent_key
+        # "No file at the default path" and "no file at the path you named" are different facts —
+        # see `explicit_path?`. Only the first one is a date gori may act on.
+        adopt_env_syntax_for_absent_key(absent_explicit: !@@load_unreadable && explicit_path?)
         return
       end
       root = load_root(raw)
@@ -221,11 +237,20 @@ module Gori
     # spelled bare. Adopt `env_syntax_when_absent` (namespaced, for everyone), re-spell the global
     # rewrite rules on the way, and write the key down so the question is never asked again.
     #
-    # The one exception is `@@load_unreadable` — a settings.json IS there and could not be read
-    # (EACCES on a file a `sudo gori` left root-owned, a `--config` naming a directory). It may
-    # well say `bare`, so this home is left reading tokens the way its projects are most likely to
-    # be spelled and the origin says `Unreadable`: no project database is touched over a
-    # permissions problem.
+    # There are TWO exceptions, and both leave the origin `Unreadable` so that
+    # `env_syntax_stated?` is false and nothing — no project database, no global rule — is
+    # re-spelled off this run:
+    #
+    #   * `@@load_unreadable` — a settings.json IS there and could not be read (EACCES on a file a
+    #     `sudo gori` left root-owned, a `--config` naming a directory). It may well say `bare`, so
+    #     this home is left reading tokens the way its projects are most likely to be spelled: no
+    #     project database is touched over a permissions problem.
+    #   * `absent_explicit` — nothing at a path the operator NAMED (`--config /tmp/typo.json`,
+    #     `$GORI_CONFIG`). Absence is only a date at the home-derived DEFAULT path; at a typed one
+    #     it says nothing about this install, whose real settings.json is still under GORI_HOME.
+    #     Adopting off it would re-spell that install's projects against a file gori never read,
+    #     and the next ordinary run would reverse it lossily. Said out loud, because a `--config`
+    #     that names nothing is a mistake worth one line.
     #
     # The PROJECT databases are not this method's business. Each one carries its own marker and is
     # reconciled the first time it is opened (`EnvMigration.reconcile`), because that is the only
@@ -233,9 +258,20 @@ module Gori
     #
     # A failed write is not fatal: the grammar applies to this run either way, and the next start
     # re-derives the same answer from the same file.
-    private def self.adopt_env_syntax_for_absent_key : Nil
+    private def self.adopt_env_syntax_for_absent_key(absent_explicit : Bool = false) : Nil
+      if absent_explicit
+        self.env_syntax = UNREADABLE_ENV_SYNTAX
+        self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
+        note_load_warning("settings: #{path} does not exist and gori was pointed at it by name " \
+                          "(--config / $GORI_CONFIG) — reading tokens as " \
+                          "#{UNREADABLE_ENV_SYNTAX.to_s.downcase} for this run and re-spelling " \
+                          "nothing, since an absence there says nothing about this install's " \
+                          "stored tokens. Fix the path, or drop the flag to use the settings " \
+                          "under GORI_HOME")
+        return
+      end
       if @@load_unreadable
-        self.env_syntax = Env::Syntax::Bare
+        self.env_syntax = UNREADABLE_ENV_SYNTAX
         self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
         return
       end

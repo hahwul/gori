@@ -263,6 +263,91 @@ describe "Settings env.syntax" do
     end
   end
 
+  # An absence at the HOME-DERIVED default path is a date gori may act on. An absence at a path the
+  # operator TYPED is a typo, and acting on it re-spells the real install's projects against a file
+  # gori never read — which the next ordinary run (reading the real `bare` again) reverses lossily.
+  it "does not read a nonexistent --config as a fresh home" do
+    with_syntax_home do |dir|
+      # The real home says bare, with a global rule spelling a token the bare way.
+      File.write(File.join(dir, "settings.json"), %({"env":{"syntax":"bare"}}))
+      Gori::Settings.load
+      Gori::Settings.env_vars = [{"API", "k"}]
+      Gori::Settings.rewriter_rules = [Gori::Settings::RewriterRule.new(1_i64, true, "k",
+        "request", "head", "X-Key: .*", "X-Key: $API", "replace", "regex", "", "")]
+      Gori::Settings.env_syntax_when_absent = Gori::Env::Syntax::Namespaced
+
+      io = IO::Memory.new
+      prev = Gori::Settings.warning_io
+      Gori::Settings.warning_io = io
+      Gori::Settings.reset_load_warning_guard
+      missing = File.join(dir, "typo.json")
+      begin
+        Gori::Settings.path_override = missing
+        Gori::Settings.load
+      ensure
+        Gori::Settings.warning_io = prev
+        Gori::Settings.path_override = nil
+      end
+      # Bare, not the adopted grammar, and nothing may be re-spelled off it.
+      Gori::Settings.env_syntax.should eq(Gori::Settings::UNREADABLE_ENV_SYNTAX)
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+      Gori::Settings.env_syntax_stated?.should be_false
+      # No global migration, and the rule's bytes are exactly as the operator left them.
+      Gori::Settings.take_env_syntax_global_migration.should be_nil
+      Gori::Settings.rewriter_rules[0].replacement.should eq("X-Key: $API")
+      # And no `settings.json.pre-namespaced-*` copy beside a file that was never rewritten.
+      Dir.glob(File.join(dir, "*.pre-namespaced-*")).should be_empty
+      # One line, and it names the path the operator typed.
+      io.to_s.should contain(missing)
+      io.to_s.should contain("reading tokens as bare")
+    ensure
+      # `with_syntax_home`'s restore replays a document that may carry no `rewriter` section at
+      # all, and `load` is tolerant of an absent one — so this list has to be dropped by hand or
+      # it outlives the example.
+      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+    end
+  end
+
+  it "reads a nonexistent $GORI_CONFIG the same way, and an absent DEFAULT path as a date" do
+    with_syntax_home do |dir|
+      Gori::Settings.env_syntax_when_absent = Gori::Env::Syntax::Namespaced
+      begin
+        ENV["GORI_CONFIG"] = File.join(dir, "nope.json")
+        Gori::Settings.reset_load_warning_guard
+        Gori::Settings.load
+        Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+        Gori::Settings.env_syntax_stated?.should be_false
+        Gori::Settings.load_warning.not_nil!.should contain("nope.json")
+      ensure
+        ENV.delete("GORI_CONFIG")
+      end
+      # The SAME home with no explicit path: absence is a date, adopted and stated.
+      Gori::Settings.load
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      Gori::Settings.env_syntax_origin.should eq(Gori::Settings::EnvSyntaxOrigin::Absent)
+      Gori::Settings.env_syntax_stated?.should be_true
+    end
+  end
+
+  # An explicitly named file that EXISTS and simply has no `env.syntax` is the pre-namespace
+  # headless install: adopting and re-spelling is the whole upgrade, and the explicit path changes
+  # nothing about it.
+  it "still adopts when an explicitly named file exists without the key" do
+    with_syntax_home do |dir|
+      cfg = File.join(dir, "elsewhere.json")
+      File.write(cfg, %({"theme":"gori"}))
+      Gori::Settings.env_syntax_when_absent = Gori::Env::Syntax::Namespaced
+      begin
+        Gori::Settings.path_override = cfg
+        Gori::Settings.load
+      ensure
+        Gori::Settings.path_override = nil
+      end
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      Gori::Settings.env_syntax_stated?.should be_true
+    end
+  end
+
   it "re-spells nothing when the file is unparseable" do
     with_syntax_home do |dir|
       Gori::Settings.env_syntax_when_absent = Gori::Env::Syntax::Namespaced
