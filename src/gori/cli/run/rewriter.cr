@@ -236,11 +236,12 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter extract add --name=SESSION --kind=cookie --selector=sid [options]\n\n" \
                      "The rule OBSERVES a response and binds one named value in memory; a Match &\n" \
-                     "Replace rule then injects it with `--value='$SESSION'`. The value itself is\n" \
+                     "Replace rule then injects it with `--value='$BIND.SESSION'`\n" \
+                     "(`--value='$SESSION'` under the legacy bare syntax). The value itself is\n" \
                      "never persisted — see `gori run rewriter bindings`."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("--name=NAME", "Binding name, without the $ (required)") { |v| name = v }
+          p.on("--name=NAME", "Binding name, without the sigil or namespace (required)") { |v| name = v }
           p.on("--when=FILTER", "Which messages to read, in intercept-filter syntax ('' = any)") { |v| when_s = v }
           p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
           p.on("--kind=KIND", "cookie|header|regex|position|jsonpath (default cookie)") { |v| kind_s = v }

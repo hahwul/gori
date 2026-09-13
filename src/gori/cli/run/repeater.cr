@@ -784,7 +784,7 @@ module Gori
           # env var pass; a DECLARED session binding is deliberately deferred past the builder
           # (`Plan.expand_requests` says so) and was substituted anyway — so `--verbatim` on a
           # session whose stored request is `GET /api?$TOKEN=1` put `GET /api?SECRETTOKEN123=1`
-          # on the wire under a flag whose help text is "no $VAR expansion". Set here beside
+          # on the wire under a flag whose help text is "no env expansion". Set here beside
           # its twin so the two cannot drift the way `verbatim` and `evidence` already did
           # between this file and MCP. See `PlanOptions#expand_bindings?`.
           expand_bindings: !verbatim,
@@ -878,8 +878,8 @@ module Gori
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds). Ignored on the WebSocket path, which paces itself with --idle-ms") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
-          p.on("--verbatim", "Send the stored bytes EXACTLY: no $VAR expansion (project env vars AND session bindings — a $NAME stays literal on the wire), no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix, and on h2 no field-name lowercasing. Nothing interprets the $ grammar, so the $$name escape is not consumed either — write $name. The active --slot's header overlay still applies: it answers a different question (send this AS WHOM) — pass no --slot to send the stored headers. It also waives the §…§ refusal: a stored § stays literal instead of being refused as an unrendered marker") { verbatim = true }
-          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
+          p.on("--verbatim", "Send the stored bytes EXACTLY: no env expansion (project env vars AND session bindings — a $ENV.KEY or $BIND.NAME token stays literal on the wire; bare syntax: $KEY / $NAME), no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix, and on h2 no field-name lowercasing. Nothing interprets the token grammar, so an escape ($$ENV.KEY, or $$name in bare syntax) is not consumed either — write the literal token itself. The active --slot's header overlay still applies: it answers a different question (send this AS WHOM) — pass no --slot to send the stored headers. It also waives the §…§ refusal: a stored § stays literal instead of being refused as an unrendered marker") { verbatim = true }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           # Opt-in, and off even under --verbatim's opposite: a stale prefix is the operator's
           # bytes by default (P7). See `Repeater::PlanOptions#reframe_grpc?`.
           p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent, for a message an edit changed the length of (default: send it as written)") { reframe_grpc = true }
@@ -1706,7 +1706,7 @@ module Gori
           p.on("--rm-header=NAME", "Delete every header with this name (repeatable). Removing Content-Length suppresses the auto-resync; removing Host suppresses the --target sync") { |v| removed_headers << v }
           p.on("-bBODY", "--body=BODY", "Request body override") { |v| body_override = v }
           p.on("--keep-request-line", "Send the stored request line as-is — do not rewrite an absolute-form line (\"GET http://h/p\") to origin-form") { keep_request_line = true }
-          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }

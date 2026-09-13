@@ -1,5 +1,6 @@
 # `gori run project` — list/create/delete projects, or manage project-scoped config:
-# scope rules, env vars ($KEY substitution), and host overrides.
+# scope rules, env vars ($ENV.KEY substitution, or $KEY under the legacy bare syntax), and
+# host overrides.
 module Gori
   module CLI
     module Run
@@ -9,7 +10,7 @@ module Gori
         {"project delete", "Delete a project and everything captured in it"},
         {"project scope", "Manage scope rules (list, add, update, delete, enable/disable)"},
         {"project sandbox", "Get/set the hard-containment sandbox gate (status, on, off)"},
-        {"project env", "Manage project env vars ($KEY substitution)"},
+        {"project env", "Manage project env vars ($ENV.KEY substitution; bare syntax: $KEY)"},
         {"project host-override", "Manage host overrides (list, add, update, delete)"},
       ])]
       private def self.cmd_project(args : Array(String)) : Nil
@@ -57,7 +58,7 @@ module Gori
             delete|rm <name>   Delete a project and everything captured in it
             scope              Manage scope rules (list, add, update, delete, enable/disable)
             sandbox            Get/set the hard-containment sandbox gate (status, on, off)
-            env                Manage project env vars ($KEY substitution)
+            env                Manage project env vars ($ENV.KEY substitution; bare syntax: $KEY)
             host-override      Manage host overrides (list, add, update, delete)
 
           Examples:
@@ -843,7 +844,8 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project env [options]\n\n" \
-                     "List project env vars used for $KEY substitution in outbound requests.\n" \
+                     "List project env vars used for $ENV.KEY substitution in outbound requests\n" \
+                     "($KEY under the legacy bare syntax — see `gori settings env-syntax`).\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run project env set KEY=value\n" \
                      "  gori run project env set KEY value\n" \
@@ -919,7 +921,9 @@ module Gori
             store.close
             abort "gori run project env set: project is busy (write did not commit) — try again"
           end
-          puts "Env var #{key} set."
+          # Spelled through `Env.spell`, because the answer to "how do I use it now?" is
+          # mode-dependent: `$ENV.KEY` on a namespaced install, `$KEY` on a bare one.
+          puts "Env var #{key} set — reference it as #{Env.spell(key, Env::Namespace::Env)}."
         ensure
           store.close
         end
