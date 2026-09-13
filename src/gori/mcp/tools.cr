@@ -1722,8 +1722,8 @@ module Gori
       private def env_unresolved_remedy(detail : String?) : String
         refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
         bare = Settings.env_syntax.bare?
-        env = bare || refs.empty? || refs.any? { |r| r.ns.env? }
-        bind = bare || refs.any? { |r| r.ns.bind? }
+        env = bare || refs.empty? || refs.any?(&.ns.env?)
+        bind = bare || refs.any?(&.ns.bind?)
         parts = [] of String
         parts << "set it with the set_env_var tool" if env
         parts << "bind it by capturing it with the create_extract_rule tool (a binding has no " \
