@@ -192,8 +192,12 @@ module Gori
         # TARGET and SNI are refused — `$` is not a legal byte in a hostname, and a literal one
         # there comes back as an unparseable target or an out-of-scope block, naming the wrong
         # gate. The CLI and TUI minimize paths carry the same two checks.
-        names = Env.unresolved(rec.target) |
-                (rec.sni.try { |s| Env.unresolved(s) } || [] of String)
+        # `deferred: nil`, like every other dial tuple. The default suppresses a DECLARED binding
+        # name on the argument that a later pass resolves it — true of a request body, false of a
+        # target: `Env.expand` resolves a dial tuple with `resolve: Owns::Env` alone and nothing
+        # re-scans it, so a `$BIND.HOST` here reaches DNS spelled `$BIND.HOST`.
+        names = Env.unresolved(rec.target, deferred: nil) |
+                (rec.sni.try { |s| Env.unresolved(s, deferred: nil) } || [] of String)
         unless names.empty?
           return err(env_unresolved_error(Env.token_list(names)), "INVALID_ARGUMENT", field: "repeater_id")
         end

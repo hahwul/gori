@@ -1703,7 +1703,32 @@ module Gori
       # on a namespaced install, `$SESSION, $TOKEN` on a bare one (`Env.token_list` decides), so
       # the names an agent reads here are already in the spelling it has to write back.
       private def env_unresolved_error(detail : String?) : String
-        "unresolved env #{detail} — set it with the set_env_var tool, or remove the token"
+        "unresolved env #{detail} — #{env_unresolved_remedy(detail)}, or remove the token"
+      end
+
+      # WHAT gives the named token a value, which is not one tool: `set_env_var` writes an env var,
+      # and a BIND name has no setter at all — it is bound at SEND time by an extract rule that
+      # captures it out of a response (or by a session slot that claims it), which is the whole
+      # point of a binding and the reason `set_env_var` is the wrong advice for one. Naming it
+      # anyway told an agent to persist a live session credential into the project as a static var:
+      # stale by the next run, and precisely what `bindings.cr` documents itself as preventing.
+      #
+      # Read off the SPELLING, because that is all this shared sentence has. Under the namespaced
+      # grammar the detail carries the namespace in the bytes (`$ENV.X` / `$BIND.X`), so each half
+      # is named only when it is there; under the bare grammar a name carries no namespace and both
+      # halves apply. Parsed through `Env.parse_ref?` — the inverse of the `Env.token_list` that
+      # produced the detail — rather than by matching `"$BIND."` as text, so a non-default prefix
+      # reads the same way.
+      private def env_unresolved_remedy(detail : String?) : String
+        refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
+        bare = Settings.env_syntax.bare?
+        env = bare || refs.empty? || refs.any? { |r| r.ns.env? }
+        bind = bare || refs.any? { |r| r.ns.bind? }
+        parts = [] of String
+        parts << "set it with the set_env_var tool" if env
+        parts << "bind it by capturing it with the create_extract_rule tool (a binding has no " \
+                 "setter — it is bound at send time from a response)" if bind
+        parts.join(", or ")
       end
 
       # Coerce a JSON arg to Int64. Accepts a JSON integer, an INTEGRAL float

@@ -1,6 +1,14 @@
 require "../spec_helper"
 require "../support/mcp_harness"
 
+# The refusal sentence is a private instance method — every tool that can refuse an unresolved
+# token shares it — so it is exposed the way the CLI's sibling is.
+class Gori::MCP::Tools
+  def env_unresolved_error_for_spec(detail : String?) : String
+    env_unresolved_error(detail)
+  end
+end
+
 # `list_env` answers "which spelling do I write?" as well as "which keys exist?".
 #
 # An agent holding a key still has to MINT a token, and the grammar is per-install: `$ENV.KEY`
@@ -79,6 +87,62 @@ describe "MCP list_env grammar report" do
         row["value"].as_s.should eq("Bearer eyJhbGciOiJ9")
         row["scheme"].as_s.should eq("Bearer")
         row["length"].as_i.should eq(19)
+      end
+    end
+  end
+
+  # The refusal every tool shares when a token resolves to nothing has to name the remedy for THE
+  # NAMESPACE it is about. `set_env_var` is the remedy for an env var; a BIND name has no setter at
+  # all — it is bound at send time from a response — so telling an agent to `set_env_var` it made it
+  # persist a live session credential into the project as a static var, stale by the next run.
+  describe "the unresolved-token remedy" do
+    it "names set_env_var for an $ENV. token and an extract rule for a $BIND. one" do
+      with_store_env do |store|
+        tools = tools_for(store)
+        with_env_syntax(Gori::Env::Syntax::Namespaced) do
+          env = tools.env_unresolved_error_for_spec("$ENV.TOKEN")
+          env.should contain("unresolved env $ENV.TOKEN")
+          env.should contain("set_env_var")
+          env.should_not contain("create_extract_rule")
+
+          bind = tools.env_unresolved_error_for_spec("$BIND.SESSION")
+          bind.should contain("create_extract_rule")
+          bind.should contain("bound at send time")
+          bind.should_not contain("set_env_var")
+
+          # Both in one list: both remedies, because both names are there.
+          both = tools.env_unresolved_error_for_spec("$ENV.TOKEN, $BIND.SESSION")
+          both.should contain("set_env_var")
+          both.should contain("create_extract_rule")
+          both.should end_with("or remove the token")
+        end
+      end
+    end
+
+    it "names both remedies under the BARE grammar, where a name carries no namespace" do
+      with_store_env do |store|
+        tools = tools_for(store)
+        with_env_syntax(Gori::Env::Syntax::Bare) do
+          msg = tools.env_unresolved_error_for_spec("$SESSION")
+          msg.should contain("set_env_var")
+          msg.should contain("create_extract_rule")
+        end
+      end
+    end
+
+    it "reads a non-default sigil rather than matching \"$BIND.\" as text" do
+      with_store_env do |store|
+        tools = tools_for(store)
+        was = Gori::Settings.env_prefix
+        begin
+          Gori::Settings.env_prefix = "%"
+          with_env_syntax(Gori::Env::Syntax::Namespaced) do
+            tools.env_unresolved_error_for_spec("%BIND.SESSION")
+              .should contain("create_extract_rule")
+          end
+        ensure
+          Gori::Settings.env_prefix = was
+        end
       end
     end
   end
