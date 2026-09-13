@@ -1306,7 +1306,7 @@ module Gori
       selected = incoming.keys.select do |k|
         (only.nil? || only.includes?(k)) && SECTION_KEYS.includes?(k)
       end
-      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, incoming[k] } } }
+      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, strip_env_syntax(k, incoming[k]) } } }
       apply_sections(JSON.parse(filtered))
       # `save` REPORTS failure rather than raising, because a failed write must not crash the
       # TUI. Discarding that here meant a full disk, a read-only filesystem or an unwritable
@@ -1318,6 +1318,28 @@ module Gori
         raise Error.new("settings were applied in memory but could not be written to #{path}")
       end
       selected
+    end
+
+    # An imported profile NEVER changes this install's token grammar.
+    #
+    # `env.syntax` is not a preference a profile may carry for someone else: it decides how the
+    # tokens already written into THIS install's project databases — env var names, Repeater
+    # drafts, rewrite-rule replacements, slot headers — are read, and nothing rewrites them. A
+    # teammate's profile exported to share a var table (or a theme) therefore used to reinterpret
+    # every token in every project of whoever imported it, in whichever direction their colleague
+    # happened to run. The switch is a deliberate, local act: `gori settings env-syntax`, which is
+    # what the import's STDERR note points at.
+    #
+    # Dropped from the DOCUMENT rather than restored after `apply_sections`, so nothing observes
+    # the flipped value in between (`Settings.env_syntax=` bumps the highlight revision and
+    # re-styles every open editor) and `save` cannot persist it.
+    #
+    # `Settings.load` from disk still honours the key: that file IS this install's own state.
+    private def self.strip_env_syntax(key : String, node : JSON::Any) : JSON::Any
+      return node unless key == "env"
+      h = node.as_h?
+      return node unless h && h.has_key?("syntax")
+      JSON::Any.new(h.reject("syntax"))
     end
 
     # Factory reset: every persisted setting back to the value a fresh install ships with,

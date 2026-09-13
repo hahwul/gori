@@ -179,14 +179,21 @@ module Gori::Settings
 
   # Omitted only when there is NOTHING to say — no vars, the default prefix AND the default
   # grammar — so an untouched bare install still writes no `env` section at all and its
-  # settings.json diff stays empty. Once the section exists the grammar is ALWAYS written: a file
-  # that says `"vars"` but not `"syntax"` means bare by the absence rule, so a namespaced install
-  # omitting the key would silently downgrade itself on the next load.
+  # settings.json diff stays empty. A NAMESPACED install always writes the section, because the
+  # grammar alone is something to say.
+  #
+  # `"syntax"` itself is written only when it is not the DEFAULT, and that is the same statement
+  # the absence rule makes from the other side: bare IS the absence of the key, so a bare install
+  # with vars writes `{"vars": …}` and no grammar, and round-trips as bare. Writing `"bare"`
+  # explicitly would make an exported profile carry a grammar it was never asked to carry — which
+  # `import_document` used to apply, flipping the importing install (see there). A namespaced
+  # install is not the default and always writes it: a file that says `"vars"` but not `"syntax"`
+  # means bare, so omitting it there would silently downgrade the install on its next load.
   private def self.serialize_env(j : JSON::Builder) : Nil
     unless env_vars.empty? && env_prefix == DEFAULT_ENV_PREFIX && env_syntax == DEFAULT_ENV_SYNTAX
       j.field "env" do
         j.object do
-          j.field "syntax", env_syntax.to_s.downcase
+          j.field "syntax", env_syntax.to_s.downcase unless env_syntax == DEFAULT_ENV_SYNTAX
           j.field "prefix", env_prefix unless env_prefix == DEFAULT_ENV_PREFIX
           unless env_vars.empty?
             j.field "vars" do

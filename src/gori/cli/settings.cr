@@ -385,21 +385,23 @@ module Gori::CLI
     puts "imported #{applied.size} section(s) into #{Settings.path}#{applied.empty? ? "" : ": #{applied.join(", ")}"}"
   end
 
-  # An imported `env.syntax` changes how every token ALREADY stored in this install is read —
-  # project env var names, Repeater drafts, rewrite-rule replacements, slot headers — and nothing
-  # rewrites them. The section list cannot carry that ("env" is equally true of a var table), so it
-  # is said on its own, on STDERR like the command notice beside it, on the dry run and the real
-  # one alike.
+  # A profile carrying `env.syntax` is IGNORED on that one key (`Settings.import_document` strips
+  # it): the grammar decides how every token ALREADY stored in this install is read — project env
+  # var names, Repeater drafts, rewrite-rule replacements, slot headers — and nothing rewrites
+  # them, so a teammate's export may not decide it. Said on STDERR anyway, on the dry run and the
+  # real one alike, because the operator who exported that profile expected the grammar to travel
+  # with it: the note is what tells them it did not, and which command does it.
   private def self.report_env_syntax_change(root : JSON::Any, applicable : Array(String)) : Nil
     return unless applicable.includes?("env")
     raw = root.as_h?.try(&.["env"]?).try(&.as_h?).try(&.["syntax"]?).try(&.as_s?)
     return unless raw
     incoming = Gori::Env::Syntax.parse?(raw.strip)
     return if incoming.nil? || incoming == Settings.env_syntax
-    STDERR.puts "note: this profile sets env.syntax = #{env_syntax_label(incoming)} (this install " \
-                "reads #{env_syntax_label(Settings.env_syntax)}) — tokens already stored in your " \
-                "projects are NOT rewritten, so #{env_syntax_example(incoming)} becomes the " \
-                "spelling gori resolves"
+    STDERR.puts "note: this profile was written for the #{env_syntax_label(incoming)} token " \
+                "grammar; this install stays #{env_syntax_label(Settings.env_syntax)} " \
+                "(#{env_syntax_example(Settings.env_syntax)}) — an import never reinterprets the " \
+                "tokens already stored in your projects. Switch with " \
+                "`gori settings env-syntax #{env_syntax_label(incoming)}`."
   end
 
   # `gori settings env-syntax [bare|namespaced]` — read or set the token grammar.

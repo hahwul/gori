@@ -273,13 +273,51 @@ describe "Settings env.syntax" do
     end
   end
 
-  it "an env import without a syntax keeps the current one; with one, applies it" do
+  # An imported profile NEVER decides the grammar: it decides how the tokens already stored in
+  # THIS install's projects are read, and a teammate's export does not speak for those. The
+  # import says so on STDERR and points at `gori settings env-syntax`.
+  it "an env import does not change the grammar, with or without a syntax key" do
     with_syntax_home do |dir|
-      File.write(File.join(dir, "settings.json"), %({"env":{"syntax":"namespaced"}}))
+      path = File.join(dir, "settings.json")
+      File.write(path, %({"env":{"syntax":"namespaced"}}))
       Gori::Settings.load
       Gori::Settings.import_document(%({"env":{"vars":[{"key":"A","value":"1"}]}}))
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
-      Gori::Settings.import_document(%({"env":{"syntax":"bare"}}))
+      Gori::Settings.import_document(%({"env":{"syntax":"bare","vars":[{"key":"B","value":"2"}]}}))
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      # The rest of the section applied, so the refusal is scoped to the one key…
+      Gori::Settings.env_vars.should eq([{"B", "2"}])
+      # …and the grammar it did not flip is still what the file says, so a restart agrees.
+      env_section(path).not_nil!["syntax"].as_s.should eq("namespaced")
+    end
+  end
+
+  # The other direction: a BARE install cannot be silently upgraded either.
+  it "an env import cannot flip a bare install to namespaced" do
+    with_syntax_home do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, %({"theme":"gori"}))
+      Gori::Settings.load
+      Gori::Settings.import_document(%({"env":{"syntax":"namespaced"}}))
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+      # Nothing left to say ⇒ no env section, i.e. bare by the absence rule.
+      JSON.parse(File.read(path)).as_h.has_key?("env").should be_false
+    end
+  end
+
+  # Bare IS the absence of the key, so a bare install exports no grammar at all. Writing
+  # `"syntax":"bare"` would make every exported profile carry a grammar nobody asked it to carry.
+  it "serializes the key only when the grammar is not the default" do
+    with_syntax_home do |dir|
+      path = File.join(dir, "settings.json")
+      Gori::Settings.load
+      Gori::Settings.env_syntax = Gori::Env::Syntax::Bare
+      Gori::Settings.env_vars = [{"A", "1"}]
+      Gori::Settings.save.should be_true
+      env_section(path).not_nil!.has_key?("syntax").should be_false
+      Gori::Settings.export_document(["env"]).should_not contain("syntax")
+      # …and it round-trips as bare.
+      Gori::Settings.load
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
     end
   end
