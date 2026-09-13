@@ -655,7 +655,7 @@ module Gori
       # alternative is a spec that can only assert the report by reading the terminal.
       def self.report_env_syntax_migration(report : EnvMigration::StoreReport?,
                                            io : IO? = STDERR) : Nil
-        lines = report.try(&.lines) || [] of String
+        lines = report.try(&.notices) || [] of String
         Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
         return if lines.empty?
         lines.each { |line| io.try &.puts line }

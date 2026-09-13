@@ -95,7 +95,7 @@ describe "gori settings env-syntax" do
     %w[--migrate --all-projects].each { |flag| verb.should_not contain(flag) }
     usage = cli_src("gori", "cli.cr")
     usage.should contain("gori settings env-syntax [bare|namespaced]")
-    usage.lines.select(&.includes?("env-syntax")).each { |l| l.should_not contain("--migrate") }
+    usage.lines.select(&.includes?("env-syntax")).each(&.should_not(contain("--migrate")))
   end
 
   it "prints the value and WHERE it came from" do
@@ -110,7 +110,7 @@ describe "gori settings env-syntax" do
       # No hint about a dry run any more: there is no flag to offer, and the thing an operator
       # reading this wants to know ("what happens to my projects?") is on the WRITE lines.
       lines.size.should eq(2)
-      lines.each { |l| l.should_not contain("--migrate") }
+      lines.each(&.should_not(contain("--migrate")))
 
       # A file that does not name the key: adopted for this run, which is NOT the same fact as
       # "the file says bare" — and reading it here means the write did not land.
@@ -149,7 +149,7 @@ describe "gori settings env-syntax" do
       lines[1].should contain("evidence")
       lines[1].should contain("gori settings env-syntax bare")
       # Nothing about the old opt-in: there is no flag to run and no table to read first.
-      lines.each { |l| l.should_not contain("--migrate") }
+      lines.each(&.should_not(contain("--migrate")))
       lines[1].should_not contain("NOT rewritten")
 
       back = Gori::CLI.env_syntax_write_lines_for_spec(Gori::Env::Syntax::Namespaced,

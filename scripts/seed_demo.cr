@@ -333,7 +333,7 @@ def bind_token(name : String) : String
 end
 
 Paths.ensure_dirs
-Settings.load # after ensure_dirs: a brand-new home adopts a grammar and writes it
+Settings.load # after ensure_dirs: a home with no `env.syntax` adopts namespaced and writes it
 registry = ProjectRegistry.new(Paths.projects_dir)
 
 # Fresh start: drop any existing "demo" project.

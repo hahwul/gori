@@ -1,5 +1,9 @@
 require "json"
 require "./paths"
+# The global-rule re-spelling `load` runs when `env.syntax` is absent. Required HERE rather than
+# left to `src/gori.cr`: this file NAMES `EnvMigration::GlobalReport`, and the bench harnesses (and
+# other small entry points) require settings.cr directly without the umbrella.
+require "./env_migration/globals"
 require "./settings/network"
 require "./settings/upstream_rules"
 require "./settings/outbound_tls"

@@ -95,8 +95,9 @@ module Gori
       end
 
       # The line plus the global-rule line, which belongs to the same event: a switch re-spells the
-      # rows AND the rules that rewrite every project's traffic.
-      def lines : Array(String)
+      # rows AND the rules that rewrite every project's traffic. Named `notices` rather than `lines`
+      # so it cannot be misread (by a human or by ameba) as `String#lines`.
+      def notices : Array(String)
         out = [] of String
         out << line unless quiet?
         global.try { |g| out << g.line }
@@ -491,7 +492,7 @@ module Gori
     private def self.vacuum_into(db_path : String, to : Env::Syntax) : String
       dest = unique_path("#{db_path}.pre-#{to.to_s.downcase}-#{stamp}")
       ::DB.open("sqlite3:#{db_path}?busy_timeout=5000") do |db|
-        db.using_connection { |conn| conn.exec("VACUUM INTO ?", dest) }
+        db.using_connection(&.exec("VACUUM INTO ?", dest))
       end
       File.chmod(dest, 0o600) rescue nil
       dest

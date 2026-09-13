@@ -3762,7 +3762,7 @@ module Gori::Tui
     # neither the bell nor the toast (`Notifications#push`). The toast yields to a bind failure
     # already on screen — capture being off is the more urgent of the two — but the ring keeps both.
     private def announce_env_syntax_migration : Nil
-      lines = @session.env_syntax_migration.try(&.lines) || [] of String
+      lines = @session.env_syntax_migration.try(&.notices) || [] of String
       Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
       return if lines.empty?
       lines.each { |line| @notifications.push(:warn, line, goto: Jobs::Goto.new(:project)) }

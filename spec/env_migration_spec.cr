@@ -249,10 +249,10 @@ describe Gori::EnvMigration do
       # bytes — it was written before namespaces existed.
       Gori::Settings.env_syntax = NS
 
-      report = with_open_store(db_path) { |store|
+      report = with_open_store(db_path) do |store|
         Gori::EnvMigration.stored_syntax(store).should eq(BARE)
         Gori::EnvMigration.reconcile(store, db_path, "demo")
-      }.not_nil!
+      end.not_nil!
 
       report.from.should eq(BARE)
       report.to.should eq(NS)
@@ -344,11 +344,11 @@ describe Gori::EnvMigration do
     with_migration_home do |db_path|
       with_open_store(db_path, &.flush)
       Gori::Settings.env_syntax = NS
-      report = with_open_store(db_path) { |store|
+      report = with_open_store(db_path) do |store|
         Gori::EnvMigration.reconcile(store, db_path, "demo")
-      }.not_nil!
+      end.not_nil!
       report.quiet?.should be_true
-      report.lines.should be_empty # nothing to say, so no surface says anything
+      report.notices.should be_empty # nothing to say, so no surface says anything
       report.backup.should be_nil
       Dir.glob("#{db_path}.pre-*").should be_empty
       with_open_store(db_path) { |s| s.setting(Gori::Env::PROJECT_SYNTAX_KEY) }.should eq("namespaced")
@@ -367,9 +367,9 @@ describe Gori::EnvMigration do
       # The operator opts out. The next open reads the marker (namespaced) against the install
       # (bare) and goes the other way.
       Gori::Settings.env_syntax = BARE
-      report = with_open_store(db_path) { |store|
+      report = with_open_store(db_path) do |store|
         Gori::EnvMigration.reconcile(store, db_path, "demo")
-      }.not_nil!
+      end.not_nil!
       report.from.should eq(NS)
       report.to.should eq(BARE)
       report.line.should contain("re-spelled to $KEY/$NAME")
@@ -415,14 +415,14 @@ describe Gori::EnvMigration do
       Gori::Settings.rewriter_rules = [Gori::Settings::RewriterRule.new(
         1_i64, true, "auth", "request", "head", "Authorization", "Bearer $token",
         "replace", "literal", "", "")]
-      report = with_open_store(db_path) { |store|
+      report = with_open_store(db_path) do |store|
         Gori::EnvMigration.reconcile(store, db_path, "demo")
-      }.not_nil!
+      end.not_nil!
       global = report.global.not_nil!
       global.tokens.should eq(1)
       Gori::Settings.rewriter_rules[0].replacement.should eq("Bearer $BIND.token")
-      report.lines.size.should eq(2) # the project line, then the global one
-      report.lines[1].should contain("global rewrite rules: 1 token re-spelled")
+      report.notices.size.should eq(2) # the project line, then the global one
+      report.notices[1].should contain("global rewrite rules: 1 token re-spelled")
     ensure
       Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
     end

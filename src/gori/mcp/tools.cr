@@ -355,7 +355,7 @@ module Gori
       private def reconcile_env_syntax(s : Store) : Nil
         return unless path = @db_path
         name = @project_name || File.basename(File.dirname(path))
-        lines = Gori::EnvMigration.reconcile(s, path, name).try(&.lines) || [] of String
+        lines = Gori::EnvMigration.reconcile(s, path, name).try(&.notices) || [] of String
         Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
         lines.each { |line| Log.info { line } }
       end
