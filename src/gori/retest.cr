@@ -5,6 +5,7 @@ require "./env"
 require "./evidence"
 require "./proxy/codec/http1"
 require "./repeater/flow_request"
+require "./repeater/draft_markers"
 
 module Gori
   # Issue-linked retest (#1036): the smallest thing that turns a confirmed finding into a
@@ -342,6 +343,16 @@ module Gori
       if method.empty?
         return Planned.new(step, "?", url, label,
           missing: "repeater ##{step.ref_id} has no request line to send")
+      end
+      # A DRAFT session holding `§…§` is one the Repeater tab sends RENDERED (#1068), and a
+      # retest replays the stored bytes — so running it would check a request the operator
+      # never sees from the tab the step points at, and a PASS would be about the literal §
+      # bytes. Refused at plan time so the preflight count and the confirm both say so before
+      # any send; `LiveBackend#send` re-checks for the same reason it re-reads the row.
+      if Repeater::DraftMarkers.live?(store, rec)
+        return Planned.new(step, method, url, label,
+          missing: Repeater::DraftMarkers.refusal(rec.id,
+            "Remove them from the session, or point this step at one without markers."))
       end
       # An assertion THIS BUILD cannot read is a refusal, not a step with no assertion. The
       # only way one gets on disk is a newer gori having written it, and the two readings are

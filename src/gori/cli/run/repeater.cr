@@ -13,6 +13,15 @@ module Gori
                         "client's hello, not a byte-exact JA3 match — `gori settings tls-fingerprint " \
                         "HOST --preset NAME` prints what actually goes out. Empty value = no override"
 
+      # The way out of the `§…§` refusal, written once for the one command that can hit it.
+      # NOT `gori run fuzz --repeater`: that seed escapes a stored `§` to the `§§` literal on
+      # purpose, so it would sweep auto-marked positions and silently un-mark the operator's.
+      # See `Repeater::DraftMarkers.refusal`.
+      MARKER_REMEDY = "Remove them from the session, write the marked request to a file and " \
+                      "sweep it with `gori run fuzz --request=FILE` (which reads §…§ as " \
+                      "positions, where `--repeater` escapes them), or pass --verbatim to say " \
+                      "the stored bytes ARE the message and send them as they are."
+
       # `gori run repeater [list|create|send|minimize|h2|move|delete] …`, or a bare flow id /
       # `--flow` for the one-shot resend.
       #
@@ -869,7 +878,7 @@ module Gori
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds). Ignored on the WebSocket path, which paces itself with --idle-ms") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
-          p.on("--verbatim", "Send the stored bytes EXACTLY: no $VAR expansion (project env vars AND session bindings — a $NAME stays literal on the wire), no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix, and on h2 no field-name lowercasing. Nothing interprets the $ grammar, so the $$name escape is not consumed either — write $name. The active --slot's header overlay still applies: it answers a different question (send this AS WHOM) — pass no --slot to send the stored headers") { verbatim = true }
+          p.on("--verbatim", "Send the stored bytes EXACTLY: no $VAR expansion (project env vars AND session bindings — a $NAME stays literal on the wire), no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix, and on h2 no field-name lowercasing. Nothing interprets the $ grammar, so the $$name escape is not consumed either — write $name. The active --slot's header overlay still applies: it answers a different question (send this AS WHOM) — pass no --slot to send the stored headers. It also waives the §…§ refusal: a stored § stays literal instead of being refused as an unrendered marker") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           # Opt-in, and off even under --verbatim's opposite: a stale prefix is the operator's
           # bytes by default (P7). See `Repeater::PlanOptions#reframe_grpc?`.
@@ -903,8 +912,13 @@ module Gori
         # get_repeater_full loads the response BLOBs too (needed for --diff), so the
         # store can close before the send — same lifetime pattern as the flow path.
         store = open_store(project, read_only: true)
-        rec, host_overrides = begin
-          {store.get_repeater_full(id), Gori::HostOverrides.load(store)}
+        # `markers_live` is read HERE, with the store still open: the predicate may have to
+        # read the session's source flow (`DraftMarkers.operator_marked?`), and this store is
+        # closed before the send like the flow path's. Its answer is about stored bytes, which
+        # this command never rewrites, so taking it early changes nothing about what it says.
+        rec, host_overrides, markers_live = begin
+          r = store.get_repeater_full(id)
+          {r, Gori::HostOverrides.load(store), r ? Repeater::DraftMarkers.live?(store, r) : false}
         ensure
           store.close
         end
@@ -934,6 +948,23 @@ module Gori
         if !use_ws && (!ws_messages.empty? || idle_ms)
           outbound.close
           abort "gori run repeater send: --message / --message-frame / --idle-ms apply to a WebSocket exchange — session ##{id} is being sent as HTTP"
+        end
+        # The HTTP path only, and AFTER `use_ws` for that reason: a framed WS exchange takes
+        # `--message` markers as a documented sweep input (a different contract), while a
+        # handshake sent as HTTP (`--http` / the stored `ws_http_only`) goes out through this
+        # engine and diverges from the tab exactly like any other request would.
+        #
+        # `--verbatim` WAIVES it, and is named in the refusal. Not a hole: the one population
+        # this gate can be wrong about is a session whose `§` really is data and that gori
+        # cannot see a capture behind (`repeater create --request-raw` over a German legal
+        # body — the module's own example), and `--verbatim` is already the spelling for "these
+        # stored bytes ARE the message". Without it the refusal is a one-way door for that
+        # request: removing the § destroys the payload under test and the Fuzzer route rewrites
+        # it into sweep positions. With it the divergence is still never SILENT, which is the
+        # whole complaint. See `Repeater::DraftMarkers`.
+        if !use_ws && markers_live && !verbatim
+          outbound.close
+          abort "gori run repeater send: #{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)}"
         end
         if use_ws
           # `--record-history` records an HTTP request+response flow; a WebSocket send is a

@@ -7,6 +7,8 @@ require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/flow_request"
 require "../../repeater/plan"
+require "../../repeater/ws_engine"
+require "../../repeater/draft_markers"
 require "../../flow_mapper"
 require "../../proxy/codec/http1"
 require "../../env"
@@ -26,6 +28,12 @@ module Gori
         # position in this method. See `send_source_conflict`.
         conflict = send_source_conflict(h)
         return conflict if conflict
+        # SECOND, and before any argument that costs a store write or a socket: a DRAFT session
+        # carrying `§…§` is one the Repeater tab sends differently (#1068). Up here rather than
+        # in `send_plan_options`' `repeater_id` branch so it is a coded INVALID_ARGUMENT naming
+        # the field, like `minimize_repeater`'s twin refusal, instead of a bare exception string.
+        markers = send_draft_marker_refusal(h)
+        return markers if markers
         save = bool_arg(h, "save_as_repeater", false)
         record_history = bool_arg(h, "record_history", true)
         # `include_sensitive` is the spelling every OTHER tool that redacts uses (get_flow,
@@ -211,6 +219,43 @@ module Gori
             "is capped, or you will rebuild a redacted or truncated copy of them."
           end
         "this call names #{named}. NOTHING was sent. #{remedy}"
+      end
+
+      # The way out, in the vocabulary an agent has. NOT `fuzz_start{repeater_id}`: that seed
+      # escapes a stored `§` to the `§§` literal on purpose, so it would sweep auto-marked
+      # positions and silently un-mark the operator's — see `Repeater::DraftMarkers.refusal`.
+      MARKER_REMEDY = "Remove them with update_repeater, pass the marked request to " \
+                      "fuzz_start as `template` (the one seed that reads §…§ as positions), or " \
+                      "pass verbatim:true to say the stored bytes ARE the message and send " \
+                      "them as they are."
+
+      # The refusal for a DRAFT repeater whose stored request holds `§…§` markers, or nil to
+      # proceed. Everything it knows lives in `Repeater::DraftMarkers` — the Repeater tab
+      # renders those markers before sending and this tool cannot, so the two surfaces put
+      # different bodies on the wire under different Content-Lengths, and this one reported
+      # `isError:false` with a status for the request nobody wrote (#1068).
+      #
+      # Silent on a WebSocket handshake, deliberately: `send_plan_options` refuses it by name
+      # ("use send_websocket"), which is the more specific answer, and a framed WS send takes
+      # markers as a documented sweep input — a different contract (#1068 scopes it out).
+      # Silent, too, on a session gori cannot find: `no repeater with id N` is that call's
+      # answer and this gate must not pre-empt it with a sentence about markers.
+      private def send_draft_marker_refusal(h) : Result?
+        return nil unless present?(h, "repeater_id")
+        id = int(h, "repeater_id")
+        return nil unless id
+        rec = store.get_repeater(id)
+        return nil unless rec
+        return nil if Repeater::WsEngine.replayable?(String.new(rec.request))
+        # `verbatim` WAIVES it — the same waiver `gori run repeater send --verbatim` makes, and
+        # for the reason that comment gives: the one population this gate can be wrong about is
+        # a session whose `§` really is data with no capture behind it, and "these stored bytes
+        # ARE the message" is exactly what this argument already says. Named in the refusal, so
+        # the divergence is never silent.
+        return nil if RequestBuilder.verbatim?(h)
+        return nil unless Repeater::DraftMarkers.live?(store, rec)
+        err("#{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)} NOTHING was sent.",
+          "INVALID_ARGUMENT", field: "repeater_id")
       end
 
       # The bytes that actually reach the origin, as head text.
@@ -1534,7 +1579,7 @@ module Gori
           "final; re-sending a truncated body puts the whole body back on the wire." do |s|
           s.field "flow_id", intprop("resend a captured flow by id (no url needed; like the TUI Repeater)")
           s.field "keep_request_line", boolprop("flow_id only: send the STORED request line as captured instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false, because a proxy capture's absolute form is a proxy artifact — but on a flow recorded from a direct send it is the routing / cache-poisoning / SSRF payload. `request_line_rewritten:true` comes back whenever the rewrite fired")
-          s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length)")
+          s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length). A session that never came from a flow and still holds §…§ markers is REFUSED — the Repeater tab renders them and this path cannot")
           s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id/repeater_id is given)")
           s.field "method", strprop("HTTP method (default GET)")
           s.field "headers", objprop("header name->value map")
@@ -1542,7 +1587,7 @@ module Gori
           s.field "body_base64", strprop("request body as base64 — the byte-exact form, and it works on BOTH the url/HTTP1.1 path and the h2_fields path. Use it whenever the body is not UTF-8 (binary, protobuf/gRPC, gzip, a multipart upload, an overlong-UTF-8 traversal payload) or carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8) — 'body' is sent as its UTF-8 encoding. Wins over 'body' and is not project-$VAR-expanded. A DECLARED session binding still resolves at the send seam, in the body as well as the head (and Content-Length follows it) — pass verbatim:true if the bytes must reach the origin exactly as given")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
           s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64 — the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header value or a binary body (a JSON string is sent as its UTF-8 encoding, so 'é' goes out as 2 bytes). Implies verbatim: no $VAR expansion, no bare-LF promotion")
-          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no $VAR expansion — project env vars AND session bindings, so a $NAME stays literal on the wire — no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). Nothing interprets the $ grammar at all, so the `$$name` escape is NOT consumed either — write `$name` directly. The active session slot's header overlay still applies: it answers a different question (send this AS WHOM). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal $NAME in the stored request ($where, $filter, $IFS) is the payload")
+          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no $VAR expansion — project env vars AND session bindings, so a $NAME stays literal on the wire — no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). Nothing interprets the $ grammar at all, so the `$$name` escape is NOT consumed either — write `$name` directly. The active session slot's header overlay still applies: it answers a different question (send this AS WHOM). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal $NAME in the stored request ($where, $filter, $IFS) is the payload. It also waives the §…§ refusal on a repeater_id replay: a stored § stays literal instead of being refused as an unrendered marker")
           s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent (default FALSE). With the default, a body you edited to a different length keeps the prefix it was captured/authored with — which is what you want when a deliberately-wrong length prefix IS the test, and what a byte-exact replay means. Set TRUE when you edited a unary gRPC message and want the origin to accept the call. Applies to a single message; a client-streaming body and grpc-web-text are left alone. Reflected in effective_request. Mirrors CLI `gori run repeater send --reframe-grpc`.")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
