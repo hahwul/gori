@@ -9,7 +9,7 @@
 #   Probe                                                             — passive scan + active findings + custom rules
 #   Decoder                                                           — pre-loaded conversion sub-tabs
 #   Authorize                                                         — the identities (session slots) to replay as
-#   Env (bindings)                                                    — project `$KEY` vars a Repeater tab uses
+#   Env (bindings)                                                    — project env vars a Repeater tab uses
 #
 # The JWT and Comparer tabs keep NO per-project state, so nothing can be seeded into them.
 # Their material is one keystroke away instead: the Decoder's `session JWT` sub-tab holds the
@@ -316,6 +316,23 @@ COOKIE_SECRET = "s3cr3t"                # Flask / Django
 RACK_SECRET   = "changeme-please-12345" # Rack wants a longer key
 COOKIE_TS     = 1718787600_i64
 
+# The demo WRITES tokens into bytes it stores — a Repeater target, a header, a slot overlay,
+# the tour prose — so it has to spell them the way THIS install reads them (`env.syntax`): a
+# bare `$token` on a namespaced machine is a literal, and the seeded tab would send it as one.
+# `Env.spell` is the only speller in the repo; loading the settings is what makes it answer
+# for this home rather than for the compiled-in default.
+Settings.load
+
+# A BUILD-time env var (`$ENV.API` / bare `$API`).
+def env_token(name : String) : String
+  Gori::Env.spell(name, Gori::Env::Namespace::Env)
+end
+
+# A SEND-time session binding (`$BIND.token` / bare `$token`).
+def bind_token(name : String) : String
+  Gori::Env.spell(name, Gori::Env::Namespace::Bind)
+end
+
 Paths.ensure_dirs
 registry = ProjectRegistry.new(Paths.projects_dir)
 
@@ -333,7 +350,7 @@ project = registry.create("demo",
   "and graphql-ws sockets, grpc-web and a connect-udp tunnel; GraphQL, SAML and framework-signed " \
   "cookies; every HTTP method from TRACE and QUERY to WebDAV's PROPFIND/VERSION-CONTROL, " \
   "with the hosts and paths that stress a fixed-width column (punycode, homograph, RTL, " \
-  "double-width, zero-width, a 2.5 GB truncated body); Repeater (incl. a WS and a `$KEY`-bound tab)/" \
+  "double-width, zero-width, a 2.5 GB truncated body); Repeater (incl. a WS and a token-bound tab)/" \
   "Fuzzer/Miner/Sequencer sessions; Rewriter rules + session bindings; project env vars; " \
   "colormarker rules; an OAST listener with callbacks; passive AND active probe findings; " \
   "and entity links tying issues and notes to related workbench items.")
@@ -1627,15 +1644,16 @@ ids[:repeater_hahwul] = store.insert_repeater("https://www.hahwul.com", hahwul_r
   true, true, ids[:hahwul_home], 3)
 store.set_repeater_name(ids[:repeater_hahwul], "hahwul home")
 
-# A tab written in `$KEY` rather than literals: `$API` is a project env var (below) and
-# `$token` is a session BINDING produced by the extract rule on /api/login. Both stay
+# A tab written in TOKENS rather than literals: `API` is a project env var (below) and
+# `token` is a session BINDING produced by the extract rule on /api/login. They come from two
+# different tables, which is why they are spelled through two different namespaces; both stay
 # unexpanded in the editor and resolve at send time — that is the whole point of the
 # Env/Bindings pair, and this tab is where you watch it happen (^E opens the env overlay).
 bound_req = replay_req("GET", "api.demo.test", "/v1/users/1",
-  {"Authorization" => "Bearer $token", "X-Client" => "$UA"})
-ids[:repeater_bound] = store.insert_repeater("$API", bound_req.to_slice,
+  {"Authorization" => "Bearer #{bind_token("token")}", "X-Client" => env_token("UA")})
+ids[:repeater_bound] = store.insert_repeater(env_token("API"), bound_req.to_slice,
   false, true, nil, 4)
-store.set_repeater_name(ids[:repeater_bound], "bound $token")
+store.set_repeater_name(ids[:repeater_bound], "bound #{bind_token("token")}")
 store.set_repeater_tags(ids[:repeater_bound], "bindings env")
 
 # A WebSocket tab. A repeater is a WS session when its request bytes are an upgrade
@@ -2431,9 +2449,9 @@ store.insert_rule(S::RuleTarget::Request, S::RulePart::Head, "cdn.demo.test/asse
 puts "• inserted 7 rewriter rules (2 active, 5 staged)"
 
 # --- Session bindings: the READ half of the Rewriter tab (extract rules) -----
-# An extract rule pulls a value OUT of a response and publishes it as `$name`, which the
-# send paths then substitute — so a token that rotates is written once, not pasted into
-# every tab. `bound $token` (Repeater) is the tab that consumes these.
+# An extract rule pulls a value OUT of a response and publishes it under a name in the BIND
+# namespace, which the send paths then substitute — so a token that rotates is written once,
+# not pasted into every tab. The Repeater tab named after the `token` binding consumes these.
 store.insert_extract_rule("token", "host:shop.demo.test path:/api/login",
   ExtractKind::JsonPath, selector: "token", host: "shop.demo.test")
 store.insert_extract_rule("sid", "host:shop.demo.test path:/api/login",
@@ -2446,7 +2464,7 @@ store.insert_extract_rule("csrf", "host:shop.demo.test path:/login",
 store.insert_extract_rule("request_id", "host:api.demo.test",
   ExtractKind::Header, selector: "X-Request-Id", host: "api.demo.test", enabled: false)
 
-# --- Project env vars (`$KEY`, the BUILD-time layer) ------------------------
+# --- Project env vars (the ENV namespace, the BUILD-time layer) -------------
 # Global vars live in settings.json; these are the project's own and follow the db, not
 # the operator. They stay literal in every editor and expand only at send time.
 Env.save_project(store, [
@@ -2724,8 +2742,8 @@ store.insert_saved_view("한글 호스트", "host:쇼핑몰.한국 OR host:xn--3
 # The Authorize tab replays one request as several identities; the identities are project
 # state (`Store::SESSION_SLOTS_KEY`) and the queue is not, so this is the half a seeder can
 # fill — and without it the tab's `i` list is empty and "send to Authorize" has nothing to
-# replay AS. `customer` claims the `token` extract rule, so its `$token` resolves from ITS
-# OWN binding table rather than the global one; `anonymous` strips credentials instead of
+# replay AS. `customer` claims the `token` extract rule, so its `token` binding resolves from
+# ITS OWN table rather than the global one; `anonymous` strips credentials instead of
 # setting them, which is the comparison that finds a missing authorization check.
 admin_jwt = make_jwt(WEAK_SECRET,
   %({"alg":"HS256","typ":"JWT"}),
@@ -2733,7 +2751,7 @@ admin_jwt = make_jwt(WEAK_SECRET,
 store.set_setting(S::SESSION_SLOTS_KEY, SessionSlot.serialize([
   SessionSlot.as_captured,
   SessionSlot.new("anonymous", remove_headers: ["Authorization", "Cookie"]),
-  SessionSlot.new("customer", [{"Authorization", "Bearer $token"}], rules: ["token"]),
+  SessionSlot.new("customer", [{"Authorization", "Bearer #{bind_token("token")}"}], rules: ["token"]),
   SessionSlot.new("admin", [{"Authorization", "Bearer #{admin_jwt}"}, {"X-Demo-Role", "admin"}]),
 ]))
 
@@ -2908,7 +2926,7 @@ Space → `l` (links) on this sub-tab opens the overlay; `↵`/`o` jumps to the 
 - **XSS PoC** repeater — re-send the reflected /search payload
 - **IDOR probe** repeater — GET /v1/users/2 with the customer token (opens WITH its last response)
 - **SSRF → OAST** repeater — POST /v1/import with an OAST payload host
-- **bound $token** repeater — written in `$API` / `$token` / `$UA`, resolved at send time
+- **bound #{bind_token("token")}** repeater — written in `#{env_token("API")}` / `#{bind_token("token")}` / `#{env_token("UA")}`, resolved at send time
 - **WS chat** repeater — a WebSocket session (upgrade handshake + 4 outbound frames)
 - **OAuth refresh** repeater — re-run the token exchange with a different client
 - **user id enum** fuzz — sweep /v1/users/{id} (positions marked §1§)
@@ -2933,9 +2951,10 @@ Which tab does what on this demo (send a selection to a tool with Space → the 
   a forced CSP, a request-body privilege flip, and a SHORT-CIRCUIT that answers the JS
   bundle locally). Toggle one on, then re-send from Repeater to watch it take effect.
 - **Rewriter → bindings** — 5 extract rules (the READ half). `token` (jsonpath) and `sid`
-  (cookie) are lifted from /api/login and published as `$token` / `$sid`.
-- **Env (^E)** — 5 project vars: `$API`, `$SHOP`, `$AUTH`, `$UA`, `$ADMIN_ID`. The
-  "bound $token" Repeater tab is written entirely in them; they expand only at send time.
+  (cookie) are lifted from /api/login and published as `#{bind_token("token")}` / `#{bind_token("sid")}`.
+- **Env (^E)** — 5 project vars: `#{env_token("API")}`, `#{env_token("SHOP")}`, `#{env_token("AUTH")}`,
+  `#{env_token("UA")}`, `#{env_token("ADMIN_ID")}`. The "bound #{bind_token("token")}" Repeater tab is
+  written entirely in them; they expand only at send time.
 - **Colormarker** — 7 row-colour rules (first match wins): 5xx red, 401/403 orange,
   legacy.demo.test purple, websocket blue, the token exchange green, gRPC/SSE green strip.
 - **OAST** — the out-of-band listener. It holds the DNS + HTTP callbacks the server made
@@ -2979,7 +2998,8 @@ note_start = <<-NOTES4
 3. **The Decoder** already has five sub-tabs loaded. Run the SAML one, then the Flask
    cookie one (`cookie-decode` auto-detects Flask vs Rack vs Django).
 4. **JWT** — send the login token (Space → JWT), crack the secret, re-forge the payload.
-5. **Repeater** — "bound $token" is written in `$API`/`$token`. Open the env overlay (^E)
+5. **Repeater** — "bound #{bind_token("token")}" is written in `#{env_token("API")}` /
+   `#{bind_token("token")}`. Open the env overlay (^E)
    to see where those come from, then look at the "WS chat" tab: a WebSocket session with
    four outbound frames queued.
 6. **Issues** — 18 of them, deliberately across all four triage states. The two on
