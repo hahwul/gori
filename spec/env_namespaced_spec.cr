@@ -134,7 +134,7 @@ describe "Gori::Env — namespaced grammar" do
       regions = Gori::Env.regions("a $ENV.HOST b $BIND.SESSION c $ENV.NOPE d $id")
       regions.map(&.name).should eq(["HOST", "SESSION", "NOPE"])
       regions.map(&.ns).should eq([Gori::Env::Namespace::Env, Gori::Env::Namespace::Bind,
-                                  Gori::Env::Namespace::Env])
+                                   Gori::Env::Namespace::Env])
       regions.map(&.known).should eq([true, true, false])
       regions[0].start.should eq(2)
       regions[0].stop.should eq(11)

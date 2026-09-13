@@ -1405,7 +1405,7 @@ module Gori
           "#{Env.token_list(names, ns: Env::Namespace::Bind)} is not bound yet")
       in Refusal::Boundary
         classes = Bindings.boundary_bytes(subst_snapshot.bind[refused.key]? ||
-                                         subst_snapshot.display[refused.key]? || "")
+                                          subst_snapshot.display[refused.key]? || "")
         # Empty only if the value changed between the refusal and here, which is a rebind and
         # therefore a new revision — say nothing rather than name a byte class that is no
         # longer in the value.

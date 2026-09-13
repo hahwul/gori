@@ -679,7 +679,7 @@ module Gori::Tui
     # head shifts the line count, and the index would then overwrite an unrelated header.
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
-      return if @loaded_ws                                                   # no head to update — see pending_edit
+      return if @loaded_ws                                               # no head to update — see pending_edit
       raw = Env.expand_wire(@editor.wire_text, unescape: Env::Owns::All) # see pending_edit
       synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
