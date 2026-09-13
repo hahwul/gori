@@ -108,7 +108,7 @@ describe "MCP list_env value shape" do
     with_store_env do |store|
       call_json(store, "set_env_var", %({"key":"AUTH","value":"Bearer eyJhbGciOiJ9"}))
       call_json(store, "set_env_var", %({"key":"RAW","value":"eyJhbGciOiJ9"}))
-      rows = call_json(store, "list_env", "{}").as_a
+      rows = call_json(store, "list_env", "{}")["vars"].as_a
       auth = rows.find! { |r| r["key"].as_s == "AUTH" }
       raw = rows.find! { |r| r["key"].as_s == "RAW" }
       auth["value"].as_s.should eq("[REDACTED]")

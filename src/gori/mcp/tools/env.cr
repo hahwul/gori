@@ -14,29 +14,44 @@ module Gori
       private def list_env(h) : Result
         include_sensitive = bool_arg(h, "include_sensitive", false)
         Result.new(JSON.build do |j|
-          j.array do
-            Settings.project_env_vars.each do |(key, val)|
-              j.object do
-                j.field "key", key
-                j.field "value", include_sensitive ? val : "[REDACTED]"
-                # Two facts about the value that are not the value.
-                #
-                # `[REDACTED]` alone leaves one question a caller cannot answer without asking
-                # for the secret: does `$AUTH` already CARRY its scheme, or does the header
-                # have to read `Bearer $AUTH`? Getting that wrong sends `Bearer Bearer …` or a
-                # bare token, and both look like an auth bug at the target rather than a
-                # spelling mistake here.
-                #
-                # `scheme` is a registered IANA keyword, `length` is a size. Deliberately NOT
-                # `Bindings.mask_preview`, which shows first-4/last-4 — right for the TUI's own
-                # binding rows, but this contract has always been "no value bytes", and a
-                # preview would weaken it for every caller that never asked.
-                j.field "length", val.bytesize
-                env_value_scheme(val).try { |sc| j.field "scheme", sc }
-              end
-            end
+          j.object do
+            # WHICH SPELLING to write, reported beside the names rather than left for the
+            # caller to guess. An agent holding a key has to produce a token, and the token
+            # grammar is per-install (`$ENV.KEY` namespaced, `$KEY` bare) with a configurable
+            # sigil — guessing wrong ships the app's own `$id` as a reference, or a reference
+            # as literal bytes. `prefix` is the sigil, `syntax` the grammar; `example` is the
+            # two of them applied, so nothing has to be assembled from parts.
+            j.field "syntax", Settings.env_syntax.to_s.downcase
+            j.field "prefix", Settings.env_prefix
+            j.field "example", Env.spell("KEY", Env::Namespace::Env)
+            j.field "vars" { j.array { each_env_var_json(j, include_sensitive) } }
           end
         end)
+      end
+
+      # One row per project env var: the key, a redacted-by-default value, and the two facts
+      # about the value that are not the value.
+      private def each_env_var_json(j : JSON::Builder, include_sensitive : Bool) : Nil
+        Settings.project_env_vars.each do |(key, val)|
+          j.object do
+            j.field "key", key
+            j.field "value", include_sensitive ? val : "[REDACTED]"
+            # Two facts about the value that are not the value.
+            #
+            # `[REDACTED]` alone leaves one question a caller cannot answer without asking
+            # for the secret: does `$AUTH` already CARRY its scheme, or does the header
+            # have to read `Bearer $AUTH`? Getting that wrong sends `Bearer Bearer …` or a
+            # bare token, and both look like an auth bug at the target rather than a
+            # spelling mistake here.
+            #
+            # `scheme` is a registered IANA keyword, `length` is a size. Deliberately NOT
+            # `Bindings.mask_preview`, which shows first-4/last-4 — right for the TUI's own
+            # binding rows, but this contract has always been "no value bytes", and a
+            # preview would weaken it for every caller that never asked.
+            j.field "length", val.bytesize
+            env_value_scheme(val).try { |sc| j.field "scheme", sc }
+          end
+        end
       end
 
       # The auth scheme an env value already carries, if any — the leading token, when it is
@@ -86,12 +101,18 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_env_tools(j : JSON::Builder) : Nil
         tool j, "list_env",
-          "List the project's env vars (used for $KEY substitution in outbound requests — see " \
-          "send_request/send_websocket). Values are [REDACTED] by default (a project env var is " \
-          "exactly the kind of place a credential/token lives); pass include_sensitive:true to see them. " \
-          "Each row also carries 'length' and, when the value already begins with one, 'scheme' " \
-          "(Bearer/Basic/…) — enough to tell whether a header should read \"Bearer $KEY\" or just " \
-          "\"$KEY\", without the value. To see which key a saved request is actually wired to, read " \
+          "List the project's env vars, substituted into outbound requests (send_request/" \
+          "send_websocket). Result: {syntax, prefix, example, vars:[…]}. 'syntax' is THIS " \
+          "install's token grammar and decides how you write a reference: namespaced = " \
+          "$ENV.KEY (session bindings are $BIND.NAME), bare = $KEY (the legacy grammar, where " \
+          "an app's own $id/$ne/$filter in a body IS a reference and needs the $$ escape). " \
+          "'prefix' is the sigil, configurable in both; 'example' is the two applied, so a " \
+          "non-default sigil needs no assembling. Values are [REDACTED] by default (a project " \
+          "env var is exactly the kind of place a credential/token lives); pass " \
+          "include_sensitive:true to see them. Each var also carries 'length' and, when the " \
+          "value already begins with one, 'scheme' (Bearer/Basic/…) — enough to tell whether a " \
+          "header should read \"Bearer <token>\" or just the token, without the value. To see " \
+          "which key a saved request is actually wired to, read " \
           "get_repeater_context{include_content:true}'s env_headers." do |s|
           s.field "include_sensitive", boolprop("return actual values instead of [REDACTED] (default false)")
         end
@@ -99,8 +120,10 @@ module Gori
         return unless @allow_actions
 
         tool j, "set_env_var",
-          "Set (create or update) a project env var used for $KEY substitution in outbound " \
-          "requests (send_request, send_websocket, repeater sends)." do |s|
+          "Set (create or update) a project env var substituted into outbound requests " \
+          "(send_request, send_websocket, repeater sends). Reference it as $ENV.KEY, or as " \
+          "$KEY under the legacy bare syntax — read list_env's 'syntax'/'example' for which " \
+          "one this install speaks." do |s|
           s.field "key", strprop("variable name ([A-Za-z_][A-Za-z0-9_]*)"), required: true
           s.field "value", strprop("variable value (default empty)")
         end

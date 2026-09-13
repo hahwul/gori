@@ -55,7 +55,7 @@ module Gori
         unsafe = Discover::Headers.unsafe_expanded(config.headers)
         unless unsafe.empty?
           raise FuzzArgError.new("header #{unsafe.first.inspect} rejected — its value contains CR or LF " \
-                                 "after $VAR expansion, which would splice extra headers into every probe")
+                                 "after env expansion, which would splice extra headers into every probe")
         end
         options = Discover::PlanOptions.new(str(h, "url") || "", config: config,
           verify: !bool_arg(h, "insecure", false) && @verify_upstream,

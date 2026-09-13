@@ -1682,7 +1682,9 @@ module Gori
       # and the remedy is the same everywhere. Naming `set_env_var` matters more here than
       # on the other surfaces: an agent cannot see the token highlighted the way the TUI
       # operator can, so the message has to carry both the name and the way to fix it.
-      # `detail` is the builder's prefixed, comma-joined token list (`$SESSION, $TOKEN`).
+      # `detail` is the builder's spelled, comma-joined token list — `$ENV.TOKEN, $BIND.SESSION`
+      # on a namespaced install, `$SESSION, $TOKEN` on a bare one (`Env.token_list` decides), so
+      # the names an agent reads here are already in the spelling it has to write back.
       private def env_unresolved_error(detail : String?) : String
         "unresolved env #{detail} — set it with the set_env_var tool, or remove the token"
       end

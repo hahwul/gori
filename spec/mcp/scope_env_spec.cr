@@ -110,12 +110,12 @@ describe Gori::MCP::Server do
         set = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_env_var","arguments":{"key":"TOKEN","value":"secret123"}}})
         mcp_tool_payload(mcp_drive(store, set)[0])["set"].as_bool.should be_true
 
-        listed = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_env"}}))[0]).as_a
+        listed = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_env"}}))[0])["vars"].as_a
         listed.size.should eq(1)
         listed[0]["key"].as_s.should eq("TOKEN")
         listed[0]["value"].as_s.should eq("[REDACTED]")
 
-        sensitive = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_env","arguments":{"include_sensitive":true}}}))[0]).as_a
+        sensitive = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_env","arguments":{"include_sensitive":true}}}))[0])["vars"].as_a
         sensitive[0]["value"].as_s.should eq("secret123")
 
         del = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_env_var","arguments":{"key":"TOKEN"}}})
@@ -308,13 +308,13 @@ describe "MCP project env vars" do
   it "reports an out-of-band env change instead of a stale in-process copy" do
     with_store do |store|
       tools = tools_for(store)
-      mcp_ok_json(tools, "list_env", "{}").as_a.should be_empty
+      mcp_ok_json(tools, "list_env", "{}")["vars"].as_a.should be_empty
 
       # Another process (`gori run project env set`) writes to the same project DB.
       store.set_setting(Gori::Env::PROJECT_VARS_KEY, %([{"key":"CLI_TOKEN","value":"abc"}]))
 
       listed = mcp_ok_json(tools, "list_env", %({"include_sensitive":true}))
-      listed.as_a.map(&.["key"].as_s).should eq ["CLI_TOKEN"]
+      listed["vars"].as_a.map(&.["key"].as_s).should eq ["CLI_TOKEN"]
     end
   end
 
@@ -327,7 +327,7 @@ describe "MCP project env vars" do
       mcp_ok_json(tools, "set_env_var", %({"key":"MCP_KEY","value":"v"}))
 
       # set_env_var read-modify-WRITES the whole array; on a stale copy CLI_TOKEN vanished.
-      keys = mcp_ok_json(tools, "list_env", "{}").as_a.map(&.["key"].as_s)
+      keys = mcp_ok_json(tools, "list_env", "{}")["vars"].as_a.map(&.["key"].as_s)
       keys.should contain "CLI_TOKEN"
       keys.should contain "MCP_KEY"
     end
@@ -342,7 +342,7 @@ describe "MCP project env vars" do
       store.set_setting(Gori::Env::PROJECT_VARS_KEY, %([{"key":"B","value":"2"}])) # CLI removed A
       mcp_ok_json(tools, "delete_env_var", %({"key":"B"}))
 
-      mcp_ok_json(tools, "list_env", "{}").as_a.should be_empty
+      mcp_ok_json(tools, "list_env", "{}")["vars"].as_a.should be_empty
     end
   end
 end
