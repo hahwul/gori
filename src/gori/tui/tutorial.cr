@@ -3,6 +3,7 @@ require "./geometry"
 require "./screen"
 require "./theme"
 require "./frame"
+require "./chrome"
 require "./layout"
 require "./mascot"
 require "./notifications"
@@ -25,8 +26,17 @@ module Gori::Tui
   # sandbox that encourages all four moves; finally a "first session" checklist.
   # Progression is never blocked — clickable Prev/Next buttons always work.
   class Tutorial
-    # The mock tab bar; mirrors the real top-level tabs the user will see.
-    TABS = %w[Project Target History Intercept Repeater Fuzzer Help]
+    # The mock tab bar: the real bar's first five NUMBERED SLOTS, in the order a default
+    # install has them (Chrome::DEFAULT_HIDDEN leaves Project·Target·History·Intercept·
+    # Repeater in slots 1-5).
+    #
+    # Five, not the nine the real bar holds, because a numbered chip costs two cells more
+    # than a bare one and the card is 78 columns at its widest: nine would overflow the
+    # strip and `tab_chip_rects` would drop the right-hand chips — a mock bar whose last
+    # digits point at nothing, in the lesson about the digits. Five fit at 80 columns with
+    # the focus badge beside them, which is the terminal the new users this tour exists for
+    # are most likely to be running.
+    TABS = %w[Project Target History Intercept Repeater]
 
     # Short labels for the progress rail (keep narrow so 7 chips fit).
     STEP_RAIL = [
@@ -75,18 +85,38 @@ module Gori::Tui
     # fake tab index the row switches to (nil = the row only closes the palette). The action
     # rides its own slot so the label is free to be reworded or translated without the
     # practice step's "Go to …" quietly turning into a no-op.
+    #
+    # Every index here must name a chip the mock bar actually draws (spec-gated): a row
+    # pointing past TABS set @p_tab to a tab no chip matches, so the palette closed onto a
+    # bar with NOTHING highlighted. Help is the tab that lost its index — it starts off the
+    # bar now (Chrome::DEFAULT_HIDDEN), which is exactly why its row still reads "Open Help"
+    # and carries no number: the palette is one of the doors (`?`, `0`, ^P) that reach a tab
+    # no digit does.
     PALETTE_ROWS = [
       {"»", "Go to Repeater", 4},
       {"≡", "Settings: Theme", nil},
       {"×", "Quit gori", nil},
       {"→", "Go to History", 2},
-      {"?", "Open Help", 6},
+      {"?", "Open Help", nil},
     ]
 
     # Fake space-menu rows (mnemonic key + label).
     SPACE_ROWS = [{'o', "Open"}, {'r', "Repeater"}, {'y', "Copy"}, {'/', "Filter"}]
 
     FLOW_ROWS = [{"GET ", "/api/users", 200}, {"POST", "/login", 401}, {"GET ", "/admin", 500}]
+
+    # The Navigate lesson's looping demo: {tab, in the body?, pane, the key shown}. A TABLE,
+    # not the arithmetic over one phase counter it replaced, because the digit step is the
+    # point of it: `4` crosses two chips at once, which no ←/→ walk can show, and deriving
+    # tab/body/pane from a phase index could only express a walk.
+    NAV_DEMO = [
+      {0, false, 0, ""},
+      {1, false, 0, "→"},
+      {3, false, 0, "4"},
+      {3, true, 0, "↓"},
+      {3, true, 1, "⇥"},
+      {3, false, 0, "esc"},
+    ]
 
     enum Step
       Welcome
@@ -350,7 +380,7 @@ module Gori::Tui
       case @step
       when Step::Navigate
         ch = Tutorial.bare_char(ev)
-        if nav_switch_key?(ev) || key.down? || key.enter? || ch == 'j'
+        if nav_switch_key?(ev) || digit_tab_key?(ev) || key.down? || key.enter? || ch == 'j'
           start_nav_live
           handle_live_shell_key(ev, practice: false)
           return
@@ -463,10 +493,12 @@ module Gori::Tui
       # Practice's "switch" goal. See Tutorial.bare_char.
       bare = Tutorial.bare_char(ev)
 
-      # Digit jump (real app: 1-9 from anywhere).
+      # Digit jump (real app: 1-9 from anywhere). A digit past the mock's last chip is
+      # SWALLOWED rather than passed on: on the real bar those slots exist, so the one thing
+      # it must not do is fall through to another binding and teach that `7` means something
+      # else.
       if (ch = bare) && ch >= '1' && ch <= '9'
-        idx = ch.ord - '1'.ord
-        if idx < TABS.size
+        if idx = digit_tab(ch)
           @p_tab = idx
           mark_switch
         end
@@ -769,6 +801,26 @@ module Gori::Tui
       return true if key.left? || key.right?
       ch = Tutorial.bare_char(ev)
       ch == 'h' || ch == 'l'
+    end
+
+    # The tab a digit reaches, or nil — both for a bare `Char` and for a whole event, since
+    # the Navigate lesson has to recognise one BEFORE it hands the shell its first key (a
+    # digit is how the lesson now asks the user to move, so it has to be one of the presses
+    # that takes the demo live — see `handle_key`).
+    private def digit_tab(ch : Char) : Int32?
+      return nil unless '1' <= ch <= '9'
+      idx = ch.ord - '1'.ord
+      # The chips the strip actually PAINTED this frame, not TABS.size: a narrow card — Miss
+      # Ring's band at 80 columns, or a small terminal — packs fewer chips than the mock has,
+      # and a digit past the last one would move a highlight nobody can see while ticking the
+      # lesson's try-it on the way past. @tab_hits is rebuilt every frame by `render_tab_bar`,
+      # and empty on the lessons that draw no bar at all.
+      @tab_hits.any? { |(_, i)| i == idx } ? idx : nil
+    end
+
+    private def digit_tab_key?(ev : Termisu::Event::Key) : Bool
+      return false unless ch = Tutorial.bare_char(ev)
+      !digit_tab(ch).nil?
     end
 
     private def palette_open_key?(ev : Termisu::Event::Key) : Bool
@@ -1183,7 +1235,7 @@ module Gori::Tui
     private def card_title : String
       case @step
       when Step::Welcome   then "WELCOME"
-      when Step::Navigate  then "MOVE AROUND · tabs & panes"
+      when Step::Navigate  then "MOVE AROUND · 1-9, tabs & panes"
       when Step::Palette   then "COMMAND PALETTE · ^P"
       when Step::SpaceMenu then "ACTION MENU · space"
       when Step::Edit      then "EDIT MODE · READ / INS"
@@ -1273,11 +1325,11 @@ module Gori::Tui
           # Reachable here, not just on Edit/Practice — see the note in `render_navigate`.
           "type · esc → READ · then n/Next"
         elsif @nav_live
-          "←/→ tabs · ↓ body · ↑ tabs · ⇥ panes · #{tour}"
+          "1-5 / ←→ tabs · ↓ body · ↑ tabs · ⇥ panes · #{tour}"
         elsif @tried_nav
           "✓ #{tour} · or keep exploring"
         else
-          "try ←/→ then ↓ · #{tour} to skip"
+          "try 2, then ↓ · #{tour} to skip"
         end
       when Step::Palette
         if @overlay == :palette
@@ -1359,7 +1411,7 @@ module Gori::Tui
       iw = {box.w - 4, 1}.max
       y = box.y + 2
       moves = [
-        "1.  tabs & panes     ←/→  ·  ↓  ·  esc  ·  ⇥",
+        "1.  tabs & panes     1-9  ·  ←/→  ·  ↓  ·  esc  ·  ⇥",
         Hotkeys.retag("2.  command palette  ^P   — jump to any action"),
         "3.  action menu      space — commands for this pane",
         "4.  edit mode        READ / INS — browse, then type",
@@ -1385,11 +1437,14 @@ module Gori::Tui
       iw = {box.w - 4, 1}.max
       y = box.y + 2
       # Every key named here is one the real app binds the same way (Help → TABS & FOCUS).
-      # The second line names the SUBTABS level some tabs (Repeater, Notes) put between the
+      # The LAST line names the SUBTABS level some tabs (Repeater, Notes) put between the
       # bar and the body: a user taught two levels stalls on the first tab that has three.
+      # It is last because it is the line a short card drops first — `lesson_split` keeps as
+      # many as fit, and the digits are what this lesson is now about.
       detail = [
-        "←/→ on the bar · 1-9 jump · Repeater/Notes add a SUBTABS strip first",
+        "1-9 jump to a tab · ←/→ walk the bar · 0 lists every tab, slot or not",
         "↓ or ↵ into the body · ↑ back to tabs · ↓ list · esc · ⇥ panes",
+        "Repeater/Notes add a SUBTABS strip between the bar and the body",
       ]
       keep, sy = Tutorial.lesson_split(box, fixed: 2, detail: detail.size)
       screen.text(ix, y, "Every screen is a tab; most tabs split into panes.", Theme.text_bright, Theme.panel, width: iw)
@@ -1398,7 +1453,14 @@ module Gori::Tui
         screen.text(ix, y, ln, Theme.muted, Theme.panel, width: iw)
         y += 1
       end
-      draw_try_line(screen, ix, y, iw, "Try: switch a tab, enter body, ↑ back to tabs.", @tried_nav)
+      # A DIGIT is what it asks for: the bar's numbers are the primary way to move between
+      # tabs now, and `←/→` was the only move this line named while the chips sat there
+      # wearing their slot numbers. Any of them still ticks the try-it.
+      #
+      # `2`, and only `2`, because a narrow card packs fewer chips than the mock has and the
+      # second is the last one drawn at every size the tour renders at — a line naming a key
+      # that does nothing on a 56-column terminal is the defect, not the lesson.
+      draw_try_line(screen, ix, y, iw, "Try: press 2, then ↓ into the body, ↑ back to tabs.", @tried_nav)
 
       shell = Rect.new(box.x + 2, sy, box.w - 4, {box.bottom - 1 - sy, 3}.max)
       if @nav_live
@@ -1412,11 +1474,15 @@ module Gori::Tui
         render_shell(screen, shell, @p_tab, @p_level == :body, @p_pane, "",
           flow: @p_flow, insert: @edit_insert, typed: @edit_typed)
       else
-        phase = (@tick // 12) % 5
-        active = phase == 0 ? 0 : 1
-        in_body = phase == 2 || phase == 3
-        pane = phase == 3 ? 1 : 0
-        keyhint = ["", "→", "↓", "⇥", "esc"][phase]
+        active, in_body, pane, keyhint = NAV_DEMO[(@tick // 12) % NAV_DEMO.size]
+        # A narrow card packs fewer chips than the demo names. Land on the last one the strip
+        # will DRAW and say that chip's digit — a demo pressing `4` over a bar showing three
+        # tabs is the lesson teaching a key that, right there on screen, does nothing.
+        drawn = Tutorial.tab_chip_rects(Tutorial.tab_labels, 0, 0, Tutorial.bar_width(shell.w)).size
+        if drawn > 0 && active >= drawn
+          active = drawn - 1
+          keyhint = (active + 1).to_s if keyhint[0]?.try(&.ascii_number?)
+        end
         render_shell(screen, shell, active, in_body, pane, keyhint, flow: 0)
       end
     end
@@ -1516,7 +1582,7 @@ module Gori::Tui
       iw = {box.w - 4, 1}.max
       y = box.y + 2
       goals = [
-        {"switch", @p_switch}, {"enter", @p_enter}, {"esc back", @p_up},
+        {"1-5 tab", @p_switch}, {"enter", @p_enter}, {"esc back", @p_up},
         {Hotkeys.retag("^P"), @p_palette}, {"space", @p_space}, {"i INS", @p_edit},
       ]
       # Practice carries two rows of prose the other lessons don't — the six goal chips — and
@@ -1556,7 +1622,7 @@ module Gori::Tui
             elsif @edit_insert
               "INS mode — type, then esc back to READ."
             else
-              Hotkeys.retag("←/→ tabs · ↓ body · ↑ tabs · ↓ list · ⇥ panes · esc · ^P · space · i")
+              Hotkeys.retag("1-5/←→ tabs · ↓ body · ↑ tabs · ↓ list · ⇥ panes · esc · ^P · space · i")
             end
       screen.text(ix, box.bottom - 2, msg, practice_done? ? Theme.green : Theme.muted, Theme.panel, width: iw)
     end
@@ -1586,7 +1652,10 @@ module Gori::Tui
         {"2.", "Project → Open browser (CA trusted for you) · other clients: gori ca"},
         {"3.", "History — pick a captured flow"},
         {"4.", "^R — send it to Repeater · edit (i) · send again"},
-        {"5.", Hotkeys.retag("Help tab — full cheat-sheet · re-open this tour: ^P → Guided tour")},
+        # `?`, not "the Help tab": Help starts OFF the bar (Chrome::DEFAULT_HIDDEN), so a
+        # checklist sending a first-time user to hunt for a chip that isn't there strands
+        # them on the one step whose job is to hand them the cheat-sheet.
+        {"5.", Hotkeys.retag("? — cheat-sheet, from any tab · this tour again: ^P → Guided tour")},
       ]
       gaps = Tutorial.prose_gaps(box, steps.size + 3, 2)
       screen.text(ix, y, "That's the tour — here's a first real session:", Theme.text_bright, Theme.panel, width: iw)
@@ -1598,7 +1667,7 @@ module Gori::Tui
         y += 1
       end
       y += 1 if gaps > 1
-      screen.text(ix, y, Hotkeys.retag("Cheat-sheet:  ^P palette · space menu · i/↵ INS · esc READ/back"), Theme.muted, Theme.panel, width: iw)
+      screen.text(ix, y, Hotkeys.retag("Cheat-sheet:  1-9 tabs · 0 all tabs · ^P palette · space menu · i/↵ INS"), Theme.muted, Theme.panel, width: iw)
       y += 1
       screen.text(ix, y, "Re-run this tour anytime:  gori tutorial", Theme.muted, Theme.panel, width: iw)
     end
@@ -1623,7 +1692,7 @@ module Gori::Tui
       # then declines to use (sx <= rect.x, on a shell too narrow to hold it) would spend
       # the whole row on a chip that never appears.
       badge = sx > rect.x
-      bar_w = badge ? {rect.w - slabel.size - 1, 1}.max : rect.w
+      bar_w = Tutorial.bar_width(rect.w)
       render_tab_bar(screen, rect.x, rect.y, bar_w, active, !in_body)
       screen.text(sx, rect.y, slabel, Theme.ink_on(scol), scol, attr: Attribute::Bold) if badge
 
@@ -1646,6 +1715,20 @@ module Gori::Tui
       end
     end
 
+    # Cells the tab strip gets once the focus badge has taken its own — the badge is
+    # ` TABS ` or ` BODY `, the same width either way, and a shell too narrow to seat it
+    # gives the whole row to the chips (`render_shell`'s `badge`).
+    #
+    # A class method because the NAVIGATE DEMO has to ask the same question before it picks
+    # the frame to draw: `render_shell` computes this after the demo has already chosen a
+    # tab, so a demo that measured the row a second way would press `4` at a strip that only
+    # packed three chips.
+    BADGE_W = 6
+
+    def self.bar_width(w : Int32) : Int32
+      w > BADGE_W + 1 ? {w - BADGE_W - 1, 1}.max : w
+    end
+
     # The hit rect and index of each mock tab chip, laid left to right and measured in terminal
     # CELLS. The advance to the next chip is the same `draw_width` the rect and the overflow test
     # use, so a wide-glyph tab name (the point of the i18n pre-work) pushes the run and its click
@@ -1663,17 +1746,34 @@ module Gori::Tui
       hits
     end
 
+    # Each chip wears its SLOT NUMBER, like the real bar (`Chrome.menu_layout`'s `numbered`,
+    # on by default). The digit is the key this lesson is about, and a chip that does not
+    # carry it leaves `1-9` as a line of prose the screen never confirms.
+    #
+    # Unconditional, not gated on `Settings.tab_numbers?`: the digits keep working when that
+    # switch is off — it only stops the bar from SAYING so — and a tour that silently drops
+    # the one affordance it is teaching, on a setting the reader has not met yet, teaches
+    # nothing in its place.
+    def self.tab_labels : Array(String)
+      TABS.map_with_index { |name, i| "#{i + 1}:#{name}" }
+    end
+
     private def render_tab_bar(screen : Screen, x : Int32, y : Int32, w : Int32,
                                active : Int32, focused : Bool) : Nil
-      @tab_hits = Tutorial.tab_chip_rects(TABS, x, y, w)
+      labels = Tutorial.tab_labels
+      @tab_hits = Tutorial.tab_chip_rects(labels, x, y, w)
       @tab_hits.each do |(rect, i)|
-        label = " #{TABS[i]} "
         if i == active
           bg = focused ? Theme.focus_gold : Theme.accent_bg
           fg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text_bright
-          screen.text(rect.x, y, label, fg, bg, attr: Attribute::Bold)
+          screen.text(rect.x, y, " #{labels[i]} ", fg, bg, attr: Attribute::Bold)
         else
-          screen.text(rect.x, y, label, Theme.muted, Theme.bg)
+          # The `N:` run a step dimmer than the name — Chrome.menu_number_ink, the same ink
+          # and the same rule the real bar paints an inactive numbered chip with, so the
+          # number reads as the lesser half of the label here too.
+          num = "#{i + 1}:"
+          screen.text(rect.x + 1, y, num, Chrome.menu_number_ink, Theme.bg)
+          screen.text(rect.x + 1 + num.size, y, TABS[i], Theme.muted, Theme.bg)
         end
       end
     end

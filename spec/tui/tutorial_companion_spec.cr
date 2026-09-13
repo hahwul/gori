@@ -372,9 +372,51 @@ end
 describe "Gori::Tui::Tutorial::PALETTE_ROWS" do
   it "carry the fake tab each navigating row switches to" do
     rows = Gori::Tui::Tutorial::PALETTE_ROWS
-    rows.select { |(_, label, _)| label.starts_with?("Go to") || label == "Open Help" }
-      .map { |(_, _, tab)| tab }.should eq([4, 2, 6])
-    rows.reject { |(_, label, _)| label.starts_with?("Go to") || label == "Open Help" }
+    rows.select { |(_, label, _)| label.starts_with?("Go to") }
+      .map { |(_, _, tab)| tab }.should eq([4, 2])
+    rows.reject { |(_, label, _)| label.starts_with?("Go to") }
       .all? { |(_, _, tab)| tab.nil? }.should be_true
+  end
+
+  # …and every index one carries names a chip the bar DRAWS. The mock bar is five slots
+  # wide now (a numbered chip is two cells wider, and nine of them overflow the card), and
+  # the row that used to send the user to tab 6 would have closed the palette onto a bar
+  # with nothing highlighted at all — no crash, no chip, in the lesson whose subject is
+  # "↵ runs the row".
+  it "never names a tab the mock bar has no chip for" do
+    Gori::Tui::Tutorial::PALETTE_ROWS.each do |(_, label, tab)|
+      next unless tab
+      (0...Gori::Tui::Tutorial::TABS.size).includes?(tab).should be_true, "#{label} → #{tab}"
+    end
+  end
+end
+
+# The chips carry their slot number, and the lesson's demo presses one. Both are the visible
+# half of "1-9 jumps to a tab": the prose says it, and these are what the screen confirms.
+describe "Gori::Tui::Tutorial" do
+  it "labels every mock chip with the digit that reaches it" do
+    Gori::Tui::Tutorial.tab_labels.should eq(
+      Gori::Tui::Tutorial::TABS.map_with_index { |name, i| "#{i + 1}:#{name}" })
+  end
+
+  it "fits the numbered strip beside the focus badge at 80 columns" do
+    # The shell the card hands `render_shell` at an 80x24 terminal (the card less its two-
+    # column margins), less the focus badge that shares the row — `bar_width`, the same
+    # answer the renderer works from, so this measures the strip the user actually gets.
+    box = Gori::Tui::Tutorial.step_card(80, 24)
+    bar_w = Gori::Tui::Tutorial.bar_width(box.w - 4)
+    labels = Gori::Tui::Tutorial.tab_labels
+    Gori::Tui::Tutorial.tab_chip_rects(labels, 0, 0, bar_w).size.should eq(labels.size)
+  end
+
+  it "presses a digit in the navigate demo, on a chip the bar has" do
+    tabs = Gori::Tui::Tutorial::NAV_DEMO.map { |(tab, _, _, _)| tab }
+    tabs.all? { |t| t < Gori::Tui::Tutorial::TABS.size }.should be_true
+    keys = Gori::Tui::Tutorial::NAV_DEMO.map { |(_, _, _, key)| key }
+    digit = keys.find { |k| k.size == 1 && k[0].ascii_number? }
+    digit.should_not be_nil
+    # …and the frame that shows it is standing on the tab that digit reaches.
+    step = Gori::Tui::Tutorial::NAV_DEMO.find! { |(_, _, _, key)| key == digit }
+    step[0].should eq(digit.not_nil!.to_i - 1)
   end
 end
