@@ -1178,18 +1178,6 @@ module Gori::Tui
       @project_view.env_prefix_edit_start
     end
 
-    # Flip the GLOBAL token grammar. The twin of the Settings → Env card's `s`, sharing its
-    # wording (`EnvOverlay.syntax_toast`) so the two surfaces cannot describe the same flip
-    # differently. `Settings.env_syntax=` bumps the highlight rev itself, so every open editor
-    # and this pane's own value column re-tint before the next frame.
-    def env_toggle_syntax : Nil
-      syntax = Settings.env_syntax.bare? ? Env::Syntax::Namespaced : Env::Syntax::Bare
-      Settings.env_syntax = syntax
-      EnvSyntaxSeam.claim # this session's operator has spoken; a file written before now is stale
-      ok = Settings.save
-      @host.status(ok ? EnvOverlay.syntax_toast(syntax) : "env syntax applied — could not save to #{Settings.path}")
-    end
-
     def env_var_selected? : Bool
       @project_view.env_vars.size > 0
     end

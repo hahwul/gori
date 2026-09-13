@@ -780,7 +780,7 @@ module Gori::Tui
       screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
       y = draw_chord_hint(screen, ix, y, iw, " a ", "add a variable", bullet: "▸ ", verb: "env.add-var")
-      draw_chord_hint(screen, ix, y, iw, " space ", "vars, prefix & syntax", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " space ", "vars & prefix", bullet: "▸ ")
     end
 
     # Unlike its four neighbours this card asks for nothing: the pane REPORTS. So the bullets

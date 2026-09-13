@@ -76,6 +76,7 @@ require "./settings_view"
 require "./tabs_overlay"
 require "./hosts_overlay"
 require "./env_overlay"
+require "./env_syntax_seam"
 require "./hotkeys_overlay"
 require "./palette"
 require "./space_menu"
@@ -2230,11 +2231,10 @@ module Gori::Tui
     private def save_env(ov : EnvOverlay) : Bool
       # The env section is written WHOLE by the merge, grammar included, and this card saves on
       # every keystroke — so a var edit used to carry the overlay's opening snapshot of the
-      # grammar back over a `gori settings env-syntax` run in another terminal. The switch is the
-      # `s` key's business (it sets `Settings.env_syntax` itself and claims the session); a save
-      # about a var adopts whatever the file says. See `EnvSyntaxSeam`.
+      # grammar back over a `gori settings env-syntax` run in another terminal. No TUI surface
+      # switches the grammar any more, so a save here never has an opinion about it: adopt
+      # whatever the file says first. See `EnvSyntaxSeam`.
       EnvSyntaxSeam.refresh_from_disk
-      ov.sync_syntax
       prefix, vars = ov.to_config
       Settings.env_prefix = prefix
       Settings.env_vars = vars.dup

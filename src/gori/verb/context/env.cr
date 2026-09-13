@@ -8,6 +8,5 @@ abstract class Gori::Verb::ExecContext
   abstract def env_edit_var : Nil       # edit the selected env var in place
   abstract def env_delete_var : Nil     # remove the selected env var
   abstract def env_edit_prefix : Nil    # edit the global env token sigil
-  abstract def env_toggle_syntax : Nil  # flip the global token grammar (bare ⇄ namespaced)
   abstract def env_var_selected? : Bool # a var exists (gates edit/delete in the menu)
 end

@@ -18,10 +18,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     project_controller.env_edit_prefix
   end
 
-  def env_toggle_syntax : Nil
-    project_controller.env_toggle_syntax
-  end
-
   def env_var_selected? : Bool
     project_controller.env_var_selected?
   end

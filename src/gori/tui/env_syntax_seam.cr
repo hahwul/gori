@@ -3,38 +3,26 @@ require "../settings"
 require "../env"
 
 module Gori::Tui
-  # Who owns `env.syntax` while a TUI session is up, and how the TUI avoids writing a stale
-  # answer back over a peer's.
+  # How the TUI avoids writing a stale `env.syntax` back over a peer's switch.
   #
   # `Settings.save` merges with the file per SECTION (`pick_changed`): a section this process
   # changed wins whole. The grammar lives in the `env` section beside the vars and the prefix, so
-  # EVERY var edit in the Settings env card rewrites it — and the env section is never reloaded
-  # while the TUI runs. A `gori settings env-syntax namespaced` in another terminal was therefore
-  # undone by the next `a`/`e`/`d` on that card: the operator's switch reverted with no message,
-  # and every editor in the session went back to reading tokens under the grammar they had left.
+  # EVERY var edit in the Settings env card — and every prefix commit on the Project tab's ENV
+  # pane — rewrites it, and the env section is never reloaded while the TUI runs. A
+  # `gori settings env-syntax namespaced` in another terminal was therefore undone by the next
+  # `a`/`e`/`d` on that card: the operator's switch reverted with no message, and every editor in
+  # the session went back to reading tokens under the grammar they had left.
   #
-  # Two halves, and both are needed. The overlay no longer hands its snapshot back on save (the
-  # `s` toggle writes `Settings.env_syntax` itself, so the snapshot only ever repeats it or
-  # contradicts it), and before any env-section write the TUI re-reads the grammar from the file —
-  # unless the TUI itself set it this session, in which case the file is the stale copy and the
-  # operator's own keystroke is the answer.
+  # No TUI surface sets the grammar any more (switching it has to RE-SPELL the tokens already
+  # stored in project DBs and in the global rules, which is `gori settings env-syntax`'s work), so
+  # there is nothing for this process to own: whenever the file states a grammar, the file is
+  # right and the in-memory copy is the one that may be stale. Re-read it before any env-section
+  # write, so a save that is about a var (or about the sigil) carries no opinion about the
+  # grammar.
   module EnvSyntaxSeam
-    # Has a TUI surface set the grammar in this session (Settings env card `s`, Project ENV pane
-    # `s`)? A class-level answer because the two surfaces are different objects and the question is
-    # about the PROCESS: once the operator flips it here, a file written before that flip is the
-    # stale side of the merge.
-    class_property? owned : Bool = false
-
-    # Called by the surfaces that actually flip it, right where they assign `Settings.env_syntax`.
-    def self.claim : Nil
-      self.owned = true
-    end
-
-    # Adopt the FILE's grammar before writing the env section, so a save that is about a var (or
-    # about the sigil) carries no opinion about the grammar. A no-op once a TUI surface has
-    # claimed it.
+    # Adopt the FILE's grammar before writing the env section. Unconditional: the only writer of
+    # this key is the CLI verb, so a difference means a peer switched while this session was up.
     def self.refresh_from_disk : Nil
-      return if owned?
       found = disk_syntax
       return unless found
       Settings.env_syntax = found unless found == Settings.env_syntax

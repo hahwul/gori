@@ -32,13 +32,11 @@ module Gori
       r.register Verb::Definition.new(
         "env.edit-prefix", "Change prefix", "Edit the sigil that opens an env token (applies globally)",
         Verb::Scope::Env, mnemonic: 'p') { |ctx| ctx.env_edit_prefix; nil }
-
-      # Like the prefix above: a GLOBAL setting, so no direct chord — the space menu only.
-      # It decides how tokens already STORED in project DBs, drafts and rule replacements are
-      # read, which is not a key an operator should be able to hit while navigating a list.
-      r.register Verb::Definition.new(
-        "env.syntax", "Token syntax", "Switch between $ENV.KEY / $BIND.KEY and bare $KEY tokens (applies globally)",
-        Verb::Scope::Env, mnemonic: 's') { |ctx| ctx.env_toggle_syntax; nil }
+      # The token GRAMMAR (`env.syntax`) is deliberately not a verb here. Flipping it re-reads
+      # every token already stored in project DBs, drafts, rule replacements and slot headers,
+      # so the switch has to re-spell those bytes — which is `gori settings env-syntax`'s job
+      # (it migrates the global rules there and then, and each project at its next open). A key
+      # on this pane could only set the setting, leaving the stored bytes mis-spelled.
     end
   end
 end

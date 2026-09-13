@@ -55,25 +55,23 @@ describe Gori::Tui::SpaceMenu do
     end
   end
 
-  # `s` is a busy mnemonic — the Activity pane's source filter is also `s` — and the Env pane's
-  # new grammar switch joins it. Different SCOPES, so neither shadows the other; a shared scope
-  # is how one set of letters silently swallows another (see the a/e/d note in verbs/env.cr).
-  it "keeps the Env pane's `s` out of the panes stacked around it" do
+  # The Env pane offers `a`/`e`/`d`/`y` and the menu-only `p`, and NOTHING on `s` — the token
+  # grammar used to live there, and it is now `gori settings env-syntax`'s alone (it has to
+  # re-spell the tokens already stored in the project, which a setting-write cannot do). `s` in
+  # this tab belongs to the Activity pane's source filter, in its own scope.
+  it "claims no `s` in the Env scope, and keeps Activity's out of it" do
     ctx = FakeExecContext.new
     ctx.current_tab = :project
     registry = Gori::Verbs.registry
 
     env_menu = SpaceMenu.new(registry)
     env_menu.open(Gori::Verb::Scope::Env, :common, ctx)
-    env_menu.verb_for('s').try(&.id).should eq("env.syntax")
+    env_menu.verb_for('s').should be_nil
+    env_menu.entries.map(&.id).should contain("env.edit-prefix")
 
-    [Gori::Verb::Scope::Project, Gori::Verb::Scope::HostOverrides,
-     Gori::Verb::Scope::ProjectActivity].each do |scope|
-      other = SpaceMenu.new(registry)
-      other.open(scope, :common, ctx)
-      other.entries.map(&.id).should_not contain("env.syntax")
-      other.verb_for('s').try(&.id).should_not eq("env.syntax")
-    end
+    activity = SpaceMenu.new(registry)
+    activity.open(Gori::Verb::Scope::ProjectActivity, :common, ctx)
+    activity.entries.map(&.id).should_not contain("env.edit-prefix")
   end
 
   it "lists the Project description pane's own verbs under its own scope" do

@@ -824,10 +824,6 @@ private class FakeContext < ExecContext
     @calls << :env_edit_prefix
   end
 
-  def env_toggle_syntax : Nil
-    @calls << :env_toggle_syntax
-  end
-
   def env_var_selected? : Bool
     true
   end

@@ -6,7 +6,6 @@ require "./text_field"
 require "./overlay"
 require "../settings"
 require "../env"
-require "./env_syntax_seam"
 
 module Gori::Tui
   # Global environment-variable editor (settings:env). Edits a working copy of the
@@ -20,11 +19,15 @@ module Gori::Tui
     property on_save : Proc(Bool)?
     property on_toast : Proc(String, Nil)?
 
-    # The token grammar this install reads (`Settings.env_syntax`), edited here as a working
-    # copy like the prefix beside it. It is not a per-var setting: it decides how the bytes
-    # ALREADY stored in project DBs, drafts, rule replacements and slot headers are read, which
-    # is why the toast says they are not rewritten.
-    getter syntax : Env::Syntax = Env::Syntax::Bare
+    # The token grammar this install reads, READ-ONLY here and read LIVE — not a working copy
+    # like the prefix beside it. Switching it has to re-spell the tokens already stored in
+    # project DBs, in drafts, in rule replacements and in slot headers; a key on this card could
+    # only set the setting and leave those bytes mis-spelled, so the switch is
+    # `gori settings env-syntax` alone. The card still NAMES the grammar, because `HOST →
+    # api.test` reads the same whether the editors resolve `$HOST` or `$ENV.HOST`.
+    def syntax : Env::Syntax
+      Settings.env_syntax
+    end
 
     def initialize
       @items = [] of {String, String}
@@ -45,25 +48,15 @@ module Gori::Tui
     def reset : Nil
       @items = Settings.env_vars.dup
       @prefix = Settings.env_prefix
-      @syntax = Settings.env_syntax
       @selected = 0
       cancel_add
       cancel_prefix_edit
     end
 
-    # The PREFIX and the vars, and deliberately not the syntax: this is the pair the shell has
-    # always read back, and `syntax` is a getter of its own. Widening the tuple would break every
-    # caller for no gain.
+    # The PREFIX and the vars, and deliberately not the syntax: this card does not edit the
+    # grammar, and it reads it live. Widening the tuple would break every caller for no gain.
     def to_config : {String, Array({String, String})}
       {@prefix, @items}
-    end
-
-    # Re-read the grammar this card DISPLAYS from the live setting. Called by the shell after it
-    # has refreshed that setting from disk (`EnvSyntaxSeam`), so a peer's switch shows up in the
-    # prefix row and the border meta instead of leaving the card describing the old grammar while
-    # every editor paints the new one.
-    def sync_syntax : Nil
-      @syntax = Settings.env_syntax
     end
 
     def adding? : Bool
@@ -86,7 +79,7 @@ module Gori::Tui
     def hint : String
       return "type prefix · ↵ save · esc cancel" if @prefix_editing
       return %(type "KEY VALUE" · ↵ save · esc cancel) if @adding
-      "↑/↓ select · a add · ↵/e edit · d delete · p prefix · s syntax · esc close"
+      "↑/↓ select · a add · ↵/e edit · d delete · p prefix · esc close"
     end
 
     # a add · ↵/e edit · d delete · p edit the prefix sigil · esc close. ^P jumps back to
@@ -124,7 +117,6 @@ module Gori::Tui
       when 'e' then edit_start
       when 'a' then add_start
       when 'p' then prefix_edit_start
-      when 's' then toggle_syntax_and_persist
       when 'd' then delete_and_persist
       end
     end
@@ -164,39 +156,6 @@ module Gori::Tui
         @field.handle_edit_key(ev)
       end
       :stay
-    end
-
-    # Flip the grammar and write it. The toast names BOTH spellings the new mode uses and says
-    # what the switch does NOT do — stored bytes keep their text, so a `$KEY` in a project var
-    # name or a saved draft becomes a literal rather than migrating. An operator who is not
-    # told that reads the next unexpanded token as a bug in the send path.
-    private def toggle_syntax_and_persist : Nil
-      @syntax = @syntax.bare? ? Env::Syntax::Namespaced : Env::Syntax::Bare
-      # Set LIVE here, where the operator asked for it, and claim the setting for this session —
-      # `Runner#save_env` deliberately no longer writes this working copy back on every var edit
-      # (see `EnvSyntaxSeam`), and the assignment bumps the highlight rev so every open editor
-      # re-tints before the next frame.
-      Settings.env_syntax = @syntax
-      EnvSyntaxSeam.claim
-      unless persist
-        toast("env syntax applied — could not save to #{Settings.path}")
-        return
-      end
-      toast(EnvOverlay.syntax_toast(@syntax, @prefix))
-    end
-
-    # ONE wording for both surfaces that own this switch — this card and the Project tab's ENV
-    # pane. Two sentences about the same flip is how two surfaces come to describe different
-    # behaviour; the pane calls this.
-    def self.syntax_toast(syntax : Env::Syntax, prefix : String = Settings.env_prefix) : String
-      spelled = if syntax.namespaced?
-                  "#{Env.spell("KEY", Env::Namespace::Env, syntax, prefix)} / " \
-                  "#{Env.spell("KEY", Env::Namespace::Bind, syntax, prefix)}"
-                else
-                  Env.spell("KEY", Env::Namespace::Env, syntax, prefix)
-                end
-      "env syntax: #{syntax.namespaced? ? "namespaced" : "bare"} — #{spelled} · " \
-      "stored tokens are not rewritten"
     end
 
     private def commit_prefix_and_persist : Nil
@@ -428,7 +387,7 @@ module Gori::Tui
       # The live SPELLING rides the meta line, because it is the one thing about this card that
       # an operator cannot infer from the rows: `HOST → api.test` reads the same whether the
       # editor two tabs over resolves `$HOST` or `$ENV.HOST`.
-      meta = "global · #{Env.spell("KEY", Env::Namespace::Env, @syntax, @prefix)} · " \
+      meta = "global · #{Env.spell("KEY", Env::Namespace::Env, syntax, @prefix)} · " \
              "#{@items.size} var#{@items.size == 1 ? "" : "s"}"
       Frame.border_meta(screen, box, "ENVIRONMENT", meta, bg: Theme.panel)
       draw_prefix_row(screen, box, box.y + 1)
@@ -471,10 +430,14 @@ module Gori::Tui
         x = screen.text(x + 7, py, @prefix, Theme.text_bright, bg, width: {box.right - x - 8, 1}.max)
         # The grammar sits on the SAME row as the sigil: they are the two halves of one
         # spelling, and the syntax on a row of its own read as a third kind of thing to edit.
+        # It is REPORTED, not edited — `p` is the only key on this row.
         x = screen.text(x + 2, py, "syntax ", Theme.muted, bg) if box.right - 2 > x + 2
-        screen.text(x, py, @syntax.namespaced? ? "namespaced" : "bare", Theme.text_bright, bg,
+        screen.text(x, py, syntax.namespaced? ? "namespaced" : "bare", Theme.text_bright, bg,
           width: {box.right - 2 - x, 0}.max)
-        hint = "p edit · s toggle"
+        # Only the key this row owns. The card is capped at 56 cells and the spelling eats most
+        # of them, so `gori settings env-syntax` — the one way to change the value beside it —
+        # would not fit here at any width; the docs carry it.
+        hint = "p edit"
         screen.text({box.right - hint.size - 3, x + 1}.max, py, hint, Theme.muted, bg)
       end
     end
