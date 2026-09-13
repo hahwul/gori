@@ -2571,7 +2571,11 @@ module Gori::Tui
       n = @env_items.size
       # `project`, against the identically-titled GLOBAL card in Settings → Env that these
       # vars are layered OVER. See `EnvOverlay#render`.
-      Frame.border_meta(screen, rect, "", "project · prefix #{Settings.env_prefix} · #{n}")
+      # The live SPELLING, not just the sigil: under the namespaced grammar the sigil alone is
+      # half the answer, and this line is the only place on the tab that says which grammar the
+      # editors two tabs over are reading these vars under.
+      Frame.border_meta(screen, rect, "",
+        "project · #{Env.spell("KEY", Env::Namespace::Env)} · #{n}")
       render_env_list(screen, rect.inset(1, 1), focused)
     end
 

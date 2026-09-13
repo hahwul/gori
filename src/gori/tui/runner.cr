@@ -2230,6 +2230,10 @@ module Gori::Tui
       prefix, vars = ov.to_config
       Settings.env_prefix = prefix
       Settings.env_vars = vars.dup
+      # The grammar rides along with every mutation of this card, not on a seam of its own: the
+      # overlay persists per keystroke and the syntax is one of the three things it holds.
+      # `Settings.env_syntax=` bumps the highlight rev itself, so every open editor re-tints.
+      Settings.env_syntax = ov.syntax
       ok = Settings.save
       Env.bump_highlight_rev if ok
       ok

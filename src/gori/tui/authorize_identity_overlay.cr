@@ -42,6 +42,11 @@ module Gori::Tui
       set_text = (identity.try(&.set_headers) || [] of {String, String})
         .map { |name, value| "#{name}: #{value}" }.join("\n")
       @editor = TextArea.new(set_text)
+      # The `$BIND.SESSION` completer, in the ONE editor where a slot's overlay headers are
+      # written — the tokens this form exists to carry. Deliberately WITHOUT `highlight: :request`
+      # on the render: these are header lines with no start line, and the request painter reads
+      # line 0 as `METHOD path HTTP/1.1`, so `Cookie: x` would paint as a malformed verb.
+      @editor.env_complete = true
       @remove = TextField.new((identity.try(&.remove_headers) || [] of String).join(", "))
       @baseline = identity.try(&.baseline?) || false
       @taken = taken.map(&.downcase).to_set
@@ -116,6 +121,13 @@ module Gori::Tui
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
+      # The popup FIRST, before esc and before ⇥ — while it is open it owns ↹/↵/↑/↓/esc, which
+      # are exactly the keys this form's row navigation and its cancel claim. Routed after them
+      # the dropdown would have been unreachable: ↹ would jump to the next row and esc would
+      # throw the whole identity away rather than close a list.
+      if @selected == EDITOR_ROW && @editor.env_completing? && @editor.handle_env_complete_key(ev)
+        return :stay
+      end
       return :cancel if key.escape?
       if key.tab?
         move(1)

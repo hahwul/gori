@@ -75,11 +75,12 @@ module Gori::Tui
       !@edit_id.nil?
     end
 
-    # The `$` is stripped so an operator can type the token the way they read it. Nothing
-    # else about the name is repaired here — `Bindings#validate` names what is wrong.
+    # The SPELLING is stripped so an operator can type the token the way they read it —
+    # `$BIND.SESSION`, `BIND.SESSION`, `$SESSION` or `SESSION` all name the same binding. What
+    # is stored is the bare name; the namespace is this field's, not the operator's to choose.
+    # Nothing else about the name is repaired here — `Bindings#validate` names what is wrong.
     def name : String
-      raw = @fields[:name].value.strip
-      raw.starts_with?('$') ? raw[1..] : raw
+      Env.strip_spelling(@fields[:name].value, Env::Namespace::Bind)
     end
 
     def match_filter : String
@@ -287,7 +288,9 @@ module Gori::Tui
       x = box.x + 3
       fg = sel ? Theme.text_bright : Theme.text
       case i
-      when ROW_NAME then draw_field(screen, box, py, bg, fg, sel, "name: $", @fields[:name])
+      # The label is the affordance that teaches the syntax, so it prints the LIVE opener
+      # (`$BIND.` / `$`) rather than a hardcoded sigil the operator would then have to undo.
+      when ROW_NAME then draw_field(screen, box, py, bg, fg, sel, "name: #{Env.input_hint(Env::Namespace::Bind)}", @fields[:name])
       when ROW_WHEN then draw_field(screen, box, py, bg, fg, sel, "when:", @fields[:filter])
       when ROW_HOST then draw_field(screen, box, py, bg, fg, sel, "host:", @fields[:host])
       when ROW_KIND then Frame.option_cycle(screen, x, py, box.right - 2, bg, "from:", KINDS.map(&.label), @kind_i, sel)

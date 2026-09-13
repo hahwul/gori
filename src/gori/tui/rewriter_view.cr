@@ -169,7 +169,7 @@ module Gori::Tui
       # The name paints like the `$KEY` token it IS — known once bound, unknown until then,
       # the same two colours the editors use. That is the operator's answer to "did my login
       # actually bind it" without leaving the row.
-      nm = "$#{rule.name}"
+      nm = Env.spell(rule.name, Env::Namespace::Bind)
       # `width:` like every other run on the row: an unclipped draw of a name the operator
       # typed paints straight through the card's right hairline on a narrow terminal.
       x = screen.text(x, py, nm, bound ? Theme.env_known : Theme.env_unknown, bg,
@@ -200,7 +200,7 @@ module Gori::Tui
       screen.fill(Rect.new(rect.x, py, rect.w, 1), bg)
       screen.cell(rect.x, py, selected ? '▎' : ' ', Theme.accent, bg)
       x = rect.x + 2
-      nm = "$#{row.name}"
+      nm = Env.spell(row.name, Env::Namespace::Bind)
       x = screen.text(x, py, nm, row.bound? ? Theme.env_known : Theme.env_unknown, bg,
         row.bound? ? Attribute::None : Attribute::Italic, width: {rect.right - x, 0}.max) + 1
       # WHICH TABLE this row is. `rows` emits one row per (rule, table it writes), so a rule

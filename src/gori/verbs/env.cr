@@ -14,7 +14,7 @@ module Gori
       have_var = ->(ctx : Verb::ExecContext) { ctx.env_var_selected? }
 
       r.register Verb::Definition.new(
-        "env.add-var", "Add env var", "Open the inline row to add a $KEY environment variable",
+        "env.add-var", "Add env var", "Open the inline row to add an environment variable",
         Verb::Scope::Env, [Verb::Chord.new("a")]) { |ctx| ctx.env_add_var; nil }
 
       r.register Verb::Definition.new(
@@ -30,8 +30,15 @@ module Gori
         Verb::Scope::Env, [Verb::Chord.new("d")], available: have_var, group: :danger) { |ctx| ctx.env_delete_var; nil }
 
       r.register Verb::Definition.new(
-        "env.edit-prefix", "Change prefix", "Edit the token prefix used for $KEY substitution (applies globally)",
+        "env.edit-prefix", "Change prefix", "Edit the sigil that opens an env token (applies globally)",
         Verb::Scope::Env, mnemonic: 'p') { |ctx| ctx.env_edit_prefix; nil }
+
+      # Like the prefix above: a GLOBAL setting, so no direct chord — the space menu only.
+      # It decides how tokens already STORED in project DBs, drafts and rule replacements are
+      # read, which is not a key an operator should be able to hit while navigating a list.
+      r.register Verb::Definition.new(
+        "env.syntax", "Token syntax", "Switch between $ENV.KEY / $BIND.KEY and bare $KEY tokens (applies globally)",
+        Verb::Scope::Env, mnemonic: 's') { |ctx| ctx.env_toggle_syntax; nil }
     end
   end
 end

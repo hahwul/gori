@@ -421,7 +421,7 @@ module Gori::Tui
       # exactly one caller in the tree (`gori run discover`); this is the second.
       if unsafe = Discover::Headers.unsafe_expanded(run.config.headers).first?
         return {nil, "header #{unsafe.inspect} rejected — its value contains CR or LF after " \
-                     "$VAR expansion, which would splice extra headers into every probe"}
+                     "env expansion, which would splice extra headers into every probe"}
       end
       options = Discover::PlanOptions.new(run.target, config: run.config,
         verify: !session.config.insecure_upstream?, overrides: session.host_overrides)
