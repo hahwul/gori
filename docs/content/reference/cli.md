@@ -1433,49 +1433,28 @@ gori settings sections             # list the top-level sections
 gori settings export [-o FILE]     # write a shareable profile (stdout by default)
 gori settings import FILE          # apply a profile's sections
 gori settings tls-fingerprint      # the JA3/JA4 gori sends to each destination
-gori settings env-syntax [VALUE]   # read or set the env-token grammar (--migrate re-spells stored tokens)
+gori settings env-syntax [VALUE]   # read or set the env-token grammar
 ```
 
 ### `gori settings env-syntax` {#env-syntax}
 
-Which grammar spells an env token: `namespaced` (`$ENV.KEY` for env vars, `$BIND.NAME` for session bindings) or `bare` (`$KEY`, `$NAME`). A global setting, because it decides how the tokens in **every** project are read. With no argument it prints the value in force and where it came from — the absence of `env.syntax` in `settings.json` means `bare`, forever, so an existing install never changes grammar on its own.
+Which grammar spells an env token: `namespaced` (`$ENV.KEY` for env vars, `$BIND.NAME` for session bindings) or `bare` (`$KEY`, `$NAME`). A global setting, because it decides how the tokens in **every** project are read. With no argument it prints the value in force and where it came from.
 
 ```bash
 gori settings env-syntax
-# bare  (default — /Users/me/.gori/settings.json does not set env.syntax)
-#   $KEY / $NAME
+# namespaced  (from /Users/me/.gori/settings.json)
+#   $ENV.KEY / $BIND.NAME
 
-gori settings env-syntax namespaced
-# env syntax: namespaced — $ENV.KEY / $BIND.NAME
-# Stored tokens are NOT rewritten unless you run `--migrate`: project env var names, Repeater
-# drafts, rewrite-rule replacements and session-slot headers keep their text, so anything
-# spelled the other way is now a literal.
+gori settings env-syntax bare
+# env syntax: bare — $KEY / $NAME
+# Each project is re-spelled the next time it opens: its stored tokens are rewritten from
+# namespaced to bare, a backup is written beside the database, and the run that does it says
+# so. Captured evidence is left exactly as it was.
 ```
 
-A switch re-reads bytes that are already stored; it does not rewrite them. See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables). `gori settings import` says on stderr when a profile's `env.syntax` differs from this install's, for the same reason.
+Namespaced is the grammar for everyone, so the absence of `env.syntax` in `settings.json` means the file predates namespaces: the next start adopts `namespaced`, re-spells the **global** rewrite rules (keeping a `settings.json.pre-namespaced-<timestamp>` copy) and writes the key. Each **project** is re-spelled the first time it opens after the grammar moved — in the TUI, in any `gori run …`, or in a `gori mcp` server — with a `gori.db.pre-<grammar>-<timestamp>` backup beside the database (`VACUUM INTO`, so the WAL is included) and one line per project on stderr saying how many tokens moved. Rewritten: Repeater drafts (request, target, SNI, name) and their WebSocket messages, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot header values, and the masked tokens in issue titles/notes and note bodies. Left alone: every row whose provenance is a capture (`flow_id` set — a capture expands nothing), any row the target grammar has no equivalent spelling for, and names that are table keys rather than tokens (env vars, extract rules, rule patterns, payload sets).
 
-#### `--migrate` {#env-syntax-migrate}
-
-The opt-in other half: re-spell the tokens already stored in a project database, then switch.
-
-```bash
-gori settings env-syntax namespaced --migrate --dry-run   # print the table, write nothing
-gori settings env-syntax namespaced --migrate             # apply, then set the grammar
-gori settings env-syntax namespaced --migrate --all-projects
-gori settings env-syntax bare --migrate --project acme    # or --db PATH
-```
-
-| Flag | |
-|---|---|
-| `--migrate` | Re-spell stored tokens FROM the other grammar INTO the value named |
-| `--dry-run` | Print project · table · row · `before → after`, then exit without writing |
-| `--project NAME` / `--db PATH` / `--all-projects` | Which databases (default: the most-recently-active project) |
-
-What it rewrites: Repeater drafts (request, target, SNI, name) and their WebSocket messages, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot header values, and the masked tokens in issue titles/notes and note bodies. `$NAME` becomes `$ENV.NAME` for an env var (global or project) and `$BIND.NAME` for a declared binding or a name a slot claims; a name in both goes to `ENV` — what the bare grammar did — and is flagged `ambiguous`. In request text a bare `$$` loses a sigil, because the bare send seam consumed it and the namespaced one does not. `$1..$9` and `$$` in a rule replacement belong to the rule grammar and are left alone.
-
-What it does not touch, and lists: every row whose provenance is a capture (`flow_id` set — a capture expands nothing), any row the target grammar has no equivalent spelling for, and a **global** rewrite rule — that one lives in `settings.json`, which this command does not back up, so it is named for you to edit. Env var names, extract-rule names, rule patterns and payload sets are not tokens and are left as they are.
-
-Before writing, the migration refuses while another gori holds the database, copies it to `gori.db.pre-<grammar>-<timestamp>` beside itself (`VACUUM INTO`, so the WAL is included), and applies every change in one transaction per project. `--migrate` is **not idempotent** — it states which grammar the stored rows are read as, so run it once per switch. Going back to `bare` is lossy for what gori cannot see: a `$NAME` in a request file, a HAR, a piped body or a wordlist starts resolving again, and the command says so.
+`env.syntax = bare` is the opt-out and re-spells each project back on its next open, escaping a literal `$NAME` that would otherwise start resolving. See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables). `gori settings import` says on stderr when a profile's `env.syntax` differs from this install's: an import never changes the grammar.
 
 ### Profiles
 

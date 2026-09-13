@@ -201,7 +201,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `create_project` / `switch_project` / `delete_project` | Create or reopen a project, point this server at another one, or delete one. Deletion is two-step: a `dry_run` first, then a confirmation token |
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | Edit the project's include / exclude rules and toggle the scope lens |
 | `set_sandbox` | Hard containment: when on, the proxy forwards only what scope allows and blocks the rest |
-| `set_env_var` / `delete_env_var` | Manage the project env tokens substitution reads. The key is stored bare: reference it as `$ENV.KEY`, or as `$KEY` under the legacy bare syntax — `list_env`'s `syntax` / `example` says which one this install speaks |
+| `set_env_var` / `delete_env_var` | Manage the project env tokens substitution reads. The key is stored bare: reference it as `$ENV.KEY`, or as `$KEY` under the `bare` opt-out — `list_env`'s `syntax` / `example` says which one this install speaks |
 | `create_session_slot` / `update_session_slot` / `delete_session_slot` | Manage the session slots, the same list the Authorize tab's identities card edits, and the set `authorize_start` replays under |
 | `set_active_session_slot` | Choose the identity every outbound request goes out as: its header overlay is applied to the final wire bytes and `$BIND.NAME` resolves against its binding table. Held by this server process only, never persisted, so a new connection starts as-captured |
 | `add_host_override` / `update_host_override` / `delete_host_override` | Manage the host to IP dial map (changes only the connect IP, never the request) |

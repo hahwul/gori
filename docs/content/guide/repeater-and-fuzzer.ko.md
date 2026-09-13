@@ -80,17 +80,20 @@ X-Api-Key: $ENV.API_KEY
 
 캡처된 트래픽에 나타나는 값은 복사하거나 표시할 때 다시 토큰으로 마스킹할 수 있어, 비밀 값이 원시 문자열이 아니라 토큰으로 유지됩니다.
 
-### 레거시 bare 문법 {#legacy-bare-syntax}
+### bare 문법과 자동 업그레이드 {#bare-syntax-and-the-automatic-upgrade}
 
-네임스페이스보다 먼저 만들어진 설치는 처음 쓰던 문법을 그대로 유지합니다. 환경 변수는 bare `$KEY`, 바인딩은 bare `$NAME`, 리터럴 `$`는 `$$`입니다. `settings.json`에 `env.syntax`가 없다는 것이 바로 그 뜻이고, 그 상태는 앞으로도 유지됩니다. 완전히 새로 만든 gori 홈만 `namespaced`로 시작합니다. bare 문법에서는 바디의 GraphQL `$id`가 `id`라는 환경 변수와 실제로 충돌하며, 이스케이프와 `--verbatim`이 있는 이유가 그것입니다.
+문법은 namespaced입니다. 네임스페이스가 생기기 전에 쓰인 프로젝트는 **처음 열릴 때 자동으로 다시 적힙니다.** TUI든 `gori run …`이든 `gori mcp` 서버든, 먼저 연 쪽이 합니다.
+
+- Repeater 초안과 그 WebSocket 프레임, Fuzzer 템플릿, Miner·Sequencer 요청, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더, 마스킹이 이슈 제목·노트에 넣어 둔 토큰.
+- **캡처된 증거는 그대로 둡니다.** 캡처는 아무것도 확장하지 않으므로 그 안의 `$id`는 원본이 보낸 바이트입니다.
+- 먼저 데이터베이스 백업을 옆에 씁니다(`gori.db.pre-namespaced-<타임스탬프>`). 그리고 작업을 한 실행이 프로젝트마다 한 줄로 토큰 몇 개가 옮겨졌고 백업이 어디 있는지 알려줍니다. 전역 재작성 규칙은 `settings.json`에 있고 같은 처리를 받으며, `settings.json.pre-namespaced-<타임스탬프>` 복사본이 남습니다.
 
 ```bash
-gori settings env-syntax             # 지금 적용된 문법과 그 출처를 출력
-gori settings env-syntax namespaced  # 전환(Settings → Env의 s 키도 같은 일을 합니다)
-gori settings env-syntax namespaced --migrate --dry-run   # 전환이 무엇을 다시 적을지 미리 보기
+gori settings env-syntax        # 지금 적용된 문법과 그 출처를 출력
+gori settings env-syntax bare   # 옵트아웃(Settings → Env의 s 키도 같은 일을 합니다)
 ```
 
-**저장된 토큰은 다시 쓰이지 않습니다.** [`--migrate`](/ko/reference/cli/#env-syntax-migrate)를 붙이면 프로젝트 데이터베이스에 이미 있는 초안·템플릿·규칙 치환 텍스트·슬롯 헤더를 다시 적습니다(먼저 `--dry-run`). 붙이지 않으면 프로젝트 환경 변수 이름, Repeater 초안, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더는 텍스트를 그대로 유지하므로, 전환하는 순간 다른 문법으로 적힌 것은 리터럴이 됩니다. 이 문서의 나머지 부분은 토큰을 namespaced 문법으로 적습니다. bare 설치에서는 네임스페이스를 뺀 형태(`$KEY`, `$NAME`)로 읽으세요.
+`env.syntax = bare`가 옵트아웃입니다. 환경 변수는 bare `$KEY`, 바인딩은 bare `$NAME`, 리터럴 `$`는 `$$`입니다. 각 프로젝트는 다음에 열릴 때 **되돌려** 다시 적히고, 그대로 두면 해석되기 시작할 리터럴 `$NAME`은 이스케이프됩니다. 다만 bare는 모호한 문법입니다. 바디의 GraphQL `$id`가 `id`라는 환경 변수와 실제로 충돌하며, 이스케이프와 `--verbatim`이 있는 이유가 그것입니다. 이 문서의 나머지 부분은 토큰을 namespaced 문법으로 적습니다. bare 설치에서는 네임스페이스를 뺀 형태(`$KEY`, `$NAME`)로 읽으세요.
 
 ## Fuzzer {#fuzzer}
 

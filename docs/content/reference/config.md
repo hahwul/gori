@@ -530,7 +530,7 @@ Tokens like `$ENV.TOKEN` expand at send time in Repeater, Fuzzer, Miner, Interce
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `syntax` | string | `"bare"` | Token grammar: `namespaced` (`$ENV.KEY` env vars, `$BIND.NAME` session bindings) or `bare` (`$KEY`, `$NAME`). **Absence means `bare`**, so an existing install never changes grammar under you; a genuinely new gori home writes `"namespaced"` on its first run. Switch with [`gori settings env-syntax`](/reference/cli/#env-syntax) — stored tokens are not rewritten |
+| `syntax` | string | `"namespaced"` | Token grammar: `namespaced` (`$ENV.KEY` env vars, `$BIND.NAME` session bindings) or `bare` (`$KEY`, `$NAME`). **Absence means the file predates namespaces**: the next start adopts `namespaced`, re-spells the global rewrite rules (keeping a `settings.json.pre-namespaced-<timestamp>` copy) and writes the key. Every project re-spells its own stored tokens the first time it opens, with a backup beside the database. `bare` is the explicit opt-out and re-spells each project back. Switch with [`gori settings env-syntax`](/reference/cli/#env-syntax) |
 | `prefix` | string | `"$"` | The sigil that opens a token (`$ENV.KEY`), in either grammar |
 | `vars` | array | `[]` | Global key/value pairs; project vars (Project tab → ENV) override on collision |
 

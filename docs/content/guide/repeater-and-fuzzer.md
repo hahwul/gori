@@ -80,17 +80,20 @@ X-Api-Key: $ENV.API_KEY
 
 Values that appear in captured traffic can be masked back to their token when copying or displaying, so secrets stay as tokens rather than raw strings.
 
-### Legacy bare syntax
+### Bare syntax, and the automatic upgrade
 
-An install that predates namespaces keeps the grammar it was written with: bare `$KEY` for an env var, bare `$NAME` for a binding, and `$$` for a literal `$`. That is what the absence of `env.syntax` in `settings.json` means, and it stays that way forever; only a genuinely new gori home starts out `namespaced`. Under bare syntax a GraphQL `$id` in a body *does* collide with an env var named `id`, which is what the escape and `--verbatim` are for.
+Namespaced is the grammar. A project written before namespaces existed is **re-spelled automatically the first time it opens** — in the TUI, in a `gori run …`, or in a `gori mcp` server, whichever gets there first:
+
+- Repeater drafts and their WebSocket frames, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot headers, and the tokens a masking pass wrote into issue titles and notes.
+- **Captured evidence is left exactly as it was.** A capture expands nothing, so its `$id` is a byte the origin sent.
+- A backup of the database is written beside it first — `gori.db.pre-namespaced-<timestamp>` — and the run that does the work prints one line per project saying how many tokens moved and where the backup is. Global rewrite rules live in `settings.json` and get the same treatment, with a `settings.json.pre-namespaced-<timestamp>` copy.
 
 ```bash
-gori settings env-syntax             # print the grammar in force, and where it came from
-gori settings env-syntax namespaced  # switch (Settings → Env, key s, does the same)
-gori settings env-syntax namespaced --migrate --dry-run   # …and what a switch would re-spell
+gori settings env-syntax        # print the grammar in force, and where it came from
+gori settings env-syntax bare   # opt out (Settings → Env, key s, does the same)
 ```
 
-**Stored tokens are not rewritten** unless you add [`--migrate`](/reference/cli/#env-syntax-migrate), which re-spells the drafts, templates, rule replacements and slot headers already in a project database (`--dry-run` first). Without it, project env var names, Repeater drafts, rewrite-rule replacements and session-slot headers keep their text, so anything spelled the other way becomes a literal the moment you switch. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
+`env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar — a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
 
 ## Fuzzer
 
