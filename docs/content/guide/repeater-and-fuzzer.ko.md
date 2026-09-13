@@ -90,8 +90,13 @@ X-Api-Key: $ENV.API_KEY
 
 ```bash
 gori settings env-syntax        # 지금 적용된 문법과 그 출처를 출력
-gori settings env-syntax bare   # 옵트아웃(Settings → Env의 s 키도 같은 일을 합니다)
+gori settings env-syntax bare   # 옵트아웃
 ```
+
+전환은 이 명령뿐입니다. TUI에는 문법을 바꾸는 키가 없습니다. 전환은 저장된 토큰을 다시 적는
+일까지 해야 하고, 설정값만으로는 그것을 할 수 없기 때문입니다. 실행 중인 TUI나 `gori mcp`
+서버는 먼저 닫으세요. 각각 시작할 때의 문법을 들고 있고, 이미 열려 있는 프로젝트는 지금이
+아니라 다음에 열릴 때 다시 적힙니다.
 
 `env.syntax = bare`가 옵트아웃입니다. 환경 변수는 bare `$KEY`, 바인딩은 bare `$NAME`, 리터럴 `$`는 `$$`입니다. 각 프로젝트는 다음에 열릴 때 **되돌려** 다시 적히고, 그대로 두면 해석되기 시작할 리터럴 `$NAME`은 이스케이프됩니다. 다만 bare는 모호한 문법입니다. 바디의 GraphQL `$id`가 `id`라는 환경 변수와 실제로 충돌하며, 이스케이프와 `--verbatim`이 있는 이유가 그것입니다. 이 문서의 나머지 부분은 토큰을 namespaced 문법으로 적습니다. bare 설치에서는 네임스페이스를 뺀 형태(`$KEY`, `$NAME`)로 읽으세요.
 

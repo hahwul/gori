@@ -90,8 +90,13 @@ Namespaced is the grammar. A project written before namespaces existed is **re-s
 
 ```bash
 gori settings env-syntax        # print the grammar in force, and where it came from
-gori settings env-syntax bare   # opt out (Settings → Env, key s, does the same)
+gori settings env-syntax bare   # opt out
 ```
+
+That command is the only switch — no TUI key sets the grammar, because switching it has to
+re-spell stored tokens, which a setting on its own cannot do. Close a running TUI or `gori mcp`
+server first: each one holds the grammar it started under, and a project already open re-spells
+itself the next time it is opened, not underneath you.
 
 `env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar — a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
 
