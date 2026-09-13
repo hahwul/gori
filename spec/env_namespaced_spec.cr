@@ -186,6 +186,68 @@ describe "Gori::Env — namespaced grammar" do
     end
   end
 
+  # The two send-seam GATES walk with a memchr hop now (`Slice#index` sigil to sigil) rather than a
+  # `prefix_at?` per byte. The hop has to land on EVERY sigil, including the second one of an escape
+  # — which is what lets the `$$NS.` probe go: the next landing reads that `NS.NAME` directly.
+  it "the memchr-hopped gate agrees with the grammar at every sigil" do
+    with_ns do
+      {
+        # near misses: a sigil with nothing a namespace can open behind it
+        "$"       => false,
+        "$E"      => false,
+        "$ENV"    => false,
+        "$ENV."   => false,
+        "$ENV.1x" => false,
+        "$env.x"  => false,
+        "$FOO.x"  => false,
+        "$ENVX"   => false,
+        "$$"      => false,
+        "$$$"     => false,
+        # a token, reached through any number of preceding sigils
+        "$ENV.A"           => true,
+        "$$ENV.A"          => true, # the escape — the pass that owns ENV consumes it
+        "$$$ENV.A"         => true,
+        "$$$$$$$$$$$ENV.A" => true,
+        # adjacent sigils and a token at the very end of the buffer
+        "$ne$ENV.A"           => true,
+        "$$$ne"               => false,
+        "x" * 4096 + "$ENV.A" => true,
+        "x" * 4096 + "$ne"    => false,
+      }.each do |text, want|
+        Gori::Env.may_contain_tokens?(text).should eq(want), "may_contain_tokens?(#{text.inspect})"
+      end
+      # …and the namespace still decides WHICH pass has to run, escape included.
+      Gori::Env.may_contain_tokens?("$$ENV.A", Gori::Env::Owns::Bind).should be_false
+      Gori::Env.may_contain_tokens?("$$BIND.A", Gori::Env::Owns::Env).should be_false
+      # A multi-byte sigil whose first byte is everywhere: the hop lands on each one and the full
+      # needle is what decides, so a near miss never reads a namespace that is not there.
+      Gori::Env.may_contain_tokens?("$a$b$c$%ENV.A", Gori::Env::Owns::All, "$%").should be_true
+      Gori::Env.may_contain_tokens?("$a$b$c$ENV.A", Gori::Env::Owns::All, "$%").should be_false
+      # The last byte being the sigil's first byte: nothing left to compare, and no read past the end.
+      Gori::Env.may_contain_tokens?("ENV.A$$", Gori::Env::Owns::All, "$%").should be_false
+    end
+  end
+
+  # `contains_escape?` is private (the send seam's "nothing is bound" fast path asks it), so it is
+  # driven through the seam that calls it: with an EMPTY binding table the pass runs only when an
+  # escape it owns is present, and what it then does is consume it.
+  it "the escape gate hops sigils too, and only for the pass that owns the namespace" do
+    with_ns do
+      # `$$BIND.X` is the binding pass's escape: with nothing bound the seam must still run, to ship
+      # `$BIND.X` rather than `$$BIND.X`.
+      Gori::Env.expand_bindings("a$$BIND.X".to_slice).should eq("a$BIND.X".to_slice)
+      # An ENV escape is not this pass's business, and neither is a bare `$$`.
+      Gori::Env.expand_bindings("a$$ENV.X".to_slice).should eq("a$$ENV.X".to_slice)
+      Gori::Env.expand_bindings("a$$x".to_slice).should eq("a$$x".to_slice)
+      # Adjacent sigils: the hop lands on the second one, which is where the escape starts.
+      Gori::Env.expand_bindings("$$$BIND.X".to_slice).should eq("$$BIND.X".to_slice)
+      # A sigil in the last byte, and a buffer shorter than two sigils: no read past the end.
+      Gori::Env.expand_bindings("x$".to_slice).should eq("x$".to_slice)
+      Gori::Env.expand_bindings("$".to_slice).should eq("$".to_slice)
+      Gori::Env.expand_bindings("".to_slice).should eq("".to_slice)
+    end
+  end
+
   it "read_token_at answers the same grammar over bytes and over chars" do
     with_ns do
       text = "x $ENV.HOST"

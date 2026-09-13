@@ -398,20 +398,24 @@ module Gori
       return false if prefix.empty? || owns.none?
       return false unless contains_prefix?(bytes, prefix)
       return true if syntax.bare?
-      plen = prefix.bytesize
-      i = 0
+      pb = prefix.to_slice
+      head = pb[0]
+      plen = pb.size
       n = bytes.size
-      while i + plen < n
-        if prefix_at?(bytes, prefix, i)
-          if ref = read_ref(bytes, i + plen, n)
-            return true if owns.includes?(ref[0].owns)
-          end
-          # A `$$NS.` escape still needs the pass that owns NS: it is the pass that consumes it.
-          if prefix_at?(bytes, prefix, i + plen) && (ref = read_ref(bytes, i + 2 * plen, n))
-            return true if owns.includes?(ref[0].owns)
-          end
+      i = 0
+      # HOP sigil to sigil, never byte to byte. This runs on the send seam over whole request bodies,
+      # and the namespaced walk was calling `prefix_at?` at every single byte of them — a per-byte
+      # call whose first act is to compare that byte against the sigil, which is precisely what
+      # `Slice#index` does in one memchr for the entire remainder.
+      while (at = bytes.index(head, i))
+        break if at + plen >= n
+        if prefix_at?(bytes, prefix, at) && (ref = read_ref(bytes, at + plen, n))
+          return true if owns.includes?(ref[0].owns)
         end
-        i += 1
+        # No separate `$$NS.` probe. An escape's own second sigil is a sigil, so this loop lands on
+        # it and reads the `NS.NAME` behind it directly — the escape branch that used to sit here was
+        # asking a question the next iteration answers, at a second `read_ref` per sigil.
+        i = at + 1
       end
       false
     end
@@ -1332,16 +1336,23 @@ module Gori
                                       syntax : Syntax = Settings.env_syntax) : Bool
       pb = prefix.to_slice
       return false if pb.empty? || owns.none?
+      plen = pb.size
+      head = pb[0]
+      n = bytes.size
+      last = n - 2 * plen
       i = 0
-      last = bytes.size - 2 * pb.size
-      while i <= last
-        if prefix_at?(bytes, prefix, i) && prefix_at?(bytes, prefix, i + pb.size)
+      # Sigil-hopping for the same reason as `may_contain_tokens?` above: this is the send seam's
+      # "there are no bindings" fast path, so it walks bodies that almost never hold a `$` at all,
+      # and the per-byte `prefix_at?` was re-deriving the memchr `Slice#index` gives for free.
+      while (at = bytes.index(head, i))
+        break if at > last
+        if prefix_at?(bytes, prefix, at) && prefix_at?(bytes, prefix, at + plen)
           return true if syntax.bare?
-          if ref = read_ref(bytes, i + 2 * pb.size, bytes.size)
+          if ref = read_ref(bytes, at + 2 * plen, n)
             return true if owns.includes?(ref[0].owns)
           end
         end
-        i += 1
+        i = at + 1
       end
       false
     end
