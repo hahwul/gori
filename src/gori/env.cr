@@ -257,11 +257,23 @@ module Gori
     # The inverse of the spellings above, for a field an operator TYPES a name into:
     # `"$BIND.SESSION"`, `"BIND.SESSION"`, `"$SESSION"`, `"SESSION"` → `"SESSION"`.
     # Tolerant on purpose — the surfaces using it accept a name pasted from anywhere.
+    #
+    # Tolerant of the SPELLING, not of the namespace. The fields calling it are scoped to ONE
+    # namespace (`ns`): an extract rule's name is a BIND name, and nothing else can be one. A
+    # `"$ENV.TOKEN"` typed there is not a BIND rule named `TOKEN` under a mistyped prefix, it is
+    # a reference to the other namespace — so `raw` comes back UNCHANGED and the caller's
+    # validator (`Bindings#validate` / `valid_key?`) refuses it by name. Stripping it would have
+    # created a rule the operator never asked for, whose token then resolves from the other
+    # table.
+    #
+    # BARE mode strips the sigil and nothing else: there are no namespaces there, so `ENV.TOKEN`
+    # is simply not a key and the validator says so.
     def self.strip_spelling(raw : String, ns : Namespace, syntax : Syntax = Settings.env_syntax,
                             prefix : String = Settings.env_prefix) : String
-      s = raw.strip
-      s = strip_sigils(s, prefix)
-      _, bare = split_qualified(s)
+      s = strip_sigils(raw.strip, prefix)
+      return s if syntax.bare?
+      found, bare = split_qualified(s)
+      return raw if found && found != ns
       bare
     end
 

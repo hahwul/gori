@@ -182,6 +182,15 @@ describe "Gori::Env — namespaced queries" do
       %w[$BIND.SESSION BIND.SESSION $SESSION SESSION].each do |raw|
         Gori::Env.strip_spelling(raw, bind).should eq("SESSION")
       end
+      # …and a FOREIGN namespace comes back untouched, so the caller's validator refuses it.
+      # A name field scoped to BIND (an extract rule's name, the TUI extract form, MCP
+      # `create_extract_rule`) is not a place `$ENV.TOKEN` abbreviates to `TOKEN`: stripping it
+      # created a BIND rule the operator never asked for, whose token then resolves out of the
+      # other table.
+      Gori::Env.strip_spelling("$ENV.TOKEN", bind).should eq("$ENV.TOKEN")
+      Gori::Env.strip_spelling("ENV.TOKEN", bind).should eq("ENV.TOKEN")
+      Gori::Env.strip_spelling("$BIND.SESSION", env).should eq("$BIND.SESSION")
+      Gori::Env.valid_key?(Gori::Env.strip_spelling("$ENV.TOKEN", bind)).should be_false
       Gori::Env.parse_ref?("$BIND.SESSION").should eq(Gori::Env::Ref.new(bind, "SESSION"))
       Gori::Env.parse_ref?("$SESSION", default_ns: bind)
         .should eq(Gori::Env::Ref.new(bind, "SESSION"))
@@ -208,6 +217,9 @@ describe "Gori::Env — namespaced queries" do
       Gori::Env.spell_escaped("SESSION", bind).should eq("$$SESSION")
       Gori::Env.input_hint(bind).should eq("$")
       Gori::Env.strip_spelling("$SESSION", bind).should eq("SESSION")
+      # No namespaces here, so the sigil is all there is to strip and `ENV.TOKEN` is simply not
+      # a key — which `valid_key?` says for the caller.
+      Gori::Env.strip_spelling("$ENV.TOKEN", bind).should eq("ENV.TOKEN")
       Gori::Env.token_list(["A", "B"]).should eq("$A, $B")
       Gori::Env.token_list(["A"], ns: bind).should eq("$A")
     end
