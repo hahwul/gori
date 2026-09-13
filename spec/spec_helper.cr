@@ -20,6 +20,28 @@ require "../src/gori"
 # assert the line swap in an IO::Memory of their own.
 Gori::Settings.warning_io = nil
 
+# THE BARE-MODE PIN. Every spec home is a brand-new one — `GORI_TEST_HOME` above, plus the
+# per-example temp homes — so without this `Settings.load` would `adopt_env_syntax_for_new_home`,
+# read the ~1,000 bare `$TOKEN` fixtures in this suite under the namespaced grammar, and write a
+# settings.json into every temp home on the way. The existing suite IS the bare-mode contract;
+# namespaced behaviour gets its own files and opts in with `with_env_syntax`.
+Gori::Settings.new_install_env_syntax = Gori::Env::Syntax::Bare
+
+# Run a block under one token grammar and restore whatever was in effect.
+#
+# The setter bumps the highlight revision (a `TextArea`'s styled buffer, the `Highlight` caches and
+# `Rules#subst_snapshot` are keyed on it), and so does the restore — otherwise an example that
+# painted under one grammar would leave a neighbour reading its cache.
+def with_env_syntax(syntax : Gori::Env::Syntax, &)
+  was = Gori::Settings.env_syntax
+  Gori::Settings.env_syntax = syntax
+  begin
+    yield
+  ensure
+    Gori::Settings.env_syntax = was
+  end
+end
+
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 
 # The chord a keypress ACTUALLY produces, built the way the TUI builds it: a Termisu key

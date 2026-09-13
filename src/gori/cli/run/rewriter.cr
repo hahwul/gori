@@ -172,7 +172,7 @@ module Gori
         mark = r.enabled? ? "x" : " "
         host = r.host.empty? ? "" : " @#{r.host}"
         cond = r.match_filter.empty? ? "any message" : r.match_filter
-        "##{r.id} [#{mark}] $#{r.name} <- #{cond} <- #{r.token_loc.label}#{host}"
+        "##{r.id} [#{mark}] #{Env.spell(r.name, Env::Namespace::Bind)} <- #{cond} <- #{r.token_loc.label}#{host}"
       end
 
       private def self.cmd_extract_list(args : Array(String)) : Nil
@@ -277,7 +277,7 @@ module Gori
             abort "gori run rewriter extract add: rule ##{id} was created but the disable did not persist " \
                   "(store busy or unwritable) — it is ENABLED and already binding; retry the disable"
           end
-          puts "Extract rule ##{id} added — $#{name} binds from #{kind.label}."
+          puts "Extract rule ##{id} added — #{Env.spell(name, Env::Namespace::Bind)} binds from #{kind.label}."
         ensure
           store.close
         end
@@ -374,7 +374,7 @@ module Gori
             puts "No bindings declared — add an extract rule with `gori run rewriter extract add`."
           else
             rules.each do |r|
-              puts "$#{r.name}#{r.enabled? ? "" : " (rule disabled)"} <- #{r.token_loc.label}#{r.host.empty? ? "" : " @#{r.host}"}"
+              puts "#{Env.spell(r.name, Env::Namespace::Bind)}#{r.enabled? ? "" : " (rule disabled)"} <- #{r.token_loc.label}#{r.host.empty? ? "" : " @#{r.host}"}"
             end
             puts
             puts "Values are held in memory by the running gori and are never persisted."

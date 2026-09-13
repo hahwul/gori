@@ -528,11 +528,13 @@ module Gori
           err("invalid 'kind' (expected #{EXTRACT_KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind")
       end
 
-      # The `$` is stripped so an agent may pass the token the way an operator reads it.
+      # The spelling is stripped so an agent may pass the token the way an operator reads it —
+      # `$BIND.SESSION`, `BIND.SESSION`, `$SESSION` or `SESSION` all name the same extract rule,
+      # whose stored `name` column is the bare one.
       private def extract_name_arg(raw : String?) : String?
         n = raw.try(&.strip)
         return nil if n.nil? || n.empty?
-        n.starts_with?('$') ? n[1..] : n
+        Gori::Env.strip_spelling(n, Gori::Env::Namespace::Bind).presence
       end
 
       # An omitted field keeps the row's current value — the "omitted fields are left

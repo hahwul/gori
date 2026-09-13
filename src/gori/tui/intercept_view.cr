@@ -574,10 +574,13 @@ module Gori::Tui
       # `Env.expand_wire` (gsub `/\r?\n/`) not `split('\n').join("\r\n")`: a `$KEY` value
       # carrying a CRLF would otherwise double into `\r\r\n` and corrupt the forwarded bytes.
       #
-      # `Escape::Consume`: a forward goes STRAIGHT to the origin — there is no send-seam
+      # `unescape: Owns::All`: a forward goes STRAIGHT to the origin — there is no send-seam
       # `expand_bindings` after this the way there is on every Repeater/Fuzzer path — so this
-      # pass is the last one and therefore the one that owes the operator `$$` → `$`.
-      raw = Env.expand_wire(@editor.wire_text, escape: Env::Escape::Consume)
+      # pass is the last one and therefore the one that owes the operator the escape. ALL of
+      # them, spelled as `Owns` rather than as `Escape::Consume`, because under the namespaced
+      # grammar there are two escapes to consume here (`$$ENV.X` and `$$BIND.X`) and the enum
+      # can only name one anonymous escape.
+      raw = Env.expand_wire(@editor.wire_text, unescape: Env::Owns::All)
       # `@sync_content_length` (^L) — see its toggle. When it is OFF the operator's declared
       # value goes out as written. When it is on the rewrite has ALREADY been reflected into
       # the visible buffer by `reflect_content_length_in_editor`, so the call below is
@@ -677,7 +680,7 @@ module Gori::Tui
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
       return if @loaded_ws                                                   # no head to update — see pending_edit
-      raw = Env.expand_wire(@editor.wire_text, escape: Env::Escape::Consume) # see pending_edit
+      raw = Env.expand_wire(@editor.wire_text, unescape: Env::Owns::All) # see pending_edit
       synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first

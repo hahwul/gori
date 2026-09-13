@@ -77,8 +77,7 @@ module Gori
       @short_circuit_count = Atomic(Int32).new(stub_count(@rules))
       # Pre-merged `$KEY` snapshot for `replacement_for`, invalidated by revision rather
       # than rebuilt per message — see `subst_snapshot`.
-      @subst_vars = nil.as(Hash(String, String)?)
-      @subst_declared = [] of String
+      @subst_snap = nil.as(SubstSnapshot?)
       @subst_env_rev = 0_u32
       @subst_binding_rev = 0_u64
       # Rules already reported as blocked on an unbound binding, at that binding revision.
@@ -1139,8 +1138,8 @@ module Gori
       # The overwhelmingly common case, and the one that must cost nothing: no `$` in the
       # replacement means the identical String comes back, exactly as before this feature.
       return text if prefix.empty? || !text.byte_index(prefix)
-      vars, declared = subst_snapshot
-      substitute(text, prefix, vars, declared, rule.op.replace? && rule.match_kind.regex?,
+      snap = subst_snapshot
+      substitute(text, prefix, snap, rule.op.replace? && rule.match_kind.regex?,
         head: head_scoped?(rule))
     end
 
@@ -1188,10 +1187,21 @@ module Gori
     #
     # Byte-level for the same reason `Env.expand` is: a BODY replacement can carry bytes
     # that are not valid UTF-8, and `String#chars` would turn each of them into U+FFFD.
-    private def substitute(repl : String, prefix : String, vars : Hash(String, String),
-                           declared : Array(String), regex : Bool, head : Bool = false) : String | Refused
+    # `$$` IS the escape here in BOTH grammars, and it is checked before anything else — a rule's
+    # replacement is the one field whose whole purpose is to inject a value, so its escape belongs
+    # to the rule grammar rather than to a namespace. (`Env.read_token_at` is then asked with
+    # `escapes: Owns::None`: the sigil pair is already gone, and nothing else here is an escape.)
+    #
+    # Under the NAMESPACED grammar the token routes by namespace: `$ENV.X` resolves out of the
+    # env-var table and can never be Unbound or Boundary-refused (an env var is the operator's own
+    # bytes, P7), `$BIND.X` out of the binding table with both refusals intact. Under the BARE one
+    # there is a single merged table and a name is a binding iff some extract rule declares it,
+    # which is what shipped.
+    private def substitute(repl : String, prefix : String, snap : SubstSnapshot,
+                           regex : Bool, head : Bool = false) : String | Refused
       bytes = repl.to_slice
       prefix_bytes = prefix.to_slice
+      syntax = Settings.env_syntax
       n = bytes.size
       plen = prefix_bytes.size
       buf = IO::Memory.new(n)
@@ -1208,8 +1218,13 @@ module Gori
           i += 2 * plen
           next
         end
-        if parsed = Env.read_key_bytes?(bytes, i + plen, n)
-          key, consumed = parsed
+        found = Env.read_token_at(bytes, i, n, syntax: syntax, prefix: prefix,
+          escapes: Env::Owns::None)
+        if found && found.kind.token?
+          key = found.name
+          vars = snap.table_for(found.ns)
+          declared = snap.declarable?(found.ns) ? snap.declared : EMPTY_DECLARED
+          consumed = found.width - plen
           # Declared by an extract rule but not bound yet → the rule must not apply.
           #
           # The send seams stopped refusing on this (see `Env.unbound`): everywhere else a
@@ -1232,7 +1247,20 @@ module Gori
           # `report_refused` writes one warn event per (rule, binding revision) naming it.
           return Refused.new(Refusal::Unbound, key) if !vars.has_key?(key) && declared.includes?(key)
           return Refused.new(Refusal::Boundary, key) if head && forges_boundary?(vars, declared, key)
-          i += emit_key(buf, bytes, vars, key, consumed, prefix, plen, regex)
+          if val = vars[key]?
+            buf << (regex ? Rules.escape_backrefs(val) : val)
+            i += plen + consumed
+          else
+            # A key that is neither a var nor a declared binding stays LITERAL — `Env.expand`'s
+            # documented contract, and the meaning every pre-existing rule already had. Refusing
+            # here instead would be a one-way door on a persisted, operator-authored table.
+            #
+            # BARE re-enters the scan just past the sigil (`$AB` retries at `A`); NAMESPACED
+            # consumes the whole `$NS.NAME`, which has nothing inside it that could open a token.
+            w = found.miss_width(plen, syntax)
+            buf.write(bytes[i, w])
+            i += w
+          end
           next
         end
         # `$1`..`$9` → `\1`..`\9`, regex replacements only (unchanged from `regex_replacement`).
@@ -1266,22 +1294,6 @@ module Gori
       prefix_bytes.each_with_index.all? { |b, j| bytes[at + j] == b }
     end
 
-    # Write one resolved (or literal) `prefix+KEY` and answer how many bytes it consumed.
-    # A key that is neither a var nor a declared binding stays LITERAL — `Env.expand`'s
-    # documented contract, and the meaning every pre-existing rule already had. Refusing
-    # here instead would be a one-way door on a persisted, operator-authored table.
-    private def emit_key(buf : IO::Memory, bytes : Bytes, vars : Hash(String, String),
-                         key : String, consumed : Int32, prefix : String,
-                         plen : Int32, regex : Bool) : Int32
-      if val = vars[key]?
-        buf << (regex ? Rules.escape_backrefs(val) : val)
-        plen + consumed
-      else
-        buf << prefix
-        plen
-      end
-    end
-
     # Double every backslash so a substituted value cannot be read as a capture reference
     # by `String#gsub(Regex, String)`. `gsub(String, String)` interprets nothing, so this is
     # applied to the regex path alone.
@@ -1310,19 +1322,50 @@ module Gori
     # would be a per-message allocation. `Env.bump_highlight_rev` fires on a settings load,
     # a project env write, a rule edit and every rebind, which is exactly the set of events
     # that can move either half.
-    private def subst_snapshot : {Hash(String, String), Array(String)}
+    private def subst_snapshot : SubstSnapshot
       erev = Env.highlight_rev
       brev = Env.binding_rev
-      cached = @subst_vars
+      cached = @subst_snap
       if cached.nil? || erev != @subst_env_rev || brev != @subst_binding_rev
-        cached = Env.display_vars
-        @subst_vars = cached
-        @subst_declared = Env.declared_bindings
+        # All three tables on the same revision keys, because the grammar can change under a
+        # running process (`Settings.env_syntax=` bumps `highlight_rev` for exactly that reason)
+        # and a snapshot holding only the merged one would then route `$ENV.X` through a table
+        # that also carries the bindings.
+        cached = SubstSnapshot.new(Env.display_vars, Env.effective_vars, Env.binding_values,
+          Env.declared_bindings)
+        @subst_snap = cached
         @subst_env_rev = erev
         @subst_binding_rev = brev
       end
-      {cached, @subst_declared}
+      cached
     end
+
+    # The tables one `substitute` pass resolves against.
+    #
+    # BARE has one merged table (`display`) and a name is a BINDING iff an extract rule declares
+    # it — the shape that shipped. NAMESPACED reads the namespace off the token instead, so an
+    # `$ENV.SESSION` cannot pick up a bound value and a `$BIND.SESSION` cannot pick up an env var
+    # of the same name.
+    record SubstSnapshot,
+      display : Hash(String, String),
+      env : Hash(String, String),
+      bind : Hash(String, String),
+      declared : Array(String) do
+      def table_for(ns : Env::Namespace?) : Hash(String, String)
+        return display if ns.nil?
+        ns.bind? ? bind : env
+      end
+
+      # Whether a name in this namespace can be DECLARED-but-unbound — the rule-scoped skip and
+      # the boundary refusal both belong to the binding layer alone.
+      def declarable?(ns : Env::Namespace?) : Bool
+        ns.nil? || ns.bind?
+      end
+    end
+
+    # A namespace that cannot be declared gets this instead of `snap.declared`, so `substitute`
+    # stays one branch-free expression rather than two copies of the refusal pair.
+    EMPTY_DECLARED = [] of String
 
     # One warn event per (rule, binding revision): a rule injecting an unbound `$SESSION`
     # into every proxied request would otherwise write one row per message. The value is
@@ -1344,17 +1387,22 @@ module Gori
       in Refusal::Unbound
         names = Env.unbound(rule.replacement)
         return if names.empty?
+        # `Refused#key` and `unbound` both answer in BARE names (they index the binding table);
+        # the SPELLING is applied here, and it is the BIND namespace's by construction — this
+        # refusal exists only for a declared binding.
         @store.insert_event("bindings", "unbound", "warn",
-          "rewrite rule #{label.inspect} not applied: #{Env.token_list(names)} is not bound yet")
+          "rewrite rule #{label.inspect} not applied: " \
+          "#{Env.token_list(names, ns: Env::Namespace::Bind)} is not bound yet")
       in Refusal::Boundary
-        vars, _ = subst_snapshot
-        classes = Bindings.boundary_bytes(vars[refused.key]? || "")
+        classes = Bindings.boundary_bytes(subst_snapshot.bind[refused.key]? ||
+                                         subst_snapshot.display[refused.key]? || "")
         # Empty only if the value changed between the refusal and here, which is a rebind and
         # therefore a new revision — say nothing rather than name a byte class that is no
         # longer in the value.
         return if classes.empty?
         @store.insert_event("bindings", "boundary_refused", "warn",
-          "rewrite rule #{label.inspect} not applied: #{Env.token_list([refused.key])}'s value " \
+          "rewrite rule #{label.inspect} not applied: " \
+          "#{Env.token_list([refused.key], ns: Env::Namespace::Bind)}'s value " \
           "carries #{Rules.and_list(classes)} and would forge a message boundary in a header " \
           "(the value is still bound — a body-scoped rule can carry it)")
       end

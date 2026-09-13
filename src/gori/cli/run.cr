@@ -887,7 +887,7 @@ module Gori
         first = pairs.first[1]
         String.build do |io|
           io << "session #{one ? "value" : "values"} went out LITERALLY — "
-          io << order.join("; ") { |s| "#{s} sent #{Env.token_list(by_slot[s])}" }
+          io << order.join("; ") { |s| "#{s} sent #{Env.token_list(by_slot[s], ns: Env::Namespace::Bind)}" }
           io << ". Nothing bound #{one ? "it" : "them"} in this process (a binding value is "
           io << "memory-only, so every run starts with an empty table), so #{one ? "that" : "those"} "
           io << "request#{one ? "" : "s"} carried the reference itself where the session belongs "
@@ -1025,7 +1025,7 @@ module Gori
           abort "#{cmd}: --bind-from: " \
                 "#{bind_from_nothing_bound(bindings, flow_id, result.response.try(&.status))}"
         end
-        STDERR.puts "bind-from: flow ##{flow_id} replayed → bound #{Env.token_list(bound)}"
+        STDERR.puts "bind-from: flow ##{flow_id} replayed → bound #{Env.token_list(bound, ns: Env::Namespace::Bind)}"
         # The seed replay ran with the table still EMPTY — that is what it is for — so the
         # active slot's own `$NAME` went out literally on this one request and
         # `Env.report_unbound_overlay` recorded it. Drained and DROPPED here: the sweep that
@@ -1062,7 +1062,7 @@ module Gori
         end
         # `{rule name, the slots claiming it}` → "$SESSION (claimed by idA)".
         detail = skipped.join(", ") do |(name, slots)|
-          "#{Env.token_list([name])} (claimed by #{slots.join(", ")})"
+          "#{Env.token_list([name], ns: Env::Namespace::Bind)} (claimed by #{slots.join(", ")})"
         end
         pick = skipped.first[1].first
         "#{replayed}, and #{skipped.size == 1 ? "the rule that would have bound is" : "the rules that would have bound are"} " \
@@ -1152,7 +1152,7 @@ module Gori
         hits, rest = split_disabled_rule_tokens(detail)
         return "unresolved env #{detail}#{where} — set it with `gori run project env set KEY value`, " \
                "or remove the token" if hits.empty?
-        names = hits.map { |(name, id)| "#{Settings.env_prefix}#{name} (extract rule ##{id})" }.join(", ")
+        names = hits.map { |(name, id)| "#{Env.spell(name, Env::Namespace::Bind)} (extract rule ##{id})" }.join(", ")
         enable = hits.map { |(_, id)| "`gori run rewriter extract enable #{id}`" }.join(", ")
         tail = rest.empty? ? "" : " · #{Env.token_list(rest)} is not declared by any rule — " \
                                   "set it with `gori run project env set KEY value`, or remove the token"
@@ -1174,21 +1174,31 @@ module Gori
       # persists; the value never does"), and stale on the next run. So the two cases have to
       # be told apart before the sentence is chosen.
       #
-      # `detail` is the builder's own `Env.token_list` output, so it is parsed back with the
-      # same prefix that produced it.
+      # `detail` is the builder's own `Env.token_list` output, so it is parsed back through
+      # `Env.parse_ref?` — the inverse of the spelling that produced it, in whichever grammar is
+      # in effect.
+      #
+      # Only a BIND reference can be "declared by a disabled rule". Under the namespaced grammar a
+      # `$ENV.*` in the same list is a plain env var, so it goes to `rest` with its namespace
+      # intact (`Ref#qualified`, which `token_list` spells back to `$ENV.X` — or to `$X` in bare
+      # mode, where the label is not part of the spelling). That is what keeps the
+      # "declared by a DISABLED rule" sentence reachable for the names it is actually about.
       private def self.split_disabled_rule_tokens(detail : String?) : {Array({String, Int64}), Array(String)}
         hits = [] of {String, Int64}
         rest = [] of String
         return {hits, rest} unless detail
         ids = Env.layer.as?(Gori::Bindings).try(&.disabled_rule_ids)
         return {hits, rest} unless ids && !ids.empty?
-        prefix = Settings.env_prefix
         detail.split(", ").each do |token|
-          name = token.starts_with?(prefix) ? token[prefix.size..] : token
-          if id = ids[name]?
-            hits << {name, id}
+          ref = Env.parse_ref?(token, default_ns: Env::Namespace::Bind)
+          unless ref
+            rest << token # not a token gori can read back — carry it through verbatim
+            next
+          end
+          if ref.ns.bind? && (id = ids[ref.name]?)
+            hits << {ref.name, id}
           else
-            rest << name
+            rest << ref.qualified
           end
         end
         {hits, rest}

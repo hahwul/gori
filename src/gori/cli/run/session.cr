@@ -463,7 +463,7 @@ module Gori
       def self.session_slot_row(slot : Gori::SessionSlot, show_values : Bool) : String
         mark = slot.baseline? ? "◆" : " "
         body = show_values ? session_slot_verbose(slot) : slot.summary
-        rules = slot.rules.empty? ? "" : " · rules #{Env.token_list(slot.rules)}"
+        rules = slot.rules.empty? ? "" : " · rules #{Env.token_list(slot.rules, ns: Env::Namespace::Bind)}"
         "#{mark} #{CLI::Output.pad(slot.name, 18)} #{body}#{rules}"
       end
 
@@ -489,7 +489,7 @@ module Gori
             io << "  set     " << n << ": " << (show_values ? v : "[REDACTED]") << '\n'
           end
           slot.remove_headers.each { |n| io << "  remove  " << n << '\n' }
-          slot.rules.each { |n| io << "  rule    " << Settings.env_prefix << n << '\n' }
+          slot.rules.each { |n| io << "  rule    " << Env.spell(n, Env::Namespace::Bind) << '\n' }
         end
       end
 
