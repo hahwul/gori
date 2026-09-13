@@ -13,6 +13,7 @@ require "./proxy/tls/cert_authority"
 require "./cli/ca"
 require "./cli/mcp"
 require "./cli/settings"
+require "./cli/settings_env_migrate"
 
 module Gori
   # Subcommand-based CLI entrypoint.
@@ -247,7 +248,7 @@ module Gori
                              "       gori settings sections\n" \
                              "       gori settings export [--sections a,b] [-o FILE]\n" \
                              "       gori settings import FILE [--sections a,b] [--dry-run]\n" \
-                             "       gori settings env-syntax [bare|namespaced]\n" \
+                             "       gori settings env-syntax [bare|namespaced] [--migrate [--dry-run]]\n" \
                              "       gori settings tls-fingerprint [HOST] [--json]"
 
     private SETTINGS_VERBS = {"export", "import", "sections", "env-syntax", "tls-fingerprint"}
