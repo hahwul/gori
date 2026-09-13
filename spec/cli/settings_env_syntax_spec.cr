@@ -51,6 +51,10 @@ private def with_cli_home(&)
   prev_cfg = ENV["GORI_CONFIG"]?
   dir = File.tempname("gori-cli-env-syntax")
   Dir.mkdir_p(dir)
+  # The GLOBAL rewrite rules are class state `Settings.load` only overwrites when the file has a
+  # `rewriter` section: a restore that loads a snapshot without one keeps the rules an example
+  # migrated in place, and they then leak into every later spec file of the shard.
+  prev_rules = Gori::Settings.rewriter_rules
   begin
     ENV["GORI_HOME"] = dir
     ENV.delete("GORI_CONFIG")
@@ -68,6 +72,7 @@ private def with_cli_home(&)
     ENV.delete("GORI_CONFIG")
     File.write(File.join(dir, "settings.json"), snapshot)
     Gori::Settings.load
+    Gori::Settings.rewriter_rules = prev_rules
     prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
     prev_cfg ? (ENV["GORI_CONFIG"] = prev_cfg) : ENV.delete("GORI_CONFIG")
     FileUtils.rm_rf(dir)
