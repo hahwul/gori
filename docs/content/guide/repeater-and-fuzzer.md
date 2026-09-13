@@ -69,6 +69,8 @@ The namespace is uppercase and case-sensitive; the name after the dot is `A-Z a-
 
 Anything else that starts with the sigil is a byte. A GraphQL variable (`$id`), a MongoDB operator (`$ne`), an OData option (`$filter`) and a JSON Schema keyword (`$ref`) are not references and need **no escape** — paste that body and send it as written. To ship the text of a token itself, double the sigil: `$$ENV.KEY` sends `$ENV.KEY`, `$$BIND.NAME` sends `$BIND.NAME`, and a bare `$$` is two literal bytes. Each pass consumes only its own escape, so `$$BIND.NAME` survives env expansion and `$$ENV.KEY` survives the binding pass.
 
+That "a bare `$NAME` is just a byte" rule is about **request text** — a body, a header, a payload you pasted. It does not hold in a [Match & Replace](/guide/proxy/#match-replace) **replacement**, which exists only to inject a value: a bare `$NAME` there that names a known env var, extract rule or claimed session binding is a rule the grammar moved out from under, so gori **does not apply that rule** and writes an event naming the re-spelling. Fix it to `$ENV.NAME` / `$BIND.NAME`, or write `$$NAME` if the literal text really is what you meant.
+
 An unknown token stays visible as literal text wherever a request is *shown*. The editor keeps what you typed, and the highlighter marks an unregistered token differently from a registered one. It is not sent, though: Repeater, the Fuzzer, the Miner, the Sequencer and Discover each refuse a run whose request line, headers or target still name a variable that resolves to nothing, and say which one, as do minimize, an intercept forward you edited, and a WebSocket message. Set it, or drop the token. The check covers the request head only. A `$` inside a body is treated as a byte, so binary uploads replay unchanged. A WebSocket **text** message has no head, so the whole payload is checked; a **binary** message is never checked, and never expanded.
 
 ```http
@@ -94,9 +96,10 @@ gori settings env-syntax bare   # opt out
 ```
 
 That command is the only switch — no TUI key sets the grammar, because switching it has to
-re-spell stored tokens, which a setting on its own cannot do. Close a running TUI or `gori mcp`
-server first: each one holds the grammar it started under, and a project already open re-spells
-itself the next time it is opened, not underneath you.
+re-spell stored tokens, which a setting on its own cannot do. A TUI session or a `gori mcp` server
+that is already running **follows** the switch on its own: it picks up the new grammar, re-spells
+the project it has open, and says what it did (a notification and an ACTIVITY row in the TUI, a log
+line for MCP).
 
 `env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar — a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
 

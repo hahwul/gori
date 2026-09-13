@@ -434,7 +434,7 @@ Four things are worth knowing before you press it.
 
 The preview directory is gori's, mode `0700`, and swept to the newest 32 files on every write; wiping `~/.gori` takes it with them.
 
-## Match & Replace (Rewriter tab)
+## Match & Replace (Rewriter tab) {#match-replace}
 
 The **Rewriter** tab is the Match & Replace editor: rules that rewrite requests and responses in flight. It sits on the tab bar right of Comparer, and the command palette reaches it too (`Ctrl-P` → **Match & Replace**, or **Go to Rewriter**).
 
