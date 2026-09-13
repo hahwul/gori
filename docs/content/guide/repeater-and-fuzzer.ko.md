@@ -49,26 +49,47 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 
 ## 환경 변수 {#environment-variables}
 
-아웃바운드 요청은 `$KEY` 스타일 치환을 지원합니다. 토큰은 에디터에서 리터럴 텍스트로 남아 있다가, Repeater, Fuzzer, Miner, Intercept 포워드, `gori run`, MCP `send_request`에서 전송 시점에만 확장됩니다.
+아웃바운드 요청은 네임스페이스로 구분되는 두 종류의 토큰을 실어 나릅니다.
 
-변수는 두 곳에서 정의합니다(키 충돌 시 프로젝트가 우선).
+| 토큰 | 해석 대상 | 시점 |
+|------|-----------|------|
+| `$ENV.KEY` | 전역 또는 프로젝트 환경 변수 | 빌드 시점, 요청을 구성하기 전 |
+| `$BIND.NAME` | extract 규칙이 채운 [세션 바인딩](/guide/proxy/#session-bindings) | 전송 시점, 활성 신원의 테이블에서 |
+
+토큰은 에디터에서 리터럴 텍스트로 남아 있다가 나가는 길에서만 확장됩니다. Repeater, Fuzzer, Miner, Intercept 포워드, `gori run`, MCP `send_request`가 그 지점입니다.
+
+환경 변수는 두 곳에서 정의합니다(키 충돌 시 프로젝트가 우선).
 
 | 레이어 | 위치 |
 |-------|-------|
 | **Global** | Preferences(`Ctrl-,`) → **Editor & Keys** → **Env**, `Ctrl-P` → **Settings: Env**, 또는 `settings.json`의 `env` 섹션 |
 | **Project** | **Project** 탭 → **ENV** 패널 (`a` 추가, `e` 편집, `d` 삭제) |
 
-기본 접두사는 `$`입니다(ENV space 메뉴의 **Change prefix**나 설정의 `env.prefix`로 변경 가능). 키는 `A-Z a-z _`로 시작해 `A-Z a-z 0-9 _`가 이어집니다.
+네임스페이스는 대문자이며 대소문자를 구분합니다. 점 뒤의 이름은 `A-Z a-z _`로 시작해 `A-Z a-z 0-9 _`가 이어집니다. 시길은 기본값이 `$`이고(ENV space 메뉴의 **Change prefix**나 설정의 `env.prefix`로 변경 가능), 네임스페이스 표기는 바꿀 수 없습니다.
+
+시길로 시작하는 그 밖의 모든 것은 바이트입니다. GraphQL 변수(`$id`), MongoDB 연산자(`$ne`), OData 옵션(`$filter`), JSON Schema 키워드(`$ref`)는 참조가 아니므로 **이스케이프가 필요하지 않습니다**. 그런 바디는 붙여넣은 그대로 보내면 됩니다. 토큰의 텍스트 자체를 보내려면 시길을 두 번 씁니다. `$$ENV.KEY`는 `$ENV.KEY`를, `$$BIND.NAME`은 `$BIND.NAME`을 보내고, `$$`만 있으면 리터럴 두 바이트입니다. 각 패스는 자기 이스케이프만 소비하므로 `$$BIND.NAME`은 환경 변수 확장을, `$$ENV.KEY`는 바인딩 패스를 그대로 통과합니다.
 
 알 수 없는 토큰은 요청이 *표시*되는 곳에서는 리터럴 텍스트로 그대로 남습니다. 에디터는 입력한 그대로를 유지하고, 하이라이터가 미등록 토큰을 등록된 토큰과 다르게 칠합니다. 다만 전송되지는 않습니다. Repeater, Fuzzer, Miner, Sequencer, Discover는 요청 라인, 헤더, 타깃에 아무것으로도 해석되지 않는 변수가 남아 있으면 그 이름을 대며 실행을 거부합니다. minimize, 편집한 intercept forward, WebSocket 메시지도 마찬가지입니다. 변수를 설정하거나 토큰을 지우세요. 검사 범위는 요청 head뿐입니다. 바디 안의 `$`는 바이트로 취급하므로 바이너리 업로드는 그대로 재전송됩니다. WebSocket **텍스트** 메시지는 head가 없으므로 페이로드 전체를 검사하고, **바이너리** 메시지는 검사하지도 확장하지도 않습니다.
 
 ```http
 GET /api/me HTTP/1.1
 Host: api.example.com
-Authorization: Bearer $TOKEN
+Authorization: Bearer $BIND.SESSION
+X-Api-Key: $ENV.API_KEY
 ```
 
-캡처된 트래픽에 나타나는 값은 복사하거나 표시할 때 다시 `$KEY`로 마스킹할 수 있어, 비밀 값이 원시 문자열이 아니라 토큰으로 유지됩니다.
+캡처된 트래픽에 나타나는 값은 복사하거나 표시할 때 다시 토큰으로 마스킹할 수 있어, 비밀 값이 원시 문자열이 아니라 토큰으로 유지됩니다.
+
+### 레거시 bare 문법 {#legacy-bare-syntax}
+
+네임스페이스보다 먼저 만들어진 설치는 처음 쓰던 문법을 그대로 유지합니다. 환경 변수는 bare `$KEY`, 바인딩은 bare `$NAME`, 리터럴 `$`는 `$$`입니다. `settings.json`에 `env.syntax`가 없다는 것이 바로 그 뜻이고, 그 상태는 앞으로도 유지됩니다. 완전히 새로 만든 gori 홈만 `namespaced`로 시작합니다. bare 문법에서는 바디의 GraphQL `$id`가 `id`라는 환경 변수와 실제로 충돌하며, 이스케이프와 `--verbatim`이 있는 이유가 그것입니다.
+
+```bash
+gori settings env-syntax             # 지금 적용된 문법과 그 출처를 출력
+gori settings env-syntax namespaced  # 전환(Settings → Env의 s 키도 같은 일을 합니다)
+```
+
+**저장된 토큰은 다시 쓰이지 않습니다.** 프로젝트 환경 변수 이름, Repeater 초안, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더는 텍스트를 그대로 유지하므로, 전환하는 순간 다른 문법으로 적힌 것은 리터럴이 됩니다. 다시 적거나, 되돌리세요. 이 문서의 나머지 부분은 토큰을 namespaced 문법으로 적습니다. bare 설치에서는 네임스페이스를 뺀 형태(`$KEY`, `$NAME`)로 읽으세요.
 
 ## Fuzzer {#fuzzer}
 

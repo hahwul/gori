@@ -49,26 +49,47 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 
 ## Environment Variables
 
-Outbound requests support `$KEY`-style substitution. Tokens stay as literal text in the editor and expand only at send time: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+Outbound requests carry two kinds of token, told apart by their namespace:
 
-Define variables in two places (project wins on a key collision):
+| Token | Resolves from | When |
+|-------|---------------|------|
+| `$ENV.KEY` | env vars, global or per-project | at build time, before the request is framed |
+| `$BIND.NAME` | a [session binding](/guide/proxy/#session-bindings) an extract rule filled | at send time, out of the active identity's table |
+
+Tokens stay as literal text in the editor and expand only on the way out: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+
+Define env vars in two places (project wins on a key collision):
 
 | Layer | Where |
 |-------|-------|
 | **Global** | Preferences (`Ctrl-,`) → **Editor & Keys** → **Env**, `Ctrl-P` → **Settings: Env**, or the `env` section of `settings.json` |
 | **Project** | **Project** tab → **ENV** pane (`a` add, `e` edit, `d` delete) |
 
-Default prefix is `$` (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings). Keys are `A-Z a-z _` followed by `A-Z a-z 0-9 _`.
+The namespace is uppercase and case-sensitive; the name after the dot is `A-Z a-z _` followed by `A-Z a-z 0-9 _`. The sigil is `$` by default (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings); the namespace spelling is not.
+
+Anything else that starts with the sigil is a byte. A GraphQL variable (`$id`), a MongoDB operator (`$ne`), an OData option (`$filter`) and a JSON Schema keyword (`$ref`) are not references and need **no escape** — paste that body and send it as written. To ship the text of a token itself, double the sigil: `$$ENV.KEY` sends `$ENV.KEY`, `$$BIND.NAME` sends `$BIND.NAME`, and a bare `$$` is two literal bytes. Each pass consumes only its own escape, so `$$BIND.NAME` survives env expansion and `$$ENV.KEY` survives the binding pass.
 
 An unknown token stays visible as literal text wherever a request is *shown*. The editor keeps what you typed, and the highlighter marks an unregistered token differently from a registered one. It is not sent, though: Repeater, the Fuzzer, the Miner, the Sequencer and Discover each refuse a run whose request line, headers or target still name a variable that resolves to nothing, and say which one, as do minimize, an intercept forward you edited, and a WebSocket message. Set it, or drop the token. The check covers the request head only. A `$` inside a body is treated as a byte, so binary uploads replay unchanged. A WebSocket **text** message has no head, so the whole payload is checked; a **binary** message is never checked, and never expanded.
 
 ```http
 GET /api/me HTTP/1.1
 Host: api.example.com
-Authorization: Bearer $TOKEN
+Authorization: Bearer $BIND.SESSION
+X-Api-Key: $ENV.API_KEY
 ```
 
-Values that appear in captured traffic can be masked back to `$KEY` when copying or displaying, so secrets stay as tokens rather than raw strings.
+Values that appear in captured traffic can be masked back to their token when copying or displaying, so secrets stay as tokens rather than raw strings.
+
+### Legacy bare syntax
+
+An install that predates namespaces keeps the grammar it was written with: bare `$KEY` for an env var, bare `$NAME` for a binding, and `$$` for a literal `$`. That is what the absence of `env.syntax` in `settings.json` means, and it stays that way forever; only a genuinely new gori home starts out `namespaced`. Under bare syntax a GraphQL `$id` in a body *does* collide with an env var named `id`, which is what the escape and `--verbatim` are for.
+
+```bash
+gori settings env-syntax             # print the grammar in force, and where it came from
+gori settings env-syntax namespaced  # switch (Settings → Env, key s, does the same)
+```
+
+**Stored tokens are not rewritten.** Project env var names, Repeater drafts, rewrite-rule replacements and session-slot headers keep their text, so anything spelled the other way becomes a literal the moment you switch. Re-spell them, or switch back. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
 
 ## Fuzzer
 
