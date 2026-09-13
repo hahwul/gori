@@ -181,10 +181,14 @@ module Gori
         # A LITERAL sigil, and the only place this direction adds bytes. Bare would either pair
         # it into an escape (a sigil right behind it) or resolve the name behind it; either way
         # the escape has to be written now, or these bytes mean something new.
-        if found.width == plen && (double_sigil?(bytes, prefix, i, n) ||
-           resolvable_name_at?(bytes, i + plen, n, env, bind))
+        name = resolvable_name_at(bytes, i + plen, n, env, bind)
+        if found.width == plen && (name || double_sigil?(bytes, prefix, i, n))
           buf << prefix << prefix
-          changes << Change.new(i, prefix, prefix * 2, nil, note: "escape")
+          # Reported with the NAME when there is one (`$id → $$id`), because that is the line an
+          # operator reads the report for; a doubled sigil in front of another sigil has no name
+          # to carry and says only what it did.
+          changes << Change.new(i, "#{prefix}#{name}", "#{prefix}#{prefix}#{name}", nil,
+            note: "escape")
           plen
         else
           buf.write(bytes[i, found.width])
@@ -216,13 +220,13 @@ module Gori
       !!found.try(&.kind.token?)
     end
 
-    # A bare NAME at `at` that the bare grammar would resolve out of either table.
-    private def self.resolvable_name_at?(bytes : Bytes, at : Int32, n : Int32,
-                                         env : Set(String), bind : Set(String)) : Bool
+    # The bare NAME at `at` that the bare grammar would resolve out of either table, or nil.
+    private def self.resolvable_name_at(bytes : Bytes, at : Int32, n : Int32,
+                                        env : Set(String), bind : Set(String)) : String?
       parsed = Env.read_key_bytes?(bytes, at, n)
-      return false unless parsed
+      return nil unless parsed
       name = parsed[0]
-      env.includes?(name) || bind.includes?(name)
+      (env.includes?(name) || bind.includes?(name)) ? name : nil
     end
 
     private def self.at_prefix?(bytes : Bytes, prefix : String, at : Int32) : Bool

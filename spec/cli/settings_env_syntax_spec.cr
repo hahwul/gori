@@ -33,6 +33,19 @@ module Gori::CLI
   def self.env_syntax_origin_for_spec : String
     env_syntax_origin
   end
+
+  # The `--migrate` half. Only the drivable pieces: `migrate_targets` and `migrate_apply!` end in
+  # `abort` on every refusal, so the flag combinations are asserted through the resolver's own
+  # return and the rest through what the run printed and wrote.
+  def self.migrate_env_syntax_for_spec(to : Gori::Env::Syntax, *, dry : Bool, db_path : String,
+                                       io : IO) : Bool
+    migrate_env_syntax(to, dry: dry, project_name: nil, db_path: db_path, all: false,
+      io: io, warn_io: nil)
+  end
+
+  def self.migrate_source_syntax_for_spec(to : Gori::Env::Syntax) : Gori::Env::Syntax
+    migrate_source_syntax(to)
+  end
 end
 
 private def with_cli_home(&)
@@ -154,5 +167,124 @@ describe "gori settings env-syntax" do
       Gori::Settings.load
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
     end
+  end
+end
+
+# `--migrate`: the one-shot data half. A temp project database reached by `--db`, so the resolver
+# and the gori home stay out of it.
+describe "gori settings env-syntax --migrate" do
+  it "re-spells FROM the other grammar, so asking twice is not a no-op" do
+    # An operator who already switched and only now wants their drafts moved gets the same
+    # rewrite; the source grammar is derived, never read from the setting.
+    Gori::CLI.migrate_source_syntax_for_spec(Gori::Env::Syntax::Namespaced)
+      .should eq(Gori::Env::Syntax::Bare)
+    Gori::CLI.migrate_source_syntax_for_spec(Gori::Env::Syntax::Bare)
+      .should eq(Gori::Env::Syntax::Namespaced)
+  end
+
+  it "prints the table on --dry-run and writes nothing" do
+    with_migrate_db do |db_path|
+      with_migrate_store(db_path) do |store|
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"id", "sekrit-value"}]))
+        store.insert_repeater("https://x.test",
+          "GET /?q=$id HTTP/1.1\r\nHost: x.test\r\n\r\n".to_slice, false, true, nil, 0)
+        store.flush
+      end
+
+      io = IO::Memory.new
+      Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Namespaced, dry: true,
+        db_path: db_path, io: io).should be_false
+      lines = io.to_s
+      lines.should contain("would re-spell 1 token in 1 row")
+      lines.should contain("repeaters.request")
+      lines.should contain("$id → $ENV.id")
+      lines.should contain("--dry-run wrote nothing")
+
+      with_migrate_store(db_path) do |store|
+        String.new(store.repeaters[0].request).should contain("q=$id ")
+      end
+      Dir.glob("#{db_path}.pre-*").should be_empty
+    end
+  end
+
+  it "rewrites for real, and backs the database up beside itself" do
+    with_migrate_db do |db_path|
+      with_migrate_store(db_path) do |store|
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"id", "sekrit-value"}]))
+        store.insert_repeater("https://x.test",
+          "GET /?q=$id HTTP/1.1\r\nHost: x.test\r\n\r\n".to_slice, false, true, nil, 0)
+        store.flush
+      end
+
+      io = IO::Memory.new
+      Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Namespaced, dry: false,
+        db_path: db_path, io: io).should be_true
+      io.to_s.should contain("backup at ")
+
+      with_migrate_store(db_path) do |store|
+        String.new(store.repeaters[0].request).should contain("q=$ENV.id ")
+      end
+      Dir.glob("#{db_path}.pre-namespaced-*").size.should eq(1)
+    end
+  end
+
+  it "escapes a literal `$id` on the way back to bare, so the wire does not move" do
+    with_migrate_db do |db_path|
+      with_migrate_store(db_path) do |store|
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"id", "sekrit-value"}]))
+        # Under the namespaced grammar these five bytes are a GraphQL variable, not a reference.
+        store.insert_repeater("https://x.test",
+          "POST / HTTP/1.1\r\nHost: x.test\r\n\r\n{\"q\":\"$id\"}".to_slice,
+          false, true, nil, 0)
+        store.flush
+      end
+
+      io = IO::Memory.new
+      Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Bare, dry: false,
+        db_path: db_path, io: io).should be_true
+      io.to_s.should contain("$id → $$id")
+
+      with_migrate_store(db_path) do |store|
+        # `$$id` is what bare ships `$id` with — the var must not resolve into a body nobody
+        # wrote it into.
+        String.new(store.repeaters[0].request).should contain(%({"q":"$$id"}))
+      end
+      Dir.glob("#{db_path}.pre-bare-*").size.should eq(1)
+    end
+  end
+
+  it "says so when there is nothing stored to re-spell" do
+    with_migrate_db do |db_path|
+      with_migrate_store(db_path) { |store| store.flush }
+      io = IO::Memory.new
+      Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Namespaced, dry: true,
+        db_path: db_path, io: io).should be_false
+      io.to_s.should contain("nothing to re-spell")
+    end
+  end
+end
+
+private def with_migrate_db(&)
+  dir = File.tempname("gori-migrate-db")
+  Dir.mkdir_p(dir)
+  prev = Gori::Settings.project_env_vars
+  begin
+    yield File.join(dir, "gori.db")
+  ensure
+    Gori::Settings.project_env_vars = prev
+    FileUtils.rm_rf(dir)
+  end
+end
+
+# One handle, closed exactly once — `Store#close` is not idempotent.
+private def with_migrate_store(db_path : String, &)
+  store = Gori::Store.open(db_path)
+  begin
+    yield store
+  ensure
+    store.close
   end
 end
