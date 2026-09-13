@@ -565,6 +565,20 @@ module Gori
     # wire already has the escape: `$$SESSION`, the one escape this module defines, which
     # `expand` consumes and this scan honours for the same reason.
 
+    # One name a slot header will ship LITERALLY, and WHY — because the two causes have different
+    # remedies and only one of them is fixable by binding.
+    #
+    # `bare_spelled` marks the second cause, and it is the worse one: a `$SESSION` under a
+    # NAMESPACED install is not an unbound reference at all, it is text. Binding it changes
+    # nothing, ever — `$BIND.SESSION` is the only spelling that resolves.
+    record SlotLiteral, name : String, bare_spelled : Bool do
+      # What the operator should write instead. For a bare spelling that is the RE-SPELLING; for a
+      # genuinely unbound reference it is the escape, since the value is what they wanted.
+      def remedy : String
+        bare_spelled ? Env.spell(name, Namespace::Bind) : Env.spell_escaped(name, Namespace::Bind)
+      end
+    end
+
     # Every `$NAME` in `slot`'s own header VALUES that will land on the wire LITERALLY when
     # this slot is the send context, in first-appearance order.
     #
@@ -573,22 +587,53 @@ module Gori
     # same operator mistake, one step earlier). An unknown `$FOO` is plan-build's business,
     # exactly as `unbound` above states; two answers to one syntax is what #525 rules out.
     def self.unbound_in_slot(slot : SessionSlot) : Array(String)
-      literal = [] of String
+      slot_literals(slot).map(&.name)
+    end
+
+    # The same scan, with the CAUSE kept.
+    #
+    # Under the namespaced grammar this also reads the header with the BARE grammar, and that half
+    # is the missed bypass this report exists to prevent. A slot is written from two doors no
+    # migration reaches — `gori run … --identities FILE` and MCP `create_session_slot` — so an
+    # operator (or an agent) hands gori `Authorization: Bearer $SESSION` on a namespaced install,
+    # those eight characters go out verbatim, the origin answers 401 exactly as it would for
+    # anonymous, and `Authorize::Identity` aggregates the row as `enforced`. A missed bypass, which
+    # is the one direction that tool's doc says it must not fail in.
+    #
+    # A BOUND name is reported in this half, deliberately, and that is the difference from the
+    # namespaced half above: a bare `$SESSION` ships literally whether or not something bound
+    # `SESSION`, because the namespaced reader never looks at it.
+    def self.slot_literals(slot : SessionSlot) : Array(SlotLiteral)
+      literal = [] of SlotLiteral
       return literal if slot.set_headers.empty?
       prefix = Settings.env_prefix
       return literal if prefix.empty?
+      syntax = Settings.env_syntax
       # Nothing to scan and nothing to allocate for the overwhelmingly common slot: header
       # values an operator typed with no reference in them. This runs per SEND.
-      return literal unless slot.set_headers.any? { |(_, v)| may_contain_tokens?(v, Owns::Bind, prefix) }
+      #
+      # The gate asks the BARE question in both grammars — "is there a sigil" — because a bare
+      # `$SESSION` is exactly what the namespaced `$NS.` fast path would reject before anything
+      # looked at it. It is still a memchr; the scan below is what the gate protects.
+      return literal unless slot.set_headers.any? { |(_, v)|
+                              may_contain_tokens?(v, Owns::Bind, prefix, Syntax::Bare)
+                            }
       vals = binding_values_as(slot.name)
       declared = declared_bindings
+      seen = Set(String).new
       slot.set_headers.each do |(_, value)|
         # BARE names in the BIND namespace: they are matched against `vals` and `declared`, both
         # keyed by bare name, and an `$ENV.X` in a slot header is the env layer's business.
         token_names(value, prefix, Namespace::Bind).each do |name|
           next if vals.has_key?(name)
           next unless declared.includes?(name) || slot.claims?(name)
-          literal << name unless literal.includes?(name)
+          literal << SlotLiteral.new(name, false) if seen.add?(name)
+        end
+        next if syntax.bare?
+        each_token(value.to_slice, prefix, Syntax::Bare) do |found|
+          name = found.name
+          next unless declared.includes?(name) || slot.claims?(name)
+          literal << SlotLiteral.new(name, true) if seen.add?(name)
         end
       end
       literal
@@ -606,28 +651,48 @@ module Gori
     # for `take_unbound_overlay` and logs each (slot, name) pair once.
     def self.report_unbound_overlay(slot : SessionSlot?) : Array(String)
       return [] of String unless slot
-      names = unbound_in_slot(slot)
-      return names if names.empty?
-      fresh = [] of String
+      found = slot_literals(slot)
+      return [] of String if found.empty?
+      fresh = [] of SlotLiteral
       @@unbound_overlay_lock.synchronize do
-        names.each do |name|
-          next unless @@unbound_overlay_seen.add?("#{slot.name} #{name}")
-          @@unbound_overlay << {slot.name, name}
-          fresh << name
+        found.each do |lit|
+          next unless @@unbound_overlay_seen.add?("#{slot.name} #{lit.name}")
+          @@unbound_overlay << {slot.name, lit.name}
+          fresh << lit
         end
       end
       unless fresh.empty?
         # gori.log (#411). Once per (slot, name) until a surface drains the list: this runs
         # per SEND, and a Fuzzer sweep under a slot would otherwise write one line per request.
         ::Log.warn do
-          "session slot #{slot.name.inspect} sends #{token_list(fresh, ns: Namespace::Bind)} " \
-          "LITERALLY — nothing has bound #{fresh.size == 1 ? "it" : "them"} in this process (a " \
-          "binding value is memory-only and every run starts with an empty table). Bind first " \
-          "(`--bind-from`, a Repeater send under this slot), or write " \
-          "`#{spell_escaped(fresh[0], Namespace::Bind)}` if the literal is what you meant"
+          names = fresh.map(&.name)
+          # A BARE spelling under the namespaced grammar is a different sentence, because binding
+          # is not the remedy for it: the reader never looks at those bytes.
+          stale = fresh.select(&.bare_spelled)
+          String.build do |io|
+            io << "session slot #{slot.name.inspect} sends "
+            io << "#{token_list(names, ns: Namespace::Bind)} LITERALLY — "
+            if stale.size == fresh.size
+              io << "#{stale.size == 1 ? "it is" : "they are"} spelled the BARE way and this "
+              io << "install reads #{spell("KEY", Namespace::Env)}/#{spell("NAME", Namespace::Bind)}, "
+              io << "so no binding will ever resolve #{stale.size == 1 ? "it" : "them"}. Write "
+              io << "`#{stale[0].remedy}`"
+            else
+              io << "nothing has bound #{fresh.size == 1 ? "it" : "them"} in this process (a "
+              io << "binding value is memory-only and every run starts with an empty table). "
+              io << "Bind first (`--bind-from`, a Repeater send under this slot), or write "
+              io << "`#{fresh[0].remedy}`"
+              unless stale.empty?
+                io << " — and `#{spell(stale[0].name, Namespace::Bind)}` for "
+                io << "#{token_list(stale.map(&.name), ns: Namespace::Bind)}, which "
+                io << "#{stale.size == 1 ? "is" : "are"} spelled the bare way this install no "
+                io << "longer reads"
+              end
+            end
+          end
         end
       end
-      names
+      found.map(&.name)
     end
 
     # Drain the record — `{slot name, binding name}` pairs, in the order they were first seen.

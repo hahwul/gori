@@ -918,7 +918,18 @@ module Gori
           io << "— #{one ? "its" : "their"} response#{one ? " is" : "s are"} NOT evidence about "
           io << "the identity #{one ? "it names" : "they name"}. Bind first — replay a login under "
           io << "the slot (`--bind-from FLOW-ID` on a `gori run` sweep, a Repeater send, "
-          io << "`send_request` over MCP) — or write `$$#{first}` if the literal is what you meant"
+          io << "`send_request` over MCP) — or write "
+          io << "`#{Env.spell_escaped(first, Env::Namespace::Bind)}` if the literal is what you meant"
+          # Under the NAMESPACED grammar the likeliest cause is not an empty table at all: a bare
+          # `$SESSION` typed into `--identities` or `create_session_slot` (neither of which any
+          # migration reaches) is TEXT, and no amount of binding will resolve it. Both remedies,
+          # because this sentence cannot see which one applies.
+          unless Settings.env_syntax.bare?
+            io << ". If #{one ? "it is" : "they are"} spelled the bare way "
+            io << "(`#{Env.spell(first, Env::Namespace::Bind, Env::Syntax::Bare)}`), this install "
+            io << "reads #{EnvMigration.spelling(Env::Syntax::Namespaced)} and the remedy is the "
+            io << "spelling: write `#{Env.spell(first, Env::Namespace::Bind)}`"
+          end
         end
       end
 

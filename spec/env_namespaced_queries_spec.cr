@@ -144,6 +144,69 @@ describe "Gori::Env — namespaced queries" do
     end
   end
 
+  # The MISSED BYPASS this report exists to prevent. `--identities FILE` and MCP
+  # `create_session_slot` are two doors no migration reaches, so a bare `$SESSION` lands in a slot
+  # header on a namespaced install — and the namespaced reader does not look at it. Those eight
+  # characters go out verbatim, the origin answers 401 exactly as it would for anonymous, and the
+  # identity aggregates as `enforced`.
+  it "reports a BARE $NAME in a slot header under the namespaced grammar" do
+    with_q(declared: ["SESSION"], bound: {} of String => String) do
+      slot = Gori::SessionSlot.new("admin",
+        set_headers: [{"Authorization", "Bearer $SESSION"}], rules: ["SESSION"])
+      Gori::Env.unbound_in_slot(slot).should eq(["SESSION"])
+      lit = Gori::Env.slot_literals(slot)
+      lit.map(&.name).should eq(["SESSION"])
+      lit[0].bare_spelled.should be_true
+      # …and the remedy is the SPELLING, not the escape: binding would change nothing.
+      lit[0].remedy.should eq("$BIND.SESSION")
+
+      # BOUND changes nothing about it, which is the difference from the namespaced half: the
+      # reader never looks at those bytes, so they ship literally either way.
+      Gori::Env.layer = QueryLayer.new(["SESSION"], {"SESSION" => "tok"})
+      Gori::Env.unbound_in_slot(slot).should eq(["SESSION"])
+      Gori::Env.slot_literals(slot)[0].bare_spelled.should be_true
+    end
+  end
+
+  it "reports a bare name a slot CLAIMS even when no enabled rule declares it" do
+    with_q(declared: [] of String, bound: {} of String => String) do
+      slot = Gori::SessionSlot.new("admin",
+        set_headers: [{"Authorization", "Bearer $SESSION"}], rules: ["SESSION"])
+      Gori::Env.unbound_in_slot(slot).should eq(["SESSION"])
+      # A name in NEITHER list is plan-build's business, exactly as the namespaced half states —
+      # `$id` in a header value is not a reference gori may speak for.
+      other = Gori::SessionSlot.new("admin",
+        set_headers: [{"X-A", "$id"}, {"X-B", "$ENV.HOST"}], rules: [] of String)
+      Gori::Env.unbound_in_slot(other).should be_empty
+    end
+  end
+
+  it "escapes still work, and the escaped spelling is not reported" do
+    with_q(declared: ["SESSION"], bound: {} of String => String) do
+      # `$$SESSION` under the namespaced grammar is two literal bytes plus a re-examined sigil, so
+      # the bare reader sees `$SESSION` inside it — and the bare reader is `escapes: All`, which is
+      # what keeps the escape out of the report.
+      esc = Gori::SessionSlot.new("admin",
+        set_headers: [{"X-A", "$$SESSION"}], rules: ["SESSION"])
+      Gori::Env.unbound_in_slot(esc).should be_empty
+    end
+  end
+
+  it "reports nothing extra in the BARE grammar, where one reader answers for both" do
+    with_env_syntax(Gori::Env::Syntax::Bare) do
+      with_q(declared: ["SESSION"], bound: {} of String => String) do
+        with_env_syntax(Gori::Env::Syntax::Bare) do
+          slot = Gori::SessionSlot.new("admin",
+            set_headers: [{"Authorization", "Bearer $SESSION"}], rules: ["SESSION"])
+          lit = Gori::Env.slot_literals(slot)
+          lit.map(&.name).should eq(["SESSION"])
+          lit[0].bare_spelled.should be_false # nothing to re-spell: this IS the grammar
+          lit[0].remedy.should eq("$$SESSION")
+        end
+      end
+    end
+  end
+
   it "mask_secrets masks each namespace back to ITS OWN spelling, ENV first on a tie" do
     with_q(vars: [{"SECRET", "AAAABBBBCCCC"}], declared: ["TOKEN"],
       bound: {"TOKEN" => "DDDDEEEEFFFF"}) do
