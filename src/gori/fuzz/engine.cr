@@ -377,7 +377,11 @@ module Gori::Fuzz
       #
       # BEFORE the scope gate, because the gate keys on the target actually sent — the same
       # rule `ClientConn` states for Match&Replace on the proxy path.
-      bytes = Gori::Env.expand_bindings(bytes, verbatim)
+      # ONE generation across the two passes below (see `Repeater::Sender#wire`): the request's
+      # own `$GEN.UUID` and one in the active slot's header overlay are the same outbound
+      # request, so they resolve to the same value.
+      gen = Gori::Env::Generation.new
+      bytes = Gori::Env.expand_bindings(bytes, verbatim, generation: gen)
       # The ACTIVE SESSION SLOT's header overlay, after the `$NAME` pass and BEFORE the scope
       # gate below — the gate keys on the target actually sent, and an overlay is header-only
       # so it cannot move the request line, but reading the same bytes the socket will is the
@@ -392,7 +396,7 @@ module Gori::Fuzz
       # `slot_overlay?` is the one way out, for the one caller that carries its own identity
       # per send (`Authorize`). Since `verbatim` cannot express "leave the headers alone",
       # a sender that MEANS a specific identity has to be able to say so at construction.
-      bytes = Gori::Env.overlay_slot(bytes) if @slot_overlay
+      bytes = Gori::Env.overlay_slot(bytes, gen) if @slot_overlay
       # Sandbox mode / an explicit EXCLUDE rule hard-blocks BEFORE the socket, so a
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect
@@ -433,12 +437,13 @@ module Gori::Fuzz
       # The FRAMES carry provenance individually (`WsFrame#evidence`) because the two
       # populations mix in one script — a `--message` override sits beside seeded rows.
       verbatim = Backend.all_verbatim(handshake) if @evidence
-      wire = Gori::Env.expand_bindings(handshake, verbatim)
+      ws_gen = Gori::Env::Generation.new
+      wire = Gori::Env.expand_bindings(handshake, verbatim, generation: ws_gen)
       # The handshake takes the session-slot overlay and the frames do not. It IS an HTTP
       # request head — the session a WebSocket rides is chosen there — while a frame has no
       # header lines for a header-only overlay to write. `Repeater::Sender#send_ws` draws the
       # line in the same place and for the same reason.
-      wire = Gori::Env.overlay_slot(wire) if @slot_overlay
+      wire = Gori::Env.overlay_slot(wire, ws_gen) if @slot_overlay
       if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire), @origin.port)
         @blocked += 1
         @blocked_reason ||= err
@@ -548,21 +553,27 @@ module Gori::Fuzz
       # `send`, still gated, still one Result per request in order). The rule pre-filters to
       # HTTP/1.1 anyway, so this is a belt-and-braces guard, not a hot path.
       return super if @http2
-      # GROUP-GATE up front, sweep-side, mirroring `Repeater::Sender#group_refusal`: one blocked
-      # member refuses the WHOLE batch and returns all-error Results — a group is one connection
-      # carrying a deliberate sequence, so a partial send would be a misleading half-probe. The
-      # target is read off each member AFTER the same binding expansion `send` applies, so the
-      # scope decision is identical to the lone-send path (BEFORE the socket, per `ClientConn`).
-      requests.each do |req|
-        target = Gori::Outbound.request_target(@evidence ? req : Gori::Env.expand_bindings(req))
-        if err = @outbound.sweep_block(@origin.scheme, @origin.host, target, @origin.port)
+      # WIRED FIRST, then gated — `Repeater::Sender#send_group`'s discipline, and for its
+      # reason. This ran the seam once to read each target and AGAIN to build the bytes, which
+      # is only the same answer while expansion is idempotent: a `$GEN.*` in a request line
+      # mints a new value per pass, so the gate judged a target the socket never got. One pass
+      # per member, and the verdict is taken on the bytes the pipeline will write.
+      reqs = requests.map do |b|
+        gen = Gori::Env::Generation.new
+        wired = @evidence ? b : Gori::Env.expand_bindings(b, generation: gen)
+        Gori::Env.overlay_slot(wired, gen)
+      end
+      # GROUP-GATE, sweep-side, mirroring `Repeater::Sender#group_refusal`: one blocked member
+      # refuses the WHOLE batch and returns all-error Results — a group is one connection
+      # carrying a deliberate sequence, so a partial send would be a misleading half-probe.
+      reqs.each do |req|
+        if err = @outbound.sweep_block(@origin.scheme, @origin.host,
+             Gori::Outbound.request_target(req), @origin.port)
           @blocked += requests.size
           @blocked_reason ||= err
           return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
         end
       end
-      reqs = @evidence ? requests : requests.map { |b| Gori::Env.expand_bindings(b) }
-      reqs = reqs.map { |b| Gori::Env.overlay_slot(b) }
       Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
         port: @origin.port, verify_upstream: @verify, sni: @sni,
         timeout: timeout || @timeout, overrides: @overrides, tls_preset: @tls_preset)
@@ -583,7 +594,8 @@ module Gori::Fuzz
 
       bytes = jobs[0].bytes
       verbatim = @evidence ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
-      expanded = Gori::Env.overlay_slot(Gori::Env.expand_bindings(bytes, verbatim))
+      race_gen = Gori::Env::Generation.new
+      expanded = Gori::Env.overlay_slot(Gori::Env.expand_bindings(bytes, verbatim, generation: race_gen), race_gen)
       # Nothing to hold back — degrade rather than slice a negative/empty tail. Never hit by a
       # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
       return super if expanded.size < 2

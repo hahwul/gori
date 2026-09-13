@@ -528,7 +528,7 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `syntax` | string | `"namespaced"` | 토큰 문법: `namespaced`(환경 변수 `$ENV.KEY`, 세션 바인딩 `$BIND.NAME`) 또는 `bare`(`$KEY`, `$NAME`). **키가 없으면 그 파일이 네임스페이스보다 먼저 쓰였다는 뜻입니다.** 다음 시작에서 `namespaced`를 채택하고, 전역 재작성 규칙을 다시 적고(`settings.json.pre-namespaced-<타임스탬프>` 복사본을 남깁니다), 키를 기록합니다. 각 프로젝트는 처음 열릴 때 저장된 토큰을 다시 적으며, 데이터베이스 옆에 백업을 남깁니다. `bare`는 명시적 옵트아웃이고 각 프로젝트를 되돌려 다시 적습니다. 전환은 [`gori settings env-syntax`](/ko/reference/cli/#env-syntax) |
+| `syntax` | string | `"namespaced"` | 토큰 문법: `namespaced`(환경 변수 `$ENV.KEY`, 세션 바인딩 `$BIND.NAME`, 요청마다 새 값을 만드는 `$GEN.NAME`) 또는 `bare`(`$KEY`, `$NAME`, 생성기 없음). **키가 없으면 그 파일이 네임스페이스보다 먼저 쓰였다는 뜻입니다.** 다음 시작에서 `namespaced`를 채택하고, 전역 재작성 규칙을 다시 적고(`settings.json.pre-namespaced-<타임스탬프>` 복사본을 남깁니다), 키를 기록합니다. 각 프로젝트는 처음 열릴 때 저장된 토큰을 다시 적으며, 데이터베이스 옆에 백업을 남깁니다. `bare`는 명시적 옵트아웃이고 각 프로젝트를 되돌려 다시 적습니다. 전환은 [`gori settings env-syntax`](/ko/reference/cli/#env-syntax) |
 | `prefix` | string | `"$"` | 토큰을 여는 시길 (`$ENV.KEY`), 두 문법 모두에서 |
 | `vars` | array | `[]` | 전역 키/값 쌍; 프로젝트 변수(Project 탭 → ENV)가 충돌 시 우선 |
 

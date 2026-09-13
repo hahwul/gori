@@ -25,6 +25,19 @@ module Gori
             j.field "prefix", Settings.env_prefix
             j.field "example", Env.spell("KEY", Env::Namespace::Env)
             j.field "vars" { j.array { each_env_var_json(j, include_sensitive) } }
+            j.field "generators" do
+              j.array do
+                if Settings.env_syntax.namespaced?
+                  Env::GENERATOR_HINTS.each do |name, description|
+                    j.object do
+                      j.field "name", name
+                      j.field "token", Env.spell(name, Env::Namespace::Gen)
+                      j.field "description", description
+                    end
+                  end
+                end
+              end
+            end
           end
         end)
       end
@@ -102,7 +115,9 @@ module Gori
       private def list_env_tools(j : JSON::Builder) : Nil
         tool j, "list_env",
           "List the project's env vars, substituted into outbound requests (send_request/" \
-          "send_websocket). Result: {syntax, prefix, example, vars:[…]}. 'syntax' is THIS " \
+          "send_websocket). Result: {syntax, prefix, example, vars:[…], generators:[…]}. " \
+          "Each generator row has its name, complete token and output format; generators are " \
+          "available under namespaced syntax and mint a fresh value per request. 'syntax' is THIS " \
           "install's token grammar and decides how you write a reference: namespaced = " \
           "$ENV.KEY (session bindings are $BIND.NAME), bare = $KEY (the legacy grammar, where " \
           "an app's own $id/$ne/$filter in a body IS a reference and needs the $$ escape). " \

@@ -25,7 +25,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--apply", "Write the minimized request back into the repeater session") { apply = true }
-          p.on("--verbatim", "Send the stored bytes as-is: no env expansion ($ENV.KEY / $BIND.NAME — bare syntax $KEY / $NAME — stay literal), no Content-Length resync (same meaning as `repeater send --verbatim`; body params stop being candidates because their framing could not be kept honest)") { verbatim = true }
+          p.on("--verbatim", "Send the stored bytes as-is: no token expansion ($ENV.KEY / $BIND.NAME / $GEN.UUID — bare syntax $KEY / $NAME — stay literal), no Content-Length resync (same meaning as `repeater send --verbatim`; body params stop being candidates because their framing could not be kept honest)") { verbatim = true }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           # Back-compat alias: this command shipped as `--insecure` while every sibling
           # (`repeater send`, the single-flow replay, `repeater h2`, fuzz/mine/…) spells it

@@ -1437,12 +1437,12 @@ gori settings env-syntax [VALUE]   # env 토큰 문법 읽기 / 설정
 
 ### `gori settings env-syntax` {#env-syntax}
 
-env 토큰을 어떤 문법으로 적는지 정합니다. `namespaced`(환경 변수 `$ENV.KEY`, 세션 바인딩 `$BIND.NAME`) 또는 `bare`(`$KEY`, `$NAME`)입니다. **모든** 프로젝트의 토큰을 어떻게 읽을지 결정하므로 전역 설정입니다. 인자 없이 실행하면 지금 적용된 값과 그 출처를 출력합니다.
+env 토큰을 어떤 문법으로 적는지 정합니다. `namespaced`(환경 변수 `$ENV.KEY`, 세션 바인딩 `$BIND.NAME`, [요청마다 새 값을 만드는 생성기](/ko/guide/repeater-and-fuzzer/#environment-variables) `$GEN.NAME`) 또는 `bare`(`$KEY`, `$NAME`, 생성기 표기 없음)입니다. **모든** 프로젝트의 토큰을 어떻게 읽을지 결정하므로 전역 설정입니다. 인자 없이 실행하면 지금 적용된 값과 그 출처를 출력합니다.
 
 ```bash
 gori settings env-syntax
 # namespaced  (from /Users/me/.gori/settings.json)
-#   $ENV.KEY / $BIND.NAME
+#   $ENV.KEY / $BIND.NAME / $GEN.UUID
 
 gori settings env-syntax bare
 # env syntax: bare — $KEY / $NAME

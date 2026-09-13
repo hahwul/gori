@@ -234,6 +234,7 @@ describe "Gori::Env — namespaced queries" do
   it "spell / spell_escaped / input_hint / strip_spelling / parse_ref? round-trip" do
     env = Gori::Env::Namespace::Env
     bind = Gori::Env::Namespace::Bind
+    gen = Gori::Env::Namespace::Gen
     with_q do
       Gori::Env.spell("HOST", env).should eq("$ENV.HOST")
       Gori::Env.spell("SESSION", bind).should eq("$BIND.SESSION")
@@ -242,6 +243,7 @@ describe "Gori::Env — namespaced queries" do
       Gori::Env.spell(Gori::Env::Ref.new(bind, "SESSION")).should eq("$BIND.SESSION")
       Gori::Env.input_hint(bind).should eq("$BIND.")
       Gori::Env.input_hint(env).should eq("$ENV.")
+      Gori::Env.input_hint(gen).should eq("$GEN.")
       %w[$BIND.SESSION BIND.SESSION $SESSION SESSION].each do |raw|
         Gori::Env.strip_spelling(raw, bind).should eq("SESSION")
       end
@@ -311,11 +313,14 @@ describe "Gori::Env — namespaced queries" do
   it "Namespace carries its own label, description and masking policy" do
     Gori::Env::Namespace::Env.label.should eq("ENV")
     Gori::Env::Namespace::Bind.label.should eq("BIND")
+    Gori::Env::Namespace::Gen.label.should eq("GEN")
     Gori::Env::Namespace.parse?("ENV").should eq(Gori::Env::Namespace::Env)
     Gori::Env::Namespace.parse?("env").should be_nil # case-SENSITIVE
+    Gori::Env::Namespace.parse?("GEN").should eq(Gori::Env::Namespace::Gen)
     Gori::Env::Namespace.parse?("RAND").should be_nil
     Gori::Env::Namespace::Bind.secret?.should be_true
     Gori::Env::Namespace::Env.secret?.should be_false
+    Gori::Env::Namespace::Gen.secret?.should be_false
     # ≤ 24 cells: the completer prints it beside the label inside a dropdown that must fit a
     # 60-column pane.
     Gori::Env::Namespace.values.max_of(&.description.size).should be <= 24

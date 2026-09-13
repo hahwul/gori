@@ -16,7 +16,7 @@ end
 # in both. Guessing wrong is silent in both directions — a reference shipped as literal bytes,
 # or the app's own `$id` resolved into a secret — so the grammar rides on the result rather than
 # on the caller's assumptions. Both modes are pinned here because the shape, not the value, is
-# the contract: the same three keys are always present.
+# the contract: the spelling fields and generator catalog are always explicit.
 private def env_result(store, args : String = "{}") : JSON::Any
   mcp_ok_json(tools_for(store), "list_env", args)
 end
@@ -32,6 +32,7 @@ describe "MCP list_env grammar report" do
         got["example"].as_s.should eq("$KEY")
         got["vars"].as_a.map(&.["key"].as_s).should eq(["TOKEN"])
         got["vars"][0]["value"].as_s.should eq("[REDACTED]")
+        got["generators"].as_a.should be_empty
       end
     end
   end
@@ -47,6 +48,12 @@ describe "MCP list_env grammar report" do
         # The rows are unchanged by the grammar: `vars` is a table keyed by BARE name, and a
         # qualified key here would be a name no `set_env_var`/`delete_env_var` call accepts.
         got["vars"].as_a.map(&.["key"].as_s).should eq(["TOKEN"])
+        generators = got["generators"].as_a
+        generators.map(&.["name"].as_s).should eq(
+          ["UUID", "RANDOM", "RANDOM_HEX", "TIMESTAMP", "TIMESTAMP_MS", "ISO8601"])
+        generators.map(&.["token"].as_s).should contain("$GEN.UUID")
+        generators.find! { |row| row["name"].as_s == "RANDOM_HEX" }["description"].as_s
+          .should contain("128-bit hex")
       end
     end
   end
@@ -60,6 +67,7 @@ describe "MCP list_env grammar report" do
           got = env_result(store)
           got["prefix"].as_s.should eq("%")
           got["example"].as_s.should eq("%ENV.KEY")
+          got["generators"].as_a[0]["token"].as_s.should eq("%GEN.UUID")
         end
       ensure
         Gori::Settings.env_prefix = was
@@ -119,6 +127,28 @@ describe "MCP list_env grammar report" do
       end
     end
 
+    it "points an unknown generator at the advertised catalog" do
+      with_store_env do |store|
+        with_env_syntax(Gori::Env::Syntax::Namespaced) do
+          msg = tools_for(store).env_unresolved_error_for_spec("$GEN.NOPE")
+          msg.should contain("unresolved generator $GEN.NOPE")
+          msg.should contain("list_env.generators")
+          msg.should_not contain("set_env_var")
+        end
+      end
+    end
+
+    it "explains a registered generator refused where nothing mints" do
+      with_store_env do |store|
+        with_env_syntax(Gori::Env::Syntax::Namespaced) do
+          msg = tools_for(store).env_unresolved_error_for_spec("$GEN.UUID")
+          msg.should contain("is a generator")
+          msg.should contain("before the request is framed")
+          msg.should_not contain("list_env.generators")
+        end
+      end
+    end
+
     it "names both remedies under the BARE grammar, where a name carries no namespace" do
       with_store_env do |store|
         tools = tools_for(store)
@@ -155,6 +185,7 @@ describe "MCP list_env grammar report" do
       desc = listed["result"]["tools"].as_a.find! { |t| t["name"].as_s == "list_env" }["description"].as_s
       desc.should contain("$ENV.KEY")
       desc.should contain("$BIND.NAME")
+      desc.should contain("generators")
       desc.should contain("bare = $KEY")
       desc.should contain("{syntax, prefix, example, vars")
     end

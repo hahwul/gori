@@ -152,6 +152,7 @@ module Gori::Discover
       # Whether ANY `$` survives in the block. When none does — the overwhelming case — every
       # fetch skips the binding path entirely and reuses the constructed block verbatim.
       @header_tokens = Env.may_contain_tokens?(@header_block, Env::Owns::Bind)
+      @header_generators = Env.may_contain_tokens?(@header_block, Env::Owns::Gen)
       @header_resolved = nil.as(String?)
       @header_rev = 0_u64
       # h2 is excluded for the reason Fuzz::Sender excludes it: H2Engine frames its own
@@ -196,15 +197,16 @@ module Gori::Discover
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, UNSAFE_URL)
       end
       req = request_head(scheme, host, port, target)
-      if @http2
-        Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
-          verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
-      elsif pool = pool_for(scheme, host, port)
-        pool.send(req)
-      else
-        Repeater::Engine.send(req, scheme: scheme, host: host, port: port,
-          verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
-      end
+      result = if @http2
+                 Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
+                   verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+               elsif pool = pool_for(scheme, host, port)
+                 pool.send(req)
+               else
+                 Repeater::Engine.send(req, scheme: scheme, host: host, port: port,
+                   verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+               end
+      result.with_wire(req)
     end
 
     # The real thing, not an approximation of it: `fetch` sends exactly these bytes (it calls
@@ -222,7 +224,12 @@ module Gori::Discover
     # already warns about; announcing the identity while sending none is that failure with a
     # receipt on top.
     def request_head(scheme : String, host : String, port : Int32, target : String) : Bytes
-      Gori::Env.overlay_slot(build_get(scheme, host, port, target, binding_headers))
+      wire = build_get(scheme, host, port, target, binding_headers)
+      # ONE generation across both passes (see `Repeater::Sender#wire`): a `$GEN.UUID` in a
+      # `--header` and one in the active slot's overlay are the same fetch.
+      gen = Gori::Env::Generation.new
+      wire = Gori::Env.expand_bindings(wire, resolve: Gori::Env::Owns::Gen, generation: gen) if @header_generators
+      Gori::Env.overlay_slot(wire, gen)
     end
 
     def close : Nil
@@ -294,7 +301,9 @@ module Gori::Discover
         # A declared-but-unbound `$NAME` used to make this nil and refuse the fetch. It now
         # resolves to the literal token, `Env.unbound`'s policy everywhere: a `--header`
         # block is operator-authored text and `$` is a legal byte in one.
-        cached = Gori::Env.expand_bindings(@header_block)
+        # GEN is deliberately excluded from this cache: it must be minted by `request_head`
+        # for every fetch, even when the same header block also contains a BIND token.
+        cached = Gori::Env.expand_bindings(@header_block, resolve: Gori::Env::Owns::Bind)
         @header_resolved = cached
       end
       cached
@@ -1943,7 +1952,11 @@ module Gori::Discover
       size = body.try(&.size.to_i64)
       max = Settings.capture_max
       body = body[0, max].dup if body && body.size > max
-      Exchange.new(@capped.request_head(p.scheme, p.host, p.port, target),
+      # A generator is deliberately fresh on every `request_head` call, so synthesizing the
+      # head again here would store a UUID the origin never saw. Production senders carry the
+      # exact wire on the Result; spec/custom backends keep the old pure reconstruction fallback.
+      request = raw.wire || @capped.request_head(p.scheme, p.host, p.port, target)
+      Exchange.new(request,
         resp, body, size, raw.incomplete?, raw.duration_us, @capped.sni)
     end
 

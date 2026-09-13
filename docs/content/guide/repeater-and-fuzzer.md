@@ -49,14 +49,28 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 
 ## Environment Variables
 
-Outbound requests carry two kinds of token, told apart by their namespace:
+Outbound requests carry three kinds of token, told apart by their namespace:
 
 | Token | Resolves from | When |
 |-------|---------------|------|
 | `$ENV.KEY` | env vars, global or per-project | at build time, before the request is framed |
 | `$BIND.NAME` | a [session binding](/guide/proxy/#session-bindings) an extract rule filled | at send time, out of the active identity's table |
+| `$GEN.NAME` | a built-in value generator | at send time, once per outbound request |
 
 Tokens stay as literal text in the editor and expand only on the way out: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+
+`GEN` provides the values commonly needed while probing a target, without a Decoder chain or a stored secret:
+
+| Token | Output |
+|-------|--------|
+| `$GEN.UUID` | UUID v4 |
+| `$GEN.RANDOM` | cryptographically secure unsigned 64-bit integer, in decimal |
+| `$GEN.RANDOM_HEX` | 128 cryptographically secure random bits, as 32 lowercase hex characters |
+| `$GEN.TIMESTAMP` | Unix time in seconds |
+| `$GEN.TIMESTAMP_MS` | Unix time in milliseconds |
+| `$GEN.ISO8601` | current UTC time in RFC 3339 form, with milliseconds |
+
+The same generator name used more than once in one request has the same value. The next request gets a fresh value. Generators run only for operator-authored request text at the final send seam; captured evidence and Fuzzer payload bytes remain literal.
 
 Define env vars in two places (project wins on a key collision):
 
@@ -101,7 +115,7 @@ that is already running **follows** the switch on its own: it picks up the new g
 the project it has open, and says what it did (a notification and an ACTIVITY row in the TUI, a log
 line for MCP).
 
-`env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar — a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
+`env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar — a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. Generators have no bare spelling: `$GEN.UUID` remains literal under the bare grammar. The rest of this documentation spells tokens the namespaced way; on a bare install, read ENV and BIND tokens without the namespace (`$KEY`, `$NAME`).
 
 ## Fuzzer
 

@@ -530,9 +530,15 @@ module Gori::CLI
   end
 
   # What a token looks like in this grammar, spelled through `Env` so a non-default prefix shows.
+  #
+  # The generator is listed under the NAMESPACED grammar alone, and not because the example
+  # would be long: bare has no generator spelling at all, so printing `$UUID` here would name a
+  # token that resolves out of the env table — the collision the namespaces exist to remove.
   private def self.env_syntax_example(s : Gori::Env::Syntax) : String
-    "#{Gori::Env.spell("KEY", Gori::Env::Namespace::Env, s)} / " \
-    "#{Gori::Env.spell("NAME", Gori::Env::Namespace::Bind, s)}"
+    parts = [Gori::Env.spell("KEY", Gori::Env::Namespace::Env, s),
+             Gori::Env.spell("NAME", Gori::Env::Namespace::Bind, s)]
+    parts << Gori::Env.spell("UUID", Gori::Env::Namespace::Gen, s) if s.namespaced?
+    parts.join(" / ")
   end
 
   # WHERE the current value came from. The absence of `env.syntax` in a file that loaded means the

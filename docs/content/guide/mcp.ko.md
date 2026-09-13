@@ -152,7 +152,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `preview_color_rule` | 어떤 색상 조건이 최근 플로우 몇 개에 **매칭**되는지, 그리고 앞서 해소되는 규칙들을 셈한 뒤 실제로 몇 개를 **칠하는지**. 전역 후보는 모든 프로젝트 규칙보다 먼저 해석되므로 `scope`를 받습니다 |
 | `grpc_schema` | 이 프로젝트가 캡처된 gRPC를 어떤 `.proto` 스키마로 렌더하는지, 각 조각이 어디서 왔는지(디스크립터 셋 파일 또는 리플렉션 페치). 아무것도 보내지 않습니다 |
 | `list_rules` | 프로젝트에 적용되는 Match & Replace 규칙을 적용 순서로 나열. 전역 규칙이 먼저, 그다음이 프로젝트 규칙(`scope`로 한쪽만 조회) |
-| `list_env` | 치환에 쓰이는 프로젝트 env 토큰. 결과는 `{syntax, prefix, example, vars}`입니다(값은 가려짐). 앞의 세 값은 참조를 어떻게 **적을지** 알려 줍니다. `syntax`는 이 설치의 문법(`namespaced`이면 `$ENV.KEY`와 `$BIND.NAME`, `bare`이면 레거시 `$KEY`), `prefix`는 시길, `example`은 그 둘을 적용한 예시여서 기본이 아닌 시길도 조립할 필요가 없습니다. `vars`의 각 행은 bare 이름으로 키를 잡고, `length`와 값이 스킴으로 시작할 때의 `scheme`도 싣습니다. 헤더를 `Bearer <token>`으로 써야 하는지 토큰만 써야 하는지, 값 없이 판단할 수 있을 만큼입니다 |
+| `list_env` | 치환에 쓰이는 프로젝트 env 토큰과 내장 생성기. 결과는 `{syntax, prefix, example, vars, generators}`입니다(env 값은 가려짐). 앞의 세 값은 참조를 어떻게 **적을지** 알려 줍니다. `syntax`는 이 설치의 문법(`namespaced`이면 `$ENV.KEY`, `$BIND.NAME`, `$GEN.UUID`; `bare`이면 생성기 없이 레거시 `$KEY`), `prefix`는 시길, `example`은 앞의 둘을 적용한 예시여서 기본이 아닌 시길도 조립할 필요가 없습니다. `vars`의 각 행은 bare 이름과 `length`, 값이 스킴으로 시작할 때의 `scheme`을 싣고, `generators`의 각 행은 완성된 토큰과 출력 형식을 싣습니다 |
 | `list_host_overrides` | 이 프로젝트에 적용 중인 호스트 → IP 다이얼 맵 |
 | `list_session_slots` | 프로젝트의 [세션 슬롯](/ko/guide/authorize/#session-slots-one-list-two-readers)(이름 붙은 신원 각각이 헤더 오버레이 하나와 그 값을 묶어 주는 extract 규칙들로 이루어집니다), 그리고 어느 쪽이 ACTIVE인지(헤더 값은 가려짐) |
 | `list_oast_providers` | 설정된 OAST 프로바이더와 현재 활성 프로바이더 |

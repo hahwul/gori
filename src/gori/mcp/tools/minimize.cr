@@ -245,7 +245,7 @@ module Gori
           s.field "repeater_id", intprop("repeater database id (`id` is accepted as an alias — the sibling repeater tools spell it that way)"), required: true
           s.field "id", intprop("alias for repeater_id")
           s.field "apply", boolprop("write the minimized request back into the session (default false)")
-          s.field "verbatim", boolprop("search with the stored bytes EXACTLY, as send_request/--verbatim would send them: no env expansion, no bare-LF→CRLF promotion, no Content-Length resync (so body params stop being removal candidates). Use it for a session seeded from a capture, where a stored $filter/$top/$where is evidence rather than a typo — under the legacy bare syntax those ARE references and such a session is otherwise refused by name or minimized against substituted bytes; under the namespaced syntax only $ENV.KEY / $BIND.NAME are references, so they never were. Default false")
+          s.field "verbatim", boolprop("search with the stored bytes EXACTLY, as send_request/--verbatim would send them: no token expansion, no bare-LF→CRLF promotion, no Content-Length resync (so body params stop being removal candidates). Use it for a session seeded from a capture, where a stored $filter/$top/$where is evidence rather than a typo — under the legacy bare syntax those ARE references and such a session is otherwise refused by name or minimized against substituted bytes; under the namespaced syntax only $ENV.KEY / $BIND.NAME / $GEN.UUID forms are references, so they never were. Default false")
           s.field "allow_unscoped", boolprop("minimize even when the target host is outside — or without — a configured scope (default false)")
         end
       end

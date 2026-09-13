@@ -1,13 +1,15 @@
 require "json"
+require "random/secure"
+require "uuid"
 require "./settings"
 require "./session_slot"
 require "./store"
 
 module Gori
-  # Global + per-project environment variables for `$KEY`-style substitution in
-  # outbound requests (Repeater, Fuzzer, Miner, Intercept, CLI, MCP). The editor
-  # keeps the raw `$KEY` text; `expand` runs at send time only. Highlighting
-  # reuses the same prefix/KEY rules via `token_regions`.
+  # Namespaced values for outbound requests (Repeater, Fuzzer, Miner, Intercept, CLI, MCP):
+  # build-time env vars, send-time session bindings and send-time generators. The editor keeps
+  # the raw token text; each namespace expands at its own outbound seam. Highlighting reuses the
+  # same parser via `token_regions`.
   module Env
     DEFAULT_PREFIX   = "$"
     PROJECT_VARS_KEY = "env.vars"
@@ -35,8 +37,9 @@ module Gori
     #   * `Bare` — `$NAME`. What every install shipped with, and what an existing install
     #     keeps forever: the tokens are already written into project DBs, drafts, rule
     #     replacements and slot headers, and gori does not rewrite those behind the operator.
-    #   * `Namespaced` — `$ENV.NAME` (build-time env vars) and `$BIND.NAME` (send-time session
-    #     bindings). `$id` / `$ne` / `$ref` are then not references at all and need NO escape.
+    #   * `Namespaced` — `$ENV.NAME` (build-time env vars), `$BIND.NAME` (send-time session
+    #     bindings) and `$GEN.NAME` (send-time built-ins). `$id` / `$ne` / `$ref` are then not
+    #     references at all and need NO escape.
     #
     # A genuinely NEW home adopts `Namespaced` (`Settings.adopt_env_syntax_for_new_home`); the
     # ABSENCE of `env.syntax` in a settings file that was read in full means `Bare`, forever.
@@ -57,23 +60,25 @@ module Gori
     enum Owns
       Env
       Bind
+      Gen
     end
 
     # The closed set of namespaces. UPPERCASE and case-sensitive: `$env.x` and `$Env.x` are not
     # tokens, so the spelling an operator reads is the spelling gori resolves.
     #
-    # This is also the extension point the syntax was chosen for — a future generator namespace
-    # (`RAND`, `OAST`, `TIME`) adds a member here and a resolution table in `vars_for`, with no
-    # new grammar and no new escape.
+    # This is also the extension point the syntax was chosen for: adding a namespace means adding
+    # one member and one resolver without growing a second parser or escape grammar.
     enum Namespace
       Env
       Bind
+      Gen
 
       # The literal that spells this namespace in a token — `$ENV.HOST`.
       def label : String
         case self
         in Namespace::Env  then "ENV"
         in Namespace::Bind then "BIND"
+        in Namespace::Gen  then "GEN"
         end
       end
 
@@ -83,6 +88,7 @@ module Gori
         case self
         in Namespace::Env  then "build-time env vars"
         in Namespace::Bind then "session bindings"
+        in Namespace::Gen  then "per-request generators"
         end
       end
 
@@ -91,13 +97,17 @@ module Gori
       # completion hint and every export treat it as secret. The policy lives with the
       # namespace rather than at each surface, which is how three surfaces come to disagree.
       def secret? : Bool
-        bind?
+        case self
+        in Namespace::Env, Namespace::Gen then false
+        in Namespace::Bind                then true
+        end
       end
 
       def owns : Owns
         case self
         in Namespace::Env  then Owns::Env
         in Namespace::Bind then Owns::Bind
+        in Namespace::Gen  then Owns::Gen
         end
       end
 
@@ -108,8 +118,17 @@ module Gori
       # silently inheriting the env layer's answer.
       def send_time? : Bool
         case self
-        in Namespace::Env  then false
-        in Namespace::Bind then true
+        in Namespace::Env                  then false
+        in Namespace::Bind, Namespace::Gen then true
+        end
+      end
+
+      # Only BIND names can exist before they have a value. GEN is send-time too, but its
+      # catalog is complete and every registered name always produces a value.
+      def declarable? : Bool
+        case self
+        in Namespace::Env, Namespace::Gen then false
+        in Namespace::Bind                then true
         end
       end
 
@@ -119,7 +138,67 @@ module Gori
       end
     end
 
-    NAMESPACES = {"ENV" => Namespace::Env, "BIND" => Namespace::Bind}
+    NAMESPACES = {"ENV" => Namespace::Env, "BIND" => Namespace::Bind, "GEN" => Namespace::Gen}
+
+    EMPTY_VARS = {} of String => String
+
+    # One request's generated values. A context is local to one expansion pass, so separate
+    # sends cannot reuse a nonce; the cache makes two `$GEN.UUID` references agree — including
+    # across the passes a single request is made of, when the seam passes ONE context to all of
+    # them (the head/body split, and the session-slot header overlay applied after it).
+    class Generation
+      # Lazy, and `nil` until a generator actually resolves: a context is created per send on
+      # paths that expand every request, and the overwhelming majority of requests carry no
+      # `$GEN.` at all. An empty Hash allocated per send would be a cost paid by the runs that
+      # never use the feature.
+      @values : Hash(String, String)? = nil
+      @now : Time? = nil
+
+      def initialize(values : Hash(String, String)? = nil)
+        @values = values.dup unless values.nil? || values.empty?
+      end
+
+      def value?(name : String) : String?
+        gen = GENERATORS[name]?
+        return nil unless gen
+        vals = (@values ||= {} of String => String)
+        vals[name]? || (vals[name] = gen.mint.call(self))
+      end
+
+      # The ONE instant this context pins, so `$GEN.TIMESTAMP` and `$GEN.ISO8601` in one request
+      # describe the same moment rather than two reads of the clock. Public because the catalog's
+      # minters below are plain procs and read it.
+      def now : Time
+        @now ||= Time.utc
+      end
+    end
+
+    # One built-in: how every surface DESCRIBES it, and the value it mints. One record and not a
+    # hint table beside a `case`, because the hint table is what `list_env`, the completer and the
+    # deferral scan all read as "the catalog": a name in one and not the other would advertise a
+    # token that then raises at the send seam, inside the fiber that was sending.
+    record Generator, hint : String, mint : Proc(Generation, String)
+
+    # Built-ins that mint a fresh value at the final send seam. Names encode every format
+    # choice the no-argument `$NS.NAME` grammar needs to make explicit.
+    GENERATORS = {
+      "UUID"         => Generator.new("UUID v4 · fresh per send", ->(_g : Generation) { UUID.random.to_s }),
+      "RANDOM"       => Generator.new("UInt64 · fresh per send", ->(_g : Generation) { Random::Secure.rand(UInt64).to_s }),
+      "RANDOM_HEX"   => Generator.new("128-bit hex · fresh per send", ->(_g : Generation) { Random::Secure.hex(16) }),
+      "TIMESTAMP"    => Generator.new("Unix seconds · per send", ->(g : Generation) { g.now.to_unix.to_s }),
+      "TIMESTAMP_MS" => Generator.new("Unix milliseconds · per send", ->(g : Generation) { g.now.to_unix_ms.to_s }),
+      "ISO8601"      => Generator.new("UTC RFC 3339 · per send", ->(g : Generation) { g.now.to_rfc3339(fraction_digits: 3) }),
+    }
+
+    # The catalog as the NAME → FORMAT table the surfaces print, derived from the one above so
+    # the two cannot drift apart. Insertion order is the catalog's order.
+    GENERATOR_HINTS = GENERATORS.transform_values(&.hint)
+
+    SEND_OWNS = Owns::Bind | Owns::Gen
+
+    def self.generator_hint?(name : String) : String?
+      GENERATOR_HINTS[name]?
+    end
 
     # The match order: LONGEST label first, so a future namespace whose label is a prefix of
     # another cannot shadow it. (`ENV`/`BIND` share no prefix; the rule is stated in code so
@@ -358,6 +437,7 @@ module Gori
       case ns
       in Namespace::Env  then effective_vars
       in Namespace::Bind then binding_values
+      in Namespace::Gen  then EMPTY_VARS
       end
     end
 
@@ -366,6 +446,7 @@ module Gori
       case ns
       in Namespace::Env  then effective_vars
       in Namespace::Bind then binding_values_as(slot)
+      in Namespace::Gen  then EMPTY_VARS
       end
     end
 
@@ -376,6 +457,7 @@ module Gori
       case ns
       in Namespace::Env  then effective_vars
       in Namespace::Bind then (@@layer.try(&.held_values) || {} of String => String)
+      in Namespace::Gen  then EMPTY_VARS
       end
     end
 
@@ -497,7 +579,10 @@ module Gori
       # they are one question — WHICH SESSION are these bytes going out as — and splitting
       # them across two globals is how the overlay and the bindings would come to disagree
       # about it.
-      def overlay(wire : Bytes) : Bytes
+      # `generation` is the send seam's context, so a `$GEN.UUID` in a slot header and one in
+      # the request it rides on are ONE value — the overlay is a second expansion pass over the
+      # same request, not a second request.
+      def overlay(wire : Bytes, generation : Generation? = nil) : Bytes
         wire
       end
 
@@ -566,8 +651,8 @@ module Gori
     # HEADER-ONLY by construction (`SessionSlot.overlay_wire`), so the body is byte-exact and
     # Content-Length never moves. That is what makes it safe on bytes the operator did not
     # author — a captured replay, a fuzz template with its payload already spliced.
-    def self.overlay_slot(wire : Bytes) : Bytes
-      (l = @@layer) ? l.overlay(wire) : wire
+    def self.overlay_slot(wire : Bytes, generation : Generation? = nil) : Bytes
+      (l = @@layer) ? l.overlay(wire, generation) : wire
     end
 
     # ── a slot overlay's own unresolved references ────────────────────────────
@@ -805,27 +890,37 @@ module Gori
     # and puts a real credential in an arbitrary position of it, where it lands in the
     # target's access log. `Fuzz::Generator#emit` already computes each payload's span in
     # order to splice it, so the template resolves and the payload does not.
-    def self.expand_bindings(bytes : Bytes, verbatim : Array({Int32, Int32})? = nil) : Bytes
+    def self.expand_bindings(bytes : Bytes, verbatim : Array({Int32, Int32})? = nil, *,
+                             resolve : Owns = SEND_OWNS,
+                             generation : Generation? = nil) : Bytes
       prefix = Settings.env_prefix
+      syntax = Settings.env_syntax
+      # GEN has no bare spelling. In the opt-out grammar this remains the BIND pass that shipped;
+      # `$GEN.UUID` is ordinary `$GEN` plus `.UUID`, never a hidden exception to that grammar.
+      resolve = send_resolution(resolve, syntax)
       # `may_contain_tokens?`, not just "is there a `$`": under the namespaced syntax a body full
       # of `$id` / `$ne` carries nothing this pass owns, and saying so costs one scan instead of
       # a full expansion of head and body.
-      return bytes if prefix.empty? || !may_contain_tokens?(bytes, Owns::Bind, prefix)
+      return bytes if prefix.empty? || resolve.none? || !may_contain_tokens?(bytes, resolve, prefix)
       vals = binding_values
+      # The Bytes form expands head and body in two calls. Seed their shared context here so the
+      # same generator name cannot change at the message boundary when a binding table is active.
+      generation ||= Generation.new if generator_in?(bytes, resolve, prefix, syntax)
       # With nothing to resolve this pass would be a no-op — except that it is also the seam
       # that CONSUMES its own escape (see `Escape`/`Owns`), and a project with no extract rule is
       # exactly where an operator escaping a GraphQL `$id` is likeliest to be.
-      return bytes if vals.empty? && !contains_escape?(bytes, prefix, owns: Owns::Bind)
+      needed, generation = prepare_send_expansion(bytes, vals, resolve, prefix, syntax, generation)
+      return bytes unless needed
       safe = boundary_safe(vals)
       boundary = head_body_boundary(bytes)
       head = expand(String.new(bytes[0...boundary]), safe, prefix,
         clip_spans(verbatim, 0, boundary), Escape::Consume,
-        resolve: Owns::Bind, bind_vars: safe).to_slice
+        syntax: syntax, resolve: resolve, bind_vars: safe, generation: generation).to_slice
       return head if boundary >= bytes.size
       raw_body = bytes[boundary..]
       body = expand(String.new(raw_body), vals, prefix,
         clip_spans(verbatim, boundary, bytes.size), Escape::Consume,
-        resolve: Owns::Bind, bind_vars: vals).to_slice
+        syntax: syntax, resolve: resolve, bind_vars: vals, generation: generation).to_slice
       unless body.size == raw_body.size
         shifted = shift_content_length(head, body.size - raw_body.size)
         warn_unshiftable_framing if shifted.same?(head)
@@ -835,6 +930,54 @@ module Gori
       buf.write(head)
       buf.write(body)
       buf.to_slice
+    end
+
+    # The send pass's namespaces in the selected grammar. GEN intentionally has no bare alias.
+    private def self.send_resolution(resolve : Owns, syntax : Syntax) : Owns
+      return resolve if syntax.namespaced?
+      resolve.includes?(Owns::Bind) ? Owns::Bind : Owns::None
+    end
+
+    private def self.generator_in?(bytes : Bytes | String, resolve : Owns, prefix : String,
+                                   syntax : Syntax) : Bool
+      return false unless syntax.namespaced? && resolve.includes?(Owns::Gen)
+      # A cheap conservative probe only: `expand` still parses and validates the token. Matching
+      # an escape or unknown name may allocate one unused context, but avoids a second reader walk
+      # over every binding-heavy request.
+      needle = "#{prefix}GEN."
+      if bytes.is_a?(String)
+        !bytes.byte_index(needle).nil?
+      else
+        contains_sequence?(bytes, needle)
+      end
+    end
+
+    private def self.contains_sequence?(bytes : Bytes, needle : String) : Bool
+      ns = needle.to_slice
+      return false if ns.empty? || ns.size > bytes.size
+      last = bytes.size - ns.size
+      at = 0
+      while at <= last
+        found = bytes.index(ns[0], at)
+        return false unless found && found <= last
+        return true if bytes[found, ns.size] == ns
+        at = found + 1
+      end
+      false
+    end
+
+    # Decide the no-op fast path and create a generator context only when no active binding table
+    # already requires the real expansion walk. In the latter case `expand` creates it lazily if
+    # it actually reaches GEN, avoiding a second full-message scan on binding-heavy fuzz runs.
+    private def self.prepare_send_expansion(text : Bytes | String, vals : Hash(String, String),
+                                            resolve : Owns, prefix : String, syntax : Syntax,
+                                            generation : Generation?) : {Bool, Generation?}
+      bind_active = resolve.includes?(Owns::Bind) && !vals.empty?
+      has_gen = !bind_active && generator_in?(text, resolve, prefix, syntax)
+      generation ||= Generation.new if has_gen
+      bytes = text.is_a?(String) ? text.to_slice : text
+      needed = bind_active || has_gen || contains_escape?(bytes, prefix, owns: resolve)
+      {needed, generation}
     end
 
     # `head` with its `Content-Length` moved by `delta`, every other byte untouched. No-op
@@ -965,7 +1108,7 @@ module Gori
 
     @@warned_unshiftable = false
 
-    # A binding substitution changed the body's length and the head's framing could not follow
+    # A send-time substitution changed the body's length and the head's framing could not follow
     # — chunked, a CL.CL pair, an obs-folded Content-Length, or no Content-Length at all. The
     # message goes out as authored, which for a chunked body means the chunk-size lines now
     # disagree with the chunk: the same desync the Content-Length shift exists to prevent,
@@ -976,10 +1119,11 @@ module Gori
       return if @@warned_unshiftable
       @@warned_unshiftable = true
       ::Log.warn do
-        "a session binding changed a request body's length, but its head's framing could not " \
+        "a session binding or generator changed a request body's length, but its head's " \
+        "framing could not " \
         "be adjusted (chunked, more than one Content-Length, an obs-folded one, or none). The " \
         "request goes out exactly as authored, so its declared framing may now disagree with " \
-        "the body — bind the value into a header, or size the body yourself"
+        "the body — put the value in a header, or size the body yourself"
       end
     end
 
@@ -999,10 +1143,14 @@ module Gori
     # (`Rules#head_scoped?` maps `part: Ws` to false). Withholding there would kill exactly the
     # multi-line values this feature allows: a PEM block, a SAML assertion, a formatted JSON
     # sub-document.
-    def self.expand_bindings(text : String, guard_boundary : Bool = true) : String
+    def self.expand_bindings(text : String, guard_boundary : Bool = true, *,
+                             resolve : Owns = SEND_OWNS,
+                             generation : Generation? = nil) : String
       prefix = Settings.env_prefix
-      return text if prefix.empty? || !may_contain_tokens?(text, Owns::Bind, prefix)
-      expand_binding_text(text, binding_values, prefix, guard_boundary)
+      syntax = Settings.env_syntax
+      resolve = send_resolution(resolve, syntax)
+      return text if prefix.empty? || resolve.none? || !may_contain_tokens?(text, resolve, prefix)
+      expand_binding_text(text, binding_values, prefix, guard_boundary, resolve, syntax, generation)
     end
 
     # `expand_bindings` resolved as if the slot NAMED were the active one, for the caller that
@@ -1022,18 +1170,24 @@ module Gori
     # An unregistered name (an `--identities` file, the baseline gori prepends) resolves out of
     # the global table alone. That is the honest answer: an identity with no slot has no private
     # table, and it is what a project with no slots at all has always done.
-    def self.expand_bindings_as(text : String, slot : String, guard_boundary : Bool = true) : String
+    def self.expand_bindings_as(text : String, slot : String, guard_boundary : Bool = true, *,
+                                generation : Generation? = nil) : String
       prefix = Settings.env_prefix
-      return text if prefix.empty? || !may_contain_tokens?(text, Owns::Bind, prefix)
-      expand_binding_text(text, binding_values_as(slot), prefix, guard_boundary)
+      resolve = Settings.env_syntax.namespaced? ? SEND_OWNS : Owns::Bind
+      return text if prefix.empty? || !may_contain_tokens?(text, resolve, prefix)
+      expand_binding_text(text, binding_values_as(slot), prefix, guard_boundary, resolve,
+        Settings.env_syntax, generation)
     end
 
     private def self.expand_binding_text(text : String, vals : Hash(String, String),
-                                         prefix : String, guard_boundary : Bool) : String
+                                         prefix : String, guard_boundary : Bool, resolve : Owns,
+                                         syntax : Syntax, generation : Generation?) : String
       # see the Bytes form
-      return text if vals.empty? && !contains_escape?(text.to_slice, prefix, owns: Owns::Bind)
+      needed, generation = prepare_send_expansion(text, vals, resolve, prefix, syntax, generation)
+      return text unless needed
       table = guard_boundary ? boundary_safe(vals) : vals
-      expand(text, table, prefix, escape: Escape::Consume, resolve: Owns::Bind, bind_vars: table)
+      expand(text, table, prefix, escape: Escape::Consume, syntax: syntax, resolve: resolve,
+        bind_vars: table, generation: generation)
     end
 
     # A WebSocket FRAME payload. All body, and that is the whole of why it needs its own door
@@ -1056,15 +1210,19 @@ module Gori
     # wire. The Bytes overload's own comment makes this argument for the HTTP half; a frame is
     # where it had no implementation.
     def self.expand_bindings_frame(payload : Bytes,
-                                   verbatim : Array({Int32, Int32})? = nil) : Bytes
+                                   verbatim : Array({Int32, Int32})? = nil, *,
+                                   generation : Generation? = nil) : Bytes
       prefix = Settings.env_prefix
-      return payload if prefix.empty? || !may_contain_tokens?(payload, Owns::Bind, prefix)
+      resolve = Settings.env_syntax.namespaced? ? SEND_OWNS : Owns::Bind
+      return payload if prefix.empty? || !may_contain_tokens?(payload, resolve, prefix)
       vals = binding_values
       # See the Bytes overload: this is also the seam that CONSUMES its own escape, so an empty
       # table is not on its own a reason to skip.
-      return payload if vals.empty? && !contains_escape?(payload, prefix, owns: Owns::Bind)
+      needed, generation = prepare_send_expansion(payload, vals, resolve, prefix,
+        Settings.env_syntax, generation)
+      return payload unless needed
       expand(String.new(payload), vals, prefix, verbatim, Escape::Consume,
-        resolve: Owns::Bind, bind_vars: vals).to_slice
+        resolve: resolve, bind_vars: vals, generation: generation).to_slice
     end
 
     # `spans` restricted to `[from, to)` and rebased so 0 is `from` — what a half of a
@@ -1194,9 +1352,10 @@ module Gori
                          escape : Escape = Escape::Preserve, *,
                          syntax : Syntax = Settings.env_syntax,
                          resolve : Owns = Owns::Env,
-                         unescape : Owns? = nil) : Bytes
+                         unescape : Owns? = nil,
+                         generation : Generation? = nil) : Bytes
       bytes = expand(text, vars, prefix, escape: escape,
-        syntax: syntax, resolve: resolve, unescape: unescape).to_slice
+        syntax: syntax, resolve: resolve, unescape: unescape, generation: generation).to_slice
       boundary = head_body_boundary(bytes)
       head = normalize_crlf(bytes[0...boundary])
       return head if boundary >= bytes.size
@@ -1270,7 +1429,8 @@ module Gori
                     syntax : Syntax = Settings.env_syntax,
                     resolve : Owns = Owns::Env,
                     unescape : Owns? = nil,
-                    bind_vars : Hash(String, String)? = nil) : String
+                    bind_vars : Hash(String, String)? = nil,
+                    generation : Generation? = nil) : String
       return text if prefix.empty?
       return text unless text.byte_index(prefix) # fast, lossless no-op when the prefix never occurs
 
@@ -1322,9 +1482,20 @@ module Gori
           # the escape mean the same thing whether or not the name after it would resolve.
           buf << prefix
           buf << found.escaped_text
-        elsif found.kind.token? && found.owned_by?(resolve) &&
-              (val = table_for(found.ns, vars, bind_vars)[found.name]?)
-          buf << val
+        elsif found.kind.token? && found.owned_by?(resolve)
+          val = if found.ns.try(&.gen?)
+                  (generation ||= Generation.new).value?(found.name)
+                else
+                  table_for(found.ns, vars, bind_vars)[found.name]?
+                end
+          if val
+            buf << val
+          else
+            w = found.miss_width(plen, syntax)
+            buf.write(bytes[i, w])
+            i += w
+            next
+          end
         else
           # A Literal, a token this pass does not own, or an owned token with no value — all
           # three are "copy what is there". An unknown name staying LITERAL is `expand`'s
@@ -1362,6 +1533,7 @@ module Gori
       case ns
       in Namespace::Env  then vars
       in Namespace::Bind then bind_vars || binding_values
+      in Namespace::Gen  then EMPTY_VARS
       end
     end
 
@@ -1530,6 +1702,13 @@ module Gori
           i += found.width
           next
         end
+        # A registered generator is resolved by the later send seam, but only for request text.
+        # `deferred: nil` is a dial tuple that never reaches that pass, and `token_names` also
+        # uses nil because it asks for every reference rather than a resolution verdict.
+        if found.ns.try(&.gen?) && deferred && generator_hint?(found.name)
+          i += found.width
+          next
+        end
         # `bind_resolvable` decides whether a BIND token may be answered by the live binding
         # table at all. A scan whose caller has a LATER pass to hand the token to (a request
         # body: `deferred` given, the send seam re-scans with `resolve: Owns::Bind`) says yes;
@@ -1552,7 +1731,7 @@ module Gori
         key = qualify_names ? qualified_of(found) : found.name
         if seen.add?(key)
           ns = found.ns
-          deferrable = ns.nil? || ns.send_time?
+          deferrable = ns.nil? || ns.declarable?
           names << key unless deferrable && deferred && deferred.includes?(found.name)
         end
         i += found.miss_width(plen, syntax)
@@ -1820,16 +1999,17 @@ module Gori
           ns = found.ns
           # Exhaustive, for `table_for`'s reason: a two-way branch paints a third namespace's token
           # `known` because the ENV table happens to hold a name of its own.
-          table =
+          known =
             if ns.nil?
-              env_table
+              env_table.has_key?(found.name)
             else
               case ns
-              in Namespace::Env  then env_table
-              in Namespace::Bind then bind_table ||= vars || binding_values
+              in Namespace::Env  then env_table.has_key?(found.name)
+              in Namespace::Bind then (bind_table ||= vars || binding_values).has_key?(found.name)
+              in Namespace::Gen  then !generator_hint?(found.name).nil?
               end
             end
-          acc << Region.new(i, i + found.width, ns, found.name, table.has_key?(found.name))
+          acc << Region.new(i, i + found.width, ns, found.name, known)
         end
         i += found.width
       end

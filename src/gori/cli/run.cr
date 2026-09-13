@@ -1188,6 +1188,21 @@ module Gori
       # on the FACT, not after the remedy — "...or remove the token for session #3" reads as
       # if the token were the session's.
       private def self.env_unresolved_error(detail : String?, where : String = "") : String
+        refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
+        if !refs.empty? && refs.all?(&.ns.gen?)
+          # A REGISTERED generator refused here is not a typo and the catalog is no remedy —
+          # offering `$GEN.UUID` as the way to fix `$GEN.UUID` says nothing. It reached this
+          # message because the value it sits in is resolved BEFORE a request exists (a dial
+          # target, an SNI: `Env.unresolved(..., deferred: nil)`), where nothing mints.
+          if refs.all? { |r| Env.generator_hint?(r.name) }
+            return "#{detail}#{where} #{refs.size == 1 ? "is a generator" : "are generators"} — " \
+                   "generators mint at the send seam, in REQUEST text, and this value is resolved " \
+                   "before the request is framed, so the token would go out literally. Write the " \
+                   "value here, or remove the token"
+          end
+          names = Env::GENERATOR_HINTS.keys.map { |name| Env.spell(name, Env::Namespace::Gen) }.join(", ")
+          return "unresolved generator #{detail}#{where} — use one of #{names}, or remove the token"
+        end
         hits, rest = split_disabled_rule_tokens(detail)
         return "unresolved env #{detail}#{where} — set it with `gori run project env set KEY value`, " \
                "or remove the token" if hits.empty?

@@ -439,7 +439,7 @@ module Gori
           p.banner = "Usage: gori run intercept edit <item-id> (--raw=RAW | --raw-file=PATH) [options]\n\n" \
                      "Forward a held item with EDITED bytes: the full replacement wire message\n" \
                      "(whichever leg — request or response — is held). The BODY is forwarded\n" \
-                     "VERBATIM (no env expansion: an $ENV.KEY / $BIND.NAME token — bare syntax\n" \
+                     "VERBATIM (no token expansion: an $ENV.KEY / $BIND.NAME / $GEN.UUID token — bare syntax\n" \
                      "$KEY / $NAME — stays literal; no line-ending rewrite); header lines are\n" \
                      "CRLF-terminated and Content-Length is resynced to the new body unless\n" \
                      "--no-update-content-length holds the value you declared.\n\n" \

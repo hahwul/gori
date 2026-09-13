@@ -73,6 +73,16 @@ describe "TextArea env peek (namespaced)" do
     end
   end
 
+  it "describes a generator without minting a preview value" do
+    with_env_fixture do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        row = peek_row("k=$GEN.UUID", 9)
+        row.should contain("$GEN.UUID")
+        row.should contain("UUID v4 · fresh per send")
+      end
+    end
+  end
+
   it "says nothing while the caret is still in the namespace run" do
     with_env_fixture do
       with_env_syntax(Gori::Env::Syntax::Namespaced) do

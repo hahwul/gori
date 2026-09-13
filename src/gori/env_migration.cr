@@ -68,8 +68,8 @@ module Gori
       Display
       # A session-slot header VALUE. `$$` is the send seam's, exactly as in a request
       # (`Env.expand_bindings_as`, `Escape::Consume`) — but that seam is the ONLY pass over these
-      # bytes, and it resolves BIND alone. So an env-only name in a slot header shipped literally
-      # under bare and must stay a bare literal, which is the same wire.
+      # bytes. It resolves BIND and, under namespaced syntax, GEN. An env-only name in a slot
+      # header shipped literally under bare and must stay a bare literal, which is the same wire.
       Slot
       # A DIAL TUPLE: a Repeater/workbench `target`, an `sni`. Expanded ONCE, by the env pass with
       # `Escape::Preserve` — so `$$` is two bytes that nothing consumes, and the ENV table is the
@@ -213,7 +213,23 @@ module Gori
         end
         found.width
       when Env::Kind::Token
-        if ns = route(found.name, env, bind, live, kind)
+        ns = route(found.name, env, bind, live, kind)
+        # Bare never had a generator grammar. Without this escape, a literal `$GEN.UUID` in an
+        # old request or slot header would start minting values merely because the automatic
+        # namespace migration opened the project. A real bare env/binding named `GEN` wins first:
+        # `$GEN.UUID` then meant that value plus the literal suffix and is re-spelled normally.
+        if ns.nil? && (kind.request? || kind.slot?)
+          gen = Env.read_token_at(bytes, i, n, syntax: Env::Syntax::Namespaced, prefix: prefix,
+            escapes: Env::Owns::All)
+          if gen && gen.kind.token? && gen.ns.try(&.gen?) && Env.generator_hint?(gen.name)
+            before = String.new(bytes[i, gen.width])
+            after = prefix + before
+            buf << after
+            changes << Change.new(i, before, after, nil, note: "literal generator")
+            return gen.width
+          end
+        end
+        if ns
           after = Env.spell(found.name, ns, Env::Syntax::Namespaced, prefix)
           buf << after
           changes << Change.new(i, Env.spell(found.name, ns, Env::Syntax::Bare, prefix), after,
@@ -243,6 +259,13 @@ module Gori
         buf.write(bytes[i, found.width])
         found.width
       when Env::Kind::Token
+        # GEN has no bare equivalent and is available only under the namespaced grammar.
+        # Keep its spelling byte-identical; an explicit switch to bare makes it literal rather
+        # than silently turning it into the unrelated `$UUID` env/binding name.
+        if found.ns.try(&.gen?)
+          buf.write(bytes[i, found.width])
+          return found.width
+        end
         ns = found.ns || Env::Namespace::Env
         after = Env.spell(found.name, ns, Env::Syntax::Bare, prefix)
         buf << after
@@ -384,10 +407,10 @@ module Gori
 
     # ── the wire check ────────────────────────────────────────────────────────
     #
-    # Whether `after` sends exactly what `before` sent. Every name is given a SENTINEL value
-    # instead of its real one — distinct per namespace, so a token routed to the wrong table is
-    # a difference rather than a coincidence — and both texts are run through the two passes a
-    # request really takes (env vars at plan-build, bindings at the send seam).
+    # Whether `after` sends exactly what `before` sent. Every name and registered generator is
+    # given a SENTINEL value instead of its real one — distinct per namespace, so a token routed
+    # to the wrong table is a difference rather than a coincidence — and both texts are run
+    # through the passes a request really takes.
     #
     # For every kind that HAS a wire, which is all but `Display`. They do not share a pass list,
     # so `kind` picks it — a slot header value is only ever seen by the binding seam, a dial tuple
@@ -404,7 +427,9 @@ module Gori
                    prefix : String = Settings.env_prefix) : Bool
       env = sentinels(env_names, "E")
       bind = sentinels(enabled_bind_names || bind_names, "B")
-      wire(before, from, env, bind, prefix, kind) == wire(after, to, env, bind, prefix, kind)
+      gen = sentinels(Env::GENERATOR_HINTS.keys, "G")
+      wire(before, from, env, bind, gen, prefix, kind) ==
+        wire(after, to, env, bind, gen, prefix, kind)
     end
 
     private def self.sentinels(names : Enumerable(String), tag : String) : Hash(String, String)
@@ -419,7 +444,8 @@ module Gori
     # `Preserve`/`Consume` are the bare grammar's knobs and map onto `Owns` exactly as production
     # does (`Env.unescape_set`).
     private def self.wire(bytes : Bytes, syntax : Env::Syntax, env : Hash(String, String),
-                          bind : Hash(String, String), prefix : String, kind : Kind) : String
+                          bind : Hash(String, String), gen : Hash(String, String), prefix : String,
+                          kind : Kind) : String
       # A RULE REPLACEMENT is resolved by `Rules#substitute`, whose grammar is nobody else's:
       # it owns `$$` and `$1..$9` in BOTH syntaxes and resolves against ONE table with the
       # bindings layered over the env vars. Modelled directly rather than approximated with two
@@ -427,10 +453,11 @@ module Gori
       return rule_wire(bytes, syntax, env, bind, prefix) if kind.rule?
       text = String.new(bytes)
       # A SLOT header value: `Env.expand_bindings_as` and nothing else. It is the last pass before
-      # the socket, so it consumes the escape, and it resolves BIND alone.
+      # the socket, so it consumes the escape and resolves BIND plus namespaced GEN.
       if kind.slot?
         return Env.expand(text, bind, prefix, nil, Env::Escape::Consume,
-          syntax: syntax, resolve: Env::Owns::Bind, bind_vars: bind)
+          syntax: syntax, resolve: Env::Owns::Bind | Env::Owns::Gen, bind_vars: bind,
+          generation: Env::Generation.new(gen))
       end
       built = Env.expand(text, env, prefix, nil, Env::Escape::Preserve,
         syntax: syntax, resolve: Env::Owns::Env)
@@ -438,7 +465,8 @@ module Gori
       # unescapes it.
       return built if kind.dial?
       Env.expand(built, bind, prefix, nil, Env::Escape::Consume,
-        syntax: syntax, resolve: Env::Owns::Bind, bind_vars: bind)
+        syntax: syntax, resolve: Env::Owns::Bind | Env::Owns::Gen, bind_vars: bind,
+        generation: Env::Generation.new(gen))
     end
 
     # `Rules#substitute`'s grammar, as a model: `$$` → one sigil (both syntaxes), `$1..$9` copied
@@ -497,6 +525,7 @@ module Gori
       case ns
       in Env::Namespace::Env  then env
       in Env::Namespace::Bind then bind
+      in Env::Namespace::Gen  then Env::EMPTY_VARS
       end
     end
   end

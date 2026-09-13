@@ -101,6 +101,20 @@ describe Gori::Discover::Sender do
     wire.should match(/\AGET \/a\?b=1 HTTP\/1\.1\r\nHost: 127\.0\.0\.1:\d+\r\n/)
   end
 
+  it "generates header values per fetch and keeps the exact generated wire on the result" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      result = nil.as(Gori::Repeater::Result?)
+      wire = wire_bytes do |port|
+        result = D::Sender.new(verify: false, timeout: 2.seconds,
+          headers: [{"X-Request-ID", "$GEN.UUID"}])
+          .fetch("http", "127.0.0.1", port, "/a")
+      end
+      id = wire.match(/X-Request-ID: ([0-9a-f-]{36})\r\n/).not_nil![1]
+      UUID.new(id).version.should eq(UUID::Version::V4)
+      String.new(result.not_nil!.wire.not_nil!).should eq(wire)
+    end
+  end
+
   it "sends nothing at all when the target carries a raw CRLF (request splicing)" do
     # The exact shape #390 captured off a real socket: the second request is complete and
     # entirely attacker-chosen — method, absolute-form request line, and Host. With
