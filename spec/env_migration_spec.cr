@@ -632,6 +632,11 @@ describe Gori::EnvMigration do
   # Going to bare it starts resolving, and the bytes are left as authored with the name said out loud.
   it "names a target literal that the bare grammar will start resolving" do
     with_migration_home do |db_path|
+      # The seeding process has to SPEAK namespaced while it writes a namespaced-marked database:
+      # the write guard (`store/env_write_guard.cr`) re-spells text a stale-grammar process is about
+      # to store, which is exactly what it is for — and would turn this fixture's literal into a
+      # token before the reconcile ever saw it.
+      Gori::Settings.env_syntax = NS
       with_open_store(db_path) do |store|
         store.set_setting(Gori::Env::PROJECT_VARS_KEY,
           Gori::Env.serialize_vars([{"id", "evil.example.com"}]))

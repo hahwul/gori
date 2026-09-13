@@ -1,9 +1,9 @@
-require "json"
 require "../settings"
 require "../env"
+require "../env_migration/store"
 
 module Gori::Tui
-  # How the TUI avoids writing a stale `env.syntax` back over a peer's switch.
+  # How a running TUI follows a token-grammar switch made in ANOTHER terminal.
   #
   # `Settings.save` merges with the file per SECTION (`pick_changed`): a section this process
   # changed wins whole. The grammar lives in the `env` section beside the vars and the prefix, so
@@ -13,43 +13,41 @@ module Gori::Tui
   # `a`/`e`/`d` on that card: the operator's switch reverted with no message, and every editor in
   # the session went back to reading tokens under the grammar they had left.
   #
-  # No TUI surface sets the grammar any more (switching it has to RE-SPELL the tokens already
-  # stored in project DBs and in the global rules, which is `gori settings env-syntax`'s work), so
-  # there is nothing for this process to own: whenever the file states a grammar, the file is
-  # right and the in-memory copy is the one that may be stale. Re-read it before any env-section
-  # write, so a save that is about a var (or about the sigil) carries no opinion about the
-  # grammar.
+  # No TUI surface SETS the grammar, so there is nothing for this process to own: whenever the file
+  # states a grammar, the file is right and the in-memory copy is the one that may be stale.
+  #
+  # But adopting it is only half the act, and the half that was here. A grammar switch re-spells
+  # the tokens stored in the project database — and `gori settings env-syntax` cannot re-spell a
+  # project that is already open in this process, because the marker check inside the reconcile is
+  # what keeps two openers from doing it twice. So the session has to do it itself, and then say
+  # what it did. That is `EnvMigration.follow_disk`; this module is the TUI's adapter onto it —
+  # `follow` at every seam that could notice, `announce` on the three surfaces the OPEN-TIME
+  # migration already uses (the ring, the bottom-bar toast, the ACTIVITY feed the reconcile writes
+  # itself).
   module EnvSyntaxSeam
-    # Adopt the FILE's grammar before writing the env section. Unconditional: the only writer of
-    # this key is the CLI verb, so a difference means a peer switched while this session was up.
-    def self.refresh_from_disk : Nil
-      found = disk_syntax
-      return unless found
-      Settings.env_syntax = found unless found == Settings.env_syntax
+    # Adopt the FILE's grammar, re-spell this session's project, and hand back the notices. Empty
+    # when the file says nothing new, which is every call but the one after a peer's switch.
+    #
+    # `session` is nilable so the overlay-level specs — which drive the env card with no project
+    # open — take the same door the Runner does; a nil one adopts the grammar and has nothing to
+    # re-spell, which is also the unbound case.
+    def self.follow(session : Gori::Session? = nil) : Array(String)
+      Gori::EnvMigration.follow_disk(session.try(&.store), session.try(&.project.db_path),
+        session.try(&.project.name))
     end
 
-    # The grammar as the FILE spells it, or nil when the file has NOTHING TO SAY.
-    #
-    # "Nothing to say" is four cases and they all mean "keep what this session has": no file yet (a
-    # home whose first save has not landed — the in-memory grammar is the only copy there is), bytes
-    # that will not parse, a value this build does not know, and an ABSENT key.
-    #
-    # The absent key belongs in that list now. `serialize_env` always writes the grammar, so a peer
-    # that switched wrote it down; an absence is a file from before namespaces, and what a
-    # pre-namespace file means is settled by `Settings.load`'s adoption — not by a refresh whose only
-    # job is to avoid clobbering a peer's switch. Reading it as bare here would have a stale file
-    # flip a live session's grammar (and, through the marker, its next project open) to the one
-    # thing this seam exists to prevent.
+    # The grammar the FILE states, or nil when it has nothing to say. A delegate, so a TUI-side
+    # reader does not grow a second copy of the four "nothing to say" cases.
     def self.disk_syntax : Env::Syntax?
-      path = Settings.path
-      return nil unless File.exists?(path)
-      root = JSON.parse(File.read(path)).as_h?
-      return nil unless root
-      raw = root["env"]?.try(&.as_h?).try(&.["syntax"]?).try(&.as_s?)
-      return nil unless raw
-      Env::Syntax.parse?(raw.strip)
-    rescue
-      nil
+      Gori::EnvMigration.disk_syntax
+    end
+
+    # Put the notices in the ring, and answer the one a caller may want as a toast. `:warn`, like
+    # the open-time announcement: the bytes in this operator's Repeater tabs changed, and `:info`
+    # takes neither the bell nor the toast (`Notifications#push`).
+    def self.announce(lines : Array(String), notifications : Notifications) : String?
+      lines.each { |line| notifications.push(:warn, line, goto: Jobs::Goto.new(:project)) }
+      lines.first?
     end
   end
 end

@@ -1,4 +1,5 @@
 require "db"
+require "json"
 require "sqlite3"
 require "../env_migration"
 require "./globals"
@@ -120,6 +121,75 @@ module Gori
       end
     end
 
+    # ── following a PEER's switch, mid-process ────────────────────────────────
+
+    # The grammar settings.json STATES, or nil when the file has nothing to say.
+    #
+    # "Nothing to say" is four cases and they all mean "keep what this process has": no file yet, bytes
+    # that will not parse, a value this build does not know, and an ABSENT key. The absent key belongs
+    # in that list because `serialize_env` ALWAYS writes the grammar, so a peer that switched wrote it
+    # down — an absence is a file from before namespaces, and what that means is settled by
+    # `Settings.load`'s adoption, not by a mid-process re-read.
+    #
+    # Read straight off the file rather than through `Settings.load`: a full load would clobber every
+    # section this process has edited and not yet saved.
+    def self.disk_syntax(path : String = Settings.path) : Env::Syntax?
+      return nil unless File.exists?(path)
+      root = JSON.parse(File.read(path)).as_h?
+      return nil unless root
+      raw = root["env"]?.try(&.as_h?).try(&.["syntax"]?).try(&.as_s?)
+      return nil unless raw
+      Env::Syntax.parse?(raw.strip)
+    rescue
+      nil
+    end
+
+    # THE mid-process seam: adopt the grammar the FILE states, re-spell the open project, and hand
+    # back the notices.
+    #
+    # A grammar switch is `gori settings env-syntax`'s to make, and it re-spells everything it can
+    # reach — but it cannot reach a project that is already OPEN in another process. Two long-lived
+    # surfaces sit on exactly that: a TUI session and a `gori mcp` server, both of which read the
+    # grammar once at startup and never again. Before this, each of them was wrong in its own way:
+    #
+    #   * the TUI flipped `Settings.env_syntax` on any env-section save, with no reconcile, so the
+    #     session's editors changed grammar while the project's stored bytes did not;
+    #   * an MCP server started under bare kept answering `list_env.syntax = bare` and kept WRITING
+    #     bare-spelled repeater/rule/slot rows into a database another process had already marked
+    #     namespaced — rows the reconcile then skips forever, because `from == to`.
+    #
+    # So: one function, called from both peer ticks and from the TUI's env-section writes, that does
+    # all three things together — adopt, reconcile, announce. Returns the lines for the caller's own
+    # channel (the TUI's ring + toast + ACTIVITY, `Log.info` for MCP), empty when there was nothing
+    # to follow.
+    #
+    # `store`/`db_path` may be nil (an UNBOUND MCP server): the grammar still moves, there is simply
+    # no project to re-spell yet, and the one that gets bound later is reconciled at its own bind.
+    def self.follow_disk(store : Store? = nil, db_path : String? = nil,
+                         project : String? = nil) : Array(String)
+      # `lines`, never `out`: `out` is a Crystal KEYWORD, and using it as a local is a parse error
+      # reported on the line after the assignment.
+      lines = [] of String
+      return lines unless Settings.env_syntax_follow_disk?
+      found = disk_syntax
+      return lines unless found
+      return lines if found == Settings.env_syntax
+      # A DEGRADED load is the one state where the grammar must not move. Half this process's
+      # settings are factory defaults; flipping how it reads tokens while it cannot re-spell the
+      # rows (`env_syntax_stated?` folds `load_degraded?` in) is the desync this function exists to
+      # close, arrived at from the other side.
+      return lines if Settings.load_degraded?
+      Settings.adopt_stated_env_syntax(found)
+      if store && db_path
+        name = project || File.basename(File.dirname(db_path))
+        reconcile(store, db_path, name).try { |r| lines.concat(r.notices) }
+      end
+      # The GLOBAL rules are re-spelled by whoever switched, not here — but a load in THIS process
+      # may still be holding a report nobody has said out loud yet.
+      Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
+      lines
+    end
+
     # ── the reconcile ─────────────────────────────────────────────────────────
 
     # Bring `store`'s tokens into this install's grammar, or return nil when there is nothing to
@@ -152,38 +222,23 @@ module Gori
       apply(plan, db_path)
     end
 
-    # The ENV table as the grammar being LEFT resolved it: the global vars merged under this
-    # project's own, exactly `Env.effective_vars`' membership — read from the STORE rather than
-    # from `Settings.project_env_vars`, because the reconcile runs BEFORE `Env.load_project` has
-    # published this project's layer (and because one process opens several projects).
-    def self.env_names(store : Store) : Set(String)
-      names = Settings.env_vars.map(&.[0]).to_set
-      Env.parse_vars_json(store.setting(Env::PROJECT_VARS_KEY)).each { |(k, _)| names << k }
-      names
-    end
-
-    # The BIND table, wider than what is bound: every extract rule's name (enabled or not) plus
-    # every name a session slot claims. A binding value is memory-only, so "what is bound right
-    # now" is empty at open time and would re-spell nothing; what the operator WROTE is the
-    # declared name, and a disabled rule's name is still the name they wrote.
-    def self.bind_names(store : Store) : Set(String)
-      names = store.extract_rules.map(&.name).to_set
-      SessionSlot.parse_json(store.setting(Store::SESSION_SLOTS_KEY)).each do |slot|
-        slot.rules.each { |r| names << r }
-      end
-      names
-    end
-
-    # The half of `bind_names` that ever RESOLVED: the names an ENABLED extract rule declares.
+    # The three name tables, which `Store` owns the queries for (`store/env_write_guard.cr`) — the
+    # WRITE-side guard asks exactly the same three of the same database, and two spellings of "what
+    # is in this project's ENV table" is how a migration and the guard behind it come to disagree.
     #
-    # Both halves of the live binding table filter on `enabled?` (`Bindings#values`,
-    # `Bindings#declared`), so a switched-off rule's name was an ordinary unknown key under bare —
-    # it resolved in no pass and in no merged table. Which matters most for a RULE replacement,
-    # whose bare table layered the bindings OVER the env vars: without this set, a name that is
-    # both an env var and a disabled extract rule was re-spelled `$BIND.name`, and the rule then
-    # injected its own spelling into live traffic instead of the env value bare had put there.
+    # Read off the STORE and not off `Settings.project_env_vars`, because the reconcile runs BEFORE
+    # `Env.load_project` has published this project's layer (and because one process opens several
+    # projects).
+    def self.env_names(store : Store) : Set(String)
+      store.env_var_names
+    end
+
+    def self.bind_names(store : Store) : Set(String)
+      store.bind_declared_names
+    end
+
     def self.enabled_bind_names(store : Store) : Set(String)
-      store.extract_rules.select(&.enabled?).map(&.name).to_set
+      store.bind_enabled_names
     end
 
     # One `UPDATE`, held until the whole project has been scanned so the write is one transaction.

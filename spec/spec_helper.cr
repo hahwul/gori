@@ -41,12 +41,19 @@ Gori::Settings.env_syntax = Gori::Env::Syntax::Bare
 # The setter bumps the highlight revision (a `TextArea`'s styled buffer, the `Highlight` caches and
 # `Rules#subst_snapshot` are keyed on it), and so does the restore — otherwise an example that
 # painted under one grammar would leave a neighbour reading its cache.
+# This is a PIN, not a load, so the mid-process re-read (`EnvMigration.follow_disk`) is switched off
+# for the duration: the temp home's settings.json says something else — or nothing — and a seam that
+# adopted the file's answer here would be fighting the pin rather than following a peer. The examples
+# that exercise that seam write a real settings.json and drive it directly.
 def with_env_syntax(syntax : Gori::Env::Syntax, &)
   was = Gori::Settings.env_syntax
+  followed = Gori::Settings.env_syntax_follow_disk?
   Gori::Settings.env_syntax = syntax
+  Gori::Settings.env_syntax_follow_disk = false
   begin
     yield
   ensure
+    Gori::Settings.env_syntax_follow_disk = followed
     Gori::Settings.env_syntax = was
   end
 end

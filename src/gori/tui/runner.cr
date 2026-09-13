@@ -2232,9 +2232,10 @@ module Gori::Tui
       # The env section is written WHOLE by the merge, grammar included, and this card saves on
       # every keystroke — so a var edit used to carry the overlay's opening snapshot of the
       # grammar back over a `gori settings env-syntax` run in another terminal. No TUI surface
-      # switches the grammar any more, so a save here never has an opinion about it: adopt
-      # whatever the file says first. See `EnvSyntaxSeam`.
-      EnvSyntaxSeam.refresh_from_disk
+      # switches the grammar any more, so a save here never has an opinion about it: follow
+      # whatever the file says first — which RE-SPELLS this project's stored tokens and says so,
+      # not just flips the reading. See `EnvSyntaxSeam`.
+      follow_env_syntax
       prefix, vars = ov.to_config
       Settings.env_prefix = prefix
       Settings.env_vars = vars.dup
@@ -3785,8 +3786,25 @@ module Gori::Tui
     #
     # `:info` notes take neither the toast nor the bell (Notifications#push rings only above
     # `:info`): a peer STOPPING active probing is worth a line in the centre and nothing louder.
+    # A peer's token-grammar switch, adopted + re-spelled + announced on this session's own
+    # channels. One call site per seam that could notice it: the peer tick below, and the two
+    # env-section writes (`save_env`, the Project ENV pane's prefix commit) whose SAVE would
+    # otherwise carry a stale grammar back over the switch.
+    #
+    # Answers whether anything was said, so the tick can mark the frame dirty.
+    private def follow_env_syntax : Bool
+      lines = EnvSyntaxSeam.follow(@session)
+      return false if lines.empty?
+      @toast ||= EnvSyntaxSeam.announce(lines, @notifications)
+      true
+    end
+
     private def drain_peer_notices : Bool
       now = Time.instant
+      # A peer's GRAMMAR switch is a peer change like any other, and the loudest one available: it
+      # rewrites stored bytes in this project. Taken on the same cadence, ahead of the rule/binding
+      # deltas, so the editors and the database agree before anything else in this pass reads them.
+      dirty = follow_env_syntax
       # The rule sets hold their own peer delta rather than returning it, so a re-read cannot eat
       # it — the Rewriter tab's `on_enter` and its `r` key both reload, and a peer's change picked
       # up by one of those is still owed a line. Taking here, on the bare cadence, is what makes
@@ -3801,7 +3819,7 @@ module Gori::Tui
       if note = @peer_notices.flush(now)
         @peer_notices_pending.unshift(note)
       end
-      return false if @peer_notices_pending.empty?
+      return dirty if @peer_notices_pending.empty?
       @peer_notices_pending.each do |note|
         goto = note.tab.try { |tab| Jobs::Goto.new(tab) }
         @notifications.push(note.level, note.message, goto: goto, source: note.source)

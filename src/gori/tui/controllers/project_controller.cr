@@ -1244,9 +1244,11 @@ module Gori::Tui
       when :empty then @host.status("env prefix: empty")
       when :ok
         # The SIGIL is global and shares the `env` section with the grammar, which the merge
-        # rewrites whole: adopt the file's grammar first so this write says nothing about it
-        # (`EnvSyntaxSeam`, the same guard the Settings env card's saves take).
-        EnvSyntaxSeam.refresh_from_disk
+        # rewrites whole: follow the file's grammar first so this write says nothing about it
+        # (`EnvSyntaxSeam`, the same seam the Settings env card's saves take). FOLLOW, not just
+        # adopt — a peer's switch re-spells this project's stored tokens, and the notices go in
+        # the ring beside the open-time ones rather than being swallowed by a prefix save.
+        EnvSyntaxSeam.announce(EnvSyntaxSeam.follow(@host.session), @host.notifications)
         Settings.env_prefix = prefix
         ok = Settings.save
         Env.bump_highlight_rev if ok

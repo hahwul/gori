@@ -62,7 +62,7 @@ private def env_card(&) : Nil
   # peer may have switched it), then write the vars and the prefix. It deliberately carries no
   # grammar of its own — the card holds no working copy to hand back.
   ov.on_save = -> {
-    Gori::Tui::EnvSyntaxSeam.refresh_from_disk
+    Gori::Tui::EnvSyntaxSeam.follow
     prefix, vars = ov.to_config
     Gori::Settings.env_prefix = prefix
     Gori::Settings.env_vars = vars.dup
@@ -163,7 +163,7 @@ describe Gori::Tui::EnvOverlay do
       # clobbering this seam exists to prevent. `Settings.load` is what settles a pre-namespace file.
       File.write(Gori::Settings.path, %({"theme":"dark"}))
       Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
-      Gori::Tui::EnvSyntaxSeam.refresh_from_disk
+      Gori::Tui::EnvSyntaxSeam.follow.should be_empty
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
       # An unknown value says nothing either — `parse_env` warns and re-spells nothing for the same
       # bytes.
@@ -174,7 +174,7 @@ describe Gori::Tui::EnvOverlay do
       Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
       File.delete(Gori::Settings.path)
       Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
-      Gori::Tui::EnvSyntaxSeam.refresh_from_disk
+      Gori::Tui::EnvSyntaxSeam.follow.should be_empty
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
     end
   end

@@ -33,6 +33,16 @@ module Gori::Settings
   # fixtures would be read under the other grammar — and migrated on their way past.
   class_property env_syntax_when_absent : Env::Syntax = DEFAULT_ENV_SYNTAX
 
+  # Whether a long-lived process may RE-READ `env.syntax` off the file mid-run and adopt it
+  # (`EnvMigration.follow_disk`). True in production, which is the whole point: a TUI session and a
+  # `gori mcp` server both live for hours and must follow a `gori settings env-syntax` run.
+  #
+  # A class_property so the SUITE can pin it. `with_env_syntax` sets the grammar in memory, over a
+  # temp home whose settings.json says something else entirely (or nothing) — and a seam that
+  # dutifully adopted the file's answer there would be fighting the pin rather than following a
+  # peer. The examples that exercise the seam write a real file and leave this alone.
+  class_property? env_syntax_follow_disk : Bool = true
+
   # WHERE the grammar in memory came from, which decides whether gori may act on it. A migration
   # rewrites stored bytes, so it may only run when this install's grammar is something the
   # install actually SAID — never over a value gori guessed because a file could not be read
@@ -80,6 +90,18 @@ module Gori::Settings
     @@env_syntax = s
     Env.bump_highlight_rev
     s
+  end
+
+  # Adopt a grammar this install STATED, read back off settings.json by a long-lived process whose
+  # in-memory copy went stale under it — see `EnvMigration.follow_disk`.
+  #
+  # The ORIGIN moves with the value, and that is the whole reason this is not a plain assignment: a
+  # value that came out of a parsed `env.syntax` is exactly what `env_syntax_stated?` asks about,
+  # and leaving the origin at this run's `Absent`/`Unreadable` would let the grammar change while
+  # the re-spelling that has to accompany it stayed refused.
+  def self.adopt_stated_env_syntax(s : Env::Syntax) : Nil
+    self.env_syntax = s
+    self.env_syntax_origin = EnvSyntaxOrigin::Stated
   end
 
   # Global hostname overrides (a process-wide /etc/hosts): ordered {host (lowercased),

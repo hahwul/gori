@@ -336,6 +336,14 @@ module Gori
       # in-flight async job fiber — which already expanded its template at build
       # time and does not re-read env during the run — never sees a torn value.
       private def refresh_project_env : Nil
+        # A PEER's grammar switch, first. An MCP server reads `Settings.env_syntax` once at startup
+        # and lives for hours, so a `gori settings env-syntax` run in the operator's terminal left
+        # this process answering `list_env.syntax` with the grammar it was born under AND writing
+        # rows in that grammar into a database the switch had already marked the other way — rows
+        # the reconcile then skips forever, because `from == to`. `follow_disk` adopts, re-spells
+        # this project and hands back what it did; `Log` is this surface's only channel, since
+        # STDOUT belongs to JSON-RPC.
+        Gori::EnvMigration.follow_disk(@store, @db_path, @project_name).each { |line| Log.info { line } }
         return unless s = @store
         Env.load_project(s)
         # RELOAD the existing table rather than replacing it: an extract rule may have been
