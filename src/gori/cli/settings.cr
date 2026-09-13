@@ -440,6 +440,7 @@ module Gori::CLI
     # Refuse rather than write half an operator's file back — the same guard export and import use.
     abort_on_degraded_settings!("env-syntax")
     was = Settings.env_syntax
+    abort_on_guessed_env_syntax!(was, syntax)
     # The GLOBAL rewrite rules are the one thing this verb still re-spells itself: they live in
     # settings.json, not in a project database, so no project open will ever reach them. Both
     # directions, and a copy of the file is written beside it first.
@@ -450,6 +451,51 @@ module Gori::CLI
     end
     env_syntax_write_lines(was, syntax).each { |line| puts line }
     global.try { |g| puts g.line }
+  end
+
+  # `migrate_global_rules(from: was, …)` re-spells the global rewrite rules, and `was` has to be a
+  # grammar this install SAID rather than one gori had to guess.
+  #
+  # `abort_on_degraded_settings!` catches the file-shaped guesses (unreadable, unparseable,
+  # half-applied). What is left is the one that leaves a perfectly loadable file behind: `env.syntax`
+  # is THERE and names no grammar — `"NAMESPACED!"`, `null`, `1` — so `Settings.env_syntax` is the
+  # fallback reading and nothing in the file says which grammar those rules' replacements are
+  # spelled in. Re-spelling them from that would rewrite rules that rewrite traffic in EVERY
+  # project, in a direction picked by a typo.
+  #
+  # The refusal is scoped to the migration: asking for the grammar gori is ALREADY reading changes
+  # no replacement (`was == syntax` skips the re-spelling entirely) and simply writes the value
+  # down, which is exactly the repair this message asks for. So `gori settings env-syntax bare` on a
+  # typo'd file fixes the key, and the next run can move the grammar with the rules in hand.
+  private def self.abort_on_guessed_env_syntax!(was : Gori::Env::Syntax,
+                                                want : Gori::Env::Syntax) : Nil
+    (msg = guessed_env_syntax_refusal(was, want)) && abort("gori settings env-syntax: #{msg}")
+  end
+
+  # The refusal above as a VALUE, so the wording and the decision are spec-callable: `abort` calls
+  # `exit` and is not catchable.
+  private def self.guessed_env_syntax_refusal(was : Gori::Env::Syntax,
+                                              want : Gori::Env::Syntax) : String?
+    return nil unless Settings.env_syntax_origin.unreadable?
+    return nil if was == want
+    "#{Settings.path} sets env.syntax to " \
+    "#{stated_env_syntax_value || "a value gori could not read"}, which names none of " \
+    "#{env_syntax_values} — so gori is reading tokens as #{env_syntax_label(was)} for this run " \
+    "and cannot tell which grammar the global rewrite rules in that file are spelled in. " \
+    "Re-spelling them from a guess would rewrite traffic in every project.\n" \
+    "Fix or delete `env.syntax` in that file (or set it explicitly with " \
+    "`gori settings env-syntax #{env_syntax_label(was)}` after checking how those rules' " \
+    "replacements are spelled), then retry."
+  end
+
+  # The `env.syntax` value the file on disk actually carries, as JSON so a `null` or a `1` reads as
+  # itself, or nil when there is no reading it. Textual-ish on purpose: this is the path where the
+  # value has already failed to parse as a grammar, and the refusal has to quote what is there.
+  private def self.stated_env_syntax_value : String?
+    JSON.parse(File.read(Settings.path)).as_h?.try(&.["env"]?).try(&.as_h?)
+      .try(&.["syntax"]?).try(&.to_json)
+  rescue
+    nil
   end
 
   # What `gori settings env-syntax` prints with no argument: the value, and WHERE it came from.

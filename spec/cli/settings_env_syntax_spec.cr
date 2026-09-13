@@ -38,6 +38,11 @@ module Gori::CLI
   def self.env_syntax_origin_for_spec : String
     env_syntax_origin
   end
+
+  def self.guessed_env_syntax_refusal_for_spec(was : Gori::Env::Syntax,
+                                               want : Gori::Env::Syntax) : String?
+    guessed_env_syntax_refusal(was, want)
+  end
 end
 
 private def with_cli_home(&)
@@ -159,6 +164,56 @@ describe "gori settings env-syntax" do
       same = Gori::CLI.env_syntax_write_lines_for_spec(Gori::Env::Syntax::Bare,
         Gori::Env::Syntax::Bare)
       same.should eq(["env syntax: bare (unchanged)"])
+    end
+  end
+
+  # The verb re-spells the GLOBAL rewrite rules itself, `from` the grammar in memory — so that
+  # grammar has to be one the install SAID. `abort_on_degraded_settings!` catches the file-shaped
+  # guesses; this is the one that leaves a perfectly loadable file behind: `env.syntax` is there and
+  # names no grammar, so nothing says which way those replacements are spelled and re-spelling them
+  # would rewrite traffic in every project in a direction picked by a typo.
+  it "refuses to migrate the global rules from a GUESSED grammar" do
+    with_cli_home do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, <<-JSON)
+        {"env":{"syntax":"NAMESPACED!"},
+         "rewriter":{"rules":[{"id":1,"enabled":true,"name":"auth","target":"request",
+                               "part":"head","pattern":"X-A: .*","replacement":"X-A: $TOKEN",
+                               "op":"replace","match_kind":"regex","host":"","body_file":""}]}}
+        JSON
+      Gori::Settings.reset_load_warning_guard
+      Gori::Settings.load
+      Gori::Settings.env_syntax_origin.should eq(Gori::Settings::EnvSyntaxOrigin::Unreadable)
+      was = Gori::Settings.env_syntax
+      was.should eq(Gori::Env::Syntax::Bare) # the unreadable reading, not DEFAULT_ENV_SYNTAX
+
+      msg = Gori::CLI.guessed_env_syntax_refusal_for_spec(was, Gori::Env::Syntax::Namespaced).not_nil!
+      msg.should contain(path)                   # the file
+      msg.should contain(%("NAMESPACED!"))       # the bad value, quoted as the file spells it
+      msg.should contain("bare|namespaced")      # what it should have been
+      msg.should contain("global rewrite rules") # why this verb in particular refuses
+      msg.should contain("Fix or delete `env.syntax`")
+      msg.should contain("then retry")
+      # …and the rule is untouched, because the refusal lands before the re-spelling.
+      Gori::Settings.rewriter_rules.map(&.replacement).should eq(["X-A: $TOKEN"])
+      Dir.glob("#{path}.pre-*").should be_empty
+
+      # The repair the message names is NOT refused: asking for the grammar gori is already reading
+      # re-spells nothing (`was == want` skips the migration) and just writes the value down, so the
+      # next run can move the grammar with the rules in hand.
+      Gori::CLI.guessed_env_syntax_refusal_for_spec(was, was).should be_nil
+    end
+  end
+
+  # A STATED grammar is not a guess, in either direction — the guard must not fire on the ordinary
+  # switch it sits in front of.
+  it "does not refuse when the grammar was stated" do
+    with_cli_home do |dir|
+      File.write(File.join(dir, "settings.json"), %({"env":{"syntax":"bare"}}))
+      Gori::Settings.load
+      Gori::Settings.env_syntax_origin.should eq(Gori::Settings::EnvSyntaxOrigin::Stated)
+      Gori::CLI.guessed_env_syntax_refusal_for_spec(Gori::Env::Syntax::Bare,
+        Gori::Env::Syntax::Namespaced).should be_nil
     end
   end
 
