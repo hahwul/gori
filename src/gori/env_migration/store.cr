@@ -528,9 +528,35 @@ module Gori
     # says a peer got there.
     private def self.apply(plan : Plan, db_path : String) : StoreReport?
       backup = plan.writes.empty? ? nil : vacuum_into(db_path, plan.to)
-      # The project half of the report, known before the write: the counters are the scan's, and the
-      # backup is already on disk. Built here because the ACTIVITY row below is written on THIS
-      # connection and needs the same sentence the surfaces print.
+      begin
+        applied = apply_writes(plan, db_path, backup)
+      rescue ex : ::DB::Error | ::SQLite3::Exception | File::Error
+        # NOTHING was written — `BEGIN IMMEDIATE` failed, or the transaction rolled back — so the
+        # backup is a copy of bytes nobody changed, and it must go with the rest of the attempt.
+        # A read-only project database (0444, a read-only mount, a `sudo gori` leftover) is opened
+        # by every single command, and each open was leaving one more
+        # `gori.db.pre-namespaced-<ts>` beside it: a directory filling with copies of a state the
+        # project never left, over a permissions problem the operator has not been told about yet.
+        backup.try { |b| File.delete?(b) }
+        return StoreReport.new(plan.project, plan.from, plan.to, 0, 0, 0, nil,
+          error: ex.message.presence || ex.class.name)
+      end
+      unless applied
+        # A peer opener committed the same migration while this one was scanning. Its backup is the
+        # one that describes the pre-migration state; ours is a copy of bytes nobody changed.
+        backup.try { |b| File.delete?(b) }
+        return nil
+      end
+      StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows, plan.left,
+        backup, bare_hints: plan.hints.uniq, global_hint: global_rule_hint(plan))
+    end
+
+    # Every planned `UPDATE`, the marker and the feed row in ONE transaction. Answers whether it
+    # COMMITTED — false means a peer had already done this migration, which is not a failure; a
+    # failure raises and the caller above cleans the backup up.
+    private def self.apply_writes(plan : Plan, db_path : String, backup : String?) : Bool
+      # The report the ACTIVITY row carries, which is why it is built here: the row goes out on THIS
+      # connection and has to be the same sentence the surfaces print.
       report = StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows, plan.left,
         backup, bare_hints: plan.hints.uniq)
       applied = false
@@ -560,16 +586,7 @@ module Gori
           end
         end
       end
-      unless applied
-        # A peer opener committed the same migration while this one was scanning. Its backup is the
-        # one that describes the pre-migration state; ours is a copy of bytes nobody changed.
-        backup.try { |b| File.delete?(b) }
-        return nil
-      end
-      report.copy_with(global_hint: global_rule_hint(plan))
-    rescue ex : ::DB::Error | ::SQLite3::Exception | File::Error
-      StoreReport.new(plan.project, plan.from, plan.to, 0, 0, 0, nil,
-        error: ex.message.presence || ex.class.name)
+      applied
     end
 
     # One `config` row in the event feed, written the way `ConfigLog.record` writes one (same

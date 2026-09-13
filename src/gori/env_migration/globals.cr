@@ -82,15 +82,39 @@ module Gori
     # Best-effort by design — a home that cannot be written to is a home whose settings.json is
     # about to fail its save too, and the report says "no backup" rather than refusing the
     # re-spelling of a grammar this install has already adopted for reading.
+    #
+    # Which is exactly why the file's own WRITABILITY is the gate. A copy is the operator's way back
+    # from a rewrite, so it is worth nothing beside a file no rewrite can reach — and it was being
+    # minted per START: the load adopts the grammar, re-spells the rules in memory, copies
+    # settings.json aside, and then fails its save, leaving one more
+    # `settings.json.pre-namespaced-<ts>` on every single `gori` invocation. A 0444 settings.json (a
+    # `sudo gori` leftover, a read-only dotfiles checkout) filled the home with copies of a state
+    # nothing ever left. The in-memory re-spelling still happens: this run READS namespaced, so its
+    # rules have to be spelled that way or they stop firing. `Settings.load` says the save failed.
     private def self.backup_settings_file(to : Env::Syntax) : String?
       path = Settings.path
-      return nil unless File.exists?(path)
+      return nil unless File.exists?(path) && replaceable?(path)
       dest = unique_path("#{path}.pre-#{to.to_s.downcase}-#{stamp}")
       File.copy(path, dest)
       File.chmod(dest, 0o600) rescue nil
       dest
     rescue
       nil
+    end
+
+    # Whether `Settings.save` could land on `path` at all — and the answer is the DIRECTORY's, not
+    # the file's. `Settings.save` goes through `DurableFile`, which stages a randomly-named sibling
+    # and RENAMES over the target, so a 0444 settings.json is replaced happily (the rename needs the
+    # directory, and the new file's 0600 is dictated rather than preserved). The case that really
+    # cannot be written is a read-only DIRECTORY: a home on a read-only mount, a root-owned
+    # `~/.gori` after a `sudo gori`.
+    #
+    # `File::Info.writable?` rather than the deprecated `File.writable?`, and rescued: a path that
+    # cannot be stat'd at all is not a path a copy belongs beside.
+    private def self.replaceable?(path : String) : Bool
+      File::Info.writable?(File.dirname(path))
+    rescue
+      false
     end
 
     # `%Y%m%d-%H%M%S`, LOCAL: the operator reads this name in a directory listing next to files

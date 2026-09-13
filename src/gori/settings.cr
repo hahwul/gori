@@ -305,8 +305,20 @@ module Gori
       # it, and until then every start re-derives the same answer from the same absence. A
       # re-spelling of the global rules is the one thing that MUST be persisted — those bytes are
       # now different from the file's, and `migrate_global_rules` has already put the
-      # `settings.json.pre-namespaced-<ts>` copy beside it.
-      save if report
+      # `settings.json.pre-namespaced-<ts>` copy beside it (only if the file can be written; see
+      # `backup_settings_file`).
+      return unless report
+      # And `save` ANSWERS. A false here is the whole failure: the rules are re-spelled in memory —
+      # which this run needs, since it reads the new grammar — while the file still holds the old
+      # spelling, so the next start re-derives the same absence and tries again. Silently, on every
+      # invocation, for as long as the permissions problem lasts. Said on the channel every other
+      # degraded load uses.
+      return if save
+      note_load_warning("settings: the global rewrite rules were re-spelled to " \
+                        "#{EnvMigration.spelling(target)} for this run, but #{path} could not be " \
+                        "written — the file still holds the old spelling, so every start will " \
+                        "re-spell them again. Fix the permissions on that file, or re-run " \
+                        "`gori settings env-syntax #{target.to_s.downcase}` once it is writable")
     end
 
     # What the last `load`'s global-rule re-spelling did, or nil when it did nothing. Read by the

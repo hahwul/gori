@@ -507,6 +507,120 @@ describe Gori::EnvMigration do
     end
   end
 
+  # A backup is the operator's way back from a rewrite. Beside a database no rewrite can reach it is
+  # worth nothing — and it was being minted PER OPEN: `VACUUM INTO` runs before the transaction (it
+  # cannot run inside one), the transaction then failed on the read-only file, and the rescue
+  # returned the error report while the copy stayed. Every command that opens the project left one
+  # more, so a 0444 `gori.db` grew a directory of copies of a state the project never left.
+  it "leaves ZERO backup files when the database cannot be written, and says so once per open" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      File.chmod(db_path, 0o444)
+      # The WAL sidecars too: a writable -wal beside a read-only main file is still a write path in.
+      %w[-wal -shm].each { |ext| File.chmod("#{db_path}#{ext}", 0o444) if File.exists?("#{db_path}#{ext}") }
+      begin
+        3.times do
+          ro = Gori::Store.open(db_path, read_only: true, background_index: false)
+          begin
+            report = Gori::EnvMigration.reconcile(ro, db_path, "demo").not_nil!
+            report.error.should_not be_nil
+            report.backup.should be_nil
+            # The line names the failure and what it costs, rather than reporting a migration.
+            report.line.should contain("could not re-spell")
+          ensure
+            ro.close
+          end
+        end
+        Dir.glob("#{db_path}.pre-*").should be_empty
+        # …and the marker is untouched, so the next open (once the permissions are fixed) tries again.
+      ensure
+        File.chmod(db_path, 0o644) rescue nil
+        %w[-wal -shm].each { |ext| File.chmod("#{db_path}#{ext}", 0o644) rescue nil }
+      end
+    end
+  end
+
+  # The settings-file half of the same rule: the copy beside settings.json is taken by the LOAD that
+  # adopts the grammar, and the save that would justify it comes after. A home the save cannot reach
+  # therefore minted one copy per `gori` invocation, forever, and said nothing.
+  #
+  # The DIRECTORY is what decides, not the file. `Settings.save` goes through `DurableFile`, which
+  # stages a randomly-named sibling and RENAMES over the target, so a 0444 settings.json is replaced
+  # happily; a read-only DIRECTORY is the case that really cannot be written. Driven through
+  # `--config` here because that is the one path whose parent gori does not own and does not tighten
+  # (`Paths.ensure_dir(…, tighten: false)`) — under GORI_HOME, `save` chmods the home back to 0700
+  # on its way past, which is the correct behaviour for a directory gori does own.
+  it "copies settings.json aside only when it can be written, and says when the save failed" do
+    with_migration_home do |db_path|
+      dir = File.join(File.dirname(File.dirname(File.dirname(db_path))), "cfg")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "settings.json")
+      File.write(path, <<-JSON)
+        {"rewriter":{"rules":[{"id":1,"enabled":true,"name":"auth","target":"request",
+                               "part":"head","pattern":"X-A: .*","replacement":"X-A: $TOKEN",
+                               "op":"replace","match_kind":"regex","host":"","body_file":""}]},
+         "env":{"vars":[{"key":"TOKEN","value":"t"}]}}
+        JSON
+      File.chmod(dir, 0o555) # a read-only config directory: `DurableFile`'s rename cannot land
+      io = IO::Memory.new
+      prev_io = Gori::Settings.warning_io
+      prev_absent = Gori::Settings.env_syntax_when_absent
+      begin
+        Gori::Settings.warning_io = io
+        Gori::Settings.env_syntax_when_absent = NS
+        Gori::Settings.path_override = path
+        Gori::Settings.reset_load_warning_guard
+        2.times { Gori::Settings.load }
+        # Adopted for READING — this run resolves `$ENV.TOKEN`, so the rules had to move with it.
+        Gori::Settings.env_syntax.should eq(NS)
+        Gori::Settings.rewriter_rules.map(&.replacement).should eq(["X-A: $ENV.TOKEN"])
+        # But nothing was copied, and nothing was written: not once, and not per start.
+        Dir.glob("#{path}.pre-*").should be_empty
+        Gori::Settings.take_env_syntax_global_migration.not_nil!.backup.should be_nil
+        JSON.parse(File.read(path)).as_h["rewriter"].as_h["rules"].as_a[0].as_h["replacement"]
+          .as_s.should eq("X-A: $TOKEN")
+        # And the failed save is SAID — the silent version re-spelled in memory on every start.
+        io.to_s.should contain("could not be written")
+        io.to_s.should contain(path)
+      ensure
+        File.chmod(dir, 0o755) rescue nil
+        Gori::Settings.path_override = nil
+        Gori::Settings.warning_io = prev_io
+        Gori::Settings.env_syntax_when_absent = prev_absent
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.take_env_syntax_global_migration
+      end
+    end
+  end
+
+  # …and the same load against a WRITABLE directory does take the copy, so the gate above cannot be
+  # mistaken for switching the backup off.
+  it "still copies settings.json aside when the directory can be written" do
+    with_migration_home do |db_path|
+      path = Gori::Settings.path
+      File.write(path, <<-JSON)
+        {"rewriter":{"rules":[{"id":1,"enabled":true,"name":"auth","target":"request",
+                               "part":"head","pattern":"X-A: .*","replacement":"X-A: $TOKEN",
+                               "op":"replace","match_kind":"regex","host":"","body_file":""}]},
+         "env":{"vars":[{"key":"TOKEN","value":"t"}]}}
+        JSON
+      prev_absent = Gori::Settings.env_syntax_when_absent
+      begin
+        Gori::Settings.env_syntax_when_absent = NS
+        Gori::Settings.load
+        report = Gori::Settings.take_env_syntax_global_migration.not_nil!
+        report.backup.should_not be_nil
+        Dir.glob("#{path}.pre-*").size.should eq(1)
+        JSON.parse(File.read(path)).as_h["rewriter"].as_h["rules"].as_a[0].as_h["replacement"]
+          .as_s.should eq("X-A: $ENV.TOKEN")
+      ensure
+        Gori::Settings.env_syntax_when_absent = prev_absent
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+      end
+    end
+  end
+
   # The commonest first open of all is a READ-ONLY one (`gori run history list`, `repeater list`).
   # The re-spelling writes through its own connection, so it happens there too — and so does the
   # feed row, which used to be written through the caller's handle and silently dropped.
