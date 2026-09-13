@@ -152,7 +152,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `preview_color_rule` | 어떤 색상 조건이 최근 플로우 몇 개에 **매칭**되는지, 그리고 앞서 해소되는 규칙들을 셈한 뒤 실제로 몇 개를 **칠하는지**. 전역 후보는 모든 프로젝트 규칙보다 먼저 해석되므로 `scope`를 받습니다 |
 | `grpc_schema` | 이 프로젝트가 캡처된 gRPC를 어떤 `.proto` 스키마로 렌더하는지, 각 조각이 어디서 왔는지(디스크립터 셋 파일 또는 리플렉션 페치). 아무것도 보내지 않습니다 |
 | `list_rules` | 프로젝트에 적용되는 Match & Replace 규칙을 적용 순서로 나열. 전역 규칙이 먼저, 그다음이 프로젝트 규칙(`scope`로 한쪽만 조회) |
-| `list_env` | `$ENV.KEY` 치환에 쓰이는 프로젝트 env 토큰(값은 가려짐). 행마다 `length`와, 값이 스킴으로 시작할 때 `scheme`도 싣습니다. 헤더를 `Bearer $ENV.KEY`로 써야 하는지 그냥 `$ENV.KEY`로 써야 하는지, 값 없이 판단할 수 있을 만큼입니다. 결과에는 지금 적용된 `syntax`와 `prefix`도 실리므로, 에이전트가 이 설치가 읽는 방식대로 토큰을 적을 수 있습니다 |
+| `list_env` | 치환에 쓰이는 프로젝트 env 토큰. 결과는 `{syntax, prefix, example, vars}`입니다(값은 가려짐). 앞의 세 값은 참조를 어떻게 **적을지** 알려 줍니다. `syntax`는 이 설치의 문법(`namespaced`이면 `$ENV.KEY`와 `$BIND.NAME`, `bare`이면 레거시 `$KEY`), `prefix`는 시길, `example`은 그 둘을 적용한 예시여서 기본이 아닌 시길도 조립할 필요가 없습니다. `vars`의 각 행은 bare 이름으로 키를 잡고, `length`와 값이 스킴으로 시작할 때의 `scheme`도 싣습니다. 헤더를 `Bearer <token>`으로 써야 하는지 토큰만 써야 하는지, 값 없이 판단할 수 있을 만큼입니다 |
 | `list_host_overrides` | 이 프로젝트에 적용 중인 호스트 → IP 다이얼 맵 |
 | `list_session_slots` | 프로젝트의 [세션 슬롯](/ko/guide/authorize/#session-slots-one-list-two-readers)(이름 붙은 신원 각각이 헤더 오버레이 하나와 그 값을 묶어 주는 extract 규칙들로 이루어집니다), 그리고 어느 쪽이 ACTIVE인지(헤더 값은 가려짐) |
 | `list_oast_providers` | 설정된 OAST 프로바이더와 현재 활성 프로바이더 |
@@ -201,7 +201,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | 프로젝트의 include / exclude 규칙 편집과 스코프 렌즈 토글 |
 | `set_sandbox` | 하드 컨테인먼트. 켜면 프록시가 스코프가 허용한 것만 전달하고 나머지는 차단 |
-| `set_env_var` / `delete_env_var` | `$ENV.KEY` 치환이 읽는 프로젝트 env 토큰 관리. 키는 bare로 저장되며, 어떤 문법으로 적히는지는 `list_env`가 보고합니다 |
+| `set_env_var` / `delete_env_var` | 치환이 읽는 프로젝트 env 토큰 관리. 키는 bare로 저장되며, 참조는 `$ENV.KEY`로, 레거시 bare 문법에서는 `$KEY`로 씁니다. 이 설치가 어느 쪽인지는 `list_env`의 `syntax` / `example`이 말해 줍니다 |
 | `create_session_slot` / `update_session_slot` / `delete_session_slot` | 세션 슬롯 관리. Authorize 탭의 identities 카드가 편집하는 바로 그 목록이고, `authorize_start`가 재생하는 집합입니다 |
 | `set_active_session_slot` | 모든 아웃바운드 요청이 어느 신원으로 나갈지 선택합니다. 그 슬롯의 헤더 오버레이가 최종 와이어 바이트에 적용되고 `$BIND.NAME`은 그 바인딩 테이블에서 해소됩니다. 이 서버 프로세스만 들고 있고 저장되지 않으므로, 새 연결은 캡처된 그대로 시작합니다 |
 | `add_host_override` / `update_host_override` / `delete_host_override` | 호스트 → IP 다이얼 맵 관리(요청은 그대로 두고 접속 IP만 변경) |
