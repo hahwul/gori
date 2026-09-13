@@ -132,6 +132,9 @@ module Gori::Tui
       # wire will carry literally is not painted — or tooltipped — as a resolved variable.
       # Fed by the Repeater's evidence baseline; see `RepeaterView#operator_env_vars`.
       @env_literal_names = Set(String).new
+      # The namespaces this editor's send path actually resolves — all of them unless an owner
+      # narrows it (`env_complete_namespaces=`).
+      @env_complete_namespaces = Env::Namespace.values
       @env_complete = nil.as(EnvComplete?)
       # Opt-in `$ENV` value peek (nil = disabled). Paired with @env_complete — the same
       # request editors get it. Shows the resolved value of a COMPLETE `$KEY` token under
@@ -2287,6 +2290,21 @@ module Gori::Tui
       @env_peek = on ? (@env_peek || EnvPeek.new) : nil # the value peek rides the same opt-in
     end
 
+    # Which namespaces this editor's bytes are actually RESOLVED against, defaulting to all of
+    # them. Narrow it where a send path runs only one of the passes: an Authorize slot's overlay
+    # headers go through `Env.expand_bindings_as` and nothing else, so an accepted `$ENV.UA`
+    # there ships as seven literal bytes with no report, on every replay. The dropdown is what
+    # offered it, so the dropdown is where the namespace is withheld — and the peek follows,
+    # because a value shown under a token this path will not resolve is the same promise.
+    #
+    # Namespaced only: the bare grammar has ONE merged table (`Env.display_vars`) and no
+    # namespace in its bytes, so there is nothing to filter there without moving the bare
+    # contract.
+    def env_complete_namespaces=(list : Array(Env::Namespace)) : Nil
+      @env_complete_namespaces = list
+      env_complete_close # the open list was built from the wider set
+    end
+
     # The `$NAME`s that will NOT be substituted on send — see the ivar. Drops the styled
     # cache: the overlay it holds was built against the old answer, and nothing else in the
     # cache key (@edits, theme, Env.highlight_rev) moves when an owner re-seeds this.
@@ -2527,18 +2545,26 @@ module Gori::Tui
       # Each namespace's table read ONCE per refresh: `vars_for(Bind)` takes the binding
       # layer's mutex, and reading it per candidate row put the dropdown in contention with
       # the send path on every keystroke.
+      #
+      # A namespace this editor's send path does NOT resolve is absent from the map entirely, so
+      # neither stage can offer it: no opener, no flattened name, and nothing for an already
+      # typed `$ENV.` to filter (see `env_complete_namespaces=`).
       tables = {} of Env::Namespace => Hash(String, String)
-      Env::Namespace.each { |ns| tables[ns] = Env.vars_for(ns) }
+      Env::Namespace.each do |ns|
+        tables[ns] = Env.vars_for(ns) if @env_complete_namespaces.includes?(ns)
+      end
       if fixed = tok.ns
-        append_env_token_rows(rows_out, {fixed => tables[fixed]}, pl, tok.token_end, prefix, syntax)
+        if table = tables[fixed]?
+          append_env_token_rows(rows_out, {fixed => table}, pl, tok.token_end, prefix, syntax)
+        end
         return rows_out
       end
       # A namespace opener. An EMPTY namespace gets no row: it would insert a prefix the
       # second stage then has nothing to offer for, which reads as a broken dropdown rather
       # than as "nothing is bound yet".
       Env::Namespace.each do |ns|
-        table = tables[ns]
-        next if table.empty?
+        table = tables[ns]?
+        next if table.nil? || table.empty?
         next unless pl.empty? || ns.label.downcase.starts_with?(pl)
         spelled = Env.input_hint(ns, syntax, prefix)
         rows_out << EnvComplete::Match.new(:ns, spelled, spelled,
@@ -2646,6 +2672,9 @@ module Gori::Tui
       # `$ENV.HOST` is not on a reference yet, and answering from one table or the other there
       # would be guessing at which of two secrets the operator is pointing at.
       ns = tok.ns || return nil
+      # A namespace this editor's send path does not run is not a reference HERE, whatever the
+      # table holds — the same answer the dropdown gives (`env_complete_namespaces=`).
+      return nil unless @env_complete_namespaces.includes?(ns)
       return nil if @env_literal_names.includes?(Env.qualify(ns, name))
       val = Env.vars_for(ns)[name]?
       return nil unless val
