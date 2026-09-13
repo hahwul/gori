@@ -2401,14 +2401,39 @@ module Gori::Tui
       when key.down?              then ec.move(1)
       when key.escape?            then ec.close
       else
-        # A `.` finishes a NAMESPACE row — it is the character that row's own label ends with,
-        # so typing it means "that one", exactly as ↹ does. Every other key falls through to
-        # the editor, which re-derives the rows from the text after the edit.
-        return false unless ec.selected_kind == :ns && !ev.ctrl? && !ev.alt? &&
-                            (ev.char || key.to_char) == '.'
+        # Every other key falls through to the editor, which re-derives the rows from the text
+        # after the edit — except the `.` that finishes a namespace row.
+        return false unless env_dot_accepts?(ec, ev)
         env_accept(ec)
       end
       true
+    end
+
+    # Does a typed `.` mean "take the selected row"? Only over a NAMESPACE row — it is the
+    # character that row's own label ends with, so typing it says "that one" exactly as ↹ does,
+    # while over a token row a dot is literal text the editor must receive.
+    #
+    # And only once the operator has typed part of the namespace. On a bare `$` the popup opens
+    # on the first opener, so `$.` — a dollar and a full stop in ordinary text (a price, a shell
+    # `$.`) — came out as `$ENV.`: a token nobody asked for, in bytes about to be sent, from two
+    # characters that mean nothing together. `$E.` still completes.
+    private def env_dot_accepts?(ec : EnvComplete, ev : Termisu::Event::Key) : Bool
+      return false unless ec.selected_kind == :ns
+      return false if ev.ctrl? || ev.alt?
+      return false unless (ev.char || ev.key.to_char) == '.'
+      env_ns_partial_typed?
+    end
+
+    # Has the operator typed any of the namespace themselves (`$E|`), or is the caret still on a
+    # bare sigil (`$|`) with the popup merely showing what could follow? Re-derives the token
+    # through the SAME walk the rows came from, so the two cannot disagree about the partial.
+    private def env_ns_partial_typed? : Bool
+      prefix = Settings.env_prefix
+      return false if prefix.empty?
+      line = @lines[@cy]? || return false
+      tok = env_caret_token(line, @cx.clamp(0, line.size), Settings.env_syntax, prefix)
+      return false unless tok
+      !tok.partial.empty?
     end
 
     private def env_accept(ec : EnvComplete) : Nil
@@ -2558,12 +2583,11 @@ module Gori::Tui
     # BARE mode: one flat list of names out of the single display table — what shipped.
     private def bare_env_matches(tok : EnvCaret, prefix : String) : Array(EnvComplete::Match)
       rows_out = [] of EnvComplete::Match
-      # `display_vars`, so a bound `$SESSION` completes beside the env vars — one syntax,
-      # one dropdown. `declared` is read ONCE here, not per candidate row: it takes the
-      # binding table's mutex.
-      vars = Env.display_vars
-      return rows_out if vars.empty?
+      # `declared` is read ONCE here, not per candidate row: it takes the binding table's mutex.
       declared = Env.declared_bindings
+      vars = bare_env_candidates(declared)
+      return rows_out if vars.empty?
+      bind_only = !@env_complete_namespaces.includes?(Env::Namespace::Env)
       pl = tok.partial.downcase
       vars.keys
         .select { |k| !env_literal_names.includes?(k) } # offering one would promise a substitution this buffer won't make
@@ -2573,9 +2597,36 @@ module Gori::Tui
         .each do |k|
           spelled = Env.spell(k, Env::Namespace::Env, Env::Syntax::Bare, prefix)
           rows_out << EnvComplete::Match.new(:token, spelled, spelled,
-            env_value_preview(vars[k], declared.includes?(k)), tok.token_end)
+            env_value_preview(vars[k], bind_only || declared.includes?(k)), tok.token_end)
         end
       rows_out
+    end
+
+    # What a BARE-mode `$NAME` may complete to, and what a bare-mode peek may answer for.
+    #
+    # `display_vars` normally — a bound `$SESSION` completes beside the env vars, one syntax and
+    # one dropdown. But an editor whose send path runs only ONE of the passes
+    # (`env_complete_namespaces=`) must not be offered the other's names in either grammar: an
+    # Authorize identity's overlay headers are resolved by `Env.expand_bindings_as` and by
+    # nothing else, so a `$UA` taken from the env layer goes out as four literal bytes on every
+    # replay, silently. Namespaced mode withholds the namespace; bare mode has no namespace in
+    # the bytes to withhold, so it withholds the NAMES.
+    #
+    # Bind-only is the binding names: bound, plus DECLARED-but-not-yet-bound — an identity is
+    # usually written before the first replay has filled the table, and `$SESSION` has to be
+    # typeable there (a declared name carries no value, so it gets no preview, which is the same
+    # answer the painter gives).
+    private def bare_env_candidates(declared : Array(String)) : Hash(String, String)
+      ns = @env_complete_namespaces
+      # The default (every namespace) keeps the merged table it always had, byte for byte.
+      return Env.display_vars if ns.size == Env::Namespace.values.size
+      out = {} of String => String
+      Env.vars_for(Env::Namespace::Env).each { |name, value| out[name] = value } if ns.includes?(Env::Namespace::Env)
+      if ns.includes?(Env::Namespace::Bind)
+        declared.each { |name| out[name] = out[name]? || "" }
+        Env.vars_for(Env::Namespace::Bind).each { |name, value| out[name] = value }
+      end
+      out
     end
 
     # NAMESPACED mode, two stages in one refresh.
@@ -2710,10 +2761,18 @@ module Gori::Tui
         # what?" in the editor where they are writing the token — Repeater, Fuzzer, Intercept —
         # with no new surface at all. A declared-but-UNBOUND name has no value and so gets no
         # peek, which is the same answer the painter gives (it stays `env_unknown`).
-        val = Env.display_vars[name]?
+        #
+        # The table is the one the DROPDOWN offers from (`bare_env_candidates`), narrowed for an
+        # editor whose send path runs only one pass: a value shown under a token this path will
+        # not resolve is the same false promise the offer was.
+        declared = Env.declared_bindings
+        val = bare_env_candidates(declared)[name]?
         return nil unless val # unregistered → just a literal string, not an env reference
+        # A DECLARED-but-unbound name is padded into that table with no value, so the dropdown
+        # can offer it before the first replay; "no value" is what the painter says about it too.
+        return nil if val.empty? && declared.includes?(name)
         return {Env.spell(name, Env::Namespace::Env, syntax, prefix),
-                env_value_preview(val, Env.declared_bindings.includes?(name))}
+                env_value_preview(val, declared.includes?(name))}
       end
       # NAMESPACED: the namespace has to be in the BYTES. A caret in the `ENV` run of
       # `$ENV.HOST` is not on a reference yet, and answering from one table or the other there

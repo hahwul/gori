@@ -178,6 +178,17 @@ describe "TextArea env completion (namespaced)" do
         # spelling, so comparing it to `HOST` would never match and the popup would sit open
         # over a finished token forever.
         typed("$ENV.HOST").env_completing?.should be_false
+        # Both namespaces, and a name that is a PREFIX of another: `$ENV.TOKEN2` is finished and
+        # closes, while `$ENV.TOKEN` stays open because `TOKEN2` is still one ↹ away.
+        typed("$BIND.SESSION").env_completing?.should be_false
+        typed("$ENV.TOKEN2").env_completing?.should be_false
+        typed("$ENV.TOKEN").env_completing?.should be_true
+        # Bare mode reaches the same rule through its own match builder.
+        with_env_syntax(Gori::Env::Syntax::Bare) do
+          typed("$HOST").env_completing?.should be_false
+          typed("$SESSION").env_completing?.should be_false
+          typed("$TOKEN").env_completing?.should be_true
+        end
       end
     end
   end
@@ -219,6 +230,24 @@ describe "TextArea env completion (namespaced)" do
         # must receive, so the popup declines the key and lets it fall through.
         t2 = typed("$TO")
         t2.handle_env_complete_key(env_key(Termisu::Input::Key::LowerA, '.')).should be_false
+      end
+    end
+  end
+
+  it "leaves a lone `$.` as text — the dot accepts a namespace the operator STARTED" do
+    with_env_fixture do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        # On a bare sigil the popup is showing what COULD follow, not a choice: `$` + `.` is a
+        # dollar and a full stop in ordinary prose (a price, a shell `$.`), and accepting the
+        # first opener there wrote `$ENV.` into bytes about to be sent.
+        ta = typed("$")
+        ta.env_completing?.should be_true
+        ta.handle_env_complete_key(env_key(Termisu::Input::Key::LowerA, '.')).should be_false
+        ta.text.should eq("$") # the key fell through to the editor, which types the dot itself
+        # One typed letter is all it takes to mean a namespace, and then `.` finishes it.
+        t2 = typed("$E")
+        t2.handle_env_complete_key(env_key(Termisu::Input::Key::LowerA, '.')).should be_true
+        t2.text.should eq("$ENV.")
       end
     end
   end

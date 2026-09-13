@@ -121,6 +121,60 @@ describe "AuthorizeIdentityOverlay env completion" do
     end
   end
 
+  # BARE mode has no namespace in the bytes to withhold, so the narrowing has to withhold the
+  # NAMES: `Env.display_vars` merges the two layers, and offering `$UA` out of it promised a
+  # substitution this path does not make just as loudly as `$ENV.UA` did.
+  it "offers only the binding names in bare mode, where there is no namespace to withhold" do
+    with_env_fixture do
+      with_env_syntax(Gori::Env::Syntax::Bare) do
+        screen = painted(identity_form("Cookie: $"))
+        screen.should contain("$SESSION")
+        screen.should_not contain("$UA")
+        screen.should_not contain("$HOST")
+        screen.should_not contain("gori/1.0")
+        screen.should_not contain("api.test")
+      end
+    end
+  end
+
+  it "peeks no value under a bare `$UA` this path will not resolve" do
+    with_env_fixture do
+      with_env_syntax(Gori::Env::Syntax::Bare) do
+        painted(identity_form("Cookie: $UA")).should_not contain("gori/1.0")
+        # The BIND pass still answers, masked.
+        peeked = painted(identity_form("Cookie: $SESSION"))
+        peeked.should contain("$SESSION")
+        peeked.should_not contain("SESSIONCOOKIEVALUE")
+      end
+    end
+  end
+
+  # A DECLARED name is typeable before the first replay has bound anything — an identity is
+  # usually written before any traffic — so it is offered with no value beside it.
+  it "offers a declared-but-unbound binding in bare mode, with no value" do
+    saved_vars = Gori::Settings.env_vars
+    saved_prefix = Gori::Settings.env_prefix
+    previous_layer = Gori::Env.layer
+    begin
+      Gori::Settings.env_vars = [{"UA", "gori/1.0"}]
+      Gori::Settings.env_prefix = "$"
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("CSRF", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
+        Gori::Env.layer = b
+        with_env_syntax(Gori::Env::Syntax::Bare) do
+          screen = painted(identity_form("Cookie: $"))
+          screen.should contain("$CSRF")
+          screen.should_not contain("$UA")
+        end
+      end
+    ensure
+      Gori::Env.layer = previous_layer
+      Gori::Settings.env_vars = saved_vars
+      Gori::Settings.env_prefix = saved_prefix
+    end
+  end
+
   # The guard against a vacuous spec above: the SAME keystrokes in an editor whose send path runs
   # both passes still offer ENV, so what is asserted there is the narrowing and not a broken
   # completer.
@@ -135,6 +189,17 @@ describe "AuthorizeIdentityOverlay env completion" do
         rows = (1...12).map { |y| b.row(y) }.join('\n')
         rows.should contain("$ENV.")
         rows.should contain("$BIND.")
+      end
+      # …and in bare mode it still offers the merged table, byte for byte what shipped.
+      with_env_syntax(Gori::Env::Syntax::Bare) do
+        ta = TextArea.new
+        ta.env_complete = true
+        "Cookie: $".each_char { |c| ta.insert(c) }
+        b = MemoryBackend.new(70, 12)
+        ta.render(Screen.new(b), Rect.new(0, 0, 70, 12), cursor: true)
+        rows = (1...12).map { |y| b.row(y) }.join('\n')
+        rows.should contain("$UA")
+        rows.should contain("$SESSION")
       end
     end
   end
