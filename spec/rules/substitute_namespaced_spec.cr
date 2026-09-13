@@ -17,11 +17,9 @@ private def with_ns_layer(bindings : Gori::Bindings?, &)
   previous = Gori::Env.layer
   Gori::Env.layer = bindings
   with_env_syntax(Gori::Env::Syntax::Namespaced) do
-    begin
-      yield
-    ensure
-      Gori::Env.layer = previous
-    end
+    yield
+  ensure
+    Gori::Env.layer = previous
   end
 end
 

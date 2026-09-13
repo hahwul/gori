@@ -42,12 +42,10 @@ private def with_q(vars : Array({String, String}) = [] of {String, String},
   Gori::Settings.project_env_vars = vars
   Gori::Env.layer = QueryLayer.new(declared, bound, held)
   with_env_syntax(Gori::Env::Syntax::Namespaced) do
-    begin
-      yield
-    ensure
-      Gori::Env.layer = prev_layer
-      Gori::Settings.project_env_vars = prev_vars
-    end
+    yield
+  ensure
+    Gori::Env.layer = prev_layer
+    Gori::Settings.project_env_vars = prev_vars
   end
 end
 
@@ -194,6 +192,8 @@ describe "Gori::Env — namespaced queries" do
     Gori::Env::Namespace.parse?("RAND").should be_nil
     Gori::Env::Namespace::Bind.secret?.should be_true
     Gori::Env::Namespace::Env.secret?.should be_false
-    Gori::Env::Namespace.values.each { |ns| ns.description.size.should be <= 24 }
+    # ≤ 24 cells: the completer prints it beside the label inside a dropdown that must fit a
+    # 60-column pane.
+    Gori::Env::Namespace.values.max_of(&.description.size).should be <= 24
   end
 end

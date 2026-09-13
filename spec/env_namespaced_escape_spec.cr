@@ -37,13 +37,11 @@ private def with_esc(vars : Array({String, String}) = [] of {String, String},
   Gori::Settings.project_env_vars = vars
   Gori::Env.layer = (declared.empty? && bound.empty?) ? nil : EscLayer.new(declared, bound)
   with_env_syntax(Gori::Env::Syntax::Namespaced) do
-    begin
-      yield
-    ensure
-      Gori::Env.layer = prev_layer
-      Gori::Settings.project_env_vars = prev_vars
-      Gori::Settings.env_vars = [] of {String, String}
-    end
+    yield
+  ensure
+    Gori::Env.layer = prev_layer
+    Gori::Settings.project_env_vars = prev_vars
+    Gori::Settings.env_vars = [] of {String, String}
   end
 end
 

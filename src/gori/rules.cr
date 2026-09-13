@@ -1221,46 +1221,9 @@ module Gori
         found = Env.read_token_at(bytes, i, n, syntax: syntax, prefix: prefix,
           escapes: Env::Owns::None)
         if found && found.kind.token?
-          key = found.name
-          vars = snap.table_for(found.ns)
-          declared = snap.declarable?(found.ns) ? snap.declared : EMPTY_DECLARED
-          consumed = found.width - plen
-          # Declared by an extract rule but not bound yet → the rule must not apply.
-          #
-          # The send seams stopped refusing on this (see `Env.unbound`): everywhere else a
-          # `$NAME` with no value is a literal on the wire. This one stays, and it is not the
-          # same disposition wearing a different hat:
-          #
-          #   * It is a rule-scoped SKIP, not a send refusal. Nothing is blocked — the message
-          #     reaches the origin, just unrewritten. The policy that changed was about gori
-          #     refusing to send bytes the operator authored; here it sends them.
-          #   * A `replacement` is a REFERENCE by construction. It is the one field in the
-          #     product whose only purpose is to inject a value, so there is no captured-body
-          #     collision to protect: nobody's GraphQL document lands in this column by
-          #     accident. Emitting the seven characters `$SESSION` into an `Authorization`
-          #     header instead would put a known-wrong credential on EVERY proxied request,
-          #     silently, for as long as the rule is enabled.
-          #   * The two halves of the policy that actually matter against a collision are
-          #     already here and predate it: `$$` is the escape (below), and a name that is
-          #     neither a var nor declared stays LITERAL (`emit_key`).
-          #
-          # `report_refused` writes one warn event per (rule, binding revision) naming it.
-          return Refused.new(Refusal::Unbound, key) if !vars.has_key?(key) && declared.includes?(key)
-          return Refused.new(Refusal::Boundary, key) if head && forges_boundary?(vars, declared, key)
-          if val = vars[key]?
-            buf << (regex ? Rules.escape_backrefs(val) : val)
-            i += plen + consumed
-          else
-            # A key that is neither a var nor a declared binding stays LITERAL — `Env.expand`'s
-            # documented contract, and the meaning every pre-existing rule already had. Refusing
-            # here instead would be a one-way door on a persisted, operator-authored table.
-            #
-            # BARE re-enters the scan just past the sigil (`$AB` retries at `A`); NAMESPACED
-            # consumes the whole `$NS.NAME`, which has nothing inside it that could open a token.
-            w = found.miss_width(plen, syntax)
-            buf.write(bytes[i, w])
-            i += w
-          end
+          written = emit_token(buf, bytes, i, found, snap, prefix, plen, syntax, regex, head)
+          return written if written.is_a?(Refused)
+          i += written
           next
         end
         # `$1`..`$9` → `\1`..`\9`, regex replacements only (unchanged from `regex_replacement`).
@@ -1274,6 +1237,53 @@ module Gori
         i += plen
       end
       String.new(buf.to_slice)
+    end
+
+    # One token of a replacement, written to `buf` — or the Refusal that stops the rule applying
+    # at all. Answers how many bytes it consumed.
+    #
+    # Declared by an extract rule but not bound yet → the rule must not apply.
+    #
+    # The send seams stopped refusing on this (see `Env.unbound`): everywhere else a `$NAME` with
+    # no value is a literal on the wire. This one stays, and it is not the same disposition
+    # wearing a different hat:
+    #
+    #   * It is a rule-scoped SKIP, not a send refusal. Nothing is blocked — the message reaches
+    #     the origin, just unrewritten. The policy that changed was about gori refusing to send
+    #     bytes the operator authored; here it sends them.
+    #   * A `replacement` is a REFERENCE by construction. It is the one field in the product whose
+    #     only purpose is to inject a value, so there is no captured-body collision to protect:
+    #     nobody's GraphQL document lands in this column by accident. Emitting the seven
+    #     characters `$SESSION` into an `Authorization` header instead would put a known-wrong
+    #     credential on EVERY proxied request, silently, for as long as the rule is enabled.
+    #   * The two halves of the policy that actually matter against a collision are already here
+    #     and predate it: `$$` is the escape (in `substitute`), and a name that is neither a var
+    #     nor declared stays LITERAL (below).
+    #
+    # Both refusals belong to the BINDING layer alone: under the namespaced grammar an `$ENV.X` is
+    # the operator's own bytes (P7) and resolves or stays literal, never refuses.
+    # `report_refused` writes one warn event per (rule, binding revision) naming it.
+    private def emit_token(buf : IO::Memory, bytes : Bytes, at : Int32, found : Env::Found,
+                           snap : SubstSnapshot, prefix : String, plen : Int32,
+                           syntax : Env::Syntax, regex : Bool, head : Bool) : Int32 | Refused
+      key = found.name
+      vars = snap.table_for(found.ns)
+      declared = snap.declarable?(found.ns) ? snap.declared : EMPTY_DECLARED
+      return Refused.new(Refusal::Unbound, key) if !vars.has_key?(key) && declared.includes?(key)
+      return Refused.new(Refusal::Boundary, key) if head && forges_boundary?(vars, declared, key)
+      if val = vars[key]?
+        buf << (regex ? Rules.escape_backrefs(val) : val)
+        return found.width
+      end
+      # A key that is neither a var nor a declared binding stays LITERAL — `Env.expand`'s
+      # documented contract, and the meaning every pre-existing rule already had. Refusing here
+      # instead would be a one-way door on a persisted, operator-authored table.
+      #
+      # BARE re-enters the scan just past the sigil (`$AB` retries at `A`); NAMESPACED consumes the
+      # whole `$NS.NAME`, which has nothing inside it that could open a second token.
+      w = found.miss_width(plen, syntax)
+      buf.write(bytes[at, w])
+      w
     end
 
     # Whether resolving `key` here would write a boundary-forging value into a HEAD, in which

@@ -1434,7 +1434,9 @@ module Gori
       return keys if prefix.empty? || !text.byte_index(prefix)
       each_token(text.to_slice, prefix, syntax) do |found|
         keys << found.name
-        (ns = found.ns).try { |n| keys << qualify(n, found.name) }
+        if ns = found.ns
+          keys << qualify(ns, found.name)
+        end
       end
       keys
     end

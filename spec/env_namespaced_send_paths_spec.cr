@@ -42,12 +42,10 @@ private def with_send_env(declared : Array(String) = [] of String,
   Gori::Settings.project_env_vars = vars
   Gori::Env.layer = SendLayer.new(declared, bound, per_slot)
   with_env_syntax(Gori::Env::Syntax::Namespaced) do
-    begin
-      yield
-    ensure
-      Gori::Env.layer = prev_layer
-      Gori::Settings.project_env_vars = prev_vars
-    end
+    yield
+  ensure
+    Gori::Env.layer = prev_layer
+    Gori::Settings.project_env_vars = prev_vars
   end
 end
 
