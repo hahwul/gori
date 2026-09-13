@@ -100,11 +100,17 @@ module Gori
         dial?
       end
 
-      # Whether these bytes reach a socket through `Env`'s passes, and so whether `safe?` can judge
-      # the re-spelling. A rule replacement is resolved by `Rules#substitute` against its own
-      # grammar; display text is resolved by nothing at all.
+      # Whether these bytes reach a socket at all, and so whether `safe?` can judge the
+      # re-spelling. DISPLAY text is the one kind that does not: nothing ever expands an issue
+      # title, so there is no wire to compare.
+      #
+      # A RULE REPLACEMENT does have one, and leaving it out was the gap: it is resolved by
+      # `Rules#substitute` rather than by `Env`'s passes, so `safe?` had nothing to run — and the
+      # one kind whose routing question is hardest (bare resolved it against ONE merged table, in
+      # the opposite precedence to a request) was also the one kind nothing checked. `wire` models
+      # that grammar directly (`rule_wire`) instead of borrowing a pass list that is not its own.
       def has_wire? : Bool
-        !(display? || rule?)
+        !display?
       end
     end
 
@@ -134,11 +140,18 @@ module Gori
     # slots claim. Which table a name is routed to, and which one wins when both hold it, is the
     # CONSUMER's question: see `route`.
     #
+    # `enabled_bind_names` is the NARROWER binding set: the names an ENABLED extract rule declares,
+    # which is the only half of `bind_names` that ever RESOLVED (`Bindings#values` and
+    # `Bindings#declared` both filter on `enabled?`). It decides precedence and the ambiguity flag,
+    # and for a rule replacement it decides membership outright — see `route`. Defaults to
+    # `bind_names`, so a caller that does not know the distinction keeps the behaviour it had.
+    #
     # `hints`, when given, collects the spellings a `Kind::Dial` row carries that the TARGET grammar
     # would resolve and this kind cannot escape — the one thing a re-spelling can neither fix nor
     # ignore, so it is said out loud instead (`EnvMigration::StoreReport#notices`).
     def self.rewrite(bytes : Bytes, *, from : Env::Syntax, to : Env::Syntax,
                      env_names : Enumerable(String), bind_names : Enumerable(String),
+                     enabled_bind_names : Enumerable(String)? = nil,
                      kind : Kind = Kind::Request,
                      prefix : String = Settings.env_prefix,
                      hints : Array(String)? = nil) : {Bytes, Array(Change)}
@@ -146,6 +159,7 @@ module Gori
       return {bytes, changes} if from == to || prefix.empty? || bytes.empty?
       env = env_names.to_set
       bind = bind_names.to_set
+      live = enabled_bind_names ? enabled_bind_names.to_set : bind
       plen = prefix.bytesize
       # `Owns::None` turns escape RECOGNITION off, which is what the rule and display grammars
       # want: `$$` is theirs, and the reader must not claim it (nor read the name behind it).
@@ -172,9 +186,9 @@ module Gori
         end
         consumed =
           if from.bare?
-            forward(bytes, buf, changes, found, i, n, plen, prefix, env, bind, kind)
+            forward(bytes, buf, changes, found, i, n, plen, prefix, env, bind, live, kind)
           else
-            backward(bytes, buf, changes, found, i, n, plen, prefix, env, bind, kind, hints)
+            backward(bytes, buf, changes, found, i, n, plen, prefix, env, bind, live, kind, hints)
           end
         i += consumed
       end
@@ -183,7 +197,8 @@ module Gori
 
     # BARE → NAMESPACED. Returns how many bytes of the input this step claimed.
     private def self.forward(bytes, buf, changes, found : Env::Found, i, n, plen, prefix,
-                             env : Set(String), bind : Set(String), kind : Kind) : Int32
+                             env : Set(String), bind : Set(String), live : Set(String),
+                             kind : Kind) : Int32
       case found.kind
       when Env::Kind::Escape
         # A bare escape is anonymous (`$$`, nothing behind it read). Under the namespaced grammar
@@ -198,11 +213,11 @@ module Gori
         end
         found.width
       when Env::Kind::Token
-        if ns = route(found.name, env, bind, kind)
+        if ns = route(found.name, env, bind, live, kind)
           after = Env.spell(found.name, ns, Env::Syntax::Namespaced, prefix)
           buf << after
-          changes << Change.new(i, "#{prefix}#{found.name}", after, Env::Ref.new(ns, found.name),
-            ambiguous: ambiguous?(found.name, env, bind, kind))
+          changes << Change.new(i, Env.spell(found.name, ns, Env::Syntax::Bare, prefix), after,
+            Env::Ref.new(ns, found.name), ambiguous: ambiguous?(found.name, env, live, kind))
         else
           # A name in neither table is a literal in BOTH grammars — a GraphQL `$id`, a Mongo
           # `$ne`. Touching it is how a migration invents a reference nobody wrote.
@@ -218,8 +233,8 @@ module Gori
     # NAMESPACED → BARE. The lossy direction, and the reason is here: bare resolves a name by
     # SHAPE, so text that was inert under the namespaced grammar can start resolving.
     private def self.backward(bytes, buf, changes, found : Env::Found, i, n, plen, prefix,
-                              env : Set(String), bind : Set(String), kind : Kind,
-                              hints : Array(String)?) : Int32
+                              env : Set(String), bind : Set(String), live : Set(String),
+                              kind : Kind, hints : Array(String)?) : Int32
       case found.kind
       when Env::Kind::Escape
         # `$$ENV.X` → bare consumes `$$` and never reads the name behind it, so the very same
@@ -228,12 +243,12 @@ module Gori
         buf.write(bytes[i, found.width])
         found.width
       when Env::Kind::Token
-        after = "#{prefix}#{found.name}"
         ns = found.ns || Env::Namespace::Env
+        after = Env.spell(found.name, ns, Env::Syntax::Bare, prefix)
         buf << after
         changes << Change.new(i, Env.spell(found.name, ns, Env::Syntax::Namespaced, prefix),
           after, Env::Ref.new(ns, found.name),
-          ambiguous: ambiguous?(found.name, env, bind, kind))
+          ambiguous: ambiguous?(found.name, env, live, kind))
         found.width
       else
         # A LITERAL sigil, and the only place this direction adds bytes — for the kinds that CAN
@@ -245,9 +260,11 @@ module Gori
         # title, and doubling the sigil corrupted the text it was supposed to preserve. A dial
         # tuple IS expanded, but with `Escape::Preserve` and never unescaped, so `$$id` in a target
         # reaches the resolver as `$$id`: the name is NAMED to the operator instead.
-        name = resolvable_name_at(bytes, i + plen, n, env, bind, kind)
+        name = resolvable_name_at(bytes, i + plen, n, env, bind, live, kind)
         unless kind.escapes_literal?
-          hints << "#{prefix}#{name}" if name && hints && kind.bare_resolution_hint?
+          if name && hints && kind.bare_resolution_hint?
+            hints << Env.spell(name, Env::Namespace::Env, Env::Syntax::Bare, prefix)
+          end
           buf.write(bytes[i, found.width])
           return found.width
         end
@@ -255,9 +272,13 @@ module Gori
           buf << prefix << prefix
           # Reported with the NAME when there is one (`$id → $$id`), because that is the line an
           # operator reads the report for; a doubled sigil in front of another sigil has no name
-          # to carry and says only what it did.
-          changes << Change.new(i, "#{prefix}#{name}", "#{prefix}#{prefix}#{name}", nil,
-            note: "escape")
+          # to carry and says only what it did. Spelled through the formatter family so a
+          # non-default sigil is not hand-concatenated into the report either.
+          ns = Env::Namespace::Env
+          changes << Change.new(i,
+            name ? Env.spell(name, ns, Env::Syntax::Bare, prefix) : prefix,
+            name ? Env.spell_escaped(name, ns, Env::Syntax::Bare, prefix) : "#{prefix}#{prefix}",
+            nil, note: "escape")
           plen
         else
           buf.write(bytes[i, found.width])
@@ -279,16 +300,29 @@ module Gori
     #     the operator hears that the other reading existed.
     #   * `Rule`: `Rules#substitute` resolves against ONE merged table, `Env.display_vars`, which
     #     layers the binding values OVER the env vars — so the BINDING is what a bare rule
-    #     replacement actually injected.
+    #     replacement actually injected. And only an ENABLED one: both halves of that table
+    #     (`Bindings#values`, `Bindings#declared`) filter on `enabled?`, which is why this kind asks
+    #     `live` and not `bind`. Routing a DISABLED rule's name to BIND was a wire change in the
+    #     worst shape available — a name that is both an env var and a switched-off extract rule
+    #     injected the ENV value under bare and became a `$BIND.name` that resolves in no table, so
+    #     the rule silently started shipping its own spelling into live traffic.
+    #
+    #     A name that is ONLY a disabled binding routes NOWHERE and stays a bare literal, which is
+    #     what bare shipped for it too (no value, not declared → literal). Nothing is lost by
+    #     leaving it: the moment the operator switches that rule back on, `Rules#substitute`'s
+    #     `BareSpelling` refusal names the re-spelling instead of injecting the text.
     #   * `Slot`: `Env.expand_bindings_as` is the only pass over a slot header value and it
     #     resolves BIND alone. An env-only name there is not a token at all: it shipped as literal
-    #     text under bare, and leaving it a bare literal is the same wire.
+    #     text under bare, and leaving it a bare literal is the same wire. The DECLARED set rather
+    #     than `live`, because a slot header is a reference by construction — `Env.unbound_in_slot`
+    #     counts a name the slot merely claims — and `$BIND.X` is the spelling that keeps working
+    #     when its rule comes back on.
     #   * `Dial`: one `Env.expand` with `resolve: Owns::Env`. The ENV table alone.
     private def self.route(name : String, env : Set(String), bind : Set(String),
-                           kind : Kind) : Env::Namespace?
+                           live : Set(String), kind : Kind) : Env::Namespace?
       case kind
       when .rule?
-        return Env::Namespace::Bind if bind.includes?(name)
+        return Env::Namespace::Bind if live.includes?(name)
         env.includes?(name) ? Env::Namespace::Env : nil
       when .slot?
         bind.includes?(name) ? Env::Namespace::Bind : nil
@@ -303,15 +337,19 @@ module Gori
     # A name this KIND could have resolved out of either table — the one case the bare grammar
     # could not distinguish and this one can. Not every kind has the ambiguity: a slot header and a
     # dial tuple resolve one table, so there was never a second reading to lose.
-    private def self.ambiguous?(name : String, env : Set(String), bind : Set(String),
+    #
+    # Asked of `live`, not of `bind`: a DISABLED extract rule resolved nothing under bare either, so
+    # a name it happens to share with an env var had exactly one reading, and flagging it ambiguous
+    # would send an operator looking for a choice that was never offered.
+    private def self.ambiguous?(name : String, env : Set(String), live : Set(String),
                                 kind : Kind) : Bool
       return false if kind.slot? || kind.dial?
-      env.includes?(name) && bind.includes?(name)
+      env.includes?(name) && live.includes?(name)
     end
 
     private def self.double_sigil?(bytes : Bytes, prefix : String, at : Int32, n : Int32) : Bool
       plen = prefix.bytesize
-      at + 2 * plen <= n && at_prefix?(bytes, prefix, at) && at_prefix?(bytes, prefix, at + plen)
+      at + 2 * plen <= n && Env.prefix_at?(bytes, prefix, at) && Env.prefix_at?(bytes, prefix, at + plen)
     end
 
     # A `$NS.NAME` token (NOT an escape) starting at `at` — what decides whether a bare `$$` in
@@ -328,23 +366,12 @@ module Gori
     # resolves bindings alone, so an env-only name there needs no escape — it was literal text
     # before the switch and stays literal text after it.
     private def self.resolvable_name_at(bytes : Bytes, at : Int32, n : Int32,
-                                        env : Set(String), bind : Set(String),
+                                        env : Set(String), bind : Set(String), live : Set(String),
                                         kind : Kind) : String?
       parsed = Env.read_key_bytes?(bytes, at, n)
       return nil unless parsed
       name = parsed[0]
-      route(name, env, bind, kind) ? name : nil
-    end
-
-    private def self.at_prefix?(bytes : Bytes, prefix : String, at : Int32) : Bool
-      pb = prefix.to_slice
-      return false if at < 0 || at + pb.size > bytes.size
-      j = 0
-      while j < pb.size
-        return false if bytes[at + j] != pb[j]
-        j += 1
-      end
-      true
+      route(name, env, bind, live, kind) ? name : nil
     end
 
     # ── the wire check ────────────────────────────────────────────────────────
@@ -354,17 +381,21 @@ module Gori
     # a difference rather than a coincidence — and both texts are run through the two passes a
     # request really takes (env vars at plan-build, bindings at the send seam).
     #
-    # For the kinds that HAVE a wire, which is not all of them: a rule replacement is resolved by
-    # `Rules#substitute` against its own grammar, and display text is resolved by nothing. The
-    # three that do have one do not share a pass list, so `kind` picks it — a slot header value is
-    # only ever seen by the binding seam, a dial tuple only by the env pass, and asking the request
-    # model of either would call a row unsafe for a pass that never runs over it.
+    # For every kind that HAS a wire, which is all but `Display`. They do not share a pass list,
+    # so `kind` picks it — a slot header value is only ever seen by the binding seam, a dial tuple
+    # only by the env pass, a rule replacement only by `Rules#substitute` — and asking the request
+    # model of any of them would call a row unsafe for a pass that never runs over it.
+    #
+    # The BINDING sentinels come from `enabled_bind_names`, because that is the only half of the
+    # binding table that ever resolved: giving a disabled rule's name a value would have this check
+    # bless a routing that ships nothing.
     def self.safe?(before : Bytes, after : Bytes, *, from : Env::Syntax, to : Env::Syntax,
                    env_names : Enumerable(String), bind_names : Enumerable(String),
+                   enabled_bind_names : Enumerable(String)? = nil,
                    kind : Kind = Kind::Request,
                    prefix : String = Settings.env_prefix) : Bool
       env = sentinels(env_names, "E")
-      bind = sentinels(bind_names, "B")
+      bind = sentinels(enabled_bind_names || bind_names, "B")
       wire(before, from, env, bind, prefix, kind) == wire(after, to, env, bind, prefix, kind)
     end
 
@@ -381,6 +412,11 @@ module Gori
     # does (`Env.unescape_set`).
     private def self.wire(bytes : Bytes, syntax : Env::Syntax, env : Hash(String, String),
                           bind : Hash(String, String), prefix : String, kind : Kind) : String
+      # A RULE REPLACEMENT is resolved by `Rules#substitute`, whose grammar is nobody else's:
+      # it owns `$$` and `$1..$9` in BOTH syntaxes and resolves against ONE table with the
+      # bindings layered over the env vars. Modelled directly rather than approximated with two
+      # `Env.expand` passes, which disagree with it about `$$` in namespaced mode.
+      return rule_wire(bytes, syntax, env, bind, prefix) if kind.rule?
       text = String.new(bytes)
       # A SLOT header value: `Env.expand_bindings_as` and nothing else. It is the last pass before
       # the socket, so it consumes the escape, and it resolves BIND alone.
@@ -395,6 +431,65 @@ module Gori
       return built if kind.dial?
       Env.expand(built, bind, prefix, nil, Env::Escape::Consume,
         syntax: syntax, resolve: Env::Owns::Bind, bind_vars: bind)
+    end
+
+    # `Rules#substitute`'s grammar, as a model: `$$` → one sigil (both syntaxes), `$1..$9` copied
+    # through unchanged (identical on both sides, so the regex/literal distinction cannot decide
+    # this check), and a token resolved out of the table its namespace names — bare's ONE table
+    # being the env vars with the bindings layered OVER them, which is the precedence `route`
+    # follows for this kind.
+    #
+    # Byte-level and reader-driven, like everything else here: a replacement is operator bytes and
+    # a `Regex` over them would need valid UTF-8.
+    private def self.rule_wire(bytes : Bytes, syntax : Env::Syntax, env : Hash(String, String),
+                               bind : Hash(String, String), prefix : String) : String
+      merged = env.dup
+      bind.each { |(k, v)| merged[k] = v }
+      plen = prefix.bytesize
+      n = bytes.size
+      buf = IO::Memory.new(n)
+      i = 0
+      while i < n
+        unless Env.prefix_at?(bytes, prefix, i)
+          buf.write_byte(bytes[i])
+          i += 1
+          next
+        end
+        if Env.prefix_at?(bytes, prefix, i + plen)
+          buf << prefix
+          i += 2 * plen
+          next
+        end
+        found = Env.read_token_at(bytes, i, n, syntax: syntax, prefix: prefix,
+          escapes: Env::Owns::None)
+        if found && found.kind.token?
+          table = rule_table(found.ns, merged, env, bind)
+          if v = table[found.name]?
+            buf << v
+            i += found.width
+            next
+          end
+          w = found.miss_width(plen, syntax)
+          buf.write(bytes[i, w])
+          i += w
+          next
+        end
+        buf << prefix
+        i += plen
+      end
+      String.new(buf.to_slice)
+    end
+
+    # Which table `Rules#substitute` resolves one token out of. Exhaustive over the namespace set,
+    # so a THIRD namespace is a compile error here rather than a silent trip through the env vars.
+    private def self.rule_table(ns : Env::Namespace?, merged : Hash(String, String),
+                                env : Hash(String, String),
+                                bind : Hash(String, String)) : Hash(String, String)
+      return merged unless ns
+      case ns
+      in Env::Namespace::Env  then env
+      in Env::Namespace::Bind then bind
+      end
     end
   end
 end

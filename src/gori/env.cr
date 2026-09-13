@@ -2024,7 +2024,11 @@ module Gori
     # `needle` occurs at `at`. Used for the sigil AND for a namespace label — both are
     # "does this literal sit here", and the prefix is operator-configurable so neither can be
     # a constant.
-    private def self.prefix_at?(bytes : Bytes, needle : String, at : Int32) : Bool
+    #
+    # Public because `EnvMigration` walks the same bytes with the same reader and had grown its
+    # own byte-identical copy. Two spellings of "is the sigil here" is how a migration ends up
+    # disagreeing with the grammar it is migrating.
+    def self.prefix_at?(bytes : Bytes, needle : String, at : Int32) : Bool
       nb = needle.to_slice
       return false if at < 0 || at + nb.size > bytes.size
       j = 0
@@ -2035,7 +2039,7 @@ module Gori
       true
     end
 
-    private def self.prefix_at?(chars : Array(Char), needle : String, at : Int32) : Bool
+    def self.prefix_at?(chars : Array(Char), needle : String, at : Int32) : Bool
       return false if at < 0 || at + needle.size > chars.size
       j = at
       needle.each_char do |c|

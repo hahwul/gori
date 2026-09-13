@@ -38,6 +38,10 @@ module Gori
     # and the CLI verb the grammar the operator typed). Two saves would write the file twice and
     # give the 3-way merge a base that already holds half the change.
     #
+    # `enabled_bind_names` is the subset that actually resolved — see `EnvMigration.rewrite`. A
+    # settings load knows no extract rules at all, so both binding sets are empty there and only a
+    # caller with a project open (the CLI verb, the project-open reconcile) fills them.
+    #
     # `env_names` / `bind_names` are the tables the OLD grammar resolved a bare `$NAME` out of. At
     # `Settings.load` time only the GLOBAL env vars are known — there is no project open, and
     # opening every project to read its tables is not something a settings load may do — so a
@@ -45,18 +49,21 @@ module Gori
     # project-open reconcile that DOES know those names (it passes them in here).
     def self.migrate_global_rules(*, from : Env::Syntax, to : Env::Syntax,
                                   env_names : Enumerable(String)? = nil,
-                                  bind_names : Enumerable(String) = [] of String) : GlobalReport?
+                                  bind_names : Enumerable(String) = [] of String,
+                                  enabled_bind_names : Enumerable(String)? = nil) : GlobalReport?
       return nil if from == to
       rules = Settings.rewriter_rules
       return nil if rules.empty?
       env = (env_names || Settings.env_vars.map(&.[0])).to_set
       bind = bind_names.to_set
+      live = enabled_bind_names ? enabled_bind_names.to_set : bind
       touched = 0
       tokens = 0
       migrated = rules.map do |rule|
         next rule if rule.replacement.empty?
         after, changes = rewrite(rule.replacement.to_slice, from: from, to: to,
-          env_names: env, bind_names: bind, kind: Kind::Rule, prefix: Settings.env_prefix)
+          env_names: env, bind_names: bind, enabled_bind_names: live, kind: Kind::Rule,
+          prefix: Settings.env_prefix)
         next rule unless changes.size > 0
         touched += 1
         tokens += changes.size

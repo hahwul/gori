@@ -138,7 +138,8 @@ module Gori
       to = Settings.env_syntax
       from = stored_syntax(store)
       return nil if from == to
-      plan = Plan.new(project, from, to, env_names(store), bind_names(store), Settings.env_prefix)
+      plan = Plan.new(project, from, to, env_names(store), bind_names(store),
+        enabled_bind_names(store), Settings.env_prefix)
       begin
         scan(store, plan)
       rescue ex
@@ -173,6 +174,18 @@ module Gori
       names
     end
 
+    # The half of `bind_names` that ever RESOLVED: the names an ENABLED extract rule declares.
+    #
+    # Both halves of the live binding table filter on `enabled?` (`Bindings#values`,
+    # `Bindings#declared`), so a switched-off rule's name was an ordinary unknown key under bare —
+    # it resolved in no pass and in no merged table. Which matters most for a RULE replacement,
+    # whose bare table layered the bindings OVER the env vars: without this set, a name that is
+    # both an env var and a disabled extract rule was re-spelled `$BIND.name`, and the rule then
+    # injected its own spelling into live traffic instead of the env value bare had put there.
+    def self.enabled_bind_names(store : Store) : Set(String)
+      store.extract_rules.select(&.enabled?).map(&.name).to_set
+    end
+
     # One `UPDATE`, held until the whole project has been scanned so the write is one transaction.
     record Write, sql : String, args : Array(::DB::Any)
 
@@ -185,6 +198,8 @@ module Gori
       getter to : Env::Syntax
       getter env_names : Set(String)
       getter bind_names : Set(String)
+      # The ENABLED subset of `bind_names` — see `EnvMigration.enabled_bind_names`.
+      getter enabled_bind_names : Set(String)
       getter prefix : String
       getter writes = [] of Write
       property tokens = 0
@@ -196,7 +211,7 @@ module Gori
       # now mean.
       getter hints = [] of String
 
-      def initialize(@project, @from, @to, @env_names, @bind_names, @prefix)
+      def initialize(@project, @from, @to, @env_names, @bind_names, @enabled_bind_names, @prefix)
       end
     end
 
@@ -221,16 +236,19 @@ module Gori
       # about, and collecting it would put a capture's bytes in a report about drafts.
       return nil if evidence
       after, changes = rewrite(bytes, from: plan.from, to: plan.to,
-        env_names: plan.env_names, bind_names: plan.bind_names, kind: kind, prefix: plan.prefix,
+        env_names: plan.env_names, bind_names: plan.bind_names,
+        enabled_bind_names: plan.enabled_bind_names, kind: kind, prefix: plan.prefix,
         hints: plan.hints)
       return nil if changes.empty?
       # The wire is the invariant (see `EnvMigration`). A text whose bytes the target grammar
       # cannot spell is LEFT and counted — a migration that ships different bytes than the
       # operator's last send is worse than one that says it could not. Asked of every kind that HAS
       # a wire, each against its own pass list: a slot header value is seen by the binding seam
-      # alone and a dial tuple by the env pass alone.
+      # alone, a dial tuple by the env pass alone, and a rule replacement by `Rules#substitute`'s
+      # own grammar (`EnvMigration.rule_wire`).
       if kind.has_wire? && !safe?(bytes, after, from: plan.from, to: plan.to,
-           env_names: plan.env_names, bind_names: plan.bind_names, kind: kind, prefix: plan.prefix)
+           env_names: plan.env_names, bind_names: plan.bind_names,
+           enabled_bind_names: plan.enabled_bind_names, kind: kind, prefix: plan.prefix)
         plan.left += 1
         return nil
       end
@@ -530,8 +548,8 @@ module Gori
       Settings.rewriter_rules.each do |rule|
         next if rule.replacement.empty?
         _, changes = rewrite(rule.replacement.to_slice, from: plan.from, to: plan.to,
-          env_names: plan.env_names, bind_names: plan.bind_names, kind: Kind::Rule,
-          prefix: plan.prefix)
+          env_names: plan.env_names, bind_names: plan.bind_names,
+          enabled_bind_names: plan.enabled_bind_names, kind: Kind::Rule, prefix: plan.prefix)
         next unless changes.any?(&.ref)
         names << (rule.name.presence || "##{rule.id}")
       end

@@ -19,7 +19,7 @@ module Gori::EnvMigration
   def self.apply_after_peer_for_spec(store : Store, db_path : String,
                                      project : String) : StoreReport?
     plan = Plan.new(project, stored_syntax(store), Settings.env_syntax,
-      env_names(store), bind_names(store), Settings.env_prefix)
+      env_names(store), bind_names(store), enabled_bind_names(store), Settings.env_prefix)
     scan(store, plan)
     # A second surface (a TUI beside an MCP server) commits the same migration while this one was
     # still scanning. Only the marker is written here; what matters is that the apply refuses.
@@ -34,10 +34,12 @@ private BIND_NAMES = ["token", "both"]
 
 private def rewrite(text : String | Bytes, from : Gori::Env::Syntax, to : Gori::Env::Syntax,
                     kind : Gori::EnvMigration::Kind = Gori::EnvMigration::Kind::Request,
-                    prefix : String = "$", hints : Array(String)? = nil)
+                    prefix : String = "$", hints : Array(String)? = nil,
+                    enabled : Array(String)? = nil)
   bytes = text.is_a?(String) ? text.to_slice : text
   after, changes = Gori::EnvMigration.rewrite(bytes, from: from, to: to,
-    env_names: ENV_NAMES, bind_names: BIND_NAMES, kind: kind, prefix: prefix, hints: hints)
+    env_names: ENV_NAMES, bind_names: BIND_NAMES, enabled_bind_names: enabled, kind: kind,
+    prefix: prefix, hints: hints)
   {after, changes}
 end
 
@@ -179,6 +181,46 @@ describe Gori::EnvMigration do
       changes.should be_empty
       String.new(after).should eq("$token")
       expect_rewrite("https://$API/p", BARE, NS, "https://$ENV.API/p", Gori::EnvMigration::Kind::Dial)
+    end
+
+    # A DISABLED extract rule declares nothing and resolves nothing — both halves of the live
+    # binding table filter on `enabled?`. So its name in a rule replacement was never a binding
+    # reference, and routing it to BIND turned a rule that injected an ENV value into one that
+    # injects its own spelling into live traffic, forever, with no refusal in front of it.
+    it "routes a rule replacement by what bare's table actually held, disabled rules excluded" do
+      # `both` is an env var AND an extract rule, but only `token` is ENABLED.
+      after, changes = rewrite("X-K: $both", BARE, NS, Gori::EnvMigration::Kind::Rule,
+        enabled: ["token"])
+      String.new(after).should eq("X-K: $ENV.both")
+      changes[0].ref.try(&.ns).should eq(Gori::Env::Namespace::Env)
+      # …and no ambiguity to report: a disabled rule never offered the second reading.
+      changes[0].ambiguous.should be_false
+      # With the rule ENABLED it is the binding, exactly as `Env.display_vars` layered it.
+      after, _ = rewrite("X-K: $both", BARE, NS, Gori::EnvMigration::Kind::Rule,
+        enabled: ["token", "both"])
+      String.new(after).should eq("X-K: $BIND.both")
+    end
+
+    # And a name that is ONLY a disabled binding is left UNSPELLED: bare shipped the literal too
+    # (no value, not declared), so the wire is identical — and when the operator switches the rule
+    # back on, `Rules#substitute`'s `BareSpelling` refusal names the re-spelling instead of
+    # injecting the text.
+    it "leaves a name that is only a DISABLED binding unspelled in a rule replacement" do
+      after, changes = rewrite("Authorization: $token", BARE, NS,
+        Gori::EnvMigration::Kind::Rule, enabled: [] of String)
+      changes.should be_empty
+      String.new(after).should eq("Authorization: $token")
+    end
+
+    # `safe?` now runs for a rule replacement, against `Rules#substitute`'s own grammar rather
+    # than a borrowed pass list — which is what makes the routing above checkable at all.
+    it "judges a rule replacement's wire against the rule grammar" do
+      # `$$` is one sigil in BOTH syntaxes here, and `$1` is a backref on both sides.
+      Gori::EnvMigration::Kind::Rule.has_wire?.should be_true
+      expect_rewrite("$$x-$1-$both", BARE, NS, "$$x-$1-$BIND.both",
+        Gori::EnvMigration::Kind::Rule)
+      # Display text still has no wire to judge.
+      Gori::EnvMigration::Kind::Display.has_wire?.should be_false
     end
 
     it "drops the bare escape's second sigil, because the namespaced grammar does not consume it" do
@@ -405,6 +447,62 @@ describe Gori::EnvMigration do
         # …and the ACTIVITY feed carries it, because "what happened to this project" is the question
         # that feed exists to answer.
         store.events_recent(20).rows.map(&.message).any?(&.includes?("re-spelled")).should be_true
+      end
+    end
+  end
+
+  # The store half of the disabled-binding routing. A rule replacement naming a DISABLED extract
+  # rule that is also an env var used to come out `$BIND.id` — a spelling that resolves in no table,
+  # so the rule stopped injecting the env value and started injecting those bytes into live traffic.
+  it "re-spells a rule replacement against the ENABLED bindings only" do
+    with_migration_home do |db_path|
+      store = Gori::Store.open(db_path)
+      begin
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+          Gori::Env.serialize_vars([{"id", "v"}, {"only", "w"}]))
+        # `id` is BOTH an env var and an extract rule — switched OFF. `only` is an env var whose
+        # name no rule carries.
+        rid = store.insert_extract_rule("id", "", Gori::ExtractKind::Header, "set-cookie")
+        store.set_extract_rule_enabled(rid, false)
+        store.insert_extract_rule("live", "", Gori::ExtractKind::Header, "set-cookie")
+        both = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "X-K", "$id/$only/$live", name: "r")
+        store.flush
+        Gori::EnvMigration.enabled_bind_names(store).should eq(Set{"live"})
+        Gori::EnvMigration.bind_names(store).should eq(Set{"id", "live"})
+      ensure
+        store.close
+      end
+      Gori::Settings.env_syntax = NS
+      with_open_store(db_path) { |st| Gori::EnvMigration.reconcile(st, db_path, "demo") }
+      with_open_store(db_path) do |st|
+        # `$id` → ENV (the value bare's merged table actually held), `$only` → ENV, `$live` → BIND.
+        st.match_rules[0].replacement.should eq("$ENV.id/$ENV.only/$BIND.live")
+      end
+    end
+  end
+
+  # And a name that is ONLY a disabled binding is left exactly as authored — the literal bare
+  # shipped for it too.
+  it "leaves a rule replacement naming only a DISABLED binding as authored" do
+    with_migration_home do |db_path|
+      store = Gori::Store.open(db_path)
+      begin
+        rid = store.insert_extract_rule("off", "", Gori::ExtractKind::Header, "set-cookie")
+        store.set_extract_rule_enabled(rid, false)
+        store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "Authorization", "Bearer $off", name: "r")
+        store.flush
+      ensure
+        store.close
+      end
+      Gori::Settings.env_syntax = NS
+      with_open_store(db_path) { |st| Gori::EnvMigration.reconcile(st, db_path, "demo") }
+      with_open_store(db_path) do |st|
+        st.match_rules[0].replacement.should eq("Bearer $off")
+        # A SLOT header, by contrast, counts the declared name whether or not its rule is on: it is
+        # a reference by construction, and `$BIND.off` keeps working when the rule comes back.
+        Gori::EnvMigration.stored_syntax(st).should eq(NS)
       end
     end
   end
