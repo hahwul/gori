@@ -182,20 +182,50 @@ class Gori::Tui::RepeaterView
   private def seed_draft_baselines : Nil
     wire = @editor.wire_text
     @evidence_pipeline_seps = pipeline_sep_count_in(wire)
-    # BARE names in the ENV namespace: this set feeds `Env.vars_without`, which SUBTRACTS from
-    # a table keyed by bare name (see `operator_env_vars`). Qualified keys would subtract
-    # nothing and every captured `$id` would resolve again.
-    @evidence_env_names = Env.token_names(wire, ns: Env::Namespace::Env).to_set
-    # Assigned unconditionally, including the empty set a draft gets: a loader can turn a
-    # tab that WAS evidence into one that isn't (load_blank after a ^R, a duplicate), and a
-    # stale literal set would keep painting resolvable tokens as unknown on a buffer that
-    # substitutes every one of them.
-    #
-    # `literal_keys` and not the set above: the EDITOR is keyed by what it PAINTS, which is a
-    # qualified `ENV.id` under the namespaced grammar and a bare `id` under the bare one. The
-    # set carries both spellings, so a mid-session syntax toggle neither loses the buffer's
-    # provenance nor starts withholding the other namespace's name.
-    @editor.env_literal_names = @evidence ? Env.literal_keys(wire) : Set(String).new
+    adopt_evidence_env_seed(wire)
+  end
+
+  # Record the SEED BYTES both `$NAME` baselines are derived from, and derive them now.
+  #
+  # The bytes rather than the two name sets, because both derivations read the token GRAMMAR and
+  # the operator can flip it mid-session (Project tab `s`, Settings env card `s`): a set computed
+  # under one grammar answers the wrong question under the other. Seeded namespaced and flipped
+  # to bare, a captured GraphQL `$id` was in NEITHER set — `token_names(ns: Env)` had found no
+  # namespaced token to name, so `vars_without({})` handed the send path the whole table and the
+  # capture's `$id` was substituted. Flipped the other way, the literal set held the bare `id`
+  # while the painter asks about `ENV.id`.
+  #
+  # Assigned unconditionally, including on a draft: a loader can turn a tab that WAS evidence
+  # into one that isn't (load_blank after a ^R, a duplicate), and a stale baseline would keep
+  # withholding substitution on a buffer that expands every token.
+  private def adopt_evidence_env_seed(wire : String) : Nil
+    @evidence_env_seed = wire
+    @evidence_env_rev = Env.highlight_rev
+    @evidence_env_names = derive_evidence_env_names(wire)
+    # The EDITOR is keyed by what it PAINTS — a qualified `ENV.id` under the namespaced grammar
+    # and a bare `id` under the bare one — so it is handed the BYTES too and re-derives its own
+    # set on the same signal (`TextArea#env_literal_source=`).
+    @editor.env_literal_source = @evidence ? wire : nil
+  end
+
+  # BARE names in the ENV namespace: this set feeds `Env.vars_without`, which SUBTRACTS from a
+  # table keyed by bare name (see `operator_env_vars`). Qualified keys would subtract nothing and
+  # every captured `$id` would resolve again.
+  private def derive_evidence_env_names(wire : String) : Set(String)
+    Env.token_names(wire, ns: Env::Namespace::Env).to_set
+  end
+
+  # The baseline, re-derived from the seed bytes when the grammar moved under it. Read through
+  # this and never off the ivar: the one consumer that mattered is on the SEND path
+  # (`operator_env_vars`), where being one grammar behind means putting a project value into a
+  # request nobody captured.
+  protected def evidence_env_names : Set(String)
+    rev = Env.highlight_rev
+    if @evidence_env_rev != rev
+      @evidence_env_rev = rev
+      @evidence_env_names = derive_evidence_env_names(@evidence_env_seed)
+    end
+    @evidence_env_names
   end
 
   # The same count over raw text, for seeding the baseline at load/restore.

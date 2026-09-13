@@ -104,6 +104,9 @@ module Gori::Tui
       # `RepeaterView#seed_draft_baselines` for the model. Empty on a draft, where every `$`
       # is the operator's by definition.
       @evidence_env_names = Set(String).new
+      # The bytes that set was derived from, and the grammar revision it was derived under.
+      @evidence_env_seed = ""
+      @evidence_env_rev = Env.highlight_rev
       @editor = TextArea.new
       @editor.gutter = true
       # Soft wrap, Burp-style, exactly as the Repeater's request pane: a long header, URL or
@@ -1594,11 +1597,32 @@ module Gori::Tui
     # handed, and the editor's answer has to match the provenance those bytes carry.
     private def seed_env_baseline : Nil
       wire = @editor.wire_text
+      @evidence_env_seed = wire
+      @evidence_env_rev = Env.highlight_rev
       # BARE names in the ENV namespace for the baseline (it subtracts from a bare-keyed
-      # table), QUALIFIED-and-bare keys for the editor (it paints what the grammar spells).
-      # See `RepeaterView::Group#seed_draft_baselines`, whose pair this mirrors.
-      @evidence_env_names = Env.token_names(wire, ns: Env::Namespace::Env).to_set
-      @editor.env_literal_names = @evidence ? Env.literal_keys(wire) : Set(String).new
+      # table), the SEED BYTES for the editor (it paints what the grammar spells — a qualified
+      # `ENV.id` namespaced, a bare `id` otherwise — and re-derives its own set from them).
+      # See `RepeaterView::Group#adopt_evidence_env_seed`, whose pair this mirrors, for why the
+      # bytes and not the two derived sets: the operator can flip `env.syntax` mid-session, and a
+      # set computed at seed time then answers the wrong grammar's question.
+      @evidence_env_names = derive_evidence_env_names(wire)
+      @editor.env_literal_source = @evidence ? wire : nil
+    end
+
+    private def derive_evidence_env_names(wire : String) : Set(String)
+      Env.token_names(wire, ns: Env::Namespace::Env).to_set
+    end
+
+    # The baseline, re-derived from the seed bytes when the grammar has moved since. Read through
+    # this and never off the ivar: its consumer is on the RUN path, where being one grammar behind
+    # means fuzzing a request whose captured `$id` was replaced by a project value.
+    private def evidence_env_names : Set(String)
+      rev = Env.highlight_rev
+      if @evidence_env_rev != rev
+        @evidence_env_rev = rev
+        @evidence_env_names = derive_evidence_env_names(@evidence_env_seed)
+      end
+      @evidence_env_names
     end
 
     # The `$KEY` table THIS template may substitute from, or nil to substitute nothing.
@@ -1611,7 +1635,7 @@ module Gori::Tui
     # tabs hold the same bytes for the same flow and must not answer this differently.
     private def operator_env_vars : Hash(String, String)?
       return nil unless @evidence
-      Env.vars_without(@evidence_env_names)
+      Env.vars_without(evidence_env_names)
     end
 
     private def evidence_template : String

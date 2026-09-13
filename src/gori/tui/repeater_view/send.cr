@@ -151,8 +151,11 @@ class Gori::Tui::RepeaterView
   # already had one and it stays literal, because gori cannot tell the two occurrences apart
   # and evidence wins when it cannot. `$$` escapes to a literal `$` on every path already,
   # so the operator has a spelling for either intent.
+  # Through the METHOD, not the ivar: the baseline re-derives itself from the seed bytes when the
+  # token grammar has moved since the seed (`evidence_env_names`), and this is the path where
+  # answering the old grammar's question sends a project value the capture never carried.
   private def operator_env_vars : Hash(String, String)
-    Env.vars_without(@evidence_env_names)
+    Env.vars_without(evidence_env_names)
   end
 
   # §…§ marker send: parse the CRLF wire form as a Fuzz template and render each marked

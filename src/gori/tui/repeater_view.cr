@@ -350,6 +350,11 @@ module Gori::Tui
       # NAME instead of per buffer. Baseline = the names the CAPTURE arrived with; empty on a
       # draft, where every `$` is the operator's by definition. See `operator_env_vars`.
       @evidence_env_names = Set(String).new
+      # The bytes that set was DERIVED from and the grammar revision it was derived under, so a
+      # mid-session `env.syntax` flip re-derives it instead of answering the old grammar's
+      # question (see `adopt_evidence_env_seed`).
+      @evidence_env_seed = ""
+      @evidence_env_rev = Env.highlight_rev
       @marker_regions_rev = -1
       @marker_regions_cache = [] of {Int32, Int32, Int32}
       # §…§ spans + the chain under the cursor, cached on the editor revision (marked_spans)

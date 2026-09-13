@@ -132,6 +132,10 @@ module Gori::Tui
       # wire will carry literally is not painted — or tooltipped — as a resolved variable.
       # Fed by the Repeater's evidence baseline; see `RepeaterView#operator_env_vars`.
       @env_literal_names = Set(String).new
+      # The bytes that set was derived FROM and the grammar revision it was derived UNDER (see
+      # `env_literal_source=`): nil source ⇒ the set is whatever an owner assigned.
+      @env_literal_source = nil.as(String?)
+      @env_literal_rev = Env.highlight_rev
       # The namespaces this editor's send path actually resolves — all of them unless an owner
       # narrows it (`env_complete_namespaces=`).
       @env_complete_namespaces = Env::Namespace.values
@@ -2096,6 +2100,10 @@ module Gori::Tui
     # above the viewport changes how the visible ones read), so styling a window of it in
     # isolation would be wrong rather than merely slower.
     private def highlighted(kind : Symbol) : Highlight::Windowed
+      # Read the literal set FIRST: it re-derives itself when the grammar moved (and drops the
+      # styled cache when the answer changed), and doing that inside the assignment below would
+      # have it invalidating the very buffer being built.
+      literal = env_literal_names
       cached = @styled
       env_rev = Env.highlight_rev
       return cached if cached && @styled_kind == kind && @styled_rev == Theme.revision && @styled_env_rev == env_rev
@@ -2110,7 +2118,7 @@ module Gori::Tui
         else
           request = kind == :request
           Highlight.from_lines_windowed(@lines, request,
-            env_tokens: request, literal: @env_literal_names)
+            env_tokens: request, literal: literal)
         end
     end
 
@@ -2308,10 +2316,49 @@ module Gori::Tui
     # The `$NAME`s that will NOT be substituted on send — see the ivar. Drops the styled
     # cache: the overlay it holds was built against the old answer, and nothing else in the
     # cache key (@edits, theme, Env.highlight_rev) moves when an owner re-seeds this.
+    #
+    # A hand-set list has no bytes behind it, so it also drops any EVIDENCE source: the set is
+    # then exactly what the caller said, under whatever grammar is in force.
     def env_literal_names=(names : Set(String)) : Nil
+      @env_literal_source = nil
+      set_env_literal_names(names)
+    end
+
+    # The EVIDENCE BYTES the literal set is derived from (nil for a buffer with no provenance),
+    # rather than a set computed once at seed time.
+    #
+    # `Env.literal_keys` reads the CURRENT grammar, so a set computed at seed time is only
+    # correct until the operator flips `env.syntax` (Project tab `s`, Settings env card `s`).
+    # After a namespaced→bare flip a captured `$id`'s literal key was the qualified `ENV.id`
+    # while the painter asks about the bare `id`, so the token started painting — and
+    # tooltipping — as a variable this buffer ships verbatim. Keeping the bytes and re-deriving
+    # on `Env.highlight_rev` is what makes the answer follow the grammar; the bytes are the
+    # SEED's, never the current buffer's, so a token the operator types afterwards is still
+    # theirs.
+    def env_literal_source=(wire : String?) : Nil
+      @env_literal_source = wire
+      @env_literal_rev = Env.highlight_rev
+      set_env_literal_names(wire ? Env.literal_keys(wire) : Set(String).new)
+    end
+
+    private def set_env_literal_names(names : Set(String)) : Nil
       return if names == @env_literal_names
       @env_literal_names = names
       @styled = nil
+    end
+
+    # The literal set, re-derived from the evidence bytes when the grammar moved under it. Every
+    # reader (the painter, both completers, the peek) goes through here — the staleness was one
+    # `Settings.env_syntax=` away from any of them.
+    private def env_literal_names : Set(String)
+      src = @env_literal_source
+      return @env_literal_names unless src
+      rev = Env.highlight_rev
+      if @env_literal_rev != rev
+        @env_literal_rev = rev
+        set_env_literal_names(Env.literal_keys(src))
+      end
+      @env_literal_names
     end
 
     # Enable the chain tooltip (paired with @conceal_spans on the request editors).
@@ -2519,7 +2566,7 @@ module Gori::Tui
       declared = Env.declared_bindings
       pl = tok.partial.downcase
       vars.keys
-        .select { |k| !@env_literal_names.includes?(k) } # offering one would promise a substitution this buffer won't make
+        .select { |k| !env_literal_names.includes?(k) } # offering one would promise a substitution this buffer won't make
         .select { |k| pl.empty? || k.downcase.starts_with?(pl) }
         .sort!
         .first(40)
@@ -2586,7 +2633,7 @@ module Gori::Tui
         table.each_key do |name|
           # The QUALIFIED key: a `$id` the capture arrived with is literal in THIS buffer, and
           # a set keyed by bare name alone would also withhold the other namespace's `id`.
-          next if @env_literal_names.includes?(Env.qualify(ns, name))
+          next if env_literal_names.includes?(Env.qualify(ns, name))
           next unless pl.empty? || name.downcase.starts_with?(pl)
           rows << {name, ns}
         end
@@ -2658,7 +2705,7 @@ module Gori::Tui
         # unregistered one doesn't: on this buffer it is not a variable reference. An evidence
         # tab used to tooltip the resolved secret under a `$TOKEN` the send path then wrote to
         # the socket as six literal bytes.
-        return nil if @env_literal_names.includes?(name)
+        return nil if env_literal_names.includes?(name)
         # `display_vars`: the peek is the operator's answer to "is my `$SESSION` bound, and to
         # what?" in the editor where they are writing the token — Repeater, Fuzzer, Intercept —
         # with no new surface at all. A declared-but-UNBOUND name has no value and so gets no
@@ -2675,7 +2722,7 @@ module Gori::Tui
       # A namespace this editor's send path does not run is not a reference HERE, whatever the
       # table holds — the same answer the dropdown gives (`env_complete_namespaces=`).
       return nil unless @env_complete_namespaces.includes?(ns)
-      return nil if @env_literal_names.includes?(Env.qualify(ns, name))
+      return nil if env_literal_names.includes?(Env.qualify(ns, name))
       val = Env.vars_for(ns)[name]?
       return nil unless val
       # Masked per NAMESPACE rather than per name: a BIND value came off the wire, whatever
