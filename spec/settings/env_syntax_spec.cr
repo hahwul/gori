@@ -177,6 +177,54 @@ describe "Settings env.syntax" do
     end
   end
 
+  # An unparseable file does NOT downgrade a namespaced install. `save` stays armed on that path
+  # and `serialize_env` would omit the section, which the next start reads as "no syntax key" —
+  # bare, forever, over a file the operator can still see the grammar in. So it is recovered
+  # textually: the tear is somewhere in a document that is mostly rule tables, and the env
+  # section is three keys.
+  it "recovers the grammar TEXTUALLY from an unparseable file and does not downgrade the install" do
+    with_syntax_home do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, %({"theme":"gori","env":{"syntax":"namespaced"},"rewriter":{"rules":[{)) # torn
+      Gori::Settings.reset_load_warning_guard
+      Gori::Settings.load
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      # The defect was the NEXT write, not the read: a save from this state used to persist the
+      # absence of the key and make the downgrade permanent.
+      Gori::Settings.save.should be_true
+      env_section(path).not_nil!["syntax"].as_s.should eq("namespaced")
+      # The corrupt copy is still kept, and its warning still names the file.
+      File.exists?("#{path}.corrupt").should be_true
+      Gori::Settings.load_warning.not_nil!.should contain("not valid JSON")
+    end
+  end
+
+  it "says so when an unparseable file does not spell the grammar either" do
+    with_syntax_home do |dir|
+      # A namespaced home first, in the same process — the value this must not leave behind.
+      File.write(File.join(dir, "settings.json"), %({"env":{"syntax":"namespaced"}}))
+      Gori::Settings.load
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+
+      io = IO::Memory.new
+      prev = Gori::Settings.warning_io
+      Gori::Settings.warning_io = io
+      Gori::Settings.reset_load_warning_guard
+      begin
+        File.write(File.join(dir, "settings.json"), %({"theme":"gori","network":{)) # no grammar in it
+        Gori::Settings.load
+      ensure
+        Gori::Settings.warning_io = prev
+      end
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+      # ONE line (the warning guard fires once per process), carrying both facts.
+      io.to_s.lines.size.should eq(1)
+      io.to_s.should contain("not valid JSON")
+      io.to_s.should contain("token grammar")
+      io.to_s.should contain("gori settings env-syntax")
+    end
+  end
+
   # PRESENT but not a string is the typo path, not the absence path: `parse_env` can only assign
   # from a string, so a guard keyed on "is the key there?" left the PREVIOUS home's grammar in
   # memory over a file that names no readable grammar at all.

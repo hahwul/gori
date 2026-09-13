@@ -133,9 +133,12 @@ module Gori
       end
       root = load_root(raw)
       unless root
-        # present but unparseable — kept a .corrupt copy, keep defaults. The grammar is one of
-        # them, explicitly: a file nobody could read cannot be evidence for the newer one.
-        self.env_syntax = DEFAULT_ENV_SYNTAX
+        # present but unparseable — kept a .corrupt copy, keep defaults. The grammar is the one
+        # exception, and `load_root` has already settled it: it is recovered TEXTUALLY from the
+        # raw file when the file still spells it, and otherwise reset to the default with a
+        # warning that says so. Resetting it here unconditionally was a silent DOWNGRADE — `save`
+        # stays armed on this path, `serialize_env` would then omit the section, and the next
+        # start would read the absence as bare forever.
         return
       end
       begin
@@ -575,9 +578,16 @@ module Gori
           # unwritable dir / full disk — the warning still goes out, minus the recovery hint
         end
       end
+      # The token GRAMMAR is recovered here rather than defaulted with everything else, and it is
+      # recovered before the warning is built so the one line the operator sees can say whether it
+      # was (see `recover_env_syntax_from_corrupt`). It cannot be a second `note_load_warning`:
+      # that guard fires once per process, so a second call would replace the recorded text with
+      # a sentence that no longer names the unparseable file — and emit nothing.
+      grammar_note = recover_env_syntax_from_corrupt(raw)
       warning = String.build do |s|
         s << "settings: #{path} is not valid JSON — using defaults for this run"
         s << "; your file is preserved at #{path}.corrupt" if kept
+        s << "; #{grammar_note}" if grammar_note
       end
       note_load_warning(warning)
       nil

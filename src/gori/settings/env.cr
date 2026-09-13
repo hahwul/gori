@@ -80,6 +80,34 @@ module Gori::Settings
     self.env_vars = parse_env_vars(e["vars"]?)
   end
 
+  # Recover the token grammar from a settings file that would not PARSE, textually.
+  #
+  # The parse failure is somewhere in a file that is mostly rule tables and theme scalars, while
+  # the env section is three keys — so a torn or hand-mangled settings.json very often still
+  # carries `"syntax": "namespaced"` verbatim. Reading it back matters more than it looks: the
+  # unparseable path leaves every section at a factory default but `save` stays ARMED, and
+  # `serialize_env` then omits the section entirely — which the next start reads as "no syntax
+  # key", i.e. bare, forever. A namespaced install would have downgraded itself, silently, in
+  # the one direction that reinterprets every `$ENV.KEY` already stored in its projects as
+  # literal bytes.
+  #
+  # Assigns the grammar either way (`load` runs over different homes in one process, so no exit
+  # path may leave the previous home's value in memory) and returns the sentence the corrupt-file
+  # warning appends, or nil when the grammar was recovered and there is nothing to warn about.
+  # TEXTUAL on purpose: the JSON is by definition not available, and the value set is closed.
+  private def self.recover_env_syntax_from_corrupt(raw : String) : String?
+    self.env_syntax = DEFAULT_ENV_SYNTAX
+    values = Env::Syntax.values.join('|', &.to_s.downcase)
+    if m = raw.match(/"syntax"\s*:\s*"(#{values})"/)
+      if s = Env::Syntax.parse?(m[1])
+        self.env_syntax = s
+        return nil
+      end
+    end
+    "gori could not read which token grammar this install speaks and is reading tokens as " \
+    "#{DEFAULT_ENV_SYNTAX.to_s.downcase} — `gori settings env-syntax` restores it"
+  end
+
   private def self.parse_env_vars(node : JSON::Any?) : Array({String, String})
     arr = node.try(&.as_a?)
     return [] of {String, String} unless arr
