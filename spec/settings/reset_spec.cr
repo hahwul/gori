@@ -131,6 +131,10 @@ describe "Settings.reset_to_factory" do
       Gori::Settings.tab_prefs.should be_empty
       Gori::Settings.env_vars.should be_empty
       Gori::Settings.env_prefix.should eq(Gori::Settings::DEFAULT_ENV_PREFIX)
+      # …but NOT the token grammar: `reset_env` leaves `env_syntax` alone on purpose (it decides
+      # how tokens already stored in PROJECT databases are read, and this fixture names none, so
+      # the absence rule already had it at bare). The preserving case is in settings/env_syntax_spec.
+      Gori::Settings.env_syntax.should eq(Gori::Settings::DEFAULT_ENV_SYNTAX)
       Gori::Settings.hostname_overrides.should be_empty
       Gori::Settings.oast_providers.should be_empty
       Gori::Settings.scan_rules.should be_empty

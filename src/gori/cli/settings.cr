@@ -417,8 +417,7 @@ module Gori::CLI
 
     Settings.load
     unless want = rest[0]?
-      puts "#{env_syntax_label(Settings.env_syntax)}  (#{env_syntax_origin})"
-      puts "  #{env_syntax_example(Settings.env_syntax)}"
+      env_syntax_read_lines.each { |line| puts line }
       return
     end
     syntax = Gori::Env::Syntax.parse?(want.strip)
@@ -431,17 +430,28 @@ module Gori::CLI
     unless Settings.save
       abort "gori settings env-syntax: applied for this process but could not be written to #{Settings.path}"
     end
-    if was == syntax
-      puts "env syntax: #{env_syntax_label(syntax)} (unchanged)"
-      return
-    end
-    puts "env syntax: #{env_syntax_label(syntax)} — #{env_syntax_example(syntax)}"
-    # The one thing an operator has to know before the next send: a switch re-reads bytes that
-    # are already stored, it does not rewrite them.
-    puts "Stored tokens are NOT rewritten: project env var names, Repeater drafts, rewrite-rule " \
-         "replacements and session-slot headers keep their text, so anything spelled the other " \
-         "way is now a literal. Re-spell them, or switch back with " \
-         "`gori settings env-syntax #{env_syntax_label(was)}`."
+    env_syntax_write_lines(was, syntax).each { |line| puts line }
+  end
+
+  # What `gori settings env-syntax` prints with no argument: the value, and WHERE it came from.
+  private def self.env_syntax_read_lines : Array(String)
+    ["#{env_syntax_label(Settings.env_syntax)}  (#{env_syntax_origin})",
+     "  #{env_syntax_example(Settings.env_syntax)}"]
+  end
+
+  # …and what it prints after a change. Pure, so the wording is spec-callable — the guards around
+  # it end in `abort`, which is not catchable.
+  #
+  # The second line is the one thing an operator has to know before their next send: a switch
+  # re-reads bytes that are ALREADY STORED, it does not rewrite them.
+  private def self.env_syntax_write_lines(was : Gori::Env::Syntax,
+                                          now : Gori::Env::Syntax) : Array(String)
+    return ["env syntax: #{env_syntax_label(now)} (unchanged)"] if was == now
+    ["env syntax: #{env_syntax_label(now)} — #{env_syntax_example(now)}",
+     "Stored tokens are NOT rewritten: project env var names, Repeater drafts, rewrite-rule " \
+     "replacements and session-slot headers keep their text, so anything spelled the other way " \
+     "is now a literal. Re-spell them, or switch back with " \
+     "`gori settings env-syntax #{env_syntax_label(was)}`."]
   end
 
   private def self.env_syntax_values : String
