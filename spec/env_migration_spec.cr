@@ -541,6 +541,33 @@ describe Gori::EnvMigration do
     end
   end
 
+  # The other half of the same failure, and the one that used to abort the COMMAND: when the
+  # DIRECTORY is read-only the `VACUUM INTO` itself cannot land, and a raise escaping the apply came
+  # out of `open_store` as SQLite's own "unable to open database <the backup path>" — so
+  # `gori run repeater list` on a read-only project directory stopped working instead of saying what
+  # it could not do.
+  it "reports rather than raises when the BACKUP itself cannot be written" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      dir = File.dirname(db_path)
+      File.chmod(dir, 0o555)
+      begin
+        ro = Gori::Store.open(db_path, read_only: true, background_index: false)
+        begin
+          report = Gori::EnvMigration.reconcile(ro, db_path, "demo").not_nil!
+          report.error.should_not be_nil
+          report.backup.should be_nil
+        ensure
+          ro.close
+        end
+      ensure
+        File.chmod(dir, 0o755) rescue nil
+      end
+      Dir.glob("#{db_path}.pre-*").should be_empty
+    end
+  end
+
   # The settings-file half of the same rule: the copy beside settings.json is taken by the LOAD that
   # adopts the grammar, and the save that would justify it comes after. A home the save cannot reach
   # therefore minted one copy per `gori` invocation, forever, and said nothing.

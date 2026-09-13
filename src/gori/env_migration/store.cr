@@ -527,7 +527,22 @@ module Gori
     # inside a transaction, which is why it happens first and is deleted again if the marker check
     # says a peer got there.
     private def self.apply(plan : Plan, db_path : String) : StoreReport?
-      backup = plan.writes.empty? ? nil : vacuum_into(db_path, plan.to)
+      backup =
+        begin
+          plan.writes.empty? ? nil : vacuum_into(db_path, plan.to)
+        rescue ex : ::DB::Error | ::SQLite3::Exception | File::Error
+          # The BACKUP could not be written — a read-only DIRECTORY, a full disk. Nothing to clean
+          # up (the copy never landed) and nothing to migrate: re-spelling a project gori could not
+          # even copy would leave the operator no way back. Reported, and the project opens.
+          #
+          # Rescued HERE and not only around the transaction below, which is where it used to be
+          # (and where it was a method-level rescue before the backup cleanup split them): a raise
+          # escaping this method aborted the whole command with SQLite's own "unable to open
+          # database <the backup path>", so `gori run repeater list` on a read-only project
+          # directory stopped working instead of saying what it could not do.
+          return StoreReport.new(plan.project, plan.from, plan.to, 0, 0, 0, nil,
+            error: ex.message.presence || ex.class.name)
+        end
       begin
         applied = apply_writes(plan, db_path, backup)
       rescue ex : ::DB::Error | ::SQLite3::Exception | File::Error
