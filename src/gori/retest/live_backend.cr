@@ -61,6 +61,23 @@ module Gori
         unless rec
           return Observation.new(error: "repeater ##{p.step.ref_id} no longer exists")
         end
+        # Re-checked here for the same reason the row is re-read: `Retest.plan` ran before the
+        # confirm, and a peer editing the tab in between can turn a runnable step into one
+        # holding live `§…§` — bytes this backend would ship literally while the tab renders
+        # them (#1068).
+        #
+        # `blocked_reason`, not `error`, and that is a choice with a consequence: `Engine#run`
+        # reads a blocked outcome as `refused` and HALTS the rest of the run (cleanup included,
+        # unless the operator allows it). Deliberate, and the same reading the scope gate two
+        # branches down gets — gori declining to send a step breaks the sequence's premise, so
+        # the steps after it would be checking a state the refused step never established. The
+        # plan-time twin answers `missing` instead, which skips one step and runs the rest:
+        # there the operator is still reading a preflight and nothing has gone out yet.
+        if Repeater::DraftMarkers.live?(@store, rec)
+          return Observation.new(blocked_reason: Retest.clip(
+            Repeater::DraftMarkers.refusal(rec.id,
+              "Remove them from the session, or point this step at one without markers.")))
+        end
         plan = begin
           Repeater::Plan.build(Retest.plan_options(rec, @overrides, @verify, @timeout), @outbound)
         rescue ex : Repeater::PlanError
