@@ -514,11 +514,12 @@ Edit from Preferences → **Network & Tabs** → **Network** → **Hostname over
 
 ### env
 
-Tokens like `$TOKEN` expand at send time in Repeater, Fuzzer, Miner, Intercept, CLI, and MCP:
+Tokens like `$ENV.TOKEN` expand at send time in Repeater, Fuzzer, Miner, Intercept, CLI, and MCP:
 
 ```json
 {
   "env": {
+    "syntax": "namespaced",
     "prefix": "$",
     "vars": [
       { "key": "TOKEN", "value": "eyJhbGciOi…" }
@@ -529,7 +530,8 @@ Tokens like `$TOKEN` expand at send time in Repeater, Fuzzer, Miner, Intercept, 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `prefix` | string | `"$"` | Token prefix (`$KEY`) |
+| `syntax` | string | `"namespaced"` | Token grammar: `namespaced` (`$ENV.KEY` env vars, `$BIND.NAME` session bindings) or `bare` (`$KEY`, `$NAME`). **Absence means the file predates namespaces**: the next start adopts `namespaced`, re-spells the global rewrite rules (keeping a `settings.json.pre-namespaced-<timestamp>` copy) and writes the key. Every project re-spells its own stored tokens the first time it opens, with a backup beside the database. `bare` is the explicit opt-out and re-spells each project back. Switch with [`gori settings env-syntax`](/reference/cli/#env-syntax) |
+| `prefix` | string | `"$"` | The sigil that opens a token (`$ENV.KEY`), in either grammar |
 | `vars` | array | `[]` | Global key/value pairs; project vars (Project tab → ENV) override on collision |
 
 See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
@@ -809,7 +811,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `editor` | External editor `command` and Markdown handling |
 | `tabs` | Which TUI tabs are shown/hidden |
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname-overrides) above |
-| `env` | Env-token prefix and global values. See [env](#env) above |
+| `env` | Env-token grammar (`syntax`), sigil and global values. See [env](#env) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `keyset` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
 | `hooks` | External process hooks: `timeout_secs` (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See [Process hooks](/guide/scripting/#process-hooks) |
 | `decoder` | Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database) |

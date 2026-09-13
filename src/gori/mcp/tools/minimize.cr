@@ -192,8 +192,12 @@ module Gori
         # TARGET and SNI are refused — `$` is not a legal byte in a hostname, and a literal one
         # there comes back as an unparseable target or an out-of-scope block, naming the wrong
         # gate. The CLI and TUI minimize paths carry the same two checks.
-        names = Env.unresolved(rec.target) |
-                (rec.sni.try { |s| Env.unresolved(s) } || [] of String)
+        # `deferred: nil`, like every other dial tuple. The default suppresses a DECLARED binding
+        # name on the argument that a later pass resolves it — true of a request body, false of a
+        # target: `Env.expand` resolves a dial tuple with `resolve: Owns::Env` alone and nothing
+        # re-scans it, so a `$BIND.HOST` here reaches DNS spelled `$BIND.HOST`.
+        names = Env.unresolved(rec.target, deferred: nil) |
+                (rec.sni.try { |s| Env.unresolved(s, deferred: nil) } || [] of String)
         unless names.empty?
           return err(env_unresolved_error(Env.token_list(names)), "INVALID_ARGUMENT", field: "repeater_id")
         end
@@ -241,7 +245,7 @@ module Gori
           s.field "repeater_id", intprop("repeater database id (`id` is accepted as an alias — the sibling repeater tools spell it that way)"), required: true
           s.field "id", intprop("alias for repeater_id")
           s.field "apply", boolprop("write the minimized request back into the session (default false)")
-          s.field "verbatim", boolprop("search with the stored bytes EXACTLY, as send_request/--verbatim would send them: no $VAR expansion, no bare-LF→CRLF promotion, no Content-Length resync (so body params stop being removal candidates). Use it for a session seeded from a capture, where an unresolved $filter/$top/$where is stored evidence rather than a typo — without it such a session is either refused by name or minimized against substituted bytes. Default false")
+          s.field "verbatim", boolprop("search with the stored bytes EXACTLY, as send_request/--verbatim would send them: no env expansion, no bare-LF→CRLF promotion, no Content-Length resync (so body params stop being removal candidates). Use it for a session seeded from a capture, where a stored $filter/$top/$where is evidence rather than a typo — under the legacy bare syntax those ARE references and such a session is otherwise refused by name or minimized against substituted bytes; under the namespaced syntax only $ENV.KEY / $BIND.NAME are references, so they never were. Default false")
           s.field "allow_unscoped", boolprop("minimize even when the target host is outside — or without — a configured scope (default false)")
         end
       end

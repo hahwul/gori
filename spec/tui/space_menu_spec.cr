@@ -55,6 +55,25 @@ describe Gori::Tui::SpaceMenu do
     end
   end
 
+  # The Env pane offers `a`/`e`/`d`/`y` and the menu-only `p`, and NOTHING on `s` — the token
+  # grammar used to live there, and it is now `gori settings env-syntax`'s alone (it has to
+  # re-spell the tokens already stored in the project, which a setting-write cannot do). `s` in
+  # this tab belongs to the Activity pane's source filter, in its own scope.
+  it "claims no `s` in the Env scope, and keeps Activity's out of it" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :project
+    registry = Gori::Verbs.registry
+
+    env_menu = SpaceMenu.new(registry)
+    env_menu.open(Gori::Verb::Scope::Env, :common, ctx)
+    env_menu.verb_for('s').should be_nil
+    env_menu.entries.map(&.id).should contain("env.edit-prefix")
+
+    activity = SpaceMenu.new(registry)
+    activity.open(Gori::Verb::Scope::ProjectActivity, :common, ctx)
+    activity.entries.map(&.id).should_not contain("env.edit-prefix")
+  end
+
   it "lists the Project description pane's own verbs under its own scope" do
     ctx = FakeExecContext.new
     ctx.current_tab = :project

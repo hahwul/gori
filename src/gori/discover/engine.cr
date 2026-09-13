@@ -151,7 +151,7 @@ module Gori::Discover
       @header_block = Headers.merge(headers).map { |name, value| "#{name}: #{value}\r\n" }.join
       # Whether ANY `$` survives in the block. When none does — the overwhelming case — every
       # fetch skips the binding path entirely and reuses the constructed block verbatim.
-      @header_tokens = !Settings.env_prefix.empty? && !@header_block.byte_index(Settings.env_prefix).nil?
+      @header_tokens = Env.may_contain_tokens?(@header_block, Env::Owns::Bind)
       @header_resolved = nil.as(String?)
       @header_rev = 0_u64
       # h2 is excluded for the reason Fuzz::Sender excludes it: H2Engine frames its own

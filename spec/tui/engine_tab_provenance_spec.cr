@@ -216,6 +216,42 @@ describe "engine tabs — provenance (T1)" do
     end
   end
 
+  # The baseline that decides the above is DERIVED from the seed bytes under the token grammar in
+  # force at seed time — and the operator can flip that grammar mid-session (Project tab `s`,
+  # Settings env card `s`). Seeded namespaced, a bare `$id` names no token at all, so the seed-time
+  # name set was EMPTY and `Env.vars_without({})` handed the send path the whole table: one
+  # keystroke two tabs away turned the capture's GraphQL variable back into a project secret on the
+  # wire. The baseline is re-derived on `Env.highlight_rev` now, which is what this asserts — over
+  # the RECEIVED bytes, because a plan that looks right and sends something else is the whole class
+  # of defect this file exists for.
+  it "the Fuzzer re-reads its capture's `$tokens` when env.syntax flips mid-session" do
+    origin = RecordingOrigin.new
+    begin
+      with_vars([{"id", "SECRET-ID"}]) do
+        with_scope do |scope|
+          body = %({"query":"query($id: ID!){ user(id: $id){ n } }","v":"ab"})
+          tmpl = "POST /graphql?p=§1§ HTTP/1.1\r\nHost: 127.0.0.1:#{origin.port}\r\n" \
+                 "Content-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n" \
+                 "Connection: close\r\n\r\n#{body}"
+          view = with_env_syntax(Gori::Env::Syntax::Namespaced) do
+            v = flow_seeded_fuzzer("http://127.0.0.1:#{origin.port}", tmpl)
+            v.evidence?.should be_true
+            v
+          end
+          view.apply_set(nil, SetSpec.new(:list, "ZZ"))
+          with_env_syntax(Gori::Env::Syntax::Bare) do
+            run_fuzz(view, scope).should be_nil
+          end
+        end
+      end
+      origin.bodies.size.should eq(1)
+      origin.bodies[0].should contain("query($id: ID!)")
+      origin.bodies[0].should_not contain("SECRET-ID")
+    ensure
+      origin.close
+    end
+  end
+
   # INVERTED for the owner's round-7 policy. This used to assert that a CAPTURE with an
   # unset `$token` ran while a DRAFT carrying the same token was REFUSED — provenance
   # deciding which of the two the operator meant. The refusal is gone from both: an unset

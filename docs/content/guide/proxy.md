@@ -62,7 +62,7 @@ A held message goes in the same queue as a held request, with a `WS↑` or `WS�
 - **A held message blocks its whole direction** until you decide it. Later messages from that peer queue behind it, and they are released in arrival order however you decide them: decide message 5 before 3 and it still goes out third. The **opposite direction keeps running**, and so do `PING`/`PONG` in both, so the socket does not die while you read. There is no way to let one message past another; a WebSocket has no message identifiers to reorder.
 - **A dropped message is invisible to both endpoints.** Nothing is written, and a WebSocket stream has no message identity for the peer to notice a hole in: no error, no gap, no retry. That is weaker than dropping an HTTP/1.1 request (which answers a `502`) or an HTTP/2 one (which cancels the stream), and gori keeps no message-log row for it either. If you need the attempt on record, note it yourself.
 - **A binary message (opcode 2) opens the hex editor**, not the text one. `↵` / `e` gives you the same byte editor the Repeater's `Ctrl-X` does: `0`-`9`/`a`-`f` overtype the nibble under the cursor, `Ins` inserts a `00` byte, `Del`/`⌫` remove one, arrows and `Home`/`End` move. The bytes never become a string, so protobuf, msgpack and CBOR survive an edit intact, which is why the text editor is not offered here, and why `Ctrl-E` (external editor) is refused on one. The card says `HEX` where it says `EDIT` on a text message, and the queue row shows the size instead of a preview.
-- **Editing a text message changes its line endings.** The editor normalises `CRLF` to `LF`, shared with the Repeater and the HTTP intercept editor. `$NAME` bindings are *not* expanded in a WebSocket payload (a `$` there is a byte, not a reference), so what you type is what is sent.
+- **Editing a text message changes its line endings.** The editor normalises `CRLF` to `LF`, shared with the Repeater and the HTTP intercept editor. `$BIND.NAME` bindings are *not* expanded in a WebSocket payload (a `$` there is a byte, not a reference), so what you type is what is sent.
 - **An edited message is re-framed as one frame** and a client → server message is re-masked with a fresh key, exactly as a [Match & Replace rule](#match-replace-websocket) does. A message you forward unchanged keeps the sender's own frame and mask key.
 - **A hold has about 5 seconds left once the peer closes the other direction.** gori waits that long for the closing handshake to finish and then tears the socket down; anything still held is forwarded unedited. The same happens if a `CLOSE` arrives in the direction you are holding: everything undecided goes out in order, then the `CLOSE`, because the protocol forbids data frames after one.
 - **Only data messages are held.** `PING`, `PONG` and `CLOSE` always pass: holding a ping breaks keepalive by construction, and holding a close strands the tunnel.
@@ -434,7 +434,7 @@ Four things are worth knowing before you press it.
 
 The preview directory is gori's, mode `0700`, and swept to the newest 32 files on every write; wiping `~/.gori` takes it with them.
 
-## Match & Replace (Rewriter tab)
+## Match & Replace (Rewriter tab) {#match-replace}
 
 The **Rewriter** tab is the Match & Replace editor: rules that rewrite requests and responses in flight. It sits on the tab bar right of Comparer, and the command palette reaches it too (`Ctrl-P` → **Match & Replace**, or **Go to Rewriter**).
 
@@ -501,7 +501,7 @@ A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` 
 
 ### Match & Replace on WebSocket {#match-replace-websocket}
 
-Set **part** to `ws` and the rule rewrites WebSocket messages instead of an HTTP head or body. **Target picks the direction**: `request` is client → server, `response` is server → client. Everything else works the same way: literal or regex, capture groups, `$NAME` bindings, and the host glob, which is matched against the host that opened the socket.
+Set **part** to `ws` and the rule rewrites WebSocket messages instead of an HTTP head or body. **Target picks the direction**: `request` is client → server, `response` is server → client. Everything else works the same way: literal or regex, capture groups, `$BIND.NAME` bindings, and the host glob, which is matched against the host that opened the socket.
 
 ```
 gori run rewriter add --target=request --part=ws --find='"role":"user"' --value='"role":"admin"'
@@ -608,9 +608,9 @@ Scriptable headless too: `gori run colormarker` (list / add / update / rm / enab
 A rotating token (a session cookie, a CSRF field, a bearer) is worth nothing to a rule that has to spell it out in advance. A **binding** is a name gori fills in at send time from something it saw in a response, and it has two halves that are two separate rows:
 
 - an **extract rule** (Rewriter tab, `extract` sub-tab) reads a value out of a response and binds a name to it. It carries a condition in the intercept-filter grammar (`path:/login AND status:200`), an optional host glob, and a descriptor: a cookie, a response header, a regex over the body, a JSON path, or a byte range.
-- an ordinary **Match & Replace rule** writes it back out. A replacement of `$SESSION` in a `set header` rule, or in a body `replace`, is resolved when the request goes out rather than when the rule was saved.
+- an ordinary **Match & Replace rule** writes it back out. A replacement of `$BIND.SESSION` in a `set header` rule, or in a body `replace`, is resolved when the request goes out rather than when the rule was saved.
 
-One name is written by exactly one extract rule; a second rule claiming the same name is refused when you save it, with the reason. A name that is declared but not yet bound does **not** go out empty and does not go out as the literal `$SESSION`. The rule is skipped and the reason lands in the events feed.
+One name is written by exactly one extract rule; a second rule claiming the same name is refused when you save it, with the reason. A name that is declared but not yet bound does **not** go out empty and does not go out as the literal `$BIND.SESSION`. The rule is skipped and the reason lands in the events feed.
 
 Extraction runs on **traffic through the proxy** and on **sends you made by hand** (a Repeater tab). It deliberately does **not** run on a sweep: Fuzzer, Miner, Discover, or an active Probe. A sweep sends attacker-shaped payloads, and a response echoing one back could rebind your session to a payload-derived value that then went out on every later request.
 
@@ -744,9 +744,9 @@ detail rather than whole facts.
 | **Description** | Free-form project notes |
 | **Scope** | Include/exclude rules (host, string, or regex) |
 | **Host overrides** | Per-project dial map |
-| **Env** | Per-project `$KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
+| **Env** | Per-project `$ENV.KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
 | **Project settings** | Scope-lens + **sandbox** toggles, per-project network pins (bind / upstream) that override the global Settings default, and the gRPC [`.proto` schema](#proto-schema) path |
-| **Activity** | Who changed what on this project: the append-only event feed, newest first. Config changes (scope rules, the sandbox, host overrides, `$KEY` vars, rewrite rules, the network pins) are recorded wherever they are made, and every row names the **actor** that made it: `tui`, `cli`, or `agent`. Background job results and agent tool calls land here too. Filter by `s` source, `l` level, `a` actor or `/` text; `↵` opens the flow or session an event names, and `⇧X` empties the feed (it asks first, since the agent audit trail goes with it). `⇧X` is the same key that clears History, Probe issues, the Issues list and the Authorize queue, each in its own tab; plain `c` stays the capture toggle here as it does everywhere else. This is where a hook or a session binding that failed *without* raising a notification becomes visible |
+| **Activity** | Who changed what on this project: the append-only event feed, newest first. Config changes (scope rules, the sandbox, host overrides, `$ENV.KEY` vars, rewrite rules, the network pins) are recorded wherever they are made, and every row names the **actor** that made it: `tui`, `cli`, or `agent`. Background job results and agent tool calls land here too. Filter by `s` source, `l` level, `a` actor or `/` text; `↵` opens the flow or session an event names, and `⇧X` empties the feed (it asks first, since the agent audit trail goes with it). `⇧X` is the same key that clears History, Probe issues, the Issues list and the Authorize queue, each in its own tab; plain `c` stays the capture toggle here as it does everywhere else. This is where a hook or a session binding that failed *without* raising a notification becomes visible |
 
 Scope rules and host overrides are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. Full flags are in the [CLI Reference](/reference/cli/#run-project).
 

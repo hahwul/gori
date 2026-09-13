@@ -224,7 +224,9 @@ module Gori::Tui
       # The rule membership rides along with the overlay summary, exactly as the session slot
       # picker draws it: it is state this card PRESERVES but does not edit, and state a card
       # keeps without showing is state the operator cannot know they still have.
-      detail = id.rules.empty? ? id.summary : "#{id.summary} · rules #{Gori::Env.token_list(id.rules)}"
+      # A slot's rule list is BARE names out of the binding table, so the namespace has to be
+      # supplied here — without it a `$SESSION` would print where `$BIND.SESSION` resolves.
+      detail = id.rules.empty? ? id.summary : "#{id.summary} · rules #{Gori::Env.token_list(id.rules, ns: Gori::Env::Namespace::Bind)}"
       screen.text(sx, py, detail, Theme.muted, bg, width: {tag_x - 1 - sx, 1}.max)
       screen.text(tag_x, py, tag, Theme.focus_gold, bg) unless tag.empty?
     end

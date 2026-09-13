@@ -140,6 +140,14 @@ module Gori
                         auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil,
                         ws_keep_key : Bool = false, ws_http_only : Bool = false,
                         tls_preset : String? = nil) : Int64
+      # A stale-grammar process must not mix two grammars into one database — see
+      # `store/env_write_guard.cr`. Skipped for an EVIDENCE row (`flow_id`): a capture expands
+      # nothing, so its `$id` is a byte the origin sent and re-spelling it would edit the record.
+      if flow_id.nil? && (w = env_write)
+        request = w.call(request, EnvMigration::Kind::Request)
+        target = w.call(target, EnvMigration::Kind::Dial)
+        sni = w.call(sni, EnvMigration::Kind::Dial)
+      end
       ts = now_us
       exec_task ->(c : DB::Connection) {
         c.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni, ws_keep_key, ws_http_only, tls_preset) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -152,11 +160,30 @@ module Gori
     def update_repeater(id : Int64, target : String, request : Bytes, http2 : Bool, auto_cl : Bool,
                         sni : String? = nil, ws_keep_key : Bool = false,
                         ws_http_only : Bool = false, tls_preset : String? = nil) : Bool
+      # Same guard as `insert_repeater`. The provenance has to be READ here (the caller does not
+      # pass it), which is why the grammar comparison comes first: on the overwhelmingly common
+      # write — this process and this database agreeing — `env_write` answers nil and no extra query
+      # is made at all.
+      if w = env_write
+        if repeater_flow_id(id).nil?
+          request = w.call(request, EnvMigration::Kind::Request)
+          target = w.call(target, EnvMigration::Kind::Dial)
+          sni = w.call(sni, EnvMigration::Kind::Dial)
+        end
+      end
       exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, ws_keep_key = ?, ws_http_only = ?, tls_preset = ?, updated_at = ? WHERE id = ?",
           target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, ws_keep_key ? 1 : 0, ws_http_only ? 1 : 0, tls_preset, now_us, id)
         nil
       }
+    end
+
+    # The `flow_id` of one tab, or nil for a draft (and for an id that is gone). A narrow read for
+    # the provenance question alone — `get_repeater` would pull the request blob with it.
+    private def repeater_flow_id(id : Int64) : Int64?
+      @db.query_one?("SELECT flow_id FROM repeaters WHERE id = ?", id, as: Int64?)
+    rescue
+      nil
     end
 
     # Set (or clear, with nil) a repeater tab's custom name — its own UPDATE, separate

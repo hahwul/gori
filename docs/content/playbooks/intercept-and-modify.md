@@ -41,7 +41,7 @@ gori run intercept                       # list held items + catch state
 gori run intercept edit 3 --raw-file edited.txt   # forward item 3 with edited bytes
 ```
 
-An edited request is forwarded with `Content-Length` resynced (on by default; `Ctrl-L` toggles it) and `$KEY` [environment variables](/guide/repeater-and-fuzzer/#environment-variables) expanded (`$$` for a literal `$`); extract-rule `$NAME` bindings are not resolved on this path. Otherwise what you typed is what goes out.
+An edited request is forwarded with `Content-Length` resynced (on by default; `Ctrl-L` toggles it) and `$ENV.KEY` [environment variables](/guide/repeater-and-fuzzer/#environment-variables) expanded (`$$ENV.KEY` for the literal text); extract-rule `$BIND.NAME` bindings are not resolved on this path. Otherwise what you typed is what goes out.
 
 **Checkpoint.** The edited request reaches the origin: switch to **History** and read the flow to confirm the change and the origin's response.
 

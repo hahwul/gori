@@ -457,6 +457,11 @@ describe Gori::Settings do
       Gori::Settings.load
       Gori::Settings.env_prefix.should eq("%")
       Gori::Settings.env_vars.should eq([{"HOST", "h.test"}, {"TOKEN", "t"}])
+      # The prefix is the SIGIL in both grammars and is orthogonal to `env.syntax`: this file
+      # names no syntax, so the grammar is bare (the absence rule) and the round trip is
+      # unchanged by the namespaces existing.
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+      Gori::Env.spell("HOST", Gori::Env::Namespace::Env).should eq("%HOST")
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)

@@ -147,12 +147,12 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_projects` | 이 호스트의 모든 gori 프로젝트 |
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
 | `list_rule_presets` | 응답 수정 [프리셋](/ko/guide/proxy/#rewriter-presets). 평범한 Match & Replace 규칙을 설치하는 이름 붙은 출발점(hidden 필드 드러내기, disabled 컨트롤 활성화, `maxlength` 제거, 클라이언트 검증 제거, CSP / 보안 헤더 제거, SRI 비활성화). 각 행이 설치할 규칙을 밝힙니다 |
-| `list_extract_rules` | 프로젝트의 **extract** 규칙. [세션 바인딩](/ko/guide/proxy/#session-bindings)의 읽는 쪽 절반. 각각 응답을 관찰해 `$NAME` 하나를 메모리에 묶고, Match & Replace 규칙이 그것을 주입합니다 |
+| `list_extract_rules` | 프로젝트의 **extract** 규칙. [세션 바인딩](/ko/guide/proxy/#session-bindings)의 읽는 쪽 절반. 각각 응답을 관찰해 `$BIND.NAME` 하나를 메모리에 묶고, Match & Replace 규칙이 그것을 주입합니다 |
 | `list_color_rules` / `list_custom_colors` | [Colormarker](/ko/guide/proxy/#colormarker) 규칙을 우선순위 순으로, 그리고 규칙의 `color`가 참조할 수 있는 전역 커스텀 색상. 표시 전용이며 색상 규칙은 트래픽을 건드리지 않습니다 |
 | `preview_color_rule` | 어떤 색상 조건이 최근 플로우 몇 개에 **매칭**되는지, 그리고 앞서 해소되는 규칙들을 셈한 뒤 실제로 몇 개를 **칠하는지**. 전역 후보는 모든 프로젝트 규칙보다 먼저 해석되므로 `scope`를 받습니다 |
 | `grpc_schema` | 이 프로젝트가 캡처된 gRPC를 어떤 `.proto` 스키마로 렌더하는지, 각 조각이 어디서 왔는지(디스크립터 셋 파일 또는 리플렉션 페치). 아무것도 보내지 않습니다 |
 | `list_rules` | 프로젝트에 적용되는 Match & Replace 규칙을 적용 순서로 나열. 전역 규칙이 먼저, 그다음이 프로젝트 규칙(`scope`로 한쪽만 조회) |
-| `list_env` | `$KEY` 치환에 쓰이는 프로젝트 env 토큰(값은 가려짐). 행마다 `length`와, 값이 스킴으로 시작할 때 `scheme`도 싣습니다. 헤더를 `Bearer $KEY`로 써야 하는지 그냥 `$KEY`로 써야 하는지, 값 없이 판단할 수 있을 만큼입니다 |
+| `list_env` | 치환에 쓰이는 프로젝트 env 토큰. 결과는 `{syntax, prefix, example, vars}`입니다(값은 가려짐). 앞의 세 값은 참조를 어떻게 **적을지** 알려 줍니다. `syntax`는 이 설치의 문법(`namespaced`이면 `$ENV.KEY`와 `$BIND.NAME`, `bare`이면 레거시 `$KEY`), `prefix`는 시길, `example`은 그 둘을 적용한 예시여서 기본이 아닌 시길도 조립할 필요가 없습니다. `vars`의 각 행은 bare 이름으로 키를 잡고, `length`와 값이 스킴으로 시작할 때의 `scheme`도 싣습니다. 헤더를 `Bearer <token>`으로 써야 하는지 토큰만 써야 하는지, 값 없이 판단할 수 있을 만큼입니다 |
 | `list_host_overrides` | 이 프로젝트에 적용 중인 호스트 → IP 다이얼 맵 |
 | `list_session_slots` | 프로젝트의 [세션 슬롯](/ko/guide/authorize/#session-slots-one-list-two-readers)(이름 붙은 신원 각각이 헤더 오버레이 하나와 그 값을 묶어 주는 extract 규칙들로 이루어집니다), 그리고 어느 쪽이 ACTIVE인지(헤더 값은 가려짐) |
 | `list_oast_providers` | 설정된 OAST 프로바이더와 현재 활성 프로바이더 |
@@ -164,7 +164,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 현재 페이로드 조회, 실행 중인 리스너의 콜백 폴링 |
 | `project_info` | 플로우 / 이슈 개수, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것 |
-| `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
+| `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $ENV.AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
 | `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다. `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 말해 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시됩니다 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
@@ -173,7 +173,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 | 도구 | 용도 |
 |------|---------|
-| `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$KEY` 환경 토큰을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림). `reframe_grpc: true`는 실제 전송되는 본문에 맞춰 단항 gRPC 메시지의 5바이트 길이 접두사를 다시 계산합니다. 기본값은 꺼짐이므로 편집된 메시지도 캡처 당시의 접두사 그대로 나갑니다 |
+| `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$ENV.KEY` 환경 토큰과 `$BIND.NAME` 바인딩을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림). `reframe_grpc: true`는 실제 전송되는 본문에 맞춰 단항 gRPC 메시지의 5바이트 길이 접두사를 다시 계산합니다. 기본값은 꺼짐이므로 편집된 메시지도 캡처 당시의 접두사 그대로 나갑니다 |
 | `send_websocket` | 저장된 WebSocket Repeater 세션을 실행하고 응답을 수집 |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 하나를 관리. 모든 응답이 `id` 옆에 `tui_index`를 싣고, 삭제는 없앤 탭 번호(`was_tui_index`)를 밝힌 뒤 나머지를 다시 번호 매깁니다 |
 | `create_repeaters` | 캡처된 flow 여러 개에서 탭을 하나씩 시드합니다. OpenAPI 임포트의 두 번째 단계입니다(아래 참고). 첫 세션을 만들기 전에 모든 flow의 존재를 확인합니다 |
@@ -189,7 +189,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `create_note` / `update_note` / `delete_note` | 프로젝트 노트 관리 |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다: `project`(기본값) 또는 모든 프로젝트에 적용되는 `global` |
 | `create_rule_from_preset` | 프리셋(`list_rule_presets` 참고)을 평범한 Match & Replace 규칙으로 설치. 규칙마다 `create_rule`을 한 번씩 부른 것과 같은 결과라, 설치 후에도 보이고 편집·비활성화됩니다. 생성된 id를 반환 |
-| `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | 응답에서 `$NAME`을 묶는 extract 규칙 관리. 이름을 바꾸면 옛 이름에 묶인 값은 라벨만 갈아 끼우는 게 아니라 버려지고, 비활성화하면 이름 자체가 **선언 해제**되어 그것을 주입하던 규칙이 낡은 값을 보내는 대신 다시 거부합니다 |
+| `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | 응답에서 `$BIND.NAME`을 묶는 extract 규칙 관리. 이름을 바꾸면 옛 이름에 묶인 값은 라벨만 갈아 끼우는 게 아니라 버려지고, 비활성화하면 이름 자체가 **선언 해제**되어 그것을 주입하던 규칙이 낡은 값을 보내는 대신 다시 거부합니다 |
 | `create_color_rule` / `update_color_rule` / `set_color_rule_enabled` / `move_color_rule` / `delete_color_rule` | Colormarker 규칙 관리. `move_color_rule`은 겉모습이 아니라 의미의 편집입니다. 활성화된 첫 매칭이 그 행을 칠합니다. 각각 `scope`를 받습니다(`project` 기본값 또는 `global`) |
 | `create_custom_color` / `update_custom_color` / `delete_custom_color` | 기본 6색 위에 피커가 제공하는 전역 커스텀 색상 정의. 하나를 지워도 그것을 이름으로 쓰던 규칙은 삭제가 전파되지 않고 무해하게 남으며, 그 행들은 보이는 기본값으로 떨어집니다 |
 | `grpc_reflect` / `grpc_forget` | 대상의 `grpc.reflection.v1`(없으면 `v1alpha`)에 디스크립터를 요청해 프로젝트에 캐시하거나, 캐시된 대상을 버립니다. `grpc_reflect`는 아웃바운드 전송이므로 다른 것들과 똑같이 스코프 게이트를 지납니다 |
@@ -201,9 +201,9 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | 프로젝트의 include / exclude 규칙 편집과 스코프 렌즈 토글 |
 | `set_sandbox` | 하드 컨테인먼트. 켜면 프록시가 스코프가 허용한 것만 전달하고 나머지는 차단 |
-| `set_env_var` / `delete_env_var` | `$KEY` 치환이 읽는 프로젝트 env 토큰 관리 |
+| `set_env_var` / `delete_env_var` | 치환이 읽는 프로젝트 env 토큰 관리. 키는 bare로 저장되며, 참조는 `$ENV.KEY`로, `bare` 옵트아웃에서는 `$KEY`로 씁니다. 이 설치가 어느 쪽인지는 `list_env`의 `syntax` / `example`이 말해 줍니다 |
 | `create_session_slot` / `update_session_slot` / `delete_session_slot` | 세션 슬롯 관리. Authorize 탭의 identities 카드가 편집하는 바로 그 목록이고, `authorize_start`가 재생하는 집합입니다 |
-| `set_active_session_slot` | 모든 아웃바운드 요청이 어느 신원으로 나갈지 선택합니다. 그 슬롯의 헤더 오버레이가 최종 와이어 바이트에 적용되고 `$NAME`은 그 바인딩 테이블에서 해소됩니다. 이 서버 프로세스만 들고 있고 저장되지 않으므로, 새 연결은 캡처된 그대로 시작합니다 |
+| `set_active_session_slot` | 모든 아웃바운드 요청이 어느 신원으로 나갈지 선택합니다. 그 슬롯의 헤더 오버레이가 최종 와이어 바이트에 적용되고 `$BIND.NAME`은 그 바인딩 테이블에서 해소됩니다. 이 서버 프로세스만 들고 있고 저장되지 않으므로, 새 연결은 캡처된 그대로 시작합니다 |
 | `add_host_override` / `update_host_override` / `delete_host_override` | 호스트 → IP 다이얼 맵 관리(요청은 그대로 두고 접속 IP만 변경) |
 | `probe_promote` / `probe_dismiss` / `probe_delete` | Probe 발견 항목을 Issues로 승격, 기각, 또는 삭제 |
 | `set_probe_mode` | 스캔 모드 설정: `off`, `passive`, `active`, `aggressive`(허가된 대상 전용) |

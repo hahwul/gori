@@ -70,7 +70,7 @@ module Gori
       # NOT the Authorize tab's `i` (that card edits the LIST — configuration — while this
       # picks the one pointer, which is memory-only and never persisted).
       r.register Verb::Definition.new(
-        "session.slot", "Session slot", "Choose the identity every send goes out as (header overlay + $NAME table)",
+        "session.slot", "Session slot", "Choose the identity every send goes out as (header overlay + binding table)",
         Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_session_slots; nil }
 
       r.register Verb::Definition.new(

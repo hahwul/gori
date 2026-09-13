@@ -247,9 +247,10 @@ module Gori
                              "       gori settings sections\n" \
                              "       gori settings export [--sections a,b] [-o FILE]\n" \
                              "       gori settings import FILE [--sections a,b] [--dry-run]\n" \
+                             "       gori settings env-syntax [bare|namespaced]\n" \
                              "       gori settings tls-fingerprint [HOST] [--json]"
 
-    private SETTINGS_VERBS = {"export", "import", "sections", "tls-fingerprint"}
+    private SETTINGS_VERBS = {"export", "import", "sections", "env-syntax", "tls-fingerprint"}
 
     # A leading BARE WORD that is not one of the three verbs is a typo, not a flag. Letting it
     # fall through to `run_settings`'s own parser dropped it — OptionParser ignores leftover

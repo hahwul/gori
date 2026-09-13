@@ -40,7 +40,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     rows = [LibraryPicker::Row.new(0, "as captured",
       session_slot_detail("the request's own session — no overlay", active.nil?))]
     list.each_with_index do |slot, i|
-      detail = slot.rules.empty? ? slot.summary : "#{slot.summary} · rules #{Gori::Env.token_list(slot.rules)}"
+      detail = slot.rules.empty? ? slot.summary : "#{slot.summary} · rules #{Gori::Env.token_list(slot.rules, ns: Gori::Env::Namespace::Bind)}"
       rows << LibraryPicker::Row.new(i + 1, slot.name, session_slot_detail(detail, slot.name == active))
     end
     rows

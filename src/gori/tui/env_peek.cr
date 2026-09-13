@@ -5,22 +5,25 @@ module Gori::Tui
   # A caret-anchored, single-row tooltip that reveals the resolved value of the
   # `$KEY` env token UNDER THE CURSOR — the read-mode (and past-typing) counterpart
   # to EnvComplete's typing-time autocomplete. The owning TextArea resolves the
-  # {key, value} for the REGISTERED token spanning the caret and feeds it via `set`
+  # {label, value} for the REGISTERED token spanning the caret and feeds it via `set`
   # (an unknown `$word` gets no peek); this holds only open state + rendering.
   # Non-interactive (no selection or accept): a pure value peek. Anchored at the
   # caret CELL, like EnvComplete.
+  #
+  # The label arrives fully SPELLED (`$ENV.HOST` / `$HOST` — `Env.spell`), never as a bare
+  # name this would prepend a sigil to: which namespace a token names is part of what the
+  # peek is answering, and a tooltip that dropped it would read identically for the env var
+  # and the binding of the same name.
   class EnvPeek
     getter? open : Bool = false
-    @key = ""
+    @label = ""
     @value = ""
-    @prefix = "$"
 
-    # Replace the shown token (opens the peek). Only registered `$KEY`s reach here — the
-    # owner passes the resolved value; an unknown `$word` gets no peek (it's just text).
-    def set(key : String, value : String, prefix : String) : Nil
-      @key = key
+    # Replace the shown token (opens the peek). Only registered tokens reach here — the
+    # owner passes the spelled label and the resolved value; an unknown `$word` gets no peek.
+    def set(label : String, value : String) : Nil
+      @label = label
       @value = value
-      @prefix = prefix
       @open = true
     end
 
@@ -43,19 +46,20 @@ module Gori::Tui
       draw_row(screen, x, y, w)
     end
 
-    # Box width = `$KEY` + a space + the value, floored at 10, clamped to bounds.
+    # Box width = the label + a space + the value, floored at 10, clamped to bounds. Both
+    # halves measured in CELLS: the label is a token spelling and the value came off the wire.
     private def box_width(bounds : Rect) : Int32
-      key_w = @prefix.size + @key.size
+      key_w = Screen.display_width(@label)
       val_w = Screen.display_width(@value)
       ({key_w + val_w + 3, 10}.max).clamp(1, bounds.w)
     end
 
-    # One tooltip row: a fill band, the `$KEY`, then the dim value (mirrors an EnvComplete
+    # One tooltip row: a fill band, the token, then the dim value (mirrors an EnvComplete
     # row so the peek reads as the same surface).
     private def draw_row(screen : Screen, x : Int32, y : Int32, w : Int32) : Nil
       bg = Theme.elevated
       screen.fill(Rect.new(x, y, w, 1), bg)
-      kx = screen.text(x + 1, y, "#{@prefix}#{@key}", Theme.env_known, bg, width: {w - 1, 1}.max)
+      kx = screen.text(x + 1, y, @label, Theme.env_known, bg, width: {w - 1, 1}.max)
       screen.text(kx + 1, y, @value, Theme.muted, bg, width: {x + w - kx - 1, 0}.max) if kx + 1 < x + w
     end
   end

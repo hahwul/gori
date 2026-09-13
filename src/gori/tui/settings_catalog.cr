@@ -83,7 +83,7 @@ module Gori::Tui
       Section.new(:mouse, "settings.mouse", "Mouse",
         "Click/scroll navigation, and whether releasing a drag also copies the selection", :editor, :form),
       Section.new(:env, "settings.env", "Env",
-        "Global environment variables for $KEY substitution in requests", :editor, :opener, resettable: false),
+        "Global environment variables you can reference in requests", :editor, :opener, resettable: false),
       Section.new(:hotkeys, "settings.hotkeys", "Hotkeys",
         "Rebind keyboard shortcuts (press a key) + pick an OS default profile", :editor, :opener),
       # Network & Tabs

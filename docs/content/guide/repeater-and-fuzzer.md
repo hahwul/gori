@@ -49,26 +49,59 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 
 ## Environment Variables
 
-Outbound requests support `$KEY`-style substitution. Tokens stay as literal text in the editor and expand only at send time: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+Outbound requests carry two kinds of token, told apart by their namespace:
 
-Define variables in two places (project wins on a key collision):
+| Token | Resolves from | When |
+|-------|---------------|------|
+| `$ENV.KEY` | env vars, global or per-project | at build time, before the request is framed |
+| `$BIND.NAME` | a [session binding](/guide/proxy/#session-bindings) an extract rule filled | at send time, out of the active identity's table |
+
+Tokens stay as literal text in the editor and expand only on the way out: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+
+Define env vars in two places (project wins on a key collision):
 
 | Layer | Where |
 |-------|-------|
 | **Global** | Preferences (`Ctrl-,`) → **Editor & Keys** → **Env**, `Ctrl-P` → **Settings: Env**, or the `env` section of `settings.json` |
 | **Project** | **Project** tab → **ENV** pane (`a` add, `e` edit, `d` delete) |
 
-Default prefix is `$` (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings). Keys are `A-Z a-z _` followed by `A-Z a-z 0-9 _`.
+The namespace is uppercase and case-sensitive; the name after the dot is `A-Z a-z _` followed by `A-Z a-z 0-9 _`. The sigil is `$` by default (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings); the namespace spelling is not.
+
+Anything else that starts with the sigil is a byte. A GraphQL variable (`$id`), a MongoDB operator (`$ne`), an OData option (`$filter`) and a JSON Schema keyword (`$ref`) are not references and need **no escape** — paste that body and send it as written. To ship the text of a token itself, double the sigil: `$$ENV.KEY` sends `$ENV.KEY`, `$$BIND.NAME` sends `$BIND.NAME`, and a bare `$$` is two literal bytes. Each pass consumes only its own escape, so `$$BIND.NAME` survives env expansion and `$$ENV.KEY` survives the binding pass.
+
+That "a bare `$NAME` is just a byte" rule is about **request text** — a body, a header, a payload you pasted. It does not hold in a [Match & Replace](/guide/proxy/#match-replace) **replacement**, which exists only to inject a value: a bare `$NAME` there that names a known env var, extract rule or claimed session binding is a rule the grammar moved out from under, so gori **does not apply that rule** and writes an event naming the re-spelling. Fix it to `$ENV.NAME` / `$BIND.NAME`, or write `$$NAME` if the literal text really is what you meant.
 
 An unknown token stays visible as literal text wherever a request is *shown*. The editor keeps what you typed, and the highlighter marks an unregistered token differently from a registered one. It is not sent, though: Repeater, the Fuzzer, the Miner, the Sequencer and Discover each refuse a run whose request line, headers or target still name a variable that resolves to nothing, and say which one, as do minimize, an intercept forward you edited, and a WebSocket message. Set it, or drop the token. The check covers the request head only. A `$` inside a body is treated as a byte, so binary uploads replay unchanged. A WebSocket **text** message has no head, so the whole payload is checked; a **binary** message is never checked, and never expanded.
 
 ```http
 GET /api/me HTTP/1.1
 Host: api.example.com
-Authorization: Bearer $TOKEN
+Authorization: Bearer $BIND.SESSION
+X-Api-Key: $ENV.API_KEY
 ```
 
-Values that appear in captured traffic can be masked back to `$KEY` when copying or displaying, so secrets stay as tokens rather than raw strings.
+Values that appear in captured traffic can be masked back to their token when copying or displaying, so secrets stay as tokens rather than raw strings.
+
+### Bare syntax, and the automatic upgrade
+
+Namespaced is the grammar. A project written before namespaces existed is **re-spelled automatically the first time it opens** — in the TUI, in a `gori run …`, or in a `gori mcp` server, whichever gets there first:
+
+- Repeater drafts and their WebSocket frames, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot headers, and the tokens a masking pass wrote into issue titles and notes.
+- **Captured evidence is left exactly as it was.** A capture expands nothing, so its `$id` is a byte the origin sent.
+- A backup of the database is written beside it first — `gori.db.pre-namespaced-<timestamp>` — and the run that does the work prints one line per project saying how many tokens moved and where the backup is. Global rewrite rules live in `settings.json` and are re-spelled by the same start, with a `settings.json.pre-namespaced-<timestamp>` copy; one that names a *project* var or an extract rule is named for you to fix instead, because a rule that rewrites every project cannot be re-spelled from inside one.
+
+```bash
+gori settings env-syntax        # print the grammar in force, and where it came from
+gori settings env-syntax bare   # opt out
+```
+
+That command is the only switch — no TUI key sets the grammar, because switching it has to
+re-spell stored tokens, which a setting on its own cannot do. A TUI session or a `gori mcp` server
+that is already running **follows** the switch on its own: it picks up the new grammar, re-spells
+the project it has open, and says what it did (a notification and an ACTIVITY row in the TUI, a log
+line for MCP).
+
+`env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar — a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
 
 ## Fuzzer
 
@@ -237,7 +270,7 @@ Every recorded flow says where it came from (the History **SRC** column, and `sr
 `src:fuzzer` / `src:gori` in a query), so a resend is never read back as traffic the target's
 client produced. See [Where a flow came from](/guide/proxy/#flow-source).
 
-A recorded flow, from either tool, is the request **as it went on the wire**: the active session slot's header overlay and any `$NAME` the send seam resolved are part of it, so replaying, comparing or scanning that flow reproduces the send rather than the draft or template it was assembled from. (A Fuzzer *row* still shows the rendered template, which is what "send to Repeater" seeds a tab from; the slot applies per send.)
+A recorded flow, from either tool, is the request **as it went on the wire**: the active session slot's header overlay and any `$BIND.NAME` the send seam resolved are part of it, so replaying, comparing or scanning that flow reproduces the send rather than the draft or template it was assembled from. (A Fuzzer *row* still shows the rendered template, which is what "send to Repeater" seeds a tab from; the slot applies per send.)
 
 ## Next Steps
 

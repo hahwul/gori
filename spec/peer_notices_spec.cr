@@ -167,11 +167,17 @@ describe Gori::PeerNotices do
       note.level.should eq(:warn)
     end
 
-    it "names the consequence for extract rules, which is where $KEY comes from" do
+    it "names the consequence for extract rules, which is where a binding token comes from" do
       t0 = Time.instant
       p = notices
       p.record_extract(Gori::RuleSetChange.new(changed: 1, reordered: false, enabled: 1), t0)
-      p.flush(t0 + 5.seconds).not_nil!.message.should contain("$KEY")
+      # Spelled through the formatter, so the notice follows the install's grammar: `$NAME`
+      # under the bare pin the suite runs in, `$BIND.NAME` when namespaced.
+      p.flush(t0 + 5.seconds).not_nil!.message.should contain("$NAME")
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        p.record_extract(Gori::RuleSetChange.new(changed: 1, reordered: false, enabled: 1), t0)
+        p.flush(t0 + 5.seconds).not_nil!.message.should contain("$BIND.NAME")
+      end
     end
   end
 end

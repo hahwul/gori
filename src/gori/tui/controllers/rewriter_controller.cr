@@ -1087,12 +1087,13 @@ module Gori::Tui
       end
       # Disabling the WRITER also un-declares the name, so a rewrite rule naming it goes
       # back to refusing rather than injecting a value nothing is refreshing any more.
-      @host.status(rule.enabled? ? "$#{rule.name} extract rule disabled" : "$#{rule.name} extract rule enabled")
+      spelled = Env.spell(rule.name, Env::Namespace::Bind)
+      @host.status(rule.enabled? ? "#{spelled} extract rule disabled" : "#{spelled} extract rule enabled")
     end
 
     def extract_delete : Nil
       rule = selected_extract_rule || return @host.status("no extract rule selected")
-      @host.confirm("DELETE EXTRACT RULE", "Delete “$#{rule.name}”? Its binding is forgotten too.",
+      @host.confirm("DELETE EXTRACT RULE", "Delete “#{Env.spell(rule.name, Env::Namespace::Bind)}”? Its binding is forgotten too.",
         confirm_label: "delete", danger: true) do
         ok = bindings.remove(rule.id)
         @sub_sel = @sub_sel.clamp(0, {extract_list.size - 1, 0}.max)
@@ -1104,7 +1105,8 @@ module Gori::Tui
     # instead of going out with a stale token, which is the point of having the action.
     def binding_clear : Nil
       row = binding_rows[@sub_sel]? || return @host.status("no binding selected")
-      return @host.status("$#{row.name} is not bound") unless row.bound?
+      spelled = Env.spell(row.name, Env::Namespace::Bind)
+      return @host.status("#{spelled} is not bound") unless row.bound?
       # `clear_row` takes the row's OWN table, because the pane lists one row per (rule,
       # table) and the operator is pointing at ONE of them. The predecessor this replaced
       # forgot the current send context instead — the active slot plus the global table — so
@@ -1112,7 +1114,7 @@ module Gori::Tui
       # the row under the cursor still bound, with no way to clear it while that slot was not
       # the active one. It is deleted; `clear_row(name, nil)` is how the global table is cleared.
       bindings.clear_row(row.name, row.slot)
-      @host.status(row.slot ? "$#{row.name} cleared for #{row.slot}" : "$#{row.name} cleared")
+      @host.status(row.slot ? "#{spelled} cleared for #{row.slot}" : "#{spelled} cleared")
     end
 
     # Commit the extract-rule editor overlay. Returns false — and says why — when the table

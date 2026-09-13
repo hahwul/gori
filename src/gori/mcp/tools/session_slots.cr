@@ -298,7 +298,8 @@ module Gori
         tool j, "create_session_slot",
           "Create a session slot (a named identity). A slot that sets and strips nothing is " \
           "'as captured' — the no-overlay baseline. Values may reference a binding: " \
-          "\"Bearer $SESSION\" resolves against THIS slot's own table when it claims the rule. " \
+          "\"Bearer $BIND.SESSION\" (\"Bearer $SESSION\" under the legacy bare syntax) resolves " \
+          "against THIS slot's own table when it claims the rule. " \
           "Pass 'flow_id' instead of 'set_headers' to BUILD the overlay from a captured login " \
           "exchange: gori copies the response's Set-Cookie pairs into one Cookie header and its " \
           "Authorization (or a top-level access_token/token/id_token string in a JSON body, as a " \
@@ -333,7 +334,8 @@ module Gori
         tool j, "set_active_session_slot",
           "Choose the SEND CONTEXT for this server: the slot whose header overlay is applied to " \
           "every outbound request (send_request, send_websocket, repeater, fuzz/mine/sequence/" \
-          "discover) and whose binding table $NAME resolves against. Pass name:null for " \
+          "discover) and whose binding table a $BIND.NAME token (bare syntax: $NAME) resolves " \
+          "against. Pass name:null for " \
           "as-captured (no overlay). Held in memory by THIS process only — it is never persisted, " \
           "so a new connection starts as-captured." do |s|
           s.field "name", strprop("slot name, or null/omitted for as-captured (no overlay)")

@@ -384,7 +384,10 @@ class Gori::Tui::RepeaterView
     @evidence = src.evidence?                             # the same bytes carry the same provenance
     @markers_declared = src.@markers_declared             # …and the same reading of their §
     @evidence_pipeline_seps = src.@evidence_pipeline_seps # …and of their `%%%`
-    @evidence_env_names = src.@evidence_env_names.dup     # …and of their `$NAME`
+    # …and of their `$NAME`, carried as the SEED BYTES so the clone re-derives its baseline on a
+    # grammar flip exactly as its source does — and so the clone's own EDITOR learns the literal
+    # set, which a copy of the derived name set never gave it.
+    adopt_evidence_env_seed(src.@evidence_env_seed)
     @http2 = src.@http2
     @target = src.@target
     @tcx = @target.size

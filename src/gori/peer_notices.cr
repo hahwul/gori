@@ -1,4 +1,5 @@
 require "./probe/mode"
+require "./env"
 require "./rule_set_change"
 require "./store"
 
@@ -100,7 +101,8 @@ module Gori
       @since ||= now
     end
 
-    # A peer changed the extract rules that decide what `$KEY` expands to at every send seam.
+    # A peer changed the extract rules that decide what a binding token (`$BIND.NAME`, or bare
+    # `$NAME`) expands to at every send seam.
     def record_extract(change : RuleSetChange, now : Time::Instant, by_agent : Bool = false) : Nil
       @extract = (held = @extract) ? held.merge(change) : change
       @by_agent ||= by_agent
@@ -148,7 +150,7 @@ module Gori
           "#{consequence(change, "rewriting live traffic here", "a different rule now wins on the same header")}"
         elsif change = extract
           "#{subject(change, "extract rule")} changed by #{author(by_agent)} — " \
-          "#{consequence(change, "$KEY may expand to a different value here", "they are read in a different order")}"
+          "#{consequence(change, "#{binding_token} may expand to a different value here", "they are read in a different order")}"
         else
           return nil
         end
@@ -161,9 +163,9 @@ module Gori
       one = change.executes == 1
       # `flush` has already taken and cleared BOTH held changes, so an extract change that
       # arrived in the same burst cannot be re-announced later — returning here without it
-      # would drop the "$KEY may expand to a different value" warning outright. It rides on
+      # would drop the "may expand to a different value" warning outright. It rides on
       # the end of this line instead: the pipe fact leads because it is the bigger one.
-      also = extract ? " (the extract rules moved too — $KEY may expand to a different value here)" : ""
+      also = extract ? " (the extract rules moved too — #{binding_token} may expand to a different value here)" : ""
       Notice.new(:warn,
         "#{counted(change.executes, "Match&Replace pipe rule")} added or changed by " \
         "#{author(by_agent)} — #{one ? "it runs" : "they run"} a local command " \
@@ -196,6 +198,13 @@ module Gori
 
     private def counted(n : Int32, noun : String) : String
       "#{n} #{noun}#{"s" if n != 1}"
+    end
+
+    # How a binding token is SPELLED on this install — `$BIND.NAME` under the namespaced syntax,
+    # `$NAME` under the legacy bare one. A notice that named the wrong grammar would point the
+    # operator at bytes their editor is not painting.
+    private def binding_token : String
+      Env.spell("NAME", Env::Namespace::Bind)
     end
 
     # A peer moved the project's probe mode and this session ADOPTED it — `@mode` is the

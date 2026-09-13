@@ -97,8 +97,14 @@ module Gori
         return [] of String if raw == masked
         prefix = Settings.env_prefix
         return [] of String if prefix.empty?
-        Env.masking_vars.keys
-          .select { |n| masked.includes?("#{prefix}#{n}") && !raw.includes?("#{prefix}#{n}") }
+        # `masking_table`, not a name list: a name can exist in BOTH namespaces and the two are
+        # different secrets with different spellings, so the test has to be the spelling
+        # `mask_secrets` would have written.
+        Env.masking_table
+          .map { |(ref, _)| {ref, Env.spell(ref)} }
+          .select { |(_, spelled)| masked.includes?(spelled) && !raw.includes?(spelled) }
+          .map { |(ref, _)| Env.report_name(ref) }
+          .uniq!
           .sort!
       end
 
@@ -675,7 +681,7 @@ module Gori
               j.field "derived_from_flow_note",
                 "repeater #{id} is still linked to flow #{fid}, but its request no longer holds that " \
                 "flow's bytes — the TUI reads that link as \"these bytes are a capture\" and sends " \
-                "$NAME literally there"
+                "#{Env.spell("NAME", Env::Namespace::Bind)} literally there"
             end
           end
         })

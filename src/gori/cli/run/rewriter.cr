@@ -172,7 +172,7 @@ module Gori
         mark = r.enabled? ? "x" : " "
         host = r.host.empty? ? "" : " @#{r.host}"
         cond = r.match_filter.empty? ? "any message" : r.match_filter
-        "##{r.id} [#{mark}] $#{r.name} <- #{cond} <- #{r.token_loc.label}#{host}"
+        "##{r.id} [#{mark}] #{Env.spell(r.name, Env::Namespace::Bind)} <- #{cond} <- #{r.token_loc.label}#{host}"
       end
 
       private def self.cmd_extract_list(args : Array(String)) : Nil
@@ -236,11 +236,12 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter extract add --name=SESSION --kind=cookie --selector=sid [options]\n\n" \
                      "The rule OBSERVES a response and binds one named value in memory; a Match &\n" \
-                     "Replace rule then injects it with `--value='$SESSION'`. The value itself is\n" \
+                     "Replace rule then injects it with `--value='$BIND.SESSION'`\n" \
+                     "(`--value='$SESSION'` under the legacy bare syntax). The value itself is\n" \
                      "never persisted — see `gori run rewriter bindings`."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("--name=NAME", "Binding name, without the $ (required)") { |v| name = v }
+          p.on("--name=NAME", "Binding name, without the sigil or namespace (required)") { |v| name = v }
           p.on("--when=FILTER", "Which messages to read, in intercept-filter syntax ('' = any)") { |v| when_s = v }
           p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
           p.on("--kind=KIND", "cookie|header|regex|position|jsonpath (default cookie)") { |v| kind_s = v }
@@ -277,7 +278,7 @@ module Gori
             abort "gori run rewriter extract add: rule ##{id} was created but the disable did not persist " \
                   "(store busy or unwritable) — it is ENABLED and already binding; retry the disable"
           end
-          puts "Extract rule ##{id} added — $#{name} binds from #{kind.label}."
+          puts "Extract rule ##{id} added — #{Env.spell(name, Env::Namespace::Bind)} binds from #{kind.label}."
         ensure
           store.close
         end
@@ -374,7 +375,7 @@ module Gori
             puts "No bindings declared — add an extract rule with `gori run rewriter extract add`."
           else
             rules.each do |r|
-              puts "$#{r.name}#{r.enabled? ? "" : " (rule disabled)"} <- #{r.token_loc.label}#{r.host.empty? ? "" : " @#{r.host}"}"
+              puts "#{Env.spell(r.name, Env::Namespace::Bind)}#{r.enabled? ? "" : " (rule disabled)"} <- #{r.token_loc.label}#{r.host.empty? ? "" : " @#{r.host}"}"
             end
             puts
             puts "Values are held in memory by the running gori and are never persisted."

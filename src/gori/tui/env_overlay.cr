@@ -19,6 +19,16 @@ module Gori::Tui
     property on_save : Proc(Bool)?
     property on_toast : Proc(String, Nil)?
 
+    # The token grammar this install reads, READ-ONLY here and read LIVE — not a working copy
+    # like the prefix beside it. Switching it has to re-spell the tokens already stored in
+    # project DBs, in drafts, in rule replacements and in slot headers; a key on this card could
+    # only set the setting and leave those bytes mis-spelled, so the switch is
+    # `gori settings env-syntax` alone. The card still NAMES the grammar, because `HOST →
+    # api.test` reads the same whether the editors resolve `$HOST` or `$ENV.HOST`.
+    def syntax : Env::Syntax
+      Settings.env_syntax
+    end
+
     def initialize
       @items = [] of {String, String}
       @prefix = Settings.env_prefix
@@ -43,6 +53,8 @@ module Gori::Tui
       cancel_prefix_edit
     end
 
+    # The PREFIX and the vars, and deliberately not the syntax: this card does not edit the
+    # grammar, and it reads it live. Widening the tuple would break every caller for no gain.
     def to_config : {String, Array({String, String})}
       {@prefix, @items}
     end
@@ -372,7 +384,11 @@ module Gori::Tui
       # a clash), and an operator reading `ENVIRONMENT · no env vars` here while `$API` resolves
       # in the editor behind it has been told nothing about which of the two they are looking at.
       # Same word the Rewriter and Colormarker rows carry as `G`.
-      meta = "global · #{@items.size} var#{@items.size == 1 ? "" : "s"}"
+      # The live SPELLING rides the meta line, because it is the one thing about this card that
+      # an operator cannot infer from the rows: `HOST → api.test` reads the same whether the
+      # editor two tabs over resolves `$HOST` or `$ENV.HOST`.
+      meta = "global · #{Env.spell("KEY", Env::Namespace::Env, syntax, @prefix)} · " \
+             "#{@items.size} var#{@items.size == 1 ? "" : "s"}"
       Frame.border_meta(screen, box, "ENVIRONMENT", meta, bg: Theme.panel)
       draw_prefix_row(screen, box, box.y + 1)
       screen.text(box.x + 3, box.y + 2, "KEY VALUE · e.g. HOST api.example.com", Theme.muted, Theme.panel, width: {box.w - 5, 1}.max)
@@ -411,9 +427,18 @@ module Gori::Tui
         @field.render(screen, x, py, w, true, Theme.text_bright, bg)
       else
         screen.text(x, py, "prefix ", Theme.muted, bg)
-        screen.text(x + 7, py, @prefix, Theme.text_bright, bg, width: {box.right - x - 8, 1}.max)
+        x = screen.text(x + 7, py, @prefix, Theme.text_bright, bg, width: {box.right - x - 8, 1}.max)
+        # The grammar sits on the SAME row as the sigil: they are the two halves of one
+        # spelling, and the syntax on a row of its own read as a third kind of thing to edit.
+        # It is REPORTED, not edited — `p` is the only key on this row.
+        x = screen.text(x + 2, py, "syntax ", Theme.muted, bg) if box.right - 2 > x + 2
+        screen.text(x, py, syntax.namespaced? ? "namespaced" : "bare", Theme.text_bright, bg,
+          width: {box.right - 2 - x, 0}.max)
+        # Only the key this row owns. The card is capped at 56 cells and the spelling eats most
+        # of them, so `gori settings env-syntax` — the one way to change the value beside it —
+        # would not fit here at any width; the docs carry it.
         hint = "p edit"
-        screen.text({box.right - hint.size - 3, x + 8}.max, py, hint, Theme.muted, bg)
+        screen.text({box.right - hint.size - 3, x + 1}.max, py, hint, Theme.muted, bg)
       end
     end
 

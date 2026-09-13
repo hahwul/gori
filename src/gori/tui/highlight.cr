@@ -284,18 +284,27 @@ module Gori::Tui
       # first — wasted per-frame allocation on the TARGET rows that redraw each frame.
       prefix = Settings.env_prefix
       return [Span.new(text, base_fg, attr)] if prefix.empty? || !text.includes?(prefix)
-      regions = Env.token_regions(text, prefix)
+      # `regions` and not `token_regions`: the NAMESPACE is what decides which table answered
+      # `known`, and it is also the half the literal set has to be asked about. The 3-tuple
+      # projection drops it, so this read the name out of the painted text with a `plen` slice
+      # — which under the namespaced grammar sliced `ENV.HOST` and matched nothing.
+      regions = Env.regions(text, prefix)
       return [Span.new(text, base_fg, attr)] if regions.empty?
       spans = [] of Span
       pos = 0
-      plen = prefix.size
-      regions.each do |(a, b, known)|
-        spans << Span.new(text[pos...a], base_fg, attr) if a > pos
+      regions.each do |r|
+        spans << Span.new(text[pos...r.start], base_fg, attr) if r.start > pos
         # A name the caller ships literally is not resolvable ON THIS BUFFER, whatever the
         # global var table says — paint what the wire will carry, not what it could have.
-        known = false if known && literal && literal.includes?(text[(a + plen)...b])
-        spans << Span.new(text[a...b], known ? Theme.env_known : Theme.env_unknown, known ? attr : (attr | Attribute::Italic))
-        pos = b
+        # Keyed QUALIFIED when the token names a namespace, so an evidence `$ENV.id` cannot be
+        # dimmed by a literal `$BIND.id` the same buffer carried.
+        known = r.known
+        if known && literal
+          ns = r.ns
+          known = false if literal.includes?(ns ? Env.qualify(ns, r.name) : r.name)
+        end
+        spans << Span.new(text[r.start...r.stop], known ? Theme.env_known : Theme.env_unknown, known ? attr : (attr | Attribute::Italic))
+        pos = r.stop
       end
       spans << Span.new(text[pos..], base_fg, attr) if pos < text.size
       spans

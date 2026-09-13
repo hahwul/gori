@@ -86,7 +86,7 @@ describe "MCP discover_start refuses a header it will not send" do
     end
   end
 
-  it "names a header that only becomes unsafe after $VAR expansion" do
+  it "names a header that only becomes unsafe after env expansion" do
     port = HTML_ORIGIN_PORT
     with_store do |store|
       saved = Gori::Settings.env_vars
@@ -106,7 +106,7 @@ describe "MCP discover_start refuses a header it will not send" do
            "allow_unscoped" => true}.to_json)
         err.should be_true
         text.should contain("Authorization")
-        text.should contain("$VAR expansion")
+        text.should contain("env expansion")
       ensure
         Gori::Settings.env_vars = saved || [] of {String, String}
         Gori::Settings.env_prefix = saved_prefix || "$"

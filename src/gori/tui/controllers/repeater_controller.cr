@@ -2250,10 +2250,14 @@ module Gori::Tui
       # The REQUEST is no longer checked at all — a `$NAME` with no value is a literal string
       # on the wire everywhere now (see `Env::Escape`). Only the TARGET and SNI are refused;
       # the CLI and MCP minimize paths carry the same two checks.
-      env_names = Env.unresolved(view.target) |
-                  (view.sni_override.try { |s| Env.unresolved(s) } || [] of String)
+      # `deferred: nil`, as on every other dial tuple: a target or SNI runs the env pass
+      # alone, so a `$BIND.X` there is never resolved and must be reported, bound or not.
+      env_names = Env.unresolved(view.target, deferred: nil) |
+                  (view.sni_override.try { |s| Env.unresolved(s, deferred: nil) } || [] of String)
       unless env_names.empty?
-        @host.status("minimize: unresolved env #{Env.token_list(env_names)} — add it in the Project tab's ENV pane")
+        # `unresolved` already answers QUALIFIED under the namespaced grammar, so the list needs
+        # the ENV namespace only as the fallback a bare name takes.
+        @host.status("minimize: unresolved env #{Env.token_list(env_names, ns: Env::Namespace::Env)} — add it in the Project tab's ENV pane")
         return
       end
       scheme, host, port = view.parse_target
@@ -2480,13 +2484,13 @@ module Gori::Tui
       end
       names = RepeaterController.literal_bindings(view.evidence?, text)
       return "" if names.empty?
-      " · #{Env.token_list(names)} sent literally (evidence tab — not substituted)"
+      " · #{Env.token_list(names, ns: Env::Namespace::Bind)} sent literally (evidence tab — not substituted)"
     end
 
     private def evidence_literal_note(view : RepeaterView) : String
       names = RepeaterController.literal_bindings(view.evidence?, view.request_text)
       return "" if names.empty?
-      " · #{Env.token_list(names)} sent literally (evidence tab — not substituted)"
+      " · #{Env.token_list(names, ns: Env::Namespace::Bind)} sent literally (evidence tab — not substituted)"
     end
 
     # `self.` and pure so the rule is directly testable, the same reason
@@ -2505,7 +2509,10 @@ module Gori::Tui
       return [] of String unless evidence
       prefix = Gori::Settings.env_prefix
       return [] of String if prefix.empty?
-      Env.binding_values.keys.select { |n| text.includes?("#{prefix}#{n}") }.sort!
+      # The SPELLING the current grammar would have put on the wire — `$ENV.`-prefixed under
+      # the namespaced one. Testing for `prefix + name` alone reported a `$SESSION` that is a
+      # literal in namespaced mode as "withheld", and missed the `$BIND.SESSION` that is not.
+      Env.binding_values.keys.select { |n| text.includes?(Env.spell(n, Env::Namespace::Bind)) }.sort!
     end
 
     # Why a `%%%` group send refuses while LIVE §…§ markers are present, or nil to proceed.

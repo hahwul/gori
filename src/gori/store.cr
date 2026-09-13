@@ -36,6 +36,7 @@ require "./store/h2_frames"
 require "./store/reads"
 require "./store/query_control"
 require "./store/sitemap_tags"
+require "./store/env_write_guard"
 require "./ql"
 require "./open_lock"
 

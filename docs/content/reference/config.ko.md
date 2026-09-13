@@ -512,11 +512,12 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 
 ### env {#env}
 
-`$TOKEN` 같은 토큰은 Repeater, Fuzzer, Miner, Intercept, CLI, MCP에서 전송 시점에 확장됩니다:
+`$ENV.TOKEN` 같은 토큰은 Repeater, Fuzzer, Miner, Intercept, CLI, MCP에서 전송 시점에 확장됩니다:
 
 ```json
 {
   "env": {
+    "syntax": "namespaced",
     "prefix": "$",
     "vars": [
       { "key": "TOKEN", "value": "eyJhbGciOi…" }
@@ -527,7 +528,8 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `prefix` | string | `"$"` | 토큰 접두사 (`$KEY`) |
+| `syntax` | string | `"namespaced"` | 토큰 문법: `namespaced`(환경 변수 `$ENV.KEY`, 세션 바인딩 `$BIND.NAME`) 또는 `bare`(`$KEY`, `$NAME`). **키가 없으면 그 파일이 네임스페이스보다 먼저 쓰였다는 뜻입니다.** 다음 시작에서 `namespaced`를 채택하고, 전역 재작성 규칙을 다시 적고(`settings.json.pre-namespaced-<타임스탬프>` 복사본을 남깁니다), 키를 기록합니다. 각 프로젝트는 처음 열릴 때 저장된 토큰을 다시 적으며, 데이터베이스 옆에 백업을 남깁니다. `bare`는 명시적 옵트아웃이고 각 프로젝트를 되돌려 다시 적습니다. 전환은 [`gori settings env-syntax`](/ko/reference/cli/#env-syntax) |
+| `prefix` | string | `"$"` | 토큰을 여는 시길 (`$ENV.KEY`), 두 문법 모두에서 |
 | `vars` | array | `[]` | 전역 키/값 쌍; 프로젝트 변수(Project 탭 → ENV)가 충돌 시 우선 |
 
 [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요.
@@ -807,7 +809,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `editor` | 외부 편집기 `command`와 Markdown 처리 |
 | `tabs` | 표시/숨김할 TUI 탭 |
 | `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname-overrides) 참고 |
-| `env` | Env 토큰 접두사와 전역 값. 위의 [env](#env) 참고 |
+| `env` | Env 토큰 문법(`syntax`), 시길, 전역 값. 위의 [env](#env) 참고 |
 | `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `command_modifier` + `keyset` + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
 | `hooks` | 외부 프로세스 훅: `timeout_secs`(기본 5, 1~60으로 클램프)는 모든 이음매에서 훅 한 번이 받는 벽시계 예산입니다. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
 | `decoder` | 이름 붙인 Decoder 체인. 모든 프로젝트가 공유하며 체인 단계에서 이름으로 부를 수 있습니다(열려 있는 서브탭은 프로젝트 DB에 있습니다) |

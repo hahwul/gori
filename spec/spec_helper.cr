@@ -20,6 +20,44 @@ require "../src/gori"
 # assert the line swap in an IO::Memory of their own.
 Gori::Settings.warning_io = nil
 
+# THE BARE-MODE PIN, and it is now what the ABSENCE of `env.syntax` means for this process.
+#
+# Every spec home is a brand-new one — `GORI_TEST_HOME` above, plus the per-example temp homes — and
+# in production an absent key means "this file predates namespaces", which is a MIGRATION: without
+# the pin every `Settings.load` in the suite would adopt the namespaced grammar, read the ~1,000
+# bare `$TOKEN` fixtures under it, re-spell every store a spec opens (backup file and all) and write
+# a settings.json into every temp home on the way. Pinned bare, the marker in a fresh database
+# (absent = bare) AGREES with the install, so `EnvMigration.reconcile` is a no-op and nothing is
+# written. The existing suite IS the bare-mode contract; namespaced behaviour gets its own files and
+# opts in with `with_env_syntax`, and the open-time migration with `spec/env_migration_spec.cr`'s
+# own homes.
+Gori::Settings.env_syntax_when_absent = Gori::Env::Syntax::Bare
+# …and the value in memory BEFORE any load, for the many examples that never call one. The class
+# property defaults to the production grammar, so this is the same pin one line earlier.
+Gori::Settings.env_syntax = Gori::Env::Syntax::Bare
+
+# Run a block under one token grammar and restore whatever was in effect.
+#
+# The setter bumps the highlight revision (a `TextArea`'s styled buffer, the `Highlight` caches and
+# `Rules#subst_snapshot` are keyed on it), and so does the restore — otherwise an example that
+# painted under one grammar would leave a neighbour reading its cache.
+# This is a PIN, not a load, so the mid-process re-read (`EnvMigration.follow_disk`) is switched off
+# for the duration: the temp home's settings.json says something else — or nothing — and a seam that
+# adopted the file's answer here would be fighting the pin rather than following a peer. The examples
+# that exercise that seam write a real settings.json and drive it directly.
+def with_env_syntax(syntax : Gori::Env::Syntax, &)
+  was = Gori::Settings.env_syntax
+  followed = Gori::Settings.env_syntax_follow_disk?
+  Gori::Settings.env_syntax = syntax
+  Gori::Settings.env_syntax_follow_disk = false
+  begin
+    yield
+  ensure
+    Gori::Settings.env_syntax_follow_disk = followed
+    Gori::Settings.env_syntax = was
+  end
+end
+
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 
 # The chord a keypress ACTUALLY produces, built the way the TUI builds it: a Termisu key

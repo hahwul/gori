@@ -86,7 +86,7 @@ gori run <subcommand> [verb] [options]
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `rewriter preset list` · `add` | List the response-modification presets, and install one as ordinary Match & Replace rules |
-| `rewriter extract` · `bindings` | Manage session-binding extract rules, and list the `$NAME`s they declare |
+| `rewriter extract` · `bindings` | Manage session-binding extract rules, and list the `$BIND.NAME`s they declare |
 | `colormarker` · `add` · `update` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | Manage History row-colour rules |
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views: named QL queries the list is narrowed by, as a lens |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | Session slots: the named identities a send or an Authorize run goes out as |
@@ -96,7 +96,7 @@ gori run <subcommand> [verb] [options]
 | `project delete <name>` | Delete a project and everything captured in it (`--yes` to confirm) |
 | `project scope` | List / add / update / delete / enable / disable scope rules |
 | `project sandbox` | Get / set the hard-containment sandbox gate (`status`, `on`, `off`) |
-| `project env` | List / set / delete project env vars (`$KEY` substitution) |
+| `project env` | List / set / delete project env vars (`$ENV.KEY` substitution) |
 | `project host-override` | List / add / update / delete project host to IP dial overrides |
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`). Global flags go **after** the verb: `gori run rewriter rm 1 --project=x`, not `gori run rewriter --project=x rm 1`, which is rejected as a usage error rather than silently listing.
@@ -296,7 +296,7 @@ gori run intercept direction request
 | `get <item-id>` | Full detail for one held item |
 | `forward <item-id>` | Release a held item byte-exact |
 | `drop <item-id>` | Drop it. The client gets a canned 502 |
-| `edit <item-id>` | Release with edited bytes: `--raw=RAW` or `--raw-file=PATH`. Forwarded verbatim (no `$KEY` expansion), with `Content-Length` resynced unless `--no-update-content-length` keeps the one you declared (the CL-desync primitive) |
+| `edit <item-id>` | Release with edited bytes: `--raw=RAW` or `--raw-file=PATH`. Forwarded verbatim (no `$ENV.KEY` / `$BIND.NAME` expansion), with `Content-Length` resynced unless `--no-update-content-length` keeps the one you declared (the CL-desync primitive) |
 | `enable` / `disable` | Arm or disarm the live catch |
 | `filter <query>` | Set the conditional-intercept query. Pass `""` to clear it |
 | `direction <both\|request\|response>` | Which leg(s) the catch holds |
@@ -385,7 +385,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | Option | Description |
 | -------- | ------------- |
 | `--diff` | Diff against the session's last stored response |
-| `--verbatim` | Send the stored bytes exactly: no `$VAR` expansion (project env vars **and** session bindings; a `$NAME` stays literal on the wire), no bare-LF promotion, no `Content-Length` resync, no HTTP/2→1.1 version fix, no h2 field-name lowercasing. Nothing interprets the `$` grammar, so the `$$name` escape is not consumed either; write `$name`. The active `--slot`'s header overlay still applies, since it answers *as whom*, not *which bytes*. Pass no `--slot` to send the stored headers |
+| `--verbatim` | Send the stored bytes exactly: no token expansion (project env vars **and** session bindings; a `$ENV.KEY` or `$BIND.NAME` stays literal on the wire), no bare-LF promotion, no `Content-Length` resync, no HTTP/2→1.1 version fix, no h2 field-name lowercasing. Nothing interprets the sigil grammar, so the `$$ENV.KEY` escape is not consumed either; write `$ENV.KEY`. The active `--slot`'s header overlay still applies, since it answers *as whom*, not *which bytes*. Pass no `--slot` to send the stored headers |
 | `--reframe-grpc` | HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent, for a unary message an edit changed the length of. Off by default, because a prefix that disagrees with its payload is a standard parser test, so it ships as written |
 | `--message=TEXT` | WebSocket: outbound text message (repeatable; replaces the session's stored messages) |
 | `--message-frame=SPEC` | WebSocket: one frame with an explicit shape. Comma-separated `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, and one of `hex=`/`b64=`/`text=` |
@@ -431,8 +431,8 @@ Sources: `--flow=ID`, `--repeater=ID`, `--request=FILE`, or stdin. Positions: `�
 | Framing | `--verbatim` sends the template's `Content-Length` as written, with no resync after payload substitution and none added to a body that declares none (for CL / CL-TE desync payloads; a body left with no `Content-Length` and no chunked `Transfer-Encoding` is warned about, because an origin reads it as zero-length). `--reframe-grpc` recomputes the gRPC 5-byte length prefix after each payload is spliced into a unary message (off by default: a stale prefix is reported, not repaired) |
 | WebSocket | A template declaring an `Upgrade: websocket` handshake is swept as a framed exchange: **one payload = one full RFC 6455 session**. `--message=TEXT` / `--message-frame=SPEC` author the outbound frames (repeatable, in order; `SPEC` is the `gori run repeater send` grammar: `opcode=`, `fin=`, `rsv=`, `mask=`, `mask_key=`, `len=`, and one of `hex=`\|`b64=`\|`text=`) and replace the frames a `--flow`/`--repeater` seed carried. Mark `§…§` positions in the frames; the handshake is a position space too, and both sweep in one run. `--idle-ms=N` per-session silence timeout (100-60000, default 3000), `--ws-keep-key` sends the template's own `Sec-WebSocket-Key`. `--ws-http-only` sweeps the handshake as an ordinary request instead. Rows carry `ws_close_code` and `ws_frames_in`, because a successful upgrade is `101` on every row. `--race`, `--http2` and `--record-history` are refused on the framed path (all three work under `--ws-http-only`, which is an ordinary HTTP sweep and does record); `--follow-redirects`, `--timeout` and `--ac` are inert and reported once. A WebSocket seed with no outbound frames is swept as plain HTTP rather than as an empty framed session |
 | Matchers | `--mc`/`--fc` status, `--mg`/`--fg` gRPC status from the `grpc-status` trailer — the HTTP/2 trailer, or grpc-web's in-body trailer frame (`7`, `>0`, `1-16`), `--ms`/`--fs` size, `--mw`/`--fw` words, `--ml`/`--fl` lines, `--mt`/`--ft` round-trip time in **ms** (`--mt '>=5000'`; the only dimension a time-based blind payload moves, and a send that times out counts as a match on it), `--mr`/`--fr` body regex, `--mh`/`--fh` a case-insensitive substring of the response HEAD (`--mh 'x-powered-by: php'`; the body regex never sees a header), `--extract=REGEX`, `--ac` auto-calibrate |
-| Session bindings | `--bind-from=FLOW-ID` replays that captured flow first so its response fills the project's `$NAME` bindings for the rest of the run |
-| Session slot | `--slot=NAME` sends as this [session slot](#run-session): its header overlay, and its binding table for `$NAME`. Applied before `--bind-from` |
+| Session bindings | `--bind-from=FLOW-ID` replays that captured flow first so its response fills the project's `$BIND.NAME` bindings for the rest of the run |
+| Session slot | `--slot=NAME` sends as this [session slot](#run-session): its header overlay, and its binding table for `$BIND.NAME`. Applied before `--bind-from` |
 | Scope | `--allow-unscoped` sends outside the project scope; Sandbox mode and explicit excludes still refuse each send |
 | Output | `--format` (`text`\|`json`\|`jsonl`), `--force`, `--fail-if-no-matches` (exit `3` when nothing matched) |
 | Evidence | `--record-history=none\|matched\|all` also writes each sent request + response to History as a flow (default `none`; `matched` records only the rows that matched, `all` every send, capped at 5000). Read them back with `gori run history` / `get_flow` |
@@ -469,8 +469,8 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | Rate control |
 | `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one |
 | `--hook=ARGV` | Transform each assembled request through an external command (argv, no shell) before it is sent, for signed / HMAC'd APIs. See [Process hooks](/guide/scripting/#process-hooks) |
-| `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$NAME` session bindings for the rest of the run |
-| `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |
+| `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$BIND.NAME` session bindings for the rest of the run |
+| `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$BIND.NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |
 | `--format` | `text`, `json`, or `jsonl` |
 
 Connections are reused by default, so a mine pays one TCP (and on https one TLS) handshake per worker rather than one per probe. The `connections · N dialed · M reused` line at the end of a run is where you see whether the target honoured it. Turn it off with `--no-keep-alive` when the target behaves per-connection.
@@ -493,8 +493,8 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | `--target`, `--http2`, `--sni`, `-k` | Transport (target required for `--request`/stdin) |
 | `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control (concurrency stays 1 for stateful tokens) |
 | `--no-keep-alive` | Dial a fresh connection per sample instead of reusing one |
-| `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$NAME` session bindings for the rest of the run |
-| `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |
+| `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$BIND.NAME` session bindings for the rest of the run |
+| `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$BIND.NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |
 | `--format` | `text`, `json`, `jsonl`, or `markdown` (the report the TUI's Export writes) |
 
 ### run authorize
@@ -565,7 +565,7 @@ gori run repeater 900 --slot admin        # re-send flow 900 as that identity
 
 The overlay is **literal**: the bytes login handed back, saved with the project. It does not re-authenticate, so a token that *rotates* (a short-lived JWT, a per-request CSRF value) belongs on the extract-rule path instead: `gori run rewriter extract` plus `--bind-from FLOW`, which re-mints the value once per run. The name is checked before the flow is read, so a duplicate is reported as a name clash rather than as "that flow is not a login".
 
-**There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span, and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `repeater`, `repeater send`, `repeater minimize`, `fuzz`, `mine`, `sequence` and `discover`. The run prints `slot: sending as NAME` on STDERR before its first request.
+**There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span, and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$BIND.SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `repeater`, `repeater send`, `repeater minimize`, `fuzz`, `mine`, `sequence` and `discover`. The run prints `slot: sending as NAME` on STDERR before its first request.
 
 ### run probe
 
@@ -620,8 +620,8 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one per origin |
 | `--assets` | Also fetch the linked images, fonts, media and archives (default: record their directory, skip the download) |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
-| `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$NAME` session bindings for the rest of the run |
-| `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |
+| `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$BIND.NAME` session bindings for the rest of the run |
+| `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$BIND.NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |
 | `--allow-unscoped` | Run even if the target is outside the project scope. Waives the up-front (Layer 1) check only. Sandbox mode and explicit exclude rules still refuse each send, and the refusal now names which of the two fired. |
 | `--force` | Bypass the unbounded-run safety gate |
 | `--no-store` | Do not write findings into the project |
@@ -631,7 +631,7 @@ Connections are reused per origin by default, so a brute-force pass pays one TCP
 
 ### Session bindings from the command line
 
-A session binding (`$SESSION` filled from a login response; see [Session bindings](/guide/proxy/#session-bindings)) lives in the **memory** of the gori process that observed it. It is never written to `settings.json` or to the project database: a restored token is stale by construction, and re-extracting one costs a single request.
+A session binding (`$BIND.SESSION` filled from a login response; see [Session bindings](/guide/proxy/#session-bindings)) lives in the **memory** of the gori process that observed it. It is never written to `settings.json` or to the project database: a restored token is stale by construction, and re-extracting one costs a single request.
 
 `gori run` is one process per invocation, and a sweep is deliberately **not** an extraction source (a response echoing an attack payload back could otherwise rebind your session to it). So a headless `fuzz` / `mine` / `sequence` / `discover` whose template names a declared binding has nothing to resolve it with, and is refused before it sends.
 
@@ -639,7 +639,7 @@ A session binding (`$SESSION` filled from a login response; see [Session binding
 
 ```bash
 gori run fuzz 42 --wordlist ids.txt --bind-from 17
-# bind-from: flow #17 replayed → bound $SESS
+# bind-from: flow #17 replayed → bound $BIND.SESS
 ```
 
 Driving two `gori mcp` tool calls over one stdio session works the same way and always has.
@@ -857,7 +857,7 @@ gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-
 report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
 
-`--notes`, `--notes-file` and `--notes-stdin` are mutually exclusive, and the body is read byte-for-byte — multiline UTF-8, CRLF and all (the value of a bound project env var is still masked to `$NAME` on the way in, as it is for every issue field). A long write-up piped in or read from a file stays out of the process listing and the shell history; on `create` it is written with the issue in one transaction, so a script no longer needs a create-then-update pair. `--notes ''` clears the notes on `update`; a file or a pipe that yields nothing is refused instead, so a report generator that dies cannot silently erase a write-up. `--notes-stdin` needs a pipe or a redirect (`--notes-stdin < notes.md`) and refuses a terminal, for the same reason `--request-stdin` does.
+`--notes`, `--notes-file` and `--notes-stdin` are mutually exclusive, and the body is read byte-for-byte — multiline UTF-8, CRLF and all (the value of a bound project env var is still masked to `$ENV.NAME` on the way in, as it is for every issue field). A long write-up piped in or read from a file stays out of the process listing and the shell history; on `create` it is written with the issue in one transaction, so a script no longer needs a create-then-update pair. `--notes ''` clears the notes on `update`; a file or a pipe that yields nothing is refused instead, so a report generator that dies cannot silently erase a write-up. `--notes-stdin` needs a pipe or a redirect (`--notes-stdin < notes.md`) and refuses a terminal, for the same reason `--request-stdin` does.
 
 | Option | Description |
 | -------- | ------------- |
@@ -963,7 +963,7 @@ gori run retest forget 3                                                       #
 | `--allow-cleanup` | `run`: send the cleanup steps even after gori refused a send |
 | `--allow-unscoped` | `run`: send outside the project scope. Sandbox and explicit excludes still apply |
 | `--no-record-history` | `run`: do not write each send to History (default: record — a retest is evidence) |
-| `--slot=NAME` | `run`: send every step as this session slot — its header overlay and its `$NAME` table |
+| `--slot=NAME` | `run`: send every step as this session slot — its header overlay and its `$BIND.NAME` table |
 | `--timeout=SEC` | `run`: per-step connect + idle timeout (default 20) |
 | `--limit=N` | `runs`: how many runs to print |
 | `--format=FMT` | `text` (default) or `json` |
@@ -1038,7 +1038,7 @@ gori run rewriter preset add remove-csp --scope global --disabled
 
 Names are `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers` and `disable-sri`. `add` takes `--scope=project|global` and `--disabled` (install without arming, to review them first). The rules it writes go through the same path `rewriter add` does, so they are listed, editable and deletable afterwards. Installing the same preset twice duplicates visibly rather than merging.
 
-**`rewriter extract`**: the rules that declare [session bindings](/guide/proxy/#session-bindings): which response a `$NAME` is read from, and where in it. Verbs: `list` (default), `add`, `rm` (`delete`), `enable`, `disable`.
+**`rewriter extract`**: the rules that declare [session bindings](/guide/proxy/#session-bindings): which response a `$BIND.NAME` is read from, and where in it. Verbs: `list` (default), `add`, `rm` (`delete`), `enable`, `disable`.
 
 ```bash
 gori run rewriter extract add --name SESS --kind cookie --selector session --host '*.example.com'
@@ -1272,7 +1272,7 @@ gori run project sandbox off             # stop blocking
 
 #### project env
 
-Manage **project** env vars used for `$KEY` substitution in outbound requests (Repeater, Fuzzer, Miner, CLI, MCP). Global vars live in `settings.json` / the TUI Settings. This command only touches the per-project layer.
+Manage **project** env vars used for `$ENV.KEY` substitution in outbound requests (Repeater, Fuzzer, Miner, CLI, MCP). Global vars live in `settings.json` / the TUI Settings. This command only touches the per-project layer. The name is stored bare; which grammar spells it on the wire is global, and [`gori settings env-syntax`](#env-syntax) decides it.
 
 ```bash
 gori run project env                              # list KEY=value
@@ -1433,7 +1433,28 @@ gori settings sections             # list the top-level sections
 gori settings export [-o FILE]     # write a shareable profile (stdout by default)
 gori settings import FILE          # apply a profile's sections
 gori settings tls-fingerprint      # the JA3/JA4 gori sends to each destination
+gori settings env-syntax [VALUE]   # read or set the env-token grammar
 ```
+
+### `gori settings env-syntax` {#env-syntax}
+
+Which grammar spells an env token: `namespaced` (`$ENV.KEY` for env vars, `$BIND.NAME` for session bindings) or `bare` (`$KEY`, `$NAME`). A global setting, because it decides how the tokens in **every** project are read. With no argument it prints the value in force and where it came from.
+
+```bash
+gori settings env-syntax
+# namespaced  (from /Users/me/.gori/settings.json)
+#   $ENV.KEY / $BIND.NAME
+
+gori settings env-syntax bare
+# env syntax: bare — $KEY / $NAME
+# Each project is re-spelled the next time it opens: its stored tokens are rewritten from
+# namespaced to bare, a backup is written beside the database, and the run that does it says
+# so. Captured evidence is left exactly as it was.
+```
+
+Namespaced is the grammar for everyone, so the absence of `env.syntax` in `settings.json` means the file predates namespaces: the next start adopts `namespaced`, re-spells the **global** rewrite rules (keeping a `settings.json.pre-namespaced-<timestamp>` copy) and writes the key. Each **project** is re-spelled the first time it opens after the grammar moved — in the TUI, in any `gori run …`, or in a `gori mcp` server — with a `gori.db.pre-<grammar>-<timestamp>` backup beside the database (`VACUUM INTO`, so the WAL is included) and one line per project on stderr saying how many tokens moved. Rewritten: Repeater drafts (request, target, SNI, name) and their WebSocket messages, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot header values, and the masked tokens in issue titles/notes and note bodies. Left alone: every row whose provenance is a capture (`flow_id` set — a capture expands nothing), any row the target grammar has no equivalent spelling for, and names that are table keys rather than tokens (env vars, extract rules, rule patterns, payload sets).
+
+`env.syntax = bare` is the opt-out and re-spells each project back on its next open, escaping a literal `$NAME` that would otherwise start resolving. See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables). `gori settings import` says on stderr when a profile's `env.syntax` differs from this install's: an import never changes the grammar.
 
 ### Profiles
 

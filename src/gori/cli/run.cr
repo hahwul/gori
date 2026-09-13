@@ -605,6 +605,14 @@ module Gori
           retention_flows: read_only ? Store::RETENTION_UNLIMITED : Settings.retention_flows,
           read_only: read_only,
           background_index: false)
+        # THE token-grammar reconcile, before anything reads a token out of this store (#env.syntax).
+        # `read_only` does not exempt a command: the handle above may be read-only, but the
+        # re-spelling writes through its own connection, and `gori run repeater list` is exactly as
+        # good a moment to bring a project's stored tokens into this install's grammar as a TUI open
+        # is — the alternative is a headless run that reads them under the wrong grammar forever.
+        # Reported HERE (STDERR, one line per project) rather than carried: every `gori run`
+        # subcommand funnels through this method, so a caller that forgot to report would be silent.
+        report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name))
         # The project's pinned upstream / dial timeouts / capture cap (#538). `bind: false`:
         # not one command routed through here LISTENS — `gori run capture` is the only
         # subcommand that binds and it opens its project through `Session.open` instead — so
@@ -635,6 +643,22 @@ module Gori
         abort "gori run: cannot open database #{project.db_path}: " \
               "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
               "#{open_failure_hint(ex, project.db_path, read_only)}"
+      end
+
+      # The open-time re-spelling, said out loud. STDERR, never STDOUT: `gori run … --format json`
+      # is piped into other programs, and a migration notice inside the JSON would break every one
+      # of them. One line per project, plus one for the GLOBAL rewrite rules when this process's
+      # settings load re-spelled those too — drained here because a `gori run` is the commonest
+      # first thing a bare-era install does after an upgrade.
+      #
+      # `io` is injectable for the same reason every other notice in this file has one: the
+      # alternative is a spec that can only assert the report by reading the terminal.
+      def self.report_env_syntax_migration(report : EnvMigration::StoreReport?,
+                                           io : IO? = STDERR) : Nil
+        lines = report.try(&.notices) || [] of String
+        Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
+        return if lines.empty?
+        lines.each { |line| io.try &.puts line }
       end
 
       # What to add after SQLite's own sentence, for the two failures that are NOT what the
@@ -887,15 +911,30 @@ module Gori
         first = pairs.first[1]
         String.build do |io|
           io << "session #{one ? "value" : "values"} went out LITERALLY — "
-          io << order.join("; ") { |s| "#{s} sent #{Env.token_list(by_slot[s])}" }
+          io << order.join("; ") { |s| "#{s} sent #{Env.token_list(by_slot[s], ns: Env::Namespace::Bind)}" }
           io << ". Nothing bound #{one ? "it" : "them"} in this process (a binding value is "
           io << "memory-only, so every run starts with an empty table), so #{one ? "that" : "those"} "
           io << "request#{one ? "" : "s"} carried the reference itself where the session belongs "
           io << "— #{one ? "its" : "their"} response#{one ? " is" : "s are"} NOT evidence about "
           io << "the identity #{one ? "it names" : "they name"}. Bind first — replay a login under "
           io << "the slot (`--bind-from FLOW-ID` on a `gori run` sweep, a Repeater send, "
-          io << "`send_request` over MCP) — or write `$$#{first}` if the literal is what you meant"
+          io << "`send_request` over MCP) — or write "
+          io << "`#{Env.spell_escaped(first, Env::Namespace::Bind)}` if the literal is what you meant"
+          io << bare_spelling_tail(first, one)
         end
+      end
+
+      # The sentence the NAMESPACED grammar adds, or "" — because under it the likeliest cause is not
+      # an empty table at all. A bare `$SESSION` typed into `--identities` or MCP
+      # `create_session_slot` (neither of which any migration reaches) is TEXT, and no amount of
+      # binding will ever resolve it. Both remedies are named, because this sentence is built from a
+      # {slot, name} pair and cannot see which spelling the header actually carried.
+      private def self.bare_spelling_tail(first : String, one : Bool) : String
+        return "" if Settings.env_syntax.bare?
+        ". If #{one ? "it is" : "they are"} spelled the bare way " \
+        "(`#{Env.spell(first, Env::Namespace::Bind, Env::Syntax::Bare)}`), this install reads " \
+        "#{EnvMigration.spelling(Env::Syntax::Namespaced)} and the remedy is the spelling: write " \
+        "`#{Env.spell(first, Env::Namespace::Bind)}`"
       end
 
       # Drain and SAY it, for a `gori run` surface that has just printed its summary. Silent
@@ -1025,7 +1064,7 @@ module Gori
           abort "#{cmd}: --bind-from: " \
                 "#{bind_from_nothing_bound(bindings, flow_id, result.response.try(&.status))}"
         end
-        STDERR.puts "bind-from: flow ##{flow_id} replayed → bound #{Env.token_list(bound)}"
+        STDERR.puts "bind-from: flow ##{flow_id} replayed → bound #{Env.token_list(bound, ns: Env::Namespace::Bind)}"
         # The seed replay ran with the table still EMPTY — that is what it is for — so the
         # active slot's own `$NAME` went out literally on this one request and
         # `Env.report_unbound_overlay` recorded it. Drained and DROPPED here: the sweep that
@@ -1062,7 +1101,7 @@ module Gori
         end
         # `{rule name, the slots claiming it}` → "$SESSION (claimed by idA)".
         detail = skipped.join(", ") do |(name, slots)|
-          "#{Env.token_list([name])} (claimed by #{slots.join(", ")})"
+          "#{Env.token_list([name], ns: Env::Namespace::Bind)} (claimed by #{slots.join(", ")})"
         end
         pick = skipped.first[1].first
         "#{replayed}, and #{skipped.size == 1 ? "the rule that would have bound is" : "the rules that would have bound are"} " \
@@ -1152,7 +1191,7 @@ module Gori
         hits, rest = split_disabled_rule_tokens(detail)
         return "unresolved env #{detail}#{where} — set it with `gori run project env set KEY value`, " \
                "or remove the token" if hits.empty?
-        names = hits.map { |(name, id)| "#{Settings.env_prefix}#{name} (extract rule ##{id})" }.join(", ")
+        names = hits.map { |(name, id)| "#{Env.spell(name, Env::Namespace::Bind)} (extract rule ##{id})" }.join(", ")
         enable = hits.map { |(_, id)| "`gori run rewriter extract enable #{id}`" }.join(", ")
         tail = rest.empty? ? "" : " · #{Env.token_list(rest)} is not declared by any rule — " \
                                   "set it with `gori run project env set KEY value`, or remove the token"
@@ -1174,21 +1213,31 @@ module Gori
       # persists; the value never does"), and stale on the next run. So the two cases have to
       # be told apart before the sentence is chosen.
       #
-      # `detail` is the builder's own `Env.token_list` output, so it is parsed back with the
-      # same prefix that produced it.
+      # `detail` is the builder's own `Env.token_list` output, so it is parsed back through
+      # `Env.parse_ref?` — the inverse of the spelling that produced it, in whichever grammar is
+      # in effect.
+      #
+      # Only a BIND reference can be "declared by a disabled rule". Under the namespaced grammar a
+      # `$ENV.*` in the same list is a plain env var, so it goes to `rest` with its namespace
+      # intact (`Ref#qualified`, which `token_list` spells back to `$ENV.X` — or to `$X` in bare
+      # mode, where the label is not part of the spelling). That is what keeps the
+      # "declared by a DISABLED rule" sentence reachable for the names it is actually about.
       private def self.split_disabled_rule_tokens(detail : String?) : {Array({String, Int64}), Array(String)}
         hits = [] of {String, Int64}
         rest = [] of String
         return {hits, rest} unless detail
         ids = Env.layer.as?(Gori::Bindings).try(&.disabled_rule_ids)
         return {hits, rest} unless ids && !ids.empty?
-        prefix = Settings.env_prefix
         detail.split(", ").each do |token|
-          name = token.starts_with?(prefix) ? token[prefix.size..] : token
-          if id = ids[name]?
-            hits << {name, id}
+          ref = Env.parse_ref?(token, default_ns: Env::Namespace::Bind)
+          unless ref
+            rest << token # not a token gori can read back — carry it through verbatim
+            next
+          end
+          if ref.ns.bind? && (id = ids[ref.name]?)
+            hits << {ref.name, id}
           else
-            rest << name
+            rest << ref.qualified
           end
         end
         {hits, rest}

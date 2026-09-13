@@ -324,6 +324,13 @@ module Gori
       values_in(@slots.try(&.active))
     end
 
+    # `Env::Layer#active_slot_claims` — the names the active slot claims, whether or not a rule of
+    # that name exists. Read through `SessionSlots`, which has its own mutex, so this must not be
+    # called with `@mutex` held (the same discipline `values` documents).
+    def active_slot_claims : Array(String)
+      @slots.try(&.active).try(&.rules) || [] of String
+    end
+
     # `Env::Layer#slot_values` — the same read, answered for a NAMED slot instead of the active
     # one. For the caller that carries several identities through one run and cannot activate
     # each in turn (`Authorize`, whose whole measurement is that two identities resolve to two
@@ -479,7 +486,7 @@ module Gori
         return "#{name.inspect} is not a valid binding name (letters, digits and _ only, not starting with a digit)"
       end
       if @mutex.synchronize { @rules.any? { |r| r.name == name && r.id != except_id } }
-        return "$#{name} is already written by another extract rule — one name, one writer"
+        return "#{Env.spell(name, Env::Namespace::Bind)} is already written by another extract rule — one name, one writer"
       end
       # AFTER the name checks: an unusable name is the more fundamental complaint, and reporting
       # the condition first made a form with both errors send its author to the wrong row.
@@ -1013,7 +1020,8 @@ module Gori
 
     private def miss(rule : Store::ExtractRule, reason : String, flow_id : Int64?) : Nil
       @store.insert_event("bindings", "extract_miss", "warn",
-        "$#{rule.name}: #{rule.token_loc.label} found nothing (#{reason})", flow_id: flow_id)
+        "#{Env.spell(rule.name, Env::Namespace::Bind)}: #{rule.token_loc.label} found nothing (#{reason})",
+        flow_id: flow_id)
     end
 
     # A bind that HAPPENED but not over the origin's bytes. Once per rule per rule revision,
@@ -1024,7 +1032,8 @@ module Gori
     private def report_scrubbed(rule : Store::ExtractRule, flow_id : Int64?) : Nil
       return unless @mutex.synchronize { @scrub_reported.add?(rule.id) }
       @store.insert_event("bindings", "extract_scrubbed", "warn",
-        "$#{rule.name}: #{rule.token_loc.label} read a response body that is not valid UTF-8 — a " \
+        "#{Env.spell(rule.name, Env::Namespace::Bind)}: #{rule.token_loc.label} read a response body " \
+        "that is not valid UTF-8 — a " \
         "regex/jsonpath descriptor has no byte-level reading, so every invalid byte was replaced " \
         "with U+FFFD before it ran and the bound value may not be the bytes the origin sent " \
         "(a cookie, header or position descriptor reads the same response byte-exact)",
@@ -1034,7 +1043,8 @@ module Gori
     private def miss_no_entity(rule : Store::ExtractRule, flow_id : Int64?) : Nil
       return unless @mutex.synchronize { @no_entity_reported.add?(rule.id) }
       @store.insert_event("bindings", "extract_no_body", "warn",
-        "$#{rule.name}: #{rule.token_loc.label} needs the response body, and this response was " \
+        "#{Env.spell(rule.name, Env::Namespace::Bind)}: #{rule.token_loc.label} needs the response " \
+        "body, and this response was " \
         "streamed rather than buffered (a server-sent-event / close-delimited / 101 body, or " \
         "one over the buffering ceiling) — the rule did not run", flow_id: flow_id)
     end

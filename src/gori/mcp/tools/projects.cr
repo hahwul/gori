@@ -178,6 +178,7 @@ module Gori
         # Same REPLACEMENT discipline as the binding layer below: the loader assigns every
         # network property including nil, so a project with no pinned upstream does not
         # inherit the previous project's jump host (#538).
+        reconcile_env_syntax(new_store)
         bind_project_network(new_store)
         Env.load_project(new_store)
         # A REPLACEMENT, not a reload: bindings are per project, and carrying one project's

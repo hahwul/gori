@@ -506,9 +506,11 @@ module Gori
             j.field "rules" { j.array { rules.each { |r| extract_rule_json(j, r) } } }
             # The whole point of the feature, stated where an agent reading this list will
             # see it — otherwise "no value field" reads as an omission rather than a design.
+            # Spelled through `Env.spell`, not hardcoded: this note tells the caller what to
+            # WRITE, and the binding spelling is per-install (`$BIND.NAME` / bare `$NAME`).
             j.field "note", "Values are bound in the memory of the gori that observed them and are " \
                             "never persisted, so they are not readable here. Inject one from a Match & " \
-                            "Replace rule with replacement \"$NAME\"."
+                            "Replace rule with replacement #{Env.spell("NAME", Env::Namespace::Bind).inspect}."
           end
         end)
       end
@@ -528,11 +530,13 @@ module Gori
           err("invalid 'kind' (expected #{EXTRACT_KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind")
       end
 
-      # The `$` is stripped so an agent may pass the token the way an operator reads it.
+      # The spelling is stripped so an agent may pass the token the way an operator reads it —
+      # `$BIND.SESSION`, `BIND.SESSION`, `$SESSION` or `SESSION` all name the same extract rule,
+      # whose stored `name` column is the bare one.
       private def extract_name_arg(raw : String?) : String?
         n = raw.try(&.strip)
         return nil if n.nil? || n.empty?
-        n.starts_with?('$') ? n[1..] : n
+        Gori::Env.strip_spelling(n, Gori::Env::Namespace::Bind).presence
       end
 
       # An omitted field keeps the row's current value — the "omitted fields are left
@@ -719,9 +723,10 @@ module Gori
 
         tool j, "list_extract_rules",
           "List the project's EXTRACT rules — the read half of a session binding. Each one " \
-          "observes a response and binds one named value ($SESSION) in memory, which a Match & " \
-          "Replace rule injects with replacement \"$SESSION\". Values are never persisted and are " \
-          "not readable here. Unordered: an extract rule produces no bytes, so two cannot compose." { }
+          "observes a response and binds one named value ($BIND.SESSION, or $SESSION under the " \
+          "legacy bare syntax — see list_env's 'syntax') in memory, which a Match & Replace rule " \
+          "injects as its replacement. Values are never persisted and are not readable here. " \
+          "Unordered: an extract rule produces no bytes, so two cannot compose." { }
 
         return unless @allow_actions
 
@@ -803,12 +808,13 @@ module Gori
         end
 
         tool j, "create_extract_rule",
-          "Add an EXTRACT rule: observe a response and bind one named value ($NAME) in memory " \
-          "for a Match & Replace rule to inject with replacement \"$NAME\". Only a DELIBERATE " \
+          "Add an EXTRACT rule: observe a response and bind one named value in memory for a " \
+          "Match & Replace rule to inject as its replacement — written $BIND.NAME, or $NAME " \
+          "under the legacy bare syntax (see list_env's 'syntax'). Only a DELIBERATE " \
           "single send (Repeater / send_request) feeds extraction — sweeps deliberately do not, " \
           "because a response echoing an attacker-shaped payload back could otherwise rebind the " \
           "operator's session to it. One name, one writer: a duplicate name is refused." do |s|
-          s.field "name", strprop("the binding name, without the $ (letters, digits and _, not starting with a digit)"), required: true
+          s.field "name", strprop("the binding name alone, no sigil or namespace (letters, digits and _, not starting with a digit)"), required: true
           s.field "kind", enumprop("where the token is read from (default cookie). cookie and header read the parsed head; the rest read the DECODED body", EXTRACT_KINDS)
           s.field "selector", strprop("cookie name, header name, regex source, or JSON path ($.a.b[0]) — required for every kind except position")
           s.field "when", strprop("which messages to read, in intercept-filter syntax (host:/path:/method:/scheme:/status:, AND/OR/NOT, '' = any). status: matches responses only")
@@ -822,7 +828,7 @@ module Gori
           "Update an existing extract rule by id. Omitted fields are left unchanged. Renaming " \
           "drops the old name's bound value rather than re-labelling it." do |s|
           s.field "id", intprop("extract rule id from list_extract_rules"), required: true
-          s.field "name", strprop("new binding name (without the $)")
+          s.field "name", strprop("new binding name (the name alone, no sigil or namespace)")
           s.field "kind", enumprop("where the token is read from", EXTRACT_KINDS)
           s.field "selector", strprop("cookie/header name, regex source, or JSON path")
           s.field "when", strprop("intercept-filter condition ('' = any message)")

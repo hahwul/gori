@@ -289,7 +289,7 @@ module Gori::Tui
              when :project_overrides
                "#{key("a", "hostoverride.add-entry")} map host→IP · space menu"
              when :project_env
-               "#{key("a", "env.add-var")} add $KEY · space prefix"
+               "#{key("a", "env.add-var")} add a variable · space menu"
              when :project_activity
                "agent calls & job results land here"
              else
@@ -761,11 +761,16 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " space ", "override actions", bullet: "▸ ")
     end
 
-    # The Project tab's ENVIRONMENT card with no vars. The copy hardcodes the default `$`
-    # sigil: an empty pane means a fresh project, and the live prefix rides the outer border.
+    # The Project tab's ENVIRONMENT card with no vars.
+    #
+    # The two lines that name a TOKEN are built at render time (`Env.spell`), not frozen into
+    # the source: this card is the first thing an operator reads about the feature, and under
+    # the namespaced grammar a `$KEY` here would teach the one spelling that does not resolve.
+    # The sentence that names no token stays static.
     private def render_project_env_full(screen : Screen, rect : Rect) : Nil
-      desc = "Store $KEY values to reuse across requests."
-      hint = "$KEY in a request expands when you send"
+      spelled = Env.spell("KEY", Env::Namespace::Env)
+      desc = "Store values to reuse across requests."
+      hint = "#{spelled} in a request expands when you send"
       inner, ix, iw = begin_centered_card(screen, rect, :project_env, "VARIABLES",
         full_inner_h(:project_env), {Screen.display_width(desc), Screen.display_width(hint)}.max)
       y = inner.y
@@ -774,7 +779,7 @@ module Gori::Tui
       y += 2
       screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
-      y = draw_chord_hint(screen, ix, y, iw, " a ", "add a $KEY variable", bullet: "▸ ", verb: "env.add-var")
+      y = draw_chord_hint(screen, ix, y, iw, " a ", "add a variable", bullet: "▸ ", verb: "env.add-var")
       draw_chord_hint(screen, ix, y, iw, " space ", "vars & prefix", bullet: "▸ ")
     end
 
@@ -912,7 +917,8 @@ module Gori::Tui
     end
 
     private def medium_project_env(headline) : Array(String)
-      [headline, "$KEY ──► value on send", "#{key("a", "env.add-var")} add var · space prefix"]
+      [headline, "#{Env.spell("KEY", Env::Namespace::Env)} ──► value on send",
+       "#{key("a", "env.add-var")} add var · space menu"]
     end
 
     private def medium_project_activity(headline) : Array(String)

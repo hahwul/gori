@@ -14,7 +14,7 @@ module Gori
       have_var = ->(ctx : Verb::ExecContext) { ctx.env_var_selected? }
 
       r.register Verb::Definition.new(
-        "env.add-var", "Add env var", "Open the inline row to add a $KEY environment variable",
+        "env.add-var", "Add env var", "Open the inline row to add an environment variable",
         Verb::Scope::Env, [Verb::Chord.new("a")]) { |ctx| ctx.env_add_var; nil }
 
       r.register Verb::Definition.new(
@@ -30,8 +30,13 @@ module Gori
         Verb::Scope::Env, [Verb::Chord.new("d")], available: have_var, group: :danger) { |ctx| ctx.env_delete_var; nil }
 
       r.register Verb::Definition.new(
-        "env.edit-prefix", "Change prefix", "Edit the token prefix used for $KEY substitution (applies globally)",
+        "env.edit-prefix", "Change prefix", "Edit the sigil that opens an env token (applies globally)",
         Verb::Scope::Env, mnemonic: 'p') { |ctx| ctx.env_edit_prefix; nil }
+      # The token GRAMMAR (`env.syntax`) is deliberately not a verb here. Flipping it re-reads
+      # every token already stored in project DBs, drafts, rule replacements and slot headers,
+      # so the switch has to re-spell those bytes — which is `gori settings env-syntax`'s job
+      # (it migrates the global rules there and then, and each project at its next open). A key
+      # on this pane could only set the setting, leaving the stored bytes mis-spelled.
     end
   end
 end

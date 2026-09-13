@@ -314,7 +314,10 @@ describe "settings profiles" do
     it "is empty when the named secret section has nothing in it (nothing to protect)" do
       with_config_home do
         Gori::Settings.env_vars = [] of {String, String}
-        Gori::Settings.document_keys.should_not contain("env")
+        # `env` is ALWAYS in the document now — it carries the token grammar, and an absent
+        # `env.syntax` means "this file predates namespaces" rather than a value. What must stay
+        # true is that a section holding no VARS is not announced as a secret one.
+        Gori::Settings.document_keys.should contain("env")
         Gori::Settings.exported_secret_sections(["env"]).should be_empty
       end
     end

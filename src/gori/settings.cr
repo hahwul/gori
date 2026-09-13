@@ -1,5 +1,9 @@
 require "json"
 require "./paths"
+# The global-rule re-spelling `load` runs when `env.syntax` is absent. Required HERE rather than
+# left to `src/gori.cr`: this file NAMES `EnvMigration::GlobalReport`, and the bench harnesses (and
+# other small entry points) require settings.cr directly without the umbrella.
+require "./env_migration/globals"
 require "./settings/network"
 require "./settings/upstream_rules"
 require "./settings/outbound_tls"
@@ -108,6 +112,20 @@ module Gori
       @@path_override || ENV["GORI_CONFIG"]?.presence || File.join(Paths.home_dir, "settings.json")
     end
 
+    # Was this process pointed at a settings file BY NAME (`gori --config PATH`, `$GORI_CONFIG`),
+    # rather than falling back to the one under GORI_HOME?
+    #
+    # It is the question "there is no file here" cannot be answered without. At the HOME-DERIVED
+    # default path, an absent settings.json is a DATE — a fresh home, or a headless install from
+    # before namespaces — and adopting the new grammar plus re-spelling the projects is the whole
+    # upgrade. At a path the operator TYPED, the same absence is a typo: the real settings.json is
+    # still sitting under GORI_HOME saying `bare`, and adopting namespaced off a misspelled
+    # `--config` would re-spell that install's project databases against a file gori never read —
+    # and the next ordinary run, reading the real `bare` again, would reverse it lossily.
+    def self.explicit_path? : Bool
+      !(@@path_override || ENV["GORI_CONFIG"]?.presence).nil?
+    end
+
     # Load persisted values into the class properties. Tolerant: a missing or
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
@@ -122,18 +140,49 @@ module Gori
       # would then let the next tick skip the fold that repairs one.
       forget_reloaded_sections
       @@load_warning = nil # cleared here, not in load_root, so a file that is fixed OR removed drops it
+      # Reset per home: `load` runs repeatedly over DIFFERENT homes in one process (the project
+      # picker, `--config`, the spec suite), and "where did the grammar come from" must never be
+      # the previous home's answer — it is what decides whether this one's projects get rewritten.
+      self.env_syntax_origin = EnvSyntaxOrigin::Absent
       raw = load_raw
       unless raw
         # No file yet (first run — keep defaults, nothing to protect) or one that is there and
         # could not be READ (`@@load_unreadable`: everything below is at a factory default over
         # a file whose contents nobody has seen).
         @@load_unreadable = File.exists?(path)
+        # "No file at the default path" and "no file at the path you named" are different facts —
+        # see `explicit_path?`. Only the first one is a date gori may act on.
+        adopt_env_syntax_for_absent_key(absent_explicit: !@@load_unreadable && explicit_path?)
         return
       end
       root = load_root(raw)
-      return unless root # present but unparseable — kept a .corrupt copy, keep defaults
+      unless root
+        # present but unparseable — kept a .corrupt copy, keep defaults. The grammar is the one
+        # exception, and `load_root` has already settled it: it is recovered TEXTUALLY from the
+        # raw file when the file still spells it, and otherwise reset to the default with a
+        # warning that says so. Resetting it here unconditionally was a silent DOWNGRADE — `save`
+        # stays armed on this path, `serialize_env` would then omit the section, and the next
+        # start would read the absence as bare forever.
+        return
+      end
       begin
         apply_sections(root)
+        # THE absence rule (see `parse_env` for why it cannot live there): a settings file read IN
+        # FULL that does not name a grammar PREDATES namespaces, so what its stored tokens are
+        # spelled in is bare. Assigned here — not left at whatever is in memory — because `load`
+        # runs repeatedly over DIFFERENT homes in one process (the project picker, `--config`, the
+        # spec suite).
+        #
+        # Only the READING is settled here. The adoption (and the migration it pulls) happens
+        # after the re-base below, and the order is load-bearing: the base is our serialization of
+        # what DISK said, so bare + un-migrated rules have to be what `@@loaded_raw` describes, or
+        # the 3-way merge reads the rewrite as "this process did not touch that section" and takes
+        # disk's un-migrated copy straight back over it.
+        #
+        # A key that is PRESENT but not a readable grammar does NOT come through here: `parse_env`
+        # has assigned the default and marked the origin `Unreadable`, and nothing may be rewritten
+        # against a value gori had to guess.
+        self.env_syntax = Env::Syntax::Bare if env_syntax_origin.absent?
       rescue
         # A malformed individual section — keep whatever loaded so far, and remember that this
         # is only HALF the operator's file: every section below the raising line is at its
@@ -147,6 +196,18 @@ module Gori
         # there leaves nothing at a default — latching the flag for those would refuse every
         # save for the rest of the process over a file that was read in full.
         @@load_partial = true
+        # Half a file proves nothing about the grammar, so the origin says `Unreadable` and no
+        # project database is re-spelled off this run (`env_syntax_stated?`).
+        #
+        # The VALUE, though, is only reset when nothing read it. `parse_env` runs in the MIDDLE of
+        # `apply_sections`, so a section BELOW it raising left a grammar the file genuinely stated
+        # — and overwriting it with a constant made this run read every token in every project
+        # under a grammar the operator's own file contradicts, over an unrelated malformed section.
+        # A `bare` opt-out torn by a bad `listeners` entry is the case: it came back namespaced.
+        # Only an origin still `Absent` (nothing assigned it) gets the fallback, and the fallback is
+        # `UNREADABLE_ENV_SYNTAX` for the same reason `recover_env_syntax_from_corrupt` uses it.
+        self.env_syntax = UNREADABLE_ENV_SYNTAX if env_syntax_origin.absent?
+        self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
         note_load_warning("settings: #{path} could not be read in full — the sections gori did " \
                           "not reach are at their factory defaults, so this run will not overwrite that file")
         return
@@ -166,6 +227,9 @@ module Gori
       # such key — so the value the migration just recovered would be dropped by the very next
       # save. Migrating after makes it a genuine change, which is what it is.
       migrate_legacy_sections(root)
+      # LAST, so the re-base above describes the file as it was READ and the rewrite below is a
+      # genuine change to the `env` and `rewriter` sections rather than a no-op the merge discards.
+      adopt_env_syntax_for_absent_key if env_syntax_origin.absent?
     rescue
       # `serialize` or `migrate_legacy_sections` raised. Every section from disk is already
       # applied by here, so the in-memory state is whole and `save` stays allowed — a
@@ -173,6 +237,100 @@ module Gori
       # position a first run is in. Swallowed, as it was before the partial-load guard
       # existed; `@@loaded_raw` staying nil already reports it through `load_degraded?`.
       nil
+    end
+
+    # `env.syntax` is not in this settings file (or there is no file at all). That is not a
+    # grammar, it is a DATE: the file predates namespaces, so whatever tokens this install has are
+    # spelled bare. Adopt `env_syntax_when_absent` (namespaced, for everyone), re-spell the global
+    # rewrite rules on the way, and write the key down so the question is never asked again.
+    #
+    # There are TWO exceptions, and both leave the origin `Unreadable` so that
+    # `env_syntax_stated?` is false and nothing — no project database, no global rule — is
+    # re-spelled off this run:
+    #
+    #   * `@@load_unreadable` — a settings.json IS there and could not be read (EACCES on a file a
+    #     `sudo gori` left root-owned, a `--config` naming a directory). It may well say `bare`, so
+    #     this home is left reading tokens the way its projects are most likely to be spelled: no
+    #     project database is touched over a permissions problem.
+    #   * `absent_explicit` — nothing at a path the operator NAMED (`--config /tmp/typo.json`,
+    #     `$GORI_CONFIG`). Absence is only a date at the home-derived DEFAULT path; at a typed one
+    #     it says nothing about this install, whose real settings.json is still under GORI_HOME.
+    #     Adopting off it would re-spell that install's projects against a file gori never read,
+    #     and the next ordinary run would reverse it lossily. Said out loud, because a `--config`
+    #     that names nothing is a mistake worth one line.
+    #
+    # The PROJECT databases are not this method's business. Each one carries its own marker and is
+    # reconciled the first time it is opened (`EnvMigration.reconcile`), because that is the only
+    # moment gori knows which project it is allowed to write to.
+    #
+    # A failed write is not fatal: the grammar applies to this run either way, and the next start
+    # re-derives the same answer from the same file.
+    private def self.adopt_env_syntax_for_absent_key(absent_explicit : Bool = false) : Nil
+      if absent_explicit
+        self.env_syntax = UNREADABLE_ENV_SYNTAX
+        self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
+        note_load_warning("settings: #{path} does not exist and gori was pointed at it by name " \
+                          "(--config / $GORI_CONFIG) — reading tokens as " \
+                          "#{UNREADABLE_ENV_SYNTAX.to_s.downcase} for this run and re-spelling " \
+                          "nothing, since an absence there says nothing about this install's " \
+                          "stored tokens. Fix the path, or drop the flag to use the settings " \
+                          "under GORI_HOME")
+        return
+      end
+      if @@load_unreadable
+        self.env_syntax = UNREADABLE_ENV_SYNTAX
+        self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
+        return
+      end
+      target = env_syntax_when_absent
+      self.env_syntax = target
+      self.env_syntax_origin = EnvSyntaxOrigin::Absent
+      # Bare is what absence already meant, so there is nothing to re-spell and nothing to write —
+      # which is also what keeps a spec home (pinned bare) from growing a settings.json.
+      return if target.bare?
+      report = EnvMigration.migrate_global_rules(from: Env::Syntax::Bare, to: target)
+      @@env_syntax_global_migration = report
+      # ONLY when the rewrite actually moved a rule. A `load` that WRITES is not a read, and an
+      # unconditional save here was one:
+      #
+      #   * it created settings.json on a home that has none, which is the exact test the TUI's
+      #     first-run wizard is gated on (`app.cr`: `File.exists?(Settings.path)`) — so the very
+      #     first `gori` on a fresh machine adopted the grammar, wrote the file, and skipped the
+      #     wizard;
+      #   * and it created the parent directory of a `--config` that names a path that does not
+      #     exist, during read-only commands (`gori run history list --config /tmp/nope.json`).
+      #
+      # Adopting in MEMORY costs nothing to leave unwritten: `serialize_env` always emits
+      # `env.syntax`, so the first ordinary save this install makes for any other reason persists
+      # it, and until then every start re-derives the same answer from the same absence. A
+      # re-spelling of the global rules is the one thing that MUST be persisted — those bytes are
+      # now different from the file's, and `migrate_global_rules` has already put the
+      # `settings.json.pre-namespaced-<ts>` copy beside it (only if the file can be written; see
+      # `backup_settings_file`).
+      return unless report
+      # And `save` ANSWERS. A false here is the whole failure: the rules are re-spelled in memory —
+      # which this run needs, since it reads the new grammar — while the file still holds the old
+      # spelling, so the next start re-derives the same absence and tries again. Silently, on every
+      # invocation, for as long as the permissions problem lasts. Said on the channel every other
+      # degraded load uses.
+      return if save
+      note_load_warning("settings: the global rewrite rules were re-spelled to " \
+                        "#{EnvMigration.spelling(target)} for this run, but #{path} could not be " \
+                        "written — the file still holds the old spelling, so every start will " \
+                        "re-spell them again. Fix the permissions on that file, or re-run " \
+                        "`gori settings env-syntax #{target.to_s.downcase}` once it is writable")
+    end
+
+    # What the last `load`'s global-rule re-spelling did, or nil when it did nothing. Read by the
+    # surfaces that report it — one line, once, next to the per-project lines (see
+    # `EnvMigration::GlobalReport`). Cleared by whoever reports it, so a second surface in the same
+    # process does not say it twice.
+    @@env_syntax_global_migration : EnvMigration::GlobalReport? = nil
+
+    def self.take_env_syntax_global_migration : EnvMigration::GlobalReport?
+      report = @@env_syntax_global_migration
+      @@env_syntax_global_migration = nil
+      report
     end
 
     # Read each top-level section of a parsed settings document into the class properties.
@@ -513,9 +671,16 @@ module Gori
           # unwritable dir / full disk — the warning still goes out, minus the recovery hint
         end
       end
+      # The token GRAMMAR is recovered here rather than defaulted with everything else, and it is
+      # recovered before the warning is built so the one line the operator sees can say whether it
+      # was (see `recover_env_syntax_from_corrupt`). It cannot be a second `note_load_warning`:
+      # that guard fires once per process, so a second call would replace the recorded text with
+      # a sentence that no longer names the unparseable file — and emit nothing.
+      grammar_note = recover_env_syntax_from_corrupt(raw)
       warning = String.build do |s|
         s << "settings: #{path} is not valid JSON — using defaults for this run"
         s << "; your file is preserved at #{path}.corrupt" if kept
+        s << "; #{grammar_note}" if grammar_note
       end
       note_load_warning(warning)
       nil
@@ -971,10 +1136,17 @@ module Gori
     # (which would train the operator to ignore the notice on the export that matters).
     # Returns the sections rather than a Bool so the notice can name what is in the file
     # instead of reciting SECRET_SECTIONS at the operator.
+    # `env` counts only when it actually holds VARS. A namespaced install with no env var writes
+    # an `env` section carrying nothing but `{"syntax": "namespaced"}` — a grammar, not a
+    # credential — and firing the "this file holds secrets" notice over it is how an operator
+    # learns to ignore the notice on the export that matters.
     def self.exported_secret_sections(only : Array(String)? = nil) : Array(String)
       return [] of String unless list = only
       present = JSON.parse(serialize).as_h.keys
-      SECRET_SECTIONS.select { |s| list.includes?(s) && present.includes?(s) }
+      SECRET_SECTIONS.select do |s|
+        next false unless list.includes?(s) && present.includes?(s)
+        s == "env" ? !env_vars.empty? : true
+      end
     end
 
     def self.export_document(only : Array(String)? = nil) : String
@@ -982,7 +1154,23 @@ module Gori
       keep = only || (doc.keys - SECRET_SECTIONS)
       JSON.build(indent: "  ") do |j|
         j.object do
-          doc.each { |k, v| j.field k, v if keep.includes?(k) }
+          # `strip_env_syntax` on the way OUT as well as on the way in: an exported profile carries
+          # no token grammar at all. `serialize` always writes the key now (absence means "predates
+          # namespaces", so a grammar has to be stated), and a profile that named one would decide
+          # how the IMPORTING install reads the tokens already stored in its own projects — the one
+          # thing an import is not allowed to do (see `report_env_syntax_change`).
+          #
+          # A section the strip leaves EMPTY is omitted, and that is not tidiness. `serialize_env`
+          # always writes `syntax`, so a var-less install's whole `env` section is the grammar —
+          # and exporting `{"env": {}}` shipped a profile that SAYS nothing about env and, on the
+          # importing side, was read as a section present with no vars. Nothing here may be a
+          # sentence about the importer's own token values.
+          doc.each do |k, v|
+            next unless keep.includes?(k)
+            stripped = strip_env_syntax(k, v)
+            next if k == "env" && (h = stripped.as_h?) && h.empty?
+            j.field k, stripped
+          end
         end
       end
     end
@@ -1227,7 +1415,7 @@ module Gori
       selected = incoming.keys.select do |k|
         (only.nil? || only.includes?(k)) && SECTION_KEYS.includes?(k)
       end
-      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, incoming[k] } } }
+      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, strip_env_syntax(k, incoming[k]) } } }
       apply_sections(JSON.parse(filtered))
       # `save` REPORTS failure rather than raising, because a failed write must not crash the
       # TUI. Discarding that here meant a full disk, a read-only filesystem or an unwritable
@@ -1239,6 +1427,28 @@ module Gori
         raise Error.new("settings were applied in memory but could not be written to #{path}")
       end
       selected
+    end
+
+    # An imported profile NEVER changes this install's token grammar.
+    #
+    # `env.syntax` is not a preference a profile may carry for someone else: it decides how the
+    # tokens already written into THIS install's project databases — env var names, Repeater
+    # drafts, rewrite-rule replacements, slot headers — are read, and nothing rewrites them. A
+    # teammate's profile exported to share a var table (or a theme) therefore used to reinterpret
+    # every token in every project of whoever imported it, in whichever direction their colleague
+    # happened to run. The switch is a deliberate, local act: `gori settings env-syntax`, which is
+    # what the import's STDERR note points at.
+    #
+    # Dropped from the DOCUMENT rather than restored after `apply_sections`, so nothing observes
+    # the flipped value in between (`Settings.env_syntax=` bumps the highlight revision and
+    # re-styles every open editor) and `save` cannot persist it.
+    #
+    # `Settings.load` from disk still honours the key: that file IS this install's own state.
+    private def self.strip_env_syntax(key : String, node : JSON::Any) : JSON::Any
+      return node unless key == "env"
+      h = node.as_h?
+      return node unless h && h.has_key?("syntax")
+      JSON::Any.new(h.reject("syntax"))
     end
 
     # Factory reset: every persisted setting back to the value a fresh install ships with,

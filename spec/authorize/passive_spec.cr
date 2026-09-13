@@ -125,6 +125,21 @@ describe Gori::Authorize::Passive do
       Gori::Authorize.resolve(id)
       Gori::Env.take_unbound_overlay.map(&.[1]).should eq(["SESSION"])
     end
+
+    # The half a NAMESPACED install needs, and the one whose absence reads as `enforced`.
+    # `--identities FILE` and MCP `create_session_slot` are doors no migration reaches, so a BARE
+    # `$SESSION` lands in a slot header the namespaced reader does not look at: those eight
+    # characters go out verbatim, the origin's 401 is indistinguishable from anonymous, and the row
+    # aggregates as the target holding.
+    it "reports a BARE $SESSION under the namespaced grammar, which nothing will ever resolve" do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        Gori::Env.take_unbound_overlay
+        id = Identity.new("admin", set_headers: [{"Authorization", "Bearer $SESSION"}],
+          rules: ["SESSION"])
+        Gori::Authorize.resolve(id)
+        Gori::Env.take_unbound_overlay.should eq([{"admin", "SESSION"}])
+      end
+    end
   end
 
   # Passive sees a NEW flow per page load, so a flow-id key would add a row every time the

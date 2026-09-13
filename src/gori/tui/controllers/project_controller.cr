@@ -2,6 +2,7 @@ require "../tab_controller"
 require "../project_view"
 require "../clipboard"
 require "../../env"
+require "../env_syntax_seam"
 
 module Gori::Tui
   # The Project tab: the project overview plus five SUB-TABS (DESCRIPTION · SCOPE · HOST
@@ -1242,6 +1243,12 @@ module Gori::Tui
       case kind
       when :empty then @host.status("env prefix: empty")
       when :ok
+        # The SIGIL is global and shares the `env` section with the grammar, which the merge
+        # rewrites whole: follow the file's grammar first so this write says nothing about it
+        # (`EnvSyntaxSeam`, the same seam the Settings env card's saves take). FOLLOW, not just
+        # adopt — a peer's switch re-spells this project's stored tokens, and the notices go in
+        # the ring beside the open-time ones rather than being swallowed by a prefix save.
+        EnvSyntaxSeam.announce(EnvSyntaxSeam.follow(@host.session), @host.notifications)
         Settings.env_prefix = prefix
         ok = Settings.save
         Env.bump_highlight_rev if ok

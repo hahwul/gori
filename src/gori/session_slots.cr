@@ -119,10 +119,26 @@ module Gori
     # context, and leaving a dangling name would make `overlay` a silent no-op that the
     # readout still reports as active.
     def save(list : Array(SessionSlot)) : Bool
+      list = respell(list)
       blob = SessionSlot.serialize(list)
       return false unless @store.set_setting(KEY, blob)
       install(list, blob)
       true
+    end
+
+    # Header VALUES re-spelled into the grammar the DATABASE is marked with, when this process
+    # speaks a different one — see `store/env_write_guard.cr`. A slot header value is
+    # `EnvMigration::Kind::Slot`: `Env.expand_bindings_as` is the only pass over it and it resolves
+    # BIND alone, so an env-var name there was never a reference and stays literal text.
+    #
+    # The slot NAME and its claimed rule names are table keys, not tokens, and are left alone.
+    private def respell(list : Array(SessionSlot),
+                        w : Store::EnvWrite? = @store.env_write) : Array(SessionSlot)
+      return list unless w
+      list.map do |slot|
+        headers = slot.set_headers.map { |(n, v)| {n, w.call(v, EnvMigration::Kind::Slot)} }
+        SessionSlot.new(slot.name, headers, slot.remove_headers, slot.baseline?, slot.rules)
+      end
     end
 
     # Publish a list this process has just committed. Split out of `save` so the
@@ -162,9 +178,15 @@ module Gori
     private def mutate(&block : Array(SessionSlot) -> Array(SessionSlot)?) : Bool
       applied = nil.as(Array(SessionSlot)?)
       blob = nil.as(String?)
+      # The re-speller is built HERE, outside the transaction: `env_write` reads three settings rows
+      # and the extract rules, and the block below runs on the WRITER FIBER — a read issued from
+      # there, inside the write it is serving, is the one thing that cannot happen. Applying it is
+      # pure, so it goes inside.
+      w = @store.env_write
       committed = @store.mutate_setting(KEY) do |raw|
         list = block.call(SessionSlot.parse_json(raw))
         if list
+          list = respell(list, w)
           applied = list
           blob = SessionSlot.serialize(list)
         end
