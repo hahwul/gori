@@ -49,14 +49,28 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 
 ## 환경 변수 {#environment-variables}
 
-아웃바운드 요청은 네임스페이스로 구분되는 두 종류의 토큰을 실어 나릅니다.
+아웃바운드 요청은 네임스페이스로 구분되는 세 종류의 토큰을 실어 나릅니다.
 
 | 토큰 | 해석 대상 | 시점 |
 |------|-----------|------|
 | `$ENV.KEY` | 전역 또는 프로젝트 환경 변수 | 빌드 시점, 요청을 구성하기 전 |
 | `$BIND.NAME` | extract 규칙이 채운 [세션 바인딩](/guide/proxy/#session-bindings) | 전송 시점, 활성 신원의 테이블에서 |
+| `$GEN.NAME` | 내장 값 생성기 | 전송 시점, 아웃바운드 요청마다 한 번 |
 
 토큰은 에디터에서 리터럴 텍스트로 남아 있다가 나가는 길에서만 확장됩니다. Repeater, Fuzzer, Miner, Intercept 포워드, `gori run`, MCP `send_request`가 그 지점입니다.
+
+`GEN`은 Decoder 체인이나 저장된 시크릿 없이 보안 테스트에서 자주 쓰는 값을 만듭니다.
+
+| 토큰 | 출력 |
+|------|------|
+| `$GEN.UUID` | UUID v4 |
+| `$GEN.RANDOM` | 암호학적으로 안전한 unsigned 64비트 정수의 10진수 표현 |
+| `$GEN.RANDOM_HEX` | 암호학적으로 안전한 128비트 난수의 소문자 16진수 표현(32자) |
+| `$GEN.TIMESTAMP` | Unix 초 |
+| `$GEN.TIMESTAMP_MS` | Unix 밀리초 |
+| `$GEN.ISO8601` | 밀리초를 포함한 현재 UTC 시각의 RFC 3339 표현 |
+
+한 요청 안에서 같은 생성기 이름을 여러 번 쓰면 같은 값이 들어갑니다. 다음 요청에서는 새 값을 만듭니다. 생성기는 최종 전송 지점에서 운영자가 작성한 요청 텍스트에만 적용되며, 캡처 증거와 Fuzzer 페이로드 바이트는 리터럴로 유지됩니다.
 
 환경 변수는 두 곳에서 정의합니다(키 충돌 시 프로젝트가 우선).
 
@@ -100,7 +114,7 @@ gori settings env-syntax bare   # 옵트아웃
 `gori mcp` 서버는 이 전환을 스스로 **따라갑니다**. 새 문법을 받아들이고, 열어 둔 프로젝트를
 다시 적고, 무엇을 했는지 알려줍니다(TUI는 알림과 ACTIVITY 행, MCP는 로그 한 줄).
 
-`env.syntax = bare`가 옵트아웃입니다. 환경 변수는 bare `$KEY`, 바인딩은 bare `$NAME`, 리터럴 `$`는 `$$`입니다. 각 프로젝트는 다음에 열릴 때 **되돌려** 다시 적히고, 그대로 두면 해석되기 시작할 리터럴 `$NAME`은 이스케이프됩니다. 다만 bare는 모호한 문법입니다. 바디의 GraphQL `$id`가 `id`라는 환경 변수와 실제로 충돌하며, 이스케이프와 `--verbatim`이 있는 이유가 그것입니다. 이 문서의 나머지 부분은 토큰을 namespaced 문법으로 적습니다. bare 설치에서는 네임스페이스를 뺀 형태(`$KEY`, `$NAME`)로 읽으세요.
+`env.syntax = bare`가 옵트아웃입니다. 환경 변수는 bare `$KEY`, 바인딩은 bare `$NAME`, 리터럴 `$`는 `$$`입니다. 각 프로젝트는 다음에 열릴 때 **되돌려** 다시 적히고, 그대로 두면 해석되기 시작할 리터럴 `$NAME`은 이스케이프됩니다. 다만 bare는 모호한 문법입니다. 바디의 GraphQL `$id`가 `id`라는 환경 변수와 실제로 충돌하며, 이스케이프와 `--verbatim`이 있는 이유가 그것입니다. 생성기는 bare 표기가 없으므로 bare 문법에서 `$GEN.UUID`는 리터럴로 남습니다. 이 문서의 나머지 부분은 토큰을 namespaced 문법으로 적습니다. bare 설치에서는 ENV와 BIND 토큰만 네임스페이스를 뺀 형태(`$KEY`, `$NAME`)로 읽으세요.
 
 ## Fuzzer {#fuzzer}
 

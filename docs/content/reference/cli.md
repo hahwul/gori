@@ -1438,12 +1438,12 @@ gori settings env-syntax [VALUE]   # read or set the env-token grammar
 
 ### `gori settings env-syntax` {#env-syntax}
 
-Which grammar spells an env token: `namespaced` (`$ENV.KEY` for env vars, `$BIND.NAME` for session bindings) or `bare` (`$KEY`, `$NAME`). A global setting, because it decides how the tokens in **every** project are read. With no argument it prints the value in force and where it came from.
+Which grammar spells an env token: `namespaced` (`$ENV.KEY` for env vars, `$BIND.NAME` for session bindings, `$GEN.NAME` for [per-request generators](/guide/repeater-and-fuzzer/#environment-variables)) or `bare` (`$KEY`, `$NAME`, with no generator spelling). A global setting, because it decides how the tokens in **every** project are read. With no argument it prints the value in force and where it came from.
 
 ```bash
 gori settings env-syntax
 # namespaced  (from /Users/me/.gori/settings.json)
-#   $ENV.KEY / $BIND.NAME
+#   $ENV.KEY / $BIND.NAME / $GEN.UUID
 
 gori settings env-syntax bare
 # env syntax: bare — $KEY / $NAME
