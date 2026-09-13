@@ -103,7 +103,7 @@ module Gori
         Env.masking_table
           .map { |(ref, _)| {ref, Env.spell(ref)} }
           .select { |(_, spelled)| masked.includes?(spelled) && !raw.includes?(spelled) }
-          .map { |(ref, _)| ref.qualified }
+          .map { |(ref, _)| Env.report_name(ref) }
           .uniq!
           .sort!
       end

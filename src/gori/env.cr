@@ -1384,6 +1384,13 @@ module Gori
       (ns = found.ns) ? qualify(ns, found.name) : found.name
     end
 
+    # The same answer for a caller holding a `Ref` rather than a scan result — the NAME a report
+    # carries (`unresolved`'s and `token_names`' list shape), not the token's spelling. Bare mode
+    # has one namespace, so a qualified name there would be a distinction nothing can act on.
+    def self.report_name(ref : Ref, syntax : Syntax = Settings.env_syntax) : String
+      syntax.bare? ? ref.name : ref.qualified
+    end
+
     # Every Token in `bytes`, in order, for the queries that want the tokens themselves rather
     # than a resolution verdict. Escapes are skipped whole (they are not references) and a
     # Literal is stepped over — the same reader, so the same token boundaries.
