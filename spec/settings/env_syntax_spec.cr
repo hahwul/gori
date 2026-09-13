@@ -177,6 +177,42 @@ describe "Settings env.syntax" do
     end
   end
 
+  # PRESENT but not a string is the typo path, not the absence path: `parse_env` can only assign
+  # from a string, so a guard keyed on "is the key there?" left the PREVIOUS home's grammar in
+  # memory over a file that names no readable grammar at all.
+  it "reads a non-string syntax as absent — bare, with a warning" do
+    with_syntax_home do |dir|
+      File.write(File.join(dir, "settings.json"), %({"env":{"syntax":"namespaced"}}))
+      Gori::Settings.load
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+
+      io = IO::Memory.new
+      prev = Gori::Settings.warning_io
+      Gori::Settings.warning_io = io
+      Gori::Settings.reset_load_warning_guard
+      begin
+        File.write(File.join(dir, "settings.json"), %({"env":{"syntax":null}}))
+        Gori::Settings.load
+      ensure
+        Gori::Settings.warning_io = prev
+      end
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+      io.to_s.should contain("env.syntax")
+    end
+  end
+
+  it "reads a NUMBER there the same way" do
+    with_syntax_home do |dir|
+      File.write(File.join(dir, "settings.json"), %({"env":{"syntax":"namespaced"}}))
+      Gori::Settings.load
+      File.write(File.join(dir, "settings.json"), %({"env":{"syntax":1,"vars":[{"key":"A","value":"1"}]}}))
+      Gori::Settings.reset_load_warning_guard
+      Gori::Settings.load
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+      Gori::Settings.env_vars.should eq([{"A", "1"}]) # the rest of the section still applied
+    end
+  end
+
   # The reason the absence rule may NOT live in `parse_env`: an import reuses `apply_sections`
   # over a FILTERED document, so a theme-only profile would otherwise flip the grammar back.
   it "an import that does not mention env leaves the grammar alone" do

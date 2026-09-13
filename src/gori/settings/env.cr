@@ -56,14 +56,25 @@ module Gori::Settings
     if pref = e["prefix"]?.try(&.as_s?)
       self.env_prefix = pref.empty? ? Env::DEFAULT_PREFIX : pref
     end
-    if raw = e["syntax"]?.try(&.as_s?)
-      if s = Env::Syntax.parse?(raw.strip)
-        self.env_syntax = s
+    if node = e["syntax"]?
+      # PRESENT but not a string (`null`, `1`, `["namespaced"]`) is the typo path, not the
+      # absence path. `as_s?` alone would have skipped the assignment altogether and left
+      # whatever grammar was in memory — the PREVIOUS home's, since `load` runs repeatedly over
+      # different homes in one process — while `Settings.load`'s absence guard read the key as
+      # present and declined to correct it. Say so and stay bare, exactly like an unknown value.
+      if raw = node.as_s?
+        if s = Env::Syntax.parse?(raw.strip)
+          self.env_syntax = s
+        else
+          self.env_syntax = DEFAULT_ENV_SYNTAX
+          note_load_warning("settings: env.syntax #{raw.inspect} is not one of " \
+                            "#{Env::Syntax.values.join('/', &.to_s.downcase)} — reading tokens as " \
+                            "#{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run")
+        end
       else
         self.env_syntax = DEFAULT_ENV_SYNTAX
-        note_load_warning("settings: env.syntax #{raw.inspect} is not one of " \
-                          "#{Env::Syntax.values.join('/', &.to_s.downcase)} — reading tokens as " \
-                          "#{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run")
+        note_load_warning("settings: env.syntax must be a string (got #{node.to_json}) — reading " \
+                          "tokens as #{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run")
       end
     end
     self.env_vars = parse_env_vars(e["vars"]?)

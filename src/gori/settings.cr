@@ -149,7 +149,13 @@ module Gori
         # Before the re-base below, so `@@loaded_raw` describes the state this actually left:
         # bare is representable as ABSENCE, so a bare install still serializes no `syntax` key and
         # `mine == base` stays the correct merge outcome for a section nobody touched.
-        unless root.as_h?.try(&.["env"]?).try(&.as_h?).try(&.has_key?("syntax"))
+        #
+        # A key that is PRESENT but not a string (`"syntax": null`, `: 1`) counts as ABSENT here,
+        # and must: `parse_env` can only assign from a string, so keying this guard on
+        # `has_key?` alone left the previous home's grammar in memory over a file that names no
+        # readable grammar at all — the leak this guard exists to close. `parse_env` warns about
+        # the same value; the two agree on the outcome.
+        unless root.as_h?.try(&.["env"]?).try(&.as_h?).try(&.["syntax"]?).try(&.as_s?)
           self.env_syntax = DEFAULT_ENV_SYNTAX
         end
       rescue
