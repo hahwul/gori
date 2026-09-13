@@ -25,7 +25,7 @@ module Gori::EnvMigration
     # still scanning. Only the marker is written here; what matters is that the apply refuses.
     store.set_setting(MARKER_KEY, Settings.env_syntax.to_s.downcase)
     store.flush
-    apply(plan, store, db_path)
+    apply(plan, db_path)
   end
 end
 
@@ -309,6 +309,29 @@ describe Gori::EnvMigration do
     end
   end
 
+  # The commonest first open of all is a READ-ONLY one (`gori run history list`, `repeater list`).
+  # The re-spelling writes through its own connection, so it happens there too — and so does the
+  # feed row, which used to be written through the caller's handle and silently dropped.
+  it "migrates through a read-only handle, feed row included" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      store = Gori::Store.open(db_path, read_only: true, background_index: false)
+      begin
+        store.read_only?.should be_true
+        Gori::EnvMigration.reconcile(store, db_path, "demo").not_nil!.tokens.should be > 0
+      ensure
+        store.close
+      end
+      with_open_store(db_path) do |store|
+        String.new(store.repeaters.find { |r| r.flow_id.nil? }.not_nil!.request)
+          .should contain("X-A: $ENV.id\r\n")
+        store.setting(Gori::Env::PROJECT_SYNTAX_KEY).should eq("namespaced")
+        store.events_recent(20).rows.map(&.message).any?(&.includes?("re-spelled")).should be_true
+      end
+    end
+  end
+
   it "is a no-op on the next open: no second backup, no second line" do
     with_migration_home do |db_path|
       seed_migration_project(db_path)
@@ -405,24 +428,46 @@ describe Gori::EnvMigration do
     end
   end
 
-  # The GLOBAL rewrite rules travel with the project open, not just with the settings load: a global
-  # rule can name an EXTRACT RULE, and no settings load knows those names — only an open project
-  # does.
-  it "re-spells a global rule against the project's own binding names" do
+  # The GLOBAL rewrite rules are NAMED at a project open and never rewritten there. `Settings.load`
+  # re-spells what it can (the global env vars); a rule that names a PROJECT var or an extract rule
+  # is only recognisable once a project is open — and rewriting it from there would not be
+  # idempotent, because nothing records which grammar the RULES are in.
+  it "names a global rule that still spells a token the old way, and leaves it alone" do
     with_migration_home do |db_path|
       seed_migration_project(db_path)
       Gori::Settings.env_syntax = NS
       Gori::Settings.rewriter_rules = [Gori::Settings::RewriterRule.new(
-        1_i64, true, "auth", "request", "head", "Authorization", "Bearer $token",
-        "replace", "literal", "", "")]
+        1_i64, true, "stamp", "request", "head", "X-Env", "Bearer $token",
+        "add_header", "literal", "", "")]
       report = with_open_store(db_path) do |store|
         Gori::EnvMigration.reconcile(store, db_path, "demo")
       end.not_nil!
-      global = report.global.not_nil!
-      global.tokens.should eq(1)
-      Gori::Settings.rewriter_rules[0].replacement.should eq("Bearer $BIND.token")
-      report.notices.size.should eq(2) # the project line, then the global one
-      report.notices[1].should contain("global rewrite rules: 1 token re-spelled")
+      hint = report.global_hint.not_nil!
+      hint.should contain("global rewrite rules: 1 rule (stamp)")
+      hint.should contain("still spell a token the bare way")
+      hint.should contain("settings.json")
+      report.notices.size.should eq(2) # the project line, then the hint
+      # NOT rewritten, and no second backup of settings.json: the rule is the operator's to fix.
+      Gori::Settings.rewriter_rules[0].replacement.should eq("Bearer $token")
+      Dir.glob("#{File.dirname(Gori::Settings.path)}/settings.json.pre-*").should be_empty
+    ensure
+      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+    end
+  end
+
+  # A rule already spelled the target's way holds nothing to fix. Its only "change" is the escape a
+  # re-spelling would add, and a hint there would fire on every project of every install that has
+  # ever switched — the noise that teaches operators to skip the line that matters.
+  it "stays quiet about a global rule that is already spelled the target's way" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      Gori::Settings.rewriter_rules = [Gori::Settings::RewriterRule.new(
+        1_i64, true, "stamp", "request", "head", "X-Env", "Bearer $ENV.API",
+        "add_header", "literal", "", "")]
+      with_open_store(db_path) do |store|
+        Gori::EnvMigration.reconcile(store, db_path, "demo").not_nil!.global_hint.should be_nil
+      end
     ensure
       Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
     end

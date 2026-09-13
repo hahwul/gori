@@ -6,6 +6,7 @@ require "../notes"
 require "../session_slot"
 require "../evidence"
 require "../config_log"
+require "../flow_source"
 require "../store"
 
 module Gori
@@ -69,12 +70,12 @@ module Gori
       rows : Int32,
       left : Int32,
       backup : String?,
-      global : GlobalReport? = nil,
+      global_hint : String? = nil,
       error : String? = nil do
       # Nothing moved and nothing needs saying: a database that had no token in the old grammar
       # got its marker and no backup. The surfaces use this to stay quiet on a fresh project.
       def quiet? : Bool
-        tokens.zero? && left.zero? && global.nil? && error.nil?
+        tokens.zero? && left.zero? && global_hint.nil? && error.nil?
       end
 
       # THE line, on every surface. One sentence per project, counters first, the way back last.
@@ -94,13 +95,14 @@ module Gori
         line
       end
 
-      # The line plus the global-rule line, which belongs to the same event: a switch re-spells the
-      # rows AND the rules that rewrite every project's traffic. Named `notices` rather than `lines`
-      # so it cannot be misread (by a human or by ameba) as `String#lines`.
+      # The line plus, when there is one, the global-rule line — they belong to the same event: the
+      # grammar moved, the rows were re-spelled, and a rule in settings.json was not. Named
+      # `notices` rather than `lines` so it cannot be misread (by a human or by ameba) as
+      # `String#lines`.
       def notices : Array(String)
         out = [] of String
-        out << line unless quiet?
-        global.try { |g| out << g.line }
+        out << line unless tokens.zero? && left.zero? && error.nil?
+        global_hint.try { |h| out << h }
         out
       end
     end
@@ -133,7 +135,7 @@ module Gori
         return StoreReport.new(project, from, to, 0, 0, 0, nil,
           error: ex.message.presence || ex.class.name)
       end
-      apply(plan, store, db_path)
+      apply(plan, db_path)
     end
 
     # The ENV table as the grammar being LEFT resolved it: the global vars merged under this
@@ -422,8 +424,13 @@ module Gori
     # either stale or torn. `VACUUM INTO` writes a single consistent database — and it cannot run
     # inside a transaction, which is why it happens first and is deleted again if the marker check
     # says a peer got there.
-    private def self.apply(plan : Plan, store : Store, db_path : String) : StoreReport?
+    private def self.apply(plan : Plan, db_path : String) : StoreReport?
       backup = plan.writes.empty? ? nil : vacuum_into(db_path, plan.to)
+      # The project half of the report, known before the write: the counters are the scan's, and the
+      # backup is already on disk. Built here because the ACTIVITY row below is written on THIS
+      # connection and needs the same sentence the surfaces print.
+      report = StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows, plan.left,
+        backup)
       applied = false
       ::DB.open("sqlite3:#{db_path}?busy_timeout=5000") do |db|
         db.using_connection do |conn|
@@ -436,6 +443,12 @@ module Gori
               conn.exec("INSERT INTO settings (key, value) VALUES (?, ?) " \
                         "ON CONFLICT(key) DO UPDATE SET value = ?",
                 MARKER_KEY, plan.to.to_s.downcase, plan.to.to_s.downcase)
+              # The ACTIVITY feed, in the same transaction and on the same connection — NOT through
+              # `ConfigLog.record(store, …)`. The caller's handle is read-only on every read-only
+              # `gori run`, and an event written through it is dropped without a word: the one
+              # surface whose whole question is "what happened to this project" would have been the
+              # one place this never showed up.
+              log_migration(conn, report) unless report.quiet?
               conn.exec("COMMIT")
               applied = true
             end
@@ -451,31 +464,53 @@ module Gori
         backup.try { |b| File.delete?(b) }
         return nil
       end
-      report = StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows, plan.left,
-        backup, global: migrate_global_rules_for(plan))
-      # The ACTIVITY feed as well as the surface's own channel: "what happened to this project" is
-      # the question the feed exists to answer, and a re-spelling of its stored tokens is the
-      # largest single edit gori ever makes to one without being asked.
-      ConfigLog.record(store, "env", report.line) unless report.quiet?
-      report
+      report.copy_with(global_hint: global_rule_hint(plan))
     rescue ex : ::DB::Error | ::SQLite3::Exception | File::Error
       StoreReport.new(plan.project, plan.from, plan.to, 0, 0, 0, nil,
         error: ex.message.presence || ex.class.name)
     end
 
-    # The GLOBAL rewrite rules, re-spelled against THIS project's tables.
+    # One `config` row in the event feed, written the way `ConfigLog.record` writes one (same
+    # `source`, same `actor` question) but on the migration's own connection.
+    private def self.log_migration(conn : ::DB::Connection, report : StoreReport) : Nil
+      conn.exec("INSERT INTO events (created_at, source, kind, level, message, actor) " \
+                "VALUES (?,?,?,?,?,?)",
+        (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64,
+        ConfigLog::SOURCE, "env", "info", report.line, FlowSource.surface.try(&.token))
+    end
+
+    # The GLOBAL rewrite rules, NAMED and never rewritten from here.
     #
-    # `Settings.load` has already done the pass it could — it knows the global env vars and nothing
-    # else — and a global rule that names a project var or an extract rule is only recognisable
-    # once a project is open. Running it again here is safe because the rewrite is driven by the
-    # name tables: a rule already spelled `$ENV.token` holds no bare name either table claims, so
-    # the second pass finds nothing and returns nil.
-    private def self.migrate_global_rules_for(plan : Plan) : GlobalReport?
-      report = migrate_global_rules(from: plan.from, to: plan.to,
-        env_names: plan.env_names, bind_names: plan.bind_names)
-      return nil unless report
-      Settings.save
-      report
+    # They live in settings.json, so `Settings.load` (and the CLI verb) re-spell them when the
+    # install's grammar moves — with only the GLOBAL env var names to go on, because no project is
+    # open at that point. A rule that names a PROJECT var or an extract rule is therefore still
+    # spelled the old way, and this is where gori can finally see that: the project whose tables
+    # give those names meaning is open.
+    #
+    # Reported rather than rewritten, and that is not squeamishness — it is the one place a rewrite
+    # would not be idempotent. The project marker says which grammar the ROWS are in; nothing says
+    # which grammar the RULES are in, so a second project opening after the same switch would
+    # re-spell an already-re-spelled replacement (namespaced → bare escapes `$token` into
+    # `$$token`, and the rule then inserts four literal bytes into live traffic).
+    #
+    # Only a change that carries a `ref` counts: an ESCAPE-only change means the rule is already
+    # spelled the target's way and merely holds a sigil the target grammar pairs differently, which
+    # is not something for an operator to go and fix.
+    private def self.global_rule_hint(plan : Plan) : String?
+      names = [] of String
+      Settings.rewriter_rules.each do |rule|
+        next if rule.replacement.empty?
+        _, changes = rewrite(rule.replacement.to_slice, from: plan.from, to: plan.to,
+          env_names: plan.env_names, bind_names: plan.bind_names, kind: Kind::Rule,
+          prefix: plan.prefix)
+        next unless changes.any? { |c| c.ref }
+        names << (rule.name.presence || "##{rule.id}")
+      end
+      return nil if names.empty?
+      "global rewrite rules: #{counted(names.size, "rule")} (#{names.join(", ")}) still spell a " \
+      "token the #{plan.from.to_s.downcase} way and rewrite traffic in EVERY project — a global " \
+      "rule lives in settings.json, not in this database, so re-spell it in Settings → Match & " \
+      "Replace or with `gori run rewriter`"
     end
 
     # The marker as this CONNECTION sees it, inside the transaction. Raw SQL rather than

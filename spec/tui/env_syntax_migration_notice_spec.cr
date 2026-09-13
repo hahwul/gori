@@ -15,11 +15,11 @@ end
 private def store_report(tokens : Int32 = 3, rows : Int32 = 2, left : Int32 = 0,
                          backup : String? = "/h/projects/acme/gori.db.pre-namespaced-20260913-101500",
                          to : Gori::Env::Syntax = Gori::Env::Syntax::Namespaced,
-                         global : Gori::EnvMigration::GlobalReport? = nil,
+                         global_hint : String? = nil,
                          error : String? = nil) : Gori::EnvMigration::StoreReport
   from = to.bare? ? Gori::Env::Syntax::Namespaced : Gori::Env::Syntax::Bare
   Gori::EnvMigration::StoreReport.new("acme", from, to, tokens, rows, left, backup,
-    global: global, error: error)
+    global_hint: global_hint, error: error)
 end
 
 describe "env.syntax migration notice" do
@@ -49,13 +49,21 @@ describe "env.syntax migration notice" do
     quiet.notices.should be_empty
   end
 
-  it "carries the global-rule line as part of the same event" do
-    global = Gori::EnvMigration::GlobalReport.new(Gori::Env::Syntax::Bare,
-      Gori::Env::Syntax::Namespaced, 1, 2, "/h/settings.json.pre-namespaced-20260913-101500")
-    lines = store_report(global: global).notices
+  # The global rewrite rules are the half a project open can only NAME: they live in settings.json,
+  # and nothing records which grammar they are spelled in, so re-spelling them from a project open
+  # would not be idempotent. The line rides along with the project's.
+  it "carries the global-rule hint as part of the same event" do
+    lines = store_report(global_hint: "global rewrite rules: 1 rule (stamp) still spell a token").notices
     lines.size.should eq(2)
-    lines[1].should eq("global rewrite rules: 2 tokens re-spelled to $ENV.KEY/$BIND.NAME in 1 rule " \
-                       "— backup at /h/settings.json.pre-namespaced-20260913-101500")
+    lines[1].should contain("still spell a token")
+  end
+
+  # …and a project with nothing to re-spell still says the hint, because the rule is broken whether
+  # or not this database had a token in it.
+  it "says the hint even when no row moved" do
+    quiet = store_report(tokens: 0, rows: 0, backup: nil, global_hint: "global rewrite rules: …")
+    quiet.quiet?.should be_false
+    quiet.notices.should eq(["global rewrite rules: …"])
   end
 
   # A failure must not be silent either: until it succeeds, the operator's drafts are spelled in a
@@ -113,10 +121,13 @@ describe "env.syntax migration notice" do
     app.should contain("Settings.take_env_syntax_global_migration")
   end
 
-  it "writes the ACTIVITY row at the migration itself, not at the surfaces" do
+  it "writes the ACTIVITY row at the migration itself, on its OWN connection" do
     # "What happened to this project" is the feed's question, and the answer must not depend on
-    # which surface opened it — the CLI has no ring to push to at all.
+    # which surface opened it — the CLI has no ring to push to at all. Written on the migration's
+    # own connection, inside the same transaction: the caller's handle is read-only on every
+    # read-only `gori run`, and an event written through THAT is dropped without a word.
     store = notice_src("gori", "env_migration", "store.cr")
-    store.should contain("ConfigLog.record(store, \"env\", report.line) unless report.quiet?")
+    store.should contain("log_migration(conn, report) unless report.quiet?")
+    store[/def self.log_migration.*?\n    end/m].not_nil!.should contain("INSERT INTO events")
   end
 end
