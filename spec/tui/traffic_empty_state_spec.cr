@@ -186,7 +186,11 @@ describe Gori::Tui::TrafficEmptyState do
     TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :project_env)
     backend.contains?("VARIABLES").should be_true
     backend.contains?("reuse across requests").should be_true
-    backend.contains?("add a $KEY variable").should be_true
+    # No `$KEY` in the static copy any more: the two lines that name a TOKEN are built at render
+    # time through `Env.spell`, because a frozen `$KEY` here teaches the one spelling that does
+    # not resolve under the namespaced grammar. This bullet names no token at all.
+    backend.contains?("add a variable").should be_true
+    backend.contains?("in a request expands when you send").should be_true
   end
 
   # The four engine tabs whose "nothing open yet" state used to be one muted line, while their
@@ -255,7 +259,7 @@ describe Gori::Tui::TrafficEmptyState do
   # The four Project sub-tab cards were the ones #928 missed: their chips were written as bare
   # literals with no `verb:`, so a rebind reached the status strip beside them (which goes
   # through `keys()`) and not the card. An operator rebinding "Add env var" to `n` then read
-  # `a  add a $KEY variable` on the only screen that was offering to teach them the key.
+  # `a  add a variable` on the only screen that was offering to teach them the key.
   it "resolves the four Project sub-tab chips through the registry too" do
     prev = Gori::Settings.keymap_overrides
     begin
@@ -268,7 +272,7 @@ describe Gori::Tui::TrafficEmptyState do
       TrafficEmptyState.registry = Gori::Verbs.registry
       { {:project_scope, "add an include or exclude rule", "n"},
        {:project_overrides, "map a host to an IP", "n"},
-       {:project_env, "add a $KEY variable", "n"},
+       {:project_env, "add a variable", "n"},
        {:project_activity, "filter by source", "w"},
       }.each do |(variant, label, want)|
         backend = MemoryBackend.new(70, 16)
