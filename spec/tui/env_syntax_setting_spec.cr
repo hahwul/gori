@@ -23,15 +23,38 @@ private def with_settings_home(&)
   dir = File.tempname("gori-env-syntax")
   Dir.mkdir_p(dir)
   ENV["GORI_HOME"] = dir
+  # "did a TUI surface flip the grammar in this session" is process state (see `EnvSyntaxSeam`),
+  # so it is reset around every example — a leaked claim would make the next example's save skip
+  # the reload it is there to assert.
+  Gori::Tui::EnvSyntaxSeam.owned = false
   begin
     yield
   ensure
     prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+    Gori::Tui::EnvSyntaxSeam.owned = false
     Gori::Settings.env_syntax = saved_syntax
     Gori::Settings.env_prefix = saved_prefix
     Gori::Settings.env_vars = saved_vars
     FileUtils.rm_rf(dir)
   end
+end
+
+# Rewrite the `env` section of the settings file the way a PEER process does — `gori settings
+# env-syntax namespaced` in another terminal, or a second gori window's own card. The card in this
+# example holds a snapshot taken before this landed.
+private def peer_writes_syntax(syntax : String) : Nil
+  path = Gori::Settings.path
+  root = (File.exists?(path) ? JSON.parse(File.read(path)).as_h : {} of String => JSON::Any)
+  env = (root["env"]?.try(&.as_h?) || {} of String => JSON::Any).dup
+  env["syntax"] = JSON::Any.new(syntax)
+  root["env"] = JSON::Any.new(env)
+  File.write(path, root.to_json)
+end
+
+private def file_syntax : String?
+  path = Gori::Settings.path
+  return nil unless File.exists?(path)
+  JSON.parse(File.read(path))["env"]?.try(&.["syntax"]?).try(&.as_s?)
 end
 
 # The card wired the way `Runner#open_settings` wires it, so the toggle really goes through
@@ -40,11 +63,16 @@ private def env_card(&) : Nil
   ov = Gori::Tui::EnvOverlay.new
   toasts = [] of String
   ov.on_toast = ->(msg : String) { toasts << msg; nil }
+  # Mirrors `Runner#save_env` line for line, INCLUDING the order: adopt the file's grammar (a
+  # peer may have switched it), resync the card's display copy, then write the vars and the
+  # prefix. It deliberately does NOT assign `Settings.env_syntax` from the overlay — the `s`
+  # toggle owns that, and handing the snapshot back on every var edit is the bug below.
   ov.on_save = -> {
+    Gori::Tui::EnvSyntaxSeam.refresh_from_disk
+    ov.sync_syntax
     prefix, vars = ov.to_config
     Gori::Settings.env_prefix = prefix
     Gori::Settings.env_vars = vars.dup
-    Gori::Settings.env_syntax = ov.syntax
     Gori::Settings.save
   }
   yield OverlayHarness.new(ov), ov, toasts
@@ -112,6 +140,77 @@ describe Gori::Tui::EnvOverlay do
       prefix.should eq(Gori::Settings.env_prefix)
       vars.should eq([{"HOST", "api.test"}])
       ov.syntax.should eq(Gori::Env::Syntax::Namespaced) # picked up by `reset`, not by the tuple
+    end
+  end
+
+  # The card persists on EVERY mutation and the `env` section is merged WHOLE, so a var edit used
+  # to carry the card's opening snapshot of the grammar back over a peer's switch — silently, and
+  # with every editor in the session then reading tokens under the grammar the operator had just
+  # left. The env section is never reloaded while the TUI runs, so the reload is the fix.
+  it "adopts a peer's grammar switch instead of writing its snapshot back over it" do
+    with_settings_home do
+      Gori::Settings.env_syntax = Gori::Env::Syntax::Bare
+      Gori::Settings.env_vars = [{"HOST", "api.test"}]
+      Gori::Settings.save.should be_true
+      env_card do |h, ov, _|
+        ov.syntax.should eq(Gori::Env::Syntax::Bare) # the snapshot this card opened on
+        peer_writes_syntax("namespaced")
+
+        # One ordinary var edit: `a`, "KEY VALUE", ↵.
+        h.press(Termisu::Input::Key::LowerA, 'a')
+        h.type("TOKEN t0k")
+        h.press(Termisu::Input::Key::Enter)
+
+        file_syntax.should eq("namespaced")
+        Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+        # …and the card stops describing the grammar it opened on, which is the other half of
+        # the lie: the meta line is the only place on screen that names it.
+        ov.syntax.should eq(Gori::Env::Syntax::Namespaced)
+        h.rendered?("syntax namespaced").should be_true
+        # The edit itself still landed.
+        Gori::Settings.env_vars.should contain({"TOKEN", "t0k"})
+        JSON.parse(File.read(Gori::Settings.path))["env"]["vars"].as_a.size.should eq(2)
+      end
+    end
+  end
+
+  it "keeps THIS session's `s` flip when the file still holds the older grammar" do
+    with_settings_home do
+      Gori::Settings.env_syntax = Gori::Env::Syntax::Bare
+      Gori::Settings.env_vars = [{"HOST", "api.test"}]
+      Gori::Settings.save.should be_true
+      env_card do |h, ov, _|
+        h.press(Termisu::Input::Key::LowerS, 's')
+        ov.syntax.should eq(Gori::Env::Syntax::Namespaced)
+        # A peer that wrote before this operator's keystroke does not get to undo it: the reload
+        # yields to the session that actually asked for a grammar.
+        peer_writes_syntax("bare")
+        h.press(Termisu::Input::Key::LowerA, 'a')
+        h.type("TOKEN t0k")
+        h.press(Termisu::Input::Key::Enter)
+
+        file_syntax.should eq("namespaced")
+        Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      end
+    end
+  end
+
+  it "reads an ABSENT env.syntax as bare, the way the loader does" do
+    with_settings_home do
+      Gori::Settings.env_syntax = Gori::Env::Syntax::Namespaced
+      Gori::Settings.env_vars = [{"HOST", "api.test"}]
+      Gori::Settings.save.should be_true
+      # A peer that switched a vars-less install back to bare writes no `env` section at all
+      # (`serialize_env` omits it), and the absence means bare forever.
+      File.write(Gori::Settings.path, %({"theme":"dark"}))
+      Gori::Tui::EnvSyntaxSeam.disk_syntax.should eq(Gori::Env::Syntax::Bare)
+      # Nothing to say ⇒ nothing is changed: no file, or bytes that will not parse.
+      File.write(Gori::Settings.path, "{not json")
+      Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
+      File.delete(Gori::Settings.path)
+      Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
+      Gori::Tui::EnvSyntaxSeam.refresh_from_disk
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
     end
   end
 

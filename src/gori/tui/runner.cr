@@ -2227,13 +2227,16 @@ module Gori::Tui
     end
 
     private def save_env(ov : EnvOverlay) : Bool
+      # The env section is written WHOLE by the merge, grammar included, and this card saves on
+      # every keystroke — so a var edit used to carry the overlay's opening snapshot of the
+      # grammar back over a `gori settings env-syntax` run in another terminal. The switch is the
+      # `s` key's business (it sets `Settings.env_syntax` itself and claims the session); a save
+      # about a var adopts whatever the file says. See `EnvSyntaxSeam`.
+      EnvSyntaxSeam.refresh_from_disk
+      ov.sync_syntax
       prefix, vars = ov.to_config
       Settings.env_prefix = prefix
       Settings.env_vars = vars.dup
-      # The grammar rides along with every mutation of this card, not on a seam of its own: the
-      # overlay persists per keystroke and the syntax is one of the three things it holds.
-      # `Settings.env_syntax=` bumps the highlight rev itself, so every open editor re-tints.
-      Settings.env_syntax = ov.syntax
       ok = Settings.save
       Env.bump_highlight_rev if ok
       ok

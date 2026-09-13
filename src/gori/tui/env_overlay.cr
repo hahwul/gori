@@ -6,6 +6,7 @@ require "./text_field"
 require "./overlay"
 require "../settings"
 require "../env"
+require "./env_syntax_seam"
 
 module Gori::Tui
   # Global environment-variable editor (settings:env). Edits a working copy of the
@@ -51,10 +52,18 @@ module Gori::Tui
     end
 
     # The PREFIX and the vars, and deliberately not the syntax: this is the pair the shell has
-    # always read back, and `syntax` is a getter of its own (`Runner#save_env` reads both).
-    # Widening the tuple would break every caller for no gain.
+    # always read back, and `syntax` is a getter of its own. Widening the tuple would break every
+    # caller for no gain.
     def to_config : {String, Array({String, String})}
       {@prefix, @items}
+    end
+
+    # Re-read the grammar this card DISPLAYS from the live setting. Called by the shell after it
+    # has refreshed that setting from disk (`EnvSyntaxSeam`), so a peer's switch shows up in the
+    # prefix row and the border meta instead of leaving the card describing the old grammar while
+    # every editor paints the new one.
+    def sync_syntax : Nil
+      @syntax = Settings.env_syntax
     end
 
     def adding? : Bool
@@ -163,6 +172,12 @@ module Gori::Tui
     # told that reads the next unexpanded token as a bug in the send path.
     private def toggle_syntax_and_persist : Nil
       @syntax = @syntax.bare? ? Env::Syntax::Namespaced : Env::Syntax::Bare
+      # Set LIVE here, where the operator asked for it, and claim the setting for this session —
+      # `Runner#save_env` deliberately no longer writes this working copy back on every var edit
+      # (see `EnvSyntaxSeam`), and the assignment bumps the highlight rev so every open editor
+      # re-tints before the next frame.
+      Settings.env_syntax = @syntax
+      EnvSyntaxSeam.claim
       unless persist
         toast("env syntax applied — could not save to #{Settings.path}")
         return

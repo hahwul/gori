@@ -2,6 +2,7 @@ require "../tab_controller"
 require "../project_view"
 require "../clipboard"
 require "../../env"
+require "../env_syntax_seam"
 
 module Gori::Tui
   # The Project tab: the project overview plus five SUB-TABS (DESCRIPTION · SCOPE · HOST
@@ -1184,6 +1185,7 @@ module Gori::Tui
     def env_toggle_syntax : Nil
       syntax = Settings.env_syntax.bare? ? Env::Syntax::Namespaced : Env::Syntax::Bare
       Settings.env_syntax = syntax
+      EnvSyntaxSeam.claim # this session's operator has spoken; a file written before now is stale
       ok = Settings.save
       @host.status(ok ? EnvOverlay.syntax_toast(syntax) : "env syntax applied — could not save to #{Settings.path}")
     end
@@ -1253,6 +1255,10 @@ module Gori::Tui
       case kind
       when :empty then @host.status("env prefix: empty")
       when :ok
+        # The SIGIL is global and shares the `env` section with the grammar, which the merge
+        # rewrites whole: adopt the file's grammar first so this write says nothing about it
+        # (`EnvSyntaxSeam`, the same guard the Settings env card's saves take).
+        EnvSyntaxSeam.refresh_from_disk
         Settings.env_prefix = prefix
         ok = Settings.save
         Env.bump_highlight_rev if ok
