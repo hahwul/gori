@@ -505,6 +505,7 @@ module Gori::Tui
       # every surface that answers "where am I listening": the top-bar chip
       # (#listen_chip_label), the status line, the listeners overlay, the traffic empty states
       # — all of which read `@session.proxy.port` directly — plus the toast above.
+      announce_env_syntax_migration
       project_controller.reload
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still
@@ -3746,6 +3747,26 @@ module Gori::Tui
     # read `listeners:1` for a two-entry config — the silent drop this readout exists to end.
     private def listener_chip_count : Int32
       @session.listener_rows.size
+    end
+
+    # What the open-time token-grammar reconcile did to this project, on the channel the operator is
+    # actually watching (#env.syntax).
+    #
+    # The SAME three surfaces a peer notice uses, for the same reason: the ring always (this is the
+    # answer to "why do my drafts read `$ENV.KEY` now?", asked a minute later), the bottom-bar toast
+    # so it is seen at all, and the ACTIVITY feed — which the migration itself wrote through
+    # `ConfigLog`, because the feed's question is "what happened to this project" and this is the
+    # largest single edit gori ever makes to one unasked.
+    #
+    # `:warn`, deliberately: the bytes in this operator's Repeater tabs changed, and `:info` takes
+    # neither the bell nor the toast (`Notifications#push`). The toast yields to a bind failure
+    # already on screen — capture being off is the more urgent of the two — but the ring keeps both.
+    private def announce_env_syntax_migration : Nil
+      lines = @session.env_syntax_migration.try(&.lines) || [] of String
+      Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
+      return if lines.empty?
+      lines.each { |line| @notifications.push(:warn, line, goto: Jobs::Goto.new(:project)) }
+      @toast ||= lines.first
     end
 
     # Peer-change announcements (#772). The policy — which peer change is worth a line, at what

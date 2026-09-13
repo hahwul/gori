@@ -605,6 +605,14 @@ module Gori
           retention_flows: read_only ? Store::RETENTION_UNLIMITED : Settings.retention_flows,
           read_only: read_only,
           background_index: false)
+        # THE token-grammar reconcile, before anything reads a token out of this store (#env.syntax).
+        # `read_only` does not exempt a command: the handle above may be read-only, but the
+        # re-spelling writes through its own connection, and `gori run repeater list` is exactly as
+        # good a moment to bring a project's stored tokens into this install's grammar as a TUI open
+        # is — the alternative is a headless run that reads them under the wrong grammar forever.
+        # Reported HERE (STDERR, one line per project) rather than carried: every `gori run`
+        # subcommand funnels through this method, so a caller that forgot to report would be silent.
+        report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name))
         # The project's pinned upstream / dial timeouts / capture cap (#538). `bind: false`:
         # not one command routed through here LISTENS — `gori run capture` is the only
         # subcommand that binds and it opens its project through `Session.open` instead — so
@@ -635,6 +643,22 @@ module Gori
         abort "gori run: cannot open database #{project.db_path}: " \
               "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
               "#{open_failure_hint(ex, project.db_path, read_only)}"
+      end
+
+      # The open-time re-spelling, said out loud. STDERR, never STDOUT: `gori run … --format json`
+      # is piped into other programs, and a migration notice inside the JSON would break every one
+      # of them. One line per project, plus one for the GLOBAL rewrite rules when this process's
+      # settings load re-spelled those too — drained here because a `gori run` is the commonest
+      # first thing a bare-era install does after an upgrade.
+      #
+      # `io` is injectable for the same reason every other notice in this file has one: the
+      # alternative is a spec that can only assert the report by reading the terminal.
+      def self.report_env_syntax_migration(report : EnvMigration::StoreReport?,
+                                           io : IO? = STDERR) : Nil
+        lines = report.try(&.lines) || [] of String
+        Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
+        return if lines.empty?
+        lines.each { |line| io.try &.puts line }
       end
 
       # What to add after SQLite's own sentence, for the two failures that are NOT what the

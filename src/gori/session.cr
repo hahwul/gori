@@ -61,6 +61,13 @@ module Gori
     # `build_listener`: a colour rule never touches a byte on the wire, so a listener has no
     # business naming it.
     getter colormarker : Colormarker
+    # What the open-time token-grammar reconcile did to this project's stored tokens, or nil when
+    # it had nothing to do (the marker already agreed with `Settings.env_syntax`). Reported by the
+    # surface that opened the session — the TUI on its status line and in the notification ring,
+    # `gori run capture` through `Log` — because only they know which channel the operator is
+    # watching. See `EnvMigration.reconcile`.
+    property env_syntax_migration : EnvMigration::StoreReport? = nil
+
     # Why the live proxy isn't listening (e.g. "port in use"), or nil when capture
     # is up. The project still opens for History/Repeater/Sitemap/etc. — only live
     # capture needs the bind — so a bind failure is non-fatal.
@@ -76,6 +83,14 @@ module Gori
         authorize_events: authorize_events)
       probe = nil.as(Probe::Analyzer?)
       begin
+        # THE token-grammar reconcile, and it runs FIRST — before the rule sets, the slots, the
+        # binding table and the project env layer are read out of this store. Those objects are what
+        # this session sends with, so re-spelling the rows after they were loaded would leave a live
+        # session sending the old spelling until something reloaded it. `Store.open` is not the seam
+        # for this (half its callers open read-only, to compare or to count), so each of the three
+        # surfaces that opens a project to WORK in it asks here; the marker in the database is what
+        # makes the second of them a no-op. See `EnvMigration.reconcile`.
+        syntax_migration = EnvMigration.reconcile(store, project.db_path, project.name)
         # Per-project network overrides: pull this project's pinned bind/upstream (if any) into
         # the Settings runtime layer BEFORE binding, so the proxy listens on the project's address
         # and Upstream.dial (reads Settings.upstream_route) tunnels through its upstream.
@@ -201,6 +216,10 @@ module Gori
           store.pause_background_index
         end
         session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, bindings, slots, scope, host_overrides, interceptor, sink, authorize_events, bind_error, lock, extra, listener_errs)
+        # Carried rather than emitted: `Session.open` has no channel to speak on (the TUI's
+        # notification ring does not exist yet, and `gori run capture` writes to `Log`), so the
+        # surface that opened the project reads it off the session and says it its own way.
+        session.env_syntax_migration = syntax_migration
         session.sync_capture_status!
         session
       rescue ex

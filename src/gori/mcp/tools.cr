@@ -281,6 +281,7 @@ module Gori
         @client_version = nil.as(String?)
         @presence = nil.as(AgentPresence?)
         if s = @store
+          reconcile_env_syntax(s)
           bind_project_network(s)
           Env.load_project(s)
           bind_binding_layer(s)
@@ -341,6 +342,22 @@ module Gori
         # added by the TUI or `gori run` since the last call, but the VALUES this process
         # observed are its own and must survive the refresh.
         @bindings.try(&.reload)
+      end
+
+      # THE token-grammar reconcile for this surface (#env.syntax). Both bind sites call it — the
+      # constructor above and `bind_project` (switch_project / an auto-binding create_project) —
+      # because an MCP server binds a project at either, and a re-spelling that only happened at
+      # startup would leave a switched-to project reading its own drafts as literal text.
+      #
+      # BEFORE the binding layer and the project env layer are read out of the store, like the TUI's
+      # `Session.open`. Reported through `Log`, which is this surface's only channel: STDOUT belongs
+      # to JSON-RPC, and a notice on it would be a protocol violation rather than a notice.
+      private def reconcile_env_syntax(s : Store) : Nil
+        return unless path = @db_path
+        name = @project_name || File.basename(File.dirname(path))
+        lines = Gori::EnvMigration.reconcile(s, path, name).try(&.lines) || [] of String
+        Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
+        lines.each { |line| Log.info { line } }
       end
 
       # Install this project's network overrides (#538) — the third caller of the loader the

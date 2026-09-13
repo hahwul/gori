@@ -408,27 +408,22 @@ module Gori::CLI
   #
   # A GLOBAL setting, so it lives here and not under `gori run project env`: that one writes the
   # project database, and this decides how the tokens in EVERY project are read.
+  #
+  # NO flags. The verb used to carry `--migrate` (plus `--dry-run` / `--project` / `--db` /
+  # `--all-projects`) because a switch only changed how STORED bytes were READ and an operator had
+  # to ask for the data half. They are gone: every project re-spells itself the first time it is
+  # opened after the grammar moved (`EnvMigration.reconcile`), which is the only moment gori knows
+  # which database it is allowed to write to — and the only one where a running peer is not holding
+  # its own copy of those rows.
   private def self.run_settings_env_syntax(args : Array(String)) : Nil
-    migrate = false
-    dry = false
-    all = false
-    project_name = nil.as(String?)
-    db_path = nil.as(String?)
     parser = OptionParser.new do |p|
-      p.banner = "Usage: gori settings env-syntax [#{env_syntax_values}] " \
-                 "[--migrate [--dry-run] [--project NAME | --all-projects | --db PATH]]"
-      p.on("--migrate", "Also re-spell the tokens already stored in a project database") { migrate = true }
-      p.on("--dry-run", "With --migrate: print what would be rewritten, then exit without writing") { dry = true }
-      p.on("--project=NAME", "Project to migrate (default: most-recently-active)") { |v| project_name = v }
-      p.on("--db=PATH", "Explicit SQLite db file to migrate") { |v| db_path = v }
-      p.on("--all-projects", "Migrate every project under the gori home") { all = true }
+      p.banner = "Usage: gori settings env-syntax [#{env_syntax_values}]"
       p.on("-h", "--help", "Show this help") { puts p; exit 0 }
       p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
       p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     rest = stray_args(parser, args)
     abort "gori settings env-syntax: one value at a time (got #{rest.size}: #{rest.join(", ")})" if rest.size > 1
-    refuse_env_syntax_migrate_flags!(migrate, dry, all, project_name, db_path, rest[0]?)
 
     Settings.load
     unless want = rest[0]?
@@ -440,73 +435,40 @@ module Gori::CLI
 
     # Refuse rather than write half an operator's file back — the same guard export and import use.
     abort_on_degraded_settings!("env-syntax")
-    # BEFORE the grammar is switched, and on its own transaction per project: a dry run must not
-    # change the setting either, and a migration that fails must leave an install whose grammar
-    # still matches its stored bytes.
-    if migrate
-      migrate_env_syntax(syntax, dry: dry, project_name: project_name,
-        db_path: db_path, all: all)
-      return if dry
-    end
     was = Settings.env_syntax
+    # The GLOBAL rewrite rules are the one thing this verb still re-spells itself: they live in
+    # settings.json, not in a project database, so no project open will ever reach them. Both
+    # directions, and a copy of the file is written beside it first.
+    global = was == syntax ? nil : Gori::EnvMigration.migrate_global_rules(from: was, to: syntax)
     Settings.env_syntax = syntax
     unless Settings.save
       abort "gori settings env-syntax: applied for this process but could not be written to #{Settings.path}"
     end
-    env_syntax_write_lines(was, syntax, migrated: migrate).each { |line| puts line }
-  end
-
-  # The migration's flags only mean something WITH `--migrate`, and `--migrate` only means
-  # something with a value to migrate TO. Said as its own sentence rather than ignored: a
-  # `--dry-run` that printed the grammar and exited 0 reads as "nothing would change".
-  private def self.refuse_env_syntax_migrate_flags!(migrate : Bool, dry : Bool, all : Bool,
-                                                    project_name : String?, db_path : String?,
-                                                    want : String?) : Nil
-    if !migrate && (dry || all || project_name || db_path)
-      abort "gori settings env-syntax: --dry-run / --project / --db / --all-projects only mean " \
-            "something with --migrate (without it the verb reads or sets the grammar and touches " \
-            "no project database)"
-    end
-    return unless migrate && want.nil?
-    abort "gori settings env-syntax: --migrate needs the grammar to migrate TO " \
-          "(#{env_syntax_values})"
+    env_syntax_write_lines(was, syntax).each { |line| puts line }
+    global.try { |g| puts g.line }
   end
 
   # What `gori settings env-syntax` prints with no argument: the value, and WHERE it came from.
   private def self.env_syntax_read_lines : Array(String)
-    lines = ["#{env_syntax_label(Settings.env_syntax)}  (#{env_syntax_origin})",
-             "  #{env_syntax_example(Settings.env_syntax)}"]
-    # Only on the grammar an install is LEAVING, and only as the safe half of the switch: the dry
-    # run is what answers "what is actually stored in there", which is the question an operator
-    # reading `bare` here is about to ask.
-    if Settings.env_syntax.bare?
-      lines << "  See what a switch would re-spell: " \
-               "`gori settings env-syntax namespaced --migrate --dry-run`"
-    end
-    lines
+    ["#{env_syntax_label(Settings.env_syntax)}  (#{env_syntax_origin})",
+     "  #{env_syntax_example(Settings.env_syntax)}"]
   end
 
   # …and what it prints after a change. Pure, so the wording is spec-callable — the guards around
   # it end in `abort`, which is not catchable.
   #
-  # The second line is the one thing an operator has to know before their next send: a switch
-  # re-reads bytes that are ALREADY STORED, it does not rewrite them.
+  # The second line is the one thing an operator has to know before their next send: the projects
+  # are re-spelled, but not in this process and not now. Each one is rewritten when it is next
+  # OPENED, so a TUI or an MCP server that is holding a project right now keeps reading the old
+  # spelling until it is restarted.
   private def self.env_syntax_write_lines(was : Gori::Env::Syntax,
-                                          now : Gori::Env::Syntax,
-                                          migrated : Bool = false) : Array(String)
-    return ["env syntax: #{env_syntax_label(now)} (unchanged)"] if was == now && !migrated
-    head = "env syntax: #{env_syntax_label(now)} — #{env_syntax_example(now)}"
-    # The `--migrate` run has just said which rows it rewrote, so repeating "stored tokens are NOT
-    # rewritten" under it would contradict the table above it.
-    return [head, "Stored tokens were re-spelled where they could be (see the table above); " \
-                  "tokens in files outside the project databases were not. Switch back with " \
-                  "`gori settings env-syntax #{env_syntax_label(was)} --migrate`."] if migrated
-    [head,
-     "Stored tokens are NOT rewritten unless you run `--migrate`: project env var names, " \
-     "Repeater drafts, rewrite-rule replacements and session-slot headers keep their text, so " \
-     "anything spelled the other way is now a literal. Re-spell them " \
-     "(`gori settings env-syntax #{env_syntax_label(now)} --migrate --dry-run` first), or switch " \
-     "back with `gori settings env-syntax #{env_syntax_label(was)}`."]
+                                          now : Gori::Env::Syntax) : Array(String)
+    return ["env syntax: #{env_syntax_label(now)} (unchanged)"] if was == now
+    ["env syntax: #{env_syntax_label(now)} — #{env_syntax_example(now)}",
+     "Each project is re-spelled the next time it opens: its stored tokens are rewritten from " \
+     "#{env_syntax_label(was)} to #{env_syntax_label(now)}, a backup is written beside the " \
+     "database, and the run that does it says so. Captured evidence is left exactly as it was. " \
+     "Switch back with `gori settings env-syntax #{env_syntax_label(was)}`."]
   end
 
   private def self.env_syntax_values : String
@@ -523,8 +485,10 @@ module Gori::CLI
     "#{Gori::Env.spell("NAME", Gori::Env::Namespace::Bind, s)}"
   end
 
-  # WHERE the current value came from. The absence of `env.syntax` in a file that loaded means
-  # bare (forever), and an operator reading `bare` needs to know which of those two they have.
+  # WHERE the current value came from. The absence of `env.syntax` in a file that loaded means the
+  # file PREDATES namespaces — so by the time this prints, the load has already adopted the
+  # namespaced grammar and written the key. Reading "does not set env.syntax" here therefore means
+  # the write did not land (a read-only home), which is worth seeing.
   private def self.env_syntax_origin : String
     path = Settings.path
     return "default — #{path} does not exist" unless File.exists?(path)
@@ -533,7 +497,7 @@ module Gori::CLI
     rescue
       nil
     end
-    stated ? "from #{path}" : "default — #{path} does not set env.syntax"
+    stated ? "from #{path}" : "adopted for this run — #{path} does not set env.syntax"
   end
 
   # The command-carrying rules this import would arm, one per line, argv included (#842).

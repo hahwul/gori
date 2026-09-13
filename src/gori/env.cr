@@ -11,8 +11,16 @@ module Gori
   module Env
     DEFAULT_PREFIX   = "$"
     PROJECT_VARS_KEY = "env.vars"
-    KEY_HEAD         = /[A-Za-z_]/
-    KEY_TAIL         = /[A-Za-z0-9_]/
+
+    # WHICH grammar the tokens stored in THIS project database are spelled in — the per-project
+    # marker beside `env.vars` on the same settings KV. ABSENT means bare, which is exactly true of
+    # every database written before namespaces existed; `EnvMigration.reconcile` compares it with
+    # `Settings.env_syntax` the first time a surface opens the project and re-spells the rows when
+    # they disagree.
+    PROJECT_SYNTAX_KEY = "env.syntax"
+
+    KEY_HEAD = /[A-Za-z_]/
+    KEY_TAIL = /[A-Za-z0-9_]/
 
     # ── how a token is SPELLED (`Settings.env_syntax`) ────────────────────────
     #

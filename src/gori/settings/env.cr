@@ -10,18 +10,52 @@ module Gori::Settings
 
   # The grammar an install reads and writes tokens in. See `Gori::Env::Syntax`.
   #
-  # The DEFAULT is bare and is what the ABSENCE of `env.syntax` means, forever: the tokens an
-  # existing install has are already written into project DBs, Repeater drafts, rewrite-rule
-  # replacements and slot headers, and gori does not rewrite those behind the operator. The
-  # absence rule is enforced in `Settings.load` and deliberately NOT in `parse_env` — see there.
-  DEFAULT_ENV_SYNTAX = Env::Syntax::Bare
+  # NAMESPACED is the grammar for everyone (`$ENV.KEY` / `$BIND.NAME`). `bare` stays as an
+  # explicit opt-out, and it is explicit in the file too: `env.syntax` is ALWAYS serialized, both
+  # values, because the ABSENCE of the key no longer means bare — it means this settings.json
+  # PREDATES namespaces, and that is a migration to run rather than a grammar to keep (see
+  # `adopt_env_syntax_for_absent_key`).
+  DEFAULT_ENV_SYNTAX = Env::Syntax::Namespaced
 
-  # What a genuinely NEW home adopts (`adopt_env_syntax_for_new_home`). A class_property so the
-  # suite can pin it: every spec home is new, and without the pin ~1,000 bare `$TOKEN` fixtures
-  # would be read under the other grammar.
-  NEW_INSTALL_ENV_SYNTAX = Env::Syntax::Namespaced
+  # What the ABSENCE of `env.syntax` resolves to. A class_property so the suite can pin it: every
+  # spec home is a fresh one with no settings file, and without the pin ~1,000 bare `$TOKEN`
+  # fixtures would be read under the other grammar — and migrated on their way past.
+  class_property env_syntax_when_absent : Env::Syntax = DEFAULT_ENV_SYNTAX
 
-  class_property new_install_env_syntax : Env::Syntax = NEW_INSTALL_ENV_SYNTAX
+  # WHERE the grammar in memory came from, which decides whether gori may act on it. A migration
+  # rewrites stored bytes, so it may only run when this install's grammar is something the
+  # install actually SAID — never over a value gori guessed because a file could not be read
+  # (see `env_syntax_stated?`).
+  enum EnvSyntaxOrigin
+    # No `env.syntax` key on a file that was read in full (or no file at all): this home predates
+    # namespaces, so the stored tokens are bare and the grammar is adopted + written.
+    Absent
+    # A readable grammar, from the file or recovered textually from a torn one.
+    Stated
+    # The key is there and names no grammar gori knows (`"NAMESPACED!"`, `null`, `1`), or the
+    # file could not be read at all. A guess, and nothing may be rewritten against a guess.
+    Unreadable
+  end
+
+  @@env_syntax_origin : EnvSyntaxOrigin = EnvSyntaxOrigin::Absent
+
+  def self.env_syntax_origin : EnvSyntaxOrigin
+    @@env_syntax_origin
+  end
+
+  protected def self.env_syntax_origin=(o : EnvSyntaxOrigin) : EnvSyntaxOrigin
+    @@env_syntax_origin = o
+  end
+
+  # May gori rewrite stored tokens against the grammar in memory? True when the install SAID it
+  # (or when the absence rule settled it over a file that was read in full), false over a guess:
+  # an unreadable settings.json, a half-applied one, a value that names no grammar. A project
+  # database whose marker disagrees with a GUESS must be left exactly as it is — re-spelling it
+  # would be a permissions problem or a typo rewriting an operator's drafts.
+  def self.env_syntax_stated? : Bool
+    !@@env_syntax_origin.unreadable? && !load_degraded?
+  end
+
   @@env_syntax : Env::Syntax = DEFAULT_ENV_SYNTAX
 
   def self.env_syntax : Env::Syntax
@@ -46,11 +80,13 @@ module Gori::Settings
   class_property env_vars : Array({String, String}) = [] of {String, String}
   class_property project_env_vars : Array({String, String}) = [] of {String, String}
 
-  # `syntax` is assigned ONLY when the key is present, and the "absence means bare" rule lives in
-  # `Settings.load` instead. That split is not cosmetic: `import_document` reuses `apply_sections`
-  # over a FILTERED document, so a theme-only profile import reaches this method with no `env`
-  # node at all — and a namespaced install would be flipped back to bare by an import that never
-  # mentioned env. An unknown value is a bad file rather than a new grammar: say so and stay bare.
+  # `syntax` is assigned ONLY when the key is present, and the "an absent key means this file
+  # predates namespaces" rule lives in `Settings.load` instead. That split is not cosmetic:
+  # `import_document` reuses `apply_sections` over a FILTERED document, so a theme-only profile
+  # import reaches this method with no `env` node at all — and an install would have its grammar
+  # re-derived (and its projects re-spelled) by an import that never mentioned env. An unknown
+  # value is a bad file rather than a new grammar: say so, read tokens as the default, and mark
+  # the origin `Unreadable` so nothing gets REWRITTEN against a value gori had to guess.
   private def self.parse_env(node : JSON::Any?) : Nil
     return unless e = node.try(&.as_h?)
     if pref = e["prefix"]?.try(&.as_s?)
@@ -65,16 +101,21 @@ module Gori::Settings
       if raw = node.as_s?
         if s = Env::Syntax.parse?(raw.strip)
           self.env_syntax = s
+          self.env_syntax_origin = EnvSyntaxOrigin::Stated
         else
           self.env_syntax = DEFAULT_ENV_SYNTAX
+          self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
           note_load_warning("settings: env.syntax #{raw.inspect} is not one of " \
                             "#{Env::Syntax.values.join('/', &.to_s.downcase)} — reading tokens as " \
-                            "#{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run")
+                            "#{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run, and re-spelling " \
+                            "nothing until the value is fixed")
         end
       else
         self.env_syntax = DEFAULT_ENV_SYNTAX
+        self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
         note_load_warning("settings: env.syntax must be a string (got #{node.to_json}) — reading " \
-                          "tokens as #{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run")
+                          "tokens as #{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run, and " \
+                          "re-spelling nothing until the value is fixed")
       end
     end
     self.env_vars = parse_env_vars(e["vars"]?)
@@ -97,6 +138,9 @@ module Gori::Settings
   # TEXTUAL on purpose: the JSON is by definition not available, and the value set is closed.
   private def self.recover_env_syntax_from_corrupt(raw : String) : String?
     self.env_syntax = DEFAULT_ENV_SYNTAX
+    # A torn file is not a file that predates namespaces, whatever the regex finds: nothing may be
+    # rewritten against it until it parses again. Recovered or not, the origin says `Unreadable`.
+    self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
     values = Env::Syntax.values.join('|', &.to_s.downcase)
     if m = raw.match(/"syntax"\s*:\s*"(#{values})"/)
       if s = Env::Syntax.parse?(m[1])
@@ -177,29 +221,26 @@ module Gori::Settings
     end
   end
 
-  # Omitted only when there is NOTHING to say — no vars, the default prefix AND the default
-  # grammar — so an untouched bare install still writes no `env` section at all and its
-  # settings.json diff stays empty. A NAMESPACED install always writes the section, because the
-  # grammar alone is something to say.
+  # ALWAYS written, both values, which is why the `env` section is never omitted any more.
   #
-  # `"syntax"` itself is written only when it is not the DEFAULT, and that is the same statement
-  # the absence rule makes from the other side: bare IS the absence of the key, so a bare install
-  # with vars writes `{"vars": …}` and no grammar, and round-trips as bare. Writing `"bare"`
-  # explicitly would make an exported profile carry a grammar it was never asked to carry — which
-  # `import_document` used to apply, flipping the importing install (see there). A namespaced
-  # install is not the default and always writes it: a file that says `"vars"` but not `"syntax"`
-  # means bare, so omitting it there would silently downgrade the install on its next load.
+  # The absence of `env.syntax` is no longer a value: it means the file predates namespaces, and
+  # the next load treats it as a MIGRATION to run (`adopt_env_syntax_for_absent_key`). So a
+  # grammar that is not written down is a grammar that gets re-derived — and for the `bare`
+  # opt-out that would mean the opt-out is overwritten on the very next start, while for
+  # namespaced it would mean the global-rule migration runs again on every load, forever.
+  #
+  # An EXPORT still carries no grammar: `strip_env_syntax` drops the key from an exported
+  # document (settings.cr), because a teammate's profile does not speak for how the tokens in
+  # THIS install's projects are read.
   private def self.serialize_env(j : JSON::Builder) : Nil
-    unless env_vars.empty? && env_prefix == DEFAULT_ENV_PREFIX && env_syntax == DEFAULT_ENV_SYNTAX
-      j.field "env" do
-        j.object do
-          j.field "syntax", env_syntax.to_s.downcase unless env_syntax == DEFAULT_ENV_SYNTAX
-          j.field "prefix", env_prefix unless env_prefix == DEFAULT_ENV_PREFIX
-          unless env_vars.empty?
-            j.field "vars" do
-              j.array do
-                env_vars.each { |(key, val)| j.object { j.field "key", key; j.field "value", val } }
-              end
+    j.field "env" do
+      j.object do
+        j.field "syntax", env_syntax.to_s.downcase
+        j.field "prefix", env_prefix unless env_prefix == DEFAULT_ENV_PREFIX
+        unless env_vars.empty?
+          j.field "vars" do
+            j.array do
+              env_vars.each { |(key, val)| j.object { j.field "key", key; j.field "value", val } }
             end
           end
         end

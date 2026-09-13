@@ -269,6 +269,11 @@ module Gori
           # unreadable) gets a clean error, not a raw DB::ConnectionRefused backtrace.
           abort "gori run capture: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
         end
+      # The open-time token-grammar reconcile, on this surface's channel. `Log` rather than a bare
+      # STDERR line so it lands in the same stream as the rest of a capture's diagnostics — and
+      # never in the `:json` flow stream on STDOUT, which is somebody's input.
+      session.env_syntax_migration.try { |r| r.lines.each { |line| Log.info { line } } }
+      Settings.take_env_syntax_global_migration.try { |g| Log.info { g.line } }
       if err = session.bind_error
         STDERR.puts "gori: not capturing — #{err}"
         STDERR.puts "  another gori instance may hold this project or the port; close it or pass --port."
