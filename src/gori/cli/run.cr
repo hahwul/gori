@@ -920,17 +920,21 @@ module Gori
           io << "the slot (`--bind-from FLOW-ID` on a `gori run` sweep, a Repeater send, "
           io << "`send_request` over MCP) — or write "
           io << "`#{Env.spell_escaped(first, Env::Namespace::Bind)}` if the literal is what you meant"
-          # Under the NAMESPACED grammar the likeliest cause is not an empty table at all: a bare
-          # `$SESSION` typed into `--identities` or `create_session_slot` (neither of which any
-          # migration reaches) is TEXT, and no amount of binding will resolve it. Both remedies,
-          # because this sentence cannot see which one applies.
-          unless Settings.env_syntax.bare?
-            io << ". If #{one ? "it is" : "they are"} spelled the bare way "
-            io << "(`#{Env.spell(first, Env::Namespace::Bind, Env::Syntax::Bare)}`), this install "
-            io << "reads #{EnvMigration.spelling(Env::Syntax::Namespaced)} and the remedy is the "
-            io << "spelling: write `#{Env.spell(first, Env::Namespace::Bind)}`"
-          end
+          io << bare_spelling_tail(first, one)
         end
+      end
+
+      # The sentence the NAMESPACED grammar adds, or "" — because under it the likeliest cause is not
+      # an empty table at all. A bare `$SESSION` typed into `--identities` or MCP
+      # `create_session_slot` (neither of which any migration reaches) is TEXT, and no amount of
+      # binding will ever resolve it. Both remedies are named, because this sentence is built from a
+      # {slot, name} pair and cannot see which spelling the header actually carried.
+      private def self.bare_spelling_tail(first : String, one : Bool) : String
+        return "" if Settings.env_syntax.bare?
+        ". If #{one ? "it is" : "they are"} spelled the bare way " \
+        "(`#{Env.spell(first, Env::Namespace::Bind, Env::Syntax::Bare)}`), this install reads " \
+        "#{EnvMigration.spelling(Env::Syntax::Namespaced)} and the remedy is the spelling: write " \
+        "`#{Env.spell(first, Env::Namespace::Bind)}`"
       end
 
       # Drain and SAY it, for a `gori run` surface that has just printed its summary. Silent

@@ -106,7 +106,7 @@ describe "MCP follows a peer's env.syntax switch" do
   # `create_repeater` path is `env_refresh`) still must not leave a bare row in a namespaced
   # database — `store/env_write_guard.cr` re-spells it on the way in.
   it "re-spells a row written by a tool that has not ticked yet" do
-    with_mcp_syntax_home do |db_path, settings_path|
+    with_mcp_syntax_home do |db_path, _|
       seed_bare_project(db_path)
       store = Gori::Store.open(db_path)
       begin

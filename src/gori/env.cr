@@ -419,7 +419,7 @@ module Gori
       # and the namespaced walk was calling `prefix_at?` at every single byte of them — a per-byte
       # call whose first act is to compare that byte against the sigil, which is precisely what
       # `Slice#index` does in one memchr for the entire remainder.
-      while (at = bytes.index(head, i))
+      while at = bytes.index(head, i)
         break if at + plen >= n
         if prefix_at?(bytes, prefix, at) && (ref = read_ref(bytes, at + plen, n))
           return true if owns.includes?(ref[0].owns)
@@ -644,9 +644,9 @@ module Gori
       # The gate asks the BARE question in both grammars — "is there a sigil" — because a bare
       # `$SESSION` is exactly what the namespaced `$NS.` fast path would reject before anything
       # looked at it. It is still a memchr; the scan below is what the gate protects.
-      return literal unless slot.set_headers.any? { |(_, v)|
+      return literal unless slot.set_headers.any? do |(_, v)|
                               may_contain_tokens?(v, Owns::Bind, prefix, Syntax::Bare)
-                            }
+                            end
       vals = binding_values_as(slot.name)
       declared = declared_bindings
       seen = Set(String).new
@@ -1382,7 +1382,7 @@ module Gori
       # Sigil-hopping for the same reason as `may_contain_tokens?` above: this is the send seam's
       # "there are no bindings" fast path, so it walks bodies that almost never hold a `$` at all,
       # and the per-byte `prefix_at?` was re-deriving the memchr `Slice#index` gives for free.
-      while (at = bytes.index(head, i))
+      while at = bytes.index(head, i)
         break if at > last
         if prefix_at?(bytes, prefix, at) && prefix_at?(bytes, prefix, at + plen)
           return true if syntax.bare?

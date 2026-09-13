@@ -13,14 +13,28 @@ require "file_utils"
 # this pair, and it is called from the peer tick and from both env-section writes.
 private CA_PATH = File.tempname("gori-tui-env-syntax-ca")
 
+# Split in two so the session is opened and closed by the inner block — the HOME and the process
+# globals are restored by the outer one either way, and neither needs a nilable holder.
 private def with_syntax_session(&)
+  with_syntax_home do |root, settings_path|
+    project = Gori::ProjectRegistry.new(root).temp("envsyntax")
+    session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
+      Gori::Proxy::Tls::CertAuthority.load_or_create(CA_PATH), Gori::Verbs.registry, project)
+    begin
+      yield session, settings_path
+    ensure
+      session.close
+    end
+  end
+end
+
+private def with_syntax_home(&)
   prev_home = ENV["GORI_HOME"]?
   prev_cfg = ENV["GORI_CONFIG"]?
   snapshot = Gori::Settings.export_document(Gori::Settings::SECTION_KEYS)
   root = File.tempname("gori-tui-env-syntax")
   Dir.mkdir_p(root)
   settings_path = File.join(root, "settings.json")
-  session = nil.as(Gori::Session?)
   begin
     ENV["GORI_HOME"] = root
     ENV.delete("GORI_CONFIG")
@@ -30,12 +44,8 @@ private def with_syntax_session(&)
     Gori::Settings.project_env_vars = [] of {String, String}
     File.write(settings_path, %({"env":{"syntax":"bare"}}))
     Gori::Settings.load
-    project = Gori::ProjectRegistry.new(root).temp("envsyntax")
-    session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
-      Gori::Proxy::Tls::CertAuthority.load_or_create(CA_PATH), Gori::Verbs.registry, project)
-    yield session, settings_path
+    yield root, settings_path
   ensure
-    session.try(&.close)
     Gori::Settings.env_syntax = Gori::Env::Syntax::Bare
     Gori::Settings.env_prefix = Gori::Settings::DEFAULT_ENV_PREFIX
     Gori::Settings.env_vars = [] of {String, String}

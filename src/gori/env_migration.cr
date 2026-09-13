@@ -260,31 +260,39 @@ module Gori
         # title, and doubling the sigil corrupted the text it was supposed to preserve. A dial
         # tuple IS expanded, but with `Escape::Preserve` and never unescaped, so `$$id` in a target
         # reaches the resolver as `$$id`: the name is NAMED to the operator instead.
-        name = resolvable_name_at(bytes, i + plen, n, env, bind, live, kind)
-        unless kind.escapes_literal?
-          if name && hints && kind.bare_resolution_hint?
-            hints << Env.spell(name, Env::Namespace::Env, Env::Syntax::Bare, prefix)
-          end
-          buf.write(bytes[i, found.width])
-          return found.width
-        end
-        if found.width == plen && (name || double_sigil?(bytes, prefix, i, n))
-          buf << prefix << prefix
-          # Reported with the NAME when there is one (`$id → $$id`), because that is the line an
-          # operator reads the report for; a doubled sigil in front of another sigil has no name
-          # to carry and says only what it did. Spelled through the formatter family so a
-          # non-default sigil is not hand-concatenated into the report either.
-          ns = Env::Namespace::Env
-          changes << Change.new(i,
-            name ? Env.spell(name, ns, Env::Syntax::Bare, prefix) : prefix,
-            name ? Env.spell_escaped(name, ns, Env::Syntax::Bare, prefix) : "#{prefix}#{prefix}",
-            nil, note: "escape")
-          plen
-        else
-          buf.write(bytes[i, found.width])
-          found.width
-        end
+        backward_literal(bytes, buf, changes, found, i, n, plen, prefix, env, bind, live, kind,
+          hints)
       end
+    end
+
+    # The LITERAL-sigil row of the namespaced → bare table, split out so `backward` stays one small
+    # dispatch over the three reader answers.
+    private def self.backward_literal(bytes, buf, changes, found : Env::Found, i, n, plen, prefix,
+                                      env : Set(String), bind : Set(String), live : Set(String),
+                                      kind : Kind, hints : Array(String)?) : Int32
+      name = resolvable_name_at(bytes, i + plen, n, env, bind, live, kind)
+      unless kind.escapes_literal?
+        if name && hints && kind.bare_resolution_hint?
+          hints << Env.spell(name, Env::Namespace::Env, Env::Syntax::Bare, prefix)
+        end
+        buf.write(bytes[i, found.width])
+        return found.width
+      end
+      unless found.width == plen && (name || double_sigil?(bytes, prefix, i, n))
+        buf.write(bytes[i, found.width])
+        return found.width
+      end
+      buf << prefix << prefix
+      # Reported with the NAME when there is one (`$id → $$id`), because that is the line an
+      # operator reads the report for; a doubled sigil in front of another sigil has no name to
+      # carry and says only what it did. Spelled through the formatter family so a non-default
+      # sigil is not hand-concatenated into the report either.
+      ns = Env::Namespace::Env
+      changes << Change.new(i,
+        name ? Env.spell(name, ns, Env::Syntax::Bare, prefix) : prefix,
+        name ? Env.spell_escaped(name, ns, Env::Syntax::Bare, prefix) : "#{prefix}#{prefix}",
+        nil, note: "escape")
+      plen
     end
 
     # Which namespace a bare `$NAME` belonged to — answered by THE CONSUMER of these bytes, not by

@@ -465,7 +465,7 @@ describe Gori::EnvMigration do
         rid = store.insert_extract_rule("id", "", Gori::ExtractKind::Header, "set-cookie")
         store.set_extract_rule_enabled(rid, false)
         store.insert_extract_rule("live", "", Gori::ExtractKind::Header, "set-cookie")
-        both = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
           "X-K", "$id/$only/$live", name: "r")
         store.flush
         Gori::EnvMigration.enabled_bind_names(store).should eq(Set{"live"})
@@ -597,7 +597,7 @@ describe Gori::EnvMigration do
   # …and the same load against a WRITABLE directory does take the copy, so the gate above cannot be
   # mistaken for switching the backup off.
   it "still copies settings.json aside when the directory can be written" do
-    with_migration_home do |db_path|
+    with_migration_home do |_|
       path = Gori::Settings.path
       File.write(path, <<-JSON)
         {"rewriter":{"rules":[{"id":1,"enabled":true,"name":"auth","target":"request",
