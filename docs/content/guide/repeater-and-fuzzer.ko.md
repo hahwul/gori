@@ -87,9 +87,10 @@ X-Api-Key: $ENV.API_KEY
 ```bash
 gori settings env-syntax             # 지금 적용된 문법과 그 출처를 출력
 gori settings env-syntax namespaced  # 전환(Settings → Env의 s 키도 같은 일을 합니다)
+gori settings env-syntax namespaced --migrate --dry-run   # 전환이 무엇을 다시 적을지 미리 보기
 ```
 
-**저장된 토큰은 다시 쓰이지 않습니다.** 프로젝트 환경 변수 이름, Repeater 초안, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더는 텍스트를 그대로 유지하므로, 전환하는 순간 다른 문법으로 적힌 것은 리터럴이 됩니다. 다시 적거나, 되돌리세요. 이 문서의 나머지 부분은 토큰을 namespaced 문법으로 적습니다. bare 설치에서는 네임스페이스를 뺀 형태(`$KEY`, `$NAME`)로 읽으세요.
+**저장된 토큰은 다시 쓰이지 않습니다.** [`--migrate`](/ko/reference/cli/#env-syntax-migrate)를 붙이면 프로젝트 데이터베이스에 이미 있는 초안·템플릿·규칙 치환 텍스트·슬롯 헤더를 다시 적습니다(먼저 `--dry-run`). 붙이지 않으면 프로젝트 환경 변수 이름, Repeater 초안, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더는 텍스트를 그대로 유지하므로, 전환하는 순간 다른 문법으로 적힌 것은 리터럴이 됩니다. 이 문서의 나머지 부분은 토큰을 namespaced 문법으로 적습니다. bare 설치에서는 네임스페이스를 뺀 형태(`$KEY`, `$NAME`)로 읽으세요.
 
 ## Fuzzer {#fuzzer}
 

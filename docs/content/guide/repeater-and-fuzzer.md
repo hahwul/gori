@@ -87,9 +87,10 @@ An install that predates namespaces keeps the grammar it was written with: bare 
 ```bash
 gori settings env-syntax             # print the grammar in force, and where it came from
 gori settings env-syntax namespaced  # switch (Settings → Env, key s, does the same)
+gori settings env-syntax namespaced --migrate --dry-run   # …and what a switch would re-spell
 ```
 
-**Stored tokens are not rewritten.** Project env var names, Repeater drafts, rewrite-rule replacements and session-slot headers keep their text, so anything spelled the other way becomes a literal the moment you switch. Re-spell them, or switch back. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
+**Stored tokens are not rewritten** unless you add [`--migrate`](/reference/cli/#env-syntax-migrate), which re-spells the drafts, templates, rule replacements and slot headers already in a project database (`--dry-run` first). Without it, project env var names, Repeater drafts, rewrite-rule replacements and session-slot headers keep their text, so anything spelled the other way becomes a literal the moment you switch. The rest of this documentation spells tokens the namespaced way; on a bare install, read them without the namespace (`$KEY`, `$NAME`).
 
 ## Fuzzer
 

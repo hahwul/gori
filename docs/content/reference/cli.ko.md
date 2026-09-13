@@ -1432,7 +1432,7 @@ gori settings sections             # 최상위 섹션 목록
 gori settings export [-o FILE]     # 공유 가능한 프로필 출력(기본 stdout)
 gori settings import FILE          # 프로필의 섹션들을 적용
 gori settings tls-fingerprint      # 목적지별로 gori가 보내는 JA3/JA4
-gori settings env-syntax [VALUE]   # env 토큰 문법 읽기 / 설정
+gori settings env-syntax [VALUE]   # env 토큰 문법 읽기 / 설정 (--migrate는 저장된 토큰도 다시 적음)
 ```
 
 ### `gori settings env-syntax` {#env-syntax}
@@ -1446,12 +1446,35 @@ gori settings env-syntax
 
 gori settings env-syntax namespaced
 # env syntax: namespaced — $ENV.KEY / $BIND.NAME
-# Stored tokens are NOT rewritten: project env var names, Repeater drafts, rewrite-rule
-# replacements and session-slot headers keep their text, so anything spelled the other way
-# is now a literal. Re-spell them, or switch back with `gori settings env-syntax bare`.
+# Stored tokens are NOT rewritten unless you run `--migrate`: project env var names, Repeater
+# drafts, rewrite-rule replacements and session-slot headers keep their text, so anything
+# spelled the other way is now a literal.
 ```
 
 전환은 이미 저장된 바이트를 다시 읽을 뿐, 그 바이트를 고쳐 쓰지 않습니다. [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요. `gori settings import`도 같은 이유로, 프로필의 `env.syntax`가 이 설치와 다르면 stderr로 알려 줍니다.
+
+#### `--migrate` {#env-syntax-migrate}
+
+선택 사항인 나머지 절반입니다. 프로젝트 데이터베이스에 이미 저장된 토큰을 다시 적고 나서 문법을 바꿉니다.
+
+```bash
+gori settings env-syntax namespaced --migrate --dry-run   # 표만 출력하고 아무것도 쓰지 않음
+gori settings env-syntax namespaced --migrate             # 적용한 뒤 문법 설정
+gori settings env-syntax namespaced --migrate --all-projects
+gori settings env-syntax bare --migrate --project acme    # 또는 --db PATH
+```
+
+| 플래그 | |
+|---|---|
+| `--migrate` | 지정한 값의 **반대** 문법으로 저장된 토큰을 지정한 문법으로 다시 적습니다 |
+| `--dry-run` | 프로젝트 · 테이블 · 행 · `before → after` 표를 출력하고 아무것도 쓰지 않습니다 |
+| `--project NAME` / `--db PATH` / `--all-projects` | 대상 데이터베이스(기본값: 가장 최근에 활동한 프로젝트) |
+
+다시 적는 대상: Repeater 초안(request, target, SNI, 이름)과 그 WebSocket 메시지, Fuzzer 템플릿, Miner·Sequencer 요청, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더 값, 그리고 이슈 제목·메모와 노트 본문에 마스킹된 토큰입니다. `$NAME`은 환경 변수(전역 또는 프로젝트)면 `$ENV.NAME`, 선언된 바인딩이거나 슬롯이 claim한 이름이면 `$BIND.NAME`이 됩니다. 양쪽에 다 있는 이름은 `ENV`로 갑니다(bare 문법이 실제로 그렇게 동작했습니다). 이때 `ambiguous`로 표시됩니다. 요청 텍스트의 bare `$$`는 시길 하나를 잃습니다. bare 전송 지점은 그것을 소비했지만 namespaced는 그렇지 않기 때문입니다. 규칙 치환 텍스트의 `$1..$9`와 `$$`는 규칙 문법의 것이므로 건드리지 않습니다.
+
+건드리지 않고 목록으로 보여 주는 것: 출처가 캡처인 모든 행(`flow_id`가 있는 행 — 캡처는 확장되지 않습니다), 그리고 대상 문법에 같은 바이트를 보내는 표기가 없는 행입니다. 환경 변수 이름, extract 규칙 이름, 규칙 패턴, 페이로드 세트는 토큰이 아니므로 그대로 둡니다.
+
+쓰기 전에, 다른 gori가 데이터베이스를 열고 있으면 거부하고, 같은 자리에 `gori.db.pre-<grammar>-<timestamp>`로 복사(`VACUUM INTO` — WAL까지 포함)한 뒤, 프로젝트당 하나의 트랜잭션으로 적용합니다. `--migrate`는 **멱등이 아닙니다**. 저장된 행을 어떤 문법으로 읽을지 스스로 선언하므로 전환마다 한 번만 실행하세요. `bare`로 되돌리는 방향은 gori가 볼 수 없는 것에 대해 손실이 있습니다. 요청 파일, HAR, 파이프로 넘긴 바디, 워드리스트 안의 `$NAME`은 다시 치환되기 시작하며, 명령이 그 사실을 알려 줍니다.
 
 ### 프로필 {#profiles}
 
