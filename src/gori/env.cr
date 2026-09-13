@@ -101,6 +101,18 @@ module Gori
         end
       end
 
+      # Whether this namespace resolves at SEND time rather than at plan-build. It is what decides
+      # whether a scan may hand a token to a later pass (`scan_unresolved`'s `bind_resolvable`) and
+      # whether a name can be DECLARED-but-unbound at all — asked here, exhaustively, rather than
+      # spelled `ns.bind?` at each site, so a third namespace has to answer the question instead of
+      # silently inheriting the env layer's answer.
+      def send_time? : Bool
+        case self
+        in Namespace::Env  then false
+        in Namespace::Bind then true
+        end
+      end
+
       # Case-SENSITIVE, deliberately: see the note above the enum.
       def self.parse?(s : String) : Namespace?
         NAMESPACES[s]?
@@ -460,6 +472,19 @@ module Gori
         values
       end
 
+      # Names the ACTIVE session slot CLAIMS, whether or not an extract rule of that name exists.
+      #
+      # A claim is a declaration by another door: `--identities FILE` and MCP
+      # `create_session_slot` both write a slot whose `rules` name bindings the project may not have
+      # yet, and `Env.unbound_in_slot` has always counted such a name as a reference for exactly
+      # that reason. It is here so a consumer that judges a SPELLING (`Rules#bare_spelling_at`) can
+      # ask the same question the send seam does instead of a narrower one.
+      #
+      # Defaults to empty: a layer with no slot registry claims nothing.
+      def active_slot_claims : Array(String)
+        [] of String
+      end
+
       # Bumped on every rule edit and every rebind, so a consumer can cache a merged
       # snapshot instead of rebuilding one per message (see `Rules`).
       abstract def rev : UInt64
@@ -710,6 +735,12 @@ module Gori
         @@unbound_overlay_seen.clear
         out
       end
+    end
+
+    # Names the ACTIVE session slot claims — see `Layer#active_slot_claims`. Empty with no slot
+    # active, which is the default and the as-captured context.
+    def self.active_slot_claims : Array(String)
+      @@layer.try(&.active_slot_claims) || [] of String
     end
 
     # The active session slot's NAME, or nil for as-captured (the default). What a surface
@@ -1321,10 +1352,17 @@ module Gori
     end
 
     # The table a token resolves from. BARE has one table and `vars` is it.
+    #
+    # Exhaustive over the namespace set, not `ns.bind? ? bind : env`: a two-way branch answers for a
+    # THIRD namespace by routing it to the env vars, silently, and "silently resolves out of the
+    # wrong table" is the one failure the namespaces exist to remove.
     private def self.table_for(ns : Namespace?, vars : Hash(String, String),
                                bind_vars : Hash(String, String)?) : Hash(String, String)
-      return vars unless ns && ns.bind?
-      bind_vars || binding_values
+      return vars unless ns
+      case ns
+      in Namespace::Env  then vars
+      in Namespace::Bind then bind_vars || binding_values
+      end
     end
 
     # Whether `bytes` holds an escape one of `owns`' passes would CONSUME. Only asked on the send
@@ -1499,7 +1537,7 @@ module Gori
         # target/SNI/URL) says no, and a bound `$BIND.HOST` is reported rather than blessed.
         # Bare mode never reaches it: there is one namespace, `found.ns` is nil, and `vars` is
         # the one table.
-        resolvable = bind_resolvable || !found.ns.try(&.bind?)
+        resolvable = bind_resolvable || !found.ns.try(&.send_time?)
         if resolvable && table_for(found.ns, vars, bind_vars).has_key?(found.name)
           i += found.width
           next
@@ -1514,7 +1552,7 @@ module Gori
         key = qualify_names ? qualified_of(found) : found.name
         if seen.add?(key)
           ns = found.ns
-          deferrable = ns.nil? || ns.bind?
+          deferrable = ns.nil? || ns.send_time?
           names << key unless deferrable && deferred && deferred.includes?(found.name)
         end
         i += found.miss_width(plen, syntax)
@@ -1780,11 +1818,17 @@ module Gori
         end
         if found.kind.token?
           ns = found.ns
-          table = if ns && ns.bind?
-                    bind_table ||= vars || binding_values
-                  else
-                    env_table
-                  end
+          # Exhaustive, for `table_for`'s reason: a two-way branch paints a third namespace's token
+          # `known` because the ENV table happens to hold a name of its own.
+          table =
+            if ns.nil?
+              env_table
+            else
+              case ns
+              in Namespace::Env  then env_table
+              in Namespace::Bind then bind_table ||= vars || binding_values
+              end
+            end
           acc << Region.new(i, i + found.width, ns, found.name, table.has_key?(found.name))
         end
         i += found.width

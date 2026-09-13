@@ -157,6 +157,59 @@ describe "Rules#substitute — namespaced" do
     end
   end
 
+  # The half the `Refusal` enum's comment already promised: "or a name a session slot claims". A slot
+  # written through `--identities FILE` or MCP `create_session_slot` names bindings the project does
+  # not hold yet — no extract rule, nothing bound — and a replacement spelling one of those BARE was
+  # shipping the seven literal characters into every proxied request instead of saying so.
+  it "names the BIND spelling for a name only an ACTIVE SLOT claims" do
+    with_store do |store|
+      slots = Gori::SessionSlots.load(store)
+      slots.save([Gori::SessionSlot.new("admin", [{"X-S", "1"}], [] of String, false,
+        ["CLAIMED"])]).should be_true
+      store.flush
+      slots.activate("admin").should be_true
+      b = Gori::Bindings.load(store, slots)
+      # Nothing DECLARES `CLAIMED` — the extract rule does not exist.
+      b.declared.should be_empty
+      Gori::Env.active_slot_claims.should be_empty # …until the layer is the live one
+      with_ns_layer(b) do
+        Gori::Env.active_slot_claims.should eq(["CLAIMED"])
+        rules = Gori::Rules.new(store, store.match_rules)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Auth",
+          "$CLAIMED", Gori::Store::RuleOp::SetHeader, Gori::Store::MatchKind::Literal,
+          "claimed", "", "")
+        rules.transform_message("GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n",
+          Gori::Store::RuleTarget::Request, "acme.test").should_not contain("X-Auth")
+        ev = store.events_after(0, 50).find { |e| e.kind == "bare_spelling" }.not_nil!
+        ev.message.should contain("write $BIND.CLAIMED to inject the value")
+      end
+    end
+  end
+
+  # A PIPE rule's replacement is a command ARGV, and the names an operator writes into one are
+  # overwhelmingly shell-shaped. There is no shell here, so gori cannot know which was meant —
+  # prescribing the re-spelling as THE fix told them to inject a gori variable where they had
+  # written `$HOME`.
+  it "offers the ESCAPE first for a pipe rule's argv, not just the re-spelling" do
+    with_store do |store|
+      with_ns_layer(nil) do
+        with_env_vars([{"HOME", "/tmp/x"}]) do
+          rules = Gori::Rules.new(store, store.match_rules)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body,
+            "k", "/bin/echo $HOME", Gori::Store::RuleOp::Pipe, Gori::Store::MatchKind::Literal,
+            "hook", "", "")
+          rules.transform_message("POST / HTTP/1.1\r\n\r\nk",
+            Gori::Store::RuleTarget::Request, "acme.test", run_hooks: true)
+          ev = store.events_after(0, 50).find { |e| e.kind == "bare_spelling" }.not_nil!
+          ev.message.should contain("$HOME is the bare spelling")
+          ev.message.should contain("there is no shell here")
+          ev.message.should contain("escape it as $$HOME")
+          ev.message.should contain("write $ENV.HOME to inject gori's value")
+        end
+      end
+    end
+  end
+
   # `$$NAME` is the escape the refusal points at, so it must keep working — and it must not be read
   # as a stale spelling on the way through. `$1` is a capture reference and never a name.
   it "keeps $$NAME a literal and $1 a backref, with no refusal" do

@@ -324,6 +324,13 @@ module Gori
       values_in(@slots.try(&.active))
     end
 
+    # `Env::Layer#active_slot_claims` — the names the active slot claims, whether or not a rule of
+    # that name exists. Read through `SessionSlots`, which has its own mutex, so this must not be
+    # called with `@mutex` held (the same discipline `values` documents).
+    def active_slot_claims : Array(String)
+      @slots.try(&.active).try(&.rules) || [] of String
+    end
+
     # `Env::Layer#slot_values` — the same read, answered for a NAMED slot instead of the active
     # one. For the caller that carries several identities through one run and cannot activate
     # each in turn (`Authorize`, whose whole measurement is that two identities resolve to two

@@ -1277,13 +1277,17 @@ module Gori
     # apply and the event names the re-spelling.
     #
     # BIND is tested first, for the reason `EnvMigration.route` gives: a bare replacement resolved
-    # against `Env.display_vars`, where the binding values are layered OVER the env vars.
+    # against `Env.display_vars`, where the binding values are layered OVER the env vars. And the
+    # BIND half is `SubstSnapshot#binds?`, which counts a name the ACTIVE SLOT CLAIMS as well as one
+    # an enabled rule declares — the half the `Refusal` enum's own comment already promised. A slot
+    # written through `--identities FILE` or MCP `create_session_slot` names bindings the project may
+    # not hold yet, and a rule replacement spelling one of those bare was shipping the literal.
     private def bare_spelling_at(bytes : Bytes, at : Int32, n : Int32,
                                  snap : SubstSnapshot) : {String, Env::Namespace}?
       parsed = Env.read_key_bytes?(bytes, at, n)
       return nil unless parsed
       name = parsed[0]
-      return {name, Env::Namespace::Bind} if snap.bind.has_key?(name) || snap.declared.includes?(name)
+      return {name, Env::Namespace::Bind} if snap.binds?(name)
       return {name, Env::Namespace::Env} if snap.env.has_key?(name)
       nil
     end
@@ -1391,7 +1395,7 @@ module Gori
         # and a snapshot holding only the merged one would then route `$ENV.X` through a table
         # that also carries the bindings.
         cached = SubstSnapshot.new(Env.display_vars, Env.effective_vars, Env.binding_values,
-          Env.declared_bindings)
+          Env.declared_bindings, Env.active_slot_claims)
         @subst_snap = cached
         @subst_env_rev = erev
         @subst_binding_rev = brev
@@ -1409,16 +1413,32 @@ module Gori
       display : Hash(String, String),
       env : Hash(String, String),
       bind : Hash(String, String),
-      declared : Array(String) do
+      declared : Array(String),
+      claimed : Array(String) = EMPTY_DECLARED do
+      # Exhaustive over the namespace set rather than `ns.bind? ? bind : env`: a two-way branch
+      # answers for a THIRD namespace by resolving it out of the env vars, silently, which is the
+      # one failure the namespaces exist to remove.
       def table_for(ns : Env::Namespace?) : Hash(String, String)
         return display if ns.nil?
-        ns.bind? ? bind : env
+        case ns
+        in Env::Namespace::Env  then env
+        in Env::Namespace::Bind then bind
+        end
       end
 
       # Whether a name in this namespace can be DECLARED-but-unbound — the rule-scoped skip and
       # the boundary refusal both belong to the binding layer alone.
       def declarable?(ns : Env::Namespace?) : Bool
-        ns.nil? || ns.bind?
+        ns.nil? || ns.send_time?
+      end
+
+      # Whether the BINDING half owns this name at all — an enabled extract rule declares it, the
+      # active session slot claims it, or it is bound right now. The claim is the half
+      # `bare_spelling_at` was missing: `--identities FILE` and MCP `create_session_slot` write
+      # slots whose `rules` name bindings the project does not have yet, and `Env.unbound_in_slot`
+      # has always counted such a name as a reference.
+      def binds?(name : String) : Bool
+        bind.has_key?(name) || declared.includes?(name) || claimed.includes?(name)
       end
     end
 
@@ -1466,14 +1486,30 @@ module Gori
           "(the value is still bound — a body-scoped rule can carry it)")
       in Refusal::BareSpelling
         ns = refused.ns || Env::Namespace::Env
+        bare = Env.spell(refused.key, ns, Env::Syntax::Bare)
         # The remedy is the SPELLING, so the message carries both of them: the one that resolves,
         # and the escape for an operator who really did mean those bytes as text.
+        #
+        # A PIPE rule's `replacement` is an argv, not text spliced into a message, and the names an
+        # operator writes into one are overwhelmingly shell-shaped — `$HOME`, `$PATH`, `$TMPDIR`.
+        # There is no shell here (`ProcessHook.parse_argv` tokenizes and `pipe_argv` resolves per
+        # element), so gori cannot know which was meant; prescribing the re-spelling as THE fix told
+        # an operator to inject a gori variable where they had written a shell one. Both, with the
+        # escape named first for that kind of rule.
+        remedy =
+          if rule.op.pipe?
+            "this is a command argv and there is no shell here — escape it as " \
+            "#{Env.spell_escaped(refused.key, ns, Env::Syntax::Bare)} if the literal " \
+            "#{bare} is what you meant, or write #{Env.spell(refused.key, ns)} to inject " \
+            "gori's value"
+          else
+            "write #{Env.spell(refused.key, ns)} to inject the value, or " \
+            "#{Env.spell_escaped(refused.key, ns, Env::Syntax::Bare)} to inject the text"
+          end
         @store.insert_event("bindings", "bare_spelling", "warn",
           "rewrite rule #{label.inspect} not applied: " \
-          "#{Settings.env_prefix}#{refused.key} is the bare spelling and this install reads " \
-          "#{EnvMigration.spelling(Env::Syntax::Namespaced)} — write " \
-          "#{Env.spell(refused.key, ns)} to inject the value, or " \
-          "#{Env.spell_escaped(refused.key, ns, Env::Syntax::Bare)} to inject the text")
+          "#{bare} is the bare spelling and this install reads " \
+          "#{EnvMigration.spelling(Env::Syntax::Namespaced)} — #{remedy}")
       end
     end
 
