@@ -516,12 +516,18 @@ describe Gori::EnvMigration do
     with_migration_home do |db_path|
       seed_migration_project(db_path)
       Gori::Settings.env_syntax = NS
-      File.chmod(db_path, 0o444)
-      # The WAL sidecars too: a writable -wal beside a read-only main file is still a write path in.
-      %w[-wal -shm].each { |ext| File.chmod("#{db_path}#{ext}", 0o444) if File.exists?("#{db_path}#{ext}") }
+      # Read-only AFTER the handle is open, every time: `Store.open` tightens the file to 0600 on the
+      # way in (the security-permissions policy), and on Linux that runs before the migration's own
+      # write connection, so a chmod taken once up front is silently undone and the write succeeds.
+      lock_down = -> do
+        File.chmod(db_path, 0o444)
+        # The WAL sidecars too: a writable -wal beside a read-only main file is still a write path in.
+        %w[-wal -shm].each { |ext| File.chmod("#{db_path}#{ext}", 0o444) if File.exists?("#{db_path}#{ext}") }
+      end
       begin
         3.times do
           ro = Gori::Store.open(db_path, read_only: true, background_index: false)
+          lock_down.call
           begin
             report = Gori::EnvMigration.reconcile(ro, db_path, "demo").not_nil!
             report.error.should_not be_nil
@@ -551,9 +557,11 @@ describe Gori::EnvMigration do
       seed_migration_project(db_path)
       Gori::Settings.env_syntax = NS
       dir = File.dirname(db_path)
-      File.chmod(dir, 0o555)
       begin
         ro = Gori::Store.open(db_path, read_only: true, background_index: false)
+        # AFTER the open, as above: `Store.open` tightens the project directory back to 0700, so a
+        # chmod taken before it is undone on Linux and the backup lands.
+        File.chmod(dir, 0o555)
         begin
           report = Gori::EnvMigration.reconcile(ro, db_path, "demo").not_nil!
           report.error.should_not be_nil
