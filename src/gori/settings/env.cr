@@ -17,6 +17,17 @@ module Gori::Settings
   # `adopt_env_syntax_for_absent_key`).
   DEFAULT_ENV_SYNTAX = Env::Syntax::Namespaced
 
+  # What gori READS tokens as when `env.syntax` is there and says nothing gori understands — a
+  # typo, a `null`, a number, a list. NOT `DEFAULT_ENV_SYNTAX`: the default is the answer for a
+  # file that PREDATES namespaces, which is a date gori can act on (adopt, re-spell, write the key
+  # down). A value nobody can read is the opposite — it is the one state where gori knows it does
+  # not know, so it reads tokens the way the install's stored bytes are most likely to be spelled
+  # and rewrites nothing (`env_syntax_origin = Unreadable`). Bare is that reading for the same
+  # reason `EnvMigration.stored_syntax` picks it: it is the answer a wrong guess cannot lose data
+  # over, and it is what the unreadable-FILE sibling (`adopt_env_syntax_for_absent_key`) already
+  # picks for a settings.json gori could not read a byte of.
+  UNREADABLE_ENV_SYNTAX = Env::Syntax::Bare
+
   # What the ABSENCE of `env.syntax` resolves to. A class_property so the suite can pin it: every
   # spec home is a fresh one with no settings file, and without the pin ~1,000 bare `$TOKEN`
   # fixtures would be read under the other grammar — and migrated on their way past.
@@ -103,22 +114,28 @@ module Gori::Settings
           self.env_syntax = s
           self.env_syntax_origin = EnvSyntaxOrigin::Stated
         else
-          self.env_syntax = DEFAULT_ENV_SYNTAX
+          self.env_syntax = UNREADABLE_ENV_SYNTAX
           self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
           note_load_warning("settings: env.syntax #{raw.inspect} is not one of " \
                             "#{Env::Syntax.values.join('/', &.to_s.downcase)} — reading tokens as " \
-                            "#{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run, and re-spelling " \
+                            "#{UNREADABLE_ENV_SYNTAX.to_s.downcase} for this run, and re-spelling " \
                             "nothing until the value is fixed")
         end
       else
-        self.env_syntax = DEFAULT_ENV_SYNTAX
+        self.env_syntax = UNREADABLE_ENV_SYNTAX
         self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
         note_load_warning("settings: env.syntax must be a string (got #{node.to_json}) — reading " \
-                          "tokens as #{DEFAULT_ENV_SYNTAX.to_s.downcase} for this run, and " \
+                          "tokens as #{UNREADABLE_ENV_SYNTAX.to_s.downcase} for this run, and " \
                           "re-spelling nothing until the value is fixed")
       end
     end
-    self.env_vars = parse_env_vars(e["vars"]?)
+    # `vars` follows the same rule as `syntax`: assigned ONLY when the key is PRESENT. An absent
+    # key is not an empty table — `export_document` strips `syntax` out of an exported `env`
+    # section, so a profile taken from a var-less install carries the literal document `{"env":{}}`,
+    # and a reader that treated that as "no vars" emptied the IMPORTER's global env var table (its
+    # token VALUES included) over a profile that said nothing about vars at all. `{"vars": []}` is
+    # still how a profile says "no vars", the same wholesale-replace rule every list section has.
+    self.env_vars = parse_env_vars(e["vars"]?) if e.has_key?("vars")
   end
 
   # Recover the token grammar from a settings file that would not PARSE, textually.
@@ -226,8 +243,12 @@ module Gori::Settings
   # The absence of `env.syntax` is no longer a value: it means the file predates namespaces, and
   # the next load treats it as a MIGRATION to run (`adopt_env_syntax_for_absent_key`). So a
   # grammar that is not written down is a grammar that gets re-derived — and for the `bare`
-  # opt-out that would mean the opt-out is overwritten on the very next start, while for
-  # namespaced it would mean the global-rule migration runs again on every load, forever.
+  # opt-out that would mean the opt-out is overwritten on the very next start.
+  #
+  # This is also what lets `load` stay a READ. It adopts the absent grammar in memory and saves
+  # only when the global-rule re-spelling actually changed the file's bytes; the key itself rides
+  # out on the next save this install makes for any other reason, because that save always emits
+  # it. Re-deriving the same answer from the same absence until then is free.
   #
   # An EXPORT still carries no grammar: `strip_env_syntax` drops the key from an exported
   # document (settings.cr), because a teammate's profile does not speak for how the tokens in

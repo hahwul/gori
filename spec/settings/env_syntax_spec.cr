@@ -5,10 +5,12 @@ require "file_utils"
 #
 # The rule, in one sentence: NAMESPACED is the grammar for everyone, and the ABSENCE of the key on a
 # settings file read in full is not a grammar — it means the file PREDATES namespaces. So absence is
-# a migration: the global rewrite rules are re-spelled (a copy of settings.json kept beside it), the
-# key is written, and every project re-spells itself the first time it opens
-# (spec/env_migration_spec.cr). `bare` stays as an explicit opt-out, and because it is explicit the
-# key is ALWAYS serialized — a grammar nobody wrote down is a grammar that gets re-derived.
+# a migration: the global rewrite rules are re-spelled (a copy of settings.json kept beside it, and
+# the one thing that makes the load save) and every project re-spells itself the first time it opens
+# (spec/env_migration_spec.cr). The KEY itself is not written by the load — a load is a read — it
+# rides out on the next ordinary save. `bare` stays as an explicit opt-out, and because it is
+# explicit the key is ALWAYS serialized: a grammar nobody wrote down is a grammar that gets
+# re-derived.
 #
 # Every example runs in its own temp home and restores the process-global settings through a load
 # of their serialization (the same discipline as reset_spec).
@@ -68,7 +70,7 @@ describe "Settings env.syntax" do
 
   # THE new absence rule. The key is not missing because the install chose bare — it is missing
   # because the file was written before namespaces existed, which is a MIGRATION and not a value.
-  it "reads the ABSENCE of the key as pre-namespace: adopts namespaced and writes the key" do
+  it "reads the ABSENCE of the key as pre-namespace and adopts namespaced IN MEMORY" do
     with_syntax_home do |dir|
       path = File.join(dir, "settings.json")
       Gori::Settings.env_syntax_when_absent = Gori::Env::Syntax::Namespaced
@@ -76,19 +78,38 @@ describe "Settings env.syntax" do
       Gori::Settings.load
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
       Gori::Settings.env_vars.should eq([{"A", "1"}])
-      # Written immediately, so the question is asked once: a second load reads a STATED grammar
-      # and runs no migration.
-      env_section(path).not_nil!["syntax"].as_s.should eq("namespaced")
+      # NOT written by the load. A load is a read: with no global rule to re-spell there is nothing
+      # that has to be persisted, and a `save` from inside `load` is the thing that used to skip the
+      # TUI's first-run wizard and create directories for a `--config` that does not exist.
+      env_section(path).not_nil!.has_key?("syntax").should be_false
       # The origin of THIS run is still the absence that settled it — and an absence read out of a
       # file gori got in full is authoritative, which is what lets the projects be re-spelled.
       Gori::Settings.env_syntax_origin.should eq(Gori::Settings::EnvSyntaxOrigin::Absent)
       Gori::Settings.env_syntax_stated?.should be_true
       Gori::Settings.take_env_syntax_global_migration.should be_nil # no global rule to re-spell
+      # The key rides out on the next ordinary save, because `serialize_env` always emits it — and
+      # from then on the question is a STATED grammar rather than a re-derived one.
+      Gori::Settings.save.should be_true
+      env_section(path).not_nil!["syntax"].as_s.should eq("namespaced")
       Gori::Settings.load
       Gori::Settings.env_syntax_origin.should eq(Gori::Settings::EnvSyntaxOrigin::Stated)
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
       # …and the rest of the operator's file survived the write.
       JSON.parse(File.read(path)).as_h["theme"].as_s.should eq("gori")
+    end
+  end
+
+  # A load may not bring a settings.json into existence. The TUI's first-run wizard is gated on
+  # `File.exists?(Settings.path)` (app.cr), so the adopt-on-absence path writing the file made the
+  # very first `gori` on a fresh machine skip the wizard — and the same write created the parent
+  # directory of a `--config` that names nothing during read-only commands.
+  it "writes NO settings.json at all on a fresh home" do
+    with_syntax_home do |dir|
+      Gori::Settings.env_syntax_when_absent = Gori::Env::Syntax::Namespaced
+      Gori::Settings.load
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      Gori::Settings.env_syntax_origin.should eq(Gori::Settings::EnvSyntaxOrigin::Absent)
+      File.exists?(File.join(dir, "settings.json")).should be_false
     end
   end
 
@@ -175,9 +196,11 @@ describe "Settings env.syntax" do
     end
   end
 
-  # A typo is not a date. The value is there and unreadable, so gori reads tokens as the default and
-  # REWRITES NOTHING — the absence path would have re-spelled every project against a guess.
-  it "warns on an unknown value, and re-spells nothing" do
+  # A typo is not a date. The value is there and unreadable, so gori reads tokens as BARE — the
+  # reading a wrong guess cannot lose data over, and the one the unreadable-FILE sibling already
+  # picks — and REWRITES NOTHING. The absence path would have re-spelled every project against a
+  # guess, and `DEFAULT_ENV_SYNTAX` here would have read every stored bare `$KEY` as literal text.
+  it "warns on an unknown value, stays bare, and re-spells nothing" do
     with_syntax_home do |dir|
       File.write(File.join(dir, "settings.json"), %({"env":{"syntax":"NAMESPACED!"}}))
       io = IO::Memory.new
@@ -189,10 +212,12 @@ describe "Settings env.syntax" do
       ensure
         Gori::Settings.warning_io = prev
       end
-      Gori::Settings.env_syntax.should eq(Gori::Settings::DEFAULT_ENV_SYNTAX)
+      Gori::Settings.env_syntax.should eq(Gori::Settings::UNREADABLE_ENV_SYNTAX)
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
       Gori::Settings.env_syntax_origin.should eq(Gori::Settings::EnvSyntaxOrigin::Unreadable)
       Gori::Settings.env_syntax_stated?.should be_false
       io.to_s.should contain("env.syntax")
+      io.to_s.should contain("reading tokens as bare")
     end
   end
 
@@ -217,7 +242,8 @@ describe "Settings env.syntax" do
       File.write(File.join(dir, "gori.db"), "")
       Gori::Settings.load
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
-      env_section(File.join(dir, "settings.json")).not_nil!["syntax"].as_s.should eq("namespaced")
+      # …and still writes nothing: the projects are re-spelled at their own open, one at a time.
+      File.exists?(File.join(dir, "settings.json")).should be_false
     end
   end
 
@@ -318,7 +344,7 @@ describe "Settings env.syntax" do
       ensure
         Gori::Settings.warning_io = prev
       end
-      Gori::Settings.env_syntax.should eq(Gori::Settings::DEFAULT_ENV_SYNTAX)
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
       Gori::Settings.env_syntax_stated?.should be_false
       io.to_s.should contain("env.syntax")
     end
@@ -390,6 +416,57 @@ describe "Settings env.syntax" do
       Gori::Settings.export_document(["env"]).should_not contain("syntax")
       Gori::Settings.load
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+    end
+  end
+
+  # An export whose `env` section is NOTHING BUT the grammar carries no env section at all — and an
+  # `env` node that says nothing about vars leaves the importer's vars alone.
+  #
+  # These are the two halves of one data loss. `serialize_env` always writes `syntax`, so a var-less
+  # install's whole section is the grammar; `export_document` strips the grammar; what shipped was
+  # the literal document `{"env":{}}`, and `parse_env` read the absent `vars` key as an empty table —
+  # so importing a teammate's theme-and-env profile emptied the importer's global env var table,
+  # token VALUES included, over a profile that mentioned no variable.
+  it "an env section that is only the grammar is not exported, and an empty one erases nothing" do
+    with_syntax_home do
+      Gori::Settings.load
+      Gori::Settings.env_syntax = Gori::Env::Syntax::Namespaced
+      Gori::Settings.env_vars = [] of {String, String}
+      doc = Gori::Settings.export_document(["env"])
+      JSON.parse(doc).as_h.has_key?("env").should be_false
+
+      # The other half, pinned directly: the document that USED to ship must still not erase vars.
+      Gori::Settings.env_vars = [{"TOKEN", "sekrit"}, {"HOST", "h"}]
+      Gori::Settings.import_document(%({"env":{}}))
+      Gori::Settings.env_vars.should eq([{"TOKEN", "sekrit"}, {"HOST", "h"}])
+      # …and the profile that DOES say "no vars" still says it.
+      Gori::Settings.import_document(%({"env":{"vars":[]}}))
+      Gori::Settings.env_vars.should be_empty
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+    end
+  end
+
+  # The round trip the two halves above exist for: a var-less install's profile, imported onto an
+  # install that HAS vars, is a no-op on those vars.
+  it "an export from a var-less install does not wipe the importer's vars" do
+    doc = nil.as(String?)
+    with_syntax_home do
+      Gori::Settings.load
+      Gori::Settings.env_syntax = Gori::Env::Syntax::Namespaced
+      Gori::Settings.env_vars = [] of {String, String}
+      doc = Gori::Settings.export_document(Gori::Settings::SECTION_KEYS)
+    end
+    with_syntax_home do
+      Gori::Settings.load
+      Gori::Settings.env_vars = [{"TOKEN", "sekrit"}]
+      Gori::Settings.save.should be_true
+      Gori::Settings.import_document(doc.not_nil!)
+      Gori::Settings.env_vars.should eq([{"TOKEN", "sekrit"}])
+      Gori::Settings.load
+      Gori::Settings.env_vars.should eq([{"TOKEN", "sekrit"}])
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
     end
   end
 

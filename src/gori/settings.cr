@@ -245,9 +245,25 @@ module Gori
       # Bare is what absence already meant, so there is nothing to re-spell and nothing to write —
       # which is also what keeps a spec home (pinned bare) from growing a settings.json.
       return if target.bare?
-      @@env_syntax_global_migration =
-        EnvMigration.migrate_global_rules(from: Env::Syntax::Bare, to: target)
-      save
+      report = EnvMigration.migrate_global_rules(from: Env::Syntax::Bare, to: target)
+      @@env_syntax_global_migration = report
+      # ONLY when the rewrite actually moved a rule. A `load` that WRITES is not a read, and an
+      # unconditional save here was one:
+      #
+      #   * it created settings.json on a home that has none, which is the exact test the TUI's
+      #     first-run wizard is gated on (`app.cr`: `File.exists?(Settings.path)`) — so the very
+      #     first `gori` on a fresh machine adopted the grammar, wrote the file, and skipped the
+      #     wizard;
+      #   * and it created the parent directory of a `--config` that names a path that does not
+      #     exist, during read-only commands (`gori run history list --config /tmp/nope.json`).
+      #
+      # Adopting in MEMORY costs nothing to leave unwritten: `serialize_env` always emits
+      # `env.syntax`, so the first ordinary save this install makes for any other reason persists
+      # it, and until then every start re-derives the same answer from the same absence. A
+      # re-spelling of the global rules is the one thing that MUST be persisted — those bytes are
+      # now different from the file's, and `migrate_global_rules` has already put the
+      # `settings.json.pre-namespaced-<ts>` copy beside it.
+      save if report
     end
 
     # What the last `load`'s global-rule re-spelling did, or nil when it did nothing. Read by the
@@ -1088,7 +1104,18 @@ module Gori
           # namespaces", so a grammar has to be stated), and a profile that named one would decide
           # how the IMPORTING install reads the tokens already stored in its own projects — the one
           # thing an import is not allowed to do (see `report_env_syntax_change`).
-          doc.each { |k, v| j.field k, strip_env_syntax(k, v) if keep.includes?(k) }
+          #
+          # A section the strip leaves EMPTY is omitted, and that is not tidiness. `serialize_env`
+          # always writes `syntax`, so a var-less install's whole `env` section is the grammar —
+          # and exporting `{"env": {}}` shipped a profile that SAYS nothing about env and, on the
+          # importing side, was read as a section present with no vars. Nothing here may be a
+          # sentence about the importer's own token values.
+          doc.each do |k, v|
+            next unless keep.includes?(k)
+            stripped = strip_env_syntax(k, v)
+            next if k == "env" && (h = stripped.as_h?) && h.empty?
+            j.field k, stripped
+          end
         end
       end
     end
