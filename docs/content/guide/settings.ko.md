@@ -90,7 +90,7 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 | **Editor** | External editor, Markdown highlight, Pretty-print bodies |
 | **Mouse** | Mouse, Drag release |
 | **Keys** | Command modifier |
-| **Env** | 오프너: 아웃바운드 요청에 쓰는 전역 `$KEY` 변수 |
+| **Env** | 오프너: 아웃바운드 요청에 쓰는 전역 `$ENV.KEY` 변수, 그리고 토큰 문법(`s`로 `namespaced` / `bare` 전환) |
 | **Hotkeys** | 오프너: 단축키 재지정, OS 기본 프로파일 선택 |
 
 **External editor**는 편집 가능한 필드에서 `^E`가 여는 프로그램입니다. 비워 두면 `$VISUAL` / `$EDITOR` / `vi` 순으로 넘어갑니다.

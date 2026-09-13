@@ -90,7 +90,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 | **Editor** | External editor, Markdown highlight, Pretty-print bodies |
 | **Mouse** | Mouse, Drag release |
 | **Keys** | Command modifier |
-| **Env** | Opener: global `$KEY` variables for outbound requests |
+| **Env** | Opener: global `$ENV.KEY` variables for outbound requests, plus the token grammar (`s` toggles `namespaced` / `bare`) |
 | **Hotkeys** | Opener: rebind any shortcut, or pick an OS default profile |
 
 **External editor** is what `^E` opens in editable fields; blank falls back to `$VISUAL` / `$EDITOR` / `vi`.

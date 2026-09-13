@@ -86,7 +86,7 @@ When you fuzz a raw request with `--request` or STDIN and pass no `--project` / 
 
 ## Authenticated Sweeps
 
-Session bindings (`$SESSION` and friends) live in the memory of the gori process that observed them. They are never persisted, because a restored token is stale by construction. That is fine in the TUI, where one process holds both the send and the sweep that follows, but `gori run` is one-shot per process.
+Session bindings (`$BIND.SESSION` and friends) live in the memory of the gori process that observed them. They are never persisted, because a restored token is stale by construction. That is fine in the TUI, where one process holds both the send and the sweep that follows, but `gori run` is one-shot per process.
 
 `--bind-from FLOW-ID` closes the gap: it replays one captured flow first, so the response fills the bindings your fuzz, mine, sequence, or discover template reads in the same process.
 
