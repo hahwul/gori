@@ -1,14 +1,14 @@
 require "./env"
 
 module Gori
-  # One-shot re-spelling of STORED env tokens when an install changes `Settings.env_syntax`
-  # (`gori settings env-syntax <value> --migrate`).
+  # Re-spelling of STORED env tokens when this install's `Settings.env_syntax` and a project's own
+  # marker disagree — the PURE rewrite, with the orchestration around it in `env_migration/store.cr`
+  # (a project database, at the moment a surface opens it) and `env_migration/globals.cr`
+  # (settings.json's global rewrite rules, at the moment the install's grammar moves).
   #
-  # A syntax switch re-reads bytes that are already in the project databases; it does not rewrite
-  # them (see `Env::Syntax`). That is the safe default and it stays the default — but it leaves an
-  # operator who switches with a project full of `$API_KEY` drafts holding text that is now
-  # literal. This module is the opt-in other half: the PURE rewrite, so the CLI verb (and a TUI
-  # action later) only has to orchestrate stores around it.
+  # It exists because a grammar switch only changes how stored bytes are READ: without this, an
+  # operator whose project is full of `$API_KEY` drafts would be holding text that is now literal.
+  # Nothing asks them — see `EnvMigration.reconcile`.
   #
   # ## The contract
   #

@@ -8,7 +8,7 @@ require "./spec_helper"
 # must NOT be tokens, asserted through `expand` (the one place a wrong answer reaches a socket)
 # and through `token_refs`/`regions` (the queries every surface reads).
 #
-# The bare grammar keeps its own ~45 spec files; the suite pins `new_install_env_syntax` to bare
+# The bare grammar keeps its own ~45 spec files; the suite pins `env_syntax_when_absent` to bare
 # (see spec_helper) and every example here opts in with `with_env_syntax`.
 
 private class NsLayer < Gori::Env::Layer
