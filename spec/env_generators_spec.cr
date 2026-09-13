@@ -204,6 +204,28 @@ describe "Gori::Env generators" do
     end
   end
 
+  # `Env::Layer#overlay` carries the send seam's generation, and Crystal has no `override`
+  # keyword: a subclass left at the one-argument spelling still COMPILES, and then never runs —
+  # the overlay silently stops being applied. One spec double was exactly that for an hour, and
+  # only a miner hook example noticed. Cheap source scan, in the repo's `shared_chrome_spec`
+  # idiom, so the next one is a failure here rather than a missing header on the wire.
+  it "keeps every Env::Layer#overlay override on the seam's signature" do
+    roots = [File.join(__DIR__, "..", "src"), __DIR__]
+    offenders = [] of String
+    roots.each do |root|
+      Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+        File.read(path).each_line do |line|
+          next unless line.matches?(/^\s*def overlay\(wire\s*:\s*Bytes/)
+          # `SessionSlots#overlay(wire, &)` is a different method on a different class — the
+          # BLOCK is how the slot registry asks its caller to resolve each header value.
+          next if line.includes?("generation") || line.includes?("&")
+          offenders << "#{File.basename(path)} — #{line.strip}"
+        end
+      end
+    end
+    offenders.should be_empty
+  end
+
   it "runs through the shared Repeater send seam and stays off for evidence or verbatim bytes" do
     with_generators do
       outbound = ungated_outbound

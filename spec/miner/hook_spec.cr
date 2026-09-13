@@ -69,7 +69,11 @@ private class HeaderOverlayLayer < Gori::Env::Layer
     0_u64
   end
 
-  def overlay(wire : Bytes) : Bytes
+  # The generation rides the hook's signature (`Env::Layer#overlay`): a send seam hands ONE
+  # context to the request expansion and to this overlay, so a `$GEN.*` in a slot header is the
+  # value the request carries. This double writes a fixed header and has no token to resolve,
+  # but it must keep the signature — a one-argument override is never called.
+  def overlay(wire : Bytes, generation : Gori::Env::Generation? = nil) : Bytes
     s = String.new(wire)
     idx = s.index("\r\n")
     return wire unless idx
