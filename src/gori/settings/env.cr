@@ -175,8 +175,15 @@ module Gori::Settings
   # path may leave the previous home's value in memory) and returns the sentence the corrupt-file
   # warning appends, or nil when the grammar was recovered and there is nothing to warn about.
   # TEXTUAL on purpose: the JSON is by definition not available, and the value set is closed.
+  #
+  # The FALLBACK is `UNREADABLE_ENV_SYNTAX` and not `DEFAULT_ENV_SYNTAX`, for the reason that
+  # constant gives: the default is the answer for a file that PREDATES namespaces — a date gori can
+  # act on — while a torn file with no grammar in it is the state where gori knows it does not know.
+  # Reading it as namespaced made every stored bare `$KEY` literal text for the run, and (since
+  # `save` stays armed on this path) wrote `namespaced` into the repaired file on the next ordinary
+  # save: a silent UPGRADE of an install whose projects are all spelled the other way, from a comma.
   private def self.recover_env_syntax_from_corrupt(raw : String) : String?
-    self.env_syntax = DEFAULT_ENV_SYNTAX
+    self.env_syntax = UNREADABLE_ENV_SYNTAX
     # A torn file is not a file that predates namespaces, whatever the regex finds: nothing may be
     # rewritten against it until it parses again. Recovered or not, the origin says `Unreadable`.
     self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
@@ -188,7 +195,7 @@ module Gori::Settings
       end
     end
     "gori could not read which token grammar this install speaks and is reading tokens as " \
-    "#{DEFAULT_ENV_SYNTAX.to_s.downcase} — `gori settings env-syntax` restores it"
+    "#{UNREADABLE_ENV_SYNTAX.to_s.downcase} — `gori settings env-syntax` restores it"
   end
 
   private def self.parse_env_vars(node : JSON::Any?) : Array({String, String})

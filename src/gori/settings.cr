@@ -197,9 +197,16 @@ module Gori
         # save for the rest of the process over a file that was read in full.
         @@load_partial = true
         # Half a file proves nothing about the grammar, so the origin says `Unreadable` and no
-        # project database is re-spelled off this run (`env_syntax_stated?`). The VALUE is the
-        # default, which is also what `@@load_partial` makes harmless: `save` refuses on this path.
-        self.env_syntax = DEFAULT_ENV_SYNTAX
+        # project database is re-spelled off this run (`env_syntax_stated?`).
+        #
+        # The VALUE, though, is only reset when nothing read it. `parse_env` runs in the MIDDLE of
+        # `apply_sections`, so a section BELOW it raising left a grammar the file genuinely stated
+        # — and overwriting it with a constant made this run read every token in every project
+        # under a grammar the operator's own file contradicts, over an unrelated malformed section.
+        # A `bare` opt-out torn by a bad `listeners` entry is the case: it came back namespaced.
+        # Only an origin still `Absent` (nothing assigned it) gets the fallback, and the fallback is
+        # `UNREADABLE_ENV_SYNTAX` for the same reason `recover_env_syntax_from_corrupt` uses it.
+        self.env_syntax = UNREADABLE_ENV_SYNTAX if env_syntax_origin.absent?
         self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
         note_load_warning("settings: #{path} could not be read in full — the sections gori did " \
                           "not reach are at their factory defaults, so this run will not overwrite that file")

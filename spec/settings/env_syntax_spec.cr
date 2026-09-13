@@ -384,6 +384,39 @@ describe "Settings env.syntax" do
     end
   end
 
+  # The two halves of a TORN file, and the line where it tears is what decides them. `save` stays
+  # ARMED on this path (nothing was applied from disk, so the next write is a deliberate clean one),
+  # which is why the VALUE this leaves in memory is the value the repaired file ends up carrying.
+  it "reads a file truncated BEFORE the env section as bare, and writes bare" do
+    with_syntax_home do |dir|
+      path = File.join(dir, "settings.json")
+      # A namespaced install whose file tears above the env section. Nothing in the bytes says which
+      # grammar it speaks, so gori knows it does not know — and bare is the reading a wrong guess
+      # cannot lose data over, since a name in neither table is a literal in both grammars.
+      Gori::Settings.env_syntax = Gori::Env::Syntax::Namespaced
+      File.write(path, %({"theme":"gori","network":{"bind_port":8080,))
+      Gori::Settings.reset_load_warning_guard
+      Gori::Settings.load
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+      Gori::Settings.env_syntax_stated?.should be_false # nothing is re-spelled off a torn file
+      Gori::Settings.save.should be_true
+      env_section(path).not_nil!["syntax"].as_s.should eq("bare")
+    end
+  end
+
+  it "recovers the grammar from a file truncated AFTER the env section" do
+    with_syntax_home do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, %({"env":{"syntax":"namespaced"},"listeners":[{"port":1,))
+      Gori::Settings.reset_load_warning_guard
+      Gori::Settings.load
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      Gori::Settings.env_syntax_stated?.should be_false
+      Gori::Settings.save.should be_true
+      env_section(path).not_nil!["syntax"].as_s.should eq("namespaced")
+    end
+  end
+
   it "says so when an unparseable file does not spell the grammar either" do
     with_syntax_home do |dir|
       # A bare home first, in the same process — the value this must not leave behind.
@@ -401,7 +434,14 @@ describe "Settings env.syntax" do
       ensure
         Gori::Settings.warning_io = prev
       end
-      Gori::Settings.env_syntax.should eq(Gori::Settings::DEFAULT_ENV_SYNTAX)
+      # BARE, not the default: a torn file with no grammar in it is the state where gori knows it
+      # does not know, and reading it as namespaced made every stored bare `$KEY` literal text.
+      Gori::Settings.env_syntax.should eq(Gori::Settings::UNREADABLE_ENV_SYNTAX)
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
+      # …and `save` stays armed on this path, so the value it WRITES is the one that matters: a
+      # namespaced fallback here upgraded a bare install permanently, from a comma.
+      Gori::Settings.save.should be_true
+      env_section(Gori::Settings.path).not_nil!["syntax"].as_s.should eq("bare")
       # ONE line (the warning guard fires once per process), carrying both facts.
       io.to_s.lines.size.should eq(1)
       io.to_s.should contain("not valid JSON")
