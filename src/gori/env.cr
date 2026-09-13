@@ -634,6 +634,12 @@ module Gori
     # right now. Widening the default of `mask_secrets` / `token_regions` to this is what
     # makes every surface that already masks (or paints a `$KEY`) cover bindings too,
     # with no per-surface change. Deliberately NOT the default of `expand`.
+    #
+    # A DISPLAY table, and under the NAMESPACED grammar not a resolution table at all: the two
+    # layers are keyed by bare name and merging them is exactly the collision the namespaces
+    # remove, so anything that RESOLVES asks `vars_for(ns)` instead. This stays because "would
+    # this token paint as known?" and "which names may completion offer?" are still one question
+    # about both layers at once.
     def self.display_vars : Hash(String, String)
       h = effective_vars
       binding_values.each { |(k, v)| h[k] = v }
