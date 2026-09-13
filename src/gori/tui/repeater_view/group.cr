@@ -182,12 +182,20 @@ class Gori::Tui::RepeaterView
   private def seed_draft_baselines : Nil
     wire = @editor.wire_text
     @evidence_pipeline_seps = pipeline_sep_count_in(wire)
-    @evidence_env_names = Env.token_names(wire).to_set
+    # BARE names in the ENV namespace: this set feeds `Env.vars_without`, which SUBTRACTS from
+    # a table keyed by bare name (see `operator_env_vars`). Qualified keys would subtract
+    # nothing and every captured `$id` would resolve again.
+    @evidence_env_names = Env.token_names(wire, ns: Env::Namespace::Env).to_set
     # Assigned unconditionally, including the empty set a draft gets: a loader can turn a
     # tab that WAS evidence into one that isn't (load_blank after a ^R, a duplicate), and a
     # stale literal set would keep painting resolvable tokens as unknown on a buffer that
     # substitutes every one of them.
-    @editor.env_literal_names = @evidence ? @evidence_env_names : Set(String).new
+    #
+    # `literal_keys` and not the set above: the EDITOR is keyed by what it PAINTS, which is a
+    # qualified `ENV.id` under the namespaced grammar and a bare `id` under the bare one. The
+    # set carries both spellings, so a mid-session syntax toggle neither loses the buffer's
+    # provenance nor starts withholding the other namespace's name.
+    @editor.env_literal_names = @evidence ? Env.literal_keys(wire) : Set(String).new
   end
 
   # The same count over raw text, for seeding the baseline at load/restore.

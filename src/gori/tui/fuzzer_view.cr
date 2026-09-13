@@ -1593,8 +1593,12 @@ module Gori::Tui
     # the text and `@evidence` are set — the baseline has to describe the bytes gori was
     # handed, and the editor's answer has to match the provenance those bytes carry.
     private def seed_env_baseline : Nil
-      @evidence_env_names = Env.token_names(@editor.wire_text).to_set
-      @editor.env_literal_names = @evidence ? @evidence_env_names : Set(String).new
+      wire = @editor.wire_text
+      # BARE names in the ENV namespace for the baseline (it subtracts from a bare-keyed
+      # table), QUALIFIED-and-bare keys for the editor (it paints what the grammar spells).
+      # See `RepeaterView::Group#seed_draft_baselines`, whose pair this mirrors.
+      @evidence_env_names = Env.token_names(wire, ns: Env::Namespace::Env).to_set
+      @editor.env_literal_names = @evidence ? Env.literal_keys(wire) : Set(String).new
     end
 
     # The `$KEY` table THIS template may substitute from, or nil to substitute nothing.

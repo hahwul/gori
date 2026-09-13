@@ -1731,7 +1731,7 @@ module Gori::Tui
       # a cursor move mid-token) must not hide the peek.
       dropdown_visible = cursor && ec && ec.open?
       if (cursor || peek) && (cc = caret_cell) && !dropdown_visible && (tok = env_token_at_cursor)
-        ep.set(tok[0], tok[1], Settings.env_prefix)
+        ep.set(tok[0], tok[1])
         ep.render(screen, cc[0], cc[1], rect)
       else
         ep.close
@@ -2335,7 +2335,13 @@ module Gori::Tui
       when key.up?, key.back_tab? then ec.move(-1)
       when key.down?              then ec.move(1)
       when key.escape?            then ec.close
-      else                             return false
+      else
+        # A `.` finishes a NAMESPACE row — it is the character that row's own label ends with,
+        # so typing it means "that one", exactly as ↹ does. Every other key falls through to
+        # the editor, which re-derives the rows from the text after the edit.
+        return false unless ec.selected_kind == :ns && !ev.ctrl? && !ev.alt? &&
+                            (ev.char || key.to_char) == '.'
+        env_accept(ec)
       end
       true
     end
@@ -2343,58 +2349,194 @@ module Gori::Tui
     private def env_accept(ec : EnvComplete) : Nil
       push_undo
       line = @lines[@cy]
-      newline, ncx = ec.accept(line, @cx.clamp(0, line.size))
+      newline, ncx, reopen = ec.accept(line, @cx.clamp(0, line.size))
       @lines[@cy] = newline
       @cx = ncx.clamp(0, newline.size)
       snap_cx_to_cluster(1) # the expansion's tail can merge with the text it was spliced into
-      ec.close
       @styled = nil
       @edits += 1
+      # A NAMESPACE row is half a reference: refresh onto its names rather than closing, so
+      # `$E` ↹ ↹ reaches `$ENV.HOST` without the operator having to reopen the popup by hand.
+      # `refresh` closes it itself when the namespace has nothing left to offer.
+      reopen ? refresh_env_complete : ec.close
     end
 
-    # Recompute the match set for the `$partial` token the caret sits in — the run of
-    # env-key chars immediately left of the caret, which must be preceded by the prefix
-    # sigil. Closes when there's no token, no registered vars, or the sole match is already
-    # fully typed. Called after every insert-mode edit; a cheap no-op when disabled.
-    private def refresh_env_complete : Nil
-      ec = @env_complete
-      return unless ec
-      prefix = Settings.env_prefix
-      return ec.close if prefix.empty?
-      # `display_vars`, so a bound `$SESSION` completes beside the env vars — one syntax,
-      # one dropdown. `declared` is read ONCE here, not per candidate row: it takes the
-      # binding table's mutex.
-      vars = Env.display_vars
-      declared = Env.declared_bindings
-      return ec.close if vars.empty?
-      line = @lines[@cy]
-      cx = @cx.clamp(0, line.size)
+    # One token under the caret, as the dropdown AND the peek both read it — there used to be
+    # two near-identical walks here and they disagreed the moment the grammar grew a second
+    # stage.
+    #
+    #   * `sigil`      — char offset of the prefix sigil (the left edge a completion replaces)
+    #   * `ns`         — the namespace ALREADY in the bytes (`$ENV.HO|ST`), else nil
+    #   * `partial`    — what is typed left of the caret in the current segment
+    #   * `full_name`  — that whole segment, caret to either edge (what a peek resolves)
+    #   * `run_end`    — end of the identifier run the caret is in
+    #   * `token_end`  — end of the whole reference, `.NAME` tail included
+    #   * `dot_follows` — a structural `.` sits at `run_end` (a namespace row must eat it)
+    record EnvCaret, sigil : Int32, ns : Env::Namespace?, partial : String, full_name : String,
+      run_end : Int32, token_end : Int32, dot_follows : Bool
+
+    # The env token the caret sits in, or nil when it sits in none.
+    #
+    # `.` is deliberately NOT a key character (`env_key_tail?` is untouched): it is STRUCTURE
+    # in `$ENV.HOST`, not part of either half, so it is crossed here explicitly. Folding it
+    # into the key run would make `a.b` and a dotted URL path look like token material and
+    # would let a name swallow the namespace in front of it.
+    private def env_caret_token(line : String, cx : Int32, syntax : Env::Syntax,
+                                prefix : String) : EnvCaret?
+      return nil if prefix.empty?
       plen = prefix.size
       ks = cx
       while ks > 0 && env_key_tail?(line[ks - 1])
         ks -= 1
       end
-      # A prefix sigil must sit immediately before the key run (else it isn't an env token).
-      return ec.close unless ks - plen >= 0 && line[(ks - plen)...ks] == prefix
-      partial = line[ks...cx]
-      # A non-empty partial must start with a valid key head — `$1` etc. never expand.
-      return ec.close if !partial.empty? && !env_key_head?(partial[0])
-      # Extend right over the rest of the key run so accepting replaces the whole identifier.
-      ke = cx
-      while ke < line.size && env_key_tail?(line[ke])
-        ke += 1
+      # STAGE B — the caret is in the NAME half of a `$NS.NAME`: the char before the run is
+      # the dot, the uppercase run before THAT parses as a namespace, and the sigil sits in
+      # front of it. Only then; `$X.TO` and `$BIND.A.B`'s `.B` fall through and complete
+      # nothing, which is what an operator typing an ordinary dotted value expects.
+      if syntax.namespaced? && ks > 0 && line[ks - 1] == '.'
+        ns_end = ks - 1
+        ns_start = ns_end
+        while ns_start > 0 && env_ns_char?(line[ns_start - 1])
+          ns_start -= 1
+        end
+        if ns_start < ns_end && (ns = Env::Namespace.parse?(line[ns_start...ns_end])) &&
+           ns_start - plen >= 0 && line[(ns_start - plen)...ns_start] == prefix
+          ke = cx
+          while ke < line.size && env_key_tail?(line[ke])
+            ke += 1
+          end
+          return EnvCaret.new(ns_start - plen, ns, line[ks...cx], line[ks...ke], ke, ke,
+            ke < line.size && line[ke] == '.')
+        end
       end
-      pl = partial.downcase
-      matches = vars.keys
+      # STAGE A — a bare run behind the sigil: `$TO`, `$E`, a fully-typed `$SESSION`, or the
+      # NAMESPACE run of a `$ENV.HOST` whose name the caret has not reached yet.
+      return nil unless ks - plen >= 0 && line[(ks - plen)...ks] == prefix
+      run_end = cx
+      while run_end < line.size && env_key_tail?(line[run_end])
+        run_end += 1
+      end
+      dot = run_end < line.size && line[run_end] == '.'
+      # A token row offered from inside the namespace run replaces the `.NAME` tail too —
+      # otherwise accepting `$ENV.HOST` over `$EN|V.TOKEN` would leave `.TOKEN` behind it.
+      token_end = run_end
+      if syntax.namespaced? && dot && Env::Namespace.parse?(line[ks...run_end])
+        token_end = run_end + 1
+        while token_end < line.size && env_key_tail?(line[token_end])
+          token_end += 1
+        end
+      end
+      EnvCaret.new(ks - plen, nil, line[ks...cx], line[ks...run_end], run_end, token_end, dot)
+    end
+
+    # Recompute the row set for the token the caret sits in. Closes when there's no token, no
+    # rows to offer, or the sole row is already fully typed. Called after every insert-mode
+    # edit; a cheap no-op when disabled.
+    private def refresh_env_complete : Nil
+      ec = @env_complete
+      return unless ec
+      prefix = Settings.env_prefix
+      return ec.close if prefix.empty?
+      syntax = Settings.env_syntax
+      line = @lines[@cy]
+      cx = @cx.clamp(0, line.size)
+      tok = env_caret_token(line, cx, syntax, prefix)
+      return ec.close unless tok
+      # A non-empty partial must start with a valid key head — `$1` etc. never expand.
+      return ec.close if !tok.partial.empty? && !env_key_head?(tok.partial[0])
+      matches = syntax.bare? ? bare_env_matches(tok, prefix) : namespaced_env_matches(tok, prefix)
+      # Auto-close on the SOLE row that is already written out in full. Compared against the
+      # typed token text rather than the partial, because a row's `insert` is a whole spelling
+      # (`$BIND.SESSION`) and a partial is only the tail of one: comparing the two would keep
+      # the popup up forever on a token that is finished, and in bare mode would never match.
+      if matches.empty? || (matches.size == 1 && matches[0].insert == line[tok.sigil...cx])
+        ec.close
+      else
+        ec.set(matches, tok.sigil)
+      end
+    end
+
+    # BARE mode: one flat list of names out of the single display table — what shipped.
+    private def bare_env_matches(tok : EnvCaret, prefix : String) : Array(EnvComplete::Match)
+      rows_out = [] of EnvComplete::Match
+      # `display_vars`, so a bound `$SESSION` completes beside the env vars — one syntax,
+      # one dropdown. `declared` is read ONCE here, not per candidate row: it takes the
+      # binding table's mutex.
+      vars = Env.display_vars
+      return rows_out if vars.empty?
+      declared = Env.declared_bindings
+      pl = tok.partial.downcase
+      vars.keys
         .select { |k| !@env_literal_names.includes?(k) } # offering one would promise a substitution this buffer won't make
         .select { |k| pl.empty? || k.downcase.starts_with?(pl) }
         .sort!
         .first(40)
-        .map { |k| {k, env_value_preview(vars[k], declared.includes?(k))} }
-      if matches.empty? || (matches.size == 1 && matches[0][0] == partial)
-        ec.close # nothing to offer, or already fully typed
-      else
-        ec.set(matches, ks - plen, ke, prefix)
+        .each do |k|
+          spelled = Env.spell(k, Env::Namespace::Env, Env::Syntax::Bare, prefix)
+          rows_out << EnvComplete::Match.new(:token, spelled, spelled,
+            env_value_preview(vars[k], declared.includes?(k)), tok.token_end)
+        end
+      rows_out
+    end
+
+    # NAMESPACED mode, two stages in one refresh.
+    #
+    # With the namespace already in the bytes (`$ENV.TO`) only that namespace's names are
+    # offered — the operator has said which table they mean. Otherwise the namespace OPENERS
+    # come first (in enum order, so the list does not reshuffle as vars are added) and then
+    # every name flattened, so `$TO` stays exactly the keystrokes bare mode needed: no
+    # namespace label starts with `TO`, so the two token rows are the whole list.
+    private def namespaced_env_matches(tok : EnvCaret, prefix : String) : Array(EnvComplete::Match)
+      rows_out = [] of EnvComplete::Match
+      syntax = Env::Syntax::Namespaced
+      pl = tok.partial.downcase
+      # Each namespace's table read ONCE per refresh: `vars_for(Bind)` takes the binding
+      # layer's mutex, and reading it per candidate row put the dropdown in contention with
+      # the send path on every keystroke.
+      tables = {} of Env::Namespace => Hash(String, String)
+      Env::Namespace.each { |ns| tables[ns] = Env.vars_for(ns) }
+      if fixed = tok.ns
+        append_env_token_rows(rows_out, {fixed => tables[fixed]}, pl, tok.token_end, prefix, syntax)
+        return rows_out
+      end
+      # A namespace opener. An EMPTY namespace gets no row: it would insert a prefix the
+      # second stage then has nothing to offer for, which reads as a broken dropdown rather
+      # than as "nothing is bound yet".
+      Env::Namespace.each do |ns|
+        table = tables[ns]
+        next if table.empty?
+        next unless pl.empty? || ns.label.downcase.starts_with?(pl)
+        spelled = Env.input_hint(ns, syntax, prefix)
+        rows_out << EnvComplete::Match.new(:ns, spelled, spelled,
+          "#{ns.description} · #{table.size}", tok.run_end + (tok.dot_follows ? 1 : 0))
+      end
+      append_env_token_rows(rows_out, tables, pl, tok.token_end, prefix, syntax)
+      rows_out
+    end
+
+    # The token rows for `tables`, filtered by `pl`, sorted by {name, namespace} so the same
+    # name in two namespaces lands adjacent, and capped — the cap is on TOKEN rows only, so a
+    # long var list can never push the namespace openers off the list.
+    private def append_env_token_rows(rows_out : Array(EnvComplete::Match),
+                                      tables : Hash(Env::Namespace, Hash(String, String)),
+                                      pl : String, replace_end : Int32, prefix : String,
+                                      syntax : Env::Syntax) : Nil
+      rows = [] of {String, Env::Namespace}
+      tables.each do |ns, table|
+        table.each_key do |name|
+          # The QUALIFIED key: a `$id` the capture arrived with is literal in THIS buffer, and
+          # a set keyed by bare name alone would also withhold the other namespace's `id`.
+          next if @env_literal_names.includes?(Env.qualify(ns, name))
+          next unless pl.empty? || name.downcase.starts_with?(pl)
+          rows << {name, ns}
+        end
+      end
+      rows.sort_by! { |row| {row[0], row[1].label} }
+      rows.first(40).each do |row|
+        name, ns = row
+        spelled = Env.spell(name, ns, syntax, prefix)
+        rows_out << EnvComplete::Match.new(:token, spelled, spelled,
+          env_value_preview(tables[ns][name]? || "", ns.secret?), replace_end)
       end
     end
 
@@ -2404,6 +2546,12 @@ module Gori::Tui
 
     private def env_key_tail?(c : Char) : Bool
       c.ascii_alphanumeric? || c == '_'
+    end
+
+    # The namespace run's alphabet. UPPERCASE only, so `$env.x` is not a token and the
+    # spelling an operator reads is the spelling gori resolves (see `Env::Namespace`).
+    private def env_ns_char?(c : Char) : Bool
+      'A' <= c <= 'Z'
     end
 
     # A one-line, whitespace-collapsed, length-capped value hint for the dropdown row.
@@ -2429,43 +2577,47 @@ module Gori::Tui
       s.size > 20 ? "#{s[0, 19]}…" : s
     end
 
-    # The COMPLETE, REGISTERED `$KEY` env token the caret currently sits inside (or
-    # immediately after), as {key, value-preview} — for the value peek. Scans the key run
-    # around @cx, requires the prefix sigil right before it, and looks the key up in the
-    # effective env vars. nil when the caret isn't on a token OR the key isn't registered —
-    # an unknown `$word` (e.g. a literal `$` typed during testing) is just text, no peek.
+    # The COMPLETE, REGISTERED env token the caret currently sits inside (or immediately
+    # after), as {spelled label, value-preview} — for the value peek. Shares `env_caret_token`
+    # with the dropdown, so the two can never disagree about where a token starts. nil when
+    # the caret isn't on a token OR the name isn't registered — an unknown `$word` (e.g. a
+    # literal `$` typed during testing) is just text, no peek.
     private def env_token_at_cursor : {String, String}?
       prefix = Settings.env_prefix
       return nil if prefix.empty?
       line = @lines[@cy]?
       return nil unless line
+      syntax = Settings.env_syntax
       cx = @cx.clamp(0, line.size)
-      plen = prefix.size
-      ks = cx
-      while ks > 0 && env_key_tail?(line[ks - 1]) # walk left to the key run's start
-        ks -= 1
-      end
-      # The prefix sigil must sit immediately before the key run (else it isn't an env token).
-      return nil unless ks - plen >= 0 && line[(ks - plen)...ks] == prefix
-      ke = cx
-      while ke < line.size && env_key_tail?(line[ke]) # extend right over the rest of the key
-        ke += 1
-      end
-      key = line[ks...ke]
+      tok = env_caret_token(line, cx, syntax, prefix) || return nil
+      name = tok.full_name
       # A valid identifier: non-empty and starting with a key head (`$1` never expands).
-      return nil if key.empty? || !env_key_head?(key[0])
-      # `display_vars`: the peek is the operator's answer to "is my `$SESSION` bound, and to
-      # what?" in the editor where they are writing the token — Repeater, Fuzzer, Intercept —
-      # with no new surface at all. A declared-but-UNBOUND name has no value and so gets no
-      # peek, which is the same answer `token_regions` paints (it stays `env_unknown`).
-      # A name the OWNER will ship literally gets no peek, for the same reason an unregistered
-      # one doesn't: on this buffer it is not a variable reference. An evidence tab used to
-      # tooltip the resolved secret under a `$TOKEN` the send path then wrote to the socket
-      # as six literal bytes.
-      return nil if @env_literal_names.includes?(key)
-      val = Env.display_vars[key]?
-      return nil unless val # unregistered → just a literal string, not an env reference
-      {key, env_value_preview(val, Env.declared_bindings.includes?(key))}
+      return nil if name.empty? || !env_key_head?(name[0])
+      if syntax.bare?
+        # A name the OWNER will ship literally gets no peek, for the same reason an
+        # unregistered one doesn't: on this buffer it is not a variable reference. An evidence
+        # tab used to tooltip the resolved secret under a `$TOKEN` the send path then wrote to
+        # the socket as six literal bytes.
+        return nil if @env_literal_names.includes?(name)
+        # `display_vars`: the peek is the operator's answer to "is my `$SESSION` bound, and to
+        # what?" in the editor where they are writing the token — Repeater, Fuzzer, Intercept —
+        # with no new surface at all. A declared-but-UNBOUND name has no value and so gets no
+        # peek, which is the same answer the painter gives (it stays `env_unknown`).
+        val = Env.display_vars[name]?
+        return nil unless val # unregistered → just a literal string, not an env reference
+        return {Env.spell(name, Env::Namespace::Env, syntax, prefix),
+                env_value_preview(val, Env.declared_bindings.includes?(name))}
+      end
+      # NAMESPACED: the namespace has to be in the BYTES. A caret in the `ENV` run of
+      # `$ENV.HOST` is not on a reference yet, and answering from one table or the other there
+      # would be guessing at which of two secrets the operator is pointing at.
+      ns = tok.ns || return nil
+      return nil if @env_literal_names.includes?(Env.qualify(ns, name))
+      val = Env.vars_for(ns)[name]?
+      return nil unless val
+      # Masked per NAMESPACE rather than per name: a BIND value came off the wire, whatever
+      # its rule's current state (see `Env::Namespace#secret?`).
+      {Env.spell(name, ns, syntax, prefix), env_value_preview(val, ns.secret?)}
     end
   end
 end
