@@ -269,7 +269,7 @@ module Gori
     # WS tab from a capture copies the capture's payloads verbatim, and whether they replay
     # literally is read from the repeater's `flow_id`, not from the frame.
     private def self.scan_ws(store : Store, plan : Plan, rec : Store::RepeaterRecord,
-                            evidence : Bool) : Nil
+                             evidence : Bool) : Nil
       store.ws_messages_for_repeater(rec.id).each do |msg|
         next unless msg.direction == "out"
         next if msg.notice?

@@ -6,6 +6,11 @@ require "file_utils"
 # A GLOBAL setting, so it lives under `gori settings` and not under `gori run project env`: that
 # one writes the PROJECT database, and this decides how the tokens in every project are read.
 #
+# The verb has NO flags any more. It used to carry `--migrate` (plus `--dry-run` / `--project` /
+# `--db` / `--all-projects`) because a switch only changed how stored bytes were READ; now every
+# project re-spells itself the first time it opens (spec/env_migration_spec.cr) and the verb's
+# whole job is to say so.
+#
 # Only the pure pieces are reachable from a spec — the verb's guards end in `abort`, which calls
 # `exit` and is not catchable — so the decisions and the wording are exposed the way
 # spec/cli_spec.cr exposes its own (`*_for_spec`), and the effect is asserted through
@@ -33,19 +38,6 @@ module Gori::CLI
   def self.env_syntax_origin_for_spec : String
     env_syntax_origin
   end
-
-  # The `--migrate` half. Only the drivable pieces: `migrate_targets` and `migrate_apply!` end in
-  # `abort` on every refusal, so the flag combinations are asserted through the resolver's own
-  # return and the rest through what the run printed and wrote.
-  def self.migrate_env_syntax_for_spec(to : Gori::Env::Syntax, *, dry : Bool, db_path : String,
-                                       io : IO) : Bool
-    migrate_env_syntax(to, dry: dry, project_name: nil, db_path: db_path, all: false,
-      io: io, warn_io: nil)
-  end
-
-  def self.migrate_source_syntax_for_spec(to : Gori::Env::Syntax) : Gori::Env::Syntax
-    migrate_source_syntax(to)
-  end
 end
 
 private def with_cli_home(&)
@@ -59,9 +51,7 @@ private def with_cli_home(&)
     ENV.delete("GORI_CONFIG")
     Gori::Settings.path_override = nil
     # `load` is TOLERANT: a file with no `env` section leaves the prefix and the vars exactly as
-    # they were, and `export_document` omits an empty `env` — so without this the previous
-    # example's `"prefix": "%"` survives the restore below and decides whether the section
-    # serializes at all.
+    # they were, so without this the previous example's `"prefix": "%"` survives the restore below.
     Gori::Settings.env_prefix = Gori::Settings::DEFAULT_ENV_PREFIX
     Gori::Settings.env_vars = [] of {String, String}
     yield dir
@@ -79,6 +69,13 @@ private def with_cli_home(&)
   end
 end
 
+# Comments stripped, the way spec/peer_notices_spec.cr reads a wiring: the prose here names the
+# flags, and a grep that matched its own explanation would pass forever.
+private def cli_src(*parts : String) : String
+  File.read(File.join(__DIR__, "..", "..", "src", *parts)).lines
+    .reject(&.lstrip.starts_with?('#')).join('\n')
+end
+
 describe "gori settings env-syntax" do
   it "is a known settings verb, so a typo is still rejected" do
     Gori::CLI.unknown_settings_verb_for_env_syntax_spec(["env-syntax"]).should be_false
@@ -90,21 +87,37 @@ describe "gori settings env-syntax" do
     Gori::CLI.env_syntax_values_for_spec.should eq("bare|namespaced")
   end
 
+  # The flags are GONE, in the parser and in the usage. Asserted by grep because every path that
+  # would reject one ends in `abort`: the parser declares no `--migrate`, so OptionParser's
+  # `invalid_option` is what an operator who types it now hits.
+  it "declares no migration flags anywhere" do
+    verb = cli_src("gori", "cli", "settings.cr")
+    %w[--migrate --all-projects].each { |flag| verb.should_not contain(flag) }
+    usage = cli_src("gori", "cli.cr")
+    usage.should contain("gori settings env-syntax [bare|namespaced]")
+    usage.lines.select(&.includes?("env-syntax")).each { |l| l.should_not contain("--migrate") }
+  end
+
   it "prints the value and WHERE it came from" do
     with_cli_home do |dir|
       path = File.join(dir, "settings.json")
-      # No file at all: the default, and the reason said out loud.
+      # No file at all: the grammar the absence rule settled, and the reason said out loud.
       Gori::Settings.load
       lines = Gori::CLI.env_syntax_read_lines_for_spec
-      lines[0].should start_with("bare")
-      lines[0].should contain("default")
+      lines[0].should start_with("bare") # the suite pins what absence means; production is namespaced
+      lines[0].should contain("does not exist")
       lines[1].should contain("$KEY")
+      # No hint about a dry run any more: there is no flag to offer, and the thing an operator
+      # reading this wants to know ("what happens to my projects?") is on the WRITE lines.
+      lines.size.should eq(2)
+      lines.each { |l| l.should_not contain("--migrate") }
 
-      # A file that does not name the key: still the default, and still not the same fact as
-      # "the file says bare" — which is the whole reason the origin is printed.
+      # A file that does not name the key: adopted for this run, which is NOT the same fact as
+      # "the file says bare" — and reading it here means the write did not land.
       File.write(path, %({"theme":"gori"}))
       Gori::Settings.load
-      Gori::CLI.env_syntax_read_lines_for_spec[0].should eq("bare  (default — #{path} does not set env.syntax)")
+      Gori::CLI.env_syntax_read_lines_for_spec[0]
+        .should eq("bare  (adopted for this run — #{path} does not set env.syntax)")
 
       File.write(path, %({"env":{"syntax":"namespaced"}}))
       Gori::Settings.load
@@ -123,17 +136,26 @@ describe "gori settings env-syntax" do
     end
   end
 
-  it "says that stored tokens are NOT rewritten, and how to switch back" do
+  # THE sentence the switch owes the operator: the projects ARE re-spelled, but not here and not
+  # now — each one when it is next opened. A running TUI or MCP server keeps the old spelling until
+  # it is restarted, which is exactly why the line says "the next time it opens".
+  it "says that each project is re-spelled the next time it opens" do
     with_cli_home do
       lines = Gori::CLI.env_syntax_write_lines_for_spec(Gori::Env::Syntax::Bare,
         Gori::Env::Syntax::Namespaced)
       lines[0].should contain("env syntax: namespaced")
-      lines[1].should contain("NOT rewritten")
+      lines[1].should contain("re-spelled the next time it opens")
+      lines[1].should contain("backup")
+      lines[1].should contain("evidence")
       lines[1].should contain("gori settings env-syntax bare")
+      # Nothing about the old opt-in: there is no flag to run and no table to read first.
+      lines.each { |l| l.should_not contain("--migrate") }
+      lines[1].should_not contain("NOT rewritten")
+
       back = Gori::CLI.env_syntax_write_lines_for_spec(Gori::Env::Syntax::Namespaced,
         Gori::Env::Syntax::Bare)
       back[1].should contain("gori settings env-syntax namespaced")
-      # Setting the value it already has says so rather than repeating the warning.
+      # Setting the value it already has says so rather than promising a migration.
       same = Gori::CLI.env_syntax_write_lines_for_spec(Gori::Env::Syntax::Bare,
         Gori::Env::Syntax::Bare)
       same.should eq(["env syntax: bare (unchanged)"])
@@ -149,7 +171,7 @@ describe "gori settings env-syntax" do
 
   # The verb's effect, asserted through the state and the file it writes (the `puts` half is the
   # pure builder above).
-  it "sets the grammar and persists it" do
+  it "sets the grammar and persists it, in both directions" do
     with_cli_home do |dir|
       path = File.join(dir, "settings.json")
       Gori::Settings.load
@@ -159,132 +181,40 @@ describe "gori settings env-syntax" do
       JSON.parse(File.read(path)).as_h["env"].as_h["syntax"].as_s.should eq("namespaced")
       Gori::Settings.load
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
-      # …and back, which must leave the key behind rather than an absence that means the same
-      # thing (`serialize_env` drops the whole section once there is nothing left to say).
+      # …and back. The key STAYS, because an absence no longer means bare — it would be read as
+      # "this file predates namespaces" and flip the opt-out back on the next start.
       Gori::Settings.env_syntax = Gori::Env::Syntax::Bare
       Gori::Settings.save.should be_true
-      JSON.parse(File.read(path)).as_h.has_key?("env").should be_false
+      JSON.parse(File.read(path)).as_h["env"].as_h["syntax"].as_s.should eq("bare")
       Gori::Settings.load
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Bare)
     end
   end
-end
 
-# `--migrate`: the one-shot data half. A temp project database reached by `--db`, so the resolver
-# and the gori home stay out of it.
-describe "gori settings env-syntax --migrate" do
-  it "re-spells FROM the other grammar, so asking twice is not a no-op" do
-    # An operator who already switched and only now wants their drafts moved gets the same
-    # rewrite; the source grammar is derived, never read from the setting.
-    Gori::CLI.migrate_source_syntax_for_spec(Gori::Env::Syntax::Namespaced)
-      .should eq(Gori::Env::Syntax::Bare)
-    Gori::CLI.migrate_source_syntax_for_spec(Gori::Env::Syntax::Bare)
-      .should eq(Gori::Env::Syntax::Namespaced)
-  end
+  # The one thing the verb still re-spells ITSELF: the global rewrite rules live in settings.json,
+  # so no project open will ever reach them. Both directions, with the file copied aside first.
+  it "re-spells the global rewrite rules on an explicit switch, both ways" do
+    with_cli_home do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, <<-JSON)
+        {"env":{"syntax":"bare","vars":[{"key":"TOKEN","value":"t"}]},
+         "rewriter":{"rules":[{"id":1,"enabled":true,"name":"auth","target":"request",
+                               "part":"head","pattern":"X-A: .*","replacement":"X-A: $TOKEN",
+                               "op":"replace","match_kind":"regex","host":"","body_file":""}]}}
+        JSON
+      Gori::Settings.load
+      report = Gori::EnvMigration.migrate_global_rules(from: Gori::Env::Syntax::Bare,
+        to: Gori::Env::Syntax::Namespaced).not_nil!
+      Gori::Settings.rewriter_rules.map(&.replacement).should eq(["X-A: $ENV.TOKEN"])
+      report.backup.not_nil!.should start_with("#{path}.pre-namespaced-")
 
-  it "prints the table on --dry-run and writes nothing" do
-    with_migrate_db do |db_path|
-      with_migrate_store(db_path) do |store|
-        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
-          Gori::Env.serialize_vars([{"id", "sekrit-value"}]))
-        store.insert_repeater("https://x.test",
-          "GET /?q=$id HTTP/1.1\r\nHost: x.test\r\n\r\n".to_slice, false, true, nil, 0)
-        store.flush
-      end
-
-      io = IO::Memory.new
-      Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Namespaced, dry: true,
-        db_path: db_path, io: io).should be_false
-      lines = io.to_s
-      lines.should contain("would re-spell 1 token in 1 row")
-      lines.should contain("repeaters.request")
-      lines.should contain("$id → $ENV.id")
-      lines.should contain("--dry-run wrote nothing")
-
-      with_migrate_store(db_path) do |store|
-        String.new(store.repeaters[0].request).should contain("q=$id ")
-      end
-      Dir.glob("#{db_path}.pre-*").should be_empty
+      # …and back, where the sigil in front of a resolvable name has to be ESCAPED or the rule
+      # starts substituting into traffic nobody asked it to.
+      Gori::Settings.rewriter_rules = [Gori::Settings.rewriter_rules[0]
+        .copy_with(replacement: "X-A: $ENV.TOKEN $TOKEN")]
+      Gori::EnvMigration.migrate_global_rules(from: Gori::Env::Syntax::Namespaced,
+        to: Gori::Env::Syntax::Bare).not_nil!.tokens.should eq(2)
+      Gori::Settings.rewriter_rules.map(&.replacement).should eq(["X-A: $TOKEN $$TOKEN"])
     end
-  end
-
-  it "rewrites for real, and backs the database up beside itself" do
-    with_migrate_db do |db_path|
-      with_migrate_store(db_path) do |store|
-        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
-          Gori::Env.serialize_vars([{"id", "sekrit-value"}]))
-        store.insert_repeater("https://x.test",
-          "GET /?q=$id HTTP/1.1\r\nHost: x.test\r\n\r\n".to_slice, false, true, nil, 0)
-        store.flush
-      end
-
-      io = IO::Memory.new
-      Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Namespaced, dry: false,
-        db_path: db_path, io: io).should be_true
-      io.to_s.should contain("backup at ")
-
-      with_migrate_store(db_path) do |store|
-        String.new(store.repeaters[0].request).should contain("q=$ENV.id ")
-      end
-      Dir.glob("#{db_path}.pre-namespaced-*").size.should eq(1)
-    end
-  end
-
-  it "escapes a literal `$id` on the way back to bare, so the wire does not move" do
-    with_migrate_db do |db_path|
-      with_migrate_store(db_path) do |store|
-        store.set_setting(Gori::Env::PROJECT_VARS_KEY,
-          Gori::Env.serialize_vars([{"id", "sekrit-value"}]))
-        # Under the namespaced grammar these five bytes are a GraphQL variable, not a reference.
-        store.insert_repeater("https://x.test",
-          "POST / HTTP/1.1\r\nHost: x.test\r\n\r\n{\"q\":\"$id\"}".to_slice,
-          false, true, nil, 0)
-        store.flush
-      end
-
-      io = IO::Memory.new
-      Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Bare, dry: false,
-        db_path: db_path, io: io).should be_true
-      io.to_s.should contain("$id → $$id")
-
-      with_migrate_store(db_path) do |store|
-        # `$$id` is what bare ships `$id` with — the var must not resolve into a body nobody
-        # wrote it into.
-        String.new(store.repeaters[0].request).should contain(%({"q":"$$id"}))
-      end
-      Dir.glob("#{db_path}.pre-bare-*").size.should eq(1)
-    end
-  end
-
-  it "says so when there is nothing stored to re-spell" do
-    with_migrate_db do |db_path|
-      with_migrate_store(db_path, &.flush)
-      io = IO::Memory.new
-      Gori::CLI.migrate_env_syntax_for_spec(Gori::Env::Syntax::Namespaced, dry: true,
-        db_path: db_path, io: io).should be_false
-      io.to_s.should contain("nothing to re-spell")
-    end
-  end
-end
-
-private def with_migrate_db(&)
-  dir = File.tempname("gori-migrate-db")
-  Dir.mkdir_p(dir)
-  prev = Gori::Settings.project_env_vars
-  begin
-    yield File.join(dir, "gori.db")
-  ensure
-    Gori::Settings.project_env_vars = prev
-    FileUtils.rm_rf(dir)
-  end
-end
-
-# One handle, closed exactly once — `Store#close` is not idempotent.
-private def with_migrate_store(db_path : String, &)
-  store = Gori::Store.open(db_path)
-  begin
-    yield store
-  ensure
-    store.close
   end
 end

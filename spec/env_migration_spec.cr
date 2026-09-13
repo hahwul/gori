@@ -1,20 +1,31 @@
 require "./spec_helper"
 require "file_utils"
 
-# `EnvMigration` — the pure re-spelling behind `gori settings env-syntax … --migrate`.
+# `EnvMigration` — the re-spelling every project gets the first time it is opened after this
+# install's token grammar moved.
 #
-# The contract asserted here is WIRE EQUIVALENCE, not "the tokens look right": every REQUEST case
+# Two halves. The PURE one asserts WIRE EQUIVALENCE, not "the tokens look right": every REQUEST case
 # is checked with `safe?`, which runs both texts through the two passes a real send takes (env vars
 # at plan-build, bindings at the send seam) with a sentinel per name. A case that re-spells
 # beautifully and ships different bytes is the failure this file exists to catch.
-module Gori::CLI
-  # The store-level half needs the orchestration, whose guards end in `abort`; these are the
-  # drivable pieces. Named apart from spec/cli/settings_env_syntax_spec.cr's wrappers so neither
-  # file depends on the other's load order.
-  def self.migrate_env_syntax_for_migration_spec(to : Gori::Env::Syntax, *, dry : Bool,
-                                                 db_path : String, io : IO) : Bool
-    migrate_env_syntax(to, dry: dry, project_name: nil, db_path: db_path, all: false,
-      io: io, warn_io: nil)
+#
+# The STORE one asserts the open-time path: the per-project marker, the backup, the one-line report,
+# the columns it claims, the ones it must not touch — and that a second opener finds the work done
+# rather than doing it again.
+module Gori::EnvMigration
+  # The inner marker re-check needs the two halves of `reconcile` apart, so a peer's commit can be
+  # made to land between them. Private methods are callable from inside their own module, which is
+  # what this wrapper is for.
+  def self.apply_after_peer_for_spec(store : Store, db_path : String,
+                                     project : String) : StoreReport?
+    plan = Plan.new(project, stored_syntax(store), Settings.env_syntax,
+      env_names(store), bind_names(store), Settings.env_prefix)
+    scan(store, plan)
+    # A second surface (a TUI beside an MCP server) commits the same migration while this one was
+    # still scanning. Only the marker is written here; what matters is that the apply refuses.
+    store.set_setting(MARKER_KEY, Settings.env_syntax.to_s.downcase)
+    store.flush
+    apply(plan, store, db_path)
   end
 end
 
@@ -228,43 +239,35 @@ describe Gori::EnvMigration do
     after.should eq("$id".to_slice)
   end
 
-  # ── the store half ────────────────────────────────────────────────────────
+  # ── the store half: the open-time reconcile ───────────────────────────────
   #
   # One project, every column the migration claims, and the two it must not touch.
-  it "migrates a project database and leaves evidence alone" do
+  it "re-spells a bare-era database on open, marks it, backs it up, and leaves evidence alone" do
     with_migration_home do |db_path|
       draft_id, evidence_id, rule_id, issue_id = seed_migration_project(db_path)
+      # This install reads namespaced; the database carries no marker, which is exactly true of its
+      # bytes — it was written before namespaces existed.
+      Gori::Settings.env_syntax = NS
 
-      io = IO::Memory.new
-      Gori::CLI.migrate_env_syntax_for_migration_spec(NS, dry: true, db_path: db_path, io: io).should be_false
-      dry = io.to_s
-      dry.should contain("would re-spell")
-      dry.should contain("$id → $ENV.id")
-      dry.should contain("$token → $BIND.token")
-      dry.should contain("--dry-run wrote nothing")
-      # The evidence row is named, not rewritten.
-      dry.should contain("evidence (flow 7)")
+      report = with_open_store(db_path) { |store|
+        Gori::EnvMigration.stored_syntax(store).should eq(BARE)
+        Gori::EnvMigration.reconcile(store, db_path, "demo")
+      }.not_nil!
 
-      # …and the dry run wrote nothing.
-      store = Gori::Store.open(db_path)
-      begin
-        String.new(store.get_repeater(draft_id).not_nil!.request).should contain("X-A: $id\r\n")
-      ensure
-        store.close
-      end
-
-      io = IO::Memory.new
-      Gori::CLI.migrate_env_syntax_for_migration_spec(NS, dry: false, db_path: db_path, io: io).should be_true
-      real = io.to_s
-      real.should contain("re-spelled")
-      real.should contain("backup at ")
+      report.from.should eq(BARE)
+      report.to.should eq(NS)
+      report.tokens.should be > 0
+      line = report.line
+      line.should start_with("project demo: ")
+      line.should contain("re-spelled to $ENV.KEY/$BIND.NAME")
+      line.should contain("backup at ")
 
       backups = Dir.glob("#{db_path}.pre-namespaced-*")
       backups.size.should eq(1)
       File.size(backups[0]).should be > 0
+      report.backup.should eq(backups[0])
 
-      store = Gori::Store.open(db_path)
-      begin
+      with_open_store(db_path) do |store|
         rec = store.get_repeater(draft_id).not_nil!
         wire = String.new(rec.request)
         wire.should contain("Host: $ENV.API\r\n")
@@ -274,7 +277,8 @@ describe Gori::EnvMigration do
         wire.should contain("{\"q\":\"$ENV.id $ne\"}") # and `$ne` is still `$ne`
         rec.target.should eq("https://$ENV.API")
 
-        # EVIDENCE: byte-identical.
+        # EVIDENCE: byte-identical. A capture expands nothing, so its `$id` is a byte the origin
+        # sent and re-spelling it would edit the record to no effect on any wire.
         String.new(store.get_repeater(evidence_id).not_nil!.request).should contain("GET /?$id ")
 
         store.match_rules.find { |r| r.id == rule_id }.not_nil!
@@ -292,16 +296,145 @@ describe Gori::EnvMigration do
         Gori::Env.parse_vars_json(store.setting(Gori::Env::PROJECT_VARS_KEY))
           .should eq([{"id", "sekrit-value"}, {"API", "api.example.com"}])
         store.extract_rules.map(&.name).should eq(["token"])
-      ensure
-        store.close
-      end
 
-      # The grammar itself is the VERB's job (the migration runs first, then the switch), so the
-      # spec drives that half the way the verb does.
-      Gori::Settings.env_syntax = NS
-      Gori::Settings.save.should be_true
-      Gori::Settings.load
-      Gori::Settings.env_syntax.should eq(NS)
+        # THE MARKER, in the project's own settings KV beside `env.vars`. This is what makes the
+        # next open a no-op — and what a `bare` opt-out later reads to know which way to go.
+        store.setting(Gori::Env::PROJECT_SYNTAX_KEY).should eq("namespaced")
+        Gori::EnvMigration.stored_syntax(store).should eq(NS)
+
+        # …and the ACTIVITY feed carries it, because "what happened to this project" is the question
+        # that feed exists to answer.
+        store.events_recent(20).rows.map(&.message).any?(&.includes?("re-spelled")).should be_true
+      end
     end
+  end
+
+  it "is a no-op on the next open: no second backup, no second line" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      with_open_store(db_path) { |store| Gori::EnvMigration.reconcile(store, db_path, "demo") }
+      before = with_open_store(db_path) { |store| String.new(store.repeaters[0].request) }
+
+      with_open_store(db_path) do |store|
+        Gori::EnvMigration.reconcile(store, db_path, "demo").should be_nil
+      end
+      Dir.glob("#{db_path}.pre-namespaced-*").size.should eq(1)
+      with_open_store(db_path) { |store| String.new(store.repeaters[0].request) }.should eq(before)
+    end
+  end
+
+  # Two surfaces open one project all the time (a TUI beside a `gori mcp` server). The marker is
+  # re-read INSIDE the write transaction, so the loser of that race writes nothing — and deletes the
+  # backup it had already taken, which describes a state nobody changed.
+  it "refuses to apply when a peer opener committed the same migration first" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      with_open_store(db_path) do |store|
+        Gori::EnvMigration.apply_after_peer_for_spec(store, db_path, "demo").should be_nil
+      end
+      Dir.glob("#{db_path}.pre-namespaced-*").should be_empty
+    end
+  end
+
+  # A FRESH database has nothing to re-spell. It still gets the marker — so the next grammar move
+  # knows which way to go — and no backup, because no row changed.
+  it "marks an empty database without backing anything up" do
+    with_migration_home do |db_path|
+      with_open_store(db_path, &.flush)
+      Gori::Settings.env_syntax = NS
+      report = with_open_store(db_path) { |store|
+        Gori::EnvMigration.reconcile(store, db_path, "demo")
+      }.not_nil!
+      report.quiet?.should be_true
+      report.lines.should be_empty # nothing to say, so no surface says anything
+      report.backup.should be_nil
+      Dir.glob("#{db_path}.pre-*").should be_empty
+      with_open_store(db_path) { |s| s.setting(Gori::Env::PROJECT_SYNTAX_KEY) }.should eq("namespaced")
+    end
+  end
+
+  # The opt-out direction, and the reason it is the lossy one: bare resolves a name by SHAPE, so a
+  # `$id` that was inert under the namespaced grammar starts resolving. Every one gori can see gets
+  # its escape.
+  it "reverses on a bare opt-out, escaping a literal that would start resolving" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      with_open_store(db_path) { |store| Gori::EnvMigration.reconcile(store, db_path, "demo") }
+
+      # The operator opts out. The next open reads the marker (namespaced) against the install
+      # (bare) and goes the other way.
+      Gori::Settings.env_syntax = BARE
+      report = with_open_store(db_path) { |store|
+        Gori::EnvMigration.reconcile(store, db_path, "demo")
+      }.not_nil!
+      report.from.should eq(NS)
+      report.to.should eq(BARE)
+      report.line.should contain("re-spelled to $KEY/$NAME")
+
+      with_open_store(db_path) do |store|
+        wire = String.new(store.repeaters.find { |r| r.flow_id.nil? }.not_nil!.request)
+        wire.should contain("X-A: $id\r\n")
+        wire.should contain("X-B: $token\r\n")
+        # The `$id` the forward pass left as one sigil is a REFERENCE to bare, so it has to be
+        # escaped back or those four bytes stop being the payload.
+        wire.should contain("X-C: $$id\r\n")
+        store.setting(Gori::Env::PROJECT_SYNTAX_KEY).should eq("bare")
+      end
+      Dir.glob("#{db_path}.pre-bare-*").size.should eq(1)
+    end
+  end
+
+  # A grammar gori had to GUESS may not rewrite anything: an unreadable settings.json, a
+  # half-applied one, a typo where the value should be. The alternative is a permissions problem
+  # re-spelling an operator's drafts.
+  it "re-spells nothing when this install's grammar was not stated" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      File.write(Gori::Settings.path, %({"env":{"syntax":"NAMESPACED!"}}))
+      Gori::Settings.reset_load_warning_guard
+      Gori::Settings.load
+      Gori::Settings.env_syntax_stated?.should be_false
+      with_open_store(db_path) do |store|
+        Gori::EnvMigration.reconcile(store, db_path, "demo").should be_nil
+        String.new(store.repeaters[0].request).should contain("X-A: $id\r\n")
+        store.setting(Gori::Env::PROJECT_SYNTAX_KEY).should be_nil
+      end
+    end
+  end
+
+  # The GLOBAL rewrite rules travel with the project open, not just with the settings load: a global
+  # rule can name an EXTRACT RULE, and no settings load knows those names — only an open project
+  # does.
+  it "re-spells a global rule against the project's own binding names" do
+    with_migration_home do |db_path|
+      seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      Gori::Settings.rewriter_rules = [Gori::Settings::RewriterRule.new(
+        1_i64, true, "auth", "request", "head", "Authorization", "Bearer $token",
+        "replace", "literal", "", "")]
+      report = with_open_store(db_path) { |store|
+        Gori::EnvMigration.reconcile(store, db_path, "demo")
+      }.not_nil!
+      global = report.global.not_nil!
+      global.tokens.should eq(1)
+      Gori::Settings.rewriter_rules[0].replacement.should eq("Bearer $BIND.token")
+      report.lines.size.should eq(2) # the project line, then the global one
+      report.lines[1].should contain("global rewrite rules: 1 token re-spelled")
+    ensure
+      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+    end
+  end
+end
+
+# One handle, closed exactly once — `Store#close` is not idempotent.
+private def with_open_store(db_path : String, &)
+  store = Gori::Store.open(db_path)
+  begin
+    yield store
+  ensure
+    store.close
   end
 end

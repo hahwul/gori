@@ -40,23 +40,26 @@ module Gori::Tui
       Settings.env_syntax = found unless found == Settings.env_syntax
     end
 
-    # The grammar as the FILE spells it: an absent key means bare (the absence rule, forever — and
-    # `serialize_env` omits the key for exactly that reason), and so does a value this build does
-    # not know, which is what `parse_env` concludes for the same bytes.
+    # The grammar as the FILE spells it, or nil when the file has NOTHING TO SAY.
     #
-    # nil means "the file has nothing to say": no file yet (a home whose first save has not landed
-    # — its in-memory grammar is the only copy there is) or bytes that will not parse, where
-    # `Settings.load` keeps what it has rather than guessing. Read here, in the TUI, rather than
-    # through a `Settings` helper, because the reload is a TUI-shaped need: the headless surfaces
-    # load, write and exit.
+    # "Nothing to say" is four cases and they all mean "keep what this session has": no file yet (a
+    # home whose first save has not landed — the in-memory grammar is the only copy there is), bytes
+    # that will not parse, a value this build does not know, and an ABSENT key.
+    #
+    # The absent key belongs in that list now. `serialize_env` always writes the grammar, so a peer
+    # that switched wrote it down; an absence is a file from before namespaces, and what a
+    # pre-namespace file means is settled by `Settings.load`'s adoption — not by a refresh whose only
+    # job is to avoid clobbering a peer's switch. Reading it as bare here would have a stale file
+    # flip a live session's grammar (and, through the marker, its next project open) to the one
+    # thing this seam exists to prevent.
     def self.disk_syntax : Env::Syntax?
       path = Settings.path
       return nil unless File.exists?(path)
       root = JSON.parse(File.read(path)).as_h?
       return nil unless root
       raw = root["env"]?.try(&.as_h?).try(&.["syntax"]?).try(&.as_s?)
-      return Settings::DEFAULT_ENV_SYNTAX unless raw
-      Env::Syntax.parse?(raw.strip) || Settings::DEFAULT_ENV_SYNTAX
+      return nil unless raw
+      Env::Syntax.parse?(raw.strip)
     rescue
       nil
     end

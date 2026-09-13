@@ -195,15 +195,22 @@ describe Gori::Tui::EnvOverlay do
     end
   end
 
-  it "reads an ABSENT env.syntax as bare, the way the loader does" do
+  it "reads an ABSENT env.syntax as nothing to say, and keeps the session's grammar" do
     with_settings_home do
       Gori::Settings.env_syntax = Gori::Env::Syntax::Namespaced
       Gori::Settings.env_vars = [{"HOST", "api.test"}]
       Gori::Settings.save.should be_true
-      # A peer that switched a vars-less install back to bare writes no `env` section at all
-      # (`serialize_env` omits it), and the absence means bare forever.
+      # A peer that switched writes the grammar down — `serialize_env` always does — so an ABSENT
+      # key is a file from before namespaces, and flipping a live session off it is exactly the
+      # clobbering this seam exists to prevent. `Settings.load` is what settles a pre-namespace file.
       File.write(Gori::Settings.path, %({"theme":"dark"}))
-      Gori::Tui::EnvSyntaxSeam.disk_syntax.should eq(Gori::Env::Syntax::Bare)
+      Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
+      Gori::Tui::EnvSyntaxSeam.refresh_from_disk
+      Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      # An unknown value says nothing either — `parse_env` warns and re-spells nothing for the same
+      # bytes.
+      File.write(Gori::Settings.path, %({"env":{"syntax":"NAMESPACED!"}}))
+      Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
       # Nothing to say ⇒ nothing is changed: no file, or bytes that will not parse.
       File.write(Gori::Settings.path, "{not json")
       Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
