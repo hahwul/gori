@@ -2250,8 +2250,10 @@ module Gori::Tui
       # The REQUEST is no longer checked at all — a `$NAME` with no value is a literal string
       # on the wire everywhere now (see `Env::Escape`). Only the TARGET and SNI are refused;
       # the CLI and MCP minimize paths carry the same two checks.
-      env_names = Env.unresolved(view.target) |
-                  (view.sni_override.try { |s| Env.unresolved(s) } || [] of String)
+      # `deferred: nil`, as on every other dial tuple: a target or SNI runs the env pass
+      # alone, so a `$BIND.X` there is never resolved and must be reported, bound or not.
+      env_names = Env.unresolved(view.target, deferred: nil) |
+                  (view.sni_override.try { |s| Env.unresolved(s, deferred: nil) } || [] of String)
       unless env_names.empty?
         # `unresolved` already answers QUALIFIED under the namespaced grammar, so the list needs
         # the ENV namespace only as the fallback a bare name takes.
