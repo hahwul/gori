@@ -316,12 +316,12 @@ describe Gori::EnvMigration do
     with_migration_home do |db_path|
       seed_migration_project(db_path)
       Gori::Settings.env_syntax = NS
-      store = Gori::Store.open(db_path, read_only: true, background_index: false)
+      ro = Gori::Store.open(db_path, read_only: true, background_index: false)
       begin
-        store.read_only?.should be_true
-        Gori::EnvMigration.reconcile(store, db_path, "demo").not_nil!.tokens.should be > 0
+        ro.read_only?.should be_true
+        Gori::EnvMigration.reconcile(ro, db_path, "demo").not_nil!.tokens.should be > 0
       ensure
-        store.close
+        ro.close
       end
       with_open_store(db_path) do |store|
         String.new(store.repeaters.find { |r| r.flow_id.nil? }.not_nil!.request)
@@ -358,6 +358,31 @@ describe Gori::EnvMigration do
         Gori::EnvMigration.apply_after_peer_for_spec(store, db_path, "demo").should be_nil
       end
       Dir.glob("#{db_path}.pre-namespaced-*").should be_empty
+    end
+  end
+
+  # A brand-new project is born SPEAKING this install's grammar and says so, so its first open has
+  # nothing to compare and nothing to scan. Only on a genuine create: `create_or_reopen` also
+  # reopens, and a bare-era database must not be stamped with a grammar its bytes are not in.
+  it "stamps the marker when a project is created, and not when one is reopened" do
+    with_migration_home do |db_path|
+      Gori::Settings.env_syntax = NS
+      registry = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      proj, created = registry.create_or_reopen("fresh")
+      created.should be_true
+      with_open_store(proj.db_path) do |fresh|
+        fresh.setting(Gori::Env::PROJECT_SYNTAX_KEY).should eq("namespaced")
+        Gori::EnvMigration.reconcile(fresh, proj.db_path, "fresh").should be_nil
+      end
+
+      # …and the bare-era project seeded beside it, REOPENED under the same namespaced install,
+      # keeps its absent marker — so the reconcile still has the migration to run.
+      seed_migration_project(db_path)
+      reopened, created2 = registry.create_or_reopen("demo")
+      created2.should be_false
+      with_open_store(reopened.db_path) do |old|
+        old.setting(Gori::Env::PROJECT_SYNTAX_KEY).should be_nil
+      end
     end
   end
 

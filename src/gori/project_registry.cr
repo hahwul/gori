@@ -3,6 +3,7 @@ require "digest/sha256"
 require "./durable_file"
 require "./project"
 require "./store"
+require "./env"
 require "./capture_lock"
 require "./open_lock"
 
@@ -172,6 +173,14 @@ module Gori
       begin
         desc = description.strip
         s.set_setting("description", desc) unless desc.empty?
+        # A BRAND-NEW database is born speaking this install's token grammar, so it says so. The
+        # marker's absence means bare (every project written before namespaces existed carries no
+        # marker), and a fresh namespaced project that left it absent would hand its first opener a
+        # pointless bare → namespaced scan of its own namespaced text — harmless today only because
+        # no name in either table is spelled `ENV` or `BIND`. Only when the file did NOT exist
+        # before: `create_or_reopen` also REOPENS, and stamping a bare-era database would claim a
+        # grammar its bytes are not in and skip the migration that fixes them.
+        s.set_setting(Env::PROJECT_SYNTAX_KEY, Settings.env_syntax.to_s.downcase) unless reopened
       ensure
         s.close
       end

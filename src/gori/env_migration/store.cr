@@ -503,7 +503,7 @@ module Gori
         _, changes = rewrite(rule.replacement.to_slice, from: plan.from, to: plan.to,
           env_names: plan.env_names, bind_names: plan.bind_names, kind: Kind::Rule,
           prefix: plan.prefix)
-        next unless changes.any? { |c| c.ref }
+        next unless changes.any?(&.ref)
         names << (rule.name.presence || "##{rule.id}")
       end
       return nil if names.empty?
