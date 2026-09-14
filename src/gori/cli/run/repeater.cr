@@ -221,6 +221,14 @@ module Gori
                     # The session's TLS fingerprint (#844) — null for a session with no
                     # override, which is what every session meant before it existed.
                     j.field "tls_preset", r.tls_preset
+                    # Only when it is TRUE, so a workbench of well-formed sessions prints the
+                    # listing it always did. It is here because the stored bytes of an
+                    # unterminated request render identically to a terminated one in every
+                    # view gori has — the whole reason #1075 cost a debugging session — and a
+                    # listing is where an operator goes to find the odd tab out.
+                    if unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
+                      j.field "head_unterminated", true
+                    end
                     j.field "last_error", r.response_error
                     j.field "last_duration_us", r.response_duration_us
                   end
@@ -244,7 +252,13 @@ module Gori
                 # that a stored preset is visible ("`repeater list` and the TUI chip both name
                 # a browser") — a claim that was not true of this listing.
                 tls = r.tls_preset.try { |t| "  tls:#{t}" } || ""
-                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{CLI::Output.pad(name, 20)}  → #{r.target}#{tls}"
+                # The one thing on this line that is not a setting but a DEFECT, so it is
+                # appended last and only when it fires. `repeater send` prints the sentence;
+                # here there is room for the fact alone, which is all this listing has to do —
+                # say which tab is the odd one out. See `unterminated_head_note`.
+                bad_head = unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
+                head = bad_head ? "  !head-unterminated" : ""
+                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{CLI::Output.pad(name, 20)}  → #{r.target}#{tls}#{head}"
               end
             end
           end
@@ -715,6 +729,21 @@ module Gori
             end
           end
 
+          # Announced, not refused — see `unterminated_head_note`. On STDERR, beside the
+          # `--flow` rewrite and dropped-advisory notices, so `--format`-less STDOUT stays the
+          # one success line a script reads. Computed from `req_content`, the bytes this call
+          # actually stored (the `--flow` seed included), and NOT re-read from the row: a
+          # report taken after the write describes the write, not the row a peer may have
+          # touched since.
+          #
+          # Through `unterminated_head?`, which owns the WebSocket exemption: a row that will
+          # go out through `WsEngine` is re-framed by `build_handshake` on every send, so
+          # saying gori sends it "exactly as given" would be a false accusation. A row later
+          # switched to HTTP (`^V`, `repeater send --http`) is caught by the send-time notice,
+          # which asks the same question of the bytes actually going out.
+          if unterminated_head?(req_content.to_slice, ws_http_only: ws_http_only, http2: http2)
+            STDERR.puts "gori run repeater create: #{unterminated_head_note}"
+          end
           puts "Repeater session ##{id} created successfully."
         ensure
           store.close
@@ -986,6 +1015,17 @@ module Gori
         # exact slice, so the recorded flow is the request that went out — session-slot overlay
         # and send-seam `$NAME` values included — rather than the draft the seam started from.
         wire = plan.wire_bytes
+        # On the WIRE, not on `rec.request`: the notice must describe the bytes that go out,
+        # so a session whose terminator arrives with a `$ENV.X` expansion is not accused, and
+        # one stored terminated but truncated by an expansion is. BEFORE the send, so it is
+        # on screen ahead of whatever the origin answers — the whole complaint in #1075 is
+        # that an opaque `400` was the only thing that ever mentioned this.
+        # `!plan.http2?` for the reason `unterminated_head?` gives at length: an h2 send
+        # re-encodes this text as an HPACK field list and never puts a head terminator on the
+        # wire, so the note would describe bytes the socket does not see.
+        if !plan.http2? && !Env.head_terminated?(wire)
+          STDERR.puts "gori run repeater send: #{unterminated_head_note}"
+        end
         result = plan.send_wire(wire)
         outbound.close
 
@@ -1164,6 +1204,77 @@ module Gori
         out = rows.select { |m| m.direction == "out" }
         kept = out.reject { |m| ws_notice_row?(m.opcode, m.payload) }
         {kept, out.size - kept.size}
+      end
+
+      # Is this STORED session's head one an operator should be told about? (#1075)
+      #
+      # Three questions, in this order for a reason. The head terminator is the cheap one and
+      # it answers `false` for every well-formed row, so neither of the two exemptions below
+      # costs anything on a healthy workbench — in particular the `String.new` the WebSocket
+      # test needs is built only for the rare row that is actually malformed, and a 500-tab
+      # listing never copies a stored request to ask.
+      #
+      # BOTH exemptions exist because a blank-line terminator is an HTTP/1.1 wire fact and
+      # two of gori's engines do not put this head on a socket as text:
+      #
+      #   * HTTP/2 has no head terminator AT ALL. `H2Engine.parse_request` splits the buffer
+      #     into lines, drops the empty one and emits an HPACK field list — measured: the
+      #     fields from `…Accept: */*\r\n\r` are byte-identical to those from `…\r\n\r\n`.
+      #     So every send from an h2 session is a well-formed request, and saying otherwise
+      #     would put a permanent `!head-unterminated` on a tab that has nothing wrong with it.
+      #   * `WsEngine.build_handshake` re-emits the head line by line and writes its own
+      #     `\r\n` terminator, so a framed handshake is framed whatever the row holds.
+      #
+      # Either way the note's claim — "gori sends it exactly as given" — would be FALSE, which
+      # is the one thing a notice about byte fidelity may not be. `ws_http_only` is the row
+      # that opts OUT of the WebSocket engine: those bytes go through the HTTP engine
+      # untouched, so they are back in.
+      #
+      # KEYWORD-ONLY, and that is load-bearing rather than style: these are same-typed Bools
+      # about the same row, and a positional pair is how a call site written against the
+      # previous arity keeps compiling while writing its `true` into the flag beside the one
+      # it meant. `Repeater::Result`'s constructor carries the same tail for the same reason.
+      #
+      # Shared by every surface that reports on a STORED row (`repeater create`'s notice,
+      # `repeater list`, MCP's session emitter). The SEND surfaces do not call it: they hold
+      # the wire and have already chosen an engine, so they ask `Env.head_terminated?` of the
+      # bytes themselves — under the same h1-only guard, for the same reason.
+      def self.unterminated_head?(request : Bytes, *, ws_http_only : Bool, http2 : Bool) : Bool
+        return false if http2 || Env.head_terminated?(request)
+        ws_http_only || !Repeater::WsEngine.replayable?(String.new(request))
+      end
+
+      # The one sentence every surface says about an unterminated head (#1075).
+      #
+      # It is a NOTICE, never a refusal, and the wording has to carry that: gori stores and
+      # sends these bytes exactly as given, because a head that never terminates is a
+      # legitimate thing to put on a socket (a desync primitive, a slowloris probe) and
+      # `repeater` exists to send non-standard HTTP. The sentence therefore states the fact,
+      # says gori did NOT touch it, and names the way an operator acquires one by accident —
+      # `$(…)`, which strips the trailing newlines a file or a here-doc keeps. That last
+      # clause is the useful half: the accidental population is almost entirely shell
+      # command substitution, and a request WITH a body survives it (the terminator is
+      # followed by the body), so the GET tab breaks while the POST tab beside it works.
+      #
+      # Shared with MCP the way `ws_notice_dropped_note` is: one sentence, so an agent and an
+      # operator reading two surfaces are told the same thing about one request. A surface
+      # with no room for it says `unterminated_head_chip` instead — the short spelling lives
+      # beside this one rather than as a literal at its call site, so an edit to the wording
+      # reaches both.
+      def self.unterminated_head_note : String
+        "the request head is NOT terminated (no blank line), so this is not a complete HTTP " \
+        "message — gori sends it exactly as given and never repairs it, because a truncated " \
+        "head is itself a test. If that was not the intent, end the head with a blank line: " \
+        "shell $(…) strips the trailing newlines that a file or a here-doc keeps"
+      end
+
+      # The same fact at toast width, for a surface that appends it to a line it does not own.
+      # The TUI's send status already carries a status, a duration and up to two other
+      # clauses, and the full sentence would push all of them off a narrow terminal — so this
+      # keeps the two halves that cannot be dropped (WHAT is wrong, and that gori sent it
+      # anyway) and leaves the remedy to `repeater list`, which has a line to spare.
+      def self.unterminated_head_chip : String
+        "head NOT terminated (no blank line) — sent as given"
       end
 
       # The one sentence every surface uses for that drop, so the CLI, MCP and the TUI

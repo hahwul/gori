@@ -224,6 +224,25 @@ module Gori
         FlowSeed.new(target, request, built.http2, built.rewrote_request_line)
       end
 
+      # The unterminated-head marker (#1075), on every MCP payload that reports a repeater
+      # request — the two writes (`create_repeater`, `update_repeater`), the session emitter
+      # `get_repeater_context` lists through, and `send_request`'s result.
+      #
+      # One emitter so the FIELD NAMES cannot drift across four payloads: an agent that learns
+      # to read `head_unterminated` on a create must find the same key on the listing it polls
+      # afterwards, or the marker is only as good as the surface it was first seen on. The
+      # predicate is the caller's, because "is this row malformed" (`CLI::Run.unterminated_head?`,
+      # which owns the WebSocket exemption) and "are these wire bytes malformed" are two
+      # different questions and the answer must come from whichever one the caller holds.
+      #
+      # Absent — not `false` — when the head is fine, so an untouched workbench serialises
+      # exactly the payload it always did.
+      private def emit_head_unterminated(j : JSON::Builder, unterminated : Bool) : Nil
+        return unless unterminated
+        j.field "head_unterminated", true
+        j.field "head_unterminated_note", CLI::Run.unterminated_head_note
+      end
+
       @[Tool("create_repeater", gated: true, agent_action: true)]
       private def create_repeater(h) : Result
         issue_id = int(h, "issue_id")
@@ -400,6 +419,11 @@ module Gori
             # session no longer carries the absolute-form line, so this is the only record
             # that it was ever there.
             j.field "request_line_rewritten", true if rewrote_request_line
+            # Over `request` — the bytes just stored — and not a re-read of the row: the
+            # report describes this write. `ws_http_only` is read off the same argument the
+            # insert above used, so the exemption and the row agree.
+            emit_head_unterminated(j, CLI::Run.unterminated_head?(request.to_slice,
+              ws_http_only: bool_arg(h, "ws_http_only", false), http2: http2))
             emit_secrets_masked(j, request, masked_request, target, masked_target)
             # How many frames were actually stored, so an agent authoring a multi-frame
             # sequence can assert on it rather than take the count on trust.
@@ -668,6 +692,11 @@ module Gori
             j.field "position", existing.position
             repeater_tui_index(id).try { |n| j.field "tui_index", n }
             j.field "ws_out_message_count", ws_count if ws_count
+            # The write door `create_repeater`'s notice would otherwise leave open: this tool
+            # replaces the stored request wholesale, so a session created well-formed can
+            # become unterminated here and nothing else on this reply would say so.
+            emit_head_unterminated(j, CLI::Run.unterminated_head?(request.to_slice,
+              ws_http_only: ws_http_only, http2: http2))
             emit_secrets_masked(j, request, masked_request, target, masked_target)
             # `flow_id` is unchanged by this write, and it is not a label: the TUI turns it
             # into `RepeaterView#evidence?`, which suppresses `$NAME` expansion because a
@@ -1172,7 +1201,7 @@ module Gori
           "sub-tab chip, which is what the operator says out loud). To seed many tabs from one " \
           "import, use create_repeaters." do |s|
           s.field "target", strprop("absolute target URL (scheme+host+optional port), e.g. https://api.example.com")
-          s.field "request", strprop("verbatim raw HTTP request bytes/text")
+          s.field "request", strprop(%(verbatim raw HTTP request bytes/text — stored byte-for-byte and never repaired or refused, because a malformed request is a legitimate thing to send. A head with no blank-line terminator is therefore kept (and is what shell $(...) leaves behind, since it strips trailing newlines); the reply, get_repeater_context and send_request all carry head_unterminated:true for such a session))
           s.field "request_base64", strprop("the raw HTTP request as base64 — the byte-exact form; use it when the request carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8, a binary body). Overrides 'request'")
           s.field "http2", boolprop("use HTTP/2 (default false)")
           s.field "auto_content_length", boolprop("auto-calculate Content-Length header (default true)")
@@ -1195,7 +1224,7 @@ module Gori
           "affixes only) use update_repeaters." do |s|
           s.field "id", intprop("repeater DATABASE id — not the number on the TUI sub-tab chip. get_repeater_context returns both, as 'db_id' and 'tui_index'"), required: true
           s.field "target", strprop("absolute target URL")
-          s.field "request", strprop("verbatim raw HTTP request")
+          s.field "request", strprop(%(verbatim raw HTTP request bytes/text — stored byte-for-byte and never repaired or refused, because a malformed request is a legitimate thing to send. A head with no blank-line terminator is therefore kept (and is what shell $(...) leaves behind, since it strips trailing newlines); the reply, get_repeater_context and send_request all carry head_unterminated:true for such a session))
           s.field "request_base64", strprop("the raw HTTP request as base64 — the byte-exact form (see create_repeater). Overrides 'request'")
           s.field "http2", boolprop("use HTTP/2")
           s.field "auto_content_length", boolprop("auto-calculate Content-Length")
