@@ -226,8 +226,9 @@ module Gori
                     # unterminated request render identically to a terminated one in every
                     # view gori has — the whole reason #1075 cost a debugging session — and a
                     # listing is where an operator goes to find the odd tab out.
-                    j.field "head_unterminated", true if unterminated_head?(r.request,
-                      ws_http_only: r.ws_http_only?, http2: r.http2?)
+                    if unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
+                      j.field "head_unterminated", true
+                    end
                     j.field "last_error", r.response_error
                     j.field "last_duration_us", r.response_duration_us
                   end
@@ -255,8 +256,8 @@ module Gori
                 # appended last and only when it fires. `repeater send` prints the sentence;
                 # here there is room for the fact alone, which is all this listing has to do —
                 # say which tab is the odd one out. See `unterminated_head_note`.
-                head = unterminated_head?(r.request, ws_http_only: r.ws_http_only?,
-                  http2: r.http2?) ? "  !head-unterminated" : ""
+                bad_head = unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
+                head = bad_head ? "  !head-unterminated" : ""
                 puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{CLI::Output.pad(name, 20)}  → #{r.target}#{tls}#{head}"
               end
             end
