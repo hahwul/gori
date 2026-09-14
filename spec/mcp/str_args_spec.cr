@@ -205,6 +205,12 @@ describe "MCP string arguments — the shared str() reader" do
       refuses_container(tools, "create_issue", "title", ->(bad : String) {
         %({"title":#{bad},"severity":"low"})
       })
+      # The issue BODY (#1076) takes the same door as every other string slot: an object
+      # handed over as notes has no defensible serialization, and `to_s`-ing one would file
+      # the finding with a Crystal inspect string for its write-up.
+      refuses_container(tools, "create_issue", "notes", ->(bad : String) {
+        %({"title":"container notes","notes":#{bad}})
+      })
     end
   end
 
