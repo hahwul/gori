@@ -127,9 +127,17 @@ module Gori
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
           include_sensitive_headers, sc, built, wire, http2, body_cap, body_omit, applied_rules, plan.h2_fields,
           request_line_rewritten, plan.websocket?, unbound_overlay,
+          # h1 ONLY, and asked of `h1_wire` rather than of `wire`. A blank-line head
+          # terminator is an HTTP/1.1 wire fact: `wire` on h2 is the HPACK dump, which has no
+          # such thing to look for, and neither does the field-native form. And the h2 BYTE
+          # path is not merely unanswerable but exempt — `H2Engine` re-encodes `h1_wire` as a
+          # field list in which the missing line was never represented, so the request that
+          # reaches the socket is well-formed and the note would describe bytes nothing sent.
+          # See `CLI::Run.unterminated_head?`, which argues it at length.
+          head_unterminated: plan.h2_fields.nil? && !plan.http2? && !Env.head_terminated?(h1_wire),
           # https only: a plaintext leg sends no ClientHello, so naming a preset there would
           # report a handshake that did not happen.
-          plan.scheme == "https" ? plan.tls_preset : nil),
+          tls_preset: plan.scheme == "https" ? plan.tls_preset : nil),
           is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -853,6 +861,7 @@ module Gori
                                    request_line_rewritten : Bool = false,
                                    websocket_handshake : Bool = false,
                                    unbound_overlay : String? = nil,
+                                   head_unterminated : Bool = false,
                                    tls_preset : String? = nil) : String
         JSON.build do |j|
           j.object do
@@ -863,6 +872,11 @@ module Gori
             # that reports the send has to say so (`effective_request.target` then shows the
             # origin-form line that actually went out). Absent means nothing was rewritten.
             j.field "request_line_rewritten", true if request_line_rewritten
+            # Beside `effective_request`, which is where the bytes are: an agent that reads
+            # only the response cannot tell a `400` about its own request from a `400` about
+            # a head that never terminated, and until #1075 nothing but the origin ever
+            # mentioned it. gori still SENT it — see `CLI::Run.unterminated_head_note`.
+            emit_head_unterminated(j, head_unterminated)
             j.field "match_replace_applied", true if applied_rules
             # Beside `effective_request`, which is where the literal `$NAME` is visible in the
             # bytes — an agent that reads the response alone cannot tell this send from one

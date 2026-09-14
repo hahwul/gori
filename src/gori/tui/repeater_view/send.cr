@@ -233,6 +233,24 @@ class Gori::Tui::RepeaterView
     @inflight = value
   end
 
+  # Did the LAST send's wire go out with an unterminated head (#1075)?
+  #
+  # Set by the controller on the UI fiber from `plan.wire_bytes` — the bytes the socket got —
+  # and read back when the result lands, so the toast that reports the origin's answer can
+  # say what gori knew about the request before the origin ever saw it. It cannot be derived
+  # in the drain: by then the operator may have typed a terminator into the editor, and the
+  # question is about the message that was sent, not about what is on screen now.
+  #
+  # Never a refusal or a repair: an unterminated head is a legitimate thing to put on a
+  # socket and the repeater exists to send non-standard HTTP. The toast says it with
+  # `CLI::Run.unterminated_head_chip`, the short spelling of the sentence the CLI and MCP
+  # print — one owner, so the wording cannot drift between surfaces.
+  #
+  # Only ever true for an HTTP/1.1 send: h2 re-encodes the head as a field list with no
+  # terminator in it, and a framed WebSocket handshake is re-terminated by `WsEngine`, so
+  # neither can be accused of putting a truncated head on the wire.
+  property? sent_head_unterminated : Bool = false
+
   getter? auto_content_length : Bool
 
   def toggle_auto_content_length : Bool

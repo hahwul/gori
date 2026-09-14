@@ -347,6 +347,12 @@ module Gori
           # existed, so a listing of untouched sessions is unchanged. An agent replaying one
           # through `send_request{repeater_id}` inherits this unless it passes its own.
           j.field "tls_preset", r.tls_preset if r.tls_preset
+          # Beside the settings, because it is the one field here that is not one: the stored
+          # bytes of an unterminated request render identically to a well-formed one in every
+          # view gori has (#1075), so a listing is the only place an agent can find the odd
+          # session out before it replays it and reads the origin's bare 400.
+          emit_head_unterminated(j, CLI::Run.unterminated_head?(r.request,
+            ws_http_only: r.ws_http_only?, http2: r.http2?))
           r_request_text = String.new(r.request).scrub
           if include_content
             emit_capped_text(j, "request", Serialize.redact_head(String.new(r.request), include_sensitive),

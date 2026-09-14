@@ -1419,10 +1419,14 @@ module Gori::Tui
           probe_scan_repeater(id, result.head, result.body, result.duration_us, tab.flow_id, view)
         end
         note = record_note ? " · #{record_note}" : ""
+        # Rides BOTH arms. On the error arm it is the more useful of the two, but a bare `400`
+        # comes back through `ok?` — that is the whole shape #1075 describes — so the success
+        # arm is where it actually earns its place.
+        head = view.sent_head_unterminated? ? " · #{CLI::Run.unterminated_head_chip}" : ""
         if result.ok?
-          @host.status("sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{note}", :done)
+          @host.status("sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{head}#{note}", :done)
         else
-          @host.status("repeater error: #{result.error}#{note}", :error)
+          @host.status("repeater error: #{result.error}#{head}#{note}", :error)
         end
         applied = true
       end
@@ -2163,6 +2167,14 @@ module Gori::Tui
       # second run of a seam whose binding values can rotate between two reads — which is why
       # `Repeater::HistoryRecord` takes `wire` as a required argument at all.
       sent_wire = plan.wire_bytes
+      # Recorded HERE, on the UI fiber, from the bytes the socket is about to get — the drain
+      # cannot recompute it, because by the time the answer lands the editor may have been
+      # typed into. This branch is already past `ws_mode?`, so a framed handshake (which
+      # `WsEngine.build_handshake` re-terminates on every send) never reaches it and is never
+      # accused; `!plan.http2?` is the other half of the same rule, because an h2 send
+      # re-encodes this text as an HPACK field list that never carried the missing line.
+      # See `CLI::Run.unterminated_head?`. #1075.
+      view.sent_head_unterminated = !plan.http2? && !Env.head_terminated?(sent_wire)
       # Read live so a toggle in Settings takes on the very next ^R, and read on the UI fiber
       # so the send fiber captures a decision rather than racing one.
       record_store = history_record_store

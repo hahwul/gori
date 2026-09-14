@@ -1866,6 +1866,25 @@ module Gori
       nil
     end
 
+    # Does this message's head END? True when `head_body_separator` finds a blank line,
+    # i.e. when the head is terminated in one of the three spellings the send path accepts.
+    #
+    # gori NEVER refuses or repairs an unterminated head — a truncated head is itself a test
+    # (a slowloris probe, a front-end/back-end desync primitive), and the repeater exists to
+    # put non-standard HTTP on the wire byte-for-byte. What it owes the operator is that the
+    # malformation not be INVISIBLE: the common way to acquire one is shell command
+    # substitution (`$(…)` strips the trailing newlines), and a head missing its last byte
+    # renders identically to a well-formed one in every view gori has. So this is a
+    # REPORTING predicate, read by the surfaces that announce what was stored and what went
+    # on the wire (#1075) — never by a gate.
+    #
+    # It asks `head_body_separator`, and must keep asking it: the answer has to be the same
+    # one the send path computes (`head_body_boundary`, which reads "no separator" as
+    # "all head"), or the marker and the socket come to disagree about one request.
+    def self.head_terminated?(bytes : Bytes) : Bool
+      !head_body_separator(bytes).nil?
+    end
+
     # Byte-level equivalent of `gsub(/\r?\n/, "\r\n")`: inserts `\r` before any
     # `\n` not already preceded by one, leaving everything else untouched. Used
     # instead of a `Regex` because `bytes` (the expanded request text) may carry
