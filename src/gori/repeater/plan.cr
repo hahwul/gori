@@ -169,6 +169,19 @@ module Gori::Repeater
     # DRAFT it expanded itself (MCP's `RequestBuilder`, the TUI editor's byte modes).
     property? evidence : Bool
 
+    # The names the EVIDENCE bytes ARRIVED with, for a surface that knows them — provenance per
+    # NAME at the SEND seam, where `$BIND`/`$GEN` resolve. nil keeps `evidence?`'s blanket skip.
+    #
+    # The sibling for the env-var pass is not a field here but a narrowed TABLE the surface
+    # hands over already subtracted (`RepeaterView#operator_env_vars`, and `Fuzz::PlanOptions#env_vars`
+    # one tree over). The send pass cannot be served that way — GEN resolves from a fixed
+    # catalog with no table to subtract from, and it must mint AT the socket — so the names
+    # travel instead. See `Sender#evidence_literals` for what went out without them.
+    #
+    # INERT on the field-native h2 path for the same reason `expand_bindings` is: nothing there
+    # expands (`build_field_native`).
+    property evidence_literals : Set(String)?
+
     # h2 ONLY: put field names on the wire with the case the operator typed. Off by default
     # because the h1 head text is both a wire format and the paste buffer — a request copied
     # from Burp or curl is conventionally title-cased and h2 requires lowercase (RFC 9113
@@ -216,6 +229,7 @@ module Gori::Repeater
                    @auto_content_length : Bool = true,
                    @resync_cl_after_expansion : Bool = false,
                    @evidence : Bool = false,
+                   @evidence_literals : Set(String)? = nil,
                    @preserve_field_case : Bool = false,
                    @reframe_grpc : Bool = false,
                    @h2_fields : Array({String, String})? = nil,
@@ -496,6 +510,7 @@ module Gori::Repeater
         timeout: options.timeout, overrides: options.overrides,
         preserve_field_case: options.preserve_field_case?, evidence: options.evidence?,
         expand_bindings: options.expand_bindings?,
+        evidence_literals: options.evidence_literals,
         reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset)
       new(sender: sender, requests: wires, scheme: scheme, host: host, port: port,
         http2: options.http2?, websocket: websocket, sni: sni,

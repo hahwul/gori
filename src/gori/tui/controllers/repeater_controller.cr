@@ -2489,18 +2489,28 @@ module Gori::Tui
     # withheld — `ws_out_messages` stamps every frame with the tab's own `@evidence`, so one
     # boolean is the honest answer here (the per-FRAME provenance the Sender reads matters
     # where the two populations mix, which in this pane they do not).
+    #
+    # TWO scans, and the split is the one thing this method now has to get right: the
+    # HANDSHAKE is an HTTP head and goes through `Sender#wire`, which resolves an operator's
+    # own name and withholds only the capture's (`evidence_literals`); the FRAMES do not —
+    # `expand_messages` still withholds every name in a frame stamped `evidence`, because a
+    # frame has no seed baseline of its own to tell the two populations apart. One scan over
+    # both would name whichever rule the other half does not follow.
     private def ws_evidence_literal_note(view : RepeaterView) : String
-      text = String.build do |io|
-        io << view.request_text << '\n'
+      frames = String.build do |io|
         view.ws_out_messages_raw.each { |m| io.write(m.payload); io << '\n' }
       end
-      names = RepeaterController.literal_bindings(view.evidence?, text)
+      names = RepeaterController.literal_bindings(view.evidence?, view.request_text,
+        view.evidence_send_literals)
+      names.concat(RepeaterController.literal_bindings(view.evidence?, frames, nil))
+      names.uniq!.sort!
       return "" if names.empty?
       " · #{Env.token_list(names, ns: Env::Namespace::Bind)} sent literally (evidence tab — not substituted)"
     end
 
     private def evidence_literal_note(view : RepeaterView) : String
-      names = RepeaterController.literal_bindings(view.evidence?, view.request_text)
+      names = RepeaterController.literal_bindings(view.evidence?, view.request_text,
+        view.evidence_send_literals)
       return "" if names.empty?
       " · #{Env.token_list(names, ns: Env::Namespace::Bind)} sent literally (evidence tab — not substituted)"
     end
@@ -2517,14 +2527,26 @@ module Gori::Tui
     # rewritten, so the two cannot disagree about what was withheld. An UNBOUND declared
     # name is deliberately not reported: nothing would have been substituted for it on any
     # surface — evidence or draft — so there is no divergence to name.
-    def self.literal_bindings(evidence : Bool, text : String) : Array(String)
+    #
+    # `literal` is WHICH of those names the seam actually withheld, and it is required for the
+    # reason the seam's own argument is: an evidence tab resolves an operator's `$BIND.CTOK`
+    # now (`Sender#evidence_literals`) and withholds only the names the capture arrived with,
+    # so reporting every declared name in the buffer would say "sent literally" about the one
+    # value gori DID substitute — the same divergence this note exists to close, pointed the
+    # other way. nil means the caller has no per-name answer and the whole buffer is withheld:
+    # a WS out-frame, and any future surface that sends captured bytes without a seed.
+    def self.literal_bindings(evidence : Bool, text : String,
+                              literal : Set(String)?) : Array(String)
       return [] of String unless evidence
       prefix = Gori::Settings.env_prefix
       return [] of String if prefix.empty?
       # The SPELLING the current grammar would have put on the wire — `$ENV.`-prefixed under
       # the namespaced one. Testing for `prefix + name` alone reported a `$SESSION` that is a
       # literal in namespaced mode as "withheld", and missed the `$BIND.SESSION` that is not.
-      Env.binding_values.keys.select { |n| text.includes?(Env.spell(n, Env::Namespace::Bind)) }.sort!
+      Env.binding_values.keys.select do |n|
+        next false unless text.includes?(Env.spell(n, Env::Namespace::Bind))
+        literal.nil? || literal.includes?(Env.literal_key(n, Env::Namespace::Bind))
+      end.sort!
     end
 
     # Why a `%%%` group send refuses while LIVE §…§ markers are present, or nil to proceed.
@@ -2605,8 +2627,15 @@ module Gori::Tui
       # `$KEY` to leave alone. `evidence:` is what tells the SENDER (session bindings) and
       # the unresolved-`$KEY` refusal that these bytes are a capture. See
       # `RepeaterView#evidence?` and `Repeater::Sender#evidence?`.
+      # `evidence_literals` is the per-NAME half of that provenance, and only an evidence tab
+      # has one to give: it is what lets the SEND seam resolve an operator's `$BIND.SESSION` /
+      # `$GEN.RANDOM_HEX` in a ^R-from-History tab while leaving the capture's own `$filter`
+      # literal — the rule `operator_env_vars` has always applied to the env-var pass one layer
+      # up. Without it a seeded tab autocompleted `$GEN.RANDOM_HEX`, showed its format hint
+      # under the caret, and put those bytes in the request line. See `Sender#evidence_literals`.
       Repeater::Plan.build(Repeater::PlanOptions.new(requests,
         expand_request: false, auto_content_length: false, evidence: view.evidence?,
+        evidence_literals: view.evidence? ? view.evidence_send_literals : nil,
         target: view.target, http2: http2, sni: view.sni_override,
         # This tab's own TLS fingerprint (#844) — the thing that makes two tabs against one
         # host with different values dial two different SSL contexts.

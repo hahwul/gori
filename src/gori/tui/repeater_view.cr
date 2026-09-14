@@ -350,9 +350,12 @@ module Gori::Tui
       # NAME instead of per buffer. Baseline = the names the CAPTURE arrived with; empty on a
       # draft, where every `$` is the operator's by definition. See `operator_env_vars`.
       @evidence_env_names = Set(String).new
-      # The bytes that set was DERIVED from and the grammar revision it was derived under, so a
-      # mid-session `env.syntax` flip re-derives it instead of answering the old grammar's
-      # question (see `adopt_evidence_env_seed`).
+      # The same baseline for the SEND-time namespaces, keyed the way a token is looked up
+      # there — `Env.literal_keys`, the editor's own literal set. See `evidence_send_literals`.
+      @evidence_send_literals = Set(String).new
+      # The bytes both sets were DERIVED from and the grammar revision they were derived under,
+      # so a mid-session `env.syntax` flip re-derives them instead of answering the old
+      # grammar's question (see `adopt_evidence_env_seed`).
       @evidence_env_seed = ""
       @evidence_env_rev = Env.highlight_rev
       @marker_regions_rev = -1
