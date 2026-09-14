@@ -15,11 +15,12 @@ module Gori
     #
     # `notes` defaults to the `''` this always wrote, so no existing caller changes. It is a
     # parameter at all for the create-with-a-body path (`gori run issues create --notes…`,
-    # #1019): filed as part of the INSERT, an issue and its evidence write arrive in one
-    # transaction, where the insert-then-`update_issue` sequence the TUI still uses can land
-    # its first half and lose the second (the toast there names that half rather than claiming
-    # both). One transaction is also the only shape where a peer reading the project between
-    # the two writes cannot see a titled issue with no body.
+    # #1019): filed as part of the INSERT, an issue and its body arrive in one transaction,
+    # where an insert-then-`update_issue` sequence can land its first half and lose the second.
+    # Every surface that files with a body now rides this — the CLI (#1019), the TUI form
+    # (#1019, see `Runner#create_issue_from_form`) and MCP `create_issue{notes:}` (#1076) —
+    # because one transaction is the only shape where a peer reading the project between the
+    # two writes cannot see a titled issue with no body.
     def insert_issue(title : String, severity : Severity, host : String?, flow_id : Int64?, cvss : String? = nil,
                      notes : String = "") : Int64
       ts = now_us

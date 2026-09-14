@@ -158,9 +158,26 @@ describe Gori::MCP::Server do
         create = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_issue","arguments":) +
                  %({"title":"leak","notes":#{body.to_json}}}})
         new_id = mcp_tool_payload(mcp_drive(store, set_var, create)[1])["id"].as_i64
-        stored = store.get_issue(new_id).not_nil!.notes
-        stored.should_not contain(secret)
-        stored.should contain("CTOK")
+        # The WHOLE string, against the spelling gori itself would write: `contain("CTOK")`
+        # would also pass for the retired bare `$CTOK`, for `$BIND.CTOK` (a different
+        # namespace is a different secret — the collision `Env.masking_table` exists to
+        # prevent), and for a body that merely says the word while the value leaked elsewhere.
+        token = Gori::Env.spell("CTOK", Gori::Env::Namespace::Env)
+        store.get_issue(new_id).not_nil!.notes.should eq("Authorization: Bearer #{token}\n")
+      end
+    end
+
+    # `notes` is read LAST, one line above the insert, so its refusal is the one most easily
+    # turned into a write-then-raise — the shape #724 is about. The error alone is not the
+    # claim; "nothing was filed" is. (`refuses_container` in str_args_spec covers the sentence.)
+    it "files nothing when notes is a container, not a titled issue with no body" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":) +
+                 %({"title":"x","notes":{"a":1}}}})
+        resp = mcp_drive(store, create)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("'notes'")
+        store.count_issues.should eq(0)
       end
     end
 

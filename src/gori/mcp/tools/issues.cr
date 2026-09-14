@@ -188,7 +188,11 @@ module Gori
 
         return unless @allow_actions
 
-        tool j, "create_issue", "Record a new issue in the project." do |s|
+        # The description says the body can ride the create, because that is the surface an
+        # agent reads when CHOOSING a tool — #1076 was filed over a create+update_issue habit
+        # formed when nothing here said otherwise, and a per-property description (below) is
+        # only read once this tool has already been picked.
+        tool j, "create_issue", "Record a new issue in the project, with its notes body, in one transaction." do |s|
           s.field "title", strprop("issue title"), required: true
           s.field "severity", enumprop("issue severity (default: derived from cvss, else info)", SEVERITIES)
           s.field "cvss", strprop("optional CVSS vector or numeric score (e.g. 9.8 or CVSS:3.1/...)")
