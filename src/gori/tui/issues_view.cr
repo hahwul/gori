@@ -1861,7 +1861,7 @@ module Gori::Tui
     # created_at/updated_at are unix MICROSECONDS (the issues.* unit) — to seconds
     # for Time.unix, like Project/History formatting.
     private def fmt_ts(us : Int64) : String
-      Time.unix(us // 1_000_000).to_local.to_s("%Y-%m-%d %H:%M")
+      LocalTime.format(us, "%Y-%m-%d %H:%M")
     end
 
     # `@issues` is the FILTERED list (apply_filter rebuilds it from the `/` query and from

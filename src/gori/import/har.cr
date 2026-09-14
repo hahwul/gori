@@ -53,6 +53,18 @@ module Gori
         end
       end
 
+      # A raise that came from the CALLER's block, not from the file. `each_flow` yields from
+      # inside the walk, so without this marker the clauses that name the file would also
+      # catch a store write or a progress callback failing and report it as a corrupt HAR.
+      # Unwrapped and re-raised as itself at the top of `each_flow`.
+      private class ConsumerRaise < Exception
+        getter inner : Exception
+
+        def initialize(@inner : Exception)
+          super(@inner.message)
+        end
+      end
+
       def self.each_flow(path : String, prov : Provenance = Provenance.none,
                          cancelled : (-> Bool)? = nil, &block : Builder::FlowPair ->) : Int32
         File.open(path) do |file|
@@ -70,10 +82,25 @@ module Gori
           pull.read_end_object
           skipped || raise Gori::Error.new("HAR file missing log object")
         end
+      rescue ex : ConsumerRaise
+        # First on purpose: the two clauses that name the FILE must never get to speak for a
+        # failure that was the caller's. Re-raised as itself — whatever the block was doing,
+        # its own error is the true one.
+        raise ex.inner
       rescue ex : Stopped
         ex.skipped
       rescue ex : JSON::ParseException
         raise Gori::Error.new("HAR file is not valid JSON: #{ex.message}")
+      rescue ex : InvalidByteSequenceError
+        # A HAR carrying one byte that is not valid UTF-8 — a browser writing a response body
+        # verbatim is the ordinary way to get one — never reaches the clause above. The pull
+        # parser reads the file through `IO#read_char`, which raises `InvalidByteSequenceError`
+        # and not a `JSON::ParseException`, so the raise ran all the way out: `import_file`
+        # rescues `File::Error` only, `CLI.run` `Gori::Error` only, and the operator got a
+        # backtrace. The whole-file parse this walk replaced built the String up front and so
+        # never met the byte here — the hole arrived with the streaming rewrite. Reported as a
+        # bad FILE, which is what it is; nothing in the HAR can be trusted past that byte.
+        raise Gori::Error.new("HAR file is not valid UTF-8: #{ex.message}")
       end
 
       # The `log` object: its `entries` array is walked, everything else (version, creator,
@@ -116,7 +143,23 @@ module Gori
           rescue
             nil
           end
-          flow ? block.call(flow) : (skipped += 1)
+          if flow
+            # The CONSUMER's raise, kept apart from the parser's. This block is the caller's —
+            # `import_har_stream` writes a chunk to SQLite and calls the progress callback in
+            # here — and `each_flow`'s rescues name the FILE. Without this, a store or UI
+            # failure carrying one of those classes came back to the operator as "HAR file is
+            # not valid UTF-8", with `import_file` then appending how many flows were written
+            # before it: a wrong diagnosis, cemented by a true-sounding detail.
+            begin
+              block.call(flow)
+            rescue ex : Stopped
+              raise ex
+            rescue ex
+              raise ConsumerRaise.new(ex)
+            end
+          else
+            skipped += 1
+          end
           if Time.instant - last_pause >= PACE_SLICE
             Fiber.yield
             last_pause = Time.instant
@@ -283,7 +326,7 @@ module Gori
         s = node.try(&.as_f?)
         return nil unless s && s.finite? && s > 0
         ms = (s * 1_000).round
-        return nil unless ms <= Int64::MAX.to_f64 / 1_000
+        return nil unless ms < Int64::MAX.to_f64 / 1_000 # strict — see `number_i64`
         ms.to_i64 * 1_000
       end
 
@@ -310,7 +353,10 @@ module Gori
         end
         f = node.as_f?
         return nil unless f && f.finite?
-        return nil unless f >= Int64::MIN.to_f64 && f <= Int64::MAX.to_f64
+        # STRICT at the top: `Int64::MAX.to_f64` rounds UP to 2^63, one more than Int64 holds,
+        # so `<=` admits exactly the value `to_i64` then overflows on. `Int64::MIN` is a power
+        # of two and converts exactly, so its bound stays inclusive.
+        return nil unless f >= Int64::MIN.to_f64 && f < Int64::MAX.to_f64
         f.to_i64
       end
 
@@ -329,7 +375,7 @@ module Gori
         # the entire entry rather than just its duration.
         return nil unless ms && ms.finite? && ms >= 0
         us = (ms * 1_000).round
-        return nil unless us <= Int64::MAX.to_f64
+        return nil unless us < Int64::MAX.to_f64 # strict — see `number_i64`
         us.to_i64
       end
 

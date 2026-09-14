@@ -274,6 +274,45 @@ describe "gori run history — CLI::Output rows" do
       .should eq(Gori::MCP::Serialize.unix_micros_iso(1_700_000_000_123_456_i64))
   end
 
+  # Two renderings of ONE instant must not disagree about whether that instant exists. `time`
+  # is local and `created_at_iso` is UTC, and `to_local` raises `ArgumentError` when a stored
+  # instant near `Time::MAX` plus a POSITIVE offset lands past it — so the same row printed
+  # under `TZ=Asia/Seoul` died where `TZ=UTC` printed it, after `[` and some rows had already
+  # gone out. Reachable from ordinary data (a HAR entry dated `9999-12-31T23:59:59.999Z`
+  # imports without complaint) and PERSISTENT, because the row is then stored.
+  it "prints a far-future row in every timezone, falling back to UTC where local cannot hold it" do
+    far = 253_402_300_799_999_000_i64 # 9999-12-31T23:59:59.999Z
+    ["Asia/Seoul", "Europe/Berlin", "UTC", "America/New_York"].each do |tz|
+      Time::Location.local = Time::Location.load(tz)
+      row = Gori::Store::FlowRow.new(
+        id: 1_i64, created_at: far, scheme: "https", method: "GET",
+        host: "h", port: 443, target: "/a", status: 200, size: 0_i64,
+        state: Gori::Store::FlowState::Complete)
+      json = JSON.parse(Gori::CLI::Output.flow_row_json(row))
+      json["time"].as_s.should contain("9999-12-31")
+      json["created_at_iso"].as_s.should eq("9999-12-31T23:59:59.999Z")
+    end
+  ensure
+    Time::Location.local = Time::Location.load_local
+  end
+
+  # The UTC field sits one line after the local one in the same object, and staying in UTC only
+  # avoids the OFFSET half of the problem: the Span addition still raises past year 9999. A
+  # column that far out is hand-edited or foreign rather than imported, but hardening only the
+  # local rendering would leave `--format json` writing the same truncated document.
+  it "prints a created_at past the end of Time in both renderings" do
+    row = Gori::Store::FlowRow.new(
+      id: 1_i64, created_at: Int64::MAX, scheme: "https", method: "GET",
+      host: "h", port: 443, target: "/a", status: 200, size: 0_i64,
+      state: Gori::Store::FlowState::Complete)
+    json = JSON.parse(Gori::CLI::Output.flow_row_json(row))
+    json["time"].as_s.should eq("—")
+    json["created_at_iso"].as_s.should eq("—")
+    # …and the MCP serializer this is pinned against byte-for-byte agrees.
+    Gori::CLI::Output.iso_time_utc(Int64::MAX)
+      .should eq(Gori::MCP::Serialize.unix_micros_iso(Int64::MAX))
+  end
+
   # The class this round closed: `JSON::Builder#string` escapes JSON metacharacters but writes
   # raw bytes through, so ONE non-UTF-8 byte in a captured field makes the whole document
   # unparseable to a strict reader (python's json.loads raises UnicodeDecodeError) — and in the

@@ -446,10 +446,10 @@ module Gori
           return
         end
         sessions.each do |s|
-          last = s.last_poll_at.try(&.to_local.to_s("%Y-%m-%d %H:%M")) || "never"
+          last = s.last_poll_at.try { |t| LocalTime.of(t).to_s("%Y-%m-%d %H:%M") } || "never"
           puts "##{s.id.to_s.ljust(5)} #{CLI::Output.pad(s.provider, 24)} #{s.kind.ljust(13)} " \
                "#{CLI::Output.pad(s.payload_host, 34)} #{s.hits.to_s.rjust(5)} hits  " \
-               "started #{s.created_at.to_local.to_s("%Y-%m-%d %H:%M")}  last poll #{last}"
+               "started #{LocalTime.of(s.created_at).to_s("%Y-%m-%d %H:%M")}  last poll #{last}"
         end
       end
 

@@ -415,7 +415,7 @@ module Gori
               when :status       then match_status(t.value, m)
               when :confirmation then Evidence.confirmation(m, statuses).includes?(t.value)
               when :source       then m.source_kind.label == t.value || m.source_kind.tag == t.value
-              when :date         then Time.unix(m.created_at // 1_000_000).to_local.to_s("%Y-%m-%d").starts_with?(t.value)
+              when :date         then LocalTime.at(m.created_at).try(&.to_s("%Y-%m-%d").starts_with?(t.value)) || false
               else                    free_text(t.value, m, statuses)
               end
         t.negate ? !hit : hit

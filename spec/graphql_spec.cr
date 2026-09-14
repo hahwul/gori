@@ -590,6 +590,19 @@ describe Gori::Graphql do
       GQL.recompose_batch(body, "   \n\n").should eq(body)
     end
 
+    # `JSON.parse` copies a `query` string's bytes verbatim without validating them, so a
+    # captured batch can put a non-UTF-8 byte in the DECODED pane. The marker scan used to be
+    # a PCRE `match`, which RAISES `ArgumentError` on such a String — on the UI fiber, which
+    # wedged the tab (every toggle/Send raised again) and ended the process at the third
+    # strike. The bytes must survive the trip: they are what goes on the wire (P7).
+    it "splices a pane carrying bytes that are not valid UTF-8" do
+      body = %([{"query":"{a}"},{"query":"{b}"}])
+      pane = String.new("# --- [0] ---\n{a \xff}".to_slice)
+      pane.valid_encoding?.should be_false
+      out = GQL.recompose_batch(body, pane)
+      out.should contain("{a \xff}")
+    end
+
     # `# --- [0] ---` is also a legal GraphQL comment. `batch_text` always writes the marker
     # after a BLANK line, so requiring one is what tells the sentinel apart from a comment
     # sitting inside a document — the same disambiguation `# variables` already gets, and

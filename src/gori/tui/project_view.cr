@@ -3039,7 +3039,7 @@ module Gori::Tui
     # `Time.local` is a timezone resolution. Asking it forty times a frame to answer a question
     # whose answer is the same for every row put two tz lookups per row on the render fiber.
     def self.act_stamp(created_at : Int64, today : Time) : String
-      t = Time.unix(created_at // 1_000_000).to_local
+      t = LocalTime.at(created_at) || return "   —"
       t.date == today.date ? t.to_s("%H:%M:%S") : t.to_s("   %m-%d")
     end
 
@@ -3069,7 +3069,7 @@ module Gori::Tui
     # it is read. The message is `act_one_line`, so a multi-line event is one row of text
     # rather than a paste that breaks whatever it lands in.
     def self.act_copy_line(row : Store::EventRow) : String
-      at = Time.unix(row.created_at // 1_000_000).to_local.to_s("%Y-%m-%d %H:%M:%S")
+      at = LocalTime.format(row.created_at, "%Y-%m-%d %H:%M:%S")
       "#{at} · #{row.level} · #{row.source} · #{act_actor_label(row.actor)} · #{act_one_line(row.message)}"
     end
 
@@ -3120,7 +3120,7 @@ module Gori::Tui
     private def format_time(t : Time?) : String
       return "—" if t.nil?
       # Local wall-clock time for creation date (no tz noise in TUI).
-      t.to_local.to_s("%Y-%m-%d %H:%M")
+      LocalTime.of(t).to_s("%Y-%m-%d %H:%M")
     end
 
     # Prose sizes for the Project pane — a space before the unit and a TB step, which is why

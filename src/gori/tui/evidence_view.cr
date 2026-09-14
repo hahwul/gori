@@ -241,7 +241,7 @@ module Gori::Tui
     end
 
     private def fmt_time(us : Int64) : String
-      Time.unix(us // 1_000_000).to_local.to_s("%m-%d %H:%M")
+      LocalTime.format(us, "%m-%d %H:%M")
     end
   end
 end

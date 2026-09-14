@@ -34,10 +34,13 @@ module Gori::Settings
     # (this rule's default unless the project overrode it) and `overridden` says which of the
     # two it is, so the list row can mark it.
     #
-    # `from_label` RAISES on an unknown label and that is safe here: a rule only reaches memory
-    # through `parse_rewriter_rules`, which clamps all four enum fields to their allowed sets,
-    # or through the CRUD below, which is handed a live rule's own `.label`. The clamp at the
-    # parse boundary is what makes this total.
+    # All four `from_label`s are TOTAL (an unrecognised label reads as that field's default),
+    # so nothing here can raise on a hand-edited file. The clamp at the parse boundary is what
+    # makes that irrelevant rather than load-bearing: a rule only reaches memory through
+    # `parse_rewriter_rules`, which restricts all four enum fields to their allowed sets, or
+    # through the CRUD below, which is handed a live rule's own `.label`. A label that gets
+    # past both of those is already a drifted file, and reading it as a default beats a
+    # backtrace out of whichever surface asked for the rules.
     def to_rule(enabled : Bool = @enabled, overridden : Bool = false) : Store::MatchRule
       Store::MatchRule.new(id, enabled,
         Store::RuleTarget.from_label(target), Store::RulePart.from_label(part),
@@ -116,10 +119,14 @@ module Gori::Settings
   # refuses it anyway), as is a header op on a non-head part (`impossible_shape?`, same
   # reasoning); the four enum fields are clamped to their allowed sets.
   #
-  # Clamping rather than `from_label` is the point: those raise on an unknown label, and a
-  # single typo in a hand-edited settings.json would take the whole file down through `load`'s
-  # blanket rescue — resetting theme, hotkeys and every other section to factory defaults.
-  # Mirrors parse_scan_rules.
+  # The clamp is a NORMALISATION, and it used to be a crash guard as well: `from_label` raised
+  # on an unknown label, so one typo in a hand-edited settings.json took the whole file down
+  # through `load`'s blanket rescue, resetting theme, hotkeys and every other section to
+  # factory defaults. All four readers are total now — an unknown label reads as that field's
+  # default — so that particular disaster is gone either way. Clamping still earns its place:
+  # it decides HERE, at the file boundary, that a label this parser does not recognise is not
+  # carried forward as itself, which is what keeps the in-memory rule and the stored one from
+  # disagreeing about what the file said. Mirrors parse_scan_rules.
   #
   # A missing `enabled` reads as FALSE. These rules rewrite live traffic in every project, so
   # the one direction a malformed or hand-written entry may not default to is "on".

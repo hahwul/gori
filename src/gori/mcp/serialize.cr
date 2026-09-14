@@ -1304,10 +1304,17 @@ module Gori
 
       # RFC3339 UTC for store timestamps (unix microseconds). Helps LLM clients
       # that can't interpret raw microsecond integers.
+      # The Span addition RAISES `ArgumentError` on a `created_at` past year 9999 — a
+      # hand-edited or foreign column, or an import whose source dated an entry there. An agent
+      # asking for such a row got a `-32603` where the row's other fields were perfectly
+      # readable. Same dash and same guard as `CLI::Output.iso_time_utc`, which a spec pins
+      # this against byte-for-byte.
       def self.unix_micros_iso(us : Int64) : String
         sec, micro = us.divmod(1_000_000)
         t = Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds
         t.to_s("%Y-%m-%dT%H:%M:%S.%LZ")
+      rescue ArgumentError
+        "—"
       end
 
       # Emits a `field_name` field carrying a decoded-body summary. nil/empty body

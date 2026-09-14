@@ -153,7 +153,7 @@ module Gori
                   j.field "db_path", pr.db_path
                   j.field "db_size", pr.db_size
                   j.field "last_modified", pr.last_modified.try(&.to_unix)
-                  j.field "time", pr.last_modified.try(&.to_local.to_s("%Y-%m-%dT%H:%M:%S%:z"))
+                  j.field "time", pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%dT%H:%M:%S%:z") }
                   j.field "flows", row.flows
                   j.field "current", row.current
                   j.field "tui_active", row.tui_active
@@ -166,7 +166,7 @@ module Gori
         else
           rows.each do |row|
             pr = row.project
-            ts = pr.last_modified.try(&.to_local.to_s("%Y-%m-%d %H:%M")) || "—"
+            ts = pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%d %H:%M") } || "—"
             id = registry.id_of(pr) || "—"
             flows = row.flows.try(&.to_s) || "?"
             puts "#{project_row_marker(row)} #{CLI::Output.pad(pr.name, 24)}  #{id.ljust(8)}  #{ts}  " \

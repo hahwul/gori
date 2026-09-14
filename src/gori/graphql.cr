@@ -547,10 +547,44 @@ module Gori
       elements.to_json
     end
 
-    # `# --- [i] ---`, the batch element marker `batch_text` writes. Anchored and strict: a
-    # GraphQL comment has to be spelled exactly this way, and be preceded by a blank line
-    # (checked by the caller), before it is allowed to cut a document in half.
-    BATCH_MARK_RE = /\A#\s*---\s*\[(\d+)\]\s*---\z/
+    # `# --- [i] ---`, the batch element marker `batch_text` writes: the declared index, or nil
+    # when this line is not a marker. Strict for the same reason the anchored regex it replaces
+    # was — a GraphQL comment has to be spelled exactly this way, and be preceded by a blank
+    # line (checked by the caller), before it is allowed to cut a document in half.
+    #
+    # Hand-rolled rather than `/\A#\s*---\s*\[(\d+)\]\s*---\z/` because a PCRE `match` RAISES
+    # `ArgumentError` on a String that is not valid UTF-8, and the string here is the DECODED
+    # PANE — routinely built from captured bytes, since `JSON.parse` copies a `query` string's
+    # bytes verbatim without validating them. A batch request carrying one such byte made every
+    # pane toggle, Send, and hand-off to the Fuzzer/Miner/Sequencer raise on the UI fiber: the
+    # tab wedged (`@decoded_dirty` is cleared only after the splice lands), and three raises
+    # inside ten seconds tripped the Runner's tick breaker and ended the process.
+    #
+    # Scrubbing was not the fix — this text is spliced into the body that goes on the wire, so
+    # substituting U+FFFD would change what is sent (P7) — and neither was refusing, which
+    # would drop the operator's edit. Every sibling inverse (`recompose`, `recompose_query`,
+    # `recompose_form`, `parse_display`) already survives these bytes by using `split`/`index`;
+    # this was the one place in the file that reached for a regex. A marker is pure ASCII, so
+    # nothing about the answer changes — only the failure mode does.
+    # A marker line whose declared index did not fit an Int32 still CUT the document under the
+    # regex (`m[1].to_i?` was nil and the block simply had no declared index, overlaying onto
+    # nothing). Separating "is a marker" from "which index" keeps that: the record is the
+    # first answer, its nilable field the second.
+    private record BatchMark, index : Int32?
+
+    private def batch_mark(line : String) : BatchMark?
+      s = line.strip
+      return nil unless s.starts_with?('#')
+      s = s[1..].strip
+      return nil unless s.starts_with?("---")
+      s = s[3..].strip
+      return nil unless s.starts_with?('[')
+      close = s.index(']') || return nil
+      digits = s[1...close]
+      return nil if digits.empty? || !digits.each_char.all?(&.ascii_number?)
+      return nil unless s[(close + 1)..].strip == "---"
+      BatchMark.new(digits.to_i?)
+    end
 
     # The edited batch pane split into {declared index, block text} pairs. Anything before the
     # first marker is the `# batch of N operations` preamble and is dropped; blocks that are
@@ -561,12 +595,12 @@ module Gori
       cur = nil.as(Array(String)?)
       idx = nil.as(Int32?)
       lines.each_with_index do |line, i|
-        if (m = BATCH_MARK_RE.match(line.strip)) && (i == 0 || lines[i - 1].strip.empty?)
+        if (mark = batch_mark(line)) && (i == 0 || lines[i - 1].strip.empty?)
           if c = cur
             segs << {idx, c.join('\n')}
           end
           cur = [] of String
-          idx = m[1].to_i?
+          idx = mark.index
           next
         end
         cur.try &.<< line

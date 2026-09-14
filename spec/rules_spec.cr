@@ -874,4 +874,32 @@ describe Gori::Rules do
       end
     end
   end
+
+  # `match_rules` carries no CHECK constraint on `target`/`part`, so a hand-edited DB — or a
+  # project file written by a build whose label set has drifted — can hold a value the enum
+  # does not know. Two of the four enum readers on that row were TOTAL (`RuleOp`, `MatchKind`)
+  # and two called the raising `Enum.parse`, so one such row took `gori run rewriter list`
+  # down with an `ArgumentError` backtrace, by way of `Rules.merged`. All four are total now:
+  # a stored row must not be able to raise on the way out of the store.
+  describe "a stored rule whose enum labels have drifted" do
+    it "reads as the defaults rather than raising out of the store" do
+      with_store do |store|
+        store.insert_rule(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body,
+          "foo", "bar", name: "t")
+        store.@db.exec("UPDATE match_rules SET target = 'bogus', part = 'bogus'")
+        rules = store.match_rules
+        rules.size.should eq(1)
+        rules.first.target.should eq(Gori::Store::RuleTarget::Request)
+        rules.first.part.should eq(Gori::Store::RulePart::Head)
+      end
+    end
+
+    it "still reads every label it does know" do
+      Gori::Store::RuleTarget.from_label("request").should eq(Gori::Store::RuleTarget::Request)
+      Gori::Store::RuleTarget.from_label("response").should eq(Gori::Store::RuleTarget::Response)
+      Gori::Store::RulePart.from_label("head").should eq(Gori::Store::RulePart::Head)
+      Gori::Store::RulePart.from_label("body").should eq(Gori::Store::RulePart::Body)
+      Gori::Store::RulePart.from_label("ws").should eq(Gori::Store::RulePart::Ws)
+    end
+  end
 end
