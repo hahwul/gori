@@ -75,7 +75,14 @@ module Gori
         end
 
         host = str(h, "host").try { |hst| Env.mask_secrets(hst) }
-        id = store.insert_issue(masked_title, severity, host, flow_id, cvss: cvss)
+        # The body, written by the SAME insert as the issue — the atomicity `gori run issues
+        # create --notes/--notes-file` already advertises. Without it an agent filing findings
+        # in bulk had to follow every create with an `update_issue(notes:)`: two writes, and an
+        # issue that exists bodiless in between. `|| ""` is the column's own default, not a
+        # fallback that loses anything — no `notes` argument still creates a bodiless issue.
+        # Masked like the title and host beside it, and like update_issue's own `notes`.
+        notes = str(h, "notes").try { |n| Env.mask_secrets(n) } || ""
+        id = store.insert_issue(masked_title, severity, host, flow_id, cvss: cvss, notes: notes)
         # insert_issue returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
@@ -185,6 +192,7 @@ module Gori
           s.field "title", strprop("issue title"), required: true
           s.field "severity", enumprop("issue severity (default: derived from cvss, else info)", SEVERITIES)
           s.field "cvss", strprop("optional CVSS vector or numeric score (e.g. 9.8 or CVSS:3.1/...)")
+          s.field "notes", strprop("optional free-form notes — the issue's body, written with the issue in one transaction")
           s.field "host", strprop("optional host the issue concerns")
           s.field "flow_id", intprop("optional flow this issue is filed from — it becomes the issue's first linked flow")
           s.field "repeater_id", intprop("optional repeater id this issue links to")

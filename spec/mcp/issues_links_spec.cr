@@ -117,6 +117,63 @@ describe Gori::MCP::Server do
       end
     end
 
+    # #1076 — the MCP half of the CLI's `--notes` / `--notes-file` / `--notes-stdin`. `notes`
+    # lived on `update_issue` only, so filing a finding over MCP cost two writes and left an
+    # issue that was bodiless in between; filing 39 of them cost 78 calls. The body is written
+    # by the insert itself, which is what makes the pair atomic.
+    it "writes the notes body in the create itself, not in a follow-up write" do
+      with_store do |store|
+        body = "## Repro\n\n1. `POST /login`\n2. 302 carrying another user's cookie\n"
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":) +
+                 %({"title":"Auth bypass","severity":"high","notes":#{body.to_json}}}})
+        new_id = mcp_tool_payload(mcp_drive(store, create)[0])["id"].as_i64
+        # Read the row, not a second tool call: the claim is that ONE write ran and the body
+        # was already in it — an issue this store never held bodiless.
+        store.get_issue(new_id).not_nil!.notes.should eq(body)
+
+        get = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_issue","arguments":{"id":#{new_id}}}})
+        mcp_tool_payload(mcp_drive(store, get)[0])["notes"].as_s.should eq(body)
+      end
+    end
+
+    # The absent case is the overwhelmingly common call and must be unchanged: `""` is the
+    # column's own default, not a value this argument introduced.
+    it "still creates a bodiless issue when notes is absent" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x"}}})
+        new_id = mcp_tool_payload(mcp_drive(store, create)[0])["id"].as_i64
+        store.get_issue(new_id).not_nil!.notes.should eq("")
+      end
+    end
+
+    # Masked like the title and host written beside it, and like `update_issue`'s own `notes`:
+    # an agent pasting a captured request into a write-up would otherwise persist a value gori
+    # recognises as a secret into a column every export and report prints.
+    it "masks a recognised secret in the notes it persists" do
+      with_store_env do |store|
+        secret = "MCPNOTESECRET4242"
+        set_var = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_env_var","arguments":) +
+                  %({"key":"CTOK","value":"#{secret}"}}})
+        body = "Authorization: Bearer #{secret}\n"
+        create = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_issue","arguments":) +
+                 %({"title":"leak","notes":#{body.to_json}}}})
+        new_id = mcp_tool_payload(mcp_drive(store, set_var, create)[1])["id"].as_i64
+        stored = store.get_issue(new_id).not_nil!.notes
+        stored.should_not contain(secret)
+        stored.should contain("CTOK")
+      end
+    end
+
+    it "declares notes on create_issue in tools/list, beside update_issue's" do
+      with_store do |store|
+        tools = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/list"}))[0]["result"]["tools"].as_a
+        schema = tools.find { |t| t["name"].as_s == "create_issue" }.not_nil!["inputSchema"]
+        schema["properties"].as_h.has_key?("notes").should be_true
+        # …and it stays OPTIONAL: a create with only a title is the call every existing agent makes.
+        schema["required"].as_a.map(&.as_s).should eq(["title"])
+      end
+    end
+
     it "rejects a present-but-invalid flow_id instead of silently unlinking" do
       with_store do |store|
         create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x","flow_id":1.9}}})
