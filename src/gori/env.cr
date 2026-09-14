@@ -890,9 +890,18 @@ module Gori
     # and puts a real credential in an arbitrary position of it, where it lands in the
     # target's access log. `Fuzz::Generator#emit` already computes each payload's span in
     # order to splice it, so the template resolves and the payload does not.
+    #
+    # `literal` is the same provenance question asked per NAME instead of per span, for a
+    # surface holding EVIDENCE bytes an operator has since typed into (`Repeater::Sender`'s
+    # `evidence_literals`): the names the capture arrived with stay literal and the rest are
+    # the operator's references. A caller passing it also passes `unescape: Owns::None` —
+    # narrowing is about which NAMES resolve, and a `$$` in captured bytes is two bytes the
+    # origin sent, exactly as the env-var pass decides it (`Fuzz::Plan`'s evidence branch).
     def self.expand_bindings(bytes : Bytes, verbatim : Array({Int32, Int32})? = nil, *,
                              resolve : Owns = SEND_OWNS,
-                             generation : Generation? = nil) : Bytes
+                             generation : Generation? = nil,
+                             literal : Set(String)? = nil,
+                             unescape : Owns? = nil) : Bytes
       prefix = Settings.env_prefix
       syntax = Settings.env_syntax
       # GEN has no bare spelling. In the opt-out grammar this remains the BIND pass that shipped;
@@ -915,12 +924,14 @@ module Gori
       boundary = head_body_boundary(bytes)
       head = expand(String.new(bytes[0...boundary]), safe, prefix,
         clip_spans(verbatim, 0, boundary), Escape::Consume,
-        syntax: syntax, resolve: resolve, bind_vars: safe, generation: generation).to_slice
+        syntax: syntax, resolve: resolve, unescape: unescape, bind_vars: safe,
+        generation: generation, literal: literal).to_slice
       return head if boundary >= bytes.size
       raw_body = bytes[boundary..]
       body = expand(String.new(raw_body), vals, prefix,
         clip_spans(verbatim, boundary, bytes.size), Escape::Consume,
-        syntax: syntax, resolve: resolve, bind_vars: vals, generation: generation).to_slice
+        syntax: syntax, resolve: resolve, unescape: unescape, bind_vars: vals,
+        generation: generation, literal: literal).to_slice
       unless body.size == raw_body.size
         shifted = shift_content_length(head, body.size - raw_body.size)
         warn_unshiftable_framing if shifted.same?(head)
@@ -1422,6 +1433,14 @@ module Gori
     #
     # `unescape` says which escapes THIS call consumes, overriding the `escape` enum — the
     # namespaced spelling of the same decision. See `unescape_set`.
+    #
+    # `literal` is provenance per NAME: the tokens an EVIDENCE buffer arrived with, which this
+    # pass must copy through byte-exact however well they resolve. It is the send seam's
+    # equivalent of the table subtraction `vars_without` performs for the env-var pass —
+    # needed as a SET because GEN has no table to subtract from (its catalog is fixed) and
+    # because a BIND table is read live at the seam. Keys are spelled the way `literal_keys`
+    # writes them, which is the way a token is looked up here: qualified (`BIND.id`) under the
+    # namespaced grammar, bare (`id`) under the bare one.
     def self.expand(text : String, vars : Hash(String, String) = effective_vars,
                     prefix : String = Settings.env_prefix,
                     verbatim : Array({Int32, Int32})? = nil,
@@ -1430,7 +1449,8 @@ module Gori
                     resolve : Owns = Owns::Env,
                     unescape : Owns? = nil,
                     bind_vars : Hash(String, String)? = nil,
-                    generation : Generation? = nil) : String
+                    generation : Generation? = nil,
+                    literal : Set(String)? = nil) : String
       return text if prefix.empty?
       return text unless text.byte_index(prefix) # fast, lossless no-op when the prefix never occurs
 
@@ -1482,7 +1502,7 @@ module Gori
           # the escape mean the same thing whether or not the name after it would resolve.
           buf << prefix
           buf << found.escaped_text
-        elsif found.kind.token? && found.owned_by?(resolve)
+        elsif found.kind.token? && found.owned_by?(resolve) && !literal_name?(literal, found)
           val = if found.ns.try(&.gen?)
                   (generation ||= Generation.new).value?(found.name)
                 else
@@ -1520,6 +1540,25 @@ module Gori
                                   given : Owns?) : Owns
       return given if given
       syntax.bare? ? (escape.consume? ? Owns::All : Owns::None) : resolve
+    end
+
+    # The key `literal_keys` files `name` under in the CURRENT grammar, for a caller that holds
+    # a name rather than a parsed token (`RepeaterController.literal_bindings`). Qualified where
+    # a token carries its namespace, bare where it cannot.
+    def self.literal_key(name : String, ns : Namespace) : String
+      Settings.env_syntax.namespaced? ? qualify(ns, name) : name
+    end
+
+    # Is this token one the caller told us to leave alone? See `expand`'s `literal`.
+    #
+    # The lookup is by the QUALIFIED key wherever the token carries a namespace, so a capture's
+    # `$ENV.id` cannot also withhold the operator's `$BIND.id` — two different references that
+    # share a name. Under the bare grammar there is one namespace and the bare name is the key,
+    # which is the same spelling `literal_keys` stores.
+    private def self.literal_name?(literal : Set(String)?, found : Found) : Bool
+      return false if literal.nil? || literal.empty?
+      ns = found.ns
+      literal.includes?(ns ? qualify(ns, found.name) : found.name)
     end
 
     # The table a token resolves from. BARE has one table and `vars` is it.

@@ -185,9 +185,10 @@ class Gori::Tui::RepeaterView
     adopt_evidence_env_seed(wire)
   end
 
-  # Record the SEED BYTES both `$NAME` baselines are derived from, and derive them now.
+  # Record the SEED BYTES every `$NAME` baseline is derived from, and derive them now — the
+  # env-var pass's names, the send seam's literal set, and the editor's painted one.
   #
-  # The bytes rather than the two name sets, because both derivations read the token GRAMMAR and
+  # The bytes rather than the name sets, because every derivation reads the token GRAMMAR and
   # the operator can flip it mid-session (Project tab `s`, Settings env card `s`): a set computed
   # under one grammar answers the wrong question under the other. Seeded namespaced and flipped
   # to bare, a captured GraphQL `$id` was in NEITHER set — `token_names(ns: Env)` had found no
@@ -202,6 +203,7 @@ class Gori::Tui::RepeaterView
     @evidence_env_seed = wire
     @evidence_env_rev = Env.highlight_rev
     @evidence_env_names = derive_evidence_env_names(wire)
+    @evidence_send_literals = Env.literal_keys(wire)
     # The EDITOR is keyed by what it PAINTS — a qualified `ENV.id` under the namespaced grammar
     # and a bare `id` under the bare one — so it is handed the BYTES too and re-derives its own
     # set on the same signal (`TextArea#env_literal_source=`).
@@ -220,12 +222,35 @@ class Gori::Tui::RepeaterView
   # (`operator_env_vars`), where being one grammar behind means putting a project value into a
   # request nobody captured.
   protected def evidence_env_names : Set(String)
-    rev = Env.highlight_rev
-    if @evidence_env_rev != rev
-      @evidence_env_rev = rev
-      @evidence_env_names = derive_evidence_env_names(@evidence_env_seed)
-    end
+    refresh_evidence_baselines
     @evidence_env_names
+  end
+
+  # The capture's names as the SEND seam looks them up — `Repeater::PlanOptions#evidence_literals`,
+  # which decides which `$BIND`/`$GEN` tokens in an evidence tab are the operator's.
+  #
+  # Empty on a draft, where every token is the operator's, and the caller passes it only for an
+  # evidence tab (`RepeaterController#repeater_plan`) — a set is what turns the send pass back
+  # on down there, so handing one over for a draft would say something true about the names and
+  # nothing about provenance.
+  #
+  # `Env.literal_keys` and not `token_names`: this set is looked up by the QUALIFIED key under
+  # the namespaced grammar and the bare one under bare, which is what `literal_keys` stores and
+  # exactly what the editor is handed for painting (`TextArea#env_literal_source=`). One
+  # derivation for both, so the tokens the pane greys out as literal are the ones the socket
+  # gets literally.
+  def evidence_send_literals : Set(String)
+    refresh_evidence_baselines
+    @evidence_send_literals
+  end
+
+  # Both baselines answer the grammar's question, so they move together when it flips.
+  private def refresh_evidence_baselines : Nil
+    rev = Env.highlight_rev
+    return if @evidence_env_rev == rev
+    @evidence_env_rev = rev
+    @evidence_env_names = derive_evidence_env_names(@evidence_env_seed)
+    @evidence_send_literals = Env.literal_keys(@evidence_env_seed)
   end
 
   # The same count over raw text, for seeding the baseline at load/restore.

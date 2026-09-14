@@ -44,8 +44,32 @@ module Gori
       # operator's own `$TOKEN` merged into evidence — `gori run repeater -H`, a TUI edit
       # over a seeded capture — now ships literally rather than resolving. That is the
       # direction that can only be READ WRONG, never SENT wrong, and a surface that wants
-      # both can expand at its own merge seam, where it still knows whose bytes are whose.
+      # both can expand at its own merge seam, where it still knows whose bytes are whose —
+      # or hands the names over here (`evidence_literals`), which is what a surface must do
+      # for the two SEND-TIME namespaces, because they have no merge seam to expand at.
       getter? evidence : Bool
+
+      # The names an EVIDENCE buffer ARRIVED with, when the surface knows them — `$BIND`/`$GEN`
+      # provenance per NAME instead of per buffer. nil (every headless caller) keeps the blanket
+      # skip `evidence?` describes; a set turns the pass back on for every OTHER name.
+      #
+      # The env-var pass has had this since the namespaces landed — `RepeaterView#operator_env_vars`
+      # subtracts the capture's names from the table and expands the rest, and `Fuzz::PlanOptions#env_vars`
+      # is the same knob one tree over — so a ^R-from-History tab already resolved an operator's
+      # `$ENV.API` while leaving the capture's `$filter` alone. The send pass could not follow it,
+      # and the two send-time namespaces are exactly the ones that cannot be expanded anywhere
+      # else: a binding resolves at the socket, and a `$GEN.RANDOM_HEX` MUST mint here (one
+      # `Generation` shared with the slot overlay, a fresh value per send). So a seeded tab
+      # autocompleted `$GEN.RANDOM_HEX`, peeked its format hint, and put those 15 bytes in the
+      # request line — recorded faithfully by History, because faithfully is the one thing the
+      # recorder does (`HistoryRecord#record`). Display promising a substitution the wire does
+      # not make is the failure `operator_env_vars` names in full; this is its other half.
+      #
+      # A capture cannot carry a name this seam did not read out of the capture, so the set is
+      # derived from the SEED bytes and re-derived when the grammar moves under it — the editor's
+      # own literal set, `Env.literal_keys`, which is what it paints and what its completer
+      # withholds. One derivation, so what the pane calls literal is what the socket gets.
+      getter evidence_literals : Set(String)?
 
       # LITERALNESS, carried from `PlanOptions#expand_bindings?` — and NOT a second spelling of
       # `evidence?` one field up. `evidence?` answers WHO WROTE these bytes; this answers
@@ -90,7 +114,7 @@ module Gori
                      @verify : Bool, @http2 : Bool = false, @sni : String? = nil,
                      @timeout : Time::Span? = nil, @overrides : Gori::HostOverrides? = nil,
                      @preserve_field_case : Bool = false, @evidence : Bool = false,
-                     @expand_bindings : Bool = true,
+                     @expand_bindings : Bool = true, @evidence_literals : Set(String)? = nil,
                      @reframe_grpc : Bool = false, tls_preset : String? = nil)
         @tls_preset = Settings.tls_preset_normalize(tls_preset)
       end
@@ -131,7 +155,7 @@ module Gori
       # predicate this seam exists to have one of, so it is gone.)
       def refusal(bytes : Bytes) : String?
         return refusal_wired(bytes) unless resolve_bindings?
-        refusal_wired(Gori::Env.expand_bindings(bytes))
+        refusal_wired(expand_send(bytes))
       end
 
       # FINAL bytes: the rule itself, asked about the slice the socket gets.
@@ -157,7 +181,27 @@ module Gori
       # is what keeps the gate's URL and the socket's URL equal by construction instead of by
       # two answers agreeing.
       private def resolve_bindings? : Bool
-        @expand_bindings && !@evidence
+        @expand_bindings && (!@evidence || !@evidence_literals.nil?)
+      end
+
+      # THE send pass, so the gate's prediction (`refusal`) and the bytes the socket gets
+      # (`wire`) can only be the same expansion — the invariant #1074 was written to keep
+      # once a generated request line made this pass non-idempotent.
+      #
+      # `unescape: Owns::None` rides with the narrowing and not with `evidence?` alone: under
+      # the namespaced grammar `Escape::Consume` is ignored and the pass consumes its OWN
+      # namespaces' escapes, so a narrowed pass over captured bytes would turn the capture's
+      # `$$BIND.x` into `$BIND.x` — a byte the origin sent, edited. The narrowing is about
+      # which NAMES resolve; `Fuzz::Plan`'s evidence branch spells the same rule for the
+      # env-var pass. The cost lands on the operator's own escape in a seeded tab (`$$GEN.UUID`
+      # ships as it reads), which is the direction that can be read wrong but not sent wrong.
+      private def expand_send(bytes : Bytes, generation : Gori::Env::Generation? = nil) : Bytes
+        if literal = @evidence_literals
+          Gori::Env.expand_bindings(bytes, generation: generation, literal: literal,
+            unescape: Gori::Env::Owns::None)
+        else
+          Gori::Env.expand_bindings(bytes, generation: generation)
+        end
       end
 
       # The first refusal across a whole send-group, or nil when every request may proceed.
@@ -220,7 +264,7 @@ module Gori
       # put two different ids on the same socket write.
       def wire(bytes : Bytes) : Bytes
         gen = Gori::Env::Generation.new
-        bytes = Gori::Env.expand_bindings(bytes, generation: gen) if resolve_bindings?
+        bytes = expand_send(bytes, gen) if resolve_bindings?
         Gori::Env.overlay_slot(bytes, gen)
       end
 

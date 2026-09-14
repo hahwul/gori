@@ -32,12 +32,42 @@ private def bound(store, name : String, value : String) : Gori::Bindings
   b
 end
 
+# `literal` — the names the CAPTURE arrived with — is the third argument because the seam it
+# reports on is now narrowed per name (`Repeater::Sender#evidence_literals`): an evidence tab
+# resolves an operator's own `$CTOK` and withholds only the capture's. nil is the caller with
+# no per-name answer (a WS out-frame), for which the whole buffer is still withheld.
+private def captured(*names : String) : Set(String)
+  names.to_a.to_set
+end
+
 describe "RepeaterController.literal_bindings" do
   it "names a BOUND binding an evidence tab is about to send unresolved" do
     with_store do |store|
       with_layer(bound(store, "CTOK", "SECRETVALUE12")) do
         req = "GET /a HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer $CTOK\r\n\r\n"
-        Gori::Tui::RepeaterController.literal_bindings(true, req).should eq(["CTOK"])
+        Gori::Tui::RepeaterController.literal_bindings(true, req, captured("CTOK")).should eq(["CTOK"])
+      end
+    end
+  end
+
+  # The other half of the narrowing, and the reason this argument exists: the same name typed
+  # by the OPERATOR into a seeded tab is substituted by the seam, so reporting it would claim
+  # a literal send of the one value that did resolve.
+  it "says nothing for a name the capture did not bring" do
+    with_store do |store|
+      with_layer(bound(store, "CTOK", "SECRETVALUE12")) do
+        req = "GET /a HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer $CTOK\r\n\r\n"
+        Gori::Tui::RepeaterController.literal_bindings(true, req, captured("filter")).should be_empty
+      end
+    end
+  end
+
+  # A surface with no seed to answer per name — the WS out-frames, which `expand_messages`
+  # still withholds whole — keeps the blanket report.
+  it "reports every declared name when the caller has no per-name answer" do
+    with_store do |store|
+      with_layer(bound(store, "CTOK", "SECRETVALUE12")) do
+        Gori::Tui::RepeaterController.literal_bindings(true, %({"t":"$CTOK"}), nil).should eq(["CTOK"])
       end
     end
   end
@@ -48,7 +78,7 @@ describe "RepeaterController.literal_bindings" do
     with_store do |store|
       with_layer(bound(store, "CTOK", "SECRETVALUE12")) do
         req = "GET /a HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer $CTOK\r\n\r\n"
-        Gori::Tui::RepeaterController.literal_bindings(false, req).should be_empty
+        Gori::Tui::RepeaterController.literal_bindings(false, req, captured("CTOK")).should be_empty
       end
     end
   end
@@ -59,7 +89,7 @@ describe "RepeaterController.literal_bindings" do
     with_store do |store|
       with_layer(bound(store, "CTOK", "SECRETVALUE12")) do
         req = "GET /a?$filter=x HTTP/1.1\r\nHost: h\r\n\r\n"
-        Gori::Tui::RepeaterController.literal_bindings(true, req).should be_empty
+        Gori::Tui::RepeaterController.literal_bindings(true, req, captured("filter")).should be_empty
       end
     end
   end
@@ -72,14 +102,15 @@ describe "RepeaterController.literal_bindings" do
       b.add("CTOK", "", Gori::ExtractKind::JsonPath, "$.t").should be_nil
       with_layer(b) do
         req = "GET /a HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer $CTOK\r\n\r\n"
-        Gori::Tui::RepeaterController.literal_bindings(true, req).should be_empty
+        Gori::Tui::RepeaterController.literal_bindings(true, req, captured("CTOK")).should be_empty
       end
     end
   end
 
   it "says nothing with no binding layer at all" do
     with_layer(nil) do
-      Gori::Tui::RepeaterController.literal_bindings(true, "GET /$CTOK HTTP/1.1\r\n\r\n").should be_empty
+      Gori::Tui::RepeaterController.literal_bindings(true, "GET /$CTOK HTTP/1.1\r\n\r\n",
+        captured("CTOK")).should be_empty
     end
   end
 end
