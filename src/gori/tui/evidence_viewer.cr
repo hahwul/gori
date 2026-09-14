@@ -420,7 +420,7 @@ module Gori::Tui
     end
 
     def self.fmt_time(us : Int64) : String
-      Time.unix(us // 1_000_000).to_local.to_s("%Y-%m-%d %H:%M:%S")
+      LocalTime.format(us, "%Y-%m-%d %H:%M:%S")
     end
   end
 end

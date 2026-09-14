@@ -1383,8 +1383,18 @@ module Gori
       # Local ISO-8601 from unix micros (the store's created_at unit). Lossy on purpose: this
       # is the field a human reads off a terminal, so it stays in the operator's timezone and
       # drops the micros. `iso_time_utc` is the machine-readable one.
+      #
+      # Through `LocalTime` because `to_local` RAISES for some operators and not others: a
+      # stored instant near `Time::MAX` plus a POSITIVE utc offset lands past it, so
+      # `TZ=Asia/Seoul` and `TZ=Europe/Berlin` got `ArgumentError: Invalid time: seconds out
+      # of range` where `TZ=UTC` and `TZ=America/New_York` printed the row. Reachable from
+      # ordinary data — a HAR entry dated `9999-12-31T23:59:59.999Z` imports without
+      # complaint — and because the row is then STORED, every later `history --format json`
+      # died on it after writing `[` and some rows, handing a script an invalid document
+      # rather than an error it could see. The same helper guards the eight render paths that
+      # read `created_at` the same way; see `Gori::LocalTime`.
       def self.iso_time(micros : Int64) : String
-        Time.unix(micros // 1_000_000).to_local.to_s("%Y-%m-%dT%H:%M:%S%:z")
+        LocalTime.format(micros, "%Y-%m-%dT%H:%M:%S%:z")
       end
 
       # RFC3339 UTC at millisecond precision from unix micros — the `*_iso` convention the
@@ -1405,9 +1415,17 @@ module Gori
       # The reverse edge — MCP reaching into `CLI::Output` for the WS shape — is gone, moved
       # onto the model that owns the data (`Store::WsMessage#emit_shape_json`), and that is the
       # part that must stay gone.
+      # Staying in UTC avoids the OFFSET half of the problem `iso_time` has, but not the range
+      # half: the Span addition raises `ArgumentError` on a `created_at` past year 9999 (a
+      # hand-edited or foreign column), and this field is emitted one line after `iso_time` in
+      # the same object — so hardening only the local one would still truncate the document.
+      # Same guard and same dash in `MCP::Serialize.unix_micros_iso`, which the spec below
+      # pins this against byte-for-byte.
       def self.iso_time_utc(micros : Int64) : String
         sec, micro = micros.divmod(1_000_000)
         (Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds).to_s("%Y-%m-%dT%H:%M:%S.%LZ")
+      rescue ArgumentError
+        "—"
       end
 
       private def self.round1(n : Float64) : String

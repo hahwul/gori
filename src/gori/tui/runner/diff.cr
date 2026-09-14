@@ -37,7 +37,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Name plus when it was last touched: two engagements against one target are routinely
   # named alike, and the date is what tells "q3" from "q3 (rerun)".
   private def diff_project_label(p : Project) : String
-    when_ = p.last_modified.try(&.to_local.to_s("%Y-%m-%d"))
+    when_ = p.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%d") }
     when_ ? "#{p.name}   #{when_}" : p.name
   end
 

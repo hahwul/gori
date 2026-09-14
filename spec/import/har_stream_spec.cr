@@ -69,6 +69,38 @@ describe "Import::Har.each_flow" do
     end
   end
 
+  # One byte that is not valid UTF-8 — a browser writing a response body verbatim is the
+  # ordinary way to get one. The pull parser reads the file through `IO#read_char`, so this
+  # arrives as `InvalidByteSequenceError` and NOT as the `JSON::ParseException` the walk was
+  # written around: it used to run out through `import_file` (`File::Error` only) and
+  # `CLI.run` (`Gori::Error` only) as a backtrace. It is a bad FILE, and says so.
+  it "reports a file whose bytes are not valid UTF-8 as a clean error, not a backtrace" do
+    body = %({"log":{"entries":[{"startedDateTime":"2026-06-01T12:00:00.000Z","time":1,"request":{"method":"GET","url":"https://s.test/","httpVersion":"HTTP/1.1","headers":[]},"response":{"status":200,"statusText":"OK","httpVersion":"HTTP/1.1","headers":[],"content":{"mimeType":"text/plain","text":"A\xffB"}}}]}})
+    with_har(body) do |path|
+      expect_raises(Gori::Error, /not valid UTF-8/) { Gori::Import::Har.each_flow(path) { } }
+      stream_store do |store|
+        expect_raises(Gori::Error, /not valid UTF-8/) { Gori::Import.import_file(store, :har, path) }
+      end
+    end
+  end
+
+  # `each_flow` YIELDS from inside the walk — `import_har_stream`'s block writes a chunk to
+  # SQLite and calls the progress callback in there — so the clauses that name the FILE would
+  # otherwise also speak for the consumer. A store or UI failure reported as "HAR file is not
+  # valid UTF-8", with the flow count appended to make it sound researched, is a wrong
+  # diagnosis pointed at the wrong artifact.
+  it "re-raises the caller's own exception instead of blaming the file" do
+    body = %({"log":{"entries":[#{har_entry(1)}]}})
+    with_har(body) do |path|
+      expect_raises(InvalidByteSequenceError, /consumer/) do
+        Gori::Import::Har.each_flow(path) { raise InvalidByteSequenceError.new("consumer blew up") }
+      end
+      expect_raises(IndexError, /consumer/) do
+        Gori::Import::Har.each_flow(path) { raise IndexError.new("consumer blew up") }
+      end
+    end
+  end
+
   it "stops where the caller cancels, without reading the rest of the file" do
     body = %({"log":{"entries":[#{har_entry(1)},#{har_entry(2)},#{har_entry(3)}]}})
     with_har(body) do |path|

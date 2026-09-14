@@ -982,8 +982,23 @@ module Gori
         to_s.downcase
       end
 
+      # TOTAL, like `RuleOp.from_label` and `MatchKind.from_label` beside it: an unrecognised
+      # label reads as the CLI's own default rather than raising. `Enum.parse` is what this
+      # was, and `Store#match_rules` reads the column straight into it — so one `match_rules`
+      # row whose `target` had drifted (a hand-edited DB, a project file from a build whose
+      # label set differs; the table carries no CHECK constraint) took `gori run rewriter
+      # list` down with an `ArgumentError` backtrace, through `Rules.merged`. Two of the four
+      # enum fields on that row were already total and two were not, which is the whole bug.
+      #
+      # This is not a hole in input validation: every WRITE path still refuses a bad label
+      # loudly — the CLI via `parse?` + abort, MCP via `values.find`, the settings file via
+      # the clamp in `parse_rewriter_rules`. This clause only decides what a row that is
+      # ALREADY stored reads as.
       def self.from_label(s : String) : RuleTarget
-        parse(s)
+        case s
+        when "response" then Response
+        else                 Request
+        end
       end
     end
 
@@ -1008,8 +1023,16 @@ module Gori
         to_s.downcase
       end
 
+      # Total for the reason `RuleTarget.from_label` gives: a stored row must not be able to
+      # raise on the way out of the store. `head` is the default the CLI and the V30 migration
+      # already use, so an unreadable label reads as the same thing a rule written without a
+      # `--part` does.
       def self.from_label(s : String) : RulePart
-        parse(s)
+        case s
+        when "body" then Body
+        when "ws"   then Ws
+        else             Head
+        end
       end
 
       # One-letter tag for a rule row (the TUI Rewriter list and `gori run rewriter`).

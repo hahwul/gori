@@ -60,4 +60,52 @@ describe Gori::Tui::Fmt do
       Gori::Tui::Fmt.dur(nil).should eq("—")
     end
   end
+
+  # `Float64#to_i` is Crystal's CHECKED conversion into Int32, so every formatter here used to
+  # raise `OverflowError` past a rounded magnitude of 2.1e9 — on the RENDER path, where the
+  # same frame is asked for again 50ms later and three failures trip the Runner's tick breaker
+  # and end the process. Reachable from stored data, not just from arithmetic: an imported
+  # HAR's `"time"` is carried into `duration_us` as-is, so `"time": 8e15` poisons the row.
+  describe "values too large or too strange to spell" do
+    it "renders an unspellable magnitude instead of raising" do
+      Gori::Tui::Fmt.dur(8_000_000_000_000_000_000_i64).should eq("2222222222h")
+      Gori::Tui::Fmt.dur(Int64::MAX).should eq("2562047788h")
+      Gori::Tui::Fmt.size(Int64::MAX).should eq("8589934592GB")
+      Gori::Tui::Fmt.count(Int64::MAX).should eq("9223372037B")
+    end
+
+    it "says infinity rather than overflowing on a non-finite float" do
+      Gori::Tui::Fmt.pct(1e308).should eq("∞%")
+      Gori::Tui::Fmt.pct(Float64::INFINITY).should eq("∞%")
+      Gori::Tui::Fmt.bits(1e308).should eq("∞b")
+      Gori::Tui::Fmt.bits(-Float64::INFINITY).should eq("-∞b")
+    end
+
+    it "reads a NaN magnitude as the module's own no-value dash" do
+      Gori::Tui::Fmt.bits(Float64::NAN).should eq("—")
+    end
+
+    # `pct` is the formatter fed a RATIO — `uniqueness` is `unique.to_f / n` — so 0/0 is its
+    # ordinary NaN source, and it printed "NaN%" while `bits` printed the dash for the same
+    # quantity. Both comparisons in `pct` are false for NaN, so it never reached the guard.
+    it "reads a NaN ratio the same way bits does" do
+      Gori::Tui::Fmt.pct(Float64::NAN).should eq("—")
+    end
+
+    # `Int64::MAX.to_f64` rounds UP to 2^63 — one MORE than Int64 holds — so a `<=` bound
+    # admits exactly the value `to_i64` then overflows on, inside the guard written to stop
+    # that. `Int64::MIN` is a power of two and converts exactly, so its bound stays inclusive.
+    it "refuses the exact 2^63 boundary that Int64::MAX.to_f64 rounds up to" do
+      two_63 = 9223372036854775808.0
+      Gori::Tui::Fmt.unit(two_63, "B").should eq("∞B")
+      Gori::Tui::Fmt.bits(two_63).should eq("∞b")
+      Gori::Tui::Fmt.pct(two_63 / 100).should eq("∞%")
+    end
+
+    # `unit` is public and its threshold is a MAGNITUDE question only for the non-negative
+    # callers it has today; a negative value keeps the one-decimal spelling it always had.
+    it "keeps the decimal spelling for a negative magnitude" do
+      Gori::Tui::Fmt.unit(-50.0, "KB").should eq("-50.0KB")
+    end
+  end
 end

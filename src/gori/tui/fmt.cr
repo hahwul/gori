@@ -19,8 +19,35 @@ module Gori::Tui
     end
 
     # One decimal under 10 (3.4KB), whole at/above (345KB) — keeps the cell ≤6 cols.
+    #
+    # `to_i64`, and the finite/range guard, because THIS is where every formatter in this
+    # module ends and `Float64#to_i` is Crystal's CHECKED conversion into **Int32**: any
+    # rounded magnitude past 2.1e9 raised `OverflowError` here, on the render path. That is
+    # reachable from stored data, not just from arithmetic — an imported HAR's `"time"` is
+    # carried into `duration_us` as-is (`Import::Har.parse_time` only bounds it at
+    # `Int64::MAX`), so a HAR declaring `"time": 8e15` makes `dur` raise every time the
+    # History row is drawn: the same frame fails again 50ms later, three strikes trip the
+    # Runner's tick breaker, and the process ends. A number too big to spell is a formatting
+    # problem and must read like one — "∞" says the cell could not be rendered, where a
+    # backtrace said the session was over.
     def self.unit(v : Float64, suffix : String) : String
-      v < 10 ? "#{v.round(1)}#{suffix}" : "#{v.round.to_i}#{suffix}"
+      v < 10 ? "#{v.round(1)}#{suffix}" : whole(v.round, suffix)
+    end
+
+    # The ONE place a Float64 magnitude becomes a whole number for display — `unit`, `pct` and
+    # `bits` all end here, because each of them wrote `v.round.to_i` separately and each was
+    # separately able to raise. A value that cannot be spelled says so in the cell rather than
+    # taking the frame down: NaN (a statistic computed over nothing) reads as the module's
+    # usual "—", and a magnitude past Int64 as "∞".
+    #
+    # The upper bound is STRICT and the lower one is not, which is not a slip: `Int64::MIN` is
+    # a power of two and converts to Float64 exactly, while `Int64::MAX.to_f64` rounds UP to
+    # 2^63 — one more than Int64 can hold. `v <= Int64::MAX.to_f64` therefore admits exactly
+    # the value that then overflows `to_i64`, in the function written to stop that.
+    private def self.whole(v : Float64, suffix : String) : String
+      return "—" if v.nan?
+      return "#{v < 0 ? "-∞" : "∞"}#{suffix}" unless Int64::MIN.to_f64 <= v < Int64::MAX.to_f64
+      "#{v.to_i64}#{suffix}"
     end
 
     # Compact occurrence count (1.2k / 3.4M / 5.0B) for tallies that can grow
@@ -38,15 +65,22 @@ module Gori::Tui
 
     # A fraction (0.0–1.0) as a percentage: whole at/above 10% (27%), one decimal below
     # (3.4%). Used by the Sequencer's entropy/uniqueness readouts.
+    #
+    # NaN is routed to `whole` rather than left to the decimal branch: `pct` is the formatter
+    # fed a RATIO, and `uniqueness` is `unique.to_f / n` — the 0/0 that `whole`'s comment calls
+    # "a statistic computed over nothing". Both of the old comparisons are false for NaN, so it
+    # fell through and printed "NaN%" while `bits` printed the module's dash for the same
+    # quantity. One spelling for one condition.
     def self.pct(frac : Float64) : String
       v = frac * 100
-      v >= 10 || v <= -10 ? "#{v.round.to_i}%" : "#{v.round(1)}%"
+      return whole(v, "%") if v.nan?
+      v >= 10 || v <= -10 ? whole(v.round, "%") : "#{v.round(1)}%"
     end
 
     # A bits figure for the Sequencer's entropy readouts (132b / 5.98b), one decimal
     # below 100 and whole above — same rounding spirit as `unit`.
     def self.bits(v : Float64) : String
-      v.abs < 100 ? "#{v.round(1)}b" : "#{v.round.to_i}b"
+      v.abs < 100 ? "#{v.round(1)}b" : whole(v.round, "b")
     end
 
     # Compact request→response latency (µs/ms/s/m/h), bounded to ≤6 cols. "—" until the

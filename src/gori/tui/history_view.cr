@@ -3153,7 +3153,7 @@ module Gori::Tui
     private def fmt_time(created_at : Int64) : String
       t = Time.unix(created_at // 1_000_000)
       return fmt_time_relative(t) if Settings.history_time_format == "relative"
-      t.to_local.to_s("%m-%d %H:%M:%S")
+      LocalTime.of(t).to_s("%m-%d %H:%M:%S")
     end
 
     # `fmt_time` through the memo — for the ABSOLUTE format only. A relative age is a

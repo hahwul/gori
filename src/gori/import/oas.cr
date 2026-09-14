@@ -16,6 +16,18 @@ module Gori
                        YAML.parse(raw).to_json
                      rescue ex : YAML::ParseException
                        raise Gori::Error.new("OpenAPI spec is not valid YAML: #{ex.message}")
+                     rescue ex : JSON::Error
+                       # The YAML parsed and the `to_json` in the SAME expression is what
+                       # raised — a `JSON::Error`, which the clause above does not cover. Three
+                       # ordinary hand-written specs reach it, so the message says what was
+                       # attempted rather than guessing which one: a self-referential anchor
+                       # (`a: &x` / `b: *x`) yields a CYCLIC `YAML::Any` and trips the nesting
+                       # guard, `maximum: .inf` and `.nan` are legal YAML scalars with no JSON
+                       # spelling, and a legitimately deep spec trips the same guard acyclically.
+                       # `ex.message` separates them for anyone who needs to know which.
+                       raise Gori::Error.new(
+                         "OpenAPI spec cannot be represented as JSON — a self-referential anchor, " \
+                         "an infinite/NaN number, or nesting past the reader's limit: #{ex.message}")
                      end
                    else
                      raw
@@ -77,7 +89,18 @@ module Gori
           # "."). Builder.endpoint only catches the empty-host case, so a "./"-style URL
           # would silently produce garbage requests instead of failing loudly. Reject any
           # URL without a scheme up front instead.
-          if URI.parse(url).scheme.nil?
+          #
+          # `URI.parse` itself RAISES on a url the spec's author can write by hand: a port
+          # that overflows Int32 (`:99999999999999999999`) comes back as `OverflowError`, a
+          # non-numeric one as `URI::Error`. Neither is a `Gori::Error`, so both left this
+          # method as a raw backtrace out of the CLI. The sibling importer already spells
+          # this out — `Wsdl#port_endpoint` wraps its own `URI.parse` for the same reason.
+          uri = begin
+            URI.parse(url)
+          rescue ex : URI::Error | OverflowError
+            raise Gori::Error.new(%(OpenAPI servers[0].url is unparseable (#{url.inspect}): #{ex.message}))
+          end
+          if uri.scheme.nil?
             raise Gori::Error.new(%(OpenAPI servers[0].url is relative (#{url.inspect}); provide an absolute server URL, e.g. "https://api.example.com/v3"))
           end
           return url
