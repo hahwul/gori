@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="직접 작성한 셸 명령이 채우는, TUI 맨 아래의 한 줄.">
+  <title>Statusline - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Statusline">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/guide/statusline/">
+  <meta property="og:description" content="직접 작성한 셸 명령이 채우는, TUI 맨 아래의 한 줄.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Statusline">
+  <meta name="twitter:description" content="직접 작성한 셸 명령이 채우는, TUI 맨 아래의 한 줄.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/guide/statusline/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Statusline","url":"https://gori.hahwul.com/ko/guide/statusline/","description":"직접 작성한 셸 명령이 채우는, TUI 맨 아래의 한 줄."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://gori.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"Statusline"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/statusline/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/statusline/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+    <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+      <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/guide/statusline/" hreflang="en" lang="en" aria-label="EN: English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/statusline/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+  <a role="menuitem" href="https://gori.hahwul.com/ko/reference/brand/">브랜드 키트 →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">문서 둘러보기</summary>
+
+    
+    <nav class="manual-nav" aria-label="문서">
+      <span class="manual-nav-label">문서</span>
+
+      
+      <details class="nav-group nav-section">
+        <summary>시작하기</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <section class="nav-section guide-navigation" aria-labelledby="guide-navigation-title">
+        <h2 id="guide-navigation-title">가이드</h2>
+        <a class="nav-overview" href="https://gori.hahwul.com/ko/guide/">개요</a>
+
+        
+        
+        
+        
+        <details class="nav-group">
+          <summary>핵심</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>워크벤치</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/cookie/">Cookie</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/authorize/">Authorize</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>자동화</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/scripting/">스크립팅</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group" open>
+          <summary>커스터마이즈</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/statusline/" class="active" aria-current="page">Statusline</a></li>
+        </ul></details>
+        
+      </section>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/ko/playbooks/">
+        <span>gori 실전 가이드</span>
+        <strong>플레이북 →</strong>
+      </a>
+      
+
+      
+      <details class="nav-group nav-section">
+        <summary>레퍼런스</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/capabilities/">기능 매트릭스</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/brand/">브랜드 키트</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="현재 위치">
+      <a href="https://gori.hahwul.com/ko/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <span aria-hidden="true">/</span><span>커스터마이즈</span>
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">가이드</p>
+      <h1>Statusline</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p><strong>statusline</strong>은 TUI 맨 아래에 선택적으로 붙는 행입니다. gori가 일정 간격으로 셸 명령을 실행하고 그 stdout을 그 행에 렌더링합니다 — 직접 쓰는 상태 바이고, Claude Code의 상태 표시줄에서 영감을 받았습니다. 기본적으로 꺼져 있으며, 무언가 바꾸기 전까지 <code>statusline</code> 섹션은 <code>settings.json</code>에 들어가지 않습니다.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/statusline.svg" alt="상태 바 아래 맨 마지막 행에 statusline이 붙은 gori History 탭. token 58m left, 빨간색 1 × 5xx, 그리고 todo 2와 첫 미완료 항목 본문이 차례로 보인다">
+  <figcaption><strong>statusline</strong>은 상태 바 아래 맨 마지막 행입니다. 이 행은 <a href="#script">아래의 스크립트</a>입니다 — 테스트 중인 토큰이 얼마나 남았는지, 타깃이 5xx를 뱉었는지, 할 일이 몇 개 남았는지. 위쪽 크롬이 말해 줄 수 없는 것들입니다.</figcaption>
+</figure>
+<h2 id="켜기">켜기</h2>
+<p><code>Ctrl-,</code>로 Preferences를 열고 <strong>General</strong>로 가면 <strong>Statusline</strong> 행들이 있습니다. <code>Enabled</code>, <code>Command</code> 입력란, 그리고 <code>Interval</code>과 <code>Timeout</code> 초입니다. 명령을 입력하면 상태 바 아래에 행이 나타납니다.</p>
+<p><code>settings.json</code>으로는 이렇습니다:</p>
+<pre><code class="language-json hljs">{
+  &quot;statusline&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;command&quot;: &quot;date '+%H:%M'&quot;,
+    &quot;interval&quot;: 3,
+    &quot;timeout&quot;: 10
+  }
+}
+</code></pre>
+<p>시계일 뿐입니다. 여기서는 모양이 중요하고, <code>command</code>에 무엇을 넣을지는 이 페이지의 나머지가 답합니다.</p>
+<p>키 하나하나의 기본값과 정확한 의미는 <a href="/ko/reference/config/#statusline">설정 레퍼런스의 <code>statusline</code></a>에 있습니다.</p>
+<p>명령을 쓰기 전에 알아둘 것 셋:</p>
+<ul>
+<li><strong>stdout의 첫 줄만 사용되고</strong>, 터미널 너비로 잘립니다. 여러 줄을 출력하는 스크립트는 첫 줄만 그려집니다.</li>
+<li><strong>ANSI/SGR 색상 이스케이프가 해석됩니다</strong> — 16색, 256색, truecolor에 볼드·밑줄까지 — 그래서 행을 평평한 문자열이 아니라 색상 세그먼트로 만들 수 있습니다.</li>
+<li><strong>편집은 즉시 반영됩니다.</strong> <code>command</code> · <code>interval</code> · <code>timeout</code>을 저장하면 현재 간격이 끝나기를 기다리지 않고 다음 프레임에 다시 실행합니다.</li>
+</ul>
+<p>UI를 막는 일은 없습니다. 실행은 그리기 경로 밖에서 일어나고, 서로 겹치지도 않습니다 — 이전 실행이 끝난 뒤에야 다음 실행을 띄웁니다.</p>
+<h2 id="presets">프리셋</h2>
+<p>상단 바는 이미 gori가 자기 자신에 대해 아는 것들을 나릅니다. 프로젝트, 캡처 상태, 바인딩
+주소, 스캔 모드. statusline이 한 줄을 차지할 값을 하려면 바가 말할 수 <strong>없는</strong> 것을 말해야
+합니다 — gori 바깥의 사실이거나, gori가 갖고는 있지만 세어 주지 않는 것.</p>
+<p>아래는 모두 한 줄이며 <code>command</code>에 그대로 넣으면 됩니다 — 설정 폼의 입력란도 한 줄입니다.
+<code>\u001b</code>는 <code>jq</code>가 이스케이프 문자를 적는 방식이고, 색상은 선택 사항입니다. 각 명령 아래는 그
+명령이 실제로 만들어낸 행입니다.</p>
+<figure class="preset-card">
+<figcaption class="preset-card-title">지금 쓰는 토큰이 얼마나 남았는지</figcaption>
+  <div class="preset-card-config"><pre><code class="language-sh">jq -rn --argjson exp &quot;$(gori run jwt &quot;$(cat &quot;${GORI_HOME:-$HOME/.gori}/token.jwt&quot;)&quot; --format json | jq .payload.exp)&quot; '(($exp - now) / 60 | floor) as $m | if $m &lt; 5 then &quot;\u001b[31m⚠ token \($m)m left\u001b[0m&quot; else &quot;\u001b[32m●\u001b[0m token \($m)m left&quot; end'
+</code></pre>
+</div>
+  <img class="preset-card-shot" src="/images/tui/statusline-token.svg" alt="statusline 한 줄: 초록 점, 그리고 token 58m left">
+  <p class="preset-card-note">테스트 중인 베어러 토큰을 파일에 두면 행이 남은 시간을 세어 주고, 5분 밑으로 떨어지면 빨강이 됩니다 — 스윕이 401로 돌아오기 시작해 엉뚱한 곳을 10분 뒤지기 전에. JWT 도구면 무엇이든 되고, gori에도 하나 있습니다.</p>
+</figure>
+<figure class="preset-card">
+<figcaption class="preset-card-title">타깃이 5xx를 뱉기 시작했는지</figcaption>
+  <div class="preset-card-config"><pre><code class="language-sh">p=$(jq -r .project); gori run history --project &quot;$p&quot; -q 'status:&gt;=500' --format json 2&gt;/dev/null | jq -rs 'length | if . == 0 then &quot;&quot; else &quot;\u001b[31m\(.) × 5xx\u001b[0m&quot; end'
+</code></pre>
+</div>
+  <img class="preset-card-shot" src="/images/tui/statusline-errors.svg" alt="빨간색 statusline 한 줄: 1 × 5xx">
+  <p class="preset-card-note">타이머로 도는 History 쿼리입니다. History가 지금 걸어 둔 필터가 아니라 프로젝트 전체에 묻고, 타깃이 멀쩡한 동안은 아무것도 출력하지 않습니다 — 그래서 무언가 무너지는 순간에만 행이 나타납니다.</p>
+</figure>
+<figure class="preset-card">
+<figcaption class="preset-card-title">노트에 아직 안 끝낸 일</figcaption>
+  <div class="preset-card-config"><pre><code class="language-sh">p=$(jq -r .project); gori run notes --all --project &quot;$p&quot; | awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf &quot;todo %d · %s&quot;, n, first }'
+</code></pre>
+</div>
+  <img class="preset-card-shot" src="/images/tui/statusline-todo.svg" alt="statusline 한 줄: todo 2, 그리고 프로젝트 노트의 첫 번째 미완료 항목 본문">
+  <p class="preset-card-note">프로젝트 노트의 `- [ ]` 항목을 세고, 첫 항목은 본문까지 펼칩니다. 체크리스트가 열어 봐야 하는 탭이 아니라 눈앞에 남습니다.</p>
+</figure>
+<p>물론 <a href="#context">컨텍스트</a>의 모든 필드도 쓸 수 있습니다 — <code>\(.flows)</code>, <code>\(.issues)</code>, 모드
+플래그들 — 다만 상단 바를 먼저 보세요. 칩을 그대로 되풀이하는 세그먼트는 한 줄을 쓰고
+아무것도 알려주지 않습니다. 값을 하는 모양은 위의 것들, 즉 gori의 데이터와 gori가 알 길이
+없는 사실을 엮는 쪽입니다:</p>
+<pre><code class="language-sh hljs"># 프로젝트, 그리고 그것을 테스트하고 있는 브랜치.
+printf '%s · %s' &quot;$(jq -r .project)&quot; &quot;$(git branch --show-current 2&gt;/dev/null)&quot;
+</code></pre>
+<h2 id="script">한 줄로 모자랄 때</h2>
+<p>세그먼트가 한둘을 넘어가면 <code>command</code>는 타이핑하는 입력란이 아니라 보관하는 스크립트가 됩니다.
+그쪽을 가리키게 하세요:</p>
+<pre><code class="language-json hljs">{
+  &quot;statusline&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;command&quot;: &quot;sh \&quot;${GORI_HOME:-$HOME/.gori}/statusline.sh\&quot;&quot;,
+    &quot;interval&quot;: 5
+  }
+}
+</code></pre>
+<pre><code class="language-sh hljs">#!/bin/sh
+# statusline.sh — one row: how long the token has, whether the target is erroring,
+# and what is still unchecked. The context arrives on stdin, so read it once.
+ctx=$(cat)
+project=$(printf '%s' &quot;$ctx&quot; | jq -r .project)
+
+token=$(jq -rn --argjson exp &quot;$(gori run jwt &quot;$(cat &quot;${GORI_HOME:-$HOME/.gori}/token.jwt&quot;)&quot; --format json | jq .payload.exp)&quot; \
+  '(($exp - now) / 60 | floor) as $m | if $m &lt; 5 then &quot;\u001b[31m⚠ token \($m)m left\u001b[0m&quot; else &quot;\u001b[32m●\u001b[0m token \($m)m left&quot; end')
+errors=$(gori run history --project &quot;$project&quot; -q 'status:&gt;=500' --format json 2&gt;/dev/null |
+  jq -rs 'length | if . == 0 then &quot;&quot; else &quot;\u001b[31m\(.) × 5xx\u001b[0m&quot; end')
+todo=$(gori run notes --all --project &quot;$project&quot; |
+  awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf &quot;todo %d · %s&quot;, n, first }')
+
+printf '%s' &quot;$token&quot;
+[ -n &quot;$errors&quot; ] &amp;&amp; printf '   %s' &quot;$errors&quot;
+[ -n &quot;$todo&quot; ] &amp;&amp; printf '   %s' &quot;$todo&quot;
+printf '\n'
+</code></pre>
+<p>이 페이지 맨 위 사진의 행이 바로 이것입니다. 위의 프리셋 셋을 합치되, 각 조각은 할 말이 있을
+때만 출력합니다. 두 가지가 핵심입니다 — stdin은 파이프이므로 컨텍스트를 <code>$ctx</code>에 <strong>한 번만</strong>
+읽고(<a href="#context">위 참고</a>), 마지막 문장을 평범한 <code>printf</code>로 두어 조용한 실행도 exit 0으로
+끝나게 합니다(안 그러면 <code>⋯ (exit 1)</code>이 찍힙니다).</p>
+<p><code>interval</code>은 5 이상을 주세요. 실행마다 짧은 프로세스 셋을 띄우는데, 브라우저에 비하면 아무것도
+아니지만 매초 할 일은 아닙니다.</p>
+<h2 id="context">stdin으로 들어오는 컨텍스트</h2>
+<p>각 실행은 라이브 세션을 설명하는 JSON 컨텍스트를 stdin으로 받으므로, 스크립트는 gori를 쿼리하지 않고도 프록시 상태를 표시할 수 있습니다:</p>
+<pre><code class="language-json hljs">{
+  &quot;version&quot;: 1,
+  &quot;project&quot;: &quot;acme&quot;,
+  &quot;capturing&quot;: true,
+  &quot;flows&quot;: 1234,
+  &quot;proxy&quot;: { &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 8070, &quot;addr&quot;: &quot;127.0.0.1:8070&quot; },
+  &quot;upstream&quot;: &quot;&quot;,
+  &quot;upstream_rules&quot;: 0,
+  &quot;scope&quot;: { &quot;active&quot;: true, &quot;rules&quot;: 2, &quot;sandbox&quot;: false },
+  &quot;intercept&quot;: { &quot;enabled&quot;: false, &quot;queued&quot;: 0, &quot;direction&quot;: &quot;both&quot; },
+  &quot;probe&quot;: &quot;passive&quot;,
+  &quot;issues&quot;: 7,
+  &quot;jobs&quot;: { &quot;running&quot;: 1, &quot;label&quot;: &quot;fuzzing 1&quot; }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>컨텍스트 스키마 버전 (현재 <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>project</code></td>
+<td>string</td>
+<td>활성 프로젝트 이름</td>
+</tr>
+<tr>
+<td><code>capturing</code></td>
+<td>bool</td>
+<td>프록시가 현재 캡처 중인지 여부</td>
+</tr>
+<tr>
+<td><code>flows</code></td>
+<td>integer</td>
+<td>캡처한 플로우 수</td>
+</tr>
+<tr>
+<td><code>proxy.host</code> / <code>proxy.port</code> / <code>proxy.addr</code></td>
+<td>string / integer / string</td>
+<td>프록시가 실제로 리스닝 중인 주소</td>
+</tr>
+<tr>
+<td><code>upstream</code></td>
+<td>string</td>
+<td><strong>캐치올</strong> 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. <a href="/ko/reference/config/#upstream-rules">업스트림 규칙</a>에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음</td>
+</tr>
+<tr>
+<td><code>upstream_rules</code></td>
+<td>integer</td>
+<td>적용 중인 <a href="/ko/reference/config/#upstream-rules">업스트림 규칙</a> 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 <code>upstream</code> 하나로는 트래픽 경로를 설명할 수 없음</td>
+</tr>
+<tr>
+<td><code>scope.active</code> / <code>scope.rules</code></td>
+<td>bool / integer</td>
+<td><a href="/ko/guide/proxy/#scope">스코프</a> 필터가 실제로 작동 중인지 — 렌즈가 켜져 있고 <strong>동시에</strong> 규칙이 하나 이상 — 그리고 규칙이 몇 개인지</td>
+</tr>
+<tr>
+<td><code>scope.sandbox</code></td>
+<td>bool</td>
+<td><a href="/ko/guide/proxy/#sandbox">Sandbox</a>가 스코프 밖 목적지를 기록만 안 하는 게 아니라 아예 차단하고 있는지</td>
+</tr>
+<tr>
+<td><code>intercept.enabled</code></td>
+<td>bool</td>
+<td>catch가 켜져 있는지. 켜져 있는 동안 실제 클라이언트가 붙잡혀 있음</td>
+</tr>
+<tr>
+<td><code>intercept.queued</code></td>
+<td>integer</td>
+<td>지금 결정을 기다리는 메시지 수</td>
+</tr>
+<tr>
+<td><code>intercept.direction</code></td>
+<td>string</td>
+<td><code>both</code> · <code>requestonly</code> · <code>responseonly</code> — 어느 쪽 다리를 붙잡는지</td>
+</tr>
+<tr>
+<td><code>probe</code></td>
+<td>string</td>
+<td><a href="/ko/guide/scanning/#probe-the-scanner">스캐너</a> 모드: <code>off</code> · <code>passive</code> · <code>active</code> · <code>aggressive</code></td>
+</tr>
+<tr>
+<td><code>issues</code></td>
+<td>integer</td>
+<td>이 프로젝트에 기록된 이슈 수</td>
+</tr>
+<tr>
+<td><code>jobs.running</code></td>
+<td>integer</td>
+<td>진행 중인 백그라운드 작업 수 (fuzz · mine · discover 등) — 활동 칩이 세는 바로 그 장부라, 전송 중인 Repeater 요청은 포함되지 않음</td>
+</tr>
+<tr>
+<td><code>jobs.label</code></td>
+<td>string | null</td>
+<td>상태 바의 활동 칩이 말하는 문구, 예: <code>&quot;fuzzing 1&quot;</code>. 실행 중인 게 없으면 <code>null</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>scope</code>부터 아래는 이미 캡처한 것이 아니라 <strong>gori가 다음에 무엇을 할지</strong>를 설명합니다. 상단 바의 칩들이 나르는 바로 그 사실이라, 위를 올려다보지 않고도 &quot;intercept가 아직 켜져 있나?&quot;를 statusline이 답할 수 있습니다. 필드는 추가만 되었고 <code>version</code>은 <code>1</code> 그대로입니다. 이전 컨텍스트에 맞춰 쓴 스크립트는 똑같이 동작합니다.</p>
+<p><strong>stdin은 한 번만 읽힙니다.</strong> 파일이 아니라 파이프이므로 먼저 읽는 명령이 전부 가져가고 두 번째는 아무것도 못 받습니다 — <code>&quot;$(jq -r .project)&quot; &quot;$(jq -r .flows)&quot;</code>는 플로우 수를 조용히 빈 값으로 출력합니다. 위 프리셋들처럼 <code>jq</code> 하나로 전체를 읽거나, 먼저 담아 두세요:</p>
+<pre><code class="language-sh hljs">ctx=$(cat); printf '%s · %s flows' &quot;$(echo &quot;$ctx&quot; | jq -r .project)&quot; &quot;$(echo &quot;$ctx&quot; | jq -r .flows)&quot;
+</code></pre>
+<h2 id="failures">명령이 실패했을 때</h2>
+<p>아무것도 출력하지 못하고 실패한 명령은 행을 비워 두는 대신 종료 상태를 보고합니다. 명령을 찾지 못했으면 <code>⋯ (exit 127)</code>, 시그널로 끝났으면 <code>⋯ (killed)</code>. <code>timeout</code>을 넘긴 실행은 종료되고 행은 <code>⋯ (timed out)</code>이 됩니다. 정상 종료했는데 출력이 없으면 행은 비어 있습니다(스크립트가 그렇게 할 수 있는 정당한 선택입니다). 어느 쪽이든 stderr는 버려집니다.</p>
+<p>이 표식들은 본문 색이 아니라 주의 색으로 그려지므로, 멈춰 버린 statusline이 &quot;나쁜 소식을 전하는 멀쩡한 statusline&quot;으로 읽히지 않습니다.</p>
+<p><code>timeout</code>은 <code>interval</code>과 의도적으로 분리되어 있습니다. 실행이 겹치지 않기 때문에 <code>interval</code>보다 느린 스크립트는 매번 죽는 대신 가능한 만큼만 천천히 갱신되고, 실행을 끝내는 것은 오직 <code>timeout</code>입니다.</p>
+<p>백그라운드로 일을 넘기는 명령(<code>curl … &amp;</code>)은 스스로 뒷정리를 해야 합니다. gori는 자기가 띄운 <code>/bin/sh</code>만 죽일 수 있고, 그 셸이 fork한 것에는 손이 닿지 않습니다 — gori 자신의 프로세스 그룹을 공유하므로 그룹에 시그널을 보내면 gori까지 함께 죽습니다. 타임아웃된 실행에는 <code>SIGKILL</code> 전에 <code>SIGTERM</code>을 먼저 보내므로 <code>cmd &amp; wait</code> 주위의 <code>trap … TERM</code>은 정리할 기회를 얻습니다. 더 간단한 답은 명령 자체에 한도를 거는 것입니다 (<code>curl --max-time 2</code>, <code>timeout 2 …</code>).</p>
+<h2 id="명령을-실을-수-있는-다른-자리">명령을 실을 수 있는 다른 자리</h2>
+<p>statusline은 데이터가 아니라 명령을 담는 다섯 설정 중 하나입니다. 나머지는 <a href="/ko/guide/scripting/#%ED%94%84%EB%A1%9C%EC%84%B8%EC%8A%A4-%ED%9B%85">프로세스 훅</a>과 외부 에디터입니다. <code>gori settings export</code>로 내보낸 프로필은 이들을 모두 실어 나를 수 있고, 전송의 양쪽 끝이 <a href="/ko/reference/cli/#profiles-that-carry-commands">그 사실을 말해 줍니다</a>.</p>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="이어서 읽기">
+  
+  <a href="https://gori.hahwul.com/ko/guide/hotkeys/" rel="prev"><span>← 이전</span><strong>단축키</strong></a>
+  
+  <a href="https://gori.hahwul.com/ko/reference/"><span>개요 →</span><strong>레퍼런스 살펴보기</strong></a>
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="이 페이지에서" data-title="이 페이지에서"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>

@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="The Probe scanner, the Param Miner, and triaging results into Issues.">
+  <title>Scanning &amp; Issues - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Scanning &amp; Issues">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/scanning/">
+  <meta property="og:description" content="The Probe scanner, the Param Miner, and triaging results into Issues.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Scanning &amp; Issues">
+  <meta name="twitter:description" content="The Probe scanner, the Param Miner, and triaging results into Issues.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/guide/scanning/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Scanning \u0026 Issues","url":"https://gori.hahwul.com/guide/scanning/","description":"The Probe scanner, the Param Miner, and triaging results into Issues."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Scanning \u0026 Issues"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/scanning/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/scanning/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/scanning/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/scanning/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    <nav class="manual-nav" aria-label="Documentation">
+      <span class="manual-nav-label">Documentation</span>
+
+      
+      <details class="nav-group nav-section">
+        <summary>Getting Started</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <section class="nav-section guide-navigation" aria-labelledby="guide-navigation-title">
+        <h2 id="guide-navigation-title">Guide</h2>
+        <a class="nav-overview" href="https://gori.hahwul.com/guide/">Overview</a>
+
+        
+        
+        
+        
+        <details class="nav-group" open>
+          <summary>Core</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/scanning/" class="active" aria-current="page">Scanning &amp; Issues</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Workbenches</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/cookie/">Cookie</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/authorize/">Authorize</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Automation</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/scripting/">Scripting</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Customize</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/statusline/">Statusline</a></li>
+        </ul></details>
+        
+      </section>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/playbooks/">
+        <span>The gori field guide</span>
+        <strong>Playbooks →</strong>
+      </a>
+      
+
+      
+      <details class="nav-group nav-section">
+        <summary>Reference</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/brand/">Brand Kit</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/guide/">Guide</a>
+      <span aria-hidden="true">/</span><span>Core</span>
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">Guide</p>
+      <h1>Scanning &amp; Issues</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>gori includes automated analysis that runs alongside your manual testing. <strong>Probe</strong> watches traffic for issues, the <strong>Param Miner</strong> discovers hidden inputs, and <strong>Issues</strong> is where results get triaged.</p>
+<h2 id="probe-the-scanner">Probe: the Scanner</h2>
+<p><strong>Probe</strong> groups security issues by type and severity. Its passive checks run as you browse (with zero extra requests), inspecting <strong>History</strong> flows and <strong>Repeater</strong> send results.</p>
+<p>Its <strong>active</strong> checks are deliberately <em>light-touch</em>: a handful of safe, low-volume probes over traffic you've already captured. By default only safe methods (<code>GET</code> / <code>HEAD</code>) are probed, each unique surface is tested once, and nothing goes out until you arm active mode. It's built to confirm a quick hunch (a parameter reflects, an origin is honored) while keeping your footprint quiet.</p>
+<p>Re-sending an unsafe method (<code>POST</code> / <code>PUT</code> / <code>PATCH</code> / <code>DELETE</code>) can mutate server state, so it is always opt-in. Tick <strong>unsafe methods</strong> in the per-flow <em>Run active scan</em> popup for a single deliberate re-send, or switch Probe to <strong>AGGRESSIVE</strong> mode, which also probes unsafe methods automatically and raises the per-rule caps (wider param sets, a wider forbidden-bypass header set). Both stay inside your project scope, so an out-of-scope host is never touched.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/probe.svg" alt="gori Probe scanner listing passive issues grouped by severity and category: permissive CORS, missing CSP and HSTS, cookie flag issues, and cacheable responses, each with an affected host">
+  <figcaption><strong>Probe</strong> surfaces passive issues as you browse (CORS, cookie hygiene, missing security headers, info leaks), grouped by severity and category.</figcaption>
+</figure>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>What it covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>headers</code></td>
+<td>Security headers (HSTS, CSP incl. report-only-only, XFO, Permissions-Policy, …), cleartext Basic auth, a password submitted or a login form served over http://, mixed content, cacheable API responses, a Set-Cookie a shared cache may store, MIME-type confusion (an HTML body under a sniffable type with no <code>nosniff</code>, JSON served as <code>text/html</code>), JWT weaknesses (<code>alg:none</code>, non-standard alg, no <code>exp</code>), cross-origin subresources without <code>integrity</code></td>
+</tr>
+<tr>
+<td><code>cookies</code></td>
+<td><code>Secure</code> / <code>HttpOnly</code> / <code>SameSite</code> and related cookie hygiene</td>
+</tr>
+<tr>
+<td><code>tech</code></td>
+<td>Technology and protocol fingerprints (also surface on the Project tab)</td>
+</tr>
+<tr>
+<td><code>infoleak</code></td>
+<td>Body disclosures, secrets in URLs / WS frames, GraphQL introspection, source maps shipped with production scripts, directory listings, sensitive JWT claims, exposed configuration and diagnostic artifacts (<code>.env</code>, <code>.git/config</code>, <code>phpinfo()</code>, <code>.htpasswd</code>, <code>wp-config</code> credentials, Spring actuator env), framework debug mode and interactive debuggers reachable in production (Symfony, Werkzeug/Flask, Django, Laravel, Rails, ASP.NET), a suspected subdomain takeover, an internal hostname or RFC 1918 address in a response header, and native-serialization blobs in cookies / parameters / hidden fields (Java, .NET <code>BinaryFormatter</code>/ViewState, PHP), the insecure-deserialization surface</td>
+</tr>
+<tr>
+<td><code>cors</code></td>
+<td>Wildcard / null origin / credentialed misconfigurations; a reflected origin cached without <code>Vary: Origin</code>; active origin reflection</td>
+</tr>
+<tr>
+<td><code>client</code></td>
+<td>Client-side suspicions in page and bundle scripts: DOM-based XSS (source into sink), DOM clobbering, prototype pollution, and postMessage weaknesses. Heuristic, so treat as leads to confirm</td>
+</tr>
+<tr>
+<td><code>active</code></td>
+<td>Confirmed by a light-touch probe: reflected parameters, backslash-powered injection points, open redirect, CRLF/response-header &amp; host-header injection, access-control bypass (spoofed client-IP / path normalization / URL-rewrite headers), NGINX alias &amp; parameter path traversal, server-side template injection, and Next.js server-action missing authorization (re-sends a <code>Next-Action</code> request with the session cookie/Authorization stripped; needs unsafe/AGGRESSIVE, since actions are POST). error-based SQL injection (a syntax-breaking payload per query parameter, flagged when a database-error signature appears in the probe but not in the clean baseline), and blind SSRF confirmed <strong>out of band</strong>: a URL parameter is pointed at an <a href="/guide/oast/">OAST</a> payload and the finding is raised when the server calls back. Blind OS command injection is confirmed the same way: a shell-breakout payload is appended to a command/diagnostic parameter (<code>cmd</code>, <code>ping</code>, <code>host</code>, …) and the finding is raised when the server&#39;s shell calls the OAST listener back. GraphQL introspection is confirmed actively too (recorded under <code>infoleak</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>Some active rules do not behave like the rest, and the Rules sub-tab says so on the row:</p>
+<ul>
+<li><strong>HTTP request smuggling</strong> (CL.TE / TE.CL / TE.TE desync) ships <strong>disabled</strong>. It sends incomplete framing probes with POST bodies and confirms a front-end/back-end desync by a timing hang, which is a heavier and less polite thing to do to a target than any other rule here. The row is badged <code>opt-in</code>; arm it deliberately with <code>gori run probe rules enable request_smuggling</code>, and read the differential confirm as an <code>--aggressive --unsafe</code> step.</li>
+<li><strong>Out-of-band rules</strong> (blind SSRF, blind OS command injection, XML external entities) ship <strong>enabled but inert</strong>: they can only send once the project has a registered OAST listener to mint a payload from. That is a capability, not a toggle, so the row is badged <code>needs OAST</code> and its request cost stays out of the estimate until a listener exists.</li>
+</ul>
+<p>Blind SSRF tests only the first URL-shaped value across the query, form fields and top-level JSON strings, using one request. Unsafe methods still need explicit opt-in. The <code>xxe_oast</code> rule also needs unsafe opt-in and sends one XML request containing an external parameter entity reference; it reports only after an OAST callback. It preserves the original document and skips existing DTDs, compressed or chunked requests, truncated bodies, bodies over 64 KiB, and unsupported encodings. These checks do not try payload lists or send confirmation retries.</p>
+<p>Severities run <code>info</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>critical</code>. Headless <code>gori run probe</code> runs passive checks by default, and pass <code>--active</code> to also run active checks.</p>
+<p>Findings are grouped by check and host, so one row can stand for dozens of hits. Open it and the <strong>AFFECTED URLS</strong> list is the evidence: <code>↑</code>/<code>↓</code> walk it and <code>Enter</code> opens the flow that URL was captured on, in the same detail view History uses. <code>s</code> goes to the source — the finding's sample flow, in History — <code>r</code> sends it to the Repeater, and <code>y</code> copies the selected URLs (or all of them).</p>
+<p>Run analysis headless. By default it reads what's already captured (History + Repeater responses) and sends nothing, or pass <code>--active</code> to send probe requests:</p>
+<pre><code class="language-bash hljs">gori run probe                       # passive issues
+gori run probe --active              # include active checks (sends probe requests)
+gori run probe --active --unsafe     # also re-send unsafe methods (may mutate server data)
+gori run probe --active --aggressive # wider caps + unsafe methods (authorized targets only)
+gori run probe --severity high       # only high-severity
+gori run probe --category cors       # a single category
+gori run probe -q 'host:example.com' # filter History with QL (Repeater still scanned)
+</code></pre>
+<h2 id="param-miner">Param Miner</h2>
+<p>The <strong>Miner</strong> discovers parameters a server accepts but doesn't advertise. Point it at a flow and it probes candidate names across locations: query string, form body, multipart/form-data, JSON (including nested objects and array roots), headers, and cookies. It buckets guesses efficiently and reports the ones that change the response. Multipart is applicable but off by default (a captured file part would be re-sent on every request); enable it with <code>--locations multipart</code> or its checkbox.</p>
+<pre><code class="language-bash hljs">gori run mine &lt;flow-id&gt; \
+  --locations query,headers \
+  --wordlist params.txt \
+  --bucket 50
+</code></pre>
+<p>A mine is latency-bound rather than CPU-bound (it sends a bucket, waits, bisects, waits), so what it mostly costs is round trips. Two things keep that count down: the run reuses one connection across its probes (one TCP, and on https one TLS, handshake per worker instead of one per probe; turn it off with the <strong>reuse connections</strong> checkbox, <code>--no-keep-alive</code>, or <code>keep_alive: false</code> when the target behaves per-connection), and every location is mined through one shared pool of workers, so three locations do not cost three times one location and the tail of a bisection no longer runs alone.</p>
+<blockquote>
+<p>The Miner tab is off the bar by default. Press <code>0</code> to open it, or give it a slot in <code>settings:tabs</code>.</p>
+</blockquote>
+<h2 id="discover-spider-brute-force">Discover: Spider &amp; Brute-Force</h2>
+<p>Where the Miner finds hidden inputs, <strong>Discover</strong> finds hidden endpoints. It spiders a target (following links you never clicked) and brute-forces unlinked directories and paths (<code>/admin</code>, <code>.git/config</code>, <code>/api/v2</code>). It lives as a sub-tab under the new <strong>Target</strong> tab, next to the Sitemap, and every endpoint it finds flows straight into that Sitemap.</p>
+<p>Start a run from where you already are: on a <strong>Sitemap</strong> node or a <strong>History</strong> flow, press <code>Space</code> and pick <strong>Discover here</strong>. A small popup lets you choose the exploration style (spider, brute-force, or both, the default), a max depth, the crawl scope, and concurrency. The run happens in the background: watch the bottom bar, pause or stop it from the Discover sub-tab (<code>^X</code> stop, <code>p</code> pause), and jump to the results from the completion notification.</p>
+<p>A finished run is more than a list of URLs. Every finding is stored with the request Discover framed and the response the origin sent back, so in the FINDINGS table <code>Enter</code> (or <code>o</code>) opens that exchange in the same detail view History uses: headers, body, pretty-printed JSON, and from there <code>^R</code> to the Repeater. Headless runs and MCP runs store the same bytes, so a finding is openable with <code>gori run show</code> or <code>get_flow</code> too.</p>
+<p>Discover is built for tight false-positive and false-negative rates on real sites:</p>
+<ul>
+<li><strong>It reads what the target says about itself.</strong> Every run fetches the well-known documents at the origin (<code>robots.txt</code>, <code>sitemap.xml</code> and <code>sitemap_index.xml</code>, the <code>.well-known/</code> registry (<code>openid-configuration</code>, <code>oauth-authorization-server</code>, <code>oauth-protected-resource</code>, <code>security.txt</code>, <code>apple-app-site-association</code>, <code>assetlinks.json</code>, <code>host-meta</code>, <code>change-password</code>), and the API's own description of itself (<code>openapi.json</code>, <code>swagger/v1/swagger.json</code>, <code>v3/api-docs</code>, <code>v2/api-docs</code>)) and crawls the endpoints they declare. An OIDC discovery document alone hands over the authorize, token, userinfo, JWKS, revocation and registration endpoints; an OpenAPI document enumerates every route the service exposes, including the ones behind auth. These are guesses at fixed paths, so they go through the same soft-404 baseline a wordlist hit does.</li>
+<li><strong>It reads your JavaScript.</strong> The spider follows <code>&lt;script src&gt;</code> like any other link, and now parses the bundle it gets back: quoted root-relative paths and absolute URLs become crawl targets. On an SPA, the API routes are reachable only from JS and by construction unlinked, so this is the surface both the spider and the brute-forcer used to miss entirely. The same pass runs over inline <code>&lt;script&gt;</code> blocks, JSON responses and source maps.</li>
+<li><strong>It reads what the brute-forcer finds.</strong> A wordlist hit's body is parsed for endpoints too, so finding <code>swagger.json</code> or an autoindex page is the start of a crawl rather than a single row. Only hits are read — the thousands of soft-404s a sweep sends cost nothing.</li>
+<li><strong>It reads the response headers.</strong> <code>Link</code> (how a paginated API names its next page, and nowhere else), <code>Content-Location</code>, <code>Refresh</code>, and the <code>Path</code> a <code>Set-Cookie</code> scopes itself to — the application saying which subtree it is mounted under, which is exactly the kind of unlinked directory this engine is for.</li>
+<li><strong>A <code>405</code> counts as an endpoint.</strong> A form target, a JSON API that only takes <code>POST</code>, a WebDAV collection: reached by <code>GET</code> once, answering <code>405</code>, and dropped by every crawler that reads <code>4xx</code> as absent. They are also the endpoints most worth testing.</li>
+<li><strong>Soft-404 calibration.</strong> Before brute-forcing a directory it sends a few known-bad paths to learn how that server answers a miss. It handles a custom-designed error page on a real <code>404</code>, a server that returns <code>200</code> for everything, one that quotes the requested path back into its error page, and one that redirects every unknown path to <code>/login</code>, so a wordlist hit only counts when it genuinely diverges from that baseline. Each of those behaves differently under the same wordlist, so the run tells you which one it found (<code>wildcard-200 (echoes path)</code>, and so on).</li>
+<li><strong>The baseline is re-measured when the target changes its mind.</strong> A baseline is taken once per directory, and a rate limiter, a WAF block page or a <code>5xx</code> meltdown partway through a sweep makes every remaining probe look like a discovery, the classic way an automated sweep produces hundreds of confident findings that are all the same block page. Discover watches for a run of probes that all clear the baseline <em>and</em> all look identical, holds those results back rather than reporting them, and re-measures the directory. What it dropped is reported as <code>drift</code> in the run summary, so a directory that went unmeasured never reads as a directory that was empty.</li>
+<li><strong>No runaway crawls.</strong> Two independent guards stop a crawl from exploding: URL-shape folding collapses <code>/user/1</code>, <code>/user/2</code>, <code>/user/3</code>… into one template, and a content fingerprint collapses near-duplicate listing pages into one cluster. A depth cap, a page cap, and a hard request budget bound the rest.</li>
+<li><strong>Scope-aware by default.</strong> A run stays on the seed origin unless you've set Scope include rules, in which case it follows them; Scope excludes and the sandbox are always respected. Launch on a path (not a host) to confine the run to that subtree.</li>
+<li><strong>It doesn't download the pictures.</strong> A page names dozens of images, fonts, tracks and archives; each costs a request and a full body download for bytes no extractor can read, and each used to spend the crawl's page budget too. Discover records their <em>directory</em> — <code>/uploads/</code> is still swept because <code>/uploads/photo.jpg</code> was linked — and skips the download, reporting the count as <code>assets</code> in the run summary. <code>--assets</code>, <code>crawl_assets: true</code>, or the <strong>fetch images/fonts/media</strong> checkbox turns them back on.</li>
+<li><strong>Connections are reused.</strong> A brute-force pass is one request per wordlist entry per directory, and each one used to pay its own TCP handshake (plus, on https, its own TLS handshake). Discover now keeps a keep-alive connection per origin, so the run pays one handshake per worker instead. Turn it off with the <strong>reuse connections</strong> checkbox, <code>--no-keep-alive</code>, or <code>keep_alive: false</code> when the target behaves per-connection (a connection-scoped rate limit, a load balancer pinning by connection).</li>
+</ul>
+<p>Each run reports its FP/FN figures: how many probes the calibrator suppressed, how much exploration the traps guards cut, and the confidence spread of what it kept.</p>
+<p>Headless, it's <code>gori run discover</code>, and it's exposed to agents over MCP (<code>discover_start</code> / <code>discover_status</code> / <code>discover_results</code> / <code>discover_stop</code>):</p>
+<pre><code class="language-bash hljs">gori run discover --target https://target.example \
+  --max-depth 3 \
+  --extensions php,json,bak \
+  --format jsonl
+</code></pre>
+<p>Discover sends real, unsolicited traffic to the target. Only run it against systems you are authorized to test.</p>
+<blockquote>
+<p>From the Sitemap, <code>Space</code> also offers <strong>Send to Repeater</strong>, which opens the selected endpoint's captured request in the Repeater workbench.</p>
+</blockquote>
+<h2 id="issues">Issues</h2>
+<p><strong>Issues</strong> is your triage list. Promote anything worth tracking (from Probe, the Fuzzer, the Miner, or your own inspection) into an issue with a severity and a status, and jump straight back to the evidence flow. Issues can be exported for reporting:</p>
+<pre><code class="language-bash hljs">gori run issues --format markdown --export report.md
+gori run issues --format sarif --export issues.sarif   # for GitHub code scanning / a CI dashboard
+</code></pre>
+<p>In the TUI, <code>⇧E</code> asks for the format and then the destination path. See <a href="/playbooks/triage-and-report/#5-export-the-report">Export the report</a> for what a SARIF result carries.</p>
+<p><code>⇧X</code> (or <code>Space</code> → <code>X</code>) clears the tab: every issue in the project, with its notes, CVSS score and evidence links. It asks first and names the total, which is the whole project, not the rows a filter is showing and not the marked set, so it is the one issues key that ignores both. <code>⇧X</code> is the same clear-all key History, Probe, Authorize and the ACTIVITY feed answer, each in its own tab.</p>
+<h3 id="marking-issues-multi-select">Marking issues (multi-select)</h3>
+<p>The list marks the same way History does. Press <code>t</code> to <strong>mark</strong> the issue under the cursor and step down, so a run of <code>t</code> marks consecutive rows. <code>Shift-↑</code> / <code>Shift-↓</code> extend a contiguous range from where you started, <code>Shift-T</code> marks everything the current filter shows, and <code>Esc</code> clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live <code>3 marked</code> count.</p>
+<p>Letting go of <code>Shift</code> ends the range: a plain <code>↑</code> / <code>↓</code> (or <code>PgUp</code> / <code>PgDn</code>, or a click on another row) hands the range back and moves on, the way a GUI list collapses its highlight. Marks you placed deliberately with <code>t</code> or <code>Shift-T</code> stay, which is what makes a discontiguous set possible. The mouse wheel only scrolls, so it never drops a mark.</p>
+<p>Marks change <strong>what the space menu acts on</strong>, not which actions exist:</p>
+<blockquote>
+<p>the effective target is <strong>the marks if any are set, else the cursor row</strong></p>
+</blockquote>
+<p>So <code>/ status:open severity:low</code> → <code>Shift-T</code> → <code>Space</code> → <code>c</code> → <strong>False positive</strong> re-triages the whole batch in one pick. The menu title reads <code>SPACE · 3 MARKED</code> and the entries rename themselves (<code>Delete 3 issues</code>) so a batch is never a surprise.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Key</th>
+<th>Over marks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Set severity</td>
+<td><code>Space</code> <code>s</code></td>
+<td>One pick, written to every marked issue</td>
+</tr>
+<tr>
+<td>Set status</td>
+<td><code>Space</code> <code>c</code></td>
+<td>One pick: the bulk &quot;false positive&quot; / &quot;resolved&quot; pass</td>
+</tr>
+<tr>
+<td>Delete</td>
+<td><code>Space</code> <code>d</code></td>
+<td>One confirm for the whole set</td>
+</tr>
+</tbody>
+</table>
+<p>Marks survive a filter change, a re-sort (including the one your own severity edit causes), and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Opening an issue pins the actions to that one issue; marks are a list-level idea. Export always writes the <strong>full</strong> report, so its menu entry says <code>(all)</code> while marks are set.</p>
+<h2 id="notes-comparer">Notes &amp; Comparer</h2>
+<p>Two more tools round out analysis:</p>
+<ul>
+<li>
+<p><strong>Notes</strong>: free-form, per-project Markdown documents (multiple notes per project). Create, edit, and close notes from the Notes tab; list or dump them headless with <code>gori run notes</code> / <code>gori run notes --all</code>. Agents can manage notes over MCP (<code>list_notes</code>, <code>get_note</code>, <code>create_note</code>, …).</p>
+</li>
+<li>
+<p><strong>Comparer</strong>: load two messages into slots A and B for a side-by-side diff, useful for spotting how a response changed between requests.</p>
+<p>A slot is filled from anywhere that holds a request and a response: <code>Space</code> → <strong>Send to Comparer</strong> from History, the Sitemap, a Repeater tab (its last send) or a Fuzzer result row, or <code>a</code> / <code>b</code> on the Comparer tab itself to pick a captured flow. That picker follows the active Scope lens, like History and the Sitemap, so turn the lens off to reach an out-of-scope flow. A Repeater send and a fuzz row leave no capture behind, so this is the only route those two have into a diff.</p>
+<p>Each column header carries that side's <code>status · size · time</code>, and the divider between them states the A→B delta; a <code>403 → 200</code> is usually the whole answer, before a body line is read.</p>
+<p>Inside the diff:</p>
+</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>←</code> / <code>→</code></td>
+<td>Diff the requests or the responses</td>
+</tr>
+<tr>
+<td><code>⇧N</code> / <code>⇧P</code></td>
+<td>Jump to the next / previous <strong>changed</strong> row (wraps; the footer shows <code>3/8</code>)</td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>Fold the unchanged runs to <code>⋯ N unchanged lines ⋯</code>, keeping 3 lines of context</td>
+</tr>
+<tr>
+<td><code>↑</code> / <code>↓</code>, <code>⇧↑</code> / <code>⇧↓</code></td>
+<td>Move the row cursor · grow a whole-row selection</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>Copy the selection, or the whole diff, as unified text</td>
+</tr>
+<tr>
+<td><code>⇧←</code> / <code>⇧→</code></td>
+<td>Scroll both columns sideways together</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td>Swap A ⇄ B</td>
+</tr>
+</tbody>
+</table>
+<p>On a changed row only the parts that actually differ are lit red/green; what both sides share is dimmed, so a re-signed token or one flipped JSON value is visible without reading the line.</p>
+<h2 id="diff-what-changed-since-last-time">Diff: what changed since last time</h2>
+<p>The Comparer diffs two <strong>messages</strong>. Retesting asks the same question one level up (<em>what changed since the last engagement?</em>), and that is the <strong>Diff</strong> sub-tab under <strong>Target</strong>, next to the Sitemap whose folding it keys on.</p>
+<p>Slots hold <strong>projects</strong>, not flows: <code>a</code> picks the baseline (the earlier engagement), <code>b</code> defaults to the project you have open, <code>w</code> swaps them, and <code>Ctrl-R</code> re-runs the read. Nothing is sent; both sides are captured traffic. Rows are endpoints, and <code>↵</code> (or <code>→</code>) hands the selected endpoint's capture from <em>each</em> side to the Comparer for the byte-level answer.</p>
+<p><strong>Endpoint identity is the whole game.</strong> Two engagements never capture the same identifiers, so a diff keyed on literal paths reports every row twice (once removed, once added) and tells you nothing. Endpoints are therefore keyed by the same folded template the Sitemap draws: <code>/users/{uuid}</code>, <code>/items/{n}</code>, <code>/search</code> with its query variants folded on. The fold runs over the union of both sides, so a route that met the fold threshold on only one side still matches itself on the other.</p>
+<p>Five verdicts, and the split between the last two is the point:</p>
+<table>
+<thead>
+<tr>
+<th>Verdict</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>added</code></td>
+<td>Captured in B, never captured in A</td>
+</tr>
+<tr>
+<td><code>gone</code></td>
+<td>Captured in both, and every answer B got was <code>404</code>/<code>410</code> where A was reachable</td>
+</tr>
+<tr>
+<td><code>changed</code></td>
+<td>Captured in both; status class, auth, content type, or size moved beyond tolerance</td>
+</tr>
+<tr>
+<td><code>same</code></td>
+<td>Captured in both, equivalent</td>
+</tr>
+<tr>
+<td><code>not seen</code></td>
+<td>In A, and B captured <strong>no request to it at all</strong>: a coverage gap, not evidence of removal</td>
+</tr>
+</tbody>
+</table>
+<p>A thinner retest visits fewer endpoints. Collapsing &quot;we did not go there&quot; into &quot;it is gone&quot; would report a short afternoon as a wave of fixes, so the two are different verdicts and the caveat sits on the header where it cannot scroll away. Both sides' flow, endpoint and host counts print beside the numbers for the same reason.</p>
+<p><code>changed</code> is judged by a tolerance band (the same calibration the Repeater's minimizer and the Miner use), not byte equality, so a page whose length wanders between captures reads as unchanged. Status is compared by <strong>class</strong>, so a <code>200</code> that became a <code>201</code> is not a finding while a <code>200</code> that became a <code>403</code> is (reported on its own <code>auth</code> axis).</p>
+<p><code>v</code> cycles the verdict lens; the counts always cover all five whatever the lens shows. Headless, it is <a href="/reference/cli/#run-diff"><code>gori run diff</code></a> (with <code>--format md</code> the report is a section you paste into the deliverable), and over MCP it is <code>diff_projects</code>.</p>
+<p><strong>A row is meant to leave the tab.</strong> A retest's deliverable is a list of findings and this is the tab that produces its input, so <code>⇧F</code> files the selected endpoint as an <strong>Issue</strong> and <code>n</code> records it as a <strong>Note</strong>: same text, one without the form, and neither moves you off the list. Both carry what only this tab knows: which two projects were compared and where their databases are, what each side actually answered, and which axis moved. The capture behind the side that <em>is</em> your open project is linked as evidence, not copied; the other side's flow is named with its database, because <code>entity_links</code> do not cross projects. A <code>not seen</code> row files as <code>info</code> and says in its own words that the newer capture never requested the endpoint; it will not claim a removal the diff did not observe. The same sentence rides on every row of <code>--format json</code>, so an agent filing one issue per row cannot lose the distinction either.</p>
+<p>Issues, notes, repeaters, and fuzz/miner sessions can be linked so you jump from an issue straight back to the evidence flow or the session that produced it. Issues record an optional CVSS vector or numeric score, and the severity follows from it, visible in the Issues list, in <code>cvss:&gt;=7</code> filters, and in every export. <code>Space</code> → <strong>Set CVSS</strong> on an issue (or <code>↵</code> on the <code>cvss</code> row of the issue form) opens the calculator: type or paste a vector (or a bare score like <code>8.8</code>) into its <code>vector:</code> row, or build one from the base metrics with <code>←/→</code>, and the two stay in step. The <code>version:</code> row picks <strong>3.1</strong> or <strong>4.0</strong>; each keeps its own selections, because the two versions ask different questions (v4.0 adds Attack Requirements and splits impact into Vulnerable/Subsequent systems) and are not convertible. A pasted vector opens on its own version, and any version the parser knows, including v2, is stored and scored as typed even though the builder only writes 3.1 and 4.0. <code>Space</code> → <strong>Link…</strong> from History, the Repeater, the Fuzzer, or the Miner opens one card holding every issue <em>and</em> every note, with <code>+ New issue…</code> / <code>+ New note…</code> pinned above them, so filing a brand-new issue for what you are looking at, already linked, is the same keystroke as attaching it to an existing one. Type to filter by title, host, status, or the words <code>issue</code> / <code>note</code>; whatever you typed becomes the new issue's title if you land on the create row.</p>
+<p>A link is a pointer, and both things it can point at are mutable: a Repeater tab holds one response and the next send replaces it, and a History flow is one retention sweep from <code>(gone)</code>. So <strong>Link… keeps the bytes</strong>. There is one verb, not a pointer/copy pair to choose between at the moment of filing: <code>↵</code> on an issue row links the ref <em>and</em> <strong>freezes</strong> its current exchange — request, response, status, timing, protocol, error and truncation flags — in one transaction, and <code>+ New issue…</code> files the issue and freezes in one go. The picker's hint says which before you press it (<code>↵ link &amp; freeze</code> / <code>↵ link</code>).</p>
+<p>What <code>↵</code> does depends on what you are attaching and where:</p>
+<table>
+<thead>
+<tr>
+<th>ref</th>
+<th>→ Issue</th>
+<th>→ Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>flow / Repeater tab with a response</td>
+<td>link + freeze</td>
+<td>link only</td>
+</tr>
+<tr>
+<td>pending flow / never-sent Repeater tab</td>
+<td>link only — the toast says <code>not frozen: …</code> and why</td>
+<td>link only</td>
+</tr>
+<tr>
+<td>fuzz / miner session</td>
+<td>link only (no single exchange)</td>
+<td>link only</td>
+</tr>
+</tbody>
+</table>
+<p>A note owns no evidence, so it always takes the pointer alone. Nothing is ever refused for want of bytes: the link is the act, the copy is what rides along, and a toast that could not take one names the reason (<code>linked to issue #3 · not frozen: repeater #2 has never been sent…</code>). The drift and byte-cost questions still come first, and answering &quot;no&quot; to either still files the link. <code>⇧F</code> (<strong>Add issue</strong>) from History freezes the same way — the marked flows are copied as the form opens.</p>
+<p>On an issue that is already linked, <code>f</code> on a live row of its RELATED card (or <code>f</code> in <code>Space</code> → <strong>Manage links</strong>) freezes that link — for links made before this rule, links filed while the source had no exchange, and links added headless. RELATED lists <strong>LIVE</strong> and <strong>FROZEN</strong> rows apart. A frozen row names its source (<code>hist #12</code>, <code>repeater #3</code>), the time of the copy, its status and size.</p>
+<p><strong>RELATED holds everything that backs the issue, and its first row is the flow the issue was filed from.</strong> There is no separate evidence or flow line above the card: an issue relates to traffic four ways — the flow it was filed from, its other links, the frozen copies, the retest steps — and the first three are one list, in that order. The first row is live-badged like any other pointer, so <code>s</code> opens it in History, <code>↵</code> shows its bytes, and <code>f</code> freezes them. (<code>o</code> used to be a second key for that same jump and is gone.) <code>r</code> sends the row under the cursor to the Repeater — a live flow's capture, or a FROZEN row's frozen request, neither of them sent — and falls back to the first flow row when the cursor is on a session. An issue filed from a flow this project no longer has shows the row as <code>(gone)</code>; deleting the flow itself clears the issue's pointer with it.</p>
+<p><strong>In RELATED, <code>↵</code> shows and <code>s</code> goes.</strong> <code>↵</code> opens the selected row's exchange in a read-only viewer over the detail — the frozen bytes on a FROZEN row, and on a LIVE one the source <em>as it is now</em> (<code>↹</code> swaps request/response, <code>y</code> copies the shown pane, <code>esc</code> lands back on the row you pressed it from). A live view says so in its title (<code>LIVE hist #12</code>) and on its provenance line (<code>as it is now · not frozen</code>), because retention or the next send can still change what it shows; <code>f</code> inside it freezes what is on screen and the card becomes <code>FROZEN EVIDENCE #N</code> without closing. <code>s</code> is the other half: it opens the row's source in its own tab — History for a flow, the Repeater/Fuzzer/Miner tab for a session, and for a frozen row the original it was copied from when that is still the same object. A fuzz or miner row is the exception <code>↵</code> names in the hint (<code>↵ open session</code>): a session is a template plus a run, with no single exchange to show, so <code>↵</code> opens it. A row whose source is gone, or a Repeater tab that has never been sent, says so instead.</p>
+<p>After the first snapshot exists, you can enable the optional <strong>Evidence</strong> tab in the tab settings. It lists the whole project archive and filters on <code>issue:</code>, <code>host:</code>, <code>method:</code>, <code>status:</code>, <code>confirmation:</code>, <code>source:</code> and <code>date:</code>. Open the linked Issue or the original History/Repeater row when it still exists, or select two snapshots with <code>c</code> to send a before/after pair to Comparer. Copy and JSON export follow the project's body-redaction policy. <code>r</code> duplicates the frozen request into a new Repeater tab but does not send it. Issue links are many-to-many and mutable; unlinking the last Issue, or deleting an Issue, leaves an orphaned snapshot in the archive. Deleting the snapshot itself requires confirmation and lists every affected Issue link. Headless, <code>gori run evidence</code> and MCP <code>list_evidence</code> with no Issue named list that same archive, orphans included.</p>
+<p>Each snapshot has a SHA-256 of its stored request and response. It is never pruned or replaced, and only its explicit delete removes it. A Repeater tab that has never been sent is refused rather than frozen request-only, as is a flow whose response has not landed yet. A copy over 1 MB shows its byte cost first, and a project's evidence is bounded at 256 MB. A Repeater copy pairs the tab's <em>saved</em> request (bindings unexpanded) with the last response the store holds. Freeze right after the send that proved the finding, when those two agree. A WebSocket copy contains its handshake, not its frame transcript. The History detail's stats line and the Repeater's RESPONSE border read <code>frozen ×N</code>; the source remains editable and its next send can still replace its response.</p>
+<h3 id="retest-the-check-a-finding-carries">Retest: the check a finding carries</h3>
+<p>Frozen evidence keeps what proved a finding; a <strong>retest</strong> is what runs it again. It is a small ordered list of Repeater sends on the Issue, each with a role and at most one expected result — the thing an issue's write-up is trying to say when it reads &quot;send #4 first to log in, then #5 should answer 403, and #6 is the control&quot;.</p>
+<p>Link the Repeater sessions to the Issue as usual, then open <code>Space</code> → <strong>Retest…</strong> (<code>⇧R</code>) on the Issue detail. <code>a</code> picks a session, its <strong>role</strong> (<code>setup</code> establishes the precondition, <code>baseline</code> is the anchor a body comparison is made against, <code>variant</code> is the case under test, <code>control</code> the negative case, <code>cleanup</code> the undo), and the one result you expect: a status (<code>status:403</code>, <code>status:2xx</code>, <code>status:200-299</code>), a JSON field (<code>json:data.role=admin</code>, <code>json-absent:data.token</code>), or a comparison with the baseline (<code>body:same</code>, <code>body:diff</code>). Leave it empty to record the outcome and assert nothing — which is what a login step or a cleanup wants. <code>⇧J</code> / <code>⇧K</code> reorder, <code>e</code> edits, <code>d</code> removes, <code>r</code> runs, and <code>⇧R</code> runs while permitting the cleanup steps after a refused send.</p>
+<p><code>↹</code> swaps the card between the plan and the last run's result table: role, session, what was expected, what actually happened, and pass or fail per step. <code>↵</code> on a result row opens the History flow <strong>that step's own send</strong> recorded — the exact response the row reports, which stays openable long after the Repeater tab has moved on, because a retest never overwrites the tab's stored response. The Issue detail carries a one-line summary (<code>retest 3 steps · last FAIL …</code>) once an issue has one, and nothing at all when it does not.</p>
+<p>A step sends whatever its Repeater tab holds at the moment of the run. That is the difference from freezing: evidence is the request as it <em>was</em>, a retest tracks the request as it is fixed.</p>
+<p>Every send goes through the project's scope and Sandbox gates and is recorded in History as <code>src:retest</code>, carrying the issue and step number. Before a batch that contains a state-changing method, gori names the exact request count and asks — each of those re-runs its side effect on the target. Once gori <strong>refuses</strong> a send, the rest of the run is skipped, cleanup steps included, unless the operator permitted them (<code>⇧R</code> here, <code>--allow-cleanup</code> / <code>allow_cleanup</code> headless): skipped rows say why, so a partial run cannot read as a pass. A <code>setup</code> step that fails halts the measurement steps but still lets cleanup run, and a <code>body:</code> comparison is <code>inconclusive</code> rather than a pass both when no baseline is behind it and when the last <code>baseline</code> step missed its own expected result — a baseline that did not establish its reading anchors nothing. The verdict is <code>pass</code> only when every step ran and every assertion was decided; the newest 20 runs per Issue are kept.</p>
+<p>Headless it is <a href="/reference/cli/#run-retest"><code>gori run retest</code></a> — <code>run</code> exits <code>0</code> only on <code>pass</code>, so a fix's CI job can gate on it — and over MCP <code>list_retest_steps</code> / <code>add_retest_step</code> / <code>run_retest</code> / <code>list_retest_runs</code> / <code>get_retest_run</code>.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/guide/mcp/">MCP Server</a>: let an agent run scans and read issues</li>
+<li><a href="/reference/cli/">CLI Reference</a>: <code>probe</code>, <code>mine</code>, <code>issues</code>, and <code>notes</code> flags</li>
+<li><a href="/reference/query-language/">Query Language</a>: scope your scans</li>
+</ul>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  
+  <a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/" rel="prev"><span>← Previous</span><strong>Repeater &amp; Fuzzer</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/guide/decoder/" rel="next"><span>Next →</span><strong>Decoder</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>

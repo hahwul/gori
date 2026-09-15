@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Rebind gori&#39;s keyboard shortcuts from the Preferences modal.">
+  <title>Hotkeys - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Hotkeys">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/hotkeys/">
+  <meta property="og:description" content="Rebind gori&apos;s keyboard shortcuts from the Preferences modal.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Hotkeys">
+  <meta name="twitter:description" content="Rebind gori&apos;s keyboard shortcuts from the Preferences modal.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/guide/hotkeys/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Hotkeys","url":"https://gori.hahwul.com/guide/hotkeys/","description":"Rebind gori's keyboard shortcuts from the Preferences modal."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Hotkeys"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/hotkeys/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/hotkeys/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/hotkeys/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/hotkeys/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    <nav class="manual-nav" aria-label="Documentation">
+      <span class="manual-nav-label">Documentation</span>
+
+      
+      <details class="nav-group nav-section">
+        <summary>Getting Started</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <section class="nav-section guide-navigation" aria-labelledby="guide-navigation-title">
+        <h2 id="guide-navigation-title">Guide</h2>
+        <a class="nav-overview" href="https://gori.hahwul.com/guide/">Overview</a>
+
+        
+        
+        
+        
+        <details class="nav-group">
+          <summary>Core</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Workbenches</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/cookie/">Cookie</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/authorize/">Authorize</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Automation</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/scripting/">Scripting</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group" open>
+          <summary>Customize</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/hotkeys/" class="active" aria-current="page">Hotkeys</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/statusline/">Statusline</a></li>
+        </ul></details>
+        
+      </section>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/playbooks/">
+        <span>The gori field guide</span>
+        <strong>Playbooks →</strong>
+      </a>
+      
+
+      
+      <details class="nav-group nav-section">
+        <summary>Reference</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/brand/">Brand Kit</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/guide/">Guide</a>
+      <span aria-hidden="true">/</span><span>Customize</span>
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">Guide</p>
+      <h1>Hotkeys</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>gori's keyboard shortcuts are rebindable from the <strong>Hotkeys</strong> editor. Reach it from Preferences (<code>Ctrl-,</code> → <strong>Editor &amp; Keys</strong> → <strong>Hotkeys</strong>, then <code>↵</code>), or jump straight there with <strong><code>settings:hotkeys</code></strong> in the command palette (<code>Ctrl-P</code>). The editor lists every rebindable action grouped by where it fires (GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …); pick a row, press a new key, done.</p>
+<pre><code class="language-text hljs">Ctrl-,  → Editor &amp; Keys → Hotkeys
+Ctrl-P  → settings:hotkeys
+</code></pre>
+<h2 id="key-budget-how-new-shortcuts-earn-a-key">Key budget (how new shortcuts earn a key)</h2>
+<p>Bare letter keys are scarce. New actions should pick a <strong>price tier</strong> before taking a chord:</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Price</th>
+<th>When</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0 Structural</strong></td>
+<td><code>Esc</code> <code>Enter</code> <code>Tab</code> arrows <code>Space</code> (leader)</td>
+<td>Always</td>
+<td>focus, open/close, READ/INS, space menu</td>
+</tr>
+<tr>
+<td><strong>L1 Loop</strong></td>
+<td>bare letter or sticky family (<code>^R</code>)</td>
+<td>many times / minute</td>
+<td>History/Issues <code>j/k</code> <code>/</code> <code>y</code> <code>t</code> (mark) <code>v</code> (view), sub-tab strip <code>t</code> (mark), Repeater send</td>
+</tr>
+<tr>
+<td><strong>L2 Session breath</strong></td>
+<td>Global bare (cap: <code>c</code> <code>i</code> <code>s</code> only)</td>
+<td>many times / session</td>
+<td>capture, intercept, scope lens</td>
+</tr>
+<tr>
+<td><strong>L3 Contextual</strong></td>
+<td><code>Space</code> then mnemonic</td>
+<td>occasional, pane-local</td>
+<td>compare, mine, send-group, copy-as</td>
+</tr>
+<tr>
+<td><strong>L4 Rare / config</strong></td>
+<td>palette (<code>Ctrl-P</code>) or Preferences (<code>Ctrl-,</code>)</td>
+<td>rare</td>
+<td>settings, Match &amp; Replace, notifications</td>
+</tr>
+</tbody>
+</table>
+<p>Rules of thumb:</p>
+<ul>
+<li>Default for new pane actions is L3 (space menu only). Promote to a direct key only after the loop proves it.</li>
+<li><strong>Ctrl</strong> is for actions that must work while typing (INS), and for run/stop on a workbench (<code>Ctrl-R</code> / <code>Ctrl-X</code>). It is not a general upgrade from bare.</li>
+<li><strong>Shift</strong> carries the whole-tab wipes. <code>⇧X</code> is <code>Clear</code> in every tab that has one (History, Probe, Authorize, Issues, and the Project ACTIVITY feed), with <code>X</code> as the space-menu letter beside it. The letter is <code>x</code> and not <code>c</code> because of what sits under the shift: bare <code>x</code> is bound in none of those five scopes, while bare <code>c</code> is live in all of them (<code>capture.toggle</code>, and <code>dismiss</code> on the Probe list), and a project wipe does not belong one shift above a key an operator presses all day. A destructive chord must also be <strong>named where it can be read before it is pressed</strong> (the Help sheet and the tab's own body hint, not the space menu alone), and it must ask first.</li>
+<li><strong><code>d</code> destroys.</strong> Bare <code>d</code> deletes or dismisses the selected row in every scope that binds it — sixteen of them. The Repeater's response diff was the one exception, and it now sits on <code>⇧D</code> so the reflex never lands on a display toggle. Its space-menu letter is <code>⇧D</code> too: <code>d</code> is <strong>Duplicate sub-tab</strong> on all nine sub-tab strips (see <a href="#space-menu">the space menu</a>), and that bucket is drawn in every pane, so the plain letter was no longer the diff toggle's to keep — which leaves the row and the keyboard spelling it the same way. A new pane action that is not a delete does not get <code>d</code>.</li>
+<li><strong>Copy is the worked example of that rule.</strong> <code>y</code> copies in READ, and <code>Ctrl-Y</code> copies in <strong>INS as well</strong>, in every text box. In INS a bare <code>y</code> is a literal character, and typing it over a <code>Shift</code>+arrows selection <em>replaces</em> the selection, so the copy reflex needs a chord that survives typing. Both are the same verb (<code>*.copy</code>), so a rebind moves the READ letter and <strong><code>Ctrl-Y</code> stays where it is</strong>: it is pinned, in every scope, including through an explicit unbind. Unbinding <code>y</code> is a statement about READ mode, and it must not quietly leave a text pane with no way at all to copy what you just selected.</li>
+<li><strong>Every list that holds something worth copying binds <code>y</code>.</strong> A pane that shows bytes, a row, or a line of record and answers nothing to <code>y</code> is a gap, not a design: the Intercept queue, the Evidence archive, the Project ACTIVITY feed and the OAST callback detail each had one and each now answers the letter. Where two copies live in one place and mean opposite things — OAST's list copies the payload gori <em>sent</em>, its detail copies what came <em>back</em> — only one can hold the chord (a scope has no focus dimension in the keymap), and the other keeps its space-menu letter.</li>
+<li><strong><code>/</code> filters the list you are looking at.</strong> Every list long enough to scroll answers it, including the three rule lists that did not: Colormarker, Match &amp; Replace and the Probe <strong>RULES</strong> sub-tab (~40 built-in rules across three sections). The bar is a <strong>lens</strong> — it hides rows, it never disables one — and <code>Esc</code> clears it. The one thing it changes is reordering: on the two lists where order decides which rule wins, a move is refused while a query is held, because a filtered list is not the order the rule engine holds.</li>
+<li><strong><code>f</code> has two tiers and one exception.</strong> It is <strong>freeze</strong> in every evidence context (an Issue's RELATED card, the evidence viewer) and <strong>find</strong> on the sub-tab strip — a different tier, which cannot collide. History's follow and the Comparer's fold-unchanged are <code>Space</code> menu entries instead; both are session-rare toggles, which is what L3 is for. The exception is the <strong>Intercept queue</strong>, where <code>f</code> forwards the held request and <code>⇧F</code> forwards them all: that is the tab's own loop key and its <code>f</code>/<code>⇧F</code> family is internally coherent, so it is documented rather than moved — the same call <code>Ctrl-R</code> gets for History → Repeater.</li>
+<li><strong><code>x</code> selects a line; <code>t</code> flips a row's flag.</strong> <code>x</code> means &quot;select this line&quot; in fourteen scopes, and it was &quot;enable/disable this rule&quot; in four (Colormarker, Match &amp; Replace, the Probe <strong>RULES</strong> list and the OAST providers). Those four now answer <code>t</code>, which is what <code>t</code> already means as <strong>mark</strong> in History, Issues, the Sitemap and the Intercept queue — a rule list has no marks, so nothing collides, and the Rewriter's toggle stops being a hand-rolled controller key and becomes an ordinary rebindable chord.</li>
+<li><strong><code>s</code> goes to the source, or flips the scope lens.</strong> Those are its only two meanings. <code>s</code> opens the tab a row lives in — the Evidence archive, an Issue's RELATED card, and the Probe list and detail — and everywhere it is not one of those, it is the Global scope lens. What it stopped meaning: swap A ⇄ B on the Comparer and the Diff (now <strong><code>w</code></strong>), and global ⇄ project on the Colormarker and Match &amp; Replace rule lists (now <code>Space</code> menu entries, so the lens is no longer shadowed there). One shadow is left and named: the Project <strong>ACTIVITY</strong> feed's <code>s</code> cycles the source chip, because that pane's <code>/</code> bar is a free-text query and does not parse <code>source:</code> / <code>level:</code> / <code>actor:</code> to fold the three chips into.</li>
+<li>The space menu is <strong>not</strong> an INS fallback: text editors swallow keys upstream, so <code>Space</code> stays a literal character there. An action that has to be reachable while typing needs a Ctrl chord, and a mnemonic alone is not enough. (This is why <code>Ctrl-Q</code>, not the space menu alone, carries the Repeater/Fuzzer decoder-chain editor after it gave <code>Ctrl-Y</code> up to Copy.)</li>
+<li><strong>History → Repeater</strong> and <strong>Repeater send</strong> stay on <strong><code>Ctrl-R</code></strong> (same muscle memory). Do not move History→Repeater to bare <code>r</code>.</li>
+<li><strong><code>r</code> sends to the Repeater; <code>Ctrl-R</code> runs.</strong> Bare <code>r</code> is &quot;send this row to the Repeater&quot; in the five scopes that have a flow to send, and nothing elsewhere: the Diff's Run moved to <code>Ctrl-R</code> (which already owns Run in nine scopes), OAST's Resume listener moved to <code>Shift-R</code>, and the Project ACTIVITY feed's Refresh is a <code>Space</code> menu entry — a feed with a refresh key probably wants none at all, since it already re-reads on entry, on a peer's write and on the poll. The sub-tab strip's <code>r</code> = rename is a different tier and is unaffected.</li>
+<li>Match &amp; Replace and Notifications ship keyless (palette / badge); rebind them if you want a Global chord.</li>
+</ul>
+<h2 id="grammar">One bare letter, one question</h2>
+<p>Bare letters are settled per <strong>question</strong>, not per tab. An action takes one of these only if it
+answers that letter's question; anything else starts at L3 (the space menu).</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Enter</code></td>
+<td>show this row in place</td>
+</tr>
+<tr>
+<td><code>o</code></td>
+<td>open this row&#39;s own detail (<code>Enter</code>&#39;s alias; on the Sitemap <code>Enter</code> expands, so <code>o</code> is the only one)</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td>go to the tab this row lives in — else the scope lens</td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>delete / dismiss the selected row</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>copy</td>
+</tr>
+<tr>
+<td><code>t</code></td>
+<td>flip this row&#39;s flag (mark, or a rule&#39;s on/off)</td>
+</tr>
+<tr>
+<td><code>a</code></td>
+<td>add a row here</td>
+</tr>
+<tr>
+<td><code>e</code></td>
+<td>edit the selected row</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>filter this list</td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>freeze (evidence) · find (the sub-tab strip)</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>send this to the Repeater</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>run</td>
+</tr>
+<tr>
+<td><code>w</code></td>
+<td>swap A ⇄ B</td>
+</tr>
+<tr>
+<td><code>x</code></td>
+<td>select this line</td>
+</tr>
+<tr>
+<td><code>Shift-X</code></td>
+<td>clear this tab (asks first)</td>
+</tr>
+<tr>
+<td><code>Space</code></td>
+<td>this tab&#39;s command menu</td>
+</tr>
+</tbody>
+</table>
+<p>Three exceptions are deliberate, each a tab's own loop key: <strong>Intercept</strong> <code>f</code> forwards (and
+<code>Shift-F</code> forwards all), <strong>History → Repeater</strong> and <strong>Repeater send</strong> stay on <code>Ctrl-R</code>, and the
+Project <strong>ACTIVITY</strong> feed's <code>s</code> cycles the source chip.</p>
+<h2 id="editing">Editing</h2>
+<p>The editor opens a working copy. Nothing is saved until you press <code>Enter</code>, and <code>Esc</code> discards every change.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> (or <code>j</code> / <code>k</code>), wheel</td>
+<td>Move the selection</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>Search the action list</td>
+</tr>
+<tr>
+<td><code>e</code> or <code>Space</code></td>
+<td>Rebind the selected action, then press the new key</td>
+</tr>
+<tr>
+<td><code>x</code> or <code>Backspace</code></td>
+<td>Unbind the selected action</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>Reset the selected action to its default</td>
+</tr>
+<tr>
+<td><code>Shift-R</code></td>
+<td>Reset every action to its defaults</td>
+</tr>
+<tr>
+<td><code>←</code> / <code>→</code></td>
+<td>Cycle the OS default profile (see below)</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>Save + apply (live, no restart)</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Discard and close</td>
+</tr>
+</tbody>
+</table>
+<p>When you start a rebind the footer shows <em>&quot;press a key to bind&quot;</em>. Press the chord you want, modifiers included, except the ones listed under <em>Reserved keys</em> below. If the key is reserved or already used by another action <strong>in the same place</strong>, the editor refuses it and tells you why; capture stays open so you can try another key.</p>
+<p>A row's chord shows <code>(unbound)</code> when nothing is bound. The <code>●</code> marker means you've changed it from the default; <code>·</code> means it's at the default.</p>
+<h2 id="conflicts">Conflicts</h2>
+<p>Two actions may share a key only if they fire in <strong>different</strong> places. That's by design (<code>s</code> is &quot;scope lens&quot; almost everywhere but &quot;go to source&quot; on Probe, <code>c</code> is &quot;toggle capture&quot; everywhere except the Intercept queue where it cycles the catch direction). The editor blocks only a <strong>same-place</strong> collision, because there the keymap could keep just one of them.</p>
+<h2 id="digits">The Digit Family</h2>
+<p>The tab bar is <strong>nine numbered slots</strong>, and the numbers are the primary way to move:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>1</code>–<code>9</code></td>
+<td>Jump to slot N on the tab bar</td>
+</tr>
+<tr>
+<td><code>0</code></td>
+<td><strong>Go to tab…</strong> — a type-to-filter list of all 21 tabs, each with a line on what it is for</td>
+</tr>
+<tr>
+<td><code>⇧1</code>–<code>⇧9</code></td>
+<td>Jump to sub-tab N of the active tab</td>
+</tr>
+<tr>
+<td><code>⇧0</code></td>
+<td><strong>Find sub-tab…</strong> — the same picker <code>f</code> opens from the strip</td>
+</tr>
+</tbody>
+</table>
+<figure class="tui-shot">
+  <img src="/images/tui/tab-goto.svg" alt="gori Go to tab card: a filter bar over the whole tab catalog, the nine tabs on the bar wearing the digits 1 to 9 and everything else wearing none, each row followed by a line saying what that tab is for">
+  <figcaption><code>0</code> opens the whole catalog. The nine on the bar wear the digit that reaches them; the rest wear none — that is the only difference being off the bar makes.</figcaption>
+</figure>
+<p>These work from <strong>everywhere</strong> — the tab bar, the sub-tab strip, a list body, a drill-in
+detail, a read-only pane — with one exception: while a field is taking text (an editor in
+INS, a <code>/</code> query bar or search, a line prompt, a picker's filter, the CVSS scorer, the
+Decoder's CHAIN field), a digit is a character. It is the same rule <code>Space</code> follows: where
+<code>Space</code> types a space, <code>3</code> types a 3 — which is what makes <code>base64</code>, <code>sha256</code> and <code>rot13</code>
+typeable into a conversion chain.</p>
+<p>The bar paints the numbers by default (<strong>Preferences → Layout → Tab numbers</strong>, <code>settings:layout</code>).
+The pill just past the last tab reads <code>0:Tabs</code> — the key, and what it opens. It sits two
+columns after the ninth slot rather than pinned to the right edge, so the order <code>→</code> walks and
+the order you read are the same one; only when the strip stops fitting beside it does it pin
+right and let the tabs scroll. It is there whatever your layout is: <code>0</code> reaches the whole
+catalog, the nine on the bar included, so there is nothing for it to count and no layout that
+makes it disappear. The run to the right of it is left free on purpose — a place for a readout
+that is not a tab.</p>
+<h3 id="nine-slots-and-the-tenth-tab">Nine slots, and the tenth tab</h3>
+<p><code>settings:tabs</code> refuses a tenth tab and says so — <code>⇧K</code> a row up across the seam instead, which
+trades it onto the bar and the last slot off. A layout saved by an older
+build (the bar used to be unbounded) is truncated to its <strong>first nine, in your own order</strong>,
+and gori names the folded tabs once on the launch that does it.</p>
+<p>One tab can still ride past the ninth slot: an off-bar tab you jumped to with <code>0</code> sits at the
+far right of the bar, <strong>without a number</strong>, until you leave it. It is where you are standing,
+not a slot you arranged — and no digit points at it.</p>
+<p>If you want the old unbounded bar back, turn off <strong>Preferences → Layout → Tab bar slots</strong>.
+The bar then scrolls with <code>‹</code> <code>›</code> again, <code>1</code>–<code>9</code> still reach its first nine tabs, and <code>0</code>
+still reaches every tab.</p>
+<h3 id="keyboard-layouts">Keyboard layouts</h3>
+<p>A terminal speaking the <strong>kitty keyboard protocol</strong> reports <code>⇧3</code> as <code>3</code> plus a shift flag,
+and gori binds that. Every other terminal sends the shifted digit as a <strong>character</strong> — <code>#</code> on
+a US layout — which gori folds back onto <code>⇧3</code>. On a <strong>non-US layout</strong> that character is a
+different one, so <code>⇧1</code>–<code>⇧9</code> work where your terminal reports the shift modifier and not
+otherwise. Both fallbacks are always live: <strong><code>f</code></strong> on the sub-tab strip opens the same picker
+<code>⇧0</code> does, and <code>Ctrl-1</code>…<code>Ctrl-9</code> is the alias for <code>⇧1</code>–<code>⇧9</code> on terminals that deliver it.</p>
+<h2 id="space-menu">The space menu</h2>
+<p><code>Space</code> in a navigable pane opens the action menu for <strong>where you are standing</strong> — the
+pane's own verbs, grouped under <code>COMMON</code> and the focused area's label, each fronted by one
+mnemonic letter. It is not the palette: there is no typing and no filter, just one keypress
+per row.</p>
+<h3 id="one-menu-per-tab-whatever-has-focus">One menu per tab, whatever has focus</h3>
+<p>Nine tabs carry a <strong>sub-tab strip</strong> — Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT,
+Cookie, Comparer and Notes. The strip's own actions used to be a context section like any
+other: they appeared <em>only</em> while the strip had focus, so from a body pane you had to walk
+focus up a level before <code>Space</code> would even offer &quot;close this sub-tab&quot;.</p>
+<p>They are now their own <code>SUB-TABS</code> bucket, and it is in the menu from <strong>every</strong> level of a tab
+that has a strip — the body panes, the strip itself and the tab bar. With <code>⇧1</code>–<code>⇧9</code> dropping
+you anywhere, what <code>Space</code> offers must not depend on which row the cursor happens to be on.</p>
+<h3 id="the-same-nine-letters-on-all-nine-strips">The same nine letters on all nine strips</h3>
+<p>The bucket is one table to learn, not nine. A tab that does not have an action simply omits
+the row; it never spends that letter on something else.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+<th>Direct chord</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>n</code></td>
+<td>New sub-tab</td>
+<td><code>Ctrl-N</code></td>
+</tr>
+<tr>
+<td><code>w</code></td>
+<td>Close sub-tab (or every marked one)</td>
+<td><code>Ctrl-W</code></td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>Duplicate sub-tab</td>
+<td></td>
+</tr>
+<tr>
+<td><code>e</code></td>
+<td>Rename sub-tab</td>
+<td><code>r</code> on the strip</td>
+</tr>
+<tr>
+<td><code>t</code></td>
+<td>Tag sub-tab (Repeater)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>Search sub-tabs — the <code>⌕</code> picker</td>
+<td><code>f</code> on the strip, <code>⇧0</code> anywhere</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>Filter the strip (name / host / method / tag)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>T</code></td>
+<td>Mark every sub-tab the filter shows</td>
+<td></td>
+</tr>
+<tr>
+<td><code>N</code></td>
+<td>Clear the sub-tab marks</td>
+<td><code>Esc</code> on the strip</td>
+</tr>
+</tbody>
+</table>
+<p><code>Ctrl-N</code> and <code>Ctrl-W</code> are shown beside their rows, and they work from any pane on all nine
+tabs — the menu teaches the faster key rather than hiding it. (Miner and Sequencer seed
+their sessions from a run, so they have no <code>n</code>.)</p>
+<p>Because the bucket rides along with every pane, its nine letters are <strong>reserved in every view
+of those tabs</strong>. A pane action that wanted one had to move: the rule is that the <em>pane</em> letter
+yields, since the strip's letter has to read the same on all nine strips. <code>Space</code> <code>W</code> marks a
+word in the Repeater/Fuzzer editors, <code>Space</code> <code>D</code> toggles the response diff, and the JWT and
+Cookie lens toggles moved to <code>m</code> (Mode — the Decoder's letter for the same gesture).</p>
+<h2 id="editor-keysets">Editor Keysets</h2>
+<p>gori's text panes are <strong>modal</strong>: <code>Esc</code> and <code>i</code> move between READ and INSERT, and in READ the bare letters are commands. The shipped grammar is helix-shaped — <strong><code>x</code> selects the line, then <code>y</code> copies it</strong> — which is one gesture away from vim, where the same thing is <code>V</code> then <code>y</code>. That one difference is what a vim-trained hand fights all day.</p>
+<p><strong>Preferences → Editor &amp; Keys → Keys → Editor keyset</strong> (<code>Ctrl-,</code>), or <strong><code>settings:keys</code></strong> in the palette, switches it:</p>
+<table>
+<thead>
+<tr>
+<th>Keyset</th>
+<th>Select line</th>
+<th>Undo</th>
+<th>Find</th>
+<th>Append</th>
+<th>Top / bottom</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>helix-ish</strong> (default)</td>
+<td><code>x</code></td>
+<td><code>Ctrl-Z</code></td>
+<td><code>Ctrl-F</code></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>vim-ish</strong></td>
+<td><code>⇧V</code></td>
+<td><code>u</code></td>
+<td><code>/</code></td>
+<td><code>a</code></td>
+<td><code>g</code> / <code>⇧G</code></td>
+</tr>
+</tbody>
+</table>
+<p>Everything not in that table is the same under both keysets, because gori already spells it the way vim does: <code>i</code> enters INSERT, <code>Esc</code> leaves it, <code>y</code> copies, <code>Ctrl-G</code> goes to a line, and arrows plus <code>Shift</code> extend a selection.</p>
+<h3 id="a-keyset-is-a-mapping-not-an-emulation">A keyset is a mapping, not an emulation</h3>
+<p>It is a named bundle of key <strong>overrides</strong> for a small, fixed set of editor actions — exactly the mechanism the <a href="#os-default-profiles">OS default profiles</a> are, one layer up. It does not add an operator-pending grammar, registers, counts, text objects, or any editing operation gori's panes do not already have. A READ-mode pane is a caret, a selection and a copy; naming keys for operations that do not exist is how &quot;vim mode&quot; becomes a promise the editor breaks.</p>
+<p>So some vim spellings are deliberately <strong>not</strong> offered, each for a reason you can check:</p>
+<ul>
+<li><strong><code>gg</code>, <code>dd</code>, <code>yy</code> and every other two-key sequence.</strong> A gori chord is one keystroke. <code>g</code> alone is the top of the pane, and <code>y</code> with nothing selected already copies the whole pane — which is the useful half of what <code>yy</code> means.</li>
+<li><strong><code>:</code> commands, including <code>:42</code>.</strong> A bare <code>:</code> is <a href="#reserved-keys">reserved</a> for gori's own command line, so go-to-line stays <code>Ctrl-G</code> under both keysets.</li>
+<li><strong>Delete.</strong> There is no delete-line in a READ-mode pane to put on <code>dd</code> or <code>D</code>. Editing happens in INSERT.</li>
+<li><strong>The enable/disable <code>x</code> on a rule list</strong> (Colormarker, Probe rules, OAST providers, Rewriter). That <code>x</code> turns a rule on and off; it is not a selection, and a keyset does not move a state change onto <code>⇧V</code>.</li>
+<li><strong>The Intercept queue's select-line</strong>, which ships keyless on purpose — that pane reaches it from the space menu, and a keyset respells keys rather than handing one to a pane whose author decided against it.</li>
+</ul>
+<h3 id="the-override-order">The override order</h3>
+<p>Four layers, most specific first:</p>
+<pre><code class="language-text hljs">your own rebinding  &gt;  the keyset  &gt;  the OS default profile  &gt;  the shipped chord
+</code></pre>
+<p>A keyset is therefore a better <strong>default</strong>, never a ceiling: pick <code>vim-ish</code> and then rebind one action in the <a href="#editing">Hotkeys editor</a>, and that one stays where you put it. &quot;Reset to default&quot; on a row puts it back to the <strong>active keyset's</strong> spelling, not to the shipped one.</p>
+<p>Every surface follows the active keyset with no extra step, because they all read the effective keymap: the status hint strips, the Help tab, the command palette, the space menu and the Hotkeys editor's own conflict messages. Under <code>vim-ish</code> the Notes footer reads <code>/ find</code> where it read <code>^F find</code>, and binding something to <code>⇧V</code> is refused by name because Select line is there.</p>
+<h3 id="it-does-not-touch-the-space-menus-letters">It does not touch the space menu's letters</h3>
+<p>A keyset moves the key you press <strong>in the pane</strong>, not the letter the <a href="#space-menu">space menu</a> puts in front of a row — the same rule any per-action rebind follows, and the reason those letters are stable identities. Under <code>vim-ish</code> the menu still fronts Select line with <code>x</code>, and prints the live chord beside it:</p>
+<pre><code class="language-text hljs">│ x Select line   ⇧V │
+</code></pre>
+<p>so the card teaches both halves rather than making you guess which one it means. The nine <code>SUB-TABS</code> letters (<code>n</code> <code>w</code> <code>d</code> <code>e</code> <code>t</code> <code>f</code> <code>/</code> <code>T</code> <code>N</code>) likewise mean the same thing on all nine strips whichever keyset you pick. The two namespaces cannot collide: the menu is modal, and a keyset only ever writes to the keymap.</p>
+<p>That includes <code>/</code>, which is a <code>SUB-TABS</code> letter <em>and</em> <code>vim-ish</code>'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in — and gori checks the chord half at boot: <code>validate_chords!</code> sweeps every (OS profile × keyset) cell, and a keyset letter that shadowed a pane's own key would fail the build rather than ship.</p>
+<h3 id="what-still-works-whatever-you-pick">What still works whatever you pick</h3>
+<p><code>Ctrl-Z</code> keeps undoing <strong>inside INSERT</strong> under <code>vim-ish</code> — that guard runs before the keymap in all nine text editors, which is where a typing hand wants it. <code>Ctrl-F</code> likewise still opens the find prompt, INSERT included; <code>/</code> is an addition in READ, not a replacement. And <code>i</code> is refused with a message on a read-only pane that sits beside an editor (the Repeater response, the Fuzzer results, the Decoder output), under both keysets.</p>
+<h2 id="reserved-keys">Reserved Keys</h2>
+<p>Some keys can't be rebound because the terminal or gori needs them:</p>
+<ul>
+<li>
+<p><strong>Quit</strong>: <code>Ctrl-C</code>, <code>Ctrl-D</code>.</p>
+</li>
+<li>
+<p><strong>Indistinguishable from named keys</strong>: <code>Ctrl-M</code> / <code>Ctrl-J</code> (Enter), <code>Ctrl-I</code> (Tab), <code>Ctrl-H</code> (Backspace), <code>Ctrl-[</code> (Escape).</p>
+</li>
+<li>
+<p><strong>Structural</strong>: <code>Enter</code>, <code>Esc</code>, <code>Tab</code>, <code>Backspace</code>, <code>Space</code> (the space-menu leader), and a bare <code>:</code> (the command line).</p>
+</li>
+<li>
+<p><strong>gori shortcuts claimed before the keymap</strong>: <code>Ctrl-G</code> (go to line), <code>Ctrl-F</code> (find, then <code>Tab</code> for find &amp; replace), <code>Ctrl-B</code> (reveal whitespace), <code>Ctrl-E</code> (external editor), <code>Ctrl-P</code> (command palette), <code>Ctrl-N</code> (new repeater/fuzz/note), <code>Ctrl-W</code> (close the sub-tab, or every marked one), <code>Ctrl-Z</code> (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter and the Project description), <code>Ctrl-,</code> (Preferences), and <code>Ctrl-1</code>…<code>Ctrl-9</code> (switch sub-tab — the <strong>alias</strong> for <code>⇧1</code>–<code>⇧9</code>, see <a href="#digits">The digit family</a>). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason <strong>Command palette</strong>, <strong>Reveal whitespace</strong>, <strong>New repeater request</strong>, and <strong>New fuzz session</strong> aren't listed in the editor. Their key is fixed.</p>
+<p>You can't move an individual key out of that family, but you <em>can</em> give the whole family a second modifier; see <a href="#command-modifier">Command modifier</a> below.</p>
+<p><code>Ctrl-G</code> / <code>Ctrl-F</code> act on whichever multi-line pane has focus: the Repeater's request and response, the History detail, the Intercept editor, Notes, the Project description, the Decoder's INPUT and OUTPUT, and the Fuzzer's template and result detail. <code>Tab</code> switches find to find &amp; replace on the six that are editable; everything else is read-only, and the prompt says so rather than offering a swap it cannot make.</p>
+</li>
+</ul>
+<p>Flow-control/signal chords like <code>Ctrl-S</code> are <strong>not</strong> reserved; gori runs the terminal in raw mode, so they reach the app (Repeater's SNI toggle ships on <code>Ctrl-S</code>).</p>
+<h2 id="os-default-profiles">OS Default Profiles</h2>
+<p>The <code>←</code> / <code>→</code> profile selector picks which <strong>default</strong> key set a fresh (un-overridden) binding uses: <code>auto</code> (tracks the platform gori was built for), <code>macOS</code>, <code>Linux</code>, or <code>Windows</code>. Your own rebindings always sit on top of the chosen profile, regardless of OS.</p>
+<p>Today the per-OS defaults are identical: in a terminal, <code>Ctrl</code>+letter chords reach the application on macOS, Linux, and Windows alike, and the genuinely hazardous keys are the reserved control characters above (blocked everywhere). The profile mechanism is in place so a real per-terminal clash can be fixed without touching dispatch. For now, <code>auto</code> is the right choice for everyone.</p>
+<h2 id="command-modifier">Command Modifier</h2>
+<p>The chord family listed under <em>Reserved keys</em> is fixed because a hardcoded guard runs before the keymap. That's a problem when your terminal never delivers the Ctrl form at all:</p>
+<ul>
+<li><strong><code>Ctrl-1</code>…<code>Ctrl-9</code> is undeliverable on many terminals</strong>: there is no control character for it, so the sub-tab jumps simply never arrive. You never need it: <strong><code>⇧1</code>–<code>⇧9</code></strong> is the primary sub-tab jump (see <a href="#digits">The digit family</a>), and on a sub-tab strip <strong><code>f</code></strong> lists and searches every open sub-tab, from whichever chip you are standing on. (The <strong><code>⌕</code></strong> at the strip's left edge opens the same list; click it, or press <code>←</code> from the first chip.)</li>
+<li><strong>A multiplexer eats the chord first.</strong> tmux's default prefix is <code>Ctrl-B</code>, which gori also uses for reveal-whitespace.</li>
+</ul>
+<p><strong>Preferences → Editor &amp; Keys → Keys → Command modifier</strong> (<code>Ctrl-,</code>), or <strong><code>settings:keys</code></strong> in the palette, switches that family between <code>Ctrl</code> and <code>Option (⌥)</code>. It is an <strong>alias, not a swap</strong>: with Option selected, <code>⌥P</code> opens the palette <em>and</em> <code>^P</code> still does. Only the advertised form changes: status hints, the Help tab and the palette all start showing <code>⌥P</code>, <code>⌥N</code>, <code>⌥1-9</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Modifier</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl</code> (default)</td>
+<td><code>^P</code> <code>^N</code> <code>^W</code> <code>^G</code> <code>^F</code> <code>^B</code> <code>^E</code> <code>^Z</code> <code>^,</code> <code>^1</code>-<code>^9</code></td>
+</tr>
+<tr>
+<td><code>Option (⌥)</code></td>
+<td>the above <strong>plus</strong> <code>⌥P</code> <code>⌥N</code> <code>⌥W</code> <code>⌥G</code> <code>⌥F</code> <code>⌥B</code> <code>⌥E</code> <code>⌥Z</code> <code>⌥,</code> <code>⌥1</code>-<code>⌥9</code></td>
+</tr>
+</tbody>
+</table>
+<p>Because Ctrl keeps working, picking Option can never lock you out of the palette. That is worth knowing before you flip it, since <strong>on macOS your terminal must be set to send Option as Meta/Esc+</strong> or <code>⌥P</code> arrives as <code>π</code> and nothing happens:</p>
+<ul>
+<li><strong>Terminal.app</strong>: Settings → Profiles → Keyboard → <em>Use Option as Meta key</em></li>
+<li><strong>iTerm2</strong>: Settings → Profiles → Keys → Left/Right Option key → <em>Esc+</em></li>
+</ul>
+<p>Two things it does not do. It doesn't touch chords the editor can already rebind (<code>^R</code> send, <code>^S</code> SNI, …); rebind those per action instead. And if you had bound an action to an <code>Option</code> chord in the family (<code>alt-n</code>, say), turning the alias on shadows it: the guard wins, that action reverts to its default, and the save toast names it.</p>
+<p>The first-run wizard recaps this on its Review step, so you can pick a modifier before ever reaching the app.</p>
+<h2 id="where-its-stored">Where It's Stored</h2>
+<p>Saved to <code>~/.gori/settings.json</code> (override the directory with <code>$GORI_HOME</code>) under a sparse <code>hotkeys</code> block. Only the bindings you changed are written, as a list of chord labels per action id; an empty list is an explicit unbind:</p>
+<pre><code class="language-json hljs">{
+  &quot;hotkeys&quot;: {
+    &quot;os&quot;: &quot;auto&quot;,
+    &quot;command_modifier&quot;: &quot;alt&quot;,
+    &quot;keyset&quot;: &quot;vim&quot;,
+    &quot;bindings&quot;: {
+      &quot;rules.edit&quot;: [&quot;g&quot;],
+      &quot;scope.edit&quot;: []
+    }
+  }
+}
+</code></pre>
+<p><code>command_modifier</code> is <code>&quot;ctrl&quot;</code> (the default) or <code>&quot;alt&quot;</code>, and <code>keyset</code> is <code>&quot;helix&quot;</code> (the default) or <code>&quot;vim&quot;</code> — see <a href="#editor-keysets">Editor keysets</a>. An unknown value for either falls back to the default rather than to no keys. An untouched install writes no <code>hotkeys</code> block at all.</p>
+<p>An absent action uses the profile default. Unknown ids and unparseable chords are ignored on load, so hand-edits and version drift degrade gracefully.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>Only an action's <strong>primary</strong> chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of <code>j</code> / <code>k</code>) aren't listed.</li>
+<li>Every surface that names a rebindable chord reads it from the effective keymap: the <strong>command palette</strong>, the <strong>space menu</strong>, the <strong>Help</strong> tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed <code>^P</code> / <code>^N</code> / <code>^W</code> / <code>^1-9</code> family (the sub-tab alias) and structural keys (<code>esc</code>, <code>↵</code>, arrows, <code>↹</code>).</li>
+<li>Space-menu <strong>mnemonic</strong> letters are stable action identities (Helix-like); rebinding changes the <em>direct</em> chord, not the space-menu letter.</li>
+<li>Where the <strong>sub-tab strip</strong> already binds a letter for an action, the menu spells that action with the same letter where it can: <code>f</code> lists and searches the sub-tabs, <code>t</code> marks a chip and <code>⇧T</code> marks the strip. Rename is the one it cannot match — the strip binds <code>r</code>, and <code>r</code> is <code>Run</code>/<code>Send</code> (the menu echo of <code>Ctrl-R</code>) in the Repeater, Fuzzer, Miner and Sequencer, where a rename does not get to displace it. One action must not have two spellings across the nine strips, so rename is <strong><code>e</code> on all of them</strong> and the strip's <code>r</code> stays a raw chord. See <a href="#space-menu">the space menu</a> for the whole table.</li>
+<li>The editor actions are rebindable individually, and as a set via <a href="#editor-keysets">Editor keysets</a>. What the rebind editor will not move is the handful whose chord a hardcoded guard answers first: <code>Esc</code> (back to READ), <code>Ctrl-Z</code>, <code>Ctrl-F</code> and <code>Ctrl-G</code>. They are listed in the Help sheet so you can read them, and a keyset can give them a second, bare spelling — which is how <code>vim-ish</code> reaches <code>u</code> and <code>/</code>.</li>
+<li>Press <strong><code>?</code></strong> from a navigable context to jump to the <strong>Help</strong> tab (mitmproxy-style cheat-sheet).</li>
+</ul>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/guide/settings/">Settings</a>: the Preferences modal and every section in it</li>
+<li><a href="/guide/themes/">Themes</a>: switch or create colour themes the same way</li>
+<li><a href="/reference/config/">Configuration Reference</a>: the <code>hotkeys</code> key in <code>settings.json</code></li>
+</ul>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  
+  <a href="https://gori.hahwul.com/guide/themes/" rel="prev"><span>← Previous</span><strong>Themes</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/guide/statusline/" rel="next"><span>Next →</span><strong>Statusline</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>

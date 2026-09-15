@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Preferences 모달에서 gori의 단축키를 재지정합니다.">
+  <title>단축키 - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="단축키">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/guide/hotkeys/">
+  <meta property="og:description" content="Preferences 모달에서 gori의 단축키를 재지정합니다.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="단축키">
+  <meta name="twitter:description" content="Preferences 모달에서 gori의 단축키를 재지정합니다.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/guide/hotkeys/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"단축키","url":"https://gori.hahwul.com/ko/guide/hotkeys/","description":"Preferences 모달에서 gori의 단축키를 재지정합니다."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://gori.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"단축키"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/hotkeys/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/hotkeys/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+    <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+      <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/guide/hotkeys/" hreflang="en" lang="en" aria-label="EN: English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/hotkeys/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+  <a role="menuitem" href="https://gori.hahwul.com/ko/reference/brand/">브랜드 키트 →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">문서 둘러보기</summary>
+
+    
+    <nav class="manual-nav" aria-label="문서">
+      <span class="manual-nav-label">문서</span>
+
+      
+      <details class="nav-group nav-section">
+        <summary>시작하기</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <section class="nav-section guide-navigation" aria-labelledby="guide-navigation-title">
+        <h2 id="guide-navigation-title">가이드</h2>
+        <a class="nav-overview" href="https://gori.hahwul.com/ko/guide/">개요</a>
+
+        
+        
+        
+        
+        <details class="nav-group">
+          <summary>핵심</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>워크벤치</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/cookie/">Cookie</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/authorize/">Authorize</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>자동화</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/scripting/">스크립팅</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group" open>
+          <summary>커스터마이즈</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/" class="active" aria-current="page">단축키</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/ko/guide/statusline/">Statusline</a></li>
+        </ul></details>
+        
+      </section>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/ko/playbooks/">
+        <span>gori 실전 가이드</span>
+        <strong>플레이북 →</strong>
+      </a>
+      
+
+      
+      <details class="nav-group nav-section">
+        <summary>레퍼런스</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/capabilities/">기능 매트릭스</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/brand/">브랜드 키트</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="현재 위치">
+      <a href="https://gori.hahwul.com/ko/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <span aria-hidden="true">/</span><span>커스터마이즈</span>
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">가이드</p>
+      <h1>단축키</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>gori의 단축키는 <strong>Hotkeys</strong> 편집기에서 재지정합니다. Preferences(<code>Ctrl-,</code> → <strong>Editor &amp; Keys</strong> → <strong>Hotkeys</strong>에서 <code>↵</code>)로 들어가거나, 커맨드 팔레트(<code>Ctrl-P</code>)의 **<code>settings:hotkeys</code>**로 바로 갈 수 있습니다. 에디터는 재지정 가능한 모든 동작을 발생 위치별(GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …)로 묶어 나열합니다. 행을 고르고, 새 키를 누르면, 끝입니다.</p>
+<pre><code class="language-text hljs">Ctrl-,  → Editor &amp; Keys → Hotkeys
+Ctrl-P  → settings:hotkeys
+</code></pre>
+<h2 id="key-budget-how-new-shortcuts-earn-a-key">키 예산 (새 단축키가 키를 얻는 방식)</h2>
+<p>맨 글자 키는 귀합니다. 새 동작은 키를 차지하기 전에 <strong>가격 등급</strong>을 정해야 합니다.</p>
+<table>
+<thead>
+<tr>
+<th>등급</th>
+<th>가격</th>
+<th>언제</th>
+<th>예시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0 구조적</strong></td>
+<td><code>Esc</code> <code>Enter</code> <code>Tab</code> 화살표 <code>Space</code>(리더)</td>
+<td>항상</td>
+<td>포커스, 열기/닫기, READ/INS, space 메뉴</td>
+</tr>
+<tr>
+<td><strong>L1 루프</strong></td>
+<td>맨 글자 또는 스티키 패밀리(<code>^R</code>)</td>
+<td>분당 여러 번</td>
+<td>History/Issues <code>j/k</code> <code>/</code> <code>y</code> <code>t</code>(표시) <code>v</code>(뷰), 서브탭 스트립 <code>t</code>(표시), Repeater 전송</td>
+</tr>
+<tr>
+<td><strong>L2 세션 호흡</strong></td>
+<td>Global 맨 글자(상한: <code>c</code> <code>i</code> <code>s</code>만)</td>
+<td>세션당 여러 번</td>
+<td>capture, intercept, scope 렌즈</td>
+</tr>
+<tr>
+<td><strong>L3 맥락적</strong></td>
+<td><code>Space</code> 다음 니모닉</td>
+<td>가끔, 패널 로컬</td>
+<td>compare, mine, send-group, copy-as</td>
+</tr>
+<tr>
+<td><strong>L4 드문 동작 / 설정</strong></td>
+<td>팔레트(<code>Ctrl-P</code>) 또는 Preferences(<code>Ctrl-,</code>)</td>
+<td>드물게</td>
+<td>설정, Match &amp; Replace, 알림</td>
+</tr>
+</tbody>
+</table>
+<p>경험칙:</p>
+<ul>
+<li>새 패널 동작의 기본값은 L3(space 메뉴 전용)입니다. 루프가 입증된 뒤에야 직접 키로 승격하세요.</li>
+<li><strong>Ctrl</strong>은 타이핑 중(INS)에도 작동해야 하는 동작, 그리고 워크벤치의 실행·중지(<code>Ctrl-R</code> / <code>Ctrl-X</code>)를 위한 것입니다. 맨 글자에서 한 단계 올리는 범용 승격 수단이 아닙니다.</li>
+<li><strong>Shift</strong>는 탭 전체를 비우는 동작을 맡습니다. <code>⇧X</code>는 clear가 있는 모든 탭(History·Probe·Authorize·Issues·프로젝트 ACTIVITY 피드)에서 같은 키이고, 스페이스 메뉴 글자는 그 옆의 <code>X</code>입니다. <code>c</code>가 아니라 <code>x</code>인 이유는 shift 아래에 무엇이 있느냐입니다: 맨 <code>x</code>는 그 다섯 스코프 어디에도 바인딩되어 있지 않지만 맨 <code>c</code>는 다섯 곳 모두에서 살아 있고(<code>capture.toggle</code>, Probe 목록에서는 dismiss), 프로젝트를 지우는 동작이 하루 종일 누르는 키 바로 위 shift에 있어서는 안 됩니다. 파괴적인 코드는 <strong>누르기 전에 읽을 수 있는 곳에 이름이 적혀 있어야</strong> 하고(스페이스 메뉴만이 아니라 Help 시트와 그 탭의 본문 힌트에), 먼저 확인을 물어야 합니다.</li>
+<li><strong><code>d</code>는 파괴합니다.</strong> 맨 <code>d</code>는 이 키를 바인딩한 모든 스코프(16곳)에서 선택한 행을 삭제하거나 무시합니다. Repeater의 응답 diff가 유일한 예외였고, 이제 <code>⇧D</code>로 옮겨서 반사적으로 누른 <code>d</code>가 표시 토글에 떨어지지 않습니다. 스페이스 메뉴 글자도 <code>⇧D</code>입니다. <code>d</code>는 아홉 개 서브탭 스트립 전부에서 <strong>서브탭 복제</strong>이고(<a href="#space-menu">space 메뉴</a> 참고) 그 버킷은 모든 패널에 함께 그려지므로, 맨 글자는 더 이상 diff 토글의 것이 아닙니다 — 덕분에 메뉴 행과 키보드가 같은 철자를 씁니다. 삭제가 아닌 새 패널 동작은 <code>d</code>를 가져가지 않습니다.</li>
+<li><strong>복사가 그 규칙의 실례입니다.</strong> <code>y</code>는 READ에서, <code>Ctrl-Y</code>는 <strong>INS에서도</strong>, 모든 텍스트 상자에서 복사합니다. INS에서 맨 <code>y</code>는 그냥 문자이고, <code>Shift</code>+화살표로 만든 선택 위에 타이핑하면 그 선택을 <em>덮어씁니다</em>. 그래서 복사 반사에는 타이핑을 견디는 코드가 필요합니다. 둘은 같은 동사(<code>*.copy</code>)이므로 재지정은 READ 쪽 글자만 옮기고 <strong><code>Ctrl-Y</code>는 그대로 남습니다</strong>. 모든 스코프에서, 명시적인 해제(unbind)를 해도 마찬가지입니다. <code>y</code>를 푸는 것은 READ 모드에 대한 결정이지, 방금 선택한 것을 복사할 방법을 텍스트 패널에서 조용히 없애도 된다는 뜻이 아니기 때문입니다.</li>
+<li><strong>복사할 것이 있는 목록은 모두 <code>y</code>를 바인딩합니다.</strong> 바이트나 행, 기록 한 줄을 보여주면서 <code>y</code>에 아무 반응이 없는 패널은 설계가 아니라 구멍입니다. Intercept 큐, Evidence 보관함, 프로젝트 ACTIVITY 피드, OAST 콜백 상세가 각각 그런 구멍이었고 이제 모두 이 글자에 응답합니다. 한 곳에 복사가 둘 있고 서로 반대 방향을 가리킬 때는 — OAST 목록은 gori가 <em>보낸</em> 페이로드를, 상세는 <em>돌아온</em> 것을 복사합니다 — 코드는 하나만 가질 수 있고(키맵에는 포커스 차원이 없습니다), 나머지는 스페이스 메뉴 글자를 유지합니다.</li>
+<li><strong><code>/</code>는 지금 보고 있는 목록을 거릅니다.</strong> 스크롤이 필요한 목록은 모두 이 키에 응답하며, 그렇지 않던 세 규칙 목록 — Colormarker, Match &amp; Replace, Probe <strong>RULES</strong> 하위 탭(세 섹션에 걸친 내장 규칙 약 40개) — 도 이제 포함됩니다. 이 바는 <strong>렌즈</strong>입니다. 행을 숨길 뿐 비활성화하지 않으며, <code>Esc</code>로 지웁니다. 바뀌는 것은 순서 변경 하나뿐입니다: 어떤 규칙이 이기는지를 순서가 결정하는 두 목록에서는, 질의가 걸린 동안 이동이 거절됩니다. 걸러진 목록은 규칙 엔진이 들고 있는 순서가 아니기 때문입니다.</li>
+<li><strong><code>f</code>는 두 계층과 예외 하나를 가집니다.</strong> 증거 맥락(Issue의 RELATED 카드, 증거 뷰어)에서는 <strong>freeze</strong>이고, 하위 탭 스트립에서는 <strong>find</strong>입니다 — 계층이 다르므로 충돌할 수 없습니다. History의 follow와 Comparer의 변경 없는 줄 접기는 대신 <code>Space</code> 메뉴 항목입니다. 둘 다 세션에 한 번 뒤집는 토글이고, 그것이 L3의 용도입니다. 예외는 <strong>Intercept 큐</strong>입니다. 거기서 <code>f</code>는 잡아둔 요청을 전달하고 <code>⇧F</code>는 전부 전달합니다. 그 탭 고유의 루프 키이고 <code>f</code>/<code>⇧F</code> 가족이 그 자체로 일관되므로, 옮기는 대신 문서로 남깁니다 — History → Repeater가 <code>Ctrl-R</code>에서 받은 것과 같은 판단입니다.</li>
+<li><strong><code>x</code>는 줄을 선택하고, <code>t</code>는 행의 플래그를 뒤집습니다.</strong> <code>x</code>는 열네 개 스코프에서 &quot;이 줄 선택&quot;이고, 네 곳(Colormarker·Match &amp; Replace·Probe <strong>RULES</strong> 목록·OAST providers)에서만 &quot;이 규칙 활성/비활성&quot;이었습니다. 이제 그 넷은 <code>t</code>에 응답합니다. <code>t</code>는 History·Issues·Sitemap·Intercept 큐에서 이미 **표시(mark)**를 뜻하고, 규칙 목록에는 표시가 없으므로 충돌하지 않습니다. 덕분에 Rewriter의 토글도 손으로 짠 컨트롤러 키를 벗어나 평범한 재지정 가능 코드가 되었습니다.</li>
+<li><strong><code>s</code>는 출처로 가거나, scope 렌즈를 뒤집습니다.</strong> 의미는 이 둘뿐입니다. <code>s</code>는 행이 사는 탭을 엽니다(Evidence 보관함, Issue의 RELATED 카드, Probe 목록과 상세). 그 밖의 모든 곳에서는 전역 scope 렌즈입니다. 더 이상 뜻하지 않게 된 것: Comparer와 Diff의 A ⇄ B 교체(이제 <strong><code>w</code></strong>), Colormarker와 Match &amp; Replace 규칙 목록의 global ⇄ project(이제 <code>Space</code> 메뉴 항목이라 렌즈를 가리지 않습니다). 가리는 곳이 한 군데 남아 있고 그것은 이름을 붙여 둡니다: 프로젝트 <strong>ACTIVITY</strong> 피드의 <code>s</code>는 source 칩을 순환합니다. 그 패널의 <code>/</code> 바는 자유 텍스트 질의라 <code>source:</code> / <code>level:</code> / <code>actor:</code>를 파싱하지 않아 세 칩을 접어 넣을 곳이 없기 때문입니다.</li>
+<li>space 메뉴는 INS의 대체 수단이 <strong>아닙니다</strong>. 텍스트 에디터가 키를 먼저 소비하므로 그곳에서 <code>Space</code>는 그냥 문자입니다. 타이핑 중에도 닿아야 하는 동작에는 Ctrl 코드가 필요하고, 니모닉만으로는 부족합니다. (Repeater/Fuzzer의 디코더 체인 편집기가 <code>Ctrl-Y</code>를 Copy에 넘겨준 뒤 space 메뉴만이 아니라 <code>Ctrl-Q</code>에 실린 이유가 이것입니다.)</li>
+<li><strong>History → Repeater</strong>와 <strong>Repeater 전송</strong>은 **<code>Ctrl-R</code>**로 유지됩니다(동일한 근육 기억). History→Repeater를 맨 글자 <code>r</code>로 옮기지 마세요.</li>
+<li><strong><code>r</code>는 Repeater로 보내고, <code>Ctrl-R</code>는 실행합니다.</strong> 맨 <code>r</code>는 보낼 플로우가 있는 다섯 스코프에서 &quot;이 행을 Repeater로 보내기&quot;이고, 그 밖에서는 아무것도 아닙니다. Diff의 Run은 <code>Ctrl-R</code>로 옮겼고(아홉 스코프에서 이미 Run을 맡고 있습니다), OAST의 Resume listener는 <code>Shift-R</code>로, 프로젝트 ACTIVITY 피드의 Refresh는 <code>Space</code> 메뉴 항목이 되었습니다 — 진입할 때·피어가 쓸 때·폴링할 때 이미 다시 읽으므로, 새로고침 키가 필요한 피드라면 아예 키가 없는 편이 낫습니다. 하위 탭 스트립의 <code>r</code>=이름 변경은 다른 계층이라 영향이 없습니다.</li>
+<li>Match &amp; Replace와 알림은 키 없이(팔레트 / 배지) 제공됩니다. Global 키 조합을 원하면 재지정하세요.</li>
+</ul>
+<h2 id="grammar">맨 글자 하나에 질문 하나</h2>
+<p>맨 글자는 탭별이 아니라 <strong>질문별</strong>로 정해집니다. 어떤 동작이 아래 글자를 가져가려면 그 글자의 질문에 답해야 하고, 그렇지 않으면 L3(스페이스 메뉴)에서 시작합니다.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>뜻</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Enter</code></td>
+<td>이 행을 그 자리에서 보여주기</td>
+</tr>
+<tr>
+<td><code>o</code></td>
+<td>이 행 자신의 상세 열기(<code>Enter</code>의 별칭. Sitemap에서는 <code>Enter</code>가 펼치기이므로 <code>o</code>가 유일한 키)</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td>이 행이 사는 탭으로 가기 — 아니면 scope 렌즈</td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>선택한 행 삭제·무시</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>복사</td>
+</tr>
+<tr>
+<td><code>t</code></td>
+<td>이 행의 플래그 뒤집기(표시, 또는 규칙의 on/off)</td>
+</tr>
+<tr>
+<td><code>a</code></td>
+<td>여기에 행 추가</td>
+</tr>
+<tr>
+<td><code>e</code></td>
+<td>선택한 행 편집</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>이 목록 거르기</td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>freeze(증거) · find(하위 탭 스트립)</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>이것을 Repeater로 보내기</td>
+</tr>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>실행</td>
+</tr>
+<tr>
+<td><code>w</code></td>
+<td>A ⇄ B 교체</td>
+</tr>
+<tr>
+<td><code>x</code></td>
+<td>이 줄 선택</td>
+</tr>
+<tr>
+<td><code>Shift-X</code></td>
+<td>이 탭 비우기(먼저 확인)</td>
+</tr>
+<tr>
+<td><code>Space</code></td>
+<td>이 탭의 명령 메뉴</td>
+</tr>
+</tbody>
+</table>
+<p>예외는 셋이며 모두 의도적입니다. 각각 그 탭 고유의 루프 키입니다: <strong>Intercept</strong>의 <code>f</code>는 전달(<code>Shift-F</code>는 전부 전달), <strong>History → Repeater</strong>와 <strong>Repeater 전송</strong>은 <code>Ctrl-R</code> 유지, 프로젝트 <strong>ACTIVITY</strong> 피드의 <code>s</code>는 source 칩 순환.</p>
+<h2 id="editing">편집</h2>
+<p>에디터는 작업 복사본을 엽니다. <code>Enter</code>를 누르기 전에는 아무것도 저장되지 않으며, <code>Esc</code>는 모든 변경을 버립니다.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code> (또는 <code>j</code> / <code>k</code>), 휠</td>
+<td>선택 이동</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>동작 목록 검색</td>
+</tr>
+<tr>
+<td><code>e</code> 또는 <code>Space</code></td>
+<td>선택한 동작 재지정, 그다음 새 키를 누릅니다</td>
+</tr>
+<tr>
+<td><code>x</code> 또는 <code>Backspace</code></td>
+<td>선택한 동작의 바인딩 해제</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>선택한 동작을 기본값으로 초기화</td>
+</tr>
+<tr>
+<td><code>Shift-R</code></td>
+<td>모든 동작을 기본값으로 초기화</td>
+</tr>
+<tr>
+<td><code>←</code> / <code>→</code></td>
+<td>OS 기본 프로파일 순환(아래 참고)</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>저장 + 적용(실시간, 재시작 없음)</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>버리고 닫기</td>
+</tr>
+</tbody>
+</table>
+<p>재지정을 시작하면 푸터에 *&quot;press a key to bind&quot;*가 표시됩니다. 아래 <em>예약된 키</em>에 나열된 것들을 제외하고, 원하는 키 조합을 수식 키와 함께 누르세요. 키가 예약되어 있거나 <strong>같은 위치</strong>의 다른 동작에서 이미 사용 중이면, 에디터는 이를 거부하고 이유를 알려줍니다. 키 입력 대기 상태는 그대로 열려 있으므로 다른 키를 눌러 보면 됩니다.</p>
+<p>바인딩된 것이 없으면 행의 키 조합에 <code>(unbound)</code>가 표시됩니다. <code>●</code> 마커는 기본값에서 변경했음을 뜻하고, <code>·</code>은 기본값 상태를 뜻합니다.</p>
+<h2 id="conflicts">충돌</h2>
+<p>두 동작은 <strong>다른</strong> 위치에서 발생할 때만 키를 공유할 수 있습니다. 이는 의도된 동작입니다(<code>s</code>는 거의 모든 곳에서 &quot;scope 렌즈&quot;지만 Probe에서는 &quot;출처로 가기&quot;, <code>c</code>는 Intercept 큐에서 catch 방향을 순환하는 것을 제외하면 어디서나 &quot;toggle capture&quot;). 에디터는 <strong>같은 위치</strong>의 충돌만 막습니다. 거기서는 키맵이 둘 중 하나만 남길 수 있기 때문입니다.</p>
+<h2 id="digits">숫자 키 패밀리</h2>
+<p>탭 바는 <strong>번호가 매겨진 아홉 개의 슬롯</strong>이고, 탭을 옮겨 다니는 기본 수단은 그 숫자입니다.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>1</code>–<code>9</code></td>
+<td>탭 바의 N번 슬롯으로 점프</td>
+</tr>
+<tr>
+<td><code>0</code></td>
+<td><strong>Go to tab…</strong> — 21개 탭 전체(슬롯 아홉 개 + 숨은 탭)를 타이핑으로 걸러 고르는 목록</td>
+</tr>
+<tr>
+<td><code>⇧1</code>–<code>⇧9</code></td>
+<td>현재 탭의 N번 서브탭으로 점프</td>
+</tr>
+<tr>
+<td><code>⇧0</code></td>
+<td><strong>Find sub-tab…</strong> — 스트립의 <code>f</code>가 여는 것과 같은 피커</td>
+</tr>
+</tbody>
+</table>
+<figure class="tui-shot">
+  <img src="/images/tui/tab-goto.svg" alt="gori Go to tab 카드: 탭 카탈로그 전체 위에 필터 바가 있고, 바에 올라간 아홉 개는 1부터 9까지 숫자를 달고 나머지는 숫자가 없으며, 각 행 뒤에 그 탭이 무엇을 위한 것인지 한 줄이 붙어 있다">
+  <figcaption><code>0</code>은 카탈로그 전체를 엽니다. 바 위의 아홉 개는 자기를 여는 숫자를 달고 있고 나머지는 달고 있지 않습니다 — 바깥에 있다는 것의 차이는 그게 전부입니다.</figcaption>
+</figure>
+<p>이 키들은 <strong>어디서나</strong> 동작합니다 — 탭 바, 서브탭 스트립, 리스트 본문, 드릴인 상세, 읽기 전용
+페인. 예외는 하나뿐입니다. 필드가 텍스트를 받는 동안(INS 상태의 에디터, <code>/</code> 쿼리 바와 검색, 한 줄
+프롬프트, 피커의 필터, CVSS 계산기, Decoder의 CHAIN 필드)에는 숫자가 문자입니다. <code>Space</code>와 같은
+규칙입니다. <code>Space</code>가 공백을 입력하는 자리에서는 <code>3</code>도 3을 입력합니다 — <code>base64</code>, <code>sha256</code>,
+<code>rot13</code>을 변환 체인에 칠 수 있는 이유가 이것입니다.</p>
+<p>바는 기본적으로 번호를 그립니다(<strong>Preferences → Layout → Tab numbers</strong>, <code>settings:layout</code>).
+마지막 탭 바로 뒤의 알약은 <code>0:Tabs</code>로 읽힙니다 — 키, 그리고 그 키가 여는 것. 오른쪽 끝에
+못박히는 대신 아홉 번째 슬롯에서 두 칸 뒤에 붙어서, <code>→</code>로 걷는 순서와 눈으로 읽는 순서가
+같아집니다. 탭이 알약 옆에 더는 들어가지 않을 때만 오른쪽 끝에 고정되고 탭이 스크롤합니다.
+레이아웃이 무엇이든 자리를 지킵니다. <code>0</code>은 바 위의 아홉 개를 포함해 카탈로그 전체에 닿으므로
+셀 것이 없고, 알약이 사라지는 레이아웃도 없습니다. 알약 오른쪽의 남는 구역은 일부러 비워
+둡니다 — 탭이 아닌 정보를 놓을 자리입니다.</p>
+<h3 id="아홉-슬롯-그리고-열-번째-탭">아홉 슬롯, 그리고 열 번째 탭</h3>
+<p><code>settings:tabs</code>는 열 번째 탭을 거부하고 그 이유를 알려줍니다 — 대신 <code>⇧K</code>로 이음선 위로 올리면
+그 탭이 바에 올라가고 마지막 슬롯이 내려갑니다. 이전
+빌드가 저장한 레이아웃(예전 바에는 상한이 없었습니다)은 <strong>사용자 자신의 순서대로 앞의 아홉
+개</strong>로 잘리고, 잘린 탭 이름을 그 실행에서 한 번 알려줍니다.</p>
+<p>한 탭만은 아홉 번째 슬롯 너머에 설 수 있습니다. <code>0</code>으로 점프해 간 바깥 탭은 그 탭을 떠날
+때까지 바의 맨 오른쪽에 <strong>번호 없이</strong> 놓입니다. 사용자가 배치한 슬롯이 아니라 지금 서 있는
+자리이고, 어떤 숫자도 그것을 가리키지 않습니다.</p>
+<p>상한 없는 예전 바를 되돌리려면 <strong>Preferences → Layout → Tab bar slots</strong>를 끄세요. 바는 다시
+<code>‹</code> <code>›</code>로 스크롤하고, <code>1</code>–<code>9</code>는 여전히 앞의 아홉 탭에 닿고, <code>0</code>은 여전히 모든 탭에 닿습니다.</p>
+<h3 id="키보드-레이아웃">키보드 레이아웃</h3>
+<p><strong>kitty 키보드 프로토콜</strong>을 쓰는 터미널은 <code>⇧3</code>을 <code>3</code> + shift 플래그로 보고하고, gori는 그것을
+바인딩합니다. 다른 터미널은 시프트된 숫자를 <strong>문자</strong>로 보냅니다 — US 레이아웃에서는 <code>#</code> —
+그래서 gori가 그것을 다시 <code>⇧3</code>으로 접습니다. <strong>비(非)US 레이아웃</strong>에서는 그 문자가 달라지므로,
+<code>⇧1</code>–<code>⇧9</code>는 터미널이 shift 모디파이어를 보고하는 경우에만 동작합니다. 대체 수단은 항상 살아
+있습니다. 서브탭 스트립의 **<code>f</code>**는 <code>⇧0</code>과 같은 피커를 열고, <code>Ctrl-1</code>…<code>Ctrl-9</code>는 그것을
+전달하는 터미널에서 <code>⇧1</code>–<code>⇧9</code>의 별칭입니다.</p>
+<h2 id="space-menu">space 메뉴</h2>
+<p>탐색 가능한 패널에서 <code>Space</code>를 누르면 <strong>지금 서 있는 자리</strong>의 액션 메뉴가 열립니다. 그 패널의
+동사들이 <code>COMMON</code>과 포커스된 영역 레이블 아래 묶이고, 각 행 앞에 니모닉 한 글자가 붙습니다.
+팔레트와는 다릅니다. 입력도 필터도 없고, 한 행당 키 한 번입니다.</p>
+<h3 id="포커스와-무관하게-탭당-하나의-메뉴">포커스와 무관하게, 탭당 하나의 메뉴</h3>
+<p>아홉 개 탭이 <strong>서브탭 스트립</strong>을 가집니다 — Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT,
+Cookie, Comparer, Notes. 예전에는 스트립 자신의 액션도 다른 컨텍스트 섹션과 똑같이 다뤄져서,
+스트립에 포커스가 있을 때<em>만</em> 나타났습니다. 그래서 본문 패널에서는 <code>Space</code>가 &quot;이 서브탭 닫기&quot;를
+제안하게 하려면 포커스를 한 단계 위로 옮겨야 했습니다.</p>
+<p>이제 그것들은 자기 몫의 <code>SUB-TABS</code> 버킷이 되었고, 스트립이 있는 탭이라면 <strong>모든</strong> 레벨의
+메뉴에 들어갑니다 — 본문 패널, 스트립 자신, 그리고 탭 바. <code>⇧1</code>–<code>⇧9</code>가 어디로든 데려다주는
+만큼, <code>Space</code>가 무엇을 제안하는지가 커서가 놓인 행에 좌우되어서는 안 됩니다.</p>
+<h3 id="아홉-스트립에서-똑같은-아홉-글자">아홉 스트립에서 똑같은 아홉 글자</h3>
+<p>이 버킷은 아홉 개가 아니라 하나의 표로 익히는 것입니다. 해당 액션이 없는 탭은 그 행을 그냥
+빼놓을 뿐, 그 글자를 다른 데 쓰지 않습니다.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+<th>직접 코드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>n</code></td>
+<td>새 서브탭</td>
+<td><code>Ctrl-N</code></td>
+</tr>
+<tr>
+<td><code>w</code></td>
+<td>서브탭 닫기 (마크된 것 전부)</td>
+<td><code>Ctrl-W</code></td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>서브탭 복제</td>
+<td></td>
+</tr>
+<tr>
+<td><code>e</code></td>
+<td>서브탭 이름 변경</td>
+<td>스트립에서 <code>r</code></td>
+</tr>
+<tr>
+<td><code>t</code></td>
+<td>서브탭 태그 (Repeater)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>f</code></td>
+<td>서브탭 검색 — <code>⌕</code> 피커</td>
+<td>스트립에서 <code>f</code>, 어디서나 <code>⇧0</code></td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>스트립 필터 (이름 / 호스트 / 메서드 / 태그)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>T</code></td>
+<td>필터가 보여주는 서브탭 전부 마크</td>
+<td></td>
+</tr>
+<tr>
+<td><code>N</code></td>
+<td>서브탭 마크 해제</td>
+<td>스트립에서 <code>Esc</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>Ctrl-N</code>과 <code>Ctrl-W</code>는 해당 행 옆에 표시되며, 아홉 탭 어느 패널에서도 동작합니다. 메뉴가 더 빠른
+키를 감추지 않고 가르칩니다. (Miner와 Sequencer는 실행으로 세션을 만들므로 <code>n</code>이 없습니다.)</p>
+<p>이 버킷이 모든 패널에 함께 실리기 때문에, 그 아홉 글자는 <strong>해당 탭의 모든 뷰에서 예약</strong>됩니다.
+그 글자를 쓰던 패널 액션은 자리를 옮겼습니다. 규칙은 <em>패널</em> 글자가 양보한다는 것입니다.
+스트립의 글자는 아홉 스트립에서 똑같이 읽혀야 하기 때문입니다. Repeater/Fuzzer 편집기에서는
+<code>Space</code> <code>W</code>가 단어를 마크하고, <code>Space</code> <code>D</code>가 응답 diff를 토글하며, JWT와 Cookie의 렌즈 토글은
+<code>m</code>(Mode — 같은 동작에 대한 Decoder의 글자)으로 옮겼습니다.</p>
+<h2 id="editor-keysets">에디터 키셋</h2>
+<p>gori의 텍스트 패널은 <strong>모달</strong>입니다. <code>Esc</code>와 <code>i</code>로 READ와 INSERT를 오가고, READ에서는 맨 글자가 명령입니다. 기본으로 제공되는 문법은 helix 형태입니다 — <strong><code>x</code>로 줄을 선택한 뒤 <code>y</code>로 복사</strong>. vim에서는 같은 동작이 <code>V</code> 다음 <code>y</code>이고, 딱 그 한 제스처가 vim에 익숙한 손이 하루 종일 부딪히는 지점입니다.</p>
+<p><strong>Preferences → Editor &amp; Keys → Keys → Editor keyset</strong>(<code>Ctrl-,</code>) 또는 팔레트의 **<code>settings:keys</code>**에서 전환합니다.</p>
+<table>
+<thead>
+<tr>
+<th>키셋</th>
+<th>줄 선택</th>
+<th>실행 취소</th>
+<th>찾기</th>
+<th>뒤에 삽입</th>
+<th>맨 위 / 맨 아래</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>helix-ish</strong> (기본)</td>
+<td><code>x</code></td>
+<td><code>Ctrl-Z</code></td>
+<td><code>Ctrl-F</code></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>vim-ish</strong></td>
+<td><code>⇧V</code></td>
+<td><code>u</code></td>
+<td><code>/</code></td>
+<td><code>a</code></td>
+<td><code>g</code> / <code>⇧G</code></td>
+</tr>
+</tbody>
+</table>
+<p>표에 없는 것은 두 키셋에서 동일합니다. gori가 이미 vim과 같게 쓰고 있기 때문입니다. <code>i</code>로 INSERT에 들어가고, <code>Esc</code>로 나오고, <code>y</code>로 복사하고, <code>Ctrl-G</code>로 줄로 이동하고, 화살표에 <code>Shift</code>를 더해 선택을 넓힙니다.</p>
+<h3 id="키셋은-매핑이지-에뮬레이션이-아닙니다">키셋은 매핑이지 에뮬레이션이 아닙니다</h3>
+<p>키셋은 소수의 고정된 에디터 동작에 대한 <strong>키 재정의 묶음</strong>입니다. <a href="#os-default-profiles">OS 기본 프로파일</a>이 쓰는 것과 정확히 같은 메커니즘을 한 층 위에 얹은 것입니다. operator-pending 문법도, 레지스터도, 반복 횟수도, 텍스트 오브젝트도, gori의 패널에 없는 편집 연산도 추가하지 않습니다. READ 모드 패널은 캐럿과 선택 영역과 복사가 전부이고, 없는 연산에 키 이름을 붙이는 것이야말로 &quot;vim 모드&quot;가 지키지 못할 약속이 되는 길입니다.</p>
+<p>그래서 일부 vim 표기는 의도적으로 제공하지 <strong>않습니다</strong>. 각각 확인 가능한 이유가 있습니다.</p>
+<ul>
+<li><strong><code>gg</code>, <code>dd</code>, <code>yy</code> 등 두 키 시퀀스 전부.</strong> gori의 키 조합은 한 번의 키 입력입니다. <code>g</code> 하나가 패널 맨 위이고, 선택이 없는 <code>y</code>는 이미 패널 전체를 복사합니다 — <code>yy</code>가 뜻하는 것의 쓸모 있는 절반입니다.</li>
+<li><strong><code>:42</code>를 포함한 <code>:</code> 명령.</strong> 맨 <code>:</code>는 gori 자체의 명령줄로 <a href="#reserved-keys">예약</a>되어 있으므로, go-to-line은 두 키셋 모두에서 <code>Ctrl-G</code>로 남습니다.</li>
+<li><strong>삭제.</strong> READ 모드 패널에는 <code>dd</code>나 <code>D</code>에 얹을 줄 삭제가 없습니다. 편집은 INSERT에서 일어납니다.</li>
+<li><strong>규칙 목록의 활성/비활성 <code>x</code></strong>(Colormarker, Probe rules, OAST providers, Rewriter). 그 <code>x</code>는 규칙을 켜고 끄는 것이지 선택이 아니며, 키셋이 상태 변경을 <code>⇧V</code>로 옮기지는 않습니다.</li>
+<li><strong>Intercept 큐의 줄 선택.</strong> 의도적으로 키가 없습니다 — 그 패널은 space 메뉴로 도달하며, 키셋은 키를 다시 쓰는 것이지 키를 두지 않기로 한 패널에 키를 쥐여 주는 것이 아닙니다.</li>
+</ul>
+<h3 id="재정의-순서">재정의 순서</h3>
+<p>가장 구체적인 것부터 네 겹입니다.</p>
+<pre><code class="language-text hljs">직접 지정한 재바인딩  &gt;  키셋  &gt;  OS 기본 프로파일  &gt;  기본 제공 키 조합
+</code></pre>
+<p>따라서 키셋은 더 나은 <strong>기본값</strong>이지 상한이 아닙니다. <code>vim-ish</code>를 고른 뒤 <a href="#editing">Hotkeys 에디터</a>에서 동작 하나를 재지정하면, 그 하나는 지정한 자리에 그대로 남습니다. 행의 &quot;기본값으로 되돌리기&quot;는 <strong>현재 키셋</strong>의 표기로 되돌아가며, 기본 제공 키로 돌아가지 않습니다.</p>
+<p>모든 화면이 별도 조치 없이 현재 키셋을 따릅니다. 전부 유효 키맵에서 읽기 때문입니다 — 상태 표시줄 힌트 스트립, Help 탭, 커맨드 팔레트, space 메뉴, 그리고 Hotkeys 에디터의 충돌 메시지까지. <code>vim-ish</code>에서 Notes 푸터는 <code>^F find</code> 대신 <code>/ find</code>로 읽히고, <code>⇧V</code>에 무언가를 바인딩하려 하면 Select line이 거기 있다고 이름을 대며 거절합니다.</p>
+<h3 id="space-메뉴의-글자는-건드리지-않습니다">space 메뉴의 글자는 건드리지 않습니다</h3>
+<p>키셋이 옮기는 것은 <strong>패널에서 누르는 키</strong>이지, <a href="#space-menu">space 메뉴</a>가 각 행 앞에 붙이는 글자가 아닙니다. 개별 재지정이 따르는 규칙과 같고, 그 글자들이 안정적인 식별자인 이유이기도 합니다. <code>vim-ish</code>에서도 메뉴는 Select line을 여전히 <code>x</code>로 앞세우고, 그 옆에 실제 키 조합을 함께 씁니다.</p>
+<pre><code class="language-text hljs">│ x Select line   ⇧V │
+</code></pre>
+<p>그래서 카드가 둘 중 어느 쪽인지 짐작하게 만드는 대신 양쪽을 모두 가르쳐 줍니다. 아홉 개 <code>SUB-TABS</code> 글자(<code>n</code> <code>w</code> <code>d</code> <code>e</code> <code>t</code> <code>f</code> <code>/</code> <code>T</code> <code>N</code>)도 어떤 키셋을 고르든 아홉 스트립 전부에서 같은 뜻입니다. 두 네임스페이스는 충돌할 수 없습니다. 메뉴는 모달이고, 키셋은 키맵에만 씁니다.</p>
+<p><code>/</code>도 마찬가지입니다. <code>SUB-TABS</code> 글자이면서 동시에 <code>vim-ish</code>의 찾기 키지만, 둘은 다른 계층입니다 — 메뉴 글자는 카드가 떠 있는 동안 스트립에 작용하고, 키 조합은 지금 서 있는 텍스트 패널을 검색합니다. 키 조합 쪽은 부팅 시점에 검사합니다. <code>validate_chords!</code>가 (OS 프로파일 × 키셋) 모든 칸을 훑으므로, 패널 고유 키를 가리는 키셋 글자는 배포되는 대신 빌드를 실패시킵니다.</p>
+<h3 id="무엇을-고르든-그대로인-것">무엇을 고르든 그대로인 것</h3>
+<p><code>vim-ish</code>에서도 <code>Ctrl-Z</code>는 <strong>INSERT 안에서</strong> 계속 실행 취소입니다. 그 가드는 아홉 개 텍스트 에디터 전부에서 키맵보다 먼저 동작하고, 타이핑하는 손이 원하는 자리가 거기입니다. <code>Ctrl-F</code>도 마찬가지로 INSERT를 포함해 계속 찾기 프롬프트를 엽니다. <code>/</code>는 READ에서의 추가이지 대체가 아닙니다. 그리고 에디터 옆의 읽기 전용 패널(Repeater 응답, Fuzzer 결과, Decoder 출력)에서 <code>i</code>는 두 키셋 모두에서 메시지와 함께 거절됩니다.</p>
+<h2 id="reserved-keys">예약된 키</h2>
+<p>일부 키는 터미널이나 gori가 필요로 하므로 재지정할 수 없습니다.</p>
+<ul>
+<li>
+<p><strong>종료</strong>: <code>Ctrl-C</code>, <code>Ctrl-D</code>.</p>
+</li>
+<li>
+<p><strong>명명된 키와 구별 불가</strong>: <code>Ctrl-M</code> / <code>Ctrl-J</code> (Enter), <code>Ctrl-I</code> (Tab), <code>Ctrl-H</code> (Backspace), <code>Ctrl-[</code> (Escape).</p>
+</li>
+<li>
+<p><strong>구조적</strong>: <code>Enter</code>, <code>Esc</code>, <code>Tab</code>, <code>Backspace</code>, <code>Space</code>(space 메뉴 리더), 그리고 맨 <code>:</code>(명령줄).</p>
+</li>
+<li>
+<p><strong>키맵보다 먼저 점유되는 gori 단축키</strong>: <code>Ctrl-G</code> (go to line), <code>Ctrl-F</code> (find, <code>Tab</code>으로 find &amp; replace), <code>Ctrl-B</code> (reveal whitespace), <code>Ctrl-E</code> (external editor), <code>Ctrl-P</code> (command palette), <code>Ctrl-N</code> (new repeater/fuzz/note), <code>Ctrl-W</code> (서브탭 닫기, 마크가 있으면 전부), <code>Ctrl-Z</code> (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), <code>Ctrl-,</code> (Preferences), 그리고 <code>Ctrl-1</code>…<code>Ctrl-9</code> (switch sub-tab — <code>⇧1</code>–<code>⇧9</code>의 <strong>별칭</strong>입니다. <a href="#digits">숫자 키 패밀리</a> 참고). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 <strong>Command palette</strong>, <strong>Reveal whitespace</strong>, <strong>New repeater request</strong>, <strong>New fuzz session</strong>은 에디터에 나열되지 않습니다. 그 키는 고정입니다.</p>
+<p><code>Ctrl-G</code> / <code>Ctrl-F</code>는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 <code>Tab</code>이 find를 find &amp; replace로 바꿉니다. 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.</p>
+<p>이 패밀리에서 개별 키를 옮길 수는 없지만, 패밀리 전체에 <strong>두 번째 모디파이어</strong>를 줄 수는 있습니다. 아래 <a href="#command-modifier">커맨드 모디파이어</a>를 참고하세요.</p>
+</li>
+</ul>
+<p><code>Ctrl-S</code> 같은 흐름 제어/시그널 키 조합은 예약되어 있지 <strong>않습니다</strong>. gori는 터미널을 raw 모드로 실행하므로 이들이 앱에 도달합니다(Repeater의 SNI 토글은 <code>Ctrl-S</code>로 제공됩니다).</p>
+<h2 id="os-default-profiles">OS 기본 프로파일</h2>
+<p><code>←</code> / <code>→</code> 프로파일 선택기는 새(재정의되지 않은) 바인딩이 어떤 <strong>기본</strong> 키 세트를 사용할지 고릅니다: <code>auto</code>(gori가 빌드된 플랫폼을 추적), <code>macOS</code>, <code>Linux</code>, <code>Windows</code>. 직접 지정한 재바인딩은 OS와 무관하게 항상 선택한 프로파일 위에 얹힙니다.</p>
+<p>현재 OS별 기본값은 동일합니다. 터미널에서 <code>Ctrl</code>+글자 조합은 macOS, Linux, Windows 모두에서 애플리케이션에 도달하며, 정말 위험한 키는 위의 예약된 제어 문자들입니다(어디서나 차단됨). 프로파일 메커니즘은 실제 터미널별 충돌이 생겼을 때 디스패치를 건드리지 않고 바로잡을 수 있도록 마련해 둔 것입니다. 지금으로서는 <code>auto</code>가 모두에게 옳은 선택입니다.</p>
+<h2 id="command-modifier">커맨드 모디파이어</h2>
+<p><em>예약된 키</em>에 나열된 키 조합 패밀리는 키맵보다 먼저 하드코딩된 가드가 소비하기 때문에 고정입니다. 문제는 <strong>터미널이 Ctrl 형태를 아예 전달하지 않는</strong> 경우입니다.</p>
+<ul>
+<li><strong><code>Ctrl-1</code>…<code>Ctrl-9</code>는 상당수 터미널에서 전달 불가</strong>입니다. 대응하는 제어 문자가 없어서 서브탭 점프가 애초에 도착하지 않습니다. 없어도 됩니다. 서브탭 점프의 기본 키는 **<code>⇧1</code>–<code>⇧9</code>**이고(<a href="#digits">숫자 키 패밀리</a>), 서브탭 스트립에서는 어느 칩에 있든 **<code>f</code>**로 열려 있는 서브탭 전체를 나열·검색할 수 있습니다. (스트립 왼쪽 끝의 **<code>⌕</code>**도 같은 목록을 엽니다. 클릭하거나, 첫 칩에서 <code>←</code>를 누르면 됩니다.)</li>
+<li><strong>멀티플렉서가 먼저 먹습니다.</strong> tmux의 기본 프리픽스는 <code>Ctrl-B</code>인데, gori도 reveal-whitespace로 씁니다.</li>
+</ul>
+<p><strong>Preferences → Editor &amp; Keys → Keys → Command modifier</strong>(<code>Ctrl-,</code>), 또는 팔레트의 **<code>settings:keys</code>**에서 이 패밀리를 <code>Ctrl</code>과 <code>Option (⌥)</code> 사이에서 고를 수 있습니다. 이는 <strong>교체가 아니라 별칭 추가</strong>입니다. Option을 고르면 <code>⌥P</code>로도 팔레트가 열리고 <code>^P</code>도 그대로 동작합니다. 바뀌는 것은 <em>표시</em>뿐입니다. 상태 힌트, Help 탭, 팔레트가 모두 <code>⌥P</code>, <code>⌥N</code>, <code>⌥1-9</code>로 표시됩니다.</p>
+<table>
+<thead>
+<tr>
+<th>모디파이어</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl</code> (기본)</td>
+<td><code>^P</code> <code>^N</code> <code>^W</code> <code>^G</code> <code>^F</code> <code>^B</code> <code>^E</code> <code>^Z</code> <code>^,</code> <code>^1</code>-<code>^9</code></td>
+</tr>
+<tr>
+<td><code>Option (⌥)</code></td>
+<td>위 전부 <strong>더하기</strong> <code>⌥P</code> <code>⌥N</code> <code>⌥W</code> <code>⌥G</code> <code>⌥F</code> <code>⌥B</code> <code>⌥E</code> <code>⌥Z</code> <code>⌥,</code> <code>⌥1</code>-<code>⌥9</code></td>
+</tr>
+</tbody>
+</table>
+<p>Ctrl이 계속 살아있으므로 Option을 골라도 팔레트에 못 들어가는 상황은 생기지 않습니다. 다만 바꾸기 전에 알아둘 점이 있습니다. <strong>macOS에서는 터미널이 Option을 Meta/Esc+로 보내도록 설정해야</strong> 합니다. 그러지 않으면 <code>⌥P</code>가 <code>π</code>로 도착해 아무 일도 일어나지 않습니다.</p>
+<ul>
+<li><strong>Terminal.app</strong>: 설정 → 프로파일 → 키보드 → <em>Option을 Meta 키로 사용</em></li>
+<li><strong>iTerm2</strong>: Settings → Profiles → Keys → Left/Right Option key → <em>Esc+</em></li>
+</ul>
+<p>하지 않는 일 두 가지. 에디터에서 이미 재지정할 수 있는 키 조합(<code>^R</code> send, <code>^S</code> SNI 등)은 건드리지 않습니다. 그건 동작별로 재지정하세요. 그리고 이 패밀리의 <code>Option</code> 조합(예: <code>alt-n</code>)에 어떤 동작을 바인딩해 뒀다면, 별칭을 켜는 순간 가려집니다. 가드가 이기고 해당 동작은 기본값으로 되돌아가며, 저장 토스트가 그 동작을 알려줍니다.</p>
+<p>첫 실행 마법사의 Review 스텝에서도 이 값을 요약해 보여주므로, 앱에 들어가기 전에 모디파이어를 고를 수 있습니다.</p>
+<h2 id="where-its-stored">저장 위치</h2>
+<p><code>~/.gori/settings.json</code>(디렉터리는 <code>$GORI_HOME</code>으로 재정의)의 <code>hotkeys</code> 블록에, 필요한 값만 담아 저장됩니다. 변경한 바인딩만 동작 id별 키 조합 라벨 목록으로 기록되며, 빈 목록은 명시적 바인딩 해제입니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;hotkeys&quot;: {
+    &quot;os&quot;: &quot;auto&quot;,
+    &quot;command_modifier&quot;: &quot;alt&quot;,
+    &quot;keyset&quot;: &quot;vim&quot;,
+    &quot;bindings&quot;: {
+      &quot;rules.edit&quot;: [&quot;g&quot;],
+      &quot;scope.edit&quot;: []
+    }
+  }
+}
+</code></pre>
+<p><code>command_modifier</code>는 <code>&quot;ctrl&quot;</code>(기본) 또는 <code>&quot;alt&quot;</code>이고, <code>keyset</code>은 <code>&quot;helix&quot;</code>(기본) 또는 <code>&quot;vim&quot;</code>입니다 — <a href="#editor-keysets">에디터 키셋</a>을 참고하세요. 둘 다 알 수 없는 값은 키가 없는 상태가 아니라 기본값으로 되돌아갑니다. 손대지 않은 설치본은 <code>hotkeys</code> 블록 자체를 쓰지 않습니다.</p>
+<p>없는 동작은 프로파일 기본값을 사용합니다. 알 수 없는 id와 파싱할 수 없는 키 조합은 로드할 때 무시되므로, 수동 편집이나 버전 차이가 있어도 무리 없이 동작합니다.</p>
+<h2 id="limitations">제약</h2>
+<ul>
+<li>동작의 <strong>주</strong> 키 조합만 표시/편집됩니다. 탐색 별칭(예: <code>j</code> / <code>k</code>의 화살표 키 중복)은 나열되지 않습니다.</li>
+<li>재지정 가능한 키 조합을 표시하는 모든 화면은 유효 키맵에서 읽습니다. <strong>커맨드 팔레트</strong>, <strong>space 메뉴</strong>, <strong>Help</strong> 탭과 팝업, 상태 표시줄의 힌트 스트립, 빈 상태 카드가 여기에 해당합니다. 리터럴로 남는 것은 동작(verb)이 아닌 키입니다. 예약된 <code>^P</code> / <code>^N</code> / <code>^W</code> / <code>^1-9</code> 계열과 구조 키(<code>esc</code>, <code>↵</code>, 화살표, <code>↹</code>)가 그렇습니다.</li>
+<li>Space 메뉴 <strong>니모닉</strong> 글자는 동작을 가리키는 안정적인 식별자입니다(Helix와 비슷). 재지정은 <em>직접</em> 누르는 키 조합만 바꿀 뿐 space 메뉴 글자는 바꾸지 않습니다.</li>
+<li><strong>하위 탭 스트립</strong>이 어떤 동작에 이미 글자를 바인딩해 두었다면 메뉴도 가능한 한 같은 글자로 그 동작을 씁니다: <code>f</code>는 하위 탭 목록·검색, <code>t</code>는 칩 마크, <code>⇧T</code>는 스트립 전체 마크입니다. 맞출 수 없는 하나가 이름 변경입니다. 스트립은 <code>r</code>을 바인딩하지만 Repeater·Fuzzer·Miner·Sequencer에서 <code>r</code>은 <code>Ctrl-R</code>을 메뉴에서 되울리는 Run/Send이고, 이름 변경이 그 자리를 빼앗을 수는 없습니다. 아홉 스트립에 걸쳐 한 동작이 두 가지로 불려서는 안 되므로, 이름 변경은 **전부 <code>e</code>**이고 스트립의 <code>r</code>은 원시 코드로 남습니다. 전체 표는 <a href="#space-menu">space 메뉴</a>를 참고하세요.</li>
+<li>에디터 동작은 개별로도, <a href="#editor-keysets">에디터 키셋</a>으로 한 벌씩도 재지정할 수 있습니다. 재지정 에디터가 옮기지 않는 것은 하드코딩된 가드가 먼저 응답하는 몇 개뿐입니다 — <code>Esc</code>(READ로 복귀), <code>Ctrl-Z</code>, <code>Ctrl-F</code>, <code>Ctrl-G</code>. 읽을 수 있도록 Help 시트에는 실려 있고, 키셋은 여기에 두 번째 맨 글자 표기를 줄 수 있습니다. <code>vim-ish</code>가 <code>u</code>와 <code>/</code>에 도달하는 방식이 바로 이것입니다.</li>
+<li>탐색 가능한 컨텍스트에서 **<code>?</code>**를 누르면 <strong>Help</strong> 탭(mitmproxy 스타일 치트시트)으로 점프합니다.</li>
+</ul>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="/ko/guide/settings/">Settings</a>: Preferences 모달과 그 안의 모든 섹션</li>
+<li><a href="/ko/guide/themes/">Themes</a>: 같은 방식으로 컬러 테마를 전환하거나 만듭니다</li>
+<li><a href="/ko/reference/config/">Configuration Reference</a>: <code>settings.json</code>의 <code>hotkeys</code> 키</li>
+</ul>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="이어서 읽기">
+  
+  <a href="https://gori.hahwul.com/ko/guide/themes/" rel="prev"><span>← 이전</span><strong>테마</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/ko/guide/statusline/" rel="next"><span>다음 →</span><strong>Statusline</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="이 페이지에서" data-title="이 페이지에서"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>
