@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- TUI: The setup wizard explains local and device access at the listen step, and the guided tour ends with a first-session checklist for the screen it returns to (#1081)
+
 ## v0.6.1
 
 - Repeater: a `$BIND.`/`$GEN.` token an operator types into a tab opened from History resolves at send time again — only the names the capture itself arrived with stay literal, instead of the whole tab being switched off (#1080)

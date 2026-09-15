@@ -199,7 +199,8 @@ module Gori
         # flag deliberately no longer touches (Settings.cli_bind_host). That separation is what
         # keeps the wizard from writing a one-run override into settings.json as the permanent
         # default, while this session still binds where the flag said.
-        wizard_error = File.exists?(Settings.path) ? nil : Tui::SetupWizard.new(term).run
+        handoff = open_db_path ? Tui::Tutorial::Handoff::Direct : Tui::Tutorial::Handoff::Picker
+        wizard_error = File.exists?(Settings.path) ? nil : Tui::SetupWizard.new(term, handoff).run
         # `notice` is the picker's one-line "here is why you are looking at this screen".
         # A failed open used to fall through to the picker in SILENCE, its reason reachable
         # only by knowing to read ~/.gori/gori.log, so an operator who typo'd `--db` saw

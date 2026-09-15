@@ -12,7 +12,7 @@ Each step ends with a **Checkpoint**: what you should see before moving on. If s
 
 ## 1. Start gori
 
-With no subcommand, gori starts the proxy and opens the interface:
+With no subcommand, gori opens the project picker. The proxy starts when you open a project:
 
 ```bash
 gori
@@ -20,13 +20,15 @@ gori
 
 The first launch runs a short [setup wizard](#first-run-wizard) (global bind, theme, and the Miss Ring mascot), then offers a [guided UI tour](#guided-ui-tour). You can take the tour now or skip it and come back; this page covers the same ground against live traffic.
 
+At the picker, select **New project**, enter a name, then press `Enter` twice (the description is optional). The guided tour returns you to this picker when it finishes on first launch.
+
 By default the proxy listens on `127.0.0.1:8070`. Override it for a single run (a project's own bind still wins when set):
 
 ```bash
 gori --listen 0.0.0.0 --port 8080
 ```
 
-**Checkpoint.** You're looking at the gori TUI: a row of tabs down the side (Project, Target, History, …) and a top bar showing the proxy address, `127.0.0.1:8070`.
+**Checkpoint.** Your project session is open. The tab bar shows Project, Target, History, …, and the top bar shows the proxy address, `127.0.0.1:8070`.
 
 ## 2. Trust the CA and capture your first flow
 
@@ -210,7 +212,7 @@ Re-run the guided setup (global proxy bind default, then theme, then Miss Ring) 
 gori wizard
 ```
 
-The bind step sets the shared default in `settings.json`, the same layer as Preferences → **Network & Tabs** → **Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed. If something already listens on the port you pick, the step says so; `Enter` again keeps it. `Esc` twice skips the wizard (the first press only arms it, so a stray `Esc` in a field cannot end setup).
+The listen IP defaults to `127.0.0.1` (this computer only); `0.0.0.0` lets other devices reach the proxy. The first `Enter` moves from IP to port, and the next continues. The choice becomes the shared default in `settings.json`; a project can pin a different address from its Project tab. If the port is busy, `Enter` again keeps it. `Esc` twice skips the wizard.
 
 The final **Review** step recaps what you picked and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl, which is useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
 
@@ -227,7 +229,7 @@ gori tutorial
   <figcaption>The guided tour walks through tabs and panes, the palette, the space menu, and READ / INS edit mode. Try each key, then practice all four in a harmless sandbox.</figcaption>
 </figure>
 
-It is also offered at the end of the first-run wizard, and from inside a session as the palette command **Guided tour** (`Ctrl-P`), which brings you back to where you were when it ends.
+It is also offered at the end of the first-run wizard, and from inside a session as the palette command **Guided tour** (`Ctrl-P`). Its last card tells you whether finishing leads to the project picker, a `--db` session, the shell, or your current session.
 
 ## Next Steps
 

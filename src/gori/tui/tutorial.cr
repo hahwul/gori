@@ -128,7 +128,85 @@ module Gori::Tui
       Done
     end
 
-    def initialize(@term : Termisu)
+    # The tour can lead to four different places. Its last card must describe the
+    # actual next screen, especially on first launch (wizard → tour → project picker
+    # or the --db session, with a picker fallback on open failure).
+    enum Handoff
+      Picker
+      Direct
+      Shell
+      Session
+    end
+
+    def self.first_session_steps(handoff : Handoff, width : Int32) : Array(String)
+      if width < 66
+        first = case handoff
+                when Handoff::Picker  then "New project → name → ↵ twice"
+                when Handoff::Direct  then "--db opens · picker if it fails"
+                when Handoff::Shell   then "gori → New project → name → ↵↵"
+                when Handoff::Session then "Back in session · ^P palette"
+                else                       raise "unknown tutorial handoff"
+                end
+        return [
+          first,
+          "^P → Open browser · check CA",
+          "c if off · visit site → History",
+          "Flow → ^R Repeater · i · ^R send",
+          "? Help · ^P Guided tour",
+        ].map { |line| Hotkeys.retag(line) }
+      end
+      first = case handoff
+              when Handoff::Picker
+                "At the picker: New project → name → ↵ twice (description optional)"
+              when Handoff::Direct
+                "Open your --db project; if picker appears, choose a project"
+              when Handoff::Shell
+                "Run gori → New project → name → ↵ twice (description optional)"
+              when Handoff::Session
+                "Back in your session: open the command palette with ^P"
+              else
+                raise "unknown tutorial handoff"
+              end
+      second = handoff.session? ? "Open browser (proxy set) · check CA · local clients: gori ca" : "^P → Open browser (proxy set) · check CA · local clients: gori ca"
+      [
+        first,
+        second,
+        "If capture is off, press c · visit a permitted site · History",
+        "Pick a flow · ^R → Repeater · edit (i) · ^R send",
+        "? for Help · ^P → Guided tour anytime",
+      ].map { |line| Hotkeys.retag(line) }
+    end
+
+    # The footer is the tour's exit route at the advertised 40-column floor. Its
+    # long lesson hints can be ellipsized there, so keep a short, truthful one for
+    # each state rather than losing the keys at the right-hand end.
+    def self.compact_footer_hint(step : Step, overlay : Symbol = :none,
+                                 insert : Bool = false, armed : Bool = false) : String
+      return "esc again to leave · any key stays" if armed
+      return "↵ run · esc close · then n next" unless overlay == :none
+      return "type · esc READ · then n next" if insert
+      case step
+      when Step::Welcome   then "↵/n start · esc esc leave"
+      when Step::Navigate  then "2/↓/↑ move · n next · b back"
+      when Step::Palette   then Hotkeys.retag("^P palette · n next · b back")
+      when Step::SpaceMenu then "space menu · n next · b back"
+      when Step::Edit      then "i INS · n next · b back"
+      when Step::Practice  then "n next · b back · keep trying"
+      when Step::Done      then "↵/n finish · esc esc leave"
+      else                      raise "unknown tutorial step"
+      end
+    end
+
+    def self.done_extra_lines(width : Int32) : {String, String}
+      if width < 71
+        {Hotkeys.retag("Keys: 1-9 tabs · ^P · space · i"), "Re-run: gori tutorial"}
+      else
+        {Hotkeys.retag("Cheat-sheet:  1-9 tabs · 0 all tabs · ^P palette · space menu · i/↵ INS"),
+         "Re-run this tour anytime:  gori tutorial"}
+      end
+    end
+
+    def initialize(@term : Termisu, @handoff : Handoff = Handoff::Shell)
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
       @step = Step::Welcome
@@ -149,7 +227,7 @@ module Gori::Tui
       @p_flow = 0       # selected row in FLOWS
       @p_switch = false # switched tabs
       @p_enter = false  # entered a tab's body
-      @p_up = false     # returned to the tab bar with esc
+      @p_up = false     # returned to the tab bar with ↑ or esc
 
       # Practice-only goals for palette / space / edit (lessons use @tried_*).
       @p_palette = false
@@ -1239,7 +1317,7 @@ module Gori::Tui
       when Step::Palette   then "COMMAND PALETTE · ^P"
       when Step::SpaceMenu then "ACTION MENU · space"
       when Step::Edit      then "EDIT MODE · READ / INS"
-      when Step::Practice  then "TRY IT · all four moves"
+      when Step::Practice  then "TRY IT · four moves, six checks"
       else                      "YOU'RE READY"
       end
     end
@@ -1260,6 +1338,7 @@ module Gori::Tui
 
     private def render_footer(screen : Screen, w : Int32, h : Int32) : Nil
       hint = footer_hint
+      hint = Tutorial.compact_footer_hint(@step, @overlay, @edit_insert, @esc_armed) if Screen.draw_width(hint) > w
       hy = h - 2
       screen.text({(w - Screen.draw_width(hint)) // 2, 0}.max, hy, hint, Theme.muted, Theme.bg)
 
@@ -1582,7 +1661,7 @@ module Gori::Tui
       iw = {box.w - 4, 1}.max
       y = box.y + 2
       goals = [
-        {"1-5 tab", @p_switch}, {"enter", @p_enter}, {"esc back", @p_up},
+        {"1-5 tab", @p_switch}, {"↓ body", @p_enter}, {"↑/esc tabs", @p_up},
         {Hotkeys.retag("^P"), @p_palette}, {"space", @p_space}, {"i INS", @p_edit},
       ]
       # Practice carries two rows of prose the other lessons don't — the six goal chips — and
@@ -1595,7 +1674,7 @@ module Gori::Tui
       pad = Tutorial.prose_gaps(box, fixed + SHELL_ROWS, 1)
       _, sy = Tutorial.lesson_split(box, fixed: fixed, detail: 0, pad: pad)
 
-      screen.text(ix, y, "Your turn — complete each move once (or Skip anytime).", Theme.text_bright, Theme.panel, width: iw)
+      screen.text(ix, y, "Try six checks · Skip anytime.", Theme.text_bright, Theme.panel, width: iw)
       y += 1
 
       per_row = one_row ? goals.size : 3
@@ -1644,32 +1723,30 @@ module Gori::Tui
       ix = box.x + 2
       iw = {box.w - 4, 1}.max
       y = box.y + 2
-      # Step 2 names the HTTPS hurdle: a proxy that cannot read TLS is where a first session
-      # actually stalls, and neither the wizard nor this tour said so. `Open browser` is the
-      # path that needs nothing else; any other client has to trust the CA (`gori ca`).
-      steps = [
-        {"1.", "run  gori  — start the TUI (proxy on your bind address)"},
-        {"2.", "Project → Open browser (CA trusted for you) · other clients: gori ca"},
-        {"3.", "History — pick a captured flow"},
-        {"4.", "^R — send it to Repeater · edit (i) · send again"},
-        # `?`, not "the Help tab": Help starts OFF the bar (Chrome::DEFAULT_HIDDEN), so a
-        # checklist sending a first-time user to hunt for a chip that isn't there strands
-        # them on the one step whose job is to hand them the cheat-sheet.
-        {"5.", Hotkeys.retag("? — cheat-sheet, from any tab · this tour again: ^P → Guided tour")},
-      ]
+      # The command palette owns Open browser; Project is a numbered tab, not its
+      # entry point. The first line follows where this caller actually returns.
+      steps = Tutorial.first_session_steps(@handoff, iw - 3)
       gaps = Tutorial.prose_gaps(box, steps.size + 3, 2)
-      screen.text(ix, y, "That's the tour — here's a first real session:", Theme.text_bright, Theme.panel, width: iw)
+      destination = case @handoff
+                    when Handoff::Picker  then "project picker"
+                    when Handoff::Direct  then "--db project or picker"
+                    when Handoff::Shell   then "shell"
+                    when Handoff::Session then "current session"
+                    else                       raise "unknown tutorial handoff"
+                    end
+      screen.text(ix, y, "Finish → #{destination}", Theme.text_bright, Theme.panel, width: iw)
       y += 1
       y += 1 if gaps > 0
-      steps.each do |(num, desc)|
-        screen.text(ix, y, num, Theme.accent, Theme.panel, width: 3)
+      steps.each_with_index do |desc, i|
+        screen.text(ix, y, "#{i + 1}.", Theme.accent, Theme.panel, width: 3)
         screen.text(ix + 3, y, desc, Theme.text, Theme.panel, width: {iw - 3, 1}.max)
         y += 1
       end
       y += 1 if gaps > 1
-      screen.text(ix, y, Hotkeys.retag("Cheat-sheet:  1-9 tabs · 0 all tabs · ^P palette · space menu · i/↵ INS"), Theme.muted, Theme.panel, width: iw)
+      extra = Tutorial.done_extra_lines(iw)
+      screen.text(ix, y, extra[0], Theme.muted, Theme.panel, width: iw)
       y += 1
-      screen.text(ix, y, "Re-run this tour anytime:  gori tutorial", Theme.muted, Theme.panel, width: iw)
+      screen.text(ix, y, extra[1], Theme.muted, Theme.panel, width: iw)
     end
 
     # --- mock UI -------------------------------------------------------------
