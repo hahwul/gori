@@ -135,7 +135,7 @@ module Gori::Tui
       Review # recap + finish
     end
 
-    def initialize(@term : Termisu)
+    def initialize(@term : Termisu, @tour_handoff : Tutorial::Handoff = Tutorial::Handoff::Shell)
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
       @step = Step::Bind
@@ -231,7 +231,7 @@ module Gori::Tui
       borrowed = !Settings.mouse
       @term.enable_mouse if borrowed
       begin
-        Tutorial.new(@term).run
+        Tutorial.new(@term, @tour_handoff).run
       ensure
         @term.disable_mouse if borrowed
       end
@@ -403,7 +403,7 @@ module Gori::Tui
         # in the field we land on clears the status (bind_insert), which is the fix the message
         # is asking for.
         switch_bind_field(:ip)
-        @status = "invalid bind IP (e.g. 127.0.0.1)"
+        @status = "invalid IP · try 127.0.0.1"
         return
       end
       unless valid_port?(@port)
@@ -418,7 +418,7 @@ module Gori::Tui
       key = "#{effective_ip}:#{@port.strip}"
       if @port_warned != key && SetupWizard.port_in_use?(effective_ip, @port.strip.to_i)
         @port_warned = key
-        @status = "port #{@port.strip} is in use on #{effective_ip} · ↵ again to keep it"
+        @status = "port #{@port.strip} busy · ↵ keep"
         return
       end
       @status = nil
@@ -774,7 +774,7 @@ module Gori::Tui
 
     private def card_title : String
       case @step
-      when Step::Bind       then "NETWORK · global default"
+      when Step::Bind       then "NETWORK · proxy address"
       when Step::Appearance then "THEME · appearance"
       when Step::Companion  then "COMPANION · Miss Ring"
       else                       "REVIEW"
@@ -820,7 +820,11 @@ module Gori::Tui
     private def footer_hints : Array(String)
       case @step
       when Step::Bind
-        ["↵ next · ↑/↓ field · esc skip", "↵ next · esc skip"]
+        if @bind_field == :ip
+          ["↵ edit port · ↑/↓ field · esc skip", "↵ port · esc skip"]
+        else
+          ["↵ next · ↑/↓ field · esc skip", "↵ next · esc skip"]
+        end
       when Step::Appearance
         ["↑/↓ pick theme · ↵ next · ⇧⇥ back · esc skip", "↑/↓ theme · ↵ next · esc skip"]
       when Step::Companion
@@ -839,17 +843,26 @@ module Gori::Tui
     private def render_bind(screen : Screen, box : Rect) : Nil
       ix = box.x + 3
       iw = {box.w - 6, 1}.max
-      screen.text(ix, box.y + 2, "Global default bind (projects inherit this)", Theme.text, Theme.panel, width: iw)
+      screen.text(ix, box.y + 2, "Where should gori listen?", Theme.text, Theme.panel, width: iw)
       fy = box.y + BIND_FIELD_ROW
-      render_field(screen, box, fy, "Bind IP", @ip, @bind_field == :ip)
-      render_field(screen, box, fy + 1, "Bind Port", @port, @bind_field == :port)
-      # Two muted lines: this is the *global* layer only. Projects may pin their own
-      # bind; -l/-p override settings for one process and are not written to disk.
-      # Keep each line ≤ ~56 chars so a 64-col card (iw ≈ 58) never clips mid-word.
-      screen.text(ix, fy + 3, "Projects inherit this unless they pin their own bind.", Theme.muted, Theme.panel, width: iw)
-      screen.text(ix, fy + 4, "Settings later · Project tab to pin · -l/-p one run.", Theme.muted, Theme.panel, width: iw)
+      render_field(screen, box, fy, "Listen IP", @ip, @bind_field == :ip)
+      render_field(screen, box, fy + 1, "Port", @port, @bind_field == :port)
+      guidance = SetupWizard.bind_guidance(iw)
+      screen.text(ix, fy + 3, guidance[0], Theme.muted, Theme.panel, width: iw)
+      screen.text(ix, fy + 4, guidance[1], Theme.muted, Theme.panel, width: iw)
       if st = @status
         screen.text(ix, fy + 5, "• #{st}", Theme.yellow, Theme.panel, width: iw)
+      end
+    end
+
+    # The two network hints have fixed rows. At 40 columns, show the meaning of each
+    # address rather than clipping a detailed settings explanation halfway through.
+    def self.bind_guidance(width : Int32) : {String, String}
+      if width >= 52
+        {"127.0.0.1: this computer only (recommended)",
+         "0.0.0.0: allow other devices · change in Settings"}
+      else
+        {"127.0.0.1: this computer", "0.0.0.0: allow other devices"}
       end
     end
 
@@ -1023,9 +1036,9 @@ module Gori::Tui
       rerun = "re-run anytime: gori wizard"
       screen.text(tx + 3, y, rerun, Theme.muted, Theme.panel) if tx + 3 + rerun.size <= box.right - 1
       y = box.y + REVIEW_RECAP_ROW
-      recap_labels = ["Proxy (global)", "Theme", "Miss Ring", "Shortcuts"]
+      recap_labels = ["Proxy default", "Theme", "Miss Ring", "Shortcuts"]
       vx = ix + recap_labels.max_of { |l| Screen.draw_width(l) } + 2 # +2 = min visible gap before the value column
-      recap(screen, box, ix, vx, y, "Proxy (global)", "#{effective_ip}:#{@port.strip}"); y += 1
+      recap(screen, box, ix, vx, y, "Proxy default", "#{effective_ip}:#{@port.strip}"); y += 1
       recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 1
       recap(screen, box, ix, vx, y, "Miss Ring", @companion_enabled ? "on · #{@companion_motion}" : "off"); y += 1
       # The only EDITABLE recap row (←/→, or a click). Spell out both the chords it moves

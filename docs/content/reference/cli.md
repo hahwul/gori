@@ -1627,7 +1627,7 @@ Runs the interactive setup (global proxy bind default, then theme, then the Miss
 gori tutorial
 ```
 
-Interactive tour of the TUI on a mock UI: tab/pane navigation, the command palette (`Ctrl-P`), the space menu (`Space`), and READ/INS edit mode. Each lesson demos the move and prompts you to try the key; a final practice step requires all four before finishing, then points you at a first real session. Offered at the end of `gori wizard`, and available inside a session as the palette command **Guided tour** (`Ctrl-P`), which returns you to where you were; safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/).
+Interactive tour of the TUI on a mock UI: tab/pane navigation, the command palette (`Ctrl-P`), the space menu (`Space`), and READ/INS edit mode. Each lesson demos the move and prompts you to try the key; practice has six optional checks across those four moves. The last card guides you from the screen you return to: picker, a `--db` project (with picker fallback), shell, or current session. Offered at the end of `gori wizard`, and available inside a session as the palette command **Guided tour** (`Ctrl-P`); safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/).
 
 ## gori update
 

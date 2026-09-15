@@ -10,6 +10,14 @@ private alias SW = Gori::Tui::SetupWizard
 # the tallest step; these examples pin that derivation from BOTH sides, so a step that grows a
 # row can't quietly push the real floor past the advertised one again.
 describe Gori::Tui::SetupWizard do
+  it "keeps local and other-device guidance readable at the minimum width" do
+    inner = SW.card_w(SW::MIN_W, 64) - 6
+    hints = SW.bind_guidance(inner)
+    hints[0].should contain("127.0.0.1")
+    hints[1].should contain("0.0.0.0")
+    hints.each { |hint| Gori::Tui::Screen.draw_width(hint).should be <= inner }
+  end
+
   it "gives every fixed-layout step a card that fits at MIN_H" do
     {SW::BIND_ROWS, SW::COMPANION_ROWS, SW::REVIEW_ROWS}.each do |rows|
       # `rows + 3` = top border + pad row + content + bottom border, which is exactly the
