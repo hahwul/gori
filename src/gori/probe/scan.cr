@@ -263,7 +263,7 @@ module Gori
               detections.concat(Passive.analyze(detail, disabled: cfg.disabled, custom: cfg.custom))
               # WS frames come from `scan_ws_frames`, a page at a time, rather than as one array
               # handed to `Passive.analyze` above (the only rule that reads them is the WS one).
-              detections.concat(scan_ws_frames(store, detail, id, cfg)) if detail.row.status == 101
+              detections.concat(scan_ws_frames(store, detail, id, cfg)) if Probe.ws_transcript_possible?(detail)
               # `!cfg.degraded`: the disabled-rule set could not be read, so gori does not
               # know which ACTIVE rules the operator switched off — see `RuleConfig`.
               # Gate on the port-less scope URL Layer 2 / History / SQL already share —
@@ -292,7 +292,7 @@ module Gori
         detections
       end
 
-      # EVERY captured frame of one 101 flow, a PAGE at a time — the shape `Analyzer#rescan_ws`
+      # EVERY captured frame of one socket, a PAGE at a time — the shape `Analyzer#rescan_ws`
       # already uses, and the only one of the three that is neither wrong bound. `ws_messages(id,
       # 200)` returns the NEWEST 200 (that limit exists to bound the detail VIEW), so a secret in
       # frame 20 of 5,000 was reported by the live analyzer and missed here; `ws_messages(id)`
@@ -301,19 +301,41 @@ module Gori
       # the oldest unscanned id covers every frame exactly once at a bounded cost.
       private def scan_ws_frames(store : Store, detail : Store::FlowDetail, flow_id : Int64,
                                  cfg : RuleConfig) : Array(Detection)
+        scan_ws_pages(detail, cfg) { |after, limit| store.ws_messages_after(flow_id, after, limit) }
+      end
+
+      # The same pass over a REPEATER tab's frames. It used to be one
+      # `ws_messages_for_repeater(rec.id, 200)` read handed straight to `Passive.analyze` — the
+      # NEWEST 200 rows, which is the wrong end for a scan for the reason spelled out above, so
+      # an early frame of a longer tab went unread. Pages forward from the oldest frame instead.
+      #
+      # What that reaches is the operator's authored SEND script and only that: see
+      # `Store#ws_messages_for_repeater_after` for why a repeater tab never holds the origin's
+      # answering frames at all. This half is therefore narrower than its flow twin by
+      # construction, not by this read.
+      private def scan_repeater_ws_frames(store : Store, detail : Store::FlowDetail,
+                                          repeater_id : Int64, cfg : RuleConfig) : Array(Detection)
+        scan_ws_pages(detail, cfg) { |after, limit| store.ws_messages_for_repeater_after(repeater_id, after, limit) }
+      end
+
+      # Page a socket's frames oldest-first and run the WS rules over each page. `fetch` is the
+      # only difference between a History flow and a Repeater tab, so both get identical
+      # coverage and identical folding from one body.
+      private def scan_ws_pages(detail : Store::FlowDetail, cfg : RuleConfig,
+                                &fetch : Int64, Int32 -> Array(Store::WsMessage)) : Array(Detection)
         dets = [] of Detection
         after = 0_i64
         loop do
-          msgs = store.ws_messages_after(flow_id, after, Analyzer::WS_MSG_CAP)
+          msgs = fetch.call(after, Analyzer::WS_MSG_CAP)
           break if msgs.empty?
           after = msgs.last.id # ordered asc ⇒ the last id is the newest scanned; page past it
           dets.concat(Passive.analyze_ws(detail, msgs, disabled: cfg.disabled))
           break if msgs.size < Analyzer::WS_MSG_CAP # a partial page ⇒ the log is drained
         end
         # `WsPayloads` dedups its type labels per Context, which is now per PAGE rather than per
-        # flow, and this array goes to `Probe.group` — which counts every observation into
+        # socket, and this array goes to `Probe.group` — which counts every observation into
         # hit_count. Fold here so paging changed coverage and memory only, not what an operator
-        # reads: one finding per (code, label) for the flow, exactly as the one-shot read gave.
+        # reads: one finding per (code, label), exactly as the one-shot read gave.
         dets.uniq! { |d| {d.code, d.evidence} }
         dets
       end
@@ -337,8 +359,12 @@ module Gori
           n += 1
           # Isolated per repeater tab, exactly like scan_flows isolates per flow.
           begin
-            ws = store.ws_messages_for_repeater(rec.id, 200)
-            Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom).each do |d|
+            Passive.analyze(detail, disabled: cfg.disabled, custom: cfg.custom).each do |d|
+              detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
+            end
+            # WS frames come from `scan_repeater_ws_frames`, a page at a time, for the same
+            # reason the flow half pages (the only rule that reads them is the WS one).
+            scan_repeater_ws_frames(store, detail, rec.id, cfg).each do |d|
               detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
             if active && !cfg.degraded && allows_row?(outbound, detail.row) && budget.take?

@@ -91,13 +91,32 @@ module Gori
           end
         end
 
-        # 101 Switching Protocols with Upgrade: websocket, or a request that asked for WS and
-        # got a matching upgrade response (covers slightly messy origins that omit/case-fold).
+        # A socket gori actually saw open, plus one tolerance for messy origins.
+        #
+        # `ctx.websocket?` is `Store::FlowDetail#websocket?` — the ONE predicate that answers this
+        # across BOTH transports: RFC 6455's `Upgrade:`/101 handshake and RFC 8441's extended
+        # CONNECT over HTTP/2, which is answered `200` and carries no `Upgrade` header at all. The
+        # `status == 101 && Upgrade` spelling this replaced knew only the first, so an application
+        # whose WebSocket rides h2 — the shape every HTTP/2-only origin uses — was never recorded
+        # as having a WebSocket endpoint at all.
+        #
+        # The two arms after it are the tolerances this rule always had, kept verbatim so the
+        # predicate only ever WIDENS: a 101 where either side names the upgrade (the strict one
+        # additionally requires it on the REQUEST), and a request that asked to upgrade paired
+        # with a response that agreed on any status (an origin that answers 200 to an h1
+        # upgrade, or a capture whose status was lost).
         private def websocket?(ctx : Context, resp : Proxy::Codec::RawResponse?) : Bool
-          req_ws = ctx.req.headers.get?("Upgrade").try(&.downcase) == "websocket"
-          resp_ws = resp.try(&.headers.get?("Upgrade").try(&.downcase)) == "websocket"
-          status_ok = ctx.row.status == 101
-          (status_ok && (resp_ws || req_ws)) || (req_ws && resp_ws)
+          return true if ctx.websocket?
+          req_ws = upgrades_to_ws?(ctx.req.headers)
+          resp_ws = !!resp.try { |r| upgrades_to_ws?(r.headers) }
+          (ctx.row.status == 101 && (req_ws || resp_ws)) || (req_ws && resp_ws)
+        end
+
+        # `Upgrade` names the `websocket` token. A LIST-valued field (RFC 9110 §7.8), so a
+        # `Upgrade: websocket, h2c` — and a second `Upgrade:` line — carries it just as much as
+        # the bare value the equality test this replaced demanded.
+        private def upgrades_to_ws?(headers : Proxy::Codec::HeaderList) : Bool
+          headers.lists?("Upgrade", "websocket")
         end
 
         # Path-only form of the request target (strip query / absolute-form origin).

@@ -115,6 +115,25 @@ module Gori
         [flow_id, after_id, limit.to_i64] of DB::Any)
     end
 
+    # Frames on a REPEATER tab with id AFTER `after_id`, OLDEST-first, up to `limit` — the
+    # repeater twin of `ws_messages_after`, and it exists for the same reason: the limited form
+    # of `ws_messages_for_repeater` below returns the NEWEST `limit` rows (that bound is for the
+    # detail VIEW), which is the wrong end for a scanner. The headless probe scan asked for 200
+    # and so read only the tail of the tab.
+    #
+    # Be precise about what that covers today, because the rows here are not a captured
+    # transcript: `update_repeater_ws_messages` is their ONLY writer and it hardcodes
+    # `direction "out"`, so a repeater tab holds the operator's authored SEND script and
+    # nothing else — `WsEngine::Result#messages` (what the origin answered) is rendered by the
+    # surfaces and never persisted. So this fixes a send script longer than 200 messages, and
+    # the server frames of a Repeater-driven socket remain outside the headless scan's reach
+    # entirely. Closing that needs a writer for the inbound side, not a different read.
+    def ws_messages_for_repeater_after(repeater_id : Int64, after_id : Int64, limit : Int32) : Array(WsMessage)
+      read_ws_messages(
+        "SELECT #{WS_MESSAGE_COLS} FROM ws_messages WHERE repeater_id = ? AND id > ? ORDER BY id LIMIT ?",
+        [repeater_id, after_id, limit.to_i64] of DB::Any)
+    end
+
     def ws_messages_for_repeater(repeater_id : Int64, limit : Int32? = nil) : Array(WsMessage)
       cols = WS_MESSAGE_COLS
       q, args = if lim = limit

@@ -39,6 +39,7 @@ module Gori
         @cache_control : Array(String)?
         @html : Bool?
         @js : Bool?
+        @websocket : Bool?
 
         def initialize(@detail : Store::FlowDetail, @ws_messages = [] of Store::WsMessage)
         end
@@ -132,11 +133,30 @@ module Gori
           @resp = @detail.response_head.try { |h| Proxy::Codec::Http1.parse_response_head(h) }
         end
 
-        # A real, scorable HTTP response: excludes a 101 upgrade and the synthetic status 0
-        # (no response captured). The header/cookie/CORS/body rules gate on this.
+        # Did this flow OPEN a WebSocket? Delegates to `Store::FlowDetail#websocket?`, the ONE
+        # predicate that knows both transports gori captures a socket over — RFC 6455's
+        # `Upgrade:`/101 handshake AND RFC 8441's extended CONNECT over HTTP/2, whose handshake
+        # is answered `200` and carries no `Upgrade` header at all (#742).
+        #
+        # Every probe reader used to ask `row.status == 101` instead, which is the h1 spelling
+        # only. That cost the engine an h2 socket three different ways: its frames were never
+        # handed to `WsPayloads` (a token in a frame of a WebSocket-over-h2 app went unreported),
+        # `Tech` did not fingerprint it as a WebSocket endpoint, and — the FP half — `response`
+        # below scored the handshake as an ordinary document, so a socket answered `200` collected
+        # `missing_hsts`/`missing_csp` for headers a WebSocket handshake has no reason to carry.
+        # Memoised: it re-reads the stored request head, and several rules ask.
+        def websocket? : Bool
+          w = @websocket
+          return w unless w.nil?
+          @websocket = @detail.websocket?
+        end
+
+        # A real, scorable HTTP response: excludes a protocol upgrade (either WebSocket
+        # transport, and any other 101) and the synthetic status 0 (no response captured).
+        # The header/cookie/CORS/body rules gate on this.
         def response : Proxy::Codec::RawResponse?
           r = raw_response
-          return nil if r.nil? || row.status == 101 || row.status == 0
+          return nil if r.nil? || row.status == 101 || row.status == 0 || websocket?
           r
         end
 

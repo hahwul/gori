@@ -1572,13 +1572,10 @@ module Gori::Tui
         repeater_id, view.target, req_text.to_slice, false, false,
         flow_id, 0, head, Bytes.empty, nil, result.duration_us, view.name, view.sni_override)
       return unless detail = Probe.detail_from_repeater(rec)
-      # Synthetic WsMessage rows (id unused by the rule; opcode 1 = text).
-      now = Time.utc.to_unix_ms * 1000
-      msgs = result.messages.compact_map do |m|
-        next unless m.opcode == 1 # text frames only
-        next if m.payload.empty?
-        Store::WsMessage.new(0_i64, flow_id || 0_i64, repeater_id, now, m.direction, 1, m.payload)
-      end
+      # The frames the passive WS rule reads — every non-control frame, with its own opcode.
+      # `Probe.ws_messages_from` owns that projection (see the note there on the `opcode == 1`
+      # filter that used to sit here and hid every BINARY frame from the rule).
+      msgs = Probe.ws_messages_from(result.messages, flow_id: flow_id, repeater_id: repeater_id)
       @host.session.probe.scan_detail(detail, repeater_id: repeater_id, ws_messages: msgs)
     rescue
     end
