@@ -868,7 +868,11 @@ module Gori::Tui
 
     private def log_event(v : SequencerView, level : Symbol, msg : String) : Nil
       g = goto_for(v)
-      @host.session.store.insert_event("sequencer", "job_done", level.to_s, msg,
+      # The SYMBOL, not `level.to_s`: `level` here is `:warning` for a weak run, which is the
+      # NOTIFICATION centre's word (`push_notification` above is handed the same symbol) and not
+      # the feed's. `insert_event`'s Symbol overload spells it — this is the producer the
+      # divergence came from, and spelling it here is what let it happen.
+      @host.session.store.insert_event("sequencer", "job_done", level, msg,
         goto_tab: g.try(&.tab.to_s), goto_session_id: g.try(&.session_id))
     end
 

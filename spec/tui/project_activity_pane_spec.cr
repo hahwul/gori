@@ -495,7 +495,45 @@ describe "ProjectView ACTIVITY refresh (the data_version poll)" do
       view.refresh_activity(store)
 
       view.activity_rows.map(&.message).should eq(["$sid found nothing"])
-      view.activity_more?.should be_true # and the walk is still below, not restarted
+      view.activity_more?.should be_true # there is still feed below to page into
+    end
+  end
+
+  # …and once it does pick one up, the resume point has to come back to page one WITH the list.
+  #
+  # The walk's `@act_next_before` names a window far below page one. Keeping it while the list
+  # becomes page one left the two describing different places, and the first `↓` past the last
+  # loaded row jumped everything in between — silently, because a feed has no gap to see. Only
+  # reachable when more than one page of matches arrives at once, which is what an attached
+  # agent's burst under an `actor`/`source` narrowing is.
+  it "adopts page one's resume point when a burst refills a walked, empty list" do
+    tmp_store(events_retention: 40) do |store, project|
+      200.times { |i| store.insert_event("agent", "agent_action", "info", "noise #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      cycle_source_to(view, "bindings")
+      view.reload_activity(store)
+      3.times { view.activity_load_more(store) }
+      view.activity_rows.should be_empty
+      walked = view.activity_more? # the walk parked a resume point deep in the feed
+
+      # More matches than one page can hold — here the 40-id scan window is what bounds it.
+      100.times { |i| store.insert_event("bindings", "extract_miss", "warn", "miss #{i}") }
+      store.flush
+      view.refresh_activity(store)
+
+      walked.should be_true
+      view.activity_rows.size.should be < 100
+      view.activity_rows.first.message.should eq("miss 99")
+      # Paging on from page one's own floor reaches every match the page could not hold. With
+      # the walk's resume point still in force the first `↓` landed below the noise instead,
+      # and the matches in between were gone for good.
+      20.times do
+        break unless view.activity_more?
+        view.activity_load_more(store)
+      end
+      seen = view.activity_rows.map(&.message)
+      100.times { |i| seen.should contain("miss #{i}") }
     end
   end
 

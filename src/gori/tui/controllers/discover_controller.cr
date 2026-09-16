@@ -539,7 +539,7 @@ module Gori::Tui
     end
 
     private def log_event(run : DiscoverRun, level : Symbol, msg : String) : Nil
-      @host.session.store.insert_event("discover", "job_done", level.to_s, msg,
+      @host.session.store.insert_event("discover", "job_done", level, msg,
         goto_tab: "target", goto_session_id: run.id.to_i64)
     end
 

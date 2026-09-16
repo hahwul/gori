@@ -1,15 +1,23 @@
 require "../spec_helper"
 
-# `events` was the ONE table in the schema with no cleanup path at all. `oast_callbacks` and
-# `fuzz_runs` are deleted with their session, `intercept_commands` is wiped by
-# `clear_intercept_state!` at every capture start, and `flows` has retention — events were only
-# ever inserted, by fourteen call sites, for as long as a project was used.
-private def events_store(events_retention, prune_interval, retention = Gori::Store::RETENTION_UNLIMITED, &)
+# `events` had no cleanup path at all until `trim_events`: `oast_callbacks` and `fuzz_runs` are
+# deleted with their session, `intercept_commands` is wiped by `clear_intercept_state!` at every
+# capture start, and `flows` has retention — events were only ever inserted, for as long as a
+# project was used. The sweep then ran off the FLOW-insert cadence only, which is the second half
+# of the same hole and what `events_trim_interval` closes.
+#
+# `flush` TWICE wherever a sweep is asserted. `flush`'s reply goes out with the batch's other
+# deferred replies, BEFORE the writer loop reaches the retention branch below them, so one flush
+# fences the writes and not the sweep. A second flush is a second batch, and the loop cannot
+# begin one until it has finished the previous iteration — the sweep included.
+private def events_store(events_retention, prune_interval,
+                         retention = Gori::Store::RETENTION_UNLIMITED,
+                         events_trim_interval = Gori::Store::EVENTS_TRIM_INTERVAL, &)
   path = File.tempname("gori-event-retention", ".db")
   db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
   Gori::Store::Schema.migrate!(db)
   store = Gori::Store.new(db, nil, retention_flows: retention, prune_interval: prune_interval,
-    events_retention: events_retention)
+    events_retention: events_retention, events_trim_interval: events_trim_interval)
   begin
     yield store
   ensure
@@ -53,6 +61,40 @@ describe "Store event-log retention" do
       store.flush
 
       store.events_after(0_i64, 100).size.should eq(3)
+    end
+  end
+
+  # THE case the cap was never enforced in. `prune` is the only caller of `trim_events` and it
+  # runs off the FLOW-insert cadence, which is zero for the two surfaces that write most of these
+  # rows: an MCP server (one `agent_action` per mutating tool call) and a TUI with capture off.
+  # For those the cap was a number nothing applied, and the table grew for the life of the
+  # project — which `events_recent` then pays for from the reading end, its scan window stopping
+  # short of a feed it can no longer reach the bottom of.
+  it "sweeps the feed in a store that never inserts a flow" do
+    events_store(5, 2, events_trim_interval: 4) do |store|
+      12.times { |i| store.insert_event("agent", "agent_action", "info", "call #{i}") }
+      store.flush
+      store.flush # fences the SWEEP, not just the writes — see the header
+
+      rows = store.events_after(0_i64, 100)
+      rows.size.should be <= 5 + 4           # the cap, plus at most one cadence of overshoot
+      rows.last.message.should eq("call 11") # and the newest is still the newest
+    end
+  end
+
+  # The event cadence must not double-sweep with the flow one, and must not starve it either:
+  # a store doing both keeps one cap, reached by whichever counter fills first.
+  it "keeps one cap when flows and events arrive together" do
+    events_store(3, 2, retention: Gori::Store::RETENTION_UNLIMITED, events_trim_interval: 4) do |store|
+      10.times do |i|
+        store.insert_event("agent", "agent_action", "info", "e#{i}")
+        store.insert_flow(event_request("/f#{i}"))
+      end
+      store.flush
+      store.flush
+
+      store.events_after(0_i64, 100).size.should be <= 3 + 4
+      store.events_after(0_i64, 100).last.message.should eq("e9")
     end
   end
 

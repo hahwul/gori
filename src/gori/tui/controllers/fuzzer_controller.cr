@@ -1287,7 +1287,7 @@ module Gori::Tui
     # (the AI firehose — see the ErrorEvent note above re: #127).
     private def log_event(v : FuzzerView, level : Symbol, msg : String) : Nil
       g = goto_for(v)
-      @host.session.store.insert_event("fuzzer", "job_done", level.to_s, msg,
+      @host.session.store.insert_event("fuzzer", "job_done", level, msg,
         goto_tab: g.try(&.tab.to_s), goto_session_id: g.try(&.session_id))
     end
 
