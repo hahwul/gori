@@ -116,7 +116,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   private def remove_selected_link(lo : LinksOverlay) : Nil
     return unless link = lo.selected_entity_link
-    @session.store.remove_link(link.id)
+    unless @session.store.remove_link(link.id)
+      @toast = "link NOT removed (project busy) — it is unchanged"
+      return
+    end
     lo.reload(@session.store)
     refresh_link_owners(lo.owner_kind, lo.owner_id)
     @toast = "link removed"

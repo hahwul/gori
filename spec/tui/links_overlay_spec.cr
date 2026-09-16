@@ -26,6 +26,12 @@ private def links_for(store, owner_id : Int64) : LinksOverlay
   lo
 end
 
+private def runner_remove_link_body : String
+  source = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "links.cr"))
+    .lines.reject(&.lstrip.starts_with?('#')).join('\n')
+  source[/private def remove_selected_link.*?(?=  private def refresh_link_owners)/m].not_nil!
+end
+
 describe Gori::Tui::LinksOverlay do
   it "names itself after its owner and carries both mode hints" do
     lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Issue, 7_i64)
@@ -115,6 +121,33 @@ describe Gori::Tui::LinksOverlay do
       esc = OverlayHarness.new(lo)
       esc.press(Termisu::Input::Key::Escape).should eq(:closed)
       esc.commits.should eq(0)
+    end
+  end
+
+  it "does not claim a link was removed when the store refused the write" do
+    # A closed writer is the deterministic stand-in for the same `exec_task_ok == false`
+    # contract a cross-process SQLite busy/lock takes. The lower layer proves the trigger;
+    # the Runner source check pins the branch because Runner.new owns a real terminal.
+    path = File.tempname("gori-link-remove-busy", ".db")
+    begin
+      store = Gori::Store.open(path)
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      link = store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
+        Gori::Store::LinkRefKind::Flow, 7_i64).not_nil!
+      store.close
+      store.remove_link(link).should be_false
+
+      body = runner_remove_link_body
+      refusal = body.index("unless @session.store.remove_link(link.id)").not_nil!
+      reload = body.index("lo.reload(@session.store)").not_nil!
+      success = body.index(%(@toast = "link removed")).not_nil!
+      refusal.should be < reload
+      reload.should be < success
+      body.should contain(%(@toast = "link NOT removed (project busy) — it is unchanged"))
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
     end
   end
 
