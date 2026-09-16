@@ -23,9 +23,12 @@ module Gori
         "Cycle the source narrowing: all, #{Gori::Store::EVENT_SOURCES.join(", ")}",
         Verb::Scope::ProjectActivity, [Verb::Chord.new("s")]) { |ctx| ctx.activity_filter_source; nil }
 
+      # From `Store::EVENT_LEVELS`, for the reason the line above reads `EVENT_SOURCES`: the
+      # sources comment next door records that this help had already lost `config` back when the
+      # chip kept its own literal, and a hand-written set here drifts the same way.
       r.register Verb::Definition.new(
         "activity.filter-level", "Filter by level",
-        "Cycle the level narrowing: all, info, success, warn, error",
+        "Cycle the level narrowing: all, #{Gori::Store::EVENT_LEVELS.join(", ")}",
         Verb::Scope::ProjectActivity, [Verb::Chord.new("l")]) { |ctx| ctx.activity_filter_level; nil }
 
       r.register Verb::Definition.new(

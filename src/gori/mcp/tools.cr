@@ -470,9 +470,10 @@ module Gori
       VIEW_SCOPES_R = %w[builtin project global]
       # The event feed's `source` column, as written by every producer.
       EVENT_SOURCES = Store::EVENT_SOURCES
-      # …and its `actor` column: the surface that acted, or nothing. Written only by the two
-      # producers that can name one (`log_agent_action`, `ConfigLog.record`), both from
-      # `FlowSource.surface`.
+      # …and its `actor` column: the surface that acted, or nothing. Written only where a surface
+      # demonstrably did (`log_agent_action`, `ConfigLog.record`, the evidence-freeze line), never
+      # defaulted — see `Store#insert_event` for why an ambient default would be worse than the
+      # empty column.
       EVENT_ACTORS          = Gori::FlowSource::Surface.values.map(&.token)
       FUZZ_MODES            = Fuzz::Mode.names
       MINE_LOCATIONS        = Miner::Location.values.map(&.label)

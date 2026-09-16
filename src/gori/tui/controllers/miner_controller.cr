@@ -800,7 +800,7 @@ module Gori::Tui
     # independent of the human NotifyMode gate above ("log freely, interrupt deliberately").
     private def log_event(v : MinerView, level : Symbol, msg : String) : Nil
       g = goto_for(v)
-      @host.session.store.insert_event("miner", "job_done", level.to_s, msg,
+      @host.session.store.insert_event("miner", "job_done", level, msg,
         goto_tab: g.try(&.tab.to_s), goto_session_id: g.try(&.session_id))
     end
 

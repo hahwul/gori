@@ -851,20 +851,41 @@ module Gori
     # Flag writers: the in-memory field is swapped under @mutex (the hot path reads it
     # there), and the persisting write runs outside it. Callers hold @write_mutex, which is
     # what keeps a concurrent toggle from interleaving between the read and the write.
+    #
+    # Only a write that MOVED the flag is logged. `ConfigLog` is for changes — "recording an
+    # attempt as a change would put a rule in the audit trail that never gated a single request"
+    # is its own doc — and these two are written absolutely (`enable`, `enable_sandbox`, MCP
+    # `set_sandbox{enabled}`) rather than as flips, so the commonest call is one that asks for
+    # the state already in force. `Runner#scope_add_host` calls `enable` on EVERY batch add, so
+    # an operator scoping twelve hosts over a session filled the Activity feed with "scope lens
+    # turned on" lines for a lens that was already on — noise in the one place the operator goes
+    # to find out what actually changed.
+    #
+    # Against the PERSISTED row, not against `@enabled`/`@sandbox`. Those are process-local and
+    # a peer moves the flag without them (that is what `#reload`'s poll is for), so a memory
+    # comparison would call a write that really did flip the stored flag a no-op and say nothing
+    # — on the sandbox, silently, about the hard containment gate. The row is what every process
+    # re-reads, so it is what "did this change anything" has to mean. One extra indexed read per
+    # toggle, which is an operator gesture.
     private def set_enabled(value : Bool) : Bool
       @mutex.synchronize { @enabled = value }
+      was = @store.setting(SETTING_ENABLED) == "1" # nil ⇒ false, the spelling `Scope.load` reads
       ok = @store.set_setting(SETTING_ENABLED, value ? "1" : "0")
-      ConfigLog.record(@store, "scope_lens", "scope lens turned #{value ? "on" : "off"}") if ok
+      ConfigLog.record(@store, "scope_lens", "scope lens turned #{value ? "on" : "off"}") if ok && was != value
       ok
     end
 
     # The sandbox is the one setting here that changes what leaves the machine — it is the hard
     # containment gate, not a display lens — so it is the last one that should be able to move
-    # without the log saying who moved it.
+    # without the log saying who moved it. Which cuts both ways: a no-op must not be logged AS a
+    # move (a feed carrying "sandbox turned ON" three times for one enable is a feed an operator
+    # cannot read the gate's history off), and a move must never be missed — so the comparison is
+    # against the stored row, for the reason `set_enabled` above spells out.
     private def set_sandbox(value : Bool) : Bool
       @mutex.synchronize { @sandbox = value }
+      was = @store.setting(SETTING_SANDBOX) == "1"
       ok = @store.set_setting(SETTING_SANDBOX, value ? "1" : "0")
-      ConfigLog.record(@store, "sandbox", "sandbox turned #{value ? "ON — out-of-scope traffic is now blocked" : "off — out-of-scope traffic is no longer blocked"}") if ok
+      ConfigLog.record(@store, "sandbox", "sandbox turned #{value ? "ON — out-of-scope traffic is now blocked" : "off — out-of-scope traffic is no longer blocked"}") if ok && was != value
       ok
     end
 

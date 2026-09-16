@@ -1124,8 +1124,9 @@ module Gori::Tui
       end
     end
 
-    # Cycle order for the `l` chip.
-    ACT_LEVELS = [nil, "info", "success", "warn", "error"]
+    # Cycle order for the `l` chip. From `Store::EVENT_LEVELS` — the list next to the writer —
+    # for the reason ACT_SOURCES is: a copy here is a copy that drifts.
+    ACT_LEVELS = [nil] + Gori::Store::EVENT_LEVELS
 
     # How many pages `refresh_activity` walks down looking for the row that heads the loaded list
     # before it gives up and reloads. One page is the ordinary tick; five is what keeps a burst
@@ -1134,9 +1135,10 @@ module Gori::Tui
     ACT_CATCHUP_PAGES = 5
 
     # What a level chip actually matches. The feed carries TWO spellings of one level: every
-    # producer writes "warn" except the Sequencer, whose `level.to_s` writes "warning". A chip
+    # producer writes "warn", and the Sequencer used to write "warning" because its `level`
+    # symbol is the notification centre's (`:warning`) and it spelled it straight through. A chip
     # that matched its own label would hide half the warnings in the feed, and rows already
-    # written cannot be respelled.
+    # written cannot be respelled — so this stays even though new rows are all "warn".
     def self.act_level_set(level : String?) : Array(String)?
       return nil unless level
       level == "warn" ? ["warn", "warning"] : [level]
@@ -1274,15 +1276,33 @@ module Gori::Tui
                         else
                           true
                         end
-      # The cursor moves only when no walk is in progress. On a fresh empty list page one IS the
-      # cursor, and adopting it is required — without it a feed that was empty at open would keep
-      # `next_before = nil` and refuse to page past the first 200 events it ever received.
-      unless @act_walked
-        @act_next_before = page.next_before
-        @act_scanned = page.window
+      # Still nothing to show. The walk, if one is in progress, is what must survive: an
+      # operator who pressed `↓` through ten empty windows under a sparse narrowing has told
+      # this pane how far back to look, and page one — which is all that was just read — knows
+      # nothing about it. Only an UNWALKED list adopts this page's resume point; without that a
+      # feed empty at open would keep `next_before = nil` and refuse to page at all.
+      if page.rows.empty?
+        unless @act_walked
+          @act_next_before = page.next_before
+          @act_scanned = page.window
+        end
+        return
       end
-      return if page.rows.empty?
+
+      # Page one HAS rows, so the loaded list BECOMES page one — and the resume point has to
+      # become page one's with it. Keeping the walk's deep `@act_next_before` here left the two
+      # describing different places: the list ended at page one's floor while the resume point
+      # named a window far below it, so the first `↓` past the last row jumped the gap and every
+      # matching event in between was skipped without a word. (Reachable whenever more than one
+      # page of matches arrives while the list is empty and walked — an agent burst under an
+      # `actor` narrowing, a job writing 200+ rows under a `source` one.) The walk's product was
+      # "nothing matches down there", which page one having rows does not contradict; what it
+      # costs is re-walking those windows, which `↓` does, and which is the cheap half of the
+      # trade against silently losing rows.
       @act_rows = page.rows
+      @act_next_before = page.next_before
+      @act_scanned = page.window
+      @act_walked = false
       resolve_activity_anchor
     end
 
@@ -2965,8 +2985,8 @@ module Gori::Tui
     # "Nothing matched" is only true of what was actually LOOKED at. A page stops either at the
     # end of the feed or at the scan bound, and `next_before` is the difference — so when the
     # scan stopped short, the sentence says how far it got instead of making a claim about
-    # events it never read. (Reachable only on a feed grown past its own retention cap, which
-    # `trim_events` allows for a process that writes events and captures no flows.)
+    # events it never read. (Reachable only on a feed grown past its own retention cap — a db
+    # from a build before `EVENTS_TRIM_INTERVAL`, or the overshoot that cadence permits.)
     private def activity_no_match_line : String
       base = "no events match #{activity_narrowing}"
       activity_more? ? "#{base} in the newest #{Fmt.count(@act_scanned.to_i64)} events" : base

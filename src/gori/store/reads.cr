@@ -136,10 +136,12 @@ module Gori
     # ~0.9 ms — so a tighter window buys nothing (5_000 measured SLOWER, once its extra
     # MAX/MIN lookup is counted) and costs correctness: any match below the window renders as
     # "no events match", which is a lie about the operator's own project. At the retention cap
-    # the bound cannot truncate a store that is being trimmed, and still bounds the one that is
-    # not — `trim_events` only runs off FLOW inserts, so an MCP-only process that writes events
-    # and captures nothing can grow this table past the cap indefinitely. That is the case this
-    # exists for, and there `next_before` says so rather than reporting the end of the feed.
+    # the bound cannot truncate a store that is being trimmed, and still bounds one that is over
+    # the cap: `trim_events` now runs off EVENT inserts as well as flow ones
+    # (`EVENTS_TRIM_INTERVAL`), so the overshoot is bounded by that cadence rather than
+    # unbounded — but a db carrying rows from a build before that, or one trimmed by a peer
+    # process while this one reads, can still hold more. There `next_before` says the scan
+    # stopped short rather than reporting the end of the feed.
     private def event_scan_window : Int32
       @events_retention
     end
@@ -152,10 +154,11 @@ module Gori
     # feed of agent rows would hand the pane an empty page while the matches sit two pages down.
     # So every narrowing here goes into the WHERE, and the scan is bounded instead.
     #
-    # `levels` is a SET, not a string, because the feed carries two spellings of one level:
-    # every producer writes "warn" except the Sequencer, whose `level.to_s` writes "warning"
-    # (`sequencer_controller.cr`). A filter that matched one would silently hide the other, and
-    # rows already written cannot be respelled.
+    # `levels` is a SET, not a string, because the feed carries two spellings of one level. Every
+    # producer writes "warn" now — `insert_event` normalizes the tray's `:warning` at the sink —
+    # but the Sequencer wrote "warning" straight through until that landed, and rows already
+    # stored cannot be respelled. A filter that matched one spelling would silently hide the
+    # other, so this stays for as long as those rows can still be in a feed.
     #
     # Does NOT rescue. `recent_agent_actions` degrades to `[]` because it garnishes a
     # notification that must go out either way; here the read IS the answer, so a swallowed

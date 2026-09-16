@@ -124,11 +124,19 @@ module Gori
 
     # Generic write (scope rules / settings / issues) run on the writer
     # connection; reply carries last_insert_rowid (meaningful for INSERTs).
+    #
+    # `event?` marks the one kind of generic write the writer loop has to COUNT: an append to
+    # `events`. The sweep that caps that table rides the cadence below, and that cadence counts
+    # FLOW inserts — which is zero for the surfaces that write the most events (see
+    # EVENTS_TRIM_INTERVAL). The flag is on the op rather than on a counter Store bumps from the
+    # caller's fiber so the count stays where every other one already is: on the writer fiber,
+    # after the batch COMMITTED, needing no lock and crediting nothing that rolled back.
     struct ExecTask < WriteOp
       getter run : DB::Connection -> Nil
       getter reply : Channel(Int64)
+      getter? event : Bool
 
-      def initialize(@run, @reply)
+      def initialize(@run, @reply, @event = false)
       end
     end
 
@@ -203,18 +211,32 @@ module Gori
     # Inserts between retention sweeps — amortizes the prune cost.
     PRUNE_INTERVAL = 2_000
 
-    # Newest `events` rows kept. This is the ONE table in the schema with no cleanup path at
-    # all: `oast_callbacks` and `fuzz_runs` are deleted with their session, `intercept_commands`
-    # is wiped by `clear_intercept_state!` at every capture start, and `flows` has retention —
-    # events were only ever inserted. Fourteen call sites write them (job lifecycle, agent
-    # actions, binding warnings), so a long-lived project accumulates them for as long as it
-    # is used, and nothing ever gave the rows back.
+    # Newest `events` rows kept. Every surface writes them (job lifecycle, agent actions, binding
+    # warnings, config changes — `spec/store/event_source_registry_spec.cr` is what counts the
+    # producers, so this does not carry a number that drifts), so a long-lived project
+    # accumulates them for as long as it is used; `trim_events` gives the rows back, on the
+    # cadence below.
     #
     # A COUNT rather than an age: the reader is a forward cursor
     # (`events_after(since_id, limit)`), so what an agent tailing the feed needs is that recent
     # rows are still there, not that any particular day is. 50k is far past what any session
     # produces — these are lifecycle rows, not per-request — and keeps the table at a few MB.
     EVENTS_RETENTION = 50_000
+    # Event inserts between `events` retention sweeps.
+    #
+    # `events` needs a cadence of its OWN because the one beside it counts FLOW inserts, and the
+    # two surfaces that write the most events insert no flows at all: a `gori mcp` server (every
+    # mutating tool call is an `agent_action` row) and a TUI session with capture off (config
+    # edits, binding warnings, job lifecycle). For those `prune` — the only caller of
+    # `trim_events` — never ran once, so EVENTS_RETENTION was a cap nothing enforced and the
+    # table grew for the life of the project. `events_recent` already documents the consequence
+    # from the reading end: past the cap its scan window stops short of the feed, and the pane
+    # has to qualify "no events match" with how far back it actually looked.
+    #
+    # A sweep is one index-served MIN lookup on the primary key and, in the common case, no
+    # DELETE at all, so 1 000 keeps it far off the write path while bounding the overshoot to
+    # 2% of the cap.
+    EVENTS_TRIM_INTERVAL = 1_000
     # Ids per statement when a batch write binds an `IN (?,?,…)` list. SQLite caps bound
     # parameters at SQLITE_MAX_VARIABLE_NUMBER, which is 999 on anything built before 3.32 —
     # so a set larger than that does not merely run slower, the statement RAISES and the whole
@@ -578,6 +600,7 @@ module Gori
                    @authorize_events : Channel(FlowEvent)? = nil,
                    @prune_interval : Int32 = PRUNE_INTERVAL,
                    @events_retention : Int32 = EVENTS_RETENTION,
+                   @events_trim_interval : Int32 = EVENTS_TRIM_INTERVAL,
                    @open_lock : OpenLock? = nil,
                    @read_only : Bool = false,
                    @background_index : Bool = true)
@@ -587,6 +610,7 @@ module Gori
       @write_failures = Atomic(Int32).new(0)
       @h2_frames_dropped = Atomic(Int32).new(0)
       @inserts_since_prune = 0
+      @events_since_trim = 0
       # Writer-fiber-only hint: does `flows.fts_dirty = 1` possibly have rows? Starts true so a
       # db reopened with a backlog (a killed process, or a batch dropped under saturation) gets
       # drained without waiting for a capture to hint at it; set false the moment an indexing
@@ -1196,6 +1220,21 @@ module Gori
       ::Log.warn { "retention prune skipped (no usable writer connection): #{ex.message}" } # gori.log (#411)
     end
 
+    # The `events` sweep on its own cadence. Same shape and same reason as `prune_safely`:
+    # `trim_events` rescues its own statement, but not the `writer_conn` checkout it is handed.
+    #
+    # Answers whether the sweep RAN, which its caller needs — a skipped sweep must not reset the
+    # cadence counter. `trim_events`' own rescue marks the connection suspect and returns, so a
+    # true here means the statement was issued, not that rows went.
+    private def trim_events_safely : Bool
+      return false if @writer_conn_suspect # a condemned connection: the next sweep takes these rows
+      trim_events(writer_conn)
+      true
+    rescue ex
+      ::Log.warn { "event-log trim skipped (no usable writer connection): #{ex.message}" } # gori.log (#411)
+      false
+    end
+
     private def writer_connection_loop : Nil
       # Cleared once per loop, not per connection — the loop takes and retires many. It stays
       # the discriminator `writer_loop`'s rescue reads to tell "the loop died" from "the final
@@ -1326,9 +1365,25 @@ module Gori
             # so counting it as a single InsertFlow (or 0) let a large import bypass the
             # retention sweep, keeping the DB far over its cap until enough live captures accrue.
             @inserts_since_prune += ops.sum { |op| op.is_a?(InsertFlow) ? 1 : (op.is_a?(InsertImportBatch) ? op.pairs.size : 0) }
+            # Events carry their own count for the reason EVENTS_TRIM_INTERVAL gives: the sum
+            # above is 0 for every process that writes events and captures nothing, so the
+            # sweep below was the branch the two chattiest surfaces never reached.
+            @events_since_trim += ops.count { |op| op.is_a?(ExecTask) && op.event? }
             if @inserts_since_prune >= @prune_interval
               prune_safely
               @inserts_since_prune = 0
+            end
+            if @events_since_trim >= @events_trim_interval
+              # Zeroed only when the sweep actually RAN. `prune` above may sweep `events` too,
+              # and then this one finds nothing to delete — one indexed MIN lookup, which is
+              # cheaper than the bookkeeping needed to skip it. What is NOT cheap is crediting a
+              # sweep that did not happen: `prune` returns above its own `trim_events` on a
+              # condemned writer connection, and `prune_safely` swallows a failed checkout
+              # outright, so zeroing on either would put the counter back to 0 with the rows
+              # still there — another full interval before the next attempt, for as long as the
+              # connection keeps failing. That is the unbounded growth this cadence exists to
+              # stop, reinstated by the branch meant to stop it.
+              @events_since_trim = 0 if trim_events_safely
             end
           else
             # NOT the IndexBatch ops: `index_replies` (collected from this same `ops` array) is
@@ -1929,9 +1984,12 @@ module Gori
       "VALUES (?,?,?,?,?,?,?,?)"
 
     # Runs a write closure on the writer connection; returns last_insert_rowid.
-    private def exec_task(run : DB::Connection -> Nil) : Int64
+    #
+    # `event: true` only from `insert_event` — it tells the writer loop this op appended to
+    # `events`, which is what drives that table's own retention sweep (see EVENTS_TRIM_INTERVAL).
+    private def exec_task(run : DB::Connection -> Nil, *, event : Bool = false) : Int64
       reply = Channel(Int64).new(1) # buffered: the writer must never block sending a reply
-      @writes.send(ExecTask.new(run, reply))
+      @writes.send(ExecTask.new(run, reply, event))
       reply.receive
     rescue Channel::ClosedError
       0_i64 # store closing — caller (settings/issues/flush) degrades, doesn't raise

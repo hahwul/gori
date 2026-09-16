@@ -10,9 +10,51 @@ module Gori
     # schema. All three read this now. A filter offering a source nothing writes returns an
     # empty feed that reads as "nothing happened".
     #
-    # Ordered the way a reader wants them: who acted first (`agent`, `config`), then the
-    # background producers.
-    EVENT_SOURCES = %w[agent config bindings rewriter probe discover fuzzer miner sequencer]
+    # Ordered the way a reader wants them: who acted first (`agent`, `config`, `issues`), then
+    # the background producers.
+    #
+    # `issues` is the one that proves the list has to live here. `runner/evidence.cr` started
+    # writing it (an operator froze a copy of a flow onto an issue) without registering it, and
+    # because the column is a free string nothing complained: the rows landed in the feed, the
+    # Activity pane's `s` chip could never narrow to them, and MCP `list_events{source:"issues"}`
+    # was REFUSED as invalid while naming a set that omitted a source the project writes. A
+    # writer that is not in this list is reachable only by reading the whole feed.
+    EVENT_SOURCES = %w[agent config issues bindings rewriter probe discover fuzzer miner sequencer]
+
+    # Every `level` the feed carries, in the order the Activity pane's `l` chip cycles them.
+    # Here for the reason EVENT_SOURCES is: the column is a free string and this is the list of
+    # what is actually written.
+    EVENT_LEVELS = %w[info success warn error]
+
+    # The feed's spelling of a producer's level SYMBOL.
+    #
+    # The four job controllers (fuzzer, miner, sequencer, discover) each pick a level as a symbol
+    # and hand the SAME symbol to the notification centre, whose vocabulary is not this one:
+    # `:warning` is a tray level, `warn` is the feed's. Spelling it straight through with
+    # `level.to_s` made the Sequencer the one producer of ten writing "warning", which the
+    # Activity pane then had to match on TOP of "warn" (`act_level_set`) or its chip would hide
+    # half the feed's warnings, and which an MCP reader comparing `level` still sees as two words
+    # for one level. Everything else passes through — `:info`, `:success` and `:error` are
+    # spelled the same on both sides.
+    def self.event_level(level : Symbol) : String
+      level == :warning ? "warn" : level.to_s
+    end
+
+    # The Symbol form, which is what a producer holding a level symbol must call.
+    #
+    # At the SINK, not at the four call sites. Spelling it per-producer is what let the
+    # divergence in the first place — each one reaches for `level.to_s` because it is already
+    # handing that symbol to the notification centre — and a fix applied at four call sites is a
+    # fix the fifth producer does not get. There is exactly one door into this table, so the
+    # vocabulary is decided on the way through it.
+    def insert_event(source : String, kind : String, level : Symbol, message : String, *,
+                     goto_tab : String? = nil, goto_session_id : Int64? = nil,
+                     flow_id : Int64? = nil, payload : String? = nil,
+                     actor : String? = nil) : Int64
+      insert_event(source, kind, Store.event_level(level), message,
+        goto_tab: goto_tab, goto_session_id: goto_session_id,
+        flow_id: flow_id, payload: payload, actor: actor)
+    end
 
     # Append one row to the #124 event feed (the AI firehose). Goes through the writer
     # fiber like every other insert; returns last_insert_rowid (0 on a dropped/closed-store
@@ -33,11 +75,15 @@ module Gori
                      goto_tab : String? = nil, goto_session_id : Int64? = nil,
                      flow_id : Int64? = nil, payload : String? = nil,
                      actor : String? = nil) : Int64
+      # `event: true` is what puts this write on the `events` retention cadence
+      # (`Store::EVENTS_TRIM_INTERVAL`). Without it the cap is enforced only by the FLOW-insert
+      # sweep, which never runs in an MCP server or a TUI with capture off — the two surfaces
+      # that write most of these rows.
       exec_task ->(c : DB::Connection) {
         c.exec("INSERT INTO events (created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor) VALUES (?,?,?,?,?,?,?,?,?,?)",
           now_us, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor)
         nil
-      }
+      }, event: true
     end
 
     # Empty the #124 feed. The human-facing counterpart to retention's `trim_events`, for an
