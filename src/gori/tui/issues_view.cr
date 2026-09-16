@@ -611,6 +611,20 @@ module Gori::Tui
       end
     end
 
+    # Whether two reloads' rows name the same related material. Entity-link ids are not the
+    # identity here: the primary flow may move between a stored link and `issue_links`'s
+    # synthetic id=0 row without changing what it points at. A frozen copy, on the other hand,
+    # has its own durable evidence id even after its source is gone.
+    private def same_related?(a : RelatedRow, b : RelatedRow) : Bool
+      if live = a.live
+        other = b.live || return false
+        return live.link.ref_kind == other.link.ref_kind && live.link.ref_id == other.link.ref_id
+      end
+      frozen = a.frozen || return false
+      other = b.frozen || return false
+      frozen.id == other.id
+    end
+
     # The open issue's RETEST state as one line, or nil when it has none (#1036).
     #
     # Drawn only when there IS one, which is what makes the feature free for the issues that
@@ -658,11 +672,20 @@ module Gori::Tui
     # it away — so nothing an issue names can disappear from the card.
     def reload_detail_links(store : Store) : Nil
       return unless issue = @detail
+      selected = selected_related
       @detail_links = Links.issue_links(store.list_links(Store::LinkOwnerKind::Issue, issue.id), issue)
       rows = Links.resolve_all(store, @detail_links).map { |res| RelatedRow.new(live: res) }
       store.issue_evidence(issue.id).each { |m| rows << RelatedRow.new(frozen: m) }
       @detail_related = rows
-      @selected_link = @selected_link.clamp(0, {@detail_related.size - 1, 0}.max)
+      @selected_link =
+        if selected && (idx = @detail_related.index { |row| same_related?(row, selected) })
+          idx
+        else
+          @selected_link.clamp(0, {@detail_related.size - 1, 0}.max)
+        end
+      # Re-anchoring can move the index when a live row is inserted ahead of a frozen one.
+      # Keep the durable selection visible instead of leaving its band outside the old window.
+      ensure_links_visible
     end
 
     def move_links(delta : Int32) : Nil

@@ -35,7 +35,7 @@
 ### Changes
 
 - Keys: one letter, one meaning — `d` only destroys, `y` always copies, `o` is only `↵`'s alias, `t` toggles a rule, `s` goes to the source, `r` sends and `^R` runs; the sub-tab verbs are one bucket drawn on all nine strip tabs; and a key the registry binds is the key that fires (#1053, #1055, #1056)
-- Issues: one concept for what backs a finding — the primary flow is RELATED's first row on every surface, `↵` shows a row's exchange in place and `s` goes to its source, and **Link…** keeps the bytes instead of offering a second verb (#1038)
+- Issues: one concept for what backs a finding — the primary flow is RELATED's first row on every surface, `↵` shows a row's exchange in place and `s` goes to its source, **Link…** keeps the bytes instead of offering a second verb, and reloads keep the same related row selected while failed removals are reported honestly (#1038)
 - Issues, Probe: RELATED and AFFECTED URLS become bordered panes with focus of their own, a finding's remediation text is a scrollable pane instead of a truncated header row, and both `/` bars complete the way History's does
 - TUI: a pane stops shouting the name the chip above it already carries, drill-ins step with one `⇧N`/`⇧P` pair, and a measured walk through the core loop fixed a dozen hint strips naming a key that was not there (#1040, #1061)
 - Performance: literal History body/header search by byte scan (`body~` over 500k flows 4.1s → 0.25s), the proxy's head read and framing decision (~26µs → ~18µs a request), Sequencer analysis (153ms → 71ms), Miner's JSON spans (~117ms → ~1ms a probe), and the Discover, Fuzzer and Probe scan paths (#997, #999, #1064, #1065, #1067, #1070)

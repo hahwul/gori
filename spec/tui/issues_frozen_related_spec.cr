@@ -164,4 +164,49 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       view.selected_evidence.not_nil!.id.should eq(a) # clamped onto the survivor
     end
   end
+
+  it "keeps the selected live row when an earlier link disappears on reload" do
+    with_store do |store|
+      first = frozen_flow(store, "/first")
+      selected = frozen_flow(store, "/selected")
+      after = frozen_flow(store, "/after")
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      first_link = store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
+        Gori::Store::LinkRefKind::Flow, first).not_nil!
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
+        Gori::Store::LinkRefKind::Flow, selected)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
+        Gori::Store::LinkRefKind::Flow, after)
+
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.move_links(1)
+      view.selected_resolved_link.not_nil!.link.ref_id.should eq(selected)
+
+      store.remove_link(first_link).should be_true
+      view.reload_detail_links(store)
+      view.selected_resolved_link.not_nil!.link.ref_id.should eq(selected)
+    end
+  end
+
+  it "keeps the selected frozen row when a live link is inserted before it" do
+    with_store do |store|
+      src = frozen_flow(store, "/frozen")
+      added = frozen_flow(store, "/added")
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      eid, status = store.freeze_evidence(issue, Gori::Evidence.from_flow(store.get_flow(src).not_nil!))
+      status.ok?.should be_true
+
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.selected_evidence.not_nil!.id.should eq(eid)
+
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
+        Gori::Store::LinkRefKind::Flow, added)
+      view.reload_detail_links(store)
+      view.selected_evidence.not_nil!.id.should eq(eid)
+    end
+  end
 end
