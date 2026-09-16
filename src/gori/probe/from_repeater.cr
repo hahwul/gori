@@ -1,5 +1,6 @@
 require "../store"
 require "../repeater/flow_request"
+require "../repeater/ws_engine"
 require "../proxy/codec/http1"
 
 module Gori
@@ -22,6 +23,29 @@ module Gori
         i += 1
       end
       nil
+    end
+
+    # Project a Repeater WebSocket send's captured frames onto the `Store::WsMessage` rows the
+    # passive WS rule reads, so a socket driven from a Repeater tab is scanned exactly as one
+    # the proxy captured. Ids are unused by the rule (nothing reads them back), so they are 0.
+    #
+    # It carries each frame's REAL opcode and drops ONLY control frames. That is the whole
+    # reason this is a named function rather than a `map` at the call site: the TUI's copy
+    # filtered to `opcode == 1` and stamped every row it kept as text, so a BINARY frame never
+    # reached `Passive::WsPayloads` — which scans binary frames deliberately (protobuf/msgpack/
+    # CBOR is the mainstream realtime encoding, and a credential rides in one as an ordinary
+    # ASCII string field). A secret in a binary frame was therefore reported for a socket gori
+    # watched and missed for the same socket replayed by hand. Control frames (ping/pong/close)
+    # carry no application payload, which is why the rule skips them anyway.
+    def self.ws_messages_from(messages : Array(Repeater::WsEngine::Message), *,
+                              flow_id : Int64?, repeater_id : Int64,
+                              created_at : Int64 = Time.utc.to_unix_ms * 1000) : Array(Store::WsMessage)
+      messages.compact_map do |m|
+        next if m.opcode >= 8 # control frame — see Store::WsMessage#control?
+        next if m.payload.empty?
+        Store::WsMessage.new(0_i64, flow_id || 0_i64, repeater_id, created_at, m.direction,
+          m.opcode, m.payload)
+      end
     end
 
     def self.detail_from_repeater(record : Store::RepeaterRecord) : Store::FlowDetail?

@@ -78,8 +78,8 @@ module Gori
         # live probe exactly as they already stopped `gori run probe` / MCP probe_scan.
         @outbound = Outbound.allowlist(@scope)
         @analyzed = Set(Int64).new
-        @ws_hwm = {} of Int64 => Int64 # per-101-flow high-water-mark: max ws_message id already scanned
-        # Cache each 101 flow's handshake FlowDetail — it NEVER changes frame-to-frame, but
+        @ws_hwm = {} of Int64 => Int64 # per-socket high-water-mark: max ws_message id already scanned
+        # Cache each socket's handshake FlowDetail — it NEVER changes frame-to-frame, but
         # InsertWs republishes :updated per frame, so rescan_ws re-read it from SQLite (heads +
         # bodies) on every frame of a chatty socket. Evicted in lock-step with @ws_hwm.
         @ws_detail = {} of Int64 => Store::FlowDetail
@@ -436,10 +436,10 @@ module Gori
             @analyzed << ev.id
             trim(@analyzed, ANALYZED_CAP)
             # HTTP/non-WS rules run once here; WS payloads are ALWAYS handled by the hwm-gated,
-            # gap-free rescan_ws so a 101 flow evicted from @analyzed and re-scanned (or one with a
+            # gap-free rescan_ws so a socket evicted from @analyzed and re-scanned (or one with a
             # backlog > WS_MSG_CAP) never re-detects already-scanned frames or skips a band of them.
             scan_detail(detail, enqueue_active: true)
-            rescan_ws(ev.id, detail) if detail.row.status == 101 # reuse the detail just loaded
+            rescan_ws(ev.id, detail) if detail.websocket? # reuse the detail just loaded
           rescue DB::Error | SQLite3::Exception
             # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
             # of the session — skip this flow and keep draining. On real shutdown the input
@@ -483,7 +483,7 @@ module Gori
           @analyzed << row.id
           trim(@analyzed, ANALYZED_CAP)
           scan_detail(detail, enqueue_active: true)
-          rescan_ws(row.id, detail) if detail.row.status == 101 # reuse the detail just loaded
+          rescan_ws(row.id, detail) if detail.websocket? # reuse the detail just loaded
         end
       rescue DB::Error | SQLite3::Exception
       rescue Channel::ClosedError
@@ -531,7 +531,7 @@ module Gori
         !row.source.try(&.self_scanned?)
       end
 
-      # Scan the WS frames a 101 flow has accumulated since the last scan — each frame exactly
+      # Scan the WS frames a socket has accumulated since the last scan — each frame exactly
       # once. InsertWs republishes :updated on every frame, so re-scanning the whole buffer each
       # time would re-detect a still-buffered secret (inflating hit_count) and re-run the regex
       # over ×WS_MSG_CAP messages per frame. The per-flow high-water-mark PAGES FORWARD from the
@@ -551,8 +551,8 @@ module Gori
         d = detail || @ws_detail[flow_id]? || @store.get_flow(flow_id)
         return unless d
         detail = d
-        return unless detail.row.status == 101
-        # Cache the immutable handshake; note_ws_scanned evicts it with @ws_hwm, but a 101 flow
+        return unless detail.websocket?
+        # Cache the immutable handshake; note_ws_scanned evicts it with @ws_hwm, but a socket
         # that never delivers a new frame wouldn't hit that path, so bound it here too.
         @ws_detail[flow_id] = detail
         @ws_detail.delete(@ws_detail.first_key) if @ws_detail.size > ANALYZED_CAP
@@ -574,7 +574,7 @@ module Gori
       end
 
       # Advance the newest ws_message id scanned for a flow so future rescans page past it. Bounded
-      # like @analyzed (only 101 flows ever get an entry, but cap it for long-lived projects).
+      # like @analyzed (only sockets ever get an entry, but cap it for long-lived projects).
       private def note_ws_scanned(flow_id : Int64, msgs : Array(Store::WsMessage)) : Nil
         return if msgs.empty?
         # delete + re-insert moves this flow to the END of the insertion order (LRU): trimming

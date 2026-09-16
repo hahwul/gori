@@ -115,6 +115,18 @@ module Gori
         [flow_id, after_id, limit.to_i64] of DB::Any)
     end
 
+    # Frames on a REPEATER tab with id AFTER `after_id`, OLDEST-first, up to `limit` — the
+    # repeater twin of `ws_messages_after`, and it exists for the same reason. The limited form
+    # of `ws_messages_for_repeater` below returns the NEWEST `limit` rows (that bound is for the
+    # detail VIEW), so the headless probe scan, which asked for 200, read only the tail of a
+    # transcript a WS repeater script can fill to `WsEngine::MAX_RECV_MESSAGES` — a secret in
+    # frame 20 of 900 was reported for the same socket captured by the proxy and missed here.
+    def ws_messages_for_repeater_after(repeater_id : Int64, after_id : Int64, limit : Int32) : Array(WsMessage)
+      read_ws_messages(
+        "SELECT #{WS_MESSAGE_COLS} FROM ws_messages WHERE repeater_id = ? AND id > ? ORDER BY id LIMIT ?",
+        [repeater_id, after_id, limit.to_i64] of DB::Any)
+    end
+
     def ws_messages_for_repeater(repeater_id : Int64, limit : Int32? = nil) : Array(WsMessage)
       cols = WS_MESSAGE_COLS
       q, args = if lim = limit
