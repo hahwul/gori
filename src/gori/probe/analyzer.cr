@@ -2,6 +2,7 @@ require "./mode"
 require "./issue"
 require "./passive"
 require "./active"
+require "./from_repeater" # Probe.ws_transcript_possible?
 require "./event"
 require "../store"
 require "../scope"
@@ -439,7 +440,7 @@ module Gori
             # gap-free rescan_ws so a socket evicted from @analyzed and re-scanned (or one with a
             # backlog > WS_MSG_CAP) never re-detects already-scanned frames or skips a band of them.
             scan_detail(detail, enqueue_active: true)
-            rescan_ws(ev.id, detail) if detail.websocket? # reuse the detail just loaded
+            rescan_ws(ev.id, detail) if Probe.ws_transcript_possible?(detail) # reuse the detail just loaded
           rescue DB::Error | SQLite3::Exception
             # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
             # of the session — skip this flow and keep draining. On real shutdown the input
@@ -483,7 +484,7 @@ module Gori
           @analyzed << row.id
           trim(@analyzed, ANALYZED_CAP)
           scan_detail(detail, enqueue_active: true)
-          rescan_ws(row.id, detail) if detail.websocket? # reuse the detail just loaded
+          rescan_ws(row.id, detail) if Probe.ws_transcript_possible?(detail) # reuse the detail just loaded
         end
       rescue DB::Error | SQLite3::Exception
       rescue Channel::ClosedError
@@ -551,7 +552,7 @@ module Gori
         d = detail || @ws_detail[flow_id]? || @store.get_flow(flow_id)
         return unless d
         detail = d
-        return unless detail.websocket?
+        return unless Probe.ws_transcript_possible?(detail)
         # Cache the immutable handshake; note_ws_scanned evicts it with @ws_hwm, but a socket
         # that never delivers a new frame wouldn't hit that path, so bound it here too.
         @ws_detail[flow_id] = detail

@@ -107,6 +107,31 @@ describe "Probe over both WebSocket transports" do
     end
   end
 
+  it "still scans a 101 whose stored request head lost its Upgrade line (an imported capture)" do
+    with_store do |store|
+      # `Import::Har.ws_messages` has NO status or header gate — its comment says every reader
+      # asks the ROWS — so a foreign HAR whose entry carries `_webSocketMessages` beside a
+      # request head with the `Upgrade:` line stripped (Chrome's provisional headers) lands real
+      # frames on a flow `FlowDetail#websocket?` calls false. Gating the scanner on that
+      # predicate ALONE traded the h2 blind spot for this one, with History's MESSAGES pane
+      # still showing the transcript. `Probe.ws_transcript_possible?` is the wider gate.
+      head = "GET /chat HTTP/1.1\r\nHost: ws.test\r\n\r\n"
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
+        method: "GET", target: "/chat", http_version: "HTTP/1.1", head: head.to_slice,
+        source: Gori::FlowSource::Kind::Import))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 101,
+        head: "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n".to_slice,
+        reason: "Switching Protocols", duration_us: 1_i64))
+      store.insert_ws_message(id, "in", 1, SECRET_FRAME.to_slice)
+      store.flush
+      detail = store.get_flow(id).not_nil!
+      detail.websocket?.should be_false # the handshake cannot prove it — the ROWS do
+      codes(Gori::Probe::Scan.scan_flows(store, [id], active: false)).should contain("secret_in_ws")
+    end
+  end
+
   it "does not treat a non-WebSocket 101 upgrade as a socket" do
     with_store do |store|
       # kubectl exec speaks SPDY over a 101. gori cannot decode it, so the frames are not

@@ -4,7 +4,7 @@
 
 - Project: the ACTIVITY feed reaches every row it holds — the `s` chip and MCP `list_events{source}` now offer the evidence-freeze rows, a burst that refills a narrowed, walked-back list no longer skips every event between page one and the walk, and the Sequencer stops writing a second spelling of `warn` (#1084)
 - Project: the event feed stops growing without bound in a project that captures no flows (an MCP server, a TUI with capture off) — its retention cap runs off event inserts too — and a scope lens or sandbox write that leaves the stored flag where it was is no longer recorded as a change (#1084)
-- Probe: a WebSocket carried by an HTTP/2 extended CONNECT (RFC 8441) is scanned like any other socket — its frames reach the payload rule, it is fingerprinted as a WebSocket endpoint, and its handshake stops collecting document-header findings; a Repeater-driven socket's BINARY frames, and its frames past the newest 200, are scanned too (#1083)
+- Probe: a WebSocket carried by an HTTP/2 extended CONNECT (RFC 8441) is scanned like any other socket — its frames reach the payload rule, it is fingerprinted as a WebSocket endpoint, and its handshake stops collecting document-header findings; in the TUI, a Repeater send's BINARY frames reach the rule too, and a headless scan reads a Repeater tab's frames from the oldest instead of the newest 200 (#1083)
 - TUI: The setup wizard explains local and device access at the listen step, and the guided tour ends with a first-session checklist for the screen it returns to (#1081)
 
 ## v0.6.1

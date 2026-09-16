@@ -263,7 +263,7 @@ module Gori
               detections.concat(Passive.analyze(detail, disabled: cfg.disabled, custom: cfg.custom))
               # WS frames come from `scan_ws_frames`, a page at a time, rather than as one array
               # handed to `Passive.analyze` above (the only rule that reads them is the WS one).
-              detections.concat(scan_ws_frames(store, detail, id, cfg)) if detail.websocket?
+              detections.concat(scan_ws_frames(store, detail, id, cfg)) if Probe.ws_transcript_possible?(detail)
               # `!cfg.degraded`: the disabled-rule set could not be read, so gori does not
               # know which ACTIVE rules the operator switched off — see `RuleConfig`.
               # Gate on the port-less scope URL Layer 2 / History / SQL already share —
@@ -304,12 +304,15 @@ module Gori
         scan_ws_pages(detail, cfg) { |after, limit| store.ws_messages_after(flow_id, after, limit) }
       end
 
-      # The same pass over a REPEATER tab's transcript. It used to be one
+      # The same pass over a REPEATER tab's frames. It used to be one
       # `ws_messages_for_repeater(rec.id, 200)` read handed straight to `Passive.analyze` — the
-      # NEWEST 200 rows, which is the wrong bound for a scan for the reason spelled out above:
-      # a WS repeater script captures up to `WsEngine::MAX_RECV_MESSAGES` (1000) server frames,
-      # so a secret in an early frame of a chatty tab went unreported while the same socket
-      # captured through the proxy reported it. Pages forward from the oldest frame instead.
+      # NEWEST 200 rows, which is the wrong end for a scan for the reason spelled out above, so
+      # an early frame of a longer tab went unread. Pages forward from the oldest frame instead.
+      #
+      # What that reaches is the operator's authored SEND script and only that: see
+      # `Store#ws_messages_for_repeater_after` for why a repeater tab never holds the origin's
+      # answering frames at all. This half is therefore narrower than its flow twin by
+      # construction, not by this read.
       private def scan_repeater_ws_frames(store : Store, detail : Store::FlowDetail,
                                           repeater_id : Int64, cfg : RuleConfig) : Array(Detection)
         scan_ws_pages(detail, cfg) { |after, limit| store.ws_messages_for_repeater_after(repeater_id, after, limit) }

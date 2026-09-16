@@ -25,6 +25,29 @@ module Gori
       nil
     end
 
+    # Does this flow plausibly HOLD a WebSocket transcript — i.e. is it worth reading
+    # `ws_messages` for? The gate in front of every WS rescan, and it is deliberately WIDER
+    # than `Store::FlowDetail#websocket?`.
+    #
+    # `websocket?` answers "did this flow OPEN a socket", which it settles from the HANDSHAKE:
+    # for h1 it requires the stored REQUEST head to carry `Upgrade: websocket`, for h2 an
+    # extended CONNECT marker. That is the right question for HAR export and for refusing a
+    # one-shot replay. It is the wrong one here, because rows can exist without a handshake
+    # that proves them: `Import::Har.ws_messages` has no status or header gate at all — its
+    # comment says outright that "every reader asks the ROWS" — so a foreign HAR whose entry
+    # carries `_webSocketMessages` beside a request head with the `Upgrade:` line stripped
+    # (Chrome's provisional headers) lands real frames on a flow `websocket?` calls false.
+    # Gating the scanner on it alone traded the h2 blind spot for an imported-capture one:
+    # History's MESSAGES pane still showed the transcript while the probe reported nothing.
+    #
+    # So: either transport's handshake, OR a bare 101 — the predicate the scanner used before
+    # it learned about h2, kept so this only ever WIDENS. Everything it lets through costs one
+    # `ws_messages_after` query that returns nothing; nothing it lets through can produce a
+    # finding that is not in the rows.
+    def self.ws_transcript_possible?(detail : Store::FlowDetail) : Bool
+      detail.websocket? || detail.row.status == 101
+    end
+
     # Project a Repeater WebSocket send's captured frames onto the `Store::WsMessage` rows the
     # passive WS rule reads, so a socket driven from a Repeater tab is scanned exactly as one
     # the proxy captured. Ids are unused by the rule (nothing reads them back), so they are 0.
