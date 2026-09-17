@@ -119,6 +119,24 @@ describe Gori::Tui::KeyScript do
     expect_raises(Gori::Error, /SLEEP takes seconds/) { KeyScript.parse("SLEEPsoon") }
   end
 
+  # A pause is the one token that costs WALL TIME, and both surfaces take the script from
+  # somewhere the operator is not: `SLEEP99999` parks the MCP server's single worker fiber for
+  # a day, and hangs `gori run screenshot` in a way nothing distinguishes from a deadlock. Both
+  # caps, because one long pause and sixty short ones buy the same outcome.
+  it "caps one SLEEP, and the pauses a whole script may add up to" do
+    KeyScript.parse("SLEEP0.5").first.pause.should eq(500.milliseconds)
+    KeyScript.parse("SLEEP5").first.pause.should eq(5.seconds) # the cap itself is allowed
+
+    expect_raises(Gori::Error, /one SLEEP may pause at most 5s/) { KeyScript.parse("SLEEP6") }
+    expect_raises(Gori::Error, /at most 5s/) { KeyScript.parse("Tab SLEEP5.001 Enter") }
+
+    # Six at the per-token cap is 30s, which is the total cap; the seventh is past it.
+    KeyScript.parse((["SLEEP5"] * 6).join(' ')).size.should eq(6)
+    expect_raises(Gori::Error, /pauses add up to 35.0s, past the 30s/) do
+      KeyScript.parse((["SLEEP5"] * 7).join(' '))
+    end
+  end
+
   # BTab maps to no chord at all, so a script that sent it would press nothing and report
   # success. Refusing names the token and points at what to write instead.
   it "refuses BTab, which reaches no chord" do

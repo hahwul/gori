@@ -106,6 +106,10 @@ module Gori::Screenshot
     # DRAWN, after the trim and any tail slice. `data-sanitized` appears only when the frame
     # went through `Screenshot::Mask` — its absence means "never masked", which is a
     # different claim from `data-sanitized="0"` ("masked, and nothing matched").
+    #
+    # `data-unmaskable` is the rest of that sentence, and appears only when there is one to
+    # tell: rules the profile carries that no frame can be asked for (its JSON pointers — see
+    # `Screenshot::Mask`). Absent is the ordinary case, "every rule reached this picture".
     private def emit_root(io : IO, f : Frame, geo : Geometry, aria : String?) : Nil
       spoken = quote(aria || "gori terminal screenshot")
       io << %(<svg xmlns="http://www.w3.org/2000/svg" width="#{f0(geo.w)}") \
@@ -114,6 +118,7 @@ module Gori::Screenshot
             %( role="img" aria-label="#{spoken}") \
             %( data-theme="#{quote(f.theme)}" data-cols="#{f.cols}" data-rows="#{geo.nrows}")
       io << %( data-sanitized="#{f.sanitized}") if f.sanitized
+      io << %( data-unmaskable="#{f.unmaskable}") if f.unmaskable > 0
       io << ">\n"
     end
 

@@ -145,11 +145,22 @@ module Gori::Screenshot
     # and the SVG only carries `data-sanitized` for the second.
     getter sanitized : Int32?
 
+    # How many of the profile's rules could not be asked of a frame at all. Today that is its
+    # JSON pointers and only those: a pointer names a position in a PARSED document, and a
+    # screen is a grid of glyphs with no structure to walk (`Redact::Matcher#pointer_rules`).
+    #
+    # Carried beside `sanitized` because the pair is one sentence. A pointer-only profile
+    # masks nothing and would otherwise report `sanitized: 0` — "checked, and clean" — when
+    # the honest answer is "none of your rules were applicable here". Every surface says it:
+    # the TUI toast, the CLI's stderr note, the MCP result object and `data-unmaskable` on the
+    # SVG root. `0` when every rule reached the frame, which is the ordinary case.
+    getter unmaskable : Int32
+
     def initialize(@cols : Int32, @rows : Int32, @cells : Array(Cell), *,
                    @bg : RGB, @fg : RGB, @theme : String = "", @title : String? = nil,
                    @captured_at : Time = Time.utc, @cursor : {Int32, Int32}? = nil,
                    @continuations : Array(WrapSpan) = [] of WrapSpan,
-                   @sanitized : Int32? = nil)
+                   @sanitized : Int32? = nil, @unmaskable : Int32 = 0)
     end
 
     # The cell at (x, y); a blank CANVAS cell outside the grid. Out of bounds reads a blank
@@ -260,10 +271,12 @@ module Gori::Screenshot
     def with(*, cells : Array(Cell)? = nil, sanitized : Int32? = @sanitized,
              title : String? = @title, rows : Int32? = nil,
              continuations : Array(WrapSpan)? = nil,
-             cursor : {Int32, Int32}? = @cursor) : Frame
+             cursor : {Int32, Int32}? = @cursor,
+             unmaskable : Int32 = @unmaskable) : Frame
       Frame.new(@cols, rows || @rows, cells || @cells,
         bg: @bg, fg: @fg, theme: @theme, title: title, captured_at: @captured_at,
-        cursor: cursor, continuations: continuations || @continuations, sanitized: sanitized)
+        cursor: cursor, continuations: continuations || @continuations, sanitized: sanitized,
+        unmaskable: unmaskable)
     end
 
     # Do these two frames show the same thing? Grid only — not the theme name, the title, the

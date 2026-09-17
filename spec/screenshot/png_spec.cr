@@ -118,6 +118,40 @@ describe Gori::Screenshot::Png do
       image.width.should eq(8)
       image.height.should eq(1)
     end
+
+    # The grid cap and the scale cap are each enforced on their own and their PRODUCT is not,
+    # which is how two in-range arguments ask for a two-gigabyte canvas. One predicate, shared:
+    # `gori run screenshot` and the MCP tool each add the sentence naming their own flags.
+    it "refuses a canvas past the pixel budget, naming the numbers" do
+      png.pixel_budget_error(8000, 8000).should be_nil
+      msg = png.pixel_budget_error(64256, 128512).not_nil!
+      msg.should contain("64256×128512")
+      msg.should contain(" = #{64256_i64 * 128512}")
+      msg.should contain(Gori::Screenshot::Png::MAX_PIXELS.to_s)
+
+      # The two documented ceilings, multiplied: a 1000x1000 grid (`--size`'s cap) at the
+      # DEFAULT scale of 2 is the half-billion-pixel canvas neither cap on its own stopped.
+      layout = Gori::Screenshot::Png::Layout.new(1000, 1000, Gori::Screenshot::Png::DEFAULT_PAD, true)
+      png.pixel_budget_error(layout.width * 2, layout.height * 2).should_not be_nil
+      # …while the shape gori's own docs are captured at is nowhere near it, even at max scale.
+      shape = Gori::Screenshot::Png::Layout.new(132, 38, Gori::Screenshot::Png::DEFAULT_PAD, true)
+      png.pixel_budget_error(shape.width * Gori::Screenshot::Png::MAX_SCALE,
+        shape.height * Gori::Screenshot::Png::MAX_SCALE)
+        .should be_nil
+    end
+
+    # It replaced a `bytes.empty?` guard that could never fire — `encode` always writes a
+    # signature and an IHDR — so the check has to be one a broken encode could actually fail.
+    it "reads its own header back and accepts only the geometry it was asked for" do
+      frame = frame_of([cell("A")], 1, 1)
+      bytes = png.render(frame, scale: 1, chrome: false, pad: 0)
+      dims = png.dimensions(frame, scale: 1, chrome: false, pad: 0)
+      png.output_error(bytes, dims).should be_nil
+      png.output_error(bytes, {dims[0] + 1, dims[1]}).not_nil!
+        .should contain("#{dims[0] + 1}×#{dims[1]}")
+      png.output_error(Bytes.empty, dims).not_nil!.should contain("no PNG signature")
+      png.output_error(bytes[0, 20], dims).not_nil!.should contain("no PNG signature")
+    end
   end
 
   describe "glyphs" do

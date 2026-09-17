@@ -17,6 +17,13 @@ module Gori::Screenshot
   # redacted anywhere in gori by design, and this changes nothing about that — a header that
   # happens to spell `token=…` on screen matches the form-key rule like any other text.
   #
+  # JSON POINTERS are SAID, not applied. A pointer names a position in a parsed document, and
+  # a frame is a grid of glyphs — there is no document here to walk, and no text spelling of
+  # `/data/0/token` that could stand in for one. Rather than drop them silently, `apply`
+  # counts them into `Frame#unmaskable` and every surface reports the number beside the
+  # sanitized count: a pointer-only profile masks nothing, and `sanitized: 0` alone would read
+  # as "checked, and clean" instead of "none of your rules could be asked here".
+  #
   # TWO PASSES, and the second is the whole reason `Frame#continuations` exists. A pane wraps
   # a long line across several screen rows, and neither half of a soft-wrapped JWT matches on
   # its own. Pass 1 is a row at a time. Pass 2 rejoins each wrap group and looks only for
@@ -46,7 +53,9 @@ module Gori::Screenshot
       return frame unless matcher
       cells = frame.cells.dup
       count = mask_rows(frame, cells, matcher) + mask_wraps(frame, cells, matcher)
-      frame.with(cells: cells, sanitized: count)
+      # The profile's pointer rules, carried out rather than dropped: see the header. Set on
+      # the same `with` as the count so the two can never be reported apart.
+      frame.with(cells: cells, sanitized: count, unmaskable: matcher.pointer_rules)
     end
 
     # Pass 1: one row at a time, over the row's full width.

@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/mcp_harness"
 require "file_utils"
+require "socket"
 
 # The MCP `screenshot` tool: draw the real TUI over the bound project, write a file, and
 # optionally hand the picture back in the result.
@@ -32,6 +33,22 @@ private def with_project_db(&)
     store.close
     FileUtils.rm_rf(root)
   end
+end
+
+# A local origin for the one example that needs a REAL running job. Answers immediately; the
+# example never lets the job fiber reach it before the assertion, which is the point.
+private def shot_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      Gori::Proxy::Codec::Http1.read_head(conn)
+      conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+      conn.flush
+      conn.close
+    end
+  end
+  port
 end
 
 private def shot_tools(store, db_path : String) : Gori::MCP::Tools
@@ -149,6 +166,144 @@ describe "MCP screenshot" do
         # An agent has no way to know this server's working directory and no reason to write
         # into it, so a bare name lands where every other picture does.
         JSON.parse(r.text)["path"].as_s.should eq(dest)
+        File.exists?(dest).should be_true
+      ensure
+        File.delete?(dest)
+      end
+    end
+  end
+
+  it "reports the pointer rules no frame could be asked for beside the sanitized count" do
+    with_project_db do |store, project|
+      before = Gori::Redact.salt
+      Gori::Redact.salt = "spec-salt"
+      dest = File.join(Dir.tempdir, "gori-mcp-shot-#{Random.rand(1_000_000)}.txt")
+      begin
+        # A pointer names a position in a PARSED document and a frame has none, so this
+        # profile masks nothing. Reported, because `"sanitized": 0` on its own tells an agent
+        # the picture was checked and came back clean.
+        Gori::Redact::Policy.write_project_scope(store,
+          Gori::Redact::Policy::ProjectScope.new(default: true, active: "ptr",
+            profiles: [Gori::Redact::Profile.new(name: "ptr", json_pointers: ["/a", "/b"])]))
+        r = shot_call(store, project.db_path,
+          %({"cols":60,"rows":20,"format":"txt","path":#{dest.to_json}}))
+        fail "screenshot errored: #{r.text}" if r.is_error
+        payload = JSON.parse(r.text)
+        payload["sanitized"].as_i.should eq(0)
+        payload["unmaskable"].as_i.should eq(2)
+      ensure
+        Gori::Redact.salt = before
+        File.delete?(dest)
+      end
+    end
+  end
+
+  it "refuses a PNG canvas past the pixel budget, and writes nothing" do
+    with_project_db do |store, project|
+      dest = File.join(Dir.tempdir, "gori-mcp-shot-#{Random.rand(1_000_000)}.png")
+      begin
+        # Every argument is inside its own documented cap and their PRODUCT is not: 300x300 at
+        # scale 8 is a 19456x38912 canvas, three quarters of a billion pixels. Refused off
+        # `Png.dimensions`, which allocates nothing.
+        r = shot_call(store, project.db_path,
+          %({"cols":300,"rows":300,"scale":8,"format":"png","path":#{dest.to_json}}))
+        r.is_error.should be_true
+        r.error_code.should eq("BUDGET_EXHAUSTED")
+        r.field.should eq("scale")
+        r.text.should contain("px cap")
+        # A refusal that already put a file on disk is not a refusal.
+        File.exists?(dest).should be_false
+      ensure
+        File.delete?(dest)
+      end
+    end
+  end
+
+  it "refuses a key script whose pauses run past the cap, before it opens anything" do
+    with_project_db do |store, project|
+      # A pause is the one token that costs wall time, and this server dispatches one call at a
+      # time — `SLEEP99999` would park its worker fiber for a day.
+      r = shot_call(store, project.db_path, %({"keys":"SLEEP99999"}))
+      r.is_error.should be_true
+      r.error_code.should eq("INVALID_ARGUMENT")
+      r.field.should eq("keys")
+      r.text.should contain("one SLEEP may pause at most")
+    end
+  end
+
+  it "refuses to draw while a background job fiber is live, and writes nothing" do
+    port = shot_origin
+    with_project_db do |store, project|
+      dest = File.join(Dir.tempdir, "gori-mcp-shot-#{Random.rand(1_000_000)}.txt")
+      tools = shot_tools(store, project.db_path)
+      begin
+        started = tools.call("fuzz_start", JSON.parse({
+          "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+          "url"            => "http://127.0.0.1:#{port}",
+          "payloads"       => [{"list" => ["a", "b", "c"]}],
+          "allow_unscoped" => true,
+        }.to_json))
+        fail "fuzz_start errored: #{started.text}" if started.is_error
+        job_id = JSON.parse(started.text)["job_id"].as_s
+
+        # No `sleep` between these two calls, deliberately: the job fiber has not been
+        # scheduled yet, which is exactly the window this gate exists for. A render would swap
+        # `Env.layer` out from under that fiber's first send.
+        r = tools.call("screenshot",
+          JSON.parse(%({"cols":60,"rows":20,"format":"txt","path":#{dest.to_json}})))
+        r.is_error.should be_true
+        r.error_code.should eq("PROJECT_BUSY")
+        r.retryable.should be_true
+        r.text.should contain("binding layer")
+        File.exists?(dest).should be_false
+
+        # …and it is exactly a wait: once the job lands, the same call draws.
+        60.times do
+          sleep 0.02.seconds
+          status = JSON.parse(tools.call("fuzz_status", JSON.parse({job_id: job_id}.to_json)).text)
+          break unless status["status"].as_s == "running"
+        end
+        ok = tools.call("screenshot",
+          JSON.parse(%({"cols":60,"rows":20,"format":"txt","path":#{dest.to_json}})))
+        fail "screenshot errored after the job: #{ok.text}" if ok.is_error
+        File.exists?(dest).should be_true
+      ensure
+        File.delete?(dest)
+      end
+    end
+  end
+
+  it "refuses a relative path that resolves OUT of the screenshots dir" do
+    with_project_db do |store, project|
+      # The schema says a relative path "is resolved under" the convention dir, and
+      # `expand_path` alone made that true of the spelling and false of the destination.
+      r = shot_call(store, project.db_path, %({"format":"txt","path":"../../escaped.txt"}))
+      r.is_error.should be_true
+      r.error_code.should eq("INVALID_ARGUMENT")
+      r.field.should eq("path")
+      r.text.should contain("relative paths resolve under")
+      File.exists?(File.expand_path("../../escaped.txt", Gori::Paths.screenshots_dir)).should be_false
+
+      # A subdirectory of it is still relative and still fine — the rule is the destination,
+      # not the number of separators.
+      sub = File.join(Gori::Paths.screenshots_dir, "sub")
+      Dir.mkdir_p(sub)
+      begin
+        ok = shot_call(store, project.db_path,
+          %({"cols":50,"rows":12,"format":"txt","path":"sub/inside.txt"}))
+        fail "screenshot errored: #{ok.text}" if ok.is_error
+        JSON.parse(ok.text)["path"].as_s.should eq(File.join(sub, "inside.txt"))
+      ensure
+        FileUtils.rm_rf(sub)
+      end
+
+      # …and an ABSOLUTE path elsewhere is still allowed: writing outside is legitimate, it
+      # just has to be spelled where a reader of the call can see it.
+      dest = File.join(Dir.tempdir, "gori-mcp-shot-#{Random.rand(1_000_000)}.txt")
+      begin
+        abs = shot_call(store, project.db_path,
+          %({"cols":50,"rows":12,"format":"txt","path":#{dest.to_json}}))
+        fail "screenshot errored: #{abs.text}" if abs.is_error
         File.exists?(dest).should be_true
       ensure
         File.delete?(dest)

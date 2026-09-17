@@ -121,9 +121,11 @@ module Gori
           p.on("--tab=NAME", "Tab to open before drawing: #{Tui::Chrome::TABS.map(&.first).join(" | ")}") { |v| f.tab = v }
           p.on("--keys=SCRIPT",
             "Keys to send before drawing, in tmux send-keys grammar " \
-            "(`C-p \"acme\" Enter Down Down`, plus SLEEP<secs>). Drives NAVIGATION: a frame is " \
-            "a picture of the store as it is now, so anything ASYNC — a Repeater send, a scan — " \
-            "is photographed mid-flight, not awaited") { |v| f.keys = v }
+            "(`C-p \"acme\" Enter Down Down`, plus SLEEP<secs>, at most " \
+            "#{Tui::KeyScript::MAX_SLEEP.total_seconds.to_i}s each and " \
+            "#{Tui::KeyScript::MAX_TOTAL_PAUSE.total_seconds.to_i}s in total). Drives " \
+            "NAVIGATION: a frame is a picture of the store as it is now, so anything ASYNC — a " \
+            "Repeater send, a scan — is photographed mid-flight, not awaited") { |v| f.keys = v }
           p.on("--size=WxH", "Terminal size to draw at (default #{SCREENSHOT_COLS}x#{SCREENSHOT_ROWS}, max #{SCREENSHOT_MAX_DIM} each)") { |v| f.size = v }
           p.on("--theme=NAME", "Theme to draw in (default: the configured one)") { |v| f.theme = v }
           p.on("--format=FMT", "Output: svg (default) | png | ansi | txt") { |v| f.format = parse_format(v, [:svg, :png, :ansi, :txt]) }
@@ -286,15 +288,28 @@ module Gori
         end
       end
 
-      # A zero-byte answer is refused rather than written: a 0-byte `.png` is a file an operator
-      # has to open to discover is empty, and every later step would treat it as a picture.
+      # The PNG, with both ends of it judged: the canvas BEFORE it is allocated, and the header
+      # after it is written.
+      #
+      # The budget first, because `--size` and `--scale` multiply: each is capped on its own and
+      # the product is not, so 1000x1000 at scale 2 asks for a 516-million-pixel canvas — two
+      # gigabytes — from two flags that were each in range. `dimensions` answers that without
+      # drawing anything (`Png.pixel_budget_error`), and this runs before the write, so a refusal
+      # leaves no file behind.
       private def self.screenshot_png(f : ScreenshotFlags, frame : Screenshot::Frame,
                                       chrome : Bool) : Bytes
         Screenshot::Font.use(f.font)
-        bytes = Screenshot::Png.render(frame, scale: f.scale || 2, title: frame.title, chrome: chrome)
-        if bytes.empty?
-          abort "gori run screenshot: the PNG renderer produced no bytes — refusing to write " \
-                "an empty picture (use --format svg)"
+        scale = f.scale || 2
+        dims = Screenshot::Png.dimensions(frame, scale: scale, chrome: chrome)
+        if msg = Screenshot::Png.pixel_budget_error(*dims)
+          abort "gori run screenshot: #{msg} — lower --scale or --size, or use --format svg"
+        end
+        bytes = Screenshot::Png.render(frame, scale: scale, title: frame.title, chrome: chrome)
+        # The header read back off the bytes, against the geometry they were asked for: the one
+        # self-check a writer can make, and the only thing that would catch a truncated encode
+        # before an operator files the picture as evidence.
+        if msg = Screenshot::Png.output_error(bytes, dims)
+          abort "gori run screenshot: #{msg} — refusing to write it (use --format svg)"
         end
         bytes
       end
@@ -334,12 +349,25 @@ module Gori
       # profile was applied" (nil, and nothing is said) and "a profile was applied and matched
       # nothing" (0), which is the difference between a picture that was never checked and one
       # that was.
-      private def self.screenshot_notes(frame : Screenshot::Frame,
-                                        choice : Redact::Policy::Choice,
-                                        io : IO = STDERR) : Nil
+      #
+      # Not private, and `io` is a parameter, for the reason the pure halves below are public:
+      # every branch here is a sentence an operator reads, and the command itself writes them
+      # to a real STDERR that a spec cannot swap.
+      def self.screenshot_notes(frame : Screenshot::Frame,
+                                choice : Redact::Policy::Choice,
+                                io : IO = STDERR) : Nil
         n = frame.sanitized || return
         profile = choice.matcher.try(&.profile)
         name = profile ? profile.name.inspect : "the active profile"
+        # Said BEFORE the count, because it changes what the count means: a pointer rule names
+        # a position in a parsed document and a frame has none, so those rules were carried
+        # here and not applied (`Screenshot::Mask`). `sanitized: 0` under a pointer-only
+        # profile would otherwise read as "checked, and clean".
+        if (u = frame.unmaskable) > 0
+          io.puts "gori run screenshot: #{u} pointer rule#{u == 1 ? "" : "s"} in profile #{name} " \
+                  "#{u == 1 ? "was" : "were"} not applied to a frame — a JSON pointer names a " \
+                  "position in a parsed document, and a rendered screen has none"
+        end
         if n > 0
           io.puts "gori run screenshot: SANITIZED (#{n}) with profile #{name}: " \
                   "#{n} value#{n == 1 ? "" : "s"} masked on the rendered frame " \

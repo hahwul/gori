@@ -88,7 +88,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when "svg"  then File.write(path, Gori::Screenshot::Svg.render(frame))
     when "ansi" then File.write(path, Gori::Screenshot::Ansi.render(frame))
     when "txt"  then File.write(path, Gori::Screenshot::Text.render(frame))
-    when "png"  then File.write(path, Gori::Screenshot::Png.render(frame, scale: Settings.screenshot_png_scale))
+    when "png"
+      # The operator's own Unifont, merged before a glyph is rasterized: `$GORI_SCREENSHOT_FONT`,
+      # then `~/.gori/fonts/unifont.hex`, then the system install — `Font.resolve_extra`'s chain,
+      # which `gori run screenshot` and the MCP tool both already ask for. No explicit path:
+      # this verb has no `--font` to pass. Without the call the one surface an operator actually
+      # takes screenshots from was the one that ignored the font they installed to fix them.
+      Gori::Screenshot::Font.use
+      File.write(path, Gori::Screenshot::Png.render(frame, scale: Settings.screenshot_png_scale))
     else
       # Unreachable from either verb (both pick from `Screenshot::FORMATS`), so this is the
       # guard for a future caller rather than a branch an operator can drive.
@@ -97,7 +104,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
     # The export convention: lowercase, the count when a profile ran, and the PATH — a
     # picture the operator cannot find is one they will take again.
-    @toast = "#{CopyMenu.sanitized_title("screenshot written", frame.sanitized)} · #{path}"
+    #
+    # Plus what the count does NOT cover: a profile's JSON pointers name positions in a parsed
+    # document, and a frame has none, so they were carried here and not applied
+    # (`Screenshot::Mask`). Left unsaid, `SANITIZED (0)` under a pointer-only profile reads as
+    # "checked, and clean".
+    note = frame.unmaskable > 0 ? " · #{frame.unmaskable} pointer rule#{frame.unmaskable == 1 ? "" : "s"} not applied to a frame" : ""
+    @toast = "#{CopyMenu.sanitized_title("screenshot written", frame.sanitized)}#{note} · #{path}"
     true
   rescue ex
     @toast = "screenshot failed: #{ex.message}"

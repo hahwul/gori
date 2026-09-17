@@ -39,6 +39,23 @@ module Gori::Screenshot
       masked.should be(f)
       # nil is "never masked", which is NOT the same claim as "masked, nothing matched".
       masked.sanitized.should be_nil
+      masked.unmaskable.should eq(0)
+    end
+
+    it "counts the profile's pointer rules as unmaskable rather than dropping them" do
+      with_salt do
+        # A pointer names a position in a PARSED document and a frame is a grid of glyphs, so
+        # there is nothing here for `/data/token` to be asked of. Reported instead of dropped:
+        # a pointer-only profile masks nothing, and `sanitized: 0` on its own reads as
+        # "checked, and clean" rather than "none of your rules could reach this picture".
+        profile = Redact::Profile.new(name: "ptr", json_pointers: ["/data/token", "/pin"])
+        masked = Mask.apply(screen(%({"data": {"token": "s3cret"}})),
+          Redact::Matcher.new(profile))
+        masked.sanitized.should eq(0)
+        masked.unmaskable.should eq(2)
+        # …and a profile whose rules DO reach a frame says so by reporting none.
+        Mask.apply(screen("Bearer #{JWT}"), default_matcher).unmaskable.should eq(0)
+      end
     end
 
     it "takes no matcher from a profile that would sanitize nothing" do

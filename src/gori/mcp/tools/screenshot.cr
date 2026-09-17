@@ -49,6 +49,34 @@ module Gori
                      "call switch_project first", "NO_PROJECT")
         end
 
+        # SECOND, and still before any side effect: a render is not safe to take while one of
+        # this server's job fibers is live.
+        #
+        # `Headless.render` swaps a shelf of process globals for the duration of the draw and
+        # puts them back after — `Env.layer` most sharply. That is correct for a call that
+        # RUNS TO COMPLETION without yielding, and the render does not: it settles reads, it
+        # sleeps a `SLEEP` step, it round-trips the store. Every one of those is a yield point,
+        # and the fibers that get scheduled there are `spawn(name: "mcp-…")`'s — fuzz, mine,
+        # discover, authorize, sequence. A job fiber that samples `Env.layer` mid-render sees
+        # the RENDER session's empty bindings, so `$BIND.NAME` expands to nothing and no
+        # session-slot overlay is applied: an authorize replay goes out as the wrong identity,
+        # silently, and the run's verdict is about a request nobody asked for.
+        #
+        # Those fibers are the only concurrency there is. `Server` reads on one fiber and runs
+        # requests on ONE worker, in arrival order (see `Server#work_loop`), so a synchronous
+        # tool call cannot overlap this one — only a job started by an earlier call can.
+        #
+        # Refused rather than serialized: a render is an observation an agent can simply take
+        # again, and PROJECT_BUSY/retryable is the answer every other "wait for the jobs" gate
+        # on this surface gives (`switch_project`, `delete_project`).
+        if jobs_running?
+          return busy("cannot draw the TUI while a background job is running " \
+                      "(fuzz/mine/discover/authorize/sequence): a headless render swaps this " \
+                      "process's binding layer for its duration, and the job's next send would " \
+                      "go out under the render's empty bindings. Wait for it, or stop it with " \
+                      "stop_job; list_jobs names what is running")
+        end
+
         a = screenshot_args(h)
         return a if a.is_a?(Result)
 
@@ -149,12 +177,29 @@ module Gori
       # Where the picture goes, or the refusal. A RELATIVE path is resolved under the
       # screenshots convention dir rather than against this server's working directory, which
       # an agent has no way to know and no reason to write into.
+      #
+      # …and is held to that, which `expand_path` alone does not do: `../../x` expands OUT of
+      # the convention dir, so the schema's promise ("resolved under #{screenshots_dir}") was
+      # true of the spelling and false of the destination. An absolute path is still allowed —
+      # writing elsewhere is a thing an agent may legitimately ask for — but it has to SAY so,
+      # because that is the spelling a human reading the call can see the destination in.
       private def screenshot_target(requested : String?, fmt : String, tab : Symbol?,
                                     overwrite : Bool) : String | Result
         asked = requested.try(&.strip).presence
         path =
           if asked
-            asked.starts_with?('/') ? asked : File.expand_path(asked, Paths.screenshots_dir)
+            if asked.starts_with?('/')
+              asked
+            else
+              under = File.expand_path(asked, Paths.screenshots_dir)
+              unless screenshot_under_dir?(under, Paths.screenshots_dir)
+                return err("'path' #{asked.inspect} resolves to #{under}, outside " \
+                           "#{Paths.screenshots_dir} — relative paths resolve under it; pass an " \
+                           "absolute path to write elsewhere",
+                  "INVALID_ARGUMENT", field: "path")
+              end
+              under
+            end
           else
             Paths.ensure_dir(Paths.screenshots_dir)
             File.join(Paths.screenshots_dir,
@@ -177,16 +222,38 @@ module Gori
         path
       end
 
+      # Is `path` inside `dir`? Lexical, over two already-expanded absolute paths, and that is
+      # the right level: `expand_path` has already folded every `..`, and asking the filesystem
+      # instead would answer about a directory that need not exist yet.
+      #
+      # The trailing separator is what keeps `<dir>-evil/x` from reading as inside `<dir>`.
+      private def screenshot_under_dir?(path : String, dir : String) : Bool
+        root = File.expand_path(dir)
+        path == root || path.starts_with?("#{root.chomp('/')}/")
+      end
+
       # The document as the bytes that go on disk. PNG is the only binary one; the rest are
       # text, and `to_slice` keeps one write path rather than two.
       private def screenshot_payload(frame : Screenshot::Frame, fmt : String, scale : Int32) : Bytes | Result
         case fmt
         when "png"
           Screenshot::Font.use
+          # `cols`, `rows` and `scale` are each clamped on their own and their PRODUCT is not:
+          # 1000x1000 at scale 2 asks for a 516-million-pixel canvas, two gigabytes, from three
+          # arguments that were every one of them in range. Judged off `dimensions`, which draws
+          # nothing, and before the write — so a refusal leaves no file behind.
+          dims = Screenshot::Png.dimensions(frame, scale: scale, title: frame.title)
+          if msg = Screenshot::Png.pixel_budget_error(*dims)
+            return err("#{msg} — lower 'scale', narrow the shot with cols/rows, or ask for " \
+                       "format:\"svg\"", "BUDGET_EXHAUSTED", field: "scale")
+          end
           bytes = Screenshot::Png.render(frame, scale: scale, title: frame.title)
-          if bytes.empty?
-            return err("the PNG renderer produced no bytes — refusing to write an empty picture; " \
-                       "ask for format:\"svg\"", "INTERNAL", field: "format")
+          # The header read back off the bytes, against the geometry they were asked for — the
+          # one self-check a writer can make, and what would catch a truncated encode before the
+          # agent is handed a path to a picture nothing can open.
+          if msg = Screenshot::Png.output_error(bytes, dims)
+            return err("#{msg} — refusing to write it; ask for format:\"svg\"",
+              "INTERNAL", field: "format")
           end
           bytes
         when "ansi" then Screenshot::Ansi.render(frame).to_slice
@@ -216,6 +283,10 @@ module Gori
       # The summary the agent reads. `sanitized` is the count of masked cells, or null when no
       # redaction profile applied at all — the same distinction `Screenshot::Mask` draws, and
       # the difference between a picture that was checked and one that never was.
+      #
+      # `unmaskable` is the rest of that answer: rules the profile carries that NO frame can be
+      # asked for (its JSON pointers). Without it a pointer-only profile reports `sanitized: 0`
+      # and an agent reads "checked, and clean" off a picture nothing was applied to.
       private def screenshot_json(path : String, fmt : String, frame : Screenshot::Frame,
                                   payload : Bytes, tab : Symbol?) : String
         JSON.build do |j|
@@ -226,6 +297,7 @@ module Gori
             j.field "rows", frame.rows
             j.field "bytes", payload.size
             j.field "sanitized", frame.sanitized
+            j.field "unmaskable", frame.unmaskable
             j.field "tab", tab.try(&.to_s)
           end
         end
@@ -242,11 +314,17 @@ module Gori
           "every shot. Returns the path it wrote; pass inline:true to also get the picture " \
           "back in this result (an image block for png, the document as text for svg/ansi/txt). " \
           "Use it to SEE what an operator would see — a pane's layout, a chart, a rendered " \
-          "issue — when the JSON tools give you rows but not the shape." do |s|
+          "issue — when the JSON tools give you rows but not the shape. REFUSED while any " \
+          "fuzz/mine/discover/authorize/sequence job is running: drawing swaps this process's " \
+          "binding layer for the duration and that job's sends would go out under the wrong " \
+          "identity — wait for it or stop_job first." do |s|
           s.field "tab", enumprop("tab to open before drawing (default: the project's own home tab)",
             Tui::Chrome::TABS.map(&.first.to_s))
           s.field "keys", strprop("keys to send before drawing, in tmux send-keys grammar " \
-                                  "(`C-p \"acme\" Enter Down Down`, plus SLEEP<secs>). Drives NAVIGATION: the frame " \
+                                  "(`C-p \"acme\" Enter Down Down`, plus SLEEP<secs> — at most " \
+                                  "#{Tui::KeyScript::MAX_SLEEP.total_seconds.to_i}s per pause and " \
+                                  "#{Tui::KeyScript::MAX_TOTAL_PAUSE.total_seconds.to_i}s over the script). " \
+                                  "Drives NAVIGATION: the frame " \
                                   "shows the store as it is now, so anything async (a Repeater send, a scan) is " \
                                   "photographed mid-flight rather than awaited")
           s.field "cols", intprop("terminal width to draw at (default 132, max #{SCREENSHOT_MAX_DIM})")

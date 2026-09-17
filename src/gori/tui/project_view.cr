@@ -3128,6 +3128,9 @@ module Gori::Tui
         # The last drawn row carries an ellipsis when the message runs past the band, so a
         # truncated explanation cannot be read as a complete one.
         line = "#{line[0, {line.size - 1, 0}.max]}…" if i == rows - 1 && lay.rows > rows
+        # The soft-wrap mark a screenshot's redaction rejoins rows with — reported every frame,
+        # because the marks are frame-scoped (Backend#mark_continuation, ReadPane#draw_row).
+        screen.mark_continuation(inner.x + 1, list.bottom + 1 + i, w) if i > 0
         screen.text(inner.x + 1, list.bottom + 1 + i, line, Theme.muted, Theme.bg, width: w)
       end
     end

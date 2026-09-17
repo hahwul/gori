@@ -115,6 +115,38 @@ describe "screenshot soft-wrap marks" do
     end
   end
 
+  it "marks the Project ACTIVITY detail band's continuation rows over its content window" do
+    # The tenth site, and the one that had no mark at all: the band wraps the selected event's
+    # whole message with `Wrap.layout` and drew its rows without saying they belonged together,
+    # so a token split across two of them was invisible to `Mask`'s second pass.
+    with_store do |store|
+      store.insert_event("bindings", "extract_miss", "warn", "HEAD#{"." * 200}TAIL")
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.reload(Gori::Project.new("p", "/tmp/nonexistent.db"), store)
+      view.focus_pane(:activity)
+      view.reload_activity(store)
+      view.activity_select(0)
+
+      rect = Rect.new(0, 0, 100, 34)
+      b = MemoryBackend.new(100, 34)
+      view.render(Screen.new(b), rect, focused: true)
+
+      # The band's LAST row: the list row above truncates the message long before `TAIL`, so
+      # this needle can only be the wrapped detail.
+      tail = row_holding(b, 34, "TAIL")
+      marks = b.snapshot.not_nil!.continuations
+      # Three rows of band, the two after the first marked as continuing it.
+      marks.map(&.y).sort!.should eq([tail - 1, tail])
+
+      mark = marks.find { |s| s.y == tail }.not_nil!
+      window = b.snapshot.not_nil!.row_text(tail, mark.x0, mark.x1).rstrip
+      # The CONTENT columns: the card's border and its one-column inset are outside the window,
+      # so a rejoined line cannot grow a `│` in the middle of a secret.
+      window.should end_with("TAIL")
+      window.should_not contain("│")
+    end
+  end
+
   it "leaves a pane that did not wrap unmarked" do
     # The other half of the contract: a mark means "this row continues the one above", so a
     # pane with nothing to continue must report nothing. Otherwise `Mask`'s wrap pass joins

@@ -300,6 +300,49 @@ describe "gori run screenshot" do
     end
   end
 
+  describe "--keys" do
+    it "refuses a script whose pauses run past the cap, before anything is opened" do
+      # `screenshot_refusal` is the whole "no" ladder and it runs before a session exists, so a
+      # `SLEEP` nobody would wait out costs a sentence rather than a hung command.
+      f = Gori::CLI::Run::ScreenshotFlags.new
+      f.keys = "SLEEP99999"
+      Gori::CLI::Run.screenshot_refusal(f).not_nil!.should contain("one SLEEP may pause at most")
+
+      ok = Gori::CLI::Run::ScreenshotFlags.new
+      ok.keys = "Down SLEEP0.5 Enter"
+      Gori::CLI::Run.screenshot_refusal(ok).should be_nil
+      ok.steps.size.should eq(3)
+    end
+  end
+
+  describe "the stderr notes" do
+    it "reports the pointer rules no frame could be asked for, beside the count" do
+      # `--redact-preview` is refused here (a frame has no per-value list), so these sentences
+      # are the ONLY thing that says what the profile did — and a pointer-only profile does
+      # nothing, while `sanitized: 0` on its own reads as "checked, and clean".
+      profile = Gori::Redact::Profile.new(name: "ptr", json_pointers: ["/a", "/b"])
+      choice = Gori::Redact::Policy::Choice.new(matcher: Gori::Redact::Matcher.new(profile))
+      frame = Gori::Screenshot::Frame.from_ansi("hello\n").with(sanitized: 0, unmaskable: 2)
+      io = IO::Memory.new
+      Gori::CLI::Run.screenshot_notes(frame, choice, io)
+      io.to_s.should contain("2 pointer rules in profile \"ptr\" were not applied to a frame")
+      io.to_s.should contain("nothing on this frame")
+
+      # Nothing to say when every rule reached the picture.
+      quiet = IO::Memory.new
+      Gori::CLI::Run.screenshot_notes(frame.with(sanitized: 1, unmaskable: 0), choice, quiet)
+      quiet.to_s.should_not contain("pointer rule")
+      quiet.to_s.should contain("SANITIZED (1)")
+    end
+
+    it "says nothing at all for a frame no profile was applied to" do
+      frame = Gori::Screenshot::Frame.from_ansi("hello\n")
+      io = IO::Memory.new
+      Gori::CLI::Run.screenshot_notes(frame, Gori::Redact::Policy::Choice.new, io)
+      io.to_s.should eq("")
+    end
+  end
+
   it "ingests a dump and takes its width from the longest row when --size says nothing" do
     dump = File.tempname("gori-shot-dump", ".ansi")
     dest = File.join(Dir.tempdir, "gori-shot-dump-#{Random.rand(1_000_000)}.txt")

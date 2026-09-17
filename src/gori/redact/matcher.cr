@@ -73,6 +73,18 @@ module Gori
       # `gsub` per shape rather than one per configured name.
       @text_rules : Array({Regex, String})
 
+      # How many of the profile's rules are JSON POINTERS — rules only the structured walk can
+      # apply, because a pointer names a position in a parsed document and there is no such
+      # thing in a run of text.
+      #
+      # Published so a caller that can only run the text pass can SAY so. `spans` (and with it
+      # every screenshot) is exactly that caller: it silently applies 0 of these, and a picture
+      # reporting `sanitized: 0` over a pointer-only profile would be claiming it checked
+      # something it never could. See `Screenshot::Frame#unmaskable`.
+      def pointer_rules : Int32
+        @pointers.size
+      end
+
       # --- the engine --------------------------------------------------------
 
       # Sanitize one entity body. `content_type` is the message's Content-Type value (nil when
@@ -336,7 +348,18 @@ module Gori
         while md
           # `md.begin(1)` RAISES for a group that did not participate, so the group is chosen
           # by asking whether it captured anything at all, never by the pattern's shape.
-          group = md[1]?.nil? ? 0 : 1
+          #
+          # The FIRST participating group, not group 1: the derived json_field rule offers two
+          # alternatives for the value (a quoted string, an unquoted scalar) and exactly one of
+          # them ever participates, so "the value" is whichever did. Reading group 1 alone gave
+          # the unquoted branch the WHOLE match — `"pin": 9137` including its name — which a
+          # replacement would then have swallowed the member name with.
+          group = 0
+          (1...md.size).each do |i|
+            next if md[i]?.nil?
+            group = i
+            break
+          end
           start = md.begin(group)
           stop = md.end(group)
           whole_end = md.end(0)
@@ -463,13 +486,31 @@ module Gori
           # runs over bodies that are truncated (a capture cut at the cap, an MCP projection cut
           # at its 64 KB display cap), and requiring the close meant a secret cut mid-value was
           # the one thing the fallback could not see.
-          rules << {Regex.new("\"(?:#{alt})\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)(?:\"|\\z)",
+          #
+          # The second alternative is the UNQUOTED scalar — a number, a bool, a null. The
+          # structured walk has always replaced those (it matches on the member NAME, not on
+          # the value's type), so a `"pin": 9137` masked by an export and left standing by the
+          # fallback was the two passes disagreeing about the same document. It runs to the
+          # next `,`/`}`/space, which over-reaches into a `{`-opened container value; that is
+          # the direction to err in here, and the structured pass covers the container properly
+          # whenever the body parses at all.
+          #
+          # TWO capture groups, only ever one of them participating — see `each_match`, which
+          # takes the first that did rather than group 1.
+          rules << {Regex.new(
+            "\"(?:#{alt})\"\\s*:\\s*(?:\"((?:[^\"\\\\]|\\\\.)*)(?:\"|\\z)|([^,}\\s]+))",
             Regex::Options::IGNORE_CASE), "json_field (text fallback)"}
         end
         unless @form.empty?
           alt = @form.keys.map { |k| Regex.escape(k) }.join('|')
-          # `name=value` as it appears in a query string, a form body or a cookie run.
-          rules << {Regex.new("(?:\\A|[&?;\\s])(?:#{alt})=([^&;\\s\"']*)",
+          # `name=value` as it appears in a query string, a form body or a cookie run — and
+          # `name = value`, which is how a form body is DRAWN: `Pretty.try_form` reflows the
+          # pairs with spaces around the `=`, and `pretty_bodies` is on at the factory. A rule
+          # that required a bare `=` therefore matched what the copy menu parses and nothing on
+          # the screen a screenshot masks. Horizontal space only: a newline between the name
+          # and its value is not a pair any of these three shapes writes, and allowing one
+          # would let a rule reach across the line break into unrelated text.
+          rules << {Regex.new("(?:\\A|[&?;\\s])(?:#{alt})[ \\t]*=[ \\t]*([^&;\\s\"']*)",
             Regex::Options::IGNORE_CASE), "form_key (text fallback)"}
         end
         rules

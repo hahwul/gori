@@ -55,17 +55,73 @@ describe Gori::Redact::Matcher do
       end
     end
 
-    it "names the same regions `value` replaces" do
+    it "finds an UNQUOTED json scalar under a listed field name" do
       with_salt do
+        # The structured pass has always covered these — `walk` replaces the value whatever its
+        # JSON type is. The TEXT fallback only knew `"name": "quoted"`, so a number, a bool or
+        # a null went unmasked in exactly the two places the fallback is all there is: a body
+        # that did not parse, and a rendered screen.
+        text = %({"user": "ada", "pin": 9137, "otp": null})
+        found = spans_of(text)
+        found.map { |s| text[s.range] }.should eq(["9137", "null"])
+        found.map(&.rule).uniq!.should eq(["json_field (text fallback)"])
+        # …and the quoted form still comes back from the same rule, with the same span.
+        quoted = %({"pin": "9137"})
+        spans_of(quoted).map { |s| quoted[s.range] }.should eq(["9137"])
+      end
+    end
+
+    it "finds a form key whose `=` is padded, the way a pretty-printed body renders it" do
+      with_salt do
+        # `Pretty.try_form` renders a form body as `key = value`, and `pretty_bodies` is ON at
+        # the factory — so this spelling, not `key=value`, is what is actually on the screen a
+        # screenshot masks. A rule that required a bare `=` matched the copy menu's structured
+        # pass and nothing on the glass.
+        text = "user = ada\npassword = correct-horse"
+        found = spans_of(text)
+        found.map { |s| text[s.range] }.should eq(["correct-horse"])
+        found.map(&.rule).should eq(["form_key (text fallback)"])
+        # …and the unpadded spelling still matches, because a query string and a cookie run
+        # never grew a space.
+        tight = "a=1&password=hunter2"
+        spans_of(tight).map { |s| tight[s.range] }.should eq(["hunter2"])
+      end
+    end
+
+    it "mints the tag `value` wrote, for the text each span slices back to" do
+      with_salt do
+        # NOT "the same regions": the fixture is `{…} <jwt>`, which is not valid JSON, so both
+        # engines take the TEXT pass and the two rule sets are trivially the same. What it
+        # actually proves is the pairing — the tag in `value`'s output is the tag for the text
+        # this span's range slices out — which is what a screenshot needs to be comparable with
+        # a copied body.
         text = %({"password": "hunter2"} #{JWT})
         matcher = Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE)
         replaced = matcher.value(text).text
         matcher.spans(text).each do |span|
-          # The tag `value` wrote for this region is in its output, and the region this span
-          # names is the text that produced it.
           replaced.should contain(span.placeholder)
           Gori::Redact.placeholder(text[span.range]).should eq(span.placeholder)
         end
+      end
+    end
+
+    it "agrees with `value` over a body the STRUCTURED pass parses" do
+      with_salt do
+        # The two engines really can diverge: `value` walks the parsed document and `spans`
+        # only ever sees text. So over a VALID body — one quoted value and one unquoted scalar,
+        # the second being what the text fallback used to miss entirely — the placeholder each
+        # writes for a field has to be the same string, or a screenshot and a copied body of
+        # one flow carry different tags for one secret and nothing correlates.
+        matcher = Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE)
+        text = %({"user":"ada","password":"hunter2","pin":9137})
+        JSON.parse(text) # the premise: this one really does parse
+        replaced = matcher.value(text).text
+
+        found = matcher.spans(text)
+        found.map { |s| text[s.range] }.should eq(["hunter2", "9137"])
+        found.each { |span| replaced.should contain(span.placeholder) }
+        replaced.should_not contain("hunter2")
+        replaced.should_not contain("9137")
       end
     end
 
