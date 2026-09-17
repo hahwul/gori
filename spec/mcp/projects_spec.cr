@@ -486,3 +486,106 @@ describe "MCP job project binding" do
     end
   end
 end
+
+# #1085 — `list_projects` used to serialise EVERY project on the host in one result. On a
+# machine with a project per worktree that ran past the MCP client's per-tool-result budget,
+# so the listing was spilled to a temp file instead of reaching the agent. These pin the
+# narrowing that replaced it, and — just as important — the two places where a shortened
+# listing must not read as a finding about the host.
+describe "Gori::MCP::Tools list_projects narrowing" do
+  it "pages, narrows by query, and never lets a short page read as an empty host" do
+    root = File.tempname("gori-projlist")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    cur_db = File.join(root, "current.db")
+    store = Gori::Store.open(cur_db)
+    tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, db_path: cur_db)
+    begin
+      reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      slugs = (1..7).map { |n| reg.slug_of(reg.create("Acme #{n}")) }
+      lone = reg.slug_of(reg.create("Zeta store"))
+      bound = reg.create_for_workspace("Bound", "/tmp/gori-ws-1085")
+      Gori::Store.open(bound.db_path).close # create_for_workspace lays the sidecars, not the db
+      bound_slug = reg.slug_of(bound)
+      bound_id = reg.id_of(bound).not_nil!
+      total = slugs.size + 2
+
+      full = JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)
+      full["total"].as_i.should eq(total)
+      full["total_projects"].as_i.should eq(total)
+      full["returned"].as_i.should eq(total)
+      full["has_more"].as_bool.should be_false
+      full["limit"].as_i.should eq(50)
+
+      # Paging reaches every row exactly once, and the truncated page says so.
+      first = JSON.parse(tools.call("list_projects", JSON.parse(%({"limit":5}))).text)
+      first["returned"].as_i.should eq(5)
+      first["has_more"].as_bool.should be_true
+      first["note"].as_s.should contain("showing 5 of #{total}")
+      first["note"].as_s.should contain("offset:5")
+      rest = JSON.parse(tools.call("list_projects", JSON.parse(%({"limit":5,"offset":5}))).text)
+      rest["has_more"].as_bool.should be_false
+      rest["note"]?.should be_nil
+      paged = (first["projects"].as_a + rest["projects"].as_a).map(&.["slug"].as_s)
+      paged.sort.should eq((slugs + [lone, bound_slug]).sort)
+
+      # query is a substring over name / slug / short id / bound workspace path.
+      by_name = JSON.parse(tools.call("list_projects", JSON.parse(%({"query":"acme"}))).text)
+      by_name["total"].as_i.should eq(slugs.size)
+      by_name["total_projects"].as_i.should eq(total)
+      by_name["query"].as_s.should eq("acme")
+      by_name["projects"].as_a.map(&.["slug"].as_s).sort!.should eq(slugs.sort)
+
+      JSON.parse(tools.call("list_projects", JSON.parse(%({"query":"zeta-st"}))).text)["projects"]
+        .as_a.map(&.["slug"].as_s).should eq([lone])
+      JSON.parse(tools.call("list_projects", JSON.parse(%({"query":#{bound_id.to_json}}))).text)["projects"]
+        .as_a.map(&.["slug"].as_s).should eq([bound_slug])
+      JSON.parse(tools.call("list_projects", JSON.parse(%({"query":"gori-ws-1085"}))).text)["projects"]
+        .as_a.map(&.["slug"].as_s).should eq([bound_slug])
+
+      # A query that matched nothing is NOT "this host has no projects".
+      miss = JSON.parse(tools.call("list_projects", JSON.parse(%({"query":"nosuchthing"}))).text)
+      miss["total"].as_i.should eq(0)
+      miss["projects"].as_a.should be_empty
+      miss["total_projects"].as_i.should eq(total)
+      miss["note"].as_s.should contain("this host has #{total} projects")
+
+      # The binding is reported whether or not the page happens to carry its row — here it
+      # never can, because the server is bound to a loose --db outside the registry.
+      full["bound"].as_bool.should be_true
+      full["current_db_path"].as_s.should eq(cur_db)
+      full["projects"].as_a.map(&.["current"].as_bool).should_not contain(true)
+
+      sw = tools.call("switch_project", JSON.parse(%({"project":#{bound_slug.to_json}})))
+      sw.is_error.should be_false
+      narrowed = JSON.parse(tools.call("list_projects", JSON.parse(%({"query":"acme"}))).text)
+      narrowed["projects"].as_a.map(&.["current"].as_bool).should_not contain(true)
+      narrowed["current_project"].as_s.should eq("Bound")
+      narrowed["current_project_slug"].as_s.should eq(bound_slug)
+      narrowed["current_project_id"].as_s.should eq(bound_id)
+      narrowed["current_db_path"].as_s.should eq(bound.db_path)
+
+      # A page off the end of a real match is the cursor's doing, not an empty host.
+      past = JSON.parse(tools.call("list_projects", JSON.parse(%({"offset":900}))).text)
+      past["returned"].as_i.should eq(0)
+      past["total"].as_i.should eq(total)
+      past["has_more"].as_bool.should be_false
+      past["note"].as_s.should contain("past the last of #{total} matching projects")
+
+      # An out-of-range page is clamped and NAMED, like every other paged tool here.
+      over = JSON.parse(tools.call("list_projects", JSON.parse(%({"limit":9999,"offset":-3}))).text)
+      over["limit"].as_i.should eq(500)
+      over["offset"].as_i.should eq(0)
+      over["pagination_warning"].as_s.should_not be_empty
+
+      # A typo'd argument is refused rather than silently widening the listing back out.
+      tools.call("list_projects", JSON.parse(%({"quer":"acme"}))).is_error.should be_true
+      tools.call("list_projects", JSON.parse(%({"limit":"many"}))).is_error.should be_true
+    ensure
+      store.close rescue nil
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+end
