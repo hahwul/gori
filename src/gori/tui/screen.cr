@@ -1,4 +1,5 @@
 require "termisu"
+require "../screenshot/frame"
 
 module Gori::Tui
   # The cell sink Screen draws into. TermisuBackend targets the real terminal;
@@ -30,6 +31,15 @@ module Gori::Tui
     # trailing half of a wide glyph the span lands on: the orphaned lead is cleared.
     def fill_span(x : Int32, y : Int32, w : Int32, fg : Color, bg : Color) : Nil
       w.times { |i| put(x + i, y, ' ', fg, bg, Attribute::None) }
+    end
+
+    # STUB — W1a implements this on TermisuBackend from @front
+    #
+    # The frame this backend last presented, as data. `nil` for a backend that keeps no grid
+    # (the recording doubles under spec/ draw eagerly and have nothing to hand back), which is
+    # why the return is nilable rather than every Backend having to invent one.
+    def snapshot : Gori::Screenshot::Frame?
+      nil
     end
   end
 
@@ -203,6 +213,29 @@ module Gori::Tui
       end
       @full = false
       sync ? @term.sync : @term.render
+    end
+
+    # STUB — W1a implements this on TermisuBackend from @front
+    #
+    # `@front`, not `@back`: the front grid is what has actually been PRESENTED (flush advances
+    # it only for cells the terminal accepted), so a snapshot taken from it is a picture of the
+    # screen rather than of a frame half-drawn. Callers therefore render before asking.
+    #
+    # `Color.default?` is the terminal's own default, which has no RGB of its own — it is
+    # whatever the emulator paints. Resolve it to the palette gori intended (`Theme.bg` for a
+    # background, `Theme.text` for a foreground; there is no `Theme.fg`) so the captured frame
+    # carries a colour rather than a deferral nothing downstream can honour.
+    def snapshot : Gori::Screenshot::Frame?
+      bg = Gori::Screenshot::RGB.new(*Theme.bg.to_rgb_components)
+      fg = Gori::Screenshot::RGB.new(*Theme.text.to_rgb_components)
+      cells = Array(Gori::Screenshot::Cell).new(@front.size) do |i|
+        c = @front.unsafe_fetch(i)
+        Gori::Screenshot::Cell.new(c.grapheme,
+          c.fg.default? ? fg : Gori::Screenshot::RGB.new(*c.fg.to_rgb_components),
+          c.bg.default? ? bg : Gori::Screenshot::RGB.new(*c.bg.to_rgb_components),
+          c.attr, c.cont?)
+      end
+      Gori::Screenshot::Frame.new(@w, @h, cells, bg: bg, fg: fg, theme: Theme.active_name)
     end
 
     # Re-fit both grids to new terminal dimensions. Driven by the caller's Resize-event

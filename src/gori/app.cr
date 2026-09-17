@@ -29,6 +29,7 @@ require "./verbs/env"
 require "./tui"
 require "./tui/runner"
 require "./tui/project_picker"
+require "./tui/headless"
 require "./tui/setup_wizard"
 
 module Gori
