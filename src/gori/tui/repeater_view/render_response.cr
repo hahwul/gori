@@ -169,6 +169,7 @@ class Gori::Tui::RepeaterView
     rows.each_with_index do |vr, i|
       y = body.y + i
       draw_resp_gutter(screen, body.x, y, gw, vr, lit)
+      mark_resp_wrap(screen, body.x + gw, y, cw, vr)
       # slice_chars is the identity for a row that IS the whole line, so an unwrapped
       # handshake header costs nothing extra.
       shown = Highlight.slice_chars(styled_resp_line(rv, vr.li), vr.a, vr.b)
@@ -264,6 +265,7 @@ class Gori::Tui::RepeaterView
       text, color = lines[vr.li]
       y = body.y + i
       draw_resp_gutter(screen, body.x, y, gw, vr, lit)
+      mark_resp_wrap(screen, body.x + gw, y, cw, vr)
       shown = text[vr.a...vr.b]
       shown = Highlight.slice_left_text(shown, xs) if xs > 0
       screen.text(body.x + gw, y, shown, color, width: cw)
@@ -296,6 +298,7 @@ class Gori::Tui::RepeaterView
       y = rect.y + i
       line = lines[vr.li]
       draw_resp_gutter(screen, rect.x, y, gw, vr, focused)
+      mark_resp_wrap(screen, rect.x + gw, y, cw, vr)
       # `last` only on the row that actually ends the line — the ␊ marker belongs at the
       # true end of the line, not at every wrap break inside it.
       eol = vr.b >= line.size && vr.li < total - 1
@@ -359,6 +362,7 @@ class Gori::Tui::RepeaterView
       need_plain = (focused && resp_navigable? && (li == @resp_cursor.cy || sel_spans)) || searching
       text = need_plain ? resp_line_text(rv, li) : nil
       draw_resp_gutter(screen, rect.x, y, gw, vr, focused)
+      mark_resp_wrap(screen, rect.x + gw, y, cw, vr)
       shown = Highlight.slice_chars(styled_resp_line(rv, li), vr.a, vr.b)
       shown = Highlight.slice_left(shown, xs) if xs > 0
       Highlight.draw(screen, rect.x + gw, y, shown, width: cw)
@@ -368,6 +372,17 @@ class Gori::Tui::RepeaterView
         Wrap.mark_search(screen, rect.x + gw, y, t, vr.a, vr.b, @search_hl, rect.x + gw + cw, xoff: xs, lower: lower.for(li, t))
       end
     end
+  end
+
+  # The soft-wrap mark a screenshot's redaction rejoins rows with: `w` columns from (x, y)
+  # continue the row above. Reported on EVERY frame, because the marks are frame-scoped (see
+  # `Backend#mark_continuation`) — a pane that stops reporting stops being redactable.
+  #
+  # A helper rather than the one-line `if` the other panes inline, for the same reason
+  # `draw_resp_gutter` beside it is one: five loops in this file draw a row, and the branch
+  # counted against each of their complexity budgets.
+  private def mark_resp_wrap(screen : Screen, x : Int32, y : Int32, w : Int32, vr : Wrap::Row) : Nil
+    screen.mark_continuation(x, y, w) if vr.sub > 0
   end
 
   # Response-pane gutter: the row number rides the FIRST visual row of a logical row only
@@ -460,6 +475,9 @@ class Gori::Tui::RepeaterView
               else            Theme.muted
               end
       draw_resp_gutter(screen, rect.x, y, gw, vr, focused)
+      # `rect.x + gw` and not `tx`: the mark names the pane's CONTENT window, which the diff
+      # pane's 2-column decoration sits inside of.
+      mark_resp_wrap(screen, rect.x + gw, y, cw, vr)
       shown = decorated.call(vr.li)[vr.a...vr.b]
       shown = Highlight.slice_left_text(shown, xs) if xs > 0
       screen.text(rect.x + gw, y, shown, color, width: cw)
