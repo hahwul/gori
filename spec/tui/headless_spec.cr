@@ -96,9 +96,18 @@ describe Gori::Tui::Headless do
     with_seeded_project do |project|
       plain = shoot(project, tab: :history, cols: 80, rows: 20)
       titled = shoot(project, tab: :history, cols: 80, rows: 20, title: "widgets")
-      plain.title.should be_nil
       titled.title.should eq("widgets")
       rows_of(titled).should eq(rows_of(plain))
+    end
+  end
+
+  it "names the project and the tab when the caller supplies no title" do
+    with_seeded_project do |project|
+      title = shoot(project, tab: :history, cols: 80, rows: 20).title.to_s
+      # `Runner#project_tab_title` — the same caption the interactive capture stamps, so a
+      # headless shot's window bar is never blank and never spelled differently.
+      title.should contain("shotproj")
+      title.should contain(Chrome.tab_label(:history))
     end
   end
 

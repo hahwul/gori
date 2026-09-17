@@ -82,7 +82,11 @@ module Gori::Tui
             runner.settle_reads
           end
           frame = runner.frame
-          frame = frame.with(title: title) if title
+          # The window bar defaults to the caption the interactive capture stamps
+          # (`Runner#capture_frame`, via the same `project_tab_title`), not to nothing: a
+          # picture whose bar is blank cannot say which project or tab it is OF, and both
+          # headless surfaces document `--title` as overriding "the frame's own".
+          frame = frame.with(title: title || runner.project_tab_title)
           Screenshot::Mask.apply(frame, matcher_for.try &.call(session.store))
         ensure
           session.close

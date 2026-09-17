@@ -2723,7 +2723,10 @@ module Gori::Tui
     # title bar a screenshot is rendered with (`Runner#capture_frame`), so the two cannot spell
     # the same thing differently — and so a screenshot keeps naming its project even when
     # settings:display has the terminal title switched off.
-    private def project_tab_title : String
+    #
+    # Public because `Tui::Headless` stamps it on the frame from OUTSIDE the Runner, which is
+    # what keeps a headless shot's window bar spelled the same as an interactive one's.
+    def project_tab_title : String
       "𝓰𝓸𝓻𝓲 - #{title_safe(@session.project.name)} - #{Chrome.tab_label(@active_tab)}"
     end
 
