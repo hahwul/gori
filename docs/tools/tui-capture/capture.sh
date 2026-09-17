@@ -5,13 +5,14 @@
 # It drives a real gori TUI inside an isolated tmux session against a throwaway
 # project seeded with real traffic, grabs each screen as truecolor ANSI
 # (tmux capture-pane -e), and renders every frame to a self-contained SVG with
-# ansi2svg.py. Nothing here touches your real ~/.gori.
+# `gori run screenshot --from-ansi`. Nothing here touches your real ~/.gori.
 #
 # Every scene is shot once per theme so the docs can swap the whole gallery when
 # the reader flips light/dark. By default the dark set lands in tui/ and the
 # light set in tui/light/; the docs pick the right one from the active theme.
 #
-# Requirements: bash, tmux, python3, curl, sqlite3, and a built ./bin/gori.
+# Requirements: bash, tmux, curl, sqlite3, jq, and a built ./bin/gori. python3 is
+# needed only by write_statusline_settings, to write the statusline scenes' settings.json.
 # Usage:  docs/tools/tui-capture/capture.sh [path-to-gori-binary]
 # Env:    SHOTS="theme:subdir …"   which palettes to shoot and where under tui/.
 #           default: "goridark: goriday:light"  (dark → tui/, light → tui/light/)
@@ -285,13 +286,15 @@ _shoot() {
     esac
   done
   sleep 0.5
-  tmux capture-pane -t goricap -e -p > "$WORK/$name.ansi"
+  # LC_ALL=C so sed treats the truecolor ANSI escapes and any captured response bodies as
+  # raw bytes: GNU sed under a UTF-8 locale aborts with "invalid multibyte sequence" the
+  # first time a capture holds one. $PORT, not the literal 8091, is the port tmux actually
+  # bound, so the substitution stays correct if that ever changes. Never `sed -i` here —
+  # BSD and GNU disagree on its argument — and no need to check the exit status by hand:
+  # `set -o pipefail` (line 24) already fails the script if capture-pane fails.
+  tmux capture-pane -t goricap -e -p | LC_ALL=C sed "s/$PORT/8070/g" > "$WORK/$name.ansi"
   tmux send-keys -t goricap C-c 2>/dev/null || true; sleep 0.2
   tmux kill-session -t goricap 2>/dev/null || true
-  # normalize the capture port to the documented default, then render
-  python3 - "$WORK/$name.ansi" <<'PY'
-import sys; p=sys.argv[1]; t=open(p).read().replace("8091","8070"); open(p,"w").write(t)
-PY
   # A strip carries no window chrome: it is one row lifted out of a screen the
   # reader has already been shown whole, and a title bar over a single line
   # reads as a window with nothing in it. The scene title becomes the spoken
@@ -303,8 +306,8 @@ PY
     render=(--title "$title")
     if [ -n "${SHOT_ARIA:-}" ]; then render+=(--aria "$SHOT_ARIA"); fi
   fi
-  python3 "$HERE/ansi2svg.py" "$WORK/$name.ansi" "$OUT/$name.svg" \
-    "${render[@]}" --fs 15
+  "$GORI" run screenshot --from-ansi "$WORK/$name.ansi" -o "$OUT/$name.svg" \
+    --format svg --font-size 15 "${render[@]}"
 }
 
 # run_scene <name> <rows> <title> <tmux-keys...> — the full TUI over the seeded DB.
@@ -476,7 +479,7 @@ seed_readme_extra() {
 # This one shot wears the brand wordmark in the window chrome instead of a
 # "gori · Scene" caption: it is the hero on both the README and the docs
 # landing, where it stands for the tool rather than for one screen. The spoken
-# label still says what the screen is (see SHOT_ARIA / ansi2svg --aria).
+# label still says what the screen is (see SHOT_ARIA / gori run screenshot --aria).
 #
 # It shows plain History — no menu over it — with Miss Ring on: a hero should
 # read as the tool at rest, and she fills the corner the way an open Space menu
