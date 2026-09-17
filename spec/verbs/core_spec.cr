@@ -43,6 +43,19 @@ describe "Gori::Verbs.register_core" do
       verb_intents(r, "view.refresh").should eq([:refresh_screen])
     end
 
+    it "keeps both screenshot verbs Global, chordless and on their own intent" do
+      # No chord on purpose: the Global bare-letter budget is closed (c/i/s), and a picture of
+      # a live engagement landing on disk is a deliberate act rather than a reflex. The palette,
+      # the space menu and Help all list them from the registry, so chordless is still findable.
+      %w[screenshot screenshot.save-as].each do |id|
+        r[id].scope.should eq(Gori::Verb::Scope::Global)
+        r[id].chords.should be_empty
+        r[id].hidden?.should be_false
+      end
+      verb_intents(r, "screenshot").should eq([:screenshot_capture])
+      verb_intents(r, "screenshot.save-as").should eq([:screenshot_save_as])
+    end
+
     it "keeps the destructive CA verbs palette-only (no chord to fat-finger)" do
       %w[ca.export ca.regenerate ca.import browser.open].each { |id| r[id].chords.should be_empty }
       verb_intents(r, "ca.export").should eq([:export_ca])

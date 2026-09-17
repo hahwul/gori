@@ -146,6 +146,14 @@ module Gori
       # capture / proxy control
       abstract def toggle_capture : Nil
 
+      # screenshots: write what is on screen to a file. Two intents, not one with an argument —
+      # `screenshot_capture` takes the picture where settings:screenshot says, and
+      # `screenshot_save_as` raises the export card so the operator names the path (its
+      # extension is what picks the format). Both capture BEFORE anything is drawn over the
+      # screen, so what lands on disk is the frame the operator was looking at.
+      abstract def screenshot_capture : Nil
+      abstract def screenshot_save_as : Nil
+
       # certificate authority
       abstract def export_ca : Nil
       abstract def regenerate_ca : Nil # mint a fresh root CA (after a confirm)
