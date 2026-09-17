@@ -15,9 +15,14 @@ module Gori
     # background job. `hint` tails the message with how to run interactively. Every
     # interactive entrypoint (the TUI and `gori wizard`) goes through here so the guard
     # lives at the one shared construction point.
-    def self.open_terminal(hint : String) : Termisu
+    #
+    # Returns the live-terminal `TerminalPort` rather than the bare `Termisu`: the surfaces
+    # hold the port (see terminal_port.cr), and wrapping HERE keeps that the only place a
+    # `Termisu` is constructed. The wrap is outside the logging silencer on purpose — it is
+    # not a termisu call and has nothing to log.
+    def self.open_terminal(hint : String) : TermisuTerminal
       bind_log_file
-      with_termisu_logging_silenced { Termisu.new }
+      TermisuTerminal.new(with_termisu_logging_silenced { Termisu.new })
     rescue IO::Error
       abort "gori: requires an interactive terminal (no /dev/tty) — #{hint}"
     end
@@ -95,6 +100,8 @@ require "./tui/input_idle_backoff_patch" # carried termisu patch — see the fil
 require "./tui/geometry"
 require "./tui/theme"
 require "./tui/screen"
+require "./tui/terminal_port"
+require "./tui/key_script"
 require "./tui/tick_breaker"
 require "./tui/frame"
 require "./tui/brand"

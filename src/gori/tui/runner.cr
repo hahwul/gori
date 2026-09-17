@@ -158,10 +158,10 @@ module Gori::Tui
   class Runner < Verb::ExecContext
     include Host # the narrow facade per-tab controllers drive the shell through
 
-    def initialize(@session : Session, @term : Termisu)
-      # Held as the base Backend: TermisuBackend is generic over the terminal type so
-      # specs can drive its diff against a double (Termisu.new needs a live /dev/tty).
-      @backend = TermisuBackend.new(@term).as(Backend)
+    def initialize(@session : Session, @term : TerminalPort)
+      # The port builds its own backend, and hands it back as the base Backend — see
+      # `TerminalPort#make_backend` for why the generic instantiation belongs there.
+      @backend = @term.make_backend
       @keymap = Hotkeys.build_keymap(@session.registry) # base verbs + OS profile + user overrides
       TrafficEmptyState.registry = @session.registry    # the empty-state cards' chord chips
       @scope = @session.scope
@@ -468,11 +468,17 @@ module Gori::Tui
       @tabs[:colormarker].as(ColormarkerController)
     end
 
-    def run : Symbol
-      # Record the opened project's db path globally for explicitly opted-in headless
-      # integrations (`gori mcp --use-active-project`). Workspace-aware MCP launches use
-      # their path binding instead, preventing a different repository from inheriting this.
-      Paths.write_active_project(@session.project.db_path)
+    # Everything `run` does before its first frame, minus the process-global bookkeeping: load
+    # the tabs that must be ready before they are focused, and turn the session's bind outcome
+    # into the entry toast. Split out of `run` so a caller that wants ONE frame and no loop —
+    # `Tui::Headless.render` — gets a Runner in exactly the state `run` would have it in,
+    # rather than a second, drifting approximation of it.
+    #
+    # `announce: false` skips the env-syntax migration notice, and that is not cosmetic: the
+    # notice is ONE-SHOT (`Settings.take_env_syntax_global_migration` consumes it) and it rings
+    # the terminal bell through `TtyOut`, which falls back to STDOUT when there is no tty. A
+    # picture of a project must not spend the operator's only notice, nor put a `\a` in a pipe.
+    def boot(*, announce : Bool = true) : Nil
       history_controller.view.reload(@session.store)
       notes_controller.view.reload(@session.store) # load persisted notes up front so the tab is ready before it's ever focused
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
@@ -506,8 +512,72 @@ module Gori::Tui
       # every surface that answers "where am I listening": the top-bar chip
       # (#listen_chip_label), the status line, the listeners overlay, the traffic empty states
       # — all of which read `@session.proxy.port` directly — plus the toast above.
-      announce_env_syntax_migration
+      announce_env_syntax_migration if announce
       project_controller.reload
+    end
+
+    # The frame as data, for a caller with no terminal to look at it on.
+    #
+    # `render` first, always: the backend's grid is only complete once `flush_screen` has run,
+    # so snapshotting without it photographs whatever the previous frame left behind.
+    #
+    # The Runner's backend is always a `TermisuBackend` (the port builds it, and both ports
+    # build that one), so the nil branch is a wiring mistake rather than a runtime condition —
+    # it says which, instead of raising a bare NilAssertionError from inside the renderer.
+    def frame : Screenshot::Frame
+      render
+      @backend.snapshot ||
+        raise Gori::Error.new("this Runner's backend keeps no cell grid, so it cannot be captured")
+    end
+
+    # The public door to the private `handle`, for a driver that supplies its own events
+    # instead of polling for them. `handle` stays private: the dispatch it performs is the
+    # Runner's business, and widening it would make every branch of the key path a contract.
+    def feed(ev : Termisu::Event::Any) : Nil
+      handle(ev)
+    end
+
+    # How long `settle_reads` will wait for a backgrounded read before drawing anyway. Generous
+    # against a large project's first History page, and a CAP rather than a delay: a settled
+    # read exits on the first pass.
+    SETTLE_TIMEOUT = 2.seconds
+
+    # Wait for the reads THIS Runner started to land.
+    #
+    # History and Sitemap compile their query on the UI fiber and run it on a worker, so
+    # `reload` returns before there are any rows — the loop's tick is what drains the result
+    # and paints it. A caller that renders without a loop (`Tui::Headless`) would otherwise
+    # photograph "no flows match…" over a full database on every single frame.
+    #
+    # NARROW on purpose, and not a general "settle the UI": it drives only the two controllers
+    # that background a read, and only until their own `searching?` clears. It does not drain
+    # flow events, repeater results or intercept holds — that is the tick's drain phase, whose
+    # job is absorbing work arriving from OUTSIDE, which has no natural end for a renderer to
+    # wait on.
+    #
+    # The clock handed to the debounce is deliberately in the future: the debounce coalesces a
+    # burst of typing into one search, and after a scripted keystroke there is no more typing
+    # coming.
+    def settle_reads(timeout : Time::Span = SETTLE_TIMEOUT) : Nil
+      deadline = Time.instant + timeout
+      loop do
+        now = Time.instant + HistoryController::QUERY_DEBOUNCE
+        history_controller.flush_query_reload_if_due(now)
+        sitemap_controller.flush_query_reload_if_due(now)
+        sitemap_controller.drain_search
+        history_controller.view.flush_filter(@session.store) if @active_tab == :history
+        break unless history_controller.view.searching? || sitemap_controller.view.searching?
+        break if Time.instant >= deadline
+        Fiber.yield
+      end
+    end
+
+    def run : Symbol
+      # Record the opened project's db path globally for explicitly opted-in headless
+      # integrations (`gori mcp --use-active-project`). Workspace-aware MCP launches use
+      # their path binding instead, preventing a different repository from inheriting this.
+      Paths.write_active_project(@session.project.db_path)
+      boot
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still
       # checked ≤50ms), but RENDER only runs when the frame would actually change —

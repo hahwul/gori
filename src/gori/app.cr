@@ -29,6 +29,7 @@ require "./verbs/env"
 require "./tui"
 require "./tui/runner"
 require "./tui/project_picker"
+require "./tui/headless"
 require "./tui/setup_wizard"
 
 module Gori
@@ -316,7 +317,7 @@ module Gori
     # ALREADY held. A compact that starts in the gap between the probe and the open falls
     # through to `try_shared` and waits it out exactly as before, which is the rare race inside
     # an already-rare collision.
-    private def open_or_report_guard(project : Project, term : Termisu) : {Symbol, String?}
+    private def open_or_report_guard(project : Project, term : Tui::TerminalPort) : {Symbol, String?}
       if OpenLock.guarded?(project.db_path)
         # `:back` with a reason is the picker's own "here is why you are looking at this
         # screen" channel — the same one a failed open uses, so this needs no new surface.
@@ -329,7 +330,7 @@ module Gori
     # `error` is a one-line reason and is non-nil ONLY when the session never opened, so the
     # caller can tell "the user pressed q" apart from "this project never opened" — both of
     # which are :back, and only one of which is worth putting on screen.
-    private def open_and_run(project : Project, term : Termisu) : {Symbol, String?}
+    private def open_and_run(project : Project, term : Tui::TerminalPort) : {Symbol, String?}
       # Pick up any bind address / verify-upstream toggle changed via Settings since startup
       # (the previous session kept its values; this one opens on the new ones). `startup_*`,
       # not the bare globals: a `-l`/`-p` flag lives in its own layer now, and dropping it here

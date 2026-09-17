@@ -206,9 +206,9 @@ module Gori::Tui
       end
     end
 
-    def initialize(@term : Termisu, @handoff : Handoff = Handoff::Shell)
-      # Held as the base Backend: TermisuBackend is generic over the terminal type.
-      @backend = TermisuBackend.new(@term).as(Backend)
+    def initialize(@term : TerminalPort, @handoff : Handoff = Handoff::Shell)
+      # The port builds its own backend — see `TerminalPort#make_backend`.
+      @backend = @term.make_backend
       @step = Step::Welcome
       @tick = 0        # loop counter driving the demo animations (advances ~20/s)
       @resized = false # forces a full repaint after a resize

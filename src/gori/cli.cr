@@ -348,7 +348,7 @@ module Gori
     # pane back in raw mode with the alternate screen up and mouse reporting on, recoverable
     # only with `reset`. App#run_tui has armed the same guard for the TUI all along — see
     # App::SignalGuard for why it restores and re-raises rather than nudging a channel.
-    private def self.with_tui_terminal(term : Termisu, &)
+    private def self.with_tui_terminal(term : Tui::TerminalPort, &)
       App::SignalGuard.new(-> { term.close; nil }).install
       begin
         yield

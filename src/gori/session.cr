@@ -73,14 +73,30 @@ module Gori
     # capture needs the bind — so a bind failure is non-fatal.
     getter bind_error : String?
 
+    # `listen: false` opens the project for READING and nothing else: no capture lock is
+    # taken, no socket is bound, no scanner runs, and the store neither sweeps retention nor
+    # drains the FTS index in the background. It is what a surface that only wants to LOOK at
+    # a project asks for — today `Tui::Headless.render`, which boots a Runner against an
+    # offscreen terminal to photograph one frame.
+    #
+    # It is deliberately NOT spelled as "the lock was taken by someone else". A view-only
+    # session that lost a race reports that in `bind_error` and the TUI advises pressing `c`
+    # to take over; a session that never asked has no race to have lost, so `bind_error` stays
+    # nil and nothing invites the caller to take capture from whoever actually holds it.
     def self.open(config : Config, ca : Proxy::Tls::CertAuthority,
                   registry : Verb::Registry, project : Project,
-                  bind_fallback : Bool = false) : Session
+                  bind_fallback : Bool = false, *, listen : Bool = true) : Session
       events = Channel(Store::FlowEvent).new(1024)
       probe_events = Channel(Store::FlowEvent).new(256)
       authorize_events = Channel(Store::FlowEvent).new(256)
-      store = Store.open(project.db_path, events, probe_events, Settings.retention_flows,
-        authorize_events: authorize_events)
+      # Both knobs follow `listen`, and for the reasons `Store.open` documents on each. A
+      # render must not trip the retention sweep — deleting the operator's oldest history as a
+      # side effect of drawing a picture of it is not a thing a reader may do — and must not
+      # start an idle FTS indexer against a project whose real capturer is another process
+      # (the #752 two-writer condition).
+      store = Store.open(project.db_path, events, probe_events,
+        listen ? Settings.retention_flows : Store::RETENTION_UNLIMITED,
+        authorize_events: authorize_events, background_index: listen)
       probe = nil.as(Probe::Analyzer?)
       begin
         # THE token-grammar reconcile, and it runs FIRST — before the rule sets, the slots, the
@@ -94,12 +110,16 @@ module Gori
         # Per-project network overrides: pull this project's pinned bind/upstream (if any) into
         # the Settings runtime layer BEFORE binding, so the proxy listens on the project's address
         # and Upstream.dial (reads Settings.upstream_route) tunnels through its upstream.
-        # `bind: true` — a Session is the one surface that LISTENS (the TUI and `gori run capture`
-        # both open the project this way), so all eight keys apply here; the headless callers of
+        # A Session is the one surface that LISTENS (the TUI and `gori run capture` both open the
+        # project this way), so all eight keys apply here; the headless callers of
         # `CLI::Run.open_store` and the MCP bind path pass `bind: false`. Mutating `config` is
         # safe — App re-seeds it from the global Settings on every project open. Inside the begin
         # so a failing settings read is torn down below rather than leaking store+channels.
-        Settings.load_project_network(store, bind: true)
+        #
+        # `bind: listen` for the reason the keyword is mandatory: `effective_bind_*` is read for
+        # DISPLAY too, so a session that never opened a socket must not leave the pair set and
+        # have every chip and status line report a port it is not on.
+        Settings.load_project_network(store, bind: listen)
         # The project's gRPC `.proto` schema (#823) — a per-project global for the same
         # reason `Env` is one: the four surfaces that render a protobuf payload reach it
         # through static serializers with no store in hand. Loading a local descriptor set
@@ -163,41 +183,49 @@ module Gori
         # it captures on its own port (the bind falls back when the configured port
         # is taken). The bind itself stays NON-FATAL: History/Repeater/Sitemap/Issues
         # all read the store / dial upstream directly and don't need the listener.
+        # `listen: false` never asks. Not "asked and was refused": `CaptureLock.try_at` is not
+        # reached, `lock` stays nil, and `bind_error` stays nil so nothing reads as a race this
+        # session lost. The `else` branch below — pause the background index, don't start the
+        # scanner — is already exactly the view-only shape a reader wants.
         bind_error =
-          begin
-            lock = CaptureLock.try_at(project.capture_lock_path)
-            if lock
-              begin
-                proxy.start(fallback: bind_fallback)
-                # Each extra listener binds independently: a transparent listener on a
-                # privileged port failing must not stop capture on the primary, but the failure
-                # is COLLECTED rather than swallowed — a redirect rule pointing at a socket that
-                # never bound is invisible from the client's side.
-                extra.each do |e|
-                  e.server.start
+          if !listen
+            nil
+          else
+            begin
+              lock = CaptureLock.try_at(project.capture_lock_path)
+              if lock
+                begin
+                  proxy.start(fallback: bind_fallback)
+                  # Each extra listener binds independently: a transparent listener on a
+                  # privileged port failing must not stop capture on the primary, but the failure
+                  # is COLLECTED rather than swallowed — a redirect rule pointing at a socket that
+                  # never bound is invisible from the client's side.
+                  extra.each do |e|
+                    e.server.start
+                  rescue ex
+                    # BindAddress.authority, not bare interpolation: `listener_rows` matches a
+                    # failure back to its server by this prefix, and a raw `::1` bind renders as
+                    # the unparseable "::1:8070" (the same bug BindAddress exists to kill).
+                    listener_errs << bind_failure(e.server, ex)
+                  end
+                  nil
                 rescue ex
-                  # BindAddress.authority, not bare interpolation: `listener_rows` matches a
-                  # failure back to its server by this prefix, and a raw `::1` bind renders as
-                  # the unparseable "::1:8070" (the same bug BindAddress exists to kill).
-                  listener_errs << bind_failure(e.server, ex)
+                  # We own this project (hold the lock) but couldn't bind the listener
+                  # (port taken, fallback off/exhausted). Stay capture-off and KEEP the
+                  # lock — the user can free the port (settings) + press c to start
+                  # (toggle_capture reuses the held lock).
+                  ex.message || "could not bind #{config.listen}:#{config.port}"
                 end
-                nil
-              rescue ex
-                # We own this project (hold the lock) but couldn't bind the listener
-                # (port taken, fallback off/exhausted). Stay capture-off and KEEP the
-                # lock — the user can free the port (settings) + press c to start
-                # (toggle_capture reuses the held lock).
-                ex.message || "could not bind #{config.listen}:#{config.port}"
+              else
+                "another gori instance already holds this database's capture lock"
               end
-            else
-              "another gori instance already holds this database's capture lock"
+            rescue ex
+              # CaptureLock.try itself failed (can't create/open the lock file) — not a
+              # bind issue; release anything we opened and report it.
+              lock.try(&.close) rescue nil
+              lock = nil
+              ex.message || "could not open the project capture lock"
             end
-          rescue ex
-            # CaptureLock.try itself failed (can't create/open the lock file) — not a
-            # bind issue; release anything we opened and report it.
-            lock.try(&.close) rescue nil
-            lock = nil
-            ex.message || "could not open the project capture lock"
           end
         if lock
           # Sole capturer for this project: clear any Pending rows orphaned by a previous
@@ -212,7 +240,9 @@ module Gori
         else
           # View-only: workbench writes (notes, issues, repeaters) still go through this
           # store, but idle FTS is the capturer's job. A second idle indexer is the #752
-          # two-writer condition against the instance that actually holds the lock.
+          # two-writer condition against the instance that actually holds the lock. This is
+          # also where a `listen: false` open lands (`Tui::Headless.render`), which never
+          # asked for the lock at all — the shape it wants is the same one.
           store.pause_background_index
         end
         session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, bindings, slots, scope, host_overrides, interceptor, sink, authorize_events, bind_error, lock, extra, listener_errs)
@@ -561,7 +591,13 @@ module Gori
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
       stop_extra_listeners
-      @store.abandon_pending!("proxy stopped before response")
+      # GATED on the lock, like the open-time sweep above it (see the comment at the `if lock`
+      # branch in `open`): a Pending row belongs to whoever is capturing, and only the lock
+      # holder is. Ungated, a view-only second instance — or a headless render that opened the
+      # project only to draw it — resolved the LIVE capturer's in-flight rows as "proxy stopped
+      # before response" on its way out, writing that sentence over responses that were still
+      # on the wire in another process.
+      @store.abandon_pending!("proxy stopped before response") if capturing_lock_held?
       # Best-effort: a delete failure here must not skip the lock/probe/store teardown below
       # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,
       # replace the real exception being unwound.
@@ -570,8 +606,9 @@ module Gori
       # get_flow against a live DB; this also closes the probe_events channel it consumes.
       @probe.stop
       # Second sweep: proxy/intercept fibers released above may still enqueue
-      # InsertFlow after the first abandon (right after proxy.stop).
-      @store.abandon_pending!("proxy stopped before response")
+      # InsertFlow after the first abandon (right after proxy.stop). Gated for the same
+      # reason as the first — a session that never captured has no fibers to have raced.
+      @store.abandon_pending!("proxy stopped before response") if capturing_lock_held?
       # Drain + stop the store BEFORE closing the events channel: the writer
       # publishes post-commit events while draining, and a closed channel would
       # otherwise make it raise mid-drain. (publish() also tolerates a closed
