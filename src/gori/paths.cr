@@ -54,6 +54,15 @@ module Gori
       File.join(home_dir, "screenshots")
     end
 
+    # Convention dir for screenshot fonts: a full GNU Unifont `.hex` dropped in here as
+    # `unifont.hex` is merged over the subset gori embeds, so a frame containing CJK or emoji
+    # renders as glyphs instead of tofu. The same rule `wordlists_dir` and `protos_dir` give
+    # their fields — a fixed name in a known place beats a path to type. See
+    # `Screenshot::Font.resolve_extra`, which probes this before any system install.
+    def self.fonts_dir : String
+      File.join(home_dir, "fonts")
+    end
+
     # A tiny global marker holding the DB PATH of the project the interactive TUI last
     # opened. Headless MCP uses this only after an explicit opt-in (`--use-active-project`);
     # otherwise MCP outside a Git workspace starts unbound so the agent can list/create/
@@ -108,6 +117,9 @@ module Gori
       # and the docs both tell an operator where pictures land, and a directory that does not
       # exist yet is a worse answer than an empty one.
       ensure_dir(screenshots_dir)
+      # …and `fonts/`, for the same reason again: the screenshot renderer's tofu message and
+      # font/README.md both tell an operator to drop a Unifont `.hex` in here.
+      ensure_dir(fonts_dir)
     end
 
     # gori's tree holds captured traffic (per-project DBs), the CA private key, and
