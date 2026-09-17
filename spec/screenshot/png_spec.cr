@@ -238,7 +238,8 @@ describe Gori::Screenshot::Png do
       Gori::Screenshot::Chrome::LIGHTS.each_with_index do |color, i|
         x = Gori::Screenshot::Png::DEFAULT_PAD + Gori::Screenshot::Png::LIGHT_R +
             i * Gori::Screenshot::Png::LIGHT_GAP
-        image.pixel(x, Gori::Screenshot::Png::TITLE_H // 2).should eq(rgb_of(color))
+        image.pixel(x, Gori::Screenshot::Png::TITLE_H // 2)
+          .should eq(rgb_of(Gori::Screenshot::RGB.hex(color)))
       end
     end
 

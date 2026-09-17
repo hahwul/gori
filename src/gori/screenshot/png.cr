@@ -182,9 +182,11 @@ module Gori::Screenshot
                                   title : String?) : Nil
       canvas.fill(0, 0, layout.width, TITLE_H, canvas.id_for(Chrome.chrome_bg(frame.bg)))
       canvas.fill(0, TITLE_H - 1, layout.width, 1, canvas.id_for(Chrome.border(frame.bg)))
+      # `Chrome::LIGHTS` are hex strings — the SVG writes them verbatim into `fill=` — so the
+      # raster side parses them once here rather than the palette growing a second spelling.
       Chrome::LIGHTS.each_with_index do |color, i|
         disc(canvas, layout.pad + LIGHT_R + i * LIGHT_GAP, TITLE_H // 2, LIGHT_R,
-          canvas.id_for(color))
+          canvas.id_for(RGB.hex(color)))
       end
       paint_title(canvas, frame, layout, title)
     end
