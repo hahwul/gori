@@ -11,13 +11,17 @@ require "openssl/hmac"
 
 # Runs the server over the given request lines and returns each emitted line as a
 # parsed JSON::Any (also proves STDOUT purity — a non-JSON line would raise here).
+# `db_path` is the project FILE the server reports as bound. Most examples leave it nil — the
+# store handle is the whole binding they need — but a tool that opens a SECOND view of the same
+# project (`screenshot`, which boots a Runner) has nothing to open without it.
 def mcp_drive(store, *lines, allow_actions = true, verify_upstream = true,
-              project_name : String? = nil, project_slug : String? = nil) : Array(JSON::Any)
+              project_name : String? = nil, project_slug : String? = nil,
+              db_path : String? = nil) : Array(JSON::Any)
   input = IO::Memory.new(lines.join('\n') + "\n")
   output = IO::Memory.new
   Gori::MCP::Server.new(store,
     allow_actions: allow_actions, verify_upstream: verify_upstream,
-    project_name: project_name, project_slug: project_slug,
+    project_name: project_name, project_slug: project_slug, db_path: db_path,
     input: input, output: output).run
   output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
 end

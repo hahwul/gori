@@ -398,7 +398,10 @@ module Gori
           "make real outbound requests or mutate issues/rules. Active requests " \
           "(send_request, send_websocket, fuzz, mine, authorize) are gated by the project scope: a target " \
           "outside — or without — a configured scope is refused (SCOPE_BLOCKED) unless you pass " \
-          "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project."
+          "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project. " \
+          "screenshot draws the real TUI over this project and writes a picture (view-only — it " \
+          "captures nothing and binds no port); reach for it when you need to SEE a pane's " \
+          "layout rather than read its rows, and pass inline:true to get the image back here."
         else
           "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, authorize_*, " \
           "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them. " \
@@ -424,6 +427,25 @@ module Gori
             j.field("content") do
               j.array do
                 j.object { j.field "type", "text"; j.field "text", result.text }
+                # Anything the tool had that does not fit in a JSON string. Only `screenshot`
+                # produces these today; `extra` is empty for every other tool, so this loop
+                # leaves the one-block shape every existing client parses untouched.
+                #
+                # A block with a mime type is BINARY (`data` is base64 — an image the model can
+                # actually look at); without one it is a second text document, which is how an
+                # SVG/ANSI/plain-text capture rides along beside the JSON summary rather than
+                # being escaped into it.
+                result.extra.each do |c|
+                  j.object do
+                    j.field "type", c.type
+                    if mime = c.mime_type
+                      j.field "data", c.data
+                      j.field "mimeType", mime
+                    else
+                      j.field "text", c.data
+                    end
+                  end
+                end
               end
             end
             if result.is_error && (code = result.error_code)

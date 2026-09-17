@@ -1,6 +1,8 @@
 require "./screenshot/frame"
 require "./screenshot/chrome"
 require "./screenshot/svg"
+require "./screenshot/png"
+require "./screenshot/font"
 require "./screenshot/ansi"
 require "./screenshot/text"
 require "./screenshot/mask"
@@ -29,5 +31,27 @@ module Gori
   # that touches `Gori::Tui` (for the SGR parser), and keeping it out of this file is what
   # lets every other file in the subsystem stay surface-free.
   module Screenshot
+    # What to call the file, when the operator (or the agent) did not say.
+    #
+    # It lives HERE and not in either surface because both `gori run screenshot` and the MCP
+    # `screenshot` tool write into the same `<GORI_HOME>/screenshots` directory: two spellings
+    # of the convention would drift, and the directory an operator browses would then be sorted
+    # by two different rules. Pure, and surface-free like everything else in this file.
+    #
+    # The tab segment is omitted when no tab was asked for: the shot is then of whatever tab
+    # the project opens on, and naming one would be a claim the file cannot back.
+    def self.suggest_filename(slug : String, tab : String?, ext : String, at : Time) : String
+      stamp = at.to_s("%Y%m%d-%H%M%S")
+      tab ? "#{slug}-#{tab}-#{stamp}.#{ext}" : "#{slug}-#{stamp}.#{ext}"
+    end
+
+    # A project name as a filename component: lowercased, everything outside `[a-z0-9._-]`
+    # folded to a single dash, and never empty. Deliberately NOT `ProjectRegistry#slugify` —
+    # that one is the DIRECTORY spelling and is private to the registry, and a picture's name
+    # is allowed to differ from the directory the project lives in.
+    def self.slug(name : String) : String
+      s = name.downcase.gsub(/[^a-z0-9._-]+/, "-").strip('-')
+      s.empty? ? "gori" : s
+    end
   end
 end

@@ -83,6 +83,11 @@ describe "MCP tool registry" do
     Gori::MCP::Tools::UNBOUND_SAFE.should_not contain("list_history")
     Gori::MCP::Tools::GATED_TOOLS.should contain("send_request")
     Gori::MCP::Tools::GATED_TOOLS.should_not contain("get_flow")
+    # `screenshot` reads the project and sends nothing, but it puts a FILE on disk outside the
+    # database — the one thing no read tool does. Gated is also what keeps the empty-argument
+    # sweep above from booting a Runner 170 times.
+    Gori::MCP::Tools::GATED_TOOLS.should contain("screenshot")
+    Gori::MCP::Tools::AGENT_ACTION_TOOLS.should_not contain("screenshot")
   end
 
   it "with no project bound and actions allowed, the tools flagged both unbound and gated reach their handlers" do

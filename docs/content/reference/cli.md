@@ -91,6 +91,7 @@ gori run <subcommand> [verb] [options]
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views: named QL queries the list is narrowed by, as a lens |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | Session slots: the named identities a send or an Authorize run goes out as |
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
+| `screenshot` (`shot`) | Render the TUI headlessly to SVG / PNG / ANSI / text |
 | `project [list]` | List known projects |
 | `project create <name>` | Create (or reopen) a project by name |
 | `project delete <name>` | Delete a project and everything captured in it (`--yes` to confirm) |
@@ -1173,6 +1174,48 @@ The query is validated **on the way in**, not when it runs. A query naming an un
 Built-in views cannot be edited or deleted, and a saved view may not take a built-in's name: it would shadow it, and `--view` could never reach the built-in again.
 
 Deleting the view a project is currently looking through drops that project back to `All`. Another project's pointer at a *global* view you delete stays inert: ids come from a monotonic counter and are never reused, so nothing can inherit it. See [Proxy & History](/guide/proxy/#views) for the interactive picker.
+
+### run screenshot
+
+Draw the TUI with **no terminal attached** and write the frame out — an SVG or PNG picture, a re-ingestable ANSI dump, or plain text. It is the shipping chrome over the real store, not a mock: the same Runner `gori` boots is booted against an offscreen terminal and asked for its frame, so a shot in a bug report or a README is the version that actually ships. The project is opened **view-only** — no port is bound, no capture lock is taken, and the active-project pointer is not moved, which is why the status line's capture chip reads `off` in every headless shot. With no `-o` the picture lands in `<GORI_HOME>/screenshots` as `<project>-<tab>-<timestamp>.<ext>`, and the path it wrote is printed on stdout.
+
+```bash
+gori run screenshot                                              # SVG of the current project
+gori run screenshot --tab history --size 132x38 -o history.svg
+gori run screenshot --tab repeater --keys 'Down Down Enter' --title 'Repeater · acme'
+gori run screenshot --format png --scale 2 -o docs/shot.png
+gori run screenshot --format ansi --tail 1 -o statusline.ansi    # one row, no window chrome
+gori run screenshot --format txt -o - | head -5                  # plain glyphs on stdout
+tmux capture-pane -e -p -t gori | gori run screenshot --from-ansi - -o remote.svg
+gori run screenshot --redact --tab history -o safe.svg           # mask secrets on the frame
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--project=NAME` | Project to draw (default: most-recently-active). `--db PATH` is the alternative; passing both is a usage error |
+| `--db=PATH` | Explicit SQLite db file to draw |
+| `--tab=NAME` | Tab to open before drawing, by catalogue name (`history`, `repeater`, `probe`, …). A digit is refused: the bar's numbering is your own visible-tab configuration, so `--tab 3` would photograph a different pane on another machine |
+| `--keys=SCRIPT` | Keys to send before drawing, in tmux `send-keys` grammar (`C-p "acme" Enter Down Down`, plus `SLEEP<secs>`). Drives **navigation**: the frame shows the store as it is now, so anything async — a Repeater send, a scan — is photographed mid-flight rather than awaited |
+| `--size=WxH` | Terminal size to draw at (default `132x38`, 1000 max each end). A shape it cannot read is refused rather than falling back to the default |
+| `--theme=NAME` | Theme to draw in, validated against the installed set (default: the configured one) |
+| `--format=FMT` | `svg` (default), `png`, `ansi` or `txt` |
+| `-o`, `--out=PATH` | Write here instead of the screenshots directory. `-` is stdout; PNG bytes to a terminal are refused, so redirect or pass a path |
+| `--force` | Overwrite an existing file. Without it an existing target is refused before anything is drawn |
+| `--title=T` | Title for the window bar (default: the frame's own) |
+| `--aria=A` | Spoken label for screen readers. `svg` only — a decorative title says nothing to a reader |
+| `--font-size=F` | SVG cell font size in px (default `15`). `svg` only |
+| `--pad=P` | SVG padding in px (default `18`). `svg` only |
+| `--tail=N` | Keep only the last `N` non-blank rows. On SVG this also drops the window chrome, which is what makes a one-row strip look like a strip |
+| `--scale=N` | PNG supersample, `1`–`8` (default `2`). `png` only |
+| `--font=PATH` | Font file to rasterize glyphs from. `png` only |
+| `--redact[=PROFILE]` / `--no-redact` | Mask the frame's cells with a redaction profile before writing, so a shot of a live engagement can be published. The count of masked cells is reported on stderr |
+| `--from-ansi=FILE` | Ingest a `tmux capture-pane -e -p` dump instead of drawing a project (`-` is stdin) |
+
+Every "X only with format Y" pairing is **refused by name** rather than ignored: a flag the format never read would produce a picture that looks right and is missing what was asked for. The same goes for `--from-ansi`, which turns the project half of the command off — `--project`, `--db`, `--tab`, `--keys` and `--theme` are then refused rather than silently dropped.
+
+**Ingesting a dump.** `--from-ansi` is how a screenshot is taken of a gori running in *another* terminal, or of a session that has already ended. A capture was already framed by the terminal that drew it, so its rows are its own: the width comes from the longest row unless `--size` gives one, and the row count always comes from the dump, never from `--size`'s height. Re-framing a dump against a width nobody typed shifts every row below the first wide one.
+
+**Redaction.** `--redact` paints the project's profile over the drawn cells, including a secret soft-wrapped across two screen rows, which neither half matches on its own. The store still holds the captured bytes; only the picture changes. `--redact-preview` is refused here — a frame is masked as cells, so there is no per-value list to print; the count on stderr is the answer instead.
 
 ### run project
 

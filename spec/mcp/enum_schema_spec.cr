@@ -99,6 +99,11 @@ private def enum_args(tools) : Array(EnumArg)
     # would exercise here can be reached. Their enums come from the same constants as the
     # tools that ARE driven below.
     next if name.in?("oast_start", "probe_scan", "send_request", "send_websocket", "grpc_reflect")
+    # `screenshot` boots a whole TUI Runner against a project FILE before any of its readers
+    # are reached, and `tools_for` binds a store with no db_path — so every value here would
+    # meet the same NO_PROJECT refusal and prove nothing about the enum. Its two closed sets
+    # (`Chrome::TABS`, `Theme.available`) are the same constants the schema is built from.
+    next if name == "screenshot"
     schema = t["inputSchema"]
     props = schema["properties"].as_h
     required = schema["required"].as_a.map(&.as_s)
