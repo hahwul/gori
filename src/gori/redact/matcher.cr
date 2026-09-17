@@ -12,6 +12,16 @@ module Gori
     # front turns that into one reported sentence (`pattern_errors`) instead of an exception
     # from the middle of a document, or worse, a silently skipped rule.
     class Matcher
+      # A region of a string this matcher would replace: the CHARACTER range (exclusive end,
+      # so it slices straight back out with `text[range]`), the placeholder that would have
+      # gone there, and the rule that claimed it. See `Matcher#spans`.
+      #
+      # `placeholder` is EMPTY when the correlation tag could not be minted — no salt is
+      # armed (`Redact::SaltMissing`). The range is still right, and a consumer must still
+      # cover it: "redacted without a tag" is a bad outcome, "left on the screen" is the
+      # one this exists to prevent. A tag is a correlation aid; the range is the redaction.
+      record Span, range : Range(Int32, Int32), placeholder : String, rule : String
+
       getter profile : Profile
 
       # Regex sources in the profile that would not compile, as `"<source>: <reason>"`. A
@@ -308,18 +318,20 @@ module Gori
         clean
       end
 
-      # Replace every match of `rx`, taking capture group 1 when the pattern has one and the
-      # whole match when it does not (see `Profile#patterns`).
+      # Walk every match of `rx` over `text`, yielding `{group start, group end, whole match
+      # end}` in order, with the cursor advanced the way a replacement pass needs it.
       #
       # Hand-rolled rather than `gsub`, because a block-form gsub only hands back the matched
       # TEXT and rebuilding "the match with its group replaced" from that re-finds the group by
       # value — which picks the wrong occurrence whenever the context around it repeats the
       # secret. Offsets cannot be wrong that way.
-      private def replace_all(text : String, rx : Regex, rule : String, path : String,
-                              hits : Array(Hit)) : String
+      #
+      # Extracted from `replace_all` so `spans` can ask the SAME question ("where are the
+      # matches") without the answer being routed through a rebuilt string: the screenshot
+      # redactor needs coordinates, not replaced text, and a second cursor loop written next
+      # to it would be a second set of these two edge cases to get wrong.
+      private def each_match(text : String, rx : Regex, & : Int32, Int32, Int32 ->) : Nil
         md = rx.match(text)
-        return text unless md
-        clean = String::Builder.new
         pos = 0
         while md
           # `md.begin(1)` RAISES for a group that did not participate, so the group is chosen
@@ -328,34 +340,114 @@ module Gori
           start = md.begin(group)
           stop = md.end(group)
           whole_end = md.end(0)
+          yield start, stop, whole_end
+          if whole_end > pos
+            pos = whole_end
+          else
+            # A zero-width WHOLE match (`x*` against `y`) leaves the cursor where it was, so the
+            # same empty match would be found forever. Step one character.
+            pos += 1
+          end
+          break if pos > text.size
+          md = rx.match(text, pos)
+        end
+      end
+
+      # Replace every match of `rx`, taking capture group 1 when the pattern has one and the
+      # whole match when it does not (see `Profile#patterns`).
+      private def replace_all(text : String, rx : Regex, rule : String, path : String,
+                              hits : Array(Hit)) : String
+        clean = nil.as(String::Builder?)
+        pos = 0
+        each_match(text, rx) do |start, stop, whole_end|
+          builder = clean ||= String::Builder.new
           before = pos
           value = text[start...stop]
           if value.empty?
             # A zero-width GROUP has nothing to replace; copy the match through rather than
             # minting a placeholder for the empty string.
-            clean << text[before...whole_end]
+            builder << text[before...whole_end]
           else
-            clean << text[before...start]
+            builder << text[before...start]
             ph = Redact.placeholder(value)
             hits << Hit.new(path, rule, ph)
-            clean << ph
-            clean << text[stop...whole_end] if whole_end > stop
+            builder << ph
+            builder << text[stop...whole_end] if whole_end > stop
           end
           if whole_end > before
             pos = whole_end
           else
-            # A zero-width WHOLE match (`x*` against `y`) leaves the cursor where it was, so the
-            # same empty match would be found forever. Step one character — and COPY it, which
-            # the branch above could not: skipping without copying silently deletes a byte of
-            # the operator's evidence at every such position.
-            clean << text[before, 1] if before < text.size
+            # The zero-width-whole-match step, and the copy `each_match` cannot do for us:
+            # skipping without copying silently deletes a byte of the operator's evidence at
+            # every such position.
+            builder << text[before, 1] if before < text.size
             pos = before + 1
           end
-          break if pos > text.size
-          md = rx.match(text, pos)
         end
-        clean << text[pos..] if pos <= text.size
-        clean.to_s
+        return text unless builder = clean
+        builder << text[pos..] if pos <= text.size
+        builder.to_s
+      end
+
+      # WHERE this matcher would redact in `text`, as character ranges into the text AS GIVEN.
+      #
+      # `value` answers "what does the sanitized text say", which is all a body needs. A
+      # SCREENSHOT needs coordinates: the cells to paint over sit at columns derived from
+      # offsets, and `value` has already rewritten the string those offsets would index.
+      #
+      # Deliberately NOT the same set of matches as `value`, and the difference is worth
+      # stating plainly. `value` applies its rules in sequence, each over the output of the
+      # last, so a rule can only match what the previous rules left behind. This runs every
+      # rule over the ORIGINAL text and merges the results, which makes it a SUPERSET: two
+      # rules that would each have claimed the same secret both report it here, and the merge
+      # folds them into one span. So a span COUNT can differ from a `Result#hits` count by
+      # one on an overlap, and the masked region is the union. For "paint over everything a
+      # profile would have hidden" that is the right direction to err in.
+      #
+      # `values_only` skips the derived `name: value` rules, matching `apply_text_rules`.
+      def spans(text : String, *, values_only : Bool = false) : Array(Span)
+        # PCRE2 RAISES on the first illegal byte rather than declining to match, so a frame
+        # holding undecodable bytes is reported as "nothing found" instead of crashing the
+        # screenshot. Same gate, same reason, as `body` and `apply_text_rules`.
+        return [] of Span unless text.valid_encoding?
+        found = [] of Span
+        rules = values_only ? @patterns : (@text_rules + @patterns)
+        rules.each do |(rx, rule)|
+          each_match(text, rx) do |start, stop, _|
+            next if stop <= start
+            found << Span.new(start...stop, tag_for(text[start...stop]), rule)
+          end
+        end
+        merge(found)
+      end
+
+      # See `Span#placeholder`: no salt is a configuration fault, and reporting it from here
+      # would cost the caller the RANGE as well as the tag.
+      private def tag_for(value : String) : String
+        Redact.placeholder(value)
+      rescue SaltMissing
+        ""
+      end
+
+      # Overlapping spans folded into one. The placeholder and rule kept are the FIRST span's
+      # — the leftmost match, and the rule `value` would have applied first.
+      #
+      # OVERLAPPING, not merely adjacent: two secrets that happen to sit side by side are two
+      # findings and are counted as two. They still cover a contiguous region either way.
+      private def merge(found : Array(Span)) : Array(Span)
+        return found if found.size < 2
+        found.sort_by! { |s| {s.range.begin, s.range.end} }
+        merged = [found[0]]
+        found.skip(1).each do |span|
+          last = merged[-1]
+          if span.range.begin < last.range.end
+            next if span.range.end <= last.range.end
+            merged[-1] = Span.new(last.range.begin...span.range.end, last.placeholder, last.rule)
+          else
+            merged << span
+          end
+        end
+        merged
       end
 
       # The profile's field/key names, re-expressed as text rules for the fallback pass. One
