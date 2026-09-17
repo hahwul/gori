@@ -409,12 +409,13 @@ module Gori
       touched = false
       migrated = slots.map do |slot|
         headers = slot.set_headers.map do |(name, value)|
-          after = text(plan, value, Kind::Slot)
+          after = slot.literal_header?(name) ? nil : text(plan, value, Kind::Slot)
           next {name, value} unless after
           touched = true
           {name, after}
         end
-        SessionSlot.new(slot.name, headers, slot.remove_headers, slot.baseline?, slot.rules)
+        SessionSlot.new(slot.name, headers, slot.remove_headers, slot.baseline?, slot.rules,
+          slot.literal_headers)
       end
       return unless touched
       plan.writes << Write.new("UPDATE settings SET value = ? WHERE key = ?",

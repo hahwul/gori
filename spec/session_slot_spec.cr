@@ -194,6 +194,43 @@ describe Gori::SessionSlot do
       slot = Slot.new("anon", remove_headers: ["Cookie"])
       slot.resolve_values { |_| "X" }.set_headers.should be_empty
     end
+
+    it "keeps captured token-looking values literal while expanding manual values" do
+      slot = Slot.new("captured",
+        set_headers: [{"Authorization", "Bearer $BIND.TOKEN"}, {"X-Manual", "$BIND.TOKEN"}],
+        literal_headers: ["authorization"])
+      resolved = slot.resolve_values(&.gsub("$BIND.TOKEN", "EXPANDED"))
+      resolved.set_headers.should eq([
+        {"Authorization", "Bearer $BIND.TOKEN"},
+        {"X-Manual", "EXPANDED"},
+      ])
+      resolved.literal_headers.should eq(["authorization"])
+    end
+  end
+
+  describe "captured-value provenance persistence" do
+    it "round-trips the literal marker and omits it for ordinary slots" do
+      captured = Slot.new("captured", set_headers: [{"Cookie", "$GEN.UUID"}], literal_headers: ["COOKIE"])
+      ordinary = Slot.new("ordinary", set_headers: [{"Cookie", "$GEN.UUID"}])
+      json = Slot.serialize([captured, ordinary])
+      json.should contain("literal")
+      back = Slot.parse_json(json)
+      back[0].literal_headers.should eq(["COOKIE"])
+      back[1].literal_headers.should be_empty
+      Slot.serialize([ordinary]).should_not contain("literal")
+    end
+
+    it "reads old blobs with an empty literal marker" do
+      old = %([{"name":"admin","baseline":false,"set":[{"name":"Cookie","value":"$BIND.TOKEN"}],"remove":[]}])
+      Slot.parse_json(old).first.literal_headers.should be_empty
+    end
+
+    it "preserves the marker through baseline and rule clones" do
+      slot = Slot.new("captured", set_headers: [{"Cookie", "$BIND.TOKEN"}],
+        literal_headers: ["cookie"])
+      slot.with_baseline(true).literal_headers.should eq(["cookie"])
+      slot.with_rules(["TOKEN"]).literal_headers.should eq(["cookie"])
+    end
   end
 
   it "reports as-captured as passthrough and summarizes header NAMES only" do

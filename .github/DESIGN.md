@@ -2734,3 +2734,54 @@ evidence` is `s` on the body and `o` in the menu, and both swaps are `w` on the 
 the menu. What a menu letter must never do is name a key the tab answers differently: that is
 why the sub-tab strip's letters and its menu's letters were unified (#1055), and why
 `sitemap.tag` gave `T` up to `sitemap.mark-all`.
+
+### 2026-09-17: a slot header copied off the wire is a snapshot, and stays byte-literal
+
+Refines: [P4](#p4), [P7](#p7). Extends the 2026-08-17 *Authorize identities are session slots*
+entry. Issue #1086.
+
+A slot could only be built from a login RESPONSE. When the login response set no cookie and
+carried no `Authorization`, and the credential was sitting in the authenticated REQUESTS
+captured right after it, there was no sanctioned path at all: the operator read the value with
+their own eyes and pasted it into an env var. That is the one move an agent client cannot make
+— reading a credential into the model's context is exactly what gori's `[REDACTED]` defaults
+exist to avoid — so the copy has to happen server-side, from flow to slot, with the value never
+crossing a surface.
+
+**The caller names the headers; gori detects nothing.** `create_session_slot{from_request_flow_id,
+copy_headers}` and `gori run session from-request <id> --copy-header NAME` copy exactly the
+named request headers, last wire field per name, and refuse atomically on a missing name. A
+`Cookie:` jar comes across whole or not at all. The alternative — guessing which of
+`X-API-Key`, a CSRF pair or a bespoke signature triplet is the credential, and which crumb of a
+browser cookie jar is the session — is a heuristic that both over- and under-reaches, and the
+operator already knows the answer.
+
+**Three headers are refused by name** (`SessionFromFlow::REFRAMING_HEADERS`): `Content-Length`,
+`Transfer-Encoding`, `Host`. A slot is applied to a DIFFERENT message than the one it was
+copied from, and the 2026-08-17 entry's first line — the overlay is header-only, so
+Content-Length never moves and the body is byte-exact — is exactly what an upserted copy of one
+would break. None of the three is a credential, so the refusal costs the feature nothing. It is
+a refusal rather than a silent drop: a caller that named one asked for it.
+
+**A captured value is not re-read as syntax.** That is the clause this entry narrows. The
+2026-08-17 entry says a `$NAME` inside a slot's own header value resolves against that slot's
+table; that holds for the overlay an OPERATOR wrote, and must not hold for bytes gori lifted
+off the wire. A session cookie that happens to contain `$BIND.SESSION` is a cookie, not a
+reference, and expanding it would send a value the origin never minted — the provenance axis
+again (P7: the axis is where the bytes came from, not what they look like). So a slot carries
+`literal_headers`, the names whose values came from a flow, and `resolve_values`,
+`Env.slot_literals`, and the env-syntax migration all skip them. Both flow-built paths mark
+their headers, `from-flow` included: it was always a snapshot of response bytes and the
+difference only became visible once a marker existed to state it.
+
+The marker is keyed by header NAME because `overlay_head` upserts by name — for a name typed
+twice only the LAST row reaches the wire. The identity form reconstructs the marker from the
+displayed text on every save (`AuthorizeIdentityOverlay#surviving_literals`) and keeps it only
+while that last row is still the captured bytes: editing it, or adding a hand-written row under
+the same name, makes the name manual again. Anything looser sends a hand-written `$BIND.TOKEN`
+as its own spelling, which is a 401 whose cause is invisible.
+
+What this deliberately does not do: scope the slot to the flow's host. A slot applies to every
+send that names it with `--slot`, host-scoping would be a second scope language beside §3, and
+the honest answer for now is that one slot is one identity — said in the CLI banner, the MCP
+tool description and the reference docs rather than enforced.

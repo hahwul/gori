@@ -78,6 +78,46 @@ describe AuthorizeIdentityOverlay do
     id.baseline?.should be_false
   end
 
+  it "preserves a captured marker only when the header name and value stay unchanged" do
+    original = Identity.new("captured", set_headers: [{"Cookie", "session=$BIND.TOKEN"}],
+      literal_headers: ["cookie"])
+    unchanged = AuthorizeIdentityOverlay.new(original, 0).build_identity.not_nil!
+    unchanged.literal_headers.should eq(["Cookie"])
+
+    edited = AuthorizeIdentityOverlay.new(original, 0)
+    edited.set_selected(AuthorizeIdentityOverlay::EDITOR_ROW)
+    otype(edited, "changed-")
+    edited.build_identity.not_nil!.literal_headers.should be_empty
+  end
+
+  # `literal_header?` is keyed by NAME and `overlay_head` upserts, so a second row under the
+  # same name is the one that reaches the wire. Marking the name captured because an earlier
+  # row is unchanged would send the new row's `$BIND.TOKEN` spelling instead of its value.
+  it "drops the captured marker when a later row under the same name is hand-written" do
+    original = Identity.new("captured", set_headers: [{"Cookie", "session=abc"}],
+      literal_headers: ["cookie"])
+    ov = AuthorizeIdentityOverlay.new(original, 0)
+    ov.set_selected(AuthorizeIdentityOverlay::EDITOR_ROW)
+    ov.handle_key(okey(Termisu::Input::Key::End))
+    ov.handle_key(okey(Termisu::Input::Key::Enter))
+    otype(ov, "Cookie: session=$BIND.TOKEN")
+    built = ov.build_identity.not_nil!
+    built.set_headers.should eq([{"Cookie", "session=abc"}, {"Cookie", "session=$BIND.TOKEN"}])
+    built.literal_headers.should be_empty
+  end
+
+  # The mirror image: the captured row typed back in LAST still reaches the wire as captured
+  # bytes, so the marker survives.
+  it "keeps the marker when the captured row is the last one under its name" do
+    original = Identity.new("captured", set_headers: [{"Cookie", "session=abc"}],
+      literal_headers: ["cookie"])
+    ov = AuthorizeIdentityOverlay.new(original, 0)
+    ov.set_selected(AuthorizeIdentityOverlay::EDITOR_ROW)
+    otype(ov, "Cookie: session=$BIND.TOKEN")
+    ov.handle_key(okey(Termisu::Input::Key::Enter))
+    ov.build_identity.not_nil!.literal_headers.should eq(["Cookie"])
+  end
+
   it "keeps the baseline flag it was opened with (the form never moves it)" do
     ov = AuthorizeIdentityOverlay.new(Identity.as_captured("base"), 0)
     ov.build_identity.not_nil!.baseline?.should be_true

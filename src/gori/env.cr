@@ -729,28 +729,40 @@ module Gori
       # The gate asks the BARE question in both grammars — "is there a sigil" — because a bare
       # `$SESSION` is exactly what the namespaced `$NS.` fast path would reject before anything
       # looked at it. It is still a memchr; the scan below is what the gate protects.
-      return literal unless slot.set_headers.any? do |(_, v)|
-                              may_contain_tokens?(v, Owns::Bind, prefix, Syntax::Bare)
-                            end
+      return literal unless slot_has_bind_tokens?(slot, prefix)
       vals = binding_values_as(slot.name)
       declared = declared_bindings
       seen = Set(String).new
-      slot.set_headers.each do |(_, value)|
-        # BARE names in the BIND namespace: they are matched against `vals` and `declared`, both
-        # keyed by bare name, and an `$ENV.X` in a slot header is the env layer's business.
-        token_names(value, prefix, Namespace::Bind).each do |name|
-          next if vals.has_key?(name)
-          next unless declared.includes?(name) || slot.claims?(name)
-          literal << SlotLiteral.new(name, false) if seen.add?(name)
-        end
-        next if syntax.bare?
-        each_token(value.to_slice, prefix, Syntax::Bare) do |found|
-          name = found.name
-          next unless declared.includes?(name) || slot.claims?(name)
-          literal << SlotLiteral.new(name, true) if seen.add?(name)
-        end
+      slot.set_headers.each do |(header_name, value)|
+        next if slot.literal_header?(header_name)
+        collect_slot_literals(literal, seen, slot, value, prefix, syntax, vals, declared)
       end
       literal
+    end
+
+    private def self.slot_has_bind_tokens?(slot : SessionSlot, prefix : String) : Bool
+      slot.set_headers.any? do |(name, value)|
+        !slot.literal_header?(name) && may_contain_tokens?(value, Owns::Bind, prefix, Syntax::Bare)
+      end
+    end
+
+    private def self.collect_slot_literals(literal : Array(SlotLiteral), seen : Set(String),
+                                           slot : SessionSlot, value : String, prefix : String,
+                                           syntax : Syntax, vals : Hash(String, String),
+                                           declared : Array(String)) : Nil
+      # BARE names in the BIND namespace: they are matched against `vals` and `declared`, both
+      # keyed by bare name, and an `$ENV.X` in a slot header is the env layer's business.
+      token_names(value, prefix, Namespace::Bind).each do |name|
+        next if vals.has_key?(name)
+        next unless declared.includes?(name) || slot.claims?(name)
+        literal << SlotLiteral.new(name, false) if seen.add?(name)
+      end
+      return if syntax.bare?
+      each_token(value.to_slice, prefix, Syntax::Bare) do |found|
+        name = found.name
+        next unless declared.includes?(name) || slot.claims?(name)
+        literal << SlotLiteral.new(name, true) if seen.add?(name)
+      end
     end
 
     # Names an overlay shipped literally, since the last `take_unbound_overlay`. A surface
