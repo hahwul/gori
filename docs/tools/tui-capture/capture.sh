@@ -306,7 +306,10 @@ _shoot() {
     render=(--title "$title")
     if [ -n "${SHOT_ARIA:-}" ]; then render+=(--aria "$SHOT_ARIA"); fi
   fi
-  "$GORI" run screenshot --from-ansi "$WORK/$name.ansi" -o "$OUT/$name.svg" \
+  # --force because re-shooting IS the workflow: the 52 SVGs under $OUT are tracked, and
+  # every one of them already exists. The python this replaced overwrote silently, and
+  # without the flag `gori run screenshot` refuses the path and `set -e` ends the run.
+  "$GORI" run screenshot --from-ansi "$WORK/$name.ansi" -o "$OUT/$name.svg" --force \
     --format svg --font-size 15 "${render[@]}"
 }
 
