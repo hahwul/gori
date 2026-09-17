@@ -88,7 +88,7 @@ module Gori
         "view.refresh", "Refresh screen", "Force a full repaint — recover from terminal corruption / stray glyphs",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.refresh_screen; nil }
 
-      # Screenshots of the live screen (#1086). NO chord on either, for two reasons that point
+      # Screenshots of the live screen. NO chord on either, for two reasons that point
       # the same way. The Global bare-letter budget is closed — L2 is `c`/`i`/`s` and nothing
       # else (see the key-budget note at the top of this file) — and a screenshot is a
       # deliberate act, not a reflex: a picture of a live engagement lands on disk carrying

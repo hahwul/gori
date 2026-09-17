@@ -1,7 +1,7 @@
 require "../../screenshot"
 require "../../redact/policy"
 
-# The screenshot verbs (#1086) — reopens Gori::Tui::Runner (see tui/runner.cr for the event
+# The screenshot verbs — reopens Gori::Tui::Runner (see tui/runner.cr for the event
 # loop, Host facade, overlays, and rendering).
 #
 # Two intents over one capture. `screenshot_capture` writes where settings:screenshot says;

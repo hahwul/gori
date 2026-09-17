@@ -2737,7 +2737,7 @@ why the sub-tab strip's letters and its menu's letters were unified (#1055), and
 
 ### 2026-09-18: a screenshot is one Frame over the backend's own grid, not a shim process
 
-Refines: [P0](#p0), [P1](#p1), [P5](#p5), [P7](#p7), [§5](#s5). Issue #1086.
+Refines: [P0](#p0), [P1](#p1), [P5](#p5), [P7](#p7), [§5](#s5).
 
 One `Screenshot::Frame` plus four serializers (SVG, PNG, ANSI, txt) sit directly over the
 backend's own front-buffer cell grid — the same grid `Screen`/`Backend#snapshot` already keep
