@@ -53,7 +53,9 @@ module Gori
           Usage: gori run project [<subcommand>] [options]
 
           Subcommands:
-            list               List projects holding captured traffic (default when no subcommand)
+            list               List projects holding captured traffic (default when no subcommand);
+                               --query=TEXT narrows to the ones whose name, slug, short id
+                               or bound workspace path contains TEXT
             create <name>      Create (or reopen) a project by name
             delete|rm <name>   Delete a project and everything captured in it
             scope              Manage scope rules (list, add, update, delete, enable/disable)
@@ -64,6 +66,7 @@ module Gori
           Examples:
             gori run project --format json
             gori run project list --all
+            gori run project list --query=acme
             gori run project create "API test" --description="staging sweep"
             gori run project delete api-test --yes
             gori run project scope add --kind=include --type=host --pattern=api.example.com
@@ -75,14 +78,18 @@ module Gori
           HELP
       end
 
-      # One row of `gori run project list`: the project, what the census found in it, and
-      # the two "this is the one your commands are using" facts that pin it into the
-      # default listing however empty it is.
+      # One row of `gori run project list`: the project (with the sidecars the row prints
+      # already read), what the census found in it, and the two "this is the one your
+      # commands are using" facts that pin it into the default listing however empty it is.
       record ProjectListRow,
-        project : Project,
+        entry : ProjectRegistry::Entry,
         flows : Int64?,
         current : Bool,
         tui_active : Bool do
+        def project : Project
+          entry.project
+        end
+
         # Nothing was ever captured here. `flows == nil` is the census failing to read the
         # db, which is emphatically NOT the same answer — see `Store.captured_flows`.
         def empty? : Bool
@@ -106,15 +113,21 @@ module Gori
       # created a second ago is the same 4 kB as a leftover from March and the operator
       # very much wants to see the one they just made.
       #
+      # `default_db` is passed IN rather than taken as the head of `counted`, because
+      # `--query` narrows what reaches here: the project a `--project`-less `gori run` reads
+      # is the head of the WHOLE registry, and deriving it from a filtered list would move
+      # the `◆` marker onto whatever the filter happened to leave first — the listing's one
+      # answer to "which project am I on?", quietly pointing at the wrong project.
+      #
       # Pure and separately testable: the census and `$GORI_HOME` are the caller's problem.
-      private def self.project_list_rows(counted : Array({Project, Int64?}), active_db : String?,
+      private def self.project_list_rows(counted : Array({ProjectRegistry::Entry, Int64?}),
+                                         default_db : String?, active_db : String?,
                                          all : Bool) : Array(ProjectListRow)
-        default = ProjectRegistry.default_of(counted.map { |project, _| project })
         wanted = active_db.try { |path| Paths.canonical_file(path) }
-        rows = counted.map do |project, flows|
-          ProjectListRow.new(project, flows,
-            current: !default.nil? && project.db_path == default.db_path,
-            tui_active: !wanted.nil? && Paths.canonical_file(project.db_path) == wanted)
+        rows = counted.map do |entry, flows|
+          ProjectListRow.new(entry, flows,
+            current: !default_db.nil? && entry.project.db_path == default_db,
+            tui_active: !wanted.nil? && Paths.canonical_file(entry.project.db_path) == wanted)
         end
         all ? rows : rows.select { |row| row.pinned? || !row.empty? }
       end
@@ -122,10 +135,13 @@ module Gori
       private def self.cmd_project_list(args : Array(String)) : Nil
         format = :text
         all = false
+        query = nil.as(String?)
         leftover = [] of String
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project [list] [options]"
           p.on("--all", "Include projects with nothing captured in them (hidden by default)") { all = true }
+          p.on("--query=TEXT", "Keep only projects whose name, dir slug, short id or bound " \
+                               "workspace path contains TEXT (case-insensitive)") { |v| query = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
@@ -137,10 +153,19 @@ module Gori
           "list, create, delete/rm, scope, sandbox, env, host-override")
 
         registry = ProjectRegistry.new(Paths.projects_dir)
-        projects = registry.list
-        counted = projects.map { |project| {project, Store.captured_flows(project.db_path)} }
-        rows = project_list_rows(counted, Paths.read_active_project, all)
-        hidden = projects.size - rows.size
+        entries = registry.entries
+        # BEFORE the census, and that ordering is the point: `Store.captured_flows` opens
+        # every project's database, while everything `--query` reads is a sidecar file
+        # beside it. On a host with a project per worktree, `--query=acme` is now one
+        # database open instead of hundreds.
+        needle = ProjectRegistry.needle(query)
+        matched = needle ? entries.select(&.matches?(needle)) : entries
+        counted = matched.map { |entry| {entry, Store.captured_flows(entry.project.db_path)} }
+        # The default is the head of the WHOLE registry, read before `--query` narrowed
+        # anything — see `project_list_rows`.
+        default_db = ProjectRegistry.default_of(entries.map(&.project)).try(&.db_path)
+        rows = project_list_rows(counted, default_db, Paths.read_active_project, all)
+        hidden = matched.size - rows.size
         if format == :json
           puts(JSON.build do |j|
             j.array do
@@ -148,10 +173,13 @@ module Gori
                 pr = row.project
                 j.object do
                   j.field "name", pr.name
-                  j.field "id", registry.id_of(pr)
-                  j.field "slug", registry.slug_of(pr)
+                  j.field "id", row.entry.id
+                  j.field "slug", row.entry.slug
                   j.field "db_path", pr.db_path
                   j.field "db_size", pr.db_size
+                  # The fourth thing `--query` matches on, so a consumer filtering the same
+                  # way has the field to do it with rather than a match it cannot explain.
+                  j.field "workspace", row.entry.workspace
                   j.field "last_modified", pr.last_modified.try(&.to_unix)
                   j.field "time", pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%dT%H:%M:%S%:z") }
                   j.field "flows", row.flows
@@ -161,24 +189,58 @@ module Gori
               end
             end
           end)
-        elsif projects.empty?
+        elsif entries.empty?
           STDERR.puts "no projects yet — capture some traffic (gori run capture / the TUI) first"
         else
           rows.each do |row|
             pr = row.project
             ts = pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%d %H:%M") } || "—"
-            id = registry.id_of(pr) || "—"
+            id = row.entry.id || "—"
             flows = row.flows.try(&.to_s) || "?"
             puts "#{project_row_marker(row)} #{CLI::Output.pad(pr.name, 24)}  #{id.ljust(8)}  #{ts}  " \
                  "#{CLI::Output.human_size(pr.db_size).rjust(8)}  #{flows.rjust(6)} flows"
           end
         end
         # On STDERR in BOTH formats, so a `--format json` consumer's pipe stays a clean
-        # array while the operator still learns their project is merely hidden rather than
-        # gone — the one reading of a shortened list that would send them to `create`.
-        return if hidden < 1
-        STDERR.puts "gori run project list: #{hidden} empty project#{hidden == 1 ? "" : "s"} hidden " \
-                    "(nothing captured) — pass --all to list every project"
+        # array while the operator still learns why the list is short — the readings that
+        # would otherwise send them to `create` for a project they already have.
+        # `needle && query`, not `query`: a blank `--query=` narrowed nothing, so the notes
+        # must not talk about a filter — while the sentences they DO print quote the
+        # operator's own spelling, which only the raw string still has.
+        project_list_notes(needle && query, entries, matched, rows, hidden, default_db).each do |line|
+          STDERR.puts "gori run project list: #{line}"
+        end
+      end
+
+      # What a shortened listing owes the operator, in the order it is worth saying. Three
+      # absences, each of which reads as a finding about the host if left unsaid: a `--query`
+      # that matched nothing is not "you have no projects", the empty-hiding lens still needs
+      # its `--all` way out, and `--query` — unlike that lens, which PINS the row — can filter
+      # out the very project the operator's other commands read, taking the `◆` marker that is
+      # this listing's whole answer to "which project am I on?" with it.
+      #
+      # `query` is the operator's spelling of a narrowing that ACTUALLY narrowed, or nil.
+      private def self.project_list_notes(query : String?, entries : Array(ProjectRegistry::Entry),
+                                          matched : Array(ProjectRegistry::Entry),
+                                          rows : Array(ProjectListRow), hidden : Int32,
+                                          default_db : String?) : Array(String)
+        notes = [] of String
+        return notes if entries.empty?
+        if query && matched.empty?
+          notes << "no project matched --query=#{query} — #{entries.size} " \
+                   "project#{entries.size == 1 ? "" : "s"} on this host; --query is a " \
+                   "case-insensitive substring of the name, dir slug, short id or workspace path"
+        elsif hidden >= 1
+          notes << "#{hidden} empty project#{hidden == 1 ? "" : "s"} hidden " \
+                   "(nothing captured) — pass --all to list every project"
+        end
+        # Only when something DID match: after "no project matched", naming the default as
+        # another thing the query excluded is the same sentence twice.
+        if query && !matched.empty? && !rows.any?(&.current) &&
+           (default = entries.find { |e| e.project.db_path == default_db })
+          notes << "the project a --project-less run reads (#{default.slug}) does not match --query=#{query}"
+        end
+        notes
       end
 
       # The leading glyph naming why a row is pinned. `◆` is the project a `gori run` with

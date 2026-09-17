@@ -37,6 +37,40 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  # `entries` + `Entry#matches?` are the ONE narrowing `gori run project list --query` and
+  # MCP `list_projects{query}` share (#1085). Looser than `#find` on purpose: the operator
+  # reaching for a listing filter is the one who does not have the exact handle yet.
+  it "matches a query as a substring of the name, slug, short id or bound workspace" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      reg.create("ACME Red Team!")
+      bound = reg.create_for_workspace("Checkout", "/src/shop/checkout-api")
+      Gori::Store.open(bound.db_path).close # the sidecars exist; `list` wants the db too
+
+      entries = reg.entries
+      entries.size.should eq(2)
+      acme = entries.find { |e| e.slug == "acme-red-team" }.not_nil!
+      checkout = entries.find { |e| e.slug == "checkout" }.not_nil!
+
+      acme.matches?("acme").should be_true     # display name, case-folded
+      acme.matches?("red-team").should be_true # directory slug
+      acme.matches?(acme.id.not_nil!).should be_true
+      acme.matches?(acme.id.not_nil![0, 4]).should be_true
+      acme.matches?("nope").should be_false
+
+      checkout.workspace.should eq("/src/shop/checkout-api")
+      checkout.matches?("shop/checkout").should be_true # the workspace a headless bind wrote
+      acme.matches?("shop/checkout").should be_false
+
+      # An empty needle narrows nothing rather than matching nothing — `needle` folds a
+      # blank argument away first, so no caller has to decide that twice.
+      acme.matches?("").should be_true
+      Gori::ProjectRegistry.needle(nil).should be_nil
+      Gori::ProjectRegistry.needle("   ").should be_nil
+      Gori::ProjectRegistry.needle("  AcMe ").should eq("acme")
+    end
+  end
+
   it "finds a project by display name or directory slug" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)

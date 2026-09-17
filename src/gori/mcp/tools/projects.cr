@@ -42,26 +42,13 @@ module Gori
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX)
         query = str(h, "query").try(&.strip).presence
-        needle = query.try(&.downcase)
+        needle = ProjectRegistry.needle(query)
 
-        reg = registry
-        # Each sidecar read ONCE and carried to both the match and the row it feeds: `id_of`
-        # and `workspace_of` each open a file, so asking twice on a host with hundreds of
-        # projects doubles the syscalls for no second answer. Same shape, for the same reason,
-        # as `ProjectRegistry#find`.
-        entries = reg.list.map { |p| {p, reg.id_of(p), reg.slug_of(p), reg.workspace_of(p)} }
-        # Substring, over every spelling `switch_project` accepts plus the workspace path a
-        # headless bind uses — the point of the argument is to FIND the project whose exact
-        # handle the caller does not have yet, so `find`'s exact/unique-prefix rules would
-        # answer nothing for the half-remembered name that sent them here.
-        matched = if n = needle
-                    entries.select do |project, id, slug, workspace|
-                      project.name.downcase.includes?(n) || slug.downcase.includes?(n) ||
-                        id.try(&.downcase.includes?(n)) || workspace.try(&.downcase.includes?(n))
-                    end
-                  else
-                    entries
-                  end
+        # `entries` reads each project's sidecars ONCE and carries them to both the match and
+        # the row they feed; `Entry#matches?` is the same predicate `gori run project list
+        # --query` narrows with, so the two surfaces cannot disagree about what "acme" means.
+        entries = registry.entries
+        matched = needle ? entries.select(&.matches?(needle)) : entries
         page = offset < matched.size ? matched[offset, Math.min(limit, matched.size - offset)] : matched[0, 0]
         current = @db_path
         Result.new(JSON.build do |j|
@@ -94,15 +81,16 @@ module Gori
             end
             j.field("projects") do
               j.array do
-                page.each do |p, id, slug, workspace|
+                page.each do |e|
+                  p = e.project
                   j.object do
                     j.field "name", p.name
-                    j.field "id", id
-                    j.field "slug", slug
+                    j.field "id", e.id
+                    j.field "slug", e.slug
                     j.field "db_path", p.db_path
                     j.field "db_size", p.db_size
                     j.field "current", !current.nil? && p.db_path == current
-                    j.field "workspace", workspace
+                    j.field "workspace", e.workspace
                     if lm = p.last_modified
                       j.field "last_modified", lm.to_unix
                       j.field "last_modified_iso", lm.to_rfc3339

@@ -1181,14 +1181,18 @@ gori run views rm 'acme 5xx' --scope global
 gori run project --format json
 gori run project list
 gori run project list --all
+gori run project list --query=acme
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--all` | 캡처된 것이 없는 프로젝트까지 모두 출력 |
+| `--query=TEXT` | 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로에 TEXT를 포함하는 프로젝트만 남김(대소문자 무시) |
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
 `list`는 **비어 있는** 프로젝트(캡처된 flow가 0개)를 숨깁니다. 워크트리나 체크아웃마다 프로젝트를 만들다 보면 수백 개가 쌓여, 정작 트래픽이 든 두세 개가 묻히기 때문입니다. 비어 있는지는 파일 크기가 아니라 행 수로 셉니다. 방금 만든 프로젝트도 3월에 남은 찌꺼기와 크기가 같습니다. 다음 두 개는 아무리 비어 있어도 항상 표시하고 표시자를 붙입니다. `◆`는 `--project` 없이 실행한 `gori run`이 읽는 프로젝트, `◇`는 TUI가 마지막으로 연 프로젝트입니다. `--format json`에서는 각각 `current`, `tui_active` 필드이고 `flows` 개수가 함께 나옵니다. 몇 개를 숨겼는지는 stderr로 나가므로 JSON 파이프는 깨끗한 배열로 남습니다.
+
+`--query`는 그 나머지 절반입니다. 프로젝트를 가리키는 모든 철자에 대한 **부분 문자열**이라, 이름이 가물가물해도 찾을 수 있습니다. 정확한 이름·슬러그·짧은 id를 요구하는 `--project`보다 느슨합니다. 나열된 프로젝트의 데이터베이스를 전부 여는 flow 센서스 **앞에** 적용되므로, 수백 개를 가진 호스트에서는 빠른 경로이기도 합니다. `--all`과는 직교하며, 표시가 아니라 행 공급원을 좁히므로 제외한 것을 stderr로 밝힙니다. 매치가 0건이면 이 호스트에 실제로 몇 개가 있는지를 알려 주고, `◆` 프로젝트가 걸러졌다면 그 사실을 이름과 함께 말합니다. 빈 프로젝트 숨김 기본값과 달리 `--query`는 그 행을 고정해 두지 않기 때문입니다. `--format json`은 바인딩된 `workspace`도 함께 실으므로, 소비자도 쿼리와 같은 사실로 걸러낼 수 있습니다. 같은 좁히기를 MCP `list_projects{query}`가 같은 술어로 제공합니다.
 
 #### project create {#project-create}
 

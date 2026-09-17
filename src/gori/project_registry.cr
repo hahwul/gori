@@ -105,6 +105,39 @@ module Gori
       projects.first?
     end
 
+    # A project together with the sidecar facts a LISTING both filters on and prints: its
+    # short id, its directory slug, and the workspace it is bound to. Each of those is a
+    # separate small file read, so a surface that filters AND prints them must read them
+    # once rather than twice per project — on a host holding a project per worktree that is
+    # hundreds of syscalls either way.
+    record Entry, project : Project, id : String?, slug : String, workspace : String? do
+      # Whether an operator's free-text narrowing keeps this project. A case-insensitive
+      # SUBSTRING over every spelling that ADDRESSES a project, plus the workspace path a
+      # headless bind uses. Deliberately looser than `#find`, whose exact/unique-prefix
+      # rules answer nothing for the half-remembered name that sends someone to a listing
+      # in the first place — and ONE predicate, because `gori run project list --query` and
+      # MCP `list_projects{query}` offering the same narrowing must not disagree about what
+      # "acme" matches.
+      def matches?(needle : String) : Bool
+        return true if needle.empty?
+        project.name.downcase.includes?(needle) || slug.downcase.includes?(needle) ||
+          !!id.try(&.downcase.includes?(needle)) || !!workspace.try(&.downcase.includes?(needle))
+      end
+    end
+
+    # `list`, with each project's sidecars read once. Same most-recently-active-first order.
+    def entries : Array(Entry)
+      list.map { |project| Entry.new(project, id_of(project), slug_of(project), workspace_of(project)) }
+    end
+
+    # The needle `Entry#matches?` takes: a caller's raw query folded once, or nil when it
+    # narrows nothing (absent, blank). Spelled here so the two listings that offer the
+    # narrowing cannot fold it differently — a query that is trimmed on one surface and not
+    # the other is the same drift as two predicates.
+    def self.needle(query : String?) : String?
+      query.try(&.strip.presence).try(&.downcase)
+    end
+
     # Existing named projects, most-recently-active first.
     def list : Array(Project)
       return [] of Project unless Dir.exists?(@root)
