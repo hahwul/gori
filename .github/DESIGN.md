@@ -2734,3 +2734,57 @@ evidence` is `s` on the body and `o` in the menu, and both swaps are `w` on the 
 the menu. What a menu letter must never do is name a key the tab answers differently: that is
 why the sub-tab strip's letters and its menu's letters were unified (#1055), and why
 `sitemap.tag` gave `T` up to `sitemap.mark-all`.
+
+### 2026-09-18: a screenshot is one Frame over the backend's own grid, not a shim process
+
+Refines: [P0](#p0), [P1](#p1), [P5](#p5), [P7](#p7), [§5](#s5). Issue #1086.
+
+One `Screenshot::Frame` plus four serializers (SVG, PNG, ANSI, txt) sit directly over the
+backend's own front-buffer cell grid — the same grid `Screen`/`Backend#snapshot` already keep
+on every flush ([§5](#s5)) — rather than driving a second process. tmux/PTY capture was the
+alternative on the table, and every reason against it points the same way: a shim binary to
+ship and version-skew against, a second process to spawn and reap, and lock contention with
+whatever terminal is actually driving the session being photographed. `Tui::Headless.render`
+boots the identical Runner every other surface boots and asks it for its frame (P1); `gori run
+screenshot` and the MCP `screenshot` tool both reach for that one seam, so a shot in a bug
+report is never a mock that drifts from what ships.
+
+Redaction (`Screenshot::Mask`) is cell masking painted over the drawn frame, not a second guess
+at "does this look like a secret". Two things about gori's shape make that the only place a
+screenshot COULD apply a profile: a view never renders an already-redacted value — the store
+holds the raw bytes (P7), and redaction happens on the way OUT, in the surface handing bytes to
+somebody else — so there is nothing upstream for a screenshot to inherit; and a profile's rules
+are BODY rules, so over a rendered screen they behave exactly as the text fallback does
+everywhere else in gori, the same reasoning the `Space → Y` copy menu already uses. `Mask.apply`
+runs a second pass over `Frame#continuations` for exactly the reason a plain per-row scan would
+miss half a secret soft-wrapped across two rows.
+
+PNG needed a font, and the choice was an embedded bitmap subset over shelling out to a system
+rasterizer: no external process, no dependency on what happens to be installed, and a
+deterministic byte-identical PNG for the same frame. A subset of GNU Unifont 18.0.01, with full
+Hangul syllable coverage, is baked into the binary — measured before it was committed against a
+budget agreed up front (≤400 KB binary, ≤3 s release build): +197 KiB and +1.45 s
+(`src/gori/screenshot/font/README.md`). CJK ideographs and emoji are excluded by that same
+budget, and the policy for a codepoint outside the subset is **tofu** (a hollow box), never a
+silent blank — a screenshot must not claim to show a character the terminal actually drew and
+drop it instead. The escape hatch is an external `.hex` file (`$GORI_SCREENSHOT_FONT`,
+`~/.gori/fonts/unifont.hex`, or the probed system package), merged over the built-in subset
+rather than replacing it.
+
+Headless sessions — `Tui::Headless.render`, so both `gori run screenshot` and the MCP tool —
+open with `Session.open(..., listen: false)`: no port, no capture lock, no scanner, no
+retention sweep, the active-project pointer untouched. Drawing a project must not take capture
+away from whichever process actually holds it, and a render that never entered the lock race
+must not report having lost one (`bind_error` stays nil rather than borrowing the
+lock-contention wording). The gap that shipped alongside it: `Session#close`'s two
+`abandon_pending!` calls were unconditional, so a view-only session — a second TUI instance, or
+now a headless render — finalized the LIVE capturer's in-flight rows as "proxy stopped before
+response" on its way out. Gating both calls on `capturing_lock_held?` is the same argument the
+open-time orphan sweep already makes (P5): a Pending row belongs to the lock holder, and only
+the lock holder is one.
+
+MCP `screenshot` is `gated: true` rather than an `agent_action`. It does the one thing every
+other read tool never does — puts a file on disk outside the project database — so it earns the
+write gate `--read-only` closes. It is not an agent action because nothing in the project state
+changes and nothing goes out on the wire; an event-feed row per screenshot would bury the
+mutations that feed exists to surface.
