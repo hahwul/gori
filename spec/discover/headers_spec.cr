@@ -17,6 +17,10 @@ describe Gori::Discover::Headers do
       H.parse_lines(["nope", ": value", "Bad Name: v", "X-Ok: y"]).should eq([{"X-Ok", "y"}])
     end
 
+    it "drops non-ASCII and separator-bearing field names" do
+      H.parse_lines(["X-Заголовок: v", "Bad/Name: v", "X-Ok: y"]).should eq([{"X-Ok", "y"}])
+    end
+
     it "drops a value carrying CR/LF (header-injection guard)" do
       H.parse_lines(["X-Inject: a\r\nEvil: y"]).should be_empty
     end

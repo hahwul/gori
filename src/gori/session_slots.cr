@@ -136,8 +136,11 @@ module Gori
                         w : Store::EnvWrite? = @store.env_write) : Array(SessionSlot)
       return list unless w
       list.map do |slot|
-        headers = slot.set_headers.map { |(n, v)| {n, w.call(v, EnvMigration::Kind::Slot)} }
-        SessionSlot.new(slot.name, headers, slot.remove_headers, slot.baseline?, slot.rules)
+        headers = slot.set_headers.map do |(name, value)|
+          slot.literal_header?(name) ? {name, value} : {name, w.call(value, EnvMigration::Kind::Slot)}
+        end
+        SessionSlot.new(slot.name, headers, slot.remove_headers, slot.baseline?, slot.rules,
+          slot.literal_headers)
       end
     end
 

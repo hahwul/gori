@@ -31,11 +31,125 @@ private def refusal(detail : Gori::Store::FlowDetail) : FromFlow::Refusal
   result.as(FromFlow::Refusal)
 end
 
+private def request_draft(detail : Gori::Store::FlowDetail,
+                          names : Array(String)) : FromFlow::Draft
+  result = FromFlow.draft_request(detail, names)
+  result.should be_a(FromFlow::Draft)
+  result.as(FromFlow::Draft)
+end
+
+private def request_refusal(detail : Gori::Store::FlowDetail,
+                            names : Array(String)) : FromFlow::Refusal
+  result = FromFlow.draft_request(detail, names)
+  result.should be_a(FromFlow::Refusal)
+  result.as(FromFlow::Refusal)
+end
+
 private def headers_of(detail : Gori::Store::FlowDetail) : Hash(String, String)
   draft(detail).set_headers.to_h
 end
 
 describe Gori::SessionFromFlow do
+  describe "request header selection" do
+    it "copies explicitly named Authorization, Cookie, and custom headers" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "GET /me HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer SECRET\r\n" \
+                 "Cookie: session=COOKIE\r\nX-CSRF-Token: CSRF\r\n\r\n")
+      selected = request_draft(detail, ["Authorization", "Cookie", "X-CSRF-Token"])
+      selected.set_headers.should eq([
+        {"Authorization", "Bearer SECRET"},
+        {"Cookie", "session=COOKIE"},
+        {"X-CSRF-Token", "CSRF"},
+      ])
+      selected.sources.should eq([
+        "Authorization ← the captured request header",
+        "Cookie ← the captured request header",
+        "X-CSRF-Token ← the captured request header",
+      ])
+    end
+
+    it "deduplicates names case-insensitively while preserving first requested order" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "GET /me HTTP/1.1\r\nHost: h.test\r\nCookie: c\r\nAuthorization: a\r\n" \
+                 "X-Trace: t\r\n\r\n")
+      selected = request_draft(detail, ["cookie", "AUTHORIZATION", "Cookie", "x-trace", "authorization"])
+      selected.set_headers.map(&.[0]).should eq(["Cookie", "Authorization", "X-Trace"])
+    end
+
+    it "takes the last wire value and keeps that field's original casing" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "GET /me HTTP/1.1\r\nHost: h.test\r\nX-Key: old\r\nx-key: new\r\n\r\n")
+      selected = request_draft(detail, ["X-KEY"])
+      selected.set_headers.should eq([{"x-key", "new"}])
+    end
+
+    it "refuses an empty selection" do
+      result = request_refusal(flow("HTTP/1.1 204 No Content\r\n\r\n"), [] of String)
+      result.code.should eq(FromFlow::EMPTY_HEADER_NAMES)
+      result.message.should contain("at least one")
+    end
+
+    it "refuses an empty or non-token header name" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: a\r\n\r\n")
+      request_refusal(detail, [""]).code.should eq(FromFlow::INVALID_HEADER_NAME)
+      request_refusal(detail, ["X-Bad:Name"]).code.should eq(FromFlow::INVALID_HEADER_NAME)
+      request_refusal(detail, ["X Bad"]).code.should eq(FromFlow::INVALID_HEADER_NAME)
+      request_refusal(detail, ["X-Заголовок"]).code.should eq(FromFlow::INVALID_HEADER_NAME)
+    end
+
+    it "refuses atomically when any requested header is absent" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: SECRET\r\n\r\n")
+      result = request_refusal(detail, ["Authorization", "Cookie"])
+      result.code.should eq(FromFlow::MISSING_HEADER)
+      result.message.should contain("Cookie")
+      result.message.should_not contain("SECRET")
+    end
+
+    it "refuses a boundary-forging value without returning a partial draft" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: safe\r\n" \
+                 "X-Bad: forged\rX-Injected: yes\r\n\r\n")
+      result = request_refusal(detail, ["Authorization", "X-Bad"])
+      result.code.should eq(FromFlow::UNSAFE_VALUE)
+      result.message.should contain("CR")
+      result.message.should_not contain("forged")
+    end
+
+    it "never includes request header values in provenance sources" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: SUPERSECRET\r\n\r\n")
+      sources = request_draft(detail, ["Authorization"]).sources.join(" ")
+      sources.should contain("Authorization")
+      sources.should contain("captured request header")
+      sources.should_not contain("SUPERSECRET")
+    end
+
+    # A slot is applied to a DIFFERENT message than the one it was copied from, so a copied
+    # framing header would make every later send declare a length its own body does not have.
+    it "refuses a framing or routing header by name, before reading the wire" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "POST / HTTP/1.1\r\nHost: h.test\r\nContent-Length: 9\r\n" \
+                 "Transfer-Encoding: chunked\r\nAuthorization: SECRET\r\n\r\n")
+      %w[Content-Length content-length Transfer-Encoding Host].each do |name|
+        result = request_refusal(detail, ["Authorization", name])
+        result.code.should eq(FromFlow::REFRAMING_HEADER)
+        result.message.should contain(name)
+        result.message.should_not contain("SECRET")
+      end
+    end
+
+    it "marks selected request headers literal for the real slot resolution path" do
+      detail = flow("HTTP/1.1 204 No Content\r\n\r\n",
+        request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer $BIND.TOKEN\r\n\r\n")
+      slot = request_draft(detail, ["authorization"]).slot("captured")
+      resolved = slot.resolve_values(&.gsub("$BIND.TOKEN", "EXPANDED"))
+      resolved.set_headers.should eq([{"Authorization", "Bearer $BIND.TOKEN"}])
+      resolved.literal_headers.should eq(["Authorization"])
+    end
+  end
+
   describe "the login shape" do
     # The whole feature in one case: a Django-ish login answering with two cookies AND a JSON
     # token. Both halves land, so `--slot admin` sends the cookie jar and the bearer.
@@ -70,6 +184,34 @@ describe Gori::SessionFromFlow do
       slot.passthrough?.should be_false
       slot.baseline?.should be_false
       draft(detail).slot("admin", true).baseline?.should be_true
+    end
+
+    it "marks every response-derived header literal through slot construction" do
+      detail = flow("HTTP/1.1 200 OK\r\nSet-Cookie: session=$GEN.UUID\r\n\r\n")
+      slot = draft(detail).slot("captured")
+      resolved = slot.resolve_values(&.gsub("$GEN.UUID", "GENERATED"))
+      resolved.set_headers.should eq([{"Cookie", "session=$GEN.UUID"}])
+      resolved.literal_headers.should eq(["Cookie"])
+    end
+
+    it "refuses invalid UTF-8 in a response-derived literal before persistence" do
+      response = String.new(Bytes[0x48, 0x54, 0x54, 0x50, 0x2f, 0x31, 0x2e, 0x31, 0x20,
+        0x32, 0x30, 0x30, 0x20, 0x4f, 0x4b, 0x0d, 0x0a, 0x53, 0x65, 0x74, 0x2d, 0x43, 0x6f,
+        0x6f, 0x6b, 0x69, 0x65, 0x3a, 0x20, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x3d,
+        0xff, 0x0d, 0x0a, 0x0d, 0x0a])
+      result = refusal(flow(response))
+      result.code.should eq(FromFlow::UNSAFE_VALUE)
+      result.message.should contain("not valid UTF-8")
+    end
+
+    it "refuses invalid UTF-8 in a request-derived literal before persistence" do
+      request = String.new(Bytes[0x47, 0x45, 0x54, 0x20, 0x2f, 0x20, 0x48, 0x54, 0x54, 0x50,
+        0x2f, 0x31, 0x2e, 0x31, 0x0d, 0x0a, 0x48, 0x6f, 0x73, 0x74, 0x3a, 0x20, 0x68, 0x0d,
+        0x0a, 0x58, 0x2d, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x3a, 0x20, 0xff, 0x0d, 0x0a, 0x0d,
+        0x0a])
+      result = request_refusal(flow("HTTP/1.1 204 No Content\r\n\r\n", request: request), ["X-Token"])
+      result.code.should eq(FromFlow::UNSAFE_VALUE)
+      result.message.should contain("not valid UTF-8")
     end
 
     # The overlay has to survive the seam it exists for: `--slot` applies it to captured wire
@@ -187,6 +329,19 @@ describe Gori::SessionFromFlow do
         detail = flow("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
           response_body: %({"access_token":"T"}))
         headers_of(detail)["Authorization"].should eq("Bearer T")
+      end
+
+      it "does not repair an invalid UTF-8 body into a token" do
+        body = String.new(Bytes[0x7b, 0x22, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x22, 0x3a,
+          0x22, 0xff, 0x22, 0x7d])
+        refusal(flow("HTTP/1.1 200 OK\r\n\r\n", response_body: body)).code
+          .should eq(FromFlow::NO_CREDENTIAL)
+      end
+
+      it "keeps header credentials when an unrelated response body is not valid UTF-8" do
+        body = String.new(Bytes[0xff, 0xfe])
+        detail = flow("HTTP/1.1 200 OK\r\nSet-Cookie: session=valid\r\n\r\n", response_body: body)
+        headers_of(detail)["Cookie"].should eq("session=valid")
       end
     end
   end

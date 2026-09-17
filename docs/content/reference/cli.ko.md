@@ -547,6 +547,7 @@ gori run session rm admin
 | `show <name>` | `--show-values`, `--format text\|json` |
 | `add` | `--name`, `--set 'Name: value'`(반복 가능), `--remove NAME`(반복 가능), `--rule NAME`(반복 가능), `--baseline` / `--no-baseline`(플래그 해제. 그러면 첫 슬롯이 기준선을 물려받습니다) |
 | `from-flow <flow-id>` | `--name`(필수), `--baseline`, `--show-values`. 오버레이를 직접 타이핑하는 대신 캡처된 로그인 교환에서 만듭니다 |
+| `from-request <flow-id>` | `--name`(필수), `--copy-header NAME`(반복 가능, 하나 이상 필요), `--baseline`, `--show-values`. 캡처된 요청에서 지정한 헤더를 복사합니다 |
 | `edit <name>` | 같은 플래그에 `--clear-set` / `--clear-remove` / `--clear-rules` 추가. 컬렉션 플래그는 그 컬렉션 **전체를 교체** 하고, 생략한 것은 그대로 둡니다 |
 | `rm`\|`delete <name>` | 그 슬롯이 주장하던 extract 규칙은 다시 전역 바인딩 테이블에 쓰게 됩니다 |
 | `baseline <name>` | Authorize 기준선 이동(정확히 한 슬롯이 갖습니다) |
@@ -563,6 +564,16 @@ gori run repeater 900 --slot admin        # 플로우 900을 그 신원으로 �
 ```
 
 오버레이는 **리터럴**입니다. 로그인이 돌려준 바이트 그대로 프로젝트에 저장됩니다. 재인증은 하지 않으므로, *회전하는* 토큰(수명 짧은 JWT, 요청마다 바뀌는 CSRF 값)은 extract 규칙 경로가 맞습니다: `gori run rewriter extract`에 `--bind-from FLOW`를 더하면 실행마다 값을 새로 발급받습니다. 이름은 플로우를 읽기 전에 검사하므로, 중복된 이름은 "그 플로우는 로그인이 아니다"가 아니라 이름 충돌로 보고됩니다.
+
+**`from-request`는 캡처된 요청에서 지정한 헤더를 복사합니다.** 인증 정보나 CSRF 값이 요청에 이미 있거나, 로그인 교환의 모든 헤더가 아닌 필요한 헤더만 의도적으로 스냅샷할 때 유용합니다. `--copy-header`를 헤더마다 반복하고, 하나 이상 지정해야 합니다. `Content-Length`, `Transfer-Encoding`, `Host`는 거부됩니다. 슬롯은 본문과 대상이 다른 메시지에 적용되므로, 이 헤더를 복사하면 이후 모든 전송의 프레이밍이나 라우팅이 어긋납니다. 저장되는 값은 리터럴 바이트이며, `--show-values`를 주지 않으면 표준 출력은 `[REDACTED]`로 가립니다. STDERR의 provenance는 복사한 헤더 이름만 출력하고 값은 출력하지 않습니다. 슬롯은 **호스트 범위가 없습니다**. `--slot NAME`을 명시한 모든 전송에 해당 슬롯의 헤더가 적용되므로, 슬롯은 의도한 신원 하나에만 사용하세요.
+
+```bash
+gori run session from-request 4211 --name admin \
+  --copy-header Cookie --copy-header X-CSRF-Token
+gori run repeater 900 --slot admin        # 해당 헤더 스냅샷으로 전송
+```
+
+이는 로그인 매크로가 아닌 **리터럴 스냅샷**입니다. 재인증하거나 회전하는 토큰을 갱신하지 않습니다. 수명이 짧은 JWT, 요청마다 바뀌는 CSRF 값처럼 다시 발급해야 하는 값은 `gori run rewriter extract`와 `--bind-from FLOW`를 사용해 실행마다 새로 추출하세요.
 
 **`session activate`는 없습니다.** `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸칠 시간이 없고, 저장해 두면 다음 실행에서 비어 있는 바인딩 테이블로 해소되어 `$BIND.SESSION`이 리터럴인 오버레이를 보내게 됩니다. 대신 전송할 때 신원을 지목하세요: `repeater`, `repeater send`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover`에서 `--slot NAME`. 실행은 첫 요청 전에 STDERR로 `slot: sending as NAME`을 찍습니다.
 

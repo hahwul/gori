@@ -214,3 +214,41 @@ describe "gori run session from-flow" do
     src.should contain("--from-flow is its own subcommand")
   end
 end
+
+# `gori run session from-request` copies an operator-selected subset of the captured request
+# into a literal slot. The engine owns header lookup/provenance; this surface owns argument
+# parsing, redacted presentation, and the transactional slot write.
+describe "gori run session from-request" do
+  it "is registered and requires a repeatable --copy-header selection" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "session.cr"))
+    src.should contain(%(when "from-request" then cmd_session_from_request))
+    src[/Usage: gori run session \[list\].*/].should contain("from-request")
+    body = src[/private def self\.cmd_session_from_request.*?\n      end\n/m]
+    body.should contain("p.on(\"--copy-header=NAME\", \"Copy this request header")
+    body.should contain("copy_headers << v.strip")
+    body.should contain("copy at least one request header")
+    body.should contain("if copy_headers.empty?")
+    body.should_not contain("copy_headers.reject!")
+  end
+
+  it "calls the shared request reader, saves atomically, and keeps values out of provenance" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "session.cr"))
+    body = src[/private def self\.cmd_session_from_request.*?\n      end\n/m]
+    body.should contain("Gori::SessionFromFlow.draft_request(detail, copy_headers)")
+    body.should contain("slots.add(slot)")
+    body.should contain("session_slot_row(slot, show_values)")
+    body.should contain("draft.sources.each")
+    body.should contain("from-request: \#{line}")
+  end
+
+  it "documents literal snapshots, redaction, and the rotating-token alternative in help" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "session.cr"))
+    banner = src[/Usage: gori run session from-request.*?"\n          p\.on\("--name/m]
+    banner.should contain("--copy-header")
+    banner.should contain("[REDACTED]")
+    banner.should contain("does not re-authenticate")
+    banner.should contain("rotating")
+    banner.should contain("rewriter extract")
+    banner.should contain("--bind-from")
+  end
+end

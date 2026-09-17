@@ -400,6 +400,22 @@ describe Gori::Proxy::Codec::Http1 do
     end
   end
 
+  describe ".header_name_safe?" do
+    it "accepts RFC tchar names and rejects separators" do
+      ["Authorization", "X-API_Key", "!#$%&'*+-.^_`|~"].each do |name|
+        Http1.header_name_safe?(name).should be_true
+      end
+      ["", "Bad Name", "Bad:Name", "Bad/Name", "Bad(Name)", "Bad,Name", "Bad?Name"].each do |name|
+        Http1.header_name_safe?(name).should be_false
+      end
+    end
+
+    it "rejects non-ASCII field names" do
+      Http1.header_name_safe?("X-Заголовок").should be_false
+      Http1.header_name_safe?("X-\xFF").should be_false
+    end
+  end
+
   describe ".gate_target" do
     # The target the SCOPE gate reads. `parse_request_head`'s strict `split(' ')` must stay
     # strict (it feeds resolve_forward/rewrite_request_line, whose `version` is parts[2]), so

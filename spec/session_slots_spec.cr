@@ -195,6 +195,19 @@ describe Gori::SessionSlots do
       end
     end
 
+    it "sends captured token-looking values literally while resolving manual values" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("captured",
+          set_headers: [{"Authorization", "Bearer $BIND.TOKEN"}, {"X-Manual", "$BIND.TOKEN"}],
+          literal_headers: ["authorization"])])
+        slots.activate("captured")
+        sent = slot_overlay(slots, "GET / HTTP/1.1\r\nHost: h\r\n\r\n", {"BIND.TOKEN" => "EXPANDED"})
+        sent.should contain("Authorization: Bearer $BIND.TOKEN")
+        sent.should contain("X-Manual: EXPANDED")
+      end
+    end
+
     it "returns the SAME slice when the active slot is a passthrough" do
       with_store do |store|
         slots = Gori::SessionSlots.load(store)

@@ -301,3 +301,138 @@ describe "MCP create_session_slot from a captured flow" do
     end
   end
 end
+
+describe "MCP create_session_slot from a captured request" do
+  it "copies Authorization, Cookie, and a custom header without echoing values" do
+    with_store do |store|
+      t = tools_for(store)
+      id = seed_login_flow(store, "HTTP/1.1 204 No Content\r\n\r\n",
+        req_head: "GET /me HTTP/1.1\r\nHost: h.test\r\n" \
+                  "Authorization: Bearer REQUESTSECRET\r\nCookie: sid=COOKIESECRET\r\n" \
+                  "X-CSRF-Token: CSRFSECRET\r\n\r\n")
+      created = call_json(t, "create_session_slot", %({"name":"admin","from_request_flow_id":#{id},"copy_headers":["Authorization","Cookie","X-CSRF-Token"]}))
+      created["set_headers"].as_a.map(&.["name"].as_s).should eq([
+        "Authorization", "Cookie", "X-CSRF-Token",
+      ])
+      created["set_headers"].as_a.each(&.["value"].as_s.should(eq("[REDACTED]")))
+      created.to_json.should_not contain("REQUESTSECRET")
+      created.to_json.should_not contain("COOKIESECRET")
+      created.to_json.should_not contain("CSRFSECRET")
+      created["sources"].to_json.should_not contain("REQUESTSECRET")
+
+      slot = Gori::SessionSlots.load(store).find("admin").not_nil!
+      slot.set_headers.to_h.should eq({
+        "Authorization" => "Bearer REQUESTSECRET",
+        "Cookie"        => "sid=COOKIESECRET",
+        "X-CSRF-Token"  => "CSRFSECRET",
+      })
+    end
+  end
+
+  it "reports an unknown request flow as NOT_FOUND" do
+    with_store do |store|
+      r = tools_for(store).call("create_session_slot",
+        JSON.parse(%({"name":"admin","from_request_flow_id":9999,"copy_headers":["Authorization"]})))
+      r.is_error.should be_true
+      r.error_code.should eq("NOT_FOUND")
+      Gori::SessionSlots.load(store).slots.should be_empty
+    end
+  end
+
+  it "reports a missing requested header with the refusal code and copy_headers field" do
+    with_store do |store|
+      t = tools_for(store)
+      id = seed_login_flow(store, "HTTP/1.1 204 No Content\r\n\r\n",
+        req_head: "GET /me HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer REQUESTSECRET\r\n\r\n")
+      r = t.call("create_session_slot", JSON.parse(%({"name":"admin","from_request_flow_id":#{id},"copy_headers":["Cookie"]})))
+      r.is_error.should be_true
+      r.error_code.should eq(Gori::SessionFromFlow::MISSING_HEADER)
+      r.field.should eq("copy_headers")
+      r.text.should contain("Cookie")
+      r.text.should_not contain("REQUESTSECRET")
+      Gori::SessionSlots.load(store).slots.should be_empty
+    end
+  end
+
+  it "refuses a mixed valid and blank selector atomically" do
+    with_store do |store|
+      t = tools_for(store)
+      id = seed_login_flow(store, "HTTP/1.1 204 No Content\r\n\r\n",
+        req_head: "GET /me HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer REQUESTSECRET\r\n\r\n")
+      r = t.call("create_session_slot", JSON.parse(%({"name":"admin","from_request_flow_id":#{id},"copy_headers":["Authorization"," "]})))
+      r.is_error.should be_true
+      r.error_code.should eq(Gori::SessionFromFlow::INVALID_HEADER_NAME)
+      r.field.should eq("copy_headers")
+      r.text.should_not contain("REQUESTSECRET")
+      Gori::SessionSlots.load(store).slots.should be_empty
+    end
+  end
+
+  it "requires from_request_flow_id and copy_headers as a pair" do
+    with_store do |store|
+      t = tools_for(store)
+      missing_copy = t.call("create_session_slot",
+        JSON.parse(%({"name":"admin","from_request_flow_id":1})))
+      missing_copy.is_error.should be_true
+      missing_copy.error_code.should eq("INVALID_ARGUMENT")
+      missing_copy.field.should eq("copy_headers")
+
+      missing_flow = t.call("create_session_slot",
+        JSON.parse(%({"name":"admin","copy_headers":["Authorization"]})))
+      missing_flow.is_error.should be_true
+      missing_flow.error_code.should eq("INVALID_ARGUMENT")
+      missing_flow.field.should eq("from_request_flow_id")
+      Gori::SessionSlots.load(store).slots.should be_empty
+    end
+  end
+
+  it "rejects every request-source and existing-source combination" do
+    with_store do |store|
+      t = tools_for(store)
+      id = seed_login_flow(store, "HTTP/1.1 204 No Content\r\n\r\n",
+        req_head: "GET /me HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer REQUESTSECRET\r\n\r\n")
+      cases = [
+        {JSON.parse(%({"name":"a","from_request_flow_id":#{id},"copy_headers":["Authorization"],"flow_id":#{id}})), "from_request_flow_id"},
+        {JSON.parse(%({"name":"b","from_request_flow_id":#{id},"copy_headers":["Authorization"],"set_headers":["X-Mode: manual"]})), "set_headers"},
+        {JSON.parse(%({"name":"c","copy_headers":["Authorization"],"flow_id":#{id}})), "copy_headers"},
+        {JSON.parse(%({"name":"d","copy_headers":["Authorization"],"set_headers":["X-Mode: manual"]})), "copy_headers"},
+      ]
+      cases.each do |args, field|
+        r = t.call("create_session_slot", args)
+        r.is_error.should be_true
+        r.error_code.should eq("INVALID_ARGUMENT")
+        r.field.should eq(field)
+      end
+      Gori::SessionSlots.load(store).slots.should be_empty
+    end
+  end
+
+  it "refuses an unreadable from_request_flow_id by that field" do
+    with_store do |store|
+      r = tools_for(store).call("create_session_slot",
+        JSON.parse(%({"name":"admin","from_request_flow_id":"latest","copy_headers":["Authorization"]})))
+      r.is_error.should be_true
+      r.error_code.should eq("INVALID_ARGUMENT")
+      r.field.should eq("from_request_flow_id")
+      r.text.should contain("integer")
+      Gori::SessionSlots.load(store).slots.should be_empty
+    end
+  end
+
+  it "declares the request-source pair and its safety caveats in tools/list" do
+    with_store do |store|
+      listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+      tool = listed.find { |x| x["name"].as_s == "create_session_slot" }.not_nil!
+      props = tool["inputSchema"]["properties"]
+      props["from_request_flow_id"]?.should_not be_nil
+      props["from_request_flow_id"]["type"].as_s.should eq("integer")
+      props["copy_headers"]?.should_not be_nil
+      desc = tool["description"].as_s
+      desc.should contain("LITERAL")
+      desc.should contain("auto-reauthenticate")
+      desc.should contain("project-wide")
+      desc.should contain("blast radius")
+      desc.should contain("create_extract_rule")
+    end
+  end
+end

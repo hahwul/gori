@@ -679,6 +679,20 @@ module Gori::Proxy::Codec::Http1
     true
   end
 
+  # Whether `name` is an RFC 7230 §3.2 field-name token. The request-token predicate owns the
+  # framing half (whitespace, controls, and DEL); this adds the tchar alphabet, including the
+  # printable separators that are legal in a request target but not a field name. Header names
+  # are ASCII by definition, so non-ASCII UTF-8 and invalid bytes are rejected here.
+  def self.header_name_safe?(name : String) : Bool
+    return false if name.empty? || !request_token_safe?(name)
+    name.each_byte do |b|
+      next if (b >= 0x41_u8 && b <= 0x5a_u8) || (b >= 0x61_u8 && b <= 0x7a_u8) ||
+              (b >= 0x30_u8 && b <= 0x39_u8) || "!#$%&'*+-.^_`|~".bytes.includes?(b)
+      return false
+    end
+    true
+  end
+
   # Index of the CRLF at or after `from`, or nil if none. Scans the raw bytes so
   # the parser never materializes the whole head as a String (P7: raw is truth).
   private def self.index_crlf(raw : Bytes, from : Int32) : Int32?

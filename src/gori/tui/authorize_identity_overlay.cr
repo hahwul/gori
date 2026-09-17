@@ -35,11 +35,18 @@ module Gori::Tui
     # under one label in the results table, and nothing on screen would say which session
     # produced which verdict.
     @taken : Set(String)
+    # The original header rows let `build_identity` distinguish an unchanged captured value
+    # from an operator edit. Provenance is deliberately reconstructed from the displayed text:
+    # changing, removing, or adding a row must make it manual again.
+    @original_set_headers : Array({String, String})
+    @original_literal_headers : Array(String)
 
     def initialize(identity : Authorize::Identity? = nil, @index : Int32? = nil,
                    taken : Array(String) = [] of String)
       @name = TextField.new(identity.try(&.name) || "")
-      set_text = (identity.try(&.set_headers) || [] of {String, String})
+      @original_set_headers = identity.try(&.set_headers) || [] of {String, String}
+      @original_literal_headers = identity.try(&.literal_headers) || [] of String
+      set_text = @original_set_headers
         .map { |name, value| "#{name}: #{value}" }.join("\n")
       @editor = TextArea.new(set_text)
       # The `$BIND.SESSION` / `$GEN.UUID` completer, in the ONE editor where a slot's overlay
@@ -99,7 +106,31 @@ module Gori::Tui
     # The identity this form describes, or nil while `refusal` stands.
     def build_identity : Authorize::Identity?
       return nil if refusal
-      Authorize::Identity.new(name, set_headers, remove_headers, @baseline)
+      headers = set_headers
+      Authorize::Identity.new(name, headers, remove_headers, @baseline, [] of String,
+        surviving_literals(headers))
+    end
+
+    # The captured-value marker as it survives this edit. `SessionSlot#literal_header?` is keyed
+    # by NAME, and `overlay_head` upserts, so for a name the operator typed twice only the LAST
+    # row reaches the wire — and that row alone decides whether the name is still captured
+    # bytes. Anything else marks a hand-written `$BIND.X` literal and sends the token's spelling
+    # instead of its value, which is the one failure this form must not introduce.
+    private def surviving_literals(headers : Array({String, String})) : Array(String)
+      marked = [] of String
+      headers.each do |(header_name, value)|
+        next unless @original_literal_headers.any? { |n| same_header?(n, header_name) }
+        captured = @original_set_headers.any? do |(original_name, original_value)|
+          same_header?(original_name, header_name) && original_value == value
+        end
+        marked.reject! { |n| same_header?(n, header_name) }
+        marked << header_name if captured
+      end
+      marked
+    end
+
+    private def same_header?(a : String, b : String) : Bool
+      a.compare(b, case_insensitive: true) == 0
     end
 
     # --- Overlay contract (see overlay.cr) ---
