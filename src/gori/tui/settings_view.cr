@@ -216,6 +216,16 @@ module Gori::Tui
         "announce new background results in a speech bubble, and react to them — independent of the bottom-bar toast — ←/→/space toggles",
         bool: true),
     ]
+    # Screenshot: what the `screenshot` verb writes, and where.
+    SCREENSHOT_FIELDS = [
+      Field.new("Format",
+        "svg = self-contained vector, crisp at any size · png = raster image · ansi = re-pasteable terminal output · txt = plain text — ←/→ cycles",
+        choices: Settings::SCREENSHOT_FORMATS),
+      Field.new("Directory",
+        "where screenshots are written — blank = ~/.gori/screenshots"),
+      Field.new("PNG scale",
+        "pixels per terminal cell edge for the png format — 1-8 (only the png format reads it)"),
+    ]
     # Notifications: bell/toast toggles + ring-buffer retention.
     NOTIFICATIONS_FIELDS = [
       Field.new("Bell on result",
@@ -254,6 +264,7 @@ module Gori::Tui
       :statusline    => STATUSLINE_FIELDS,
       :display       => DISPLAY_FIELDS,
       :companion     => COMPANION_FIELDS,
+      :screenshot    => SCREENSHOT_FIELDS,
       :notifications => NOTIFICATIONS_FIELDS,
       :general       => GENERAL_FIELDS,
     }
@@ -295,6 +306,7 @@ module Gori::Tui
                 when :statusline    then statusline_values
                 when :display       then display_values
                 when :companion     then companion_values
+                when :screenshot    then screenshot_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
                 when :general       then general_values
                 else                     network_values
@@ -361,6 +373,11 @@ module Gori::Tui
                   Settings::DEFAULT_COMPANION_PLACEMENT,
                   Settings::DEFAULT_COMPANION_MOTION,
                   Settings::DEFAULT_COMPANION_NOTICES ? "on" : "off",
+                ]
+                when :screenshot then [
+                  Settings::DEFAULT_SCREENSHOT_FORMAT,
+                  Settings::DEFAULT_SCREENSHOT_DIR,
+                  Settings::DEFAULT_SCREENSHOT_PNG_SCALE.to_s,
                 ]
                 when :notifications then [
                   Settings::DEFAULT_NOTIFY_BELL ? "on" : "off",
@@ -545,6 +562,18 @@ module Gori::Tui
         Settings.companion_placement,
         Settings.companion_motion,
         Settings.companion_notices? ? "on" : "off",
+      ]
+    end
+
+    # The SCREENSHOT row values. The format and the scale are read through Settings' own
+    # clamping readers, so a hand-edited settings.json holding an unknown format shows the
+    # default rather than a row whose ←/→ cycle cannot find its own value in `choices` — the
+    # `mouse_values` defence.
+    private def screenshot_values : Array(String)
+      [
+        Settings.screenshot_format,
+        Settings.screenshot_dir,
+        Settings.screenshot_png_scale.to_s,
       ]
     end
 
@@ -789,6 +818,22 @@ module Gori::Tui
         Settings.companion_motion = Settings.normalize_companion_motion(@values[2])
         Settings.companion_notices = @values[3] == "on"
         @values = companion_values
+        return persist
+      end
+      if @section == :screenshot
+        # REFUSED rather than clamped, unlike the load path: a value typed into this row is a
+        # request, and silently writing 8 where the operator typed 40 is a setting that does
+        # not say what it does. The loader clamps because a profile has nobody to tell.
+        scale = @values[2].strip.to_i?
+        unless scale && scale >= Settings::MIN_SCREENSHOT_PNG_SCALE && scale <= Settings::MAX_SCREENSHOT_PNG_SCALE
+          @status = "invalid PNG scale"
+          return "settings: invalid PNG scale #{@values[2].inspect} " \
+                 "(#{Settings::MIN_SCREENSHOT_PNG_SCALE}-#{Settings::MAX_SCREENSHOT_PNG_SCALE})"
+        end
+        Settings.screenshot_format = Settings.normalize_screenshot_format(@values[0])
+        Settings.screenshot_dir = @values[1].strip # blank is valid → ~/.gori/screenshots
+        Settings.screenshot_png_scale = scale
+        @values = screenshot_values
         return persist
       end
       if @section == :notifications

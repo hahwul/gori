@@ -27,6 +27,7 @@ require "./settings/discover"
 require "./settings/update"
 require "./settings/fuzzer"
 require "./settings/redaction"
+require "./settings/screenshot"
 
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
@@ -437,6 +438,7 @@ module Gori
       parse_redaction(root["redaction"]?)
       parse_layout(root["layout"]?)
       parse_statusline(root["statusline"]?)
+      parse_screenshot(root["screenshot"]?)
       parse_display(root["display"]?)
       parse_companion(root["companion"]?)
       parse_notifications(root["notifications"]?)
@@ -1113,7 +1115,7 @@ module Gori
     # The `document_keys - SECTION_KEYS` guard in spec/settings/profile_spec.cr catches a
     # rename, and catches an addition as soon as any example populates the new section.
     SECTION_KEYS = %w[
-      theme mouse mouse_drag pretty_bodies layout statusline display companion notifications general update
+      theme mouse mouse_drag pretty_bodies layout statusline screenshot display companion notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
       hooks colormarker saved_views redaction
@@ -1508,6 +1510,7 @@ module Gori
       reset_appearance
       reset_layout
       reset_statusline
+      reset_screenshot
       reset_display
       reset_companion
       reset_notifications
@@ -1552,6 +1555,7 @@ module Gori
           serialize_appearance(j)
           serialize_layout(j)
           serialize_statusline(j)
+          serialize_screenshot(j)
           serialize_display(j)
           serialize_companion(j)
           serialize_notifications(j)
