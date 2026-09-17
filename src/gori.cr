@@ -78,6 +78,7 @@ require "./gori/verbs/import"
 require "./gori/verbs/history"
 require "./gori/import"
 require "./gori/export"
+require "./gori/screenshot"
 require "./gori/verbs/sitemap"
 require "./gori/verbs/discover"
 require "./gori/verbs/oast"
@@ -113,5 +114,9 @@ require "./gori/tolerance"
 require "./gori/sitemap"
 require "./gori/diff"
 require "./gori/tui"
+# AFTER ./gori/tui: `Frame.from_ansi` is the one part of the screenshot subsystem that
+# reaches into a surface (Tui::Ansi, the SGR parser). Everything else it needs is already
+# loaded above, surface-free.
+require "./gori/screenshot/ingest"
 require "./gori/app"
 require "./gori/cli"

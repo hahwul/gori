@@ -61,78 +61,78 @@ module AnsiFixtures
   FRAME_TITLE    = "gori · Fixture"
   WORDMARK_TITLE = "𝓰𝓸𝓻𝓲 · capture"
 
-  FRAME_SVG = <<-'SVG'
-  <svg xmlns="http://www.w3.org/2000/svg" width="216" height="160" viewBox="0 0 216.0 160.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="gori · Fixture">
-  <rect x="0.5" y="0.5" width="215.0" height="159.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
-  <rect x="1" y="1" width="214.0" height="34.0" rx="10" ry="10" fill="#19191a"/>
-  <rect x="1" y="24.0" width="214.0" height="10" fill="#19191a"/>
-  <circle cx="18.0" cy="17.0" r="5.5" fill="#e0645f"/>
-  <circle cx="34.0" cy="17.0" r="5.5" fill="#e0b24f"/>
-  <circle cx="50.0" cy="17.0" r="5.5" fill="#4fb06a"/>
-  <text x="108.0" y="22.0" text-anchor="middle" fill="#919191" font-family="'Apple Symbols','Segoe UI Symbol','Cambria Math','STIX Two Math','Noto Sans Math','DejaVu Sans',ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="12.3px">gori · Fixture</text>
-  <rect x="36.00" y="106.00" width="54.00" height="18.00" fill="#26262c"/>
-  <rect x="90.00" y="106.00" width="27.00" height="18.00" fill="#c8c8cc"/>
-  <rect x="81.00" y="124.00" width="63.00" height="18.00" fill="#26262c"/>
-  <text x="18.00" y="65.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">╭─</text>
-  <text x="45.00" y="65.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" font-weight="700" xml:space="preserve">gori</text>
-  <text x="90.00" y="65.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">capture</text>
-  <text x="162.00" y="65.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">───╮</text>
-  <text x="18.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="36.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#00afff" xml:space="preserve">GET</text>
-  <text x="72.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">/a&amp;b</text>
-  <text x="117.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">&lt;x&gt;</text>
-  <text x="189.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="18.00" y="101.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="36.00" y="101.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">inherits</text>
-  <text x="18.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="45.00" y="119.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">band</text>
-  <text x="90.00" y="119.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#0a0a0b" xml:space="preserve">REV</text>
-  <text x="189.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="27.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#808080" xml:space="preserve">12:34</text>
-  <text x="90.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ready</text>
-  </svg>
-  SVG
+  FRAME_SVG = <<-SVG
+    <svg xmlns="http://www.w3.org/2000/svg" width="216" height="160" viewBox="0 0 216.0 160.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="gori · Fixture">
+    <rect x="0.5" y="0.5" width="215.0" height="159.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
+    <rect x="1" y="1" width="214.0" height="34.0" rx="10" ry="10" fill="#19191a"/>
+    <rect x="1" y="24.0" width="214.0" height="10" fill="#19191a"/>
+    <circle cx="18.0" cy="17.0" r="5.5" fill="#e0645f"/>
+    <circle cx="34.0" cy="17.0" r="5.5" fill="#e0b24f"/>
+    <circle cx="50.0" cy="17.0" r="5.5" fill="#4fb06a"/>
+    <text x="108.0" y="22.0" text-anchor="middle" fill="#919191" font-family="'Apple Symbols','Segoe UI Symbol','Cambria Math','STIX Two Math','Noto Sans Math','DejaVu Sans',ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="12.3px">gori · Fixture</text>
+    <rect x="36.00" y="106.00" width="54.00" height="18.00" fill="#26262c"/>
+    <rect x="90.00" y="106.00" width="27.00" height="18.00" fill="#c8c8cc"/>
+    <rect x="81.00" y="124.00" width="63.00" height="18.00" fill="#26262c"/>
+    <text x="18.00" y="65.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">╭─</text>
+    <text x="45.00" y="65.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" font-weight="700" xml:space="preserve">gori</text>
+    <text x="90.00" y="65.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">capture</text>
+    <text x="162.00" y="65.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">───╮</text>
+    <text x="18.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="36.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#00afff" xml:space="preserve">GET</text>
+    <text x="72.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">/a&amp;b</text>
+    <text x="117.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">&lt;x&gt;</text>
+    <text x="189.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="18.00" y="101.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="36.00" y="101.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">inherits</text>
+    <text x="18.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="45.00" y="119.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">band</text>
+    <text x="90.00" y="119.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#0a0a0b" xml:space="preserve">REV</text>
+    <text x="189.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="27.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#808080" xml:space="preserve">12:34</text>
+    <text x="90.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ready</text>
+    </svg>
+    SVG
 
-  STRIP_SVG = <<-'SVG'
-  <svg xmlns="http://www.w3.org/2000/svg" width="200" height="38" viewBox="0 0 200.0 38.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="row">
-  <rect x="0.5" y="0.5" width="199.0" height="37.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
-  <rect x="73.00" y="10.00" width="63.00" height="18.00" fill="#26262c"/>
-  <text x="19.00" y="23.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#808080" xml:space="preserve">12:34</text>
-  <text x="82.00" y="23.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ready</text>
-  </svg>
-  SVG
+  STRIP_SVG = <<-SVG
+    <svg xmlns="http://www.w3.org/2000/svg" width="200" height="38" viewBox="0 0 200.0 38.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="row">
+    <rect x="0.5" y="0.5" width="199.0" height="37.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
+    <rect x="73.00" y="10.00" width="63.00" height="18.00" fill="#26262c"/>
+    <text x="19.00" y="23.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#808080" xml:space="preserve">12:34</text>
+    <text x="82.00" y="23.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ready</text>
+    </svg>
+    SVG
 
-  WORDMARK_SVG = <<-'SVG'
-  <svg xmlns="http://www.w3.org/2000/svg" width="216" height="160" viewBox="0 0 216.0 160.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="𝓰𝓸𝓻𝓲 · capture">
-  <rect x="0.5" y="0.5" width="215.0" height="159.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
-  <rect x="1" y="1" width="214.0" height="34.0" rx="10" ry="10" fill="#19191a"/>
-  <rect x="1" y="24.0" width="214.0" height="10" fill="#19191a"/>
-  <circle cx="18.0" cy="17.0" r="5.5" fill="#e0645f"/>
-  <circle cx="34.0" cy="17.0" r="5.5" fill="#e0b24f"/>
-  <circle cx="50.0" cy="17.0" r="5.5" fill="#4fb06a"/>
-  <text x="108.0" y="22.0" text-anchor="middle" fill="#919191" font-family="'Apple Symbols','Segoe UI Symbol','Cambria Math','STIX Two Math','Noto Sans Math','DejaVu Sans',ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="12.3px">𝓰𝓸𝓻𝓲 · capture</text>
-  <rect x="36.00" y="106.00" width="54.00" height="18.00" fill="#26262c"/>
-  <rect x="90.00" y="106.00" width="27.00" height="18.00" fill="#c8c8cc"/>
-  <rect x="81.00" y="124.00" width="63.00" height="18.00" fill="#26262c"/>
-  <text x="18.00" y="65.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">╭─</text>
-  <text x="45.00" y="65.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" font-weight="700" xml:space="preserve">gori</text>
-  <text x="90.00" y="65.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">capture</text>
-  <text x="162.00" y="65.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">───╮</text>
-  <text x="18.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="36.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#00afff" xml:space="preserve">GET</text>
-  <text x="72.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">/a&amp;b</text>
-  <text x="117.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">&lt;x&gt;</text>
-  <text x="189.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="18.00" y="101.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="36.00" y="101.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">inherits</text>
-  <text x="18.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="45.00" y="119.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">band</text>
-  <text x="90.00" y="119.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#0a0a0b" xml:space="preserve">REV</text>
-  <text x="189.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
-  <text x="27.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#808080" xml:space="preserve">12:34</text>
-  <text x="90.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ready</text>
-  </svg>
-  SVG
+  WORDMARK_SVG = <<-SVG
+    <svg xmlns="http://www.w3.org/2000/svg" width="216" height="160" viewBox="0 0 216.0 160.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="𝓰𝓸𝓻𝓲 · capture">
+    <rect x="0.5" y="0.5" width="215.0" height="159.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
+    <rect x="1" y="1" width="214.0" height="34.0" rx="10" ry="10" fill="#19191a"/>
+    <rect x="1" y="24.0" width="214.0" height="10" fill="#19191a"/>
+    <circle cx="18.0" cy="17.0" r="5.5" fill="#e0645f"/>
+    <circle cx="34.0" cy="17.0" r="5.5" fill="#e0b24f"/>
+    <circle cx="50.0" cy="17.0" r="5.5" fill="#4fb06a"/>
+    <text x="108.0" y="22.0" text-anchor="middle" fill="#919191" font-family="'Apple Symbols','Segoe UI Symbol','Cambria Math','STIX Two Math','Noto Sans Math','DejaVu Sans',ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="12.3px">𝓰𝓸𝓻𝓲 · capture</text>
+    <rect x="36.00" y="106.00" width="54.00" height="18.00" fill="#26262c"/>
+    <rect x="90.00" y="106.00" width="27.00" height="18.00" fill="#c8c8cc"/>
+    <rect x="81.00" y="124.00" width="63.00" height="18.00" fill="#26262c"/>
+    <text x="18.00" y="65.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">╭─</text>
+    <text x="45.00" y="65.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#d9c28b" font-weight="700" xml:space="preserve">gori</text>
+    <text x="90.00" y="65.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">capture</text>
+    <text x="162.00" y="65.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">───╮</text>
+    <text x="18.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="36.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#00afff" xml:space="preserve">GET</text>
+    <text x="72.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">/a&amp;b</text>
+    <text x="117.00" y="83.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">&lt;x&gt;</text>
+    <text x="189.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="18.00" y="101.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="36.00" y="101.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">inherits</text>
+    <text x="18.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="45.00" y="119.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">band</text>
+    <text x="90.00" y="119.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#0a0a0b" xml:space="preserve">REV</text>
+    <text x="189.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">│</text>
+    <text x="27.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#808080" xml:space="preserve">12:34</text>
+    <text x="90.00" y="137.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ready</text>
+    </svg>
+    SVG
 
   # Everything the reference renderer could NOT represent, so it has no golden: the
   # attribute bits below bold, a wide (CJK) grapheme, a combining sequence, and the
