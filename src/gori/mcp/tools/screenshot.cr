@@ -177,12 +177,29 @@ module Gori
       # Where the picture goes, or the refusal. A RELATIVE path is resolved under the
       # screenshots convention dir rather than against this server's working directory, which
       # an agent has no way to know and no reason to write into.
+      #
+      # …and is held to that, which `expand_path` alone does not do: `../../x` expands OUT of
+      # the convention dir, so the schema's promise ("resolved under #{screenshots_dir}") was
+      # true of the spelling and false of the destination. An absolute path is still allowed —
+      # writing elsewhere is a thing an agent may legitimately ask for — but it has to SAY so,
+      # because that is the spelling a human reading the call can see the destination in.
       private def screenshot_target(requested : String?, fmt : String, tab : Symbol?,
                                     overwrite : Bool) : String | Result
         asked = requested.try(&.strip).presence
         path =
           if asked
-            asked.starts_with?('/') ? asked : File.expand_path(asked, Paths.screenshots_dir)
+            if asked.starts_with?('/')
+              asked
+            else
+              under = File.expand_path(asked, Paths.screenshots_dir)
+              unless screenshot_under_dir?(under, Paths.screenshots_dir)
+                return err("'path' #{asked.inspect} resolves to #{under}, outside " \
+                           "#{Paths.screenshots_dir} — relative paths resolve under it; pass an " \
+                           "absolute path to write elsewhere",
+                  "INVALID_ARGUMENT", field: "path")
+              end
+              under
+            end
           else
             Paths.ensure_dir(Paths.screenshots_dir)
             File.join(Paths.screenshots_dir,
@@ -203,6 +220,16 @@ module Gori
             "INVALID_ARGUMENT", field: "path")
         end
         path
+      end
+
+      # Is `path` inside `dir`? Lexical, over two already-expanded absolute paths, and that is
+      # the right level: `expand_path` has already folded every `..`, and asking the filesystem
+      # instead would answer about a directory that need not exist yet.
+      #
+      # The trailing separator is what keeps `<dir>-evil/x` from reading as inside `<dir>`.
+      private def screenshot_under_dir?(path : String, dir : String) : Bool
+        root = File.expand_path(dir)
+        path == root || path.starts_with?("#{root.chomp('/')}/")
       end
 
       # The document as the bytes that go on disk. PNG is the only binary one; the rest are

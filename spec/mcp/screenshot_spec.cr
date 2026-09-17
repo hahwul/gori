@@ -273,6 +273,44 @@ describe "MCP screenshot" do
     end
   end
 
+  it "refuses a relative path that resolves OUT of the screenshots dir" do
+    with_project_db do |store, project|
+      # The schema says a relative path "is resolved under" the convention dir, and
+      # `expand_path` alone made that true of the spelling and false of the destination.
+      r = shot_call(store, project.db_path, %({"format":"txt","path":"../../escaped.txt"}))
+      r.is_error.should be_true
+      r.error_code.should eq("INVALID_ARGUMENT")
+      r.field.should eq("path")
+      r.text.should contain("relative paths resolve under")
+      File.exists?(File.expand_path("../../escaped.txt", Gori::Paths.screenshots_dir)).should be_false
+
+      # A subdirectory of it is still relative and still fine — the rule is the destination,
+      # not the number of separators.
+      sub = File.join(Gori::Paths.screenshots_dir, "sub")
+      Dir.mkdir_p(sub)
+      begin
+        ok = shot_call(store, project.db_path,
+          %({"cols":50,"rows":12,"format":"txt","path":"sub/inside.txt"}))
+        fail "screenshot errored: #{ok.text}" if ok.is_error
+        JSON.parse(ok.text)["path"].as_s.should eq(File.join(sub, "inside.txt"))
+      ensure
+        FileUtils.rm_rf(sub)
+      end
+
+      # …and an ABSOLUTE path elsewhere is still allowed: writing outside is legitimate, it
+      # just has to be spelled where a reader of the call can see it.
+      dest = File.join(Dir.tempdir, "gori-mcp-shot-#{Random.rand(1_000_000)}.txt")
+      begin
+        abs = shot_call(store, project.db_path,
+          %({"cols":50,"rows":12,"format":"txt","path":#{dest.to_json}}))
+        fail "screenshot errored: #{abs.text}" if abs.is_error
+        File.exists?(dest).should be_true
+      ensure
+        File.delete?(dest)
+      end
+    end
+  end
+
   it "refuses NO_PROJECT when the server was bound by store rather than by path" do
     with_store do |store|
       # `tools_for` binds a handle and no db_path — exactly the shape an embedder produces.
