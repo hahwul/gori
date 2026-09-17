@@ -90,4 +90,26 @@ describe Gori::Paths do
       end
     end
   end
+
+  # The convention dirs are created up front, not on first write: their whole point is that
+  # the help text and the docs can tell an operator where to drop a wordlist or where a
+  # screenshot lands, and an empty directory is a better answer than a missing one.
+  describe ".screenshots_dir" do
+    it "sits in gori's own tree and is created locked along with the rest" do
+      with_tmp_dir do |dir|
+        was = ENV["GORI_HOME"]?
+        ENV["GORI_HOME"] = dir
+        begin
+          Gori::Paths.screenshots_dir.should eq(File.join(dir, "screenshots"))
+          Gori::Paths.ensure_dirs
+          Dir.exists?(Gori::Paths.screenshots_dir).should be_true
+          # A picture of a live engagement is captured evidence, so it is 0700 like every
+          # other directory under GORI_HOME — see DIR_MODE.
+          mode_of(Gori::Paths.screenshots_dir).should eq(0o700)
+        ensure
+          was ? (ENV["GORI_HOME"] = was) : ENV.delete("GORI_HOME")
+        end
+      end
+    end
+  end
 end

@@ -45,6 +45,15 @@ module Gori
       File.join(home_dir, "protos")
     end
 
+    # Convention dir for screenshots: `gori screenshot` writes here when the operator names no
+    # path, and a bare (slash-less) name resolves against it — the same rule `wordlists_dir`
+    # gives the Fuzzer's payload field and `protos_dir` gives the gRPC schema field. A picture
+    # of a live engagement is evidence, so it lands inside the one tree gori owns and locks
+    # down (0700, see DIR_MODE) rather than in the working directory.
+    def self.screenshots_dir : String
+      File.join(home_dir, "screenshots")
+    end
+
     # A tiny global marker holding the DB PATH of the project the interactive TUI last
     # opened. Headless MCP uses this only after an explicit opt-in (`--use-active-project`);
     # otherwise MCP outside a Git workspace starts unbound so the agent can list/create/
@@ -95,6 +104,10 @@ module Gori
       # operator to drop a descriptor set in here, and a directory that does not exist yet is
       # a worse answer than an empty one.
       ensure_dir(protos_dir)
+      # …and the screenshots dir, for the third time for the same reason: the flag's help text
+      # and the docs both tell an operator where pictures land, and a directory that does not
+      # exist yet is a worse answer than an empty one.
+      ensure_dir(screenshots_dir)
     end
 
     # gori's tree holds captured traffic (per-project DBs), the CA private key, and
