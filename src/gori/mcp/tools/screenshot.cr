@@ -216,6 +216,10 @@ module Gori
       # The summary the agent reads. `sanitized` is the count of masked cells, or null when no
       # redaction profile applied at all — the same distinction `Screenshot::Mask` draws, and
       # the difference between a picture that was checked and one that never was.
+      #
+      # `unmaskable` is the rest of that answer: rules the profile carries that NO frame can be
+      # asked for (its JSON pointers). Without it a pointer-only profile reports `sanitized: 0`
+      # and an agent reads "checked, and clean" off a picture nothing was applied to.
       private def screenshot_json(path : String, fmt : String, frame : Screenshot::Frame,
                                   payload : Bytes, tab : Symbol?) : String
         JSON.build do |j|
@@ -226,6 +230,7 @@ module Gori
             j.field "rows", frame.rows
             j.field "bytes", payload.size
             j.field "sanitized", frame.sanitized
+            j.field "unmaskable", frame.unmaskable
             j.field "tab", tab.try(&.to_s)
           end
         end

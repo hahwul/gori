@@ -334,12 +334,25 @@ module Gori
       # profile was applied" (nil, and nothing is said) and "a profile was applied and matched
       # nothing" (0), which is the difference between a picture that was never checked and one
       # that was.
-      private def self.screenshot_notes(frame : Screenshot::Frame,
-                                        choice : Redact::Policy::Choice,
-                                        io : IO = STDERR) : Nil
+      #
+      # Not private, and `io` is a parameter, for the reason the pure halves below are public:
+      # every branch here is a sentence an operator reads, and the command itself writes them
+      # to a real STDERR that a spec cannot swap.
+      def self.screenshot_notes(frame : Screenshot::Frame,
+                                choice : Redact::Policy::Choice,
+                                io : IO = STDERR) : Nil
         n = frame.sanitized || return
         profile = choice.matcher.try(&.profile)
         name = profile ? profile.name.inspect : "the active profile"
+        # Said BEFORE the count, because it changes what the count means: a pointer rule names
+        # a position in a parsed document and a frame has none, so those rules were carried
+        # here and not applied (`Screenshot::Mask`). `sanitized: 0` under a pointer-only
+        # profile would otherwise read as "checked, and clean".
+        if (u = frame.unmaskable) > 0
+          io.puts "gori run screenshot: #{u} pointer rule#{u == 1 ? "" : "s"} in profile #{name} " \
+                  "#{u == 1 ? "was" : "were"} not applied to a frame — a JSON pointer names a " \
+                  "position in a parsed document, and a rendered screen has none"
+        end
         if n > 0
           io.puts "gori run screenshot: SANITIZED (#{n}) with profile #{name}: " \
                   "#{n} value#{n == 1 ? "" : "s"} masked on the rendered frame " \

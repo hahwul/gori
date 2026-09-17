@@ -55,6 +55,22 @@ describe Gori::Redact::Matcher do
       end
     end
 
+    it "finds an UNQUOTED json scalar under a listed field name" do
+      with_salt do
+        # The structured pass has always covered these — `walk` replaces the value whatever its
+        # JSON type is. The TEXT fallback only knew `"name": "quoted"`, so a number, a bool or
+        # a null went unmasked in exactly the two places the fallback is all there is: a body
+        # that did not parse, and a rendered screen.
+        text = %({"user": "ada", "pin": 9137, "otp": null})
+        found = spans_of(text)
+        found.map { |s| text[s.range] }.should eq(["9137", "null"])
+        found.map(&.rule).uniq!.should eq(["json_field (text fallback)"])
+        # …and the quoted form still comes back from the same rule, with the same span.
+        quoted = %({"pin": "9137"})
+        spans_of(quoted).map { |s| quoted[s.range] }.should eq(["9137"])
+      end
+    end
+
     it "finds a form key whose `=` is padded, the way a pretty-printed body renders it" do
       with_salt do
         # `Pretty.try_form` renders a form body as `key = value`, and `pretty_bodies` is ON at

@@ -156,6 +156,31 @@ describe "MCP screenshot" do
     end
   end
 
+  it "reports the pointer rules no frame could be asked for beside the sanitized count" do
+    with_project_db do |store, project|
+      before = Gori::Redact.salt
+      Gori::Redact.salt = "spec-salt"
+      dest = File.join(Dir.tempdir, "gori-mcp-shot-#{Random.rand(1_000_000)}.txt")
+      begin
+        # A pointer names a position in a PARSED document and a frame has none, so this
+        # profile masks nothing. Reported, because `"sanitized": 0` on its own tells an agent
+        # the picture was checked and came back clean.
+        Gori::Redact::Policy.write_project_scope(store,
+          Gori::Redact::Policy::ProjectScope.new(default: true, active: "ptr",
+            profiles: [Gori::Redact::Profile.new(name: "ptr", json_pointers: ["/a", "/b"])]))
+        r = shot_call(store, project.db_path,
+          %({"cols":60,"rows":20,"format":"txt","path":#{dest.to_json}}))
+        fail "screenshot errored: #{r.text}" if r.is_error
+        payload = JSON.parse(r.text)
+        payload["sanitized"].as_i.should eq(0)
+        payload["unmaskable"].as_i.should eq(2)
+      ensure
+        Gori::Redact.salt = before
+        File.delete?(dest)
+      end
+    end
+  end
+
   it "refuses NO_PROJECT when the server was bound by store rather than by path" do
     with_store do |store|
       # `tools_for` binds a handle and no db_path — exactly the shape an embedder produces.

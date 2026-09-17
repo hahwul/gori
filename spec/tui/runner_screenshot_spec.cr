@@ -303,6 +303,26 @@ describe "Runner#screenshot_capture" do
     end
   end
 
+  it "says how many of the profile's rules no frame could be asked for" do
+    with_runner(form: true, tab: :history, cols: 200) do |runner, session|
+      before = Gori::Redact.salt
+      Gori::Redact.salt = "spec-salt"
+      begin
+        # A pointer names a position in a PARSED document; a screen has none. So this profile
+        # masks nothing, and `SANITIZED (0)` alone would read as "checked, and clean".
+        Gori::Redact::Policy.write_project_scope(session.store,
+          Gori::Redact::Policy::ProjectScope.new(default: true, active: "ptr",
+            profiles: [Gori::Redact::Profile.new(name: "ptr", json_pointers: ["/password"])]))
+        runner.screenshot_capture
+        text = status_text(runner)
+        text.should contain("SANITIZED (0)")
+        text.should contain("1 pointer rule not applied to a frame")
+      ensure
+        Gori::Redact.salt = before
+      end
+    end
+  end
+
   it "writes the format settings:screenshot names" do
     with_runner(tab: :history) do |runner|
       Gori::Settings.screenshot_format = "txt"

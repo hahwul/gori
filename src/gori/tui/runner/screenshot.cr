@@ -97,7 +97,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
     # The export convention: lowercase, the count when a profile ran, and the PATH — a
     # picture the operator cannot find is one they will take again.
-    @toast = "#{CopyMenu.sanitized_title("screenshot written", frame.sanitized)} · #{path}"
+    #
+    # Plus what the count does NOT cover: a profile's JSON pointers name positions in a parsed
+    # document, and a frame has none, so they were carried here and not applied
+    # (`Screenshot::Mask`). Left unsaid, `SANITIZED (0)` under a pointer-only profile reads as
+    # "checked, and clean".
+    note = frame.unmaskable > 0 ? " · #{frame.unmaskable} pointer rule#{frame.unmaskable == 1 ? "" : "s"} not applied to a frame" : ""
+    @toast = "#{CopyMenu.sanitized_title("screenshot written", frame.sanitized)}#{note} · #{path}"
     true
   rescue ex
     @toast = "screenshot failed: #{ex.message}"

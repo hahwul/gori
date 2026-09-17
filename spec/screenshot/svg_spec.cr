@@ -76,6 +76,12 @@ module Gori::Screenshot
         .should contain(%(data-sanitized="0"))
       Svg.render(hand_frame.with(sanitized: 4)).lines.first
         .should contain(%(data-sanitized="4"))
+      # …and the rules that could not be asked of a frame at all, when there are any. Absent
+      # is the ordinary case ("every rule reached this picture"), so it is not written as 0.
+      Svg.render(hand_frame.with(sanitized: 0)).lines.first
+        .should_not contain("data-unmaskable")
+      Svg.render(hand_frame.with(sanitized: 0, unmaskable: 2)).lines.first
+        .should contain(%(data-unmaskable="2"))
     end
 
     it "drops the window chrome for a strip and keeps the cells" do
