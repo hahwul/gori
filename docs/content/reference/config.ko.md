@@ -462,6 +462,30 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 
 나머지는 [Statusline 가이드](/ko/guide/statusline/)에 있습니다. 매 실행이 stdin으로 받는 [JSON 컨텍스트](/ko/guide/statusline/#context), 그대로 붙여 넣을 수 있는 [명령들](/ko/guide/statusline/#presets)과 각각이 만들어낸 행의 사진, 그리고 [명령이 실패했을 때 행이 하는 말](/ko/guide/statusline/#failures)입니다.
 
+### screenshot {#screenshot}
+
+`screenshot` 명령이 어디에 어떤 형식으로 쓰는지에 대한 설정입니다 (커맨드 팔레트 → **Settings: Screenshot**). 모든 값이 기본값이면 섹션이 생략됩니다.
+
+```json
+{
+  "screenshot": {
+    "format": "svg",
+    "dir": "",
+    "png_scale": 2
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `format` | string | `"svg"` | **Screenshot**가 쓰는 형식: `"svg"`(자체 완결형 벡터, 글자가 그대로 선택됨), `"png"`(래스터), `"ansi"`(다시 붙여 넣을 수 있는 터미널 덤프), `"txt"`(평문). 모르는 값은 `"svg"`로 읽음 |
+| `dir` | string | `""` | 스크린샷이 쓰이는 디렉터리. 비어 있으면 소유자 전용(`0700`) 관례 디렉터리인 `$GORI_HOME/screenshots`. `~`와 상대 경로는 확장됨 |
+| `png_scale` | integer | `2` | `png` 형식에서 터미널 셀 한 변당 픽셀 수, `1`-`8`로 제한. 나머지 세 형식은 읽지 않음 |
+
+팔레트 항목 두 개가 이 설정을 씁니다. **Screenshot**는 `dir`에 바로 `<project>-<tab>-<YYYYmmdd-HHMMSS>.<format>`로 쓰고, 같은 초에 이미 있는 이름이면 덮어쓰는 대신 `-2` · `-3` … 접미사를 붙입니다. **Screenshot to…**는 대신 export 카드를 띄우며, 거기서는 **입력한 확장자가 형식을 결정합니다** — `.svg` · `.png` · `.ansi` · `.txt` — 즉 `format`은 미리 채워지는 기본값만 제공합니다. 둘 다 키 바인딩이 없습니다. Global 단일 문자 예산이 이미 닫혔고, 살아 있는 대상의 화면을 그림으로 남기는 일은 의도적인 행위이기 때문입니다.
+
+스크린샷은 메뉴를 내린 화면 그대로를 찍으며, 디스크에 닿기 전에 프로젝트의 [redaction](#redaction) 프로필이 그 위에 칠해집니다. 프로필이 가리겠다고 한 값은 그림에서도 가려지고, 토스트가 몇 개 영역을 가렸는지 알려줍니다. 폭이 충분한 영역에는 가려진 복사·내보내기와 같은 `[REDACTED:…]` 상관 태그가 실립니다.
+
 ### display {#display}
 
 메시지 본문과 화면 요소 설정입니다 (커맨드 팔레트 → **Settings: Display**). 모든 값이 기본값이면 섹션이 생략됩니다.
@@ -820,6 +844,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `companion` | 마스코트 Miss Ring: `enabled`(기본 off), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
 | `layout` | History / Probe / Issues 미리보기, Sitemap 펼침 깊이, 탭 바 번호. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
+| `screenshot` | screenshot 명령이 쓰는 위치(`dir`) · `format` · `png_scale`. 위의 [screenshot](#screenshot) 참고 |
 | `redaction` | 안전한 내보내기 프로파일, 활성 프로파일, 기본 적용 스위치, 자리표시자 salt. 위의 [redaction](#redaction) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, `wrap_lines`(긴 줄 접기, 기본 켜짐), 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |
 
