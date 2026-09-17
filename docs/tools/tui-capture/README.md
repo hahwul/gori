@@ -20,10 +20,12 @@ light theme).
    straight into the throwaway DB, so nothing registers with a public interactsh
    server and no real source IP ends up in a published image (the addresses are
    RFC 5737 documentation ranges).
-2. `ansi2svg.py` parses that ANSI into a cell grid and emits an SVG, placing each
-   run of text with `textLength` + `lengthAdjust` so the monospace grid stays
-   aligned regardless of the viewer's font. It auto-detects the theme's
-   background, so light themes render correctly too.
+2. `gori run screenshot --from-ansi` parses that ANSI into a cell grid and emits
+   an SVG, placing each run of text with `textLength` + `lengthAdjust` so the
+   monospace grid stays aligned regardless of the viewer's font. It auto-detects
+   the theme's background, so light themes render correctly too. This is the
+   same cell model the TUI itself draws into (`Gori::Screenshot::Frame`), so the
+   picture and the program cannot disagree about a glyph's width or a colour.
 
 Nothing here touches your real `~/.gori`.
 
@@ -34,8 +36,10 @@ shards build                       # ensure ./bin/gori exists
 docs/tools/tui-capture/capture.sh  # writes docs/static/images/tui/*.svg
 ```
 
-Requirements: `bash`, `tmux`, `python3`, `curl`, `sqlite3`, `jq` (the statusline scenes'
-commands are jq programs).
+Requirements: `bash`, `tmux`, `curl`, `sqlite3`, `jq` (the statusline scenes'
+commands are jq programs), and a built `./bin/gori`. `python3` is needed only to
+write the statusline scenes' `settings.json` (`write_statusline_settings`); the
+ANSI-to-SVG rendering step no longer uses it.
 
 Set `ONLY` to shoot a subset of the three groups (`scenes themes readme`):
 
@@ -87,7 +91,7 @@ life left in the token under test, a 5xx count, and the first unchecked task in 
 
 `statusline-token.svg`, `statusline-errors.svg` and `statusline-todo.svg` are the gallery on
 the Statusline guide, and they are **strips**: one row, rendered with no window chrome
-(`run_strip` → `ansi2svg.py --tail 1`). Each is the row produced by the command printed above
+(`run_strip` → `gori run screenshot --from-ansi ... --tail 1`). Each is the row produced by the command printed above
 it on that page, so the commands live in `write_statusline_settings` — one place — rather than
 being retyped per scene. All three call `gori run` (jwt · history · notes), which is why the
 pane puts the built binary on PATH: the shot has to be of the command a reader would type,
@@ -110,8 +114,8 @@ only on the first pass, so light and dark show the same flows).
 
 Its window chrome carries the `𝓰𝓸𝓻𝓲` wordmark instead of a `gori · Scene`
 caption — it stands for the tool, not for one screen. Decorative glyphs say
-nothing out loud, so the shot passes `SHOT_ARIA` and `ansi2svg.py` writes that
-as the SVG's `aria-label` instead of the title.
+nothing out loud, so the shot passes `SHOT_ARIA` and `gori run screenshot`
+writes that as the SVG's `aria-label` instead of the title.
 
 It is also the only shot with Miss Ring on (`write_settings <theme> companion`); she
 ships off, and the doc scenes document the default install. Her corner is why
@@ -122,8 +126,30 @@ the bottom or she covers live SIZE/DUR cells.
 
 ```bash
 tmux capture-pane -e -p > frame.ansi          # from any gori tmux session
-python3 ansi2svg.py frame.ansi frame.svg --title "gori · History"
+bin/gori run screenshot --from-ansi frame.ansi -o frame.svg --title "gori · History"
 
 # just the last row, no window chrome — a strip
-python3 ansi2svg.py frame.ansi row.svg --tail 1 --pad 10 --aria "gori statusline row: …"
+bin/gori run screenshot --from-ansi frame.ansi -o row.svg \
+  --tail 1 --pad 10 --aria "gori statusline row: …"
+
+# read the ANSI dump from stdin instead of a file
+tmux capture-pane -e -p | bin/gori run screenshot --from-ansi - -o frame.svg --title "gori · History"
+
+# PNG instead of SVG, supersampled 2x
+bin/gori run screenshot --from-ansi frame.ansi -o frame.png --format png --scale 2
 ```
+
+## What changed
+
+The SVGs in this tree used to be rendered by `ansi2svg.py`; they now come from
+`bin/gori run screenshot --from-ansi`, a byte-exact port of that script for
+everything it understood (see `spec/screenshot/ansi2svg_parity_spec.cr`). Two
+things the python renderer could not see now render correctly:
+
+- Attribute bits it ignored — underline, italic, dim, and strikethrough — are
+  drawn.
+- A wide glyph (CJK, emoji) is measured as two columns, matching the terminal's
+  own cursor math, instead of one.
+
+A frame re-shot after this change can therefore differ from its already-committed
+twin in more than just timestamps, if the scene carries any of the above.
