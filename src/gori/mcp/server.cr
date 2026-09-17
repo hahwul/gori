@@ -424,6 +424,25 @@ module Gori
             j.field("content") do
               j.array do
                 j.object { j.field "type", "text"; j.field "text", result.text }
+                # Anything the tool had that does not fit in a JSON string. Only `screenshot`
+                # produces these today; `extra` is empty for every other tool, so this loop
+                # leaves the one-block shape every existing client parses untouched.
+                #
+                # A block with a mime type is BINARY (`data` is base64 — an image the model can
+                # actually look at); without one it is a second text document, which is how an
+                # SVG/ANSI/plain-text capture rides along beside the JSON summary rather than
+                # being escaped into it.
+                result.extra.each do |c|
+                  j.object do
+                    j.field "type", c.type
+                    if mime = c.mime_type
+                      j.field "data", c.data
+                      j.field "mimeType", mime
+                    else
+                      j.field "text", c.data
+                    end
+                  end
+                end
               end
             end
             if result.is_error && (code = result.error_code)

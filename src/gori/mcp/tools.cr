@@ -76,15 +76,31 @@ module Gori
     class Tools
       Log = ::Log.for("mcp.tools")
 
+      # One EXTRA content block beside a Result's text, for the bytes an MCP `content[]` entry
+      # can carry that a JSON field cannot. `type` is the MCP block type ("image", "text");
+      # `data` is base64 for an image and the document itself for text; `mime_type` nil is
+      # what makes a block text (see `Server#handle_tools_call`, which emits the two shapes).
+      #
+      # MCP's `content` was always an ARRAY and gori has always written exactly one text block
+      # into it, because every tool here answers in JSON. `screenshot{inline:true}` is the
+      # first tool with BYTES to hand back, and an image block is the only way the protocol
+      # carries them — a base64 string stuffed into the JSON text would reach the model as
+      # characters, not as a picture it can look at.
+      record Content, type : String, data : String, mime_type : String? = nil
+
       # One tool outcome. `is_error` maps to the MCP `isError` flag — a tool-level
       # failure the model is meant to see and recover from, distinct from a
       # JSON-RPC protocol error. Error results also carry a stable machine
       # `error_code` (+ optional `field`, `retryable`, `details`) so a caller can
       # apply policy / auto-recovery without parsing the human `text`. The `Server`
       # surfaces these in `structuredContent`; see `err` and `classify`.
+      #
+      # `extra` is appended to `content[]` after the text block. It defaults to empty, which
+      # is every tool but `screenshot` — nothing that already builds a Result has to change.
       record Result, text : String, is_error : Bool = false,
         error_code : String? = nil, field : String? = nil,
-        retryable : Bool = false, details : JSON::Any? = nil
+        retryable : Bool = false, details : JSON::Any? = nil,
+        extra : Array(Content) = [] of Content
       # `part` is "response" (the default, and everything this tool ever served) or "request".
       # The request cursor exists because `get_repeater_context` is the ONLY read-back of a
       # repeater's request and it caps at MCP_REPEATER_REQUEST_MAX — so bytes past the cap
