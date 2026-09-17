@@ -272,29 +272,6 @@ module Gori::Tui
       sync ? @term.sync : @term.render
     end
 
-    # STUB — W1a implements this on TermisuBackend from @front
-    #
-    # `@front`, not `@back`: the front grid is what has actually been PRESENTED (flush advances
-    # it only for cells the terminal accepted), so a snapshot taken from it is a picture of the
-    # screen rather than of a frame half-drawn. Callers therefore render before asking.
-    #
-    # `Color.default?` is the terminal's own default, which has no RGB of its own — it is
-    # whatever the emulator paints. Resolve it to the palette gori intended (`Theme.bg` for a
-    # background, `Theme.text` for a foreground; there is no `Theme.fg`) so the captured frame
-    # carries a colour rather than a deferral nothing downstream can honour.
-    def snapshot : Gori::Screenshot::Frame?
-      bg = Gori::Screenshot::RGB.new(*Theme.bg.to_rgb_components)
-      fg = Gori::Screenshot::RGB.new(*Theme.text.to_rgb_components)
-      cells = Array(Gori::Screenshot::Cell).new(@front.size) do |i|
-        c = @front.unsafe_fetch(i)
-        Gori::Screenshot::Cell.new(c.grapheme,
-          c.fg.default? ? fg : Gori::Screenshot::RGB.new(*c.fg.to_rgb_components),
-          c.bg.default? ? bg : Gori::Screenshot::RGB.new(*c.bg.to_rgb_components),
-          c.attr, c.cont?)
-      end
-      Gori::Screenshot::Frame.new(@w, @h, cells, bg: bg, fg: fg, theme: Theme.active_name)
-    end
-
     # Re-fit both grids to new terminal dimensions. Driven by the caller's Resize-event
     # handler with the event's width/height — the SAME dims termisu already resized its
     # buffer to — so the two never diverge. `@full` forces the next flush to re-forward
