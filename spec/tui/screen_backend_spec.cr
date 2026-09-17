@@ -291,6 +291,121 @@ module Gori::Tui
       Gori::Tui.buffers_identical(eager.buffer, fake.buffer, w, h).should be_nil
     end
 
+    # --- Screenshot::Frame capture -----------------------------------------------------
+    #
+    # `snapshot` is the screenshot subsystem's whole read side, and the things it can get
+    # wrong are all "which state did it read": the half-drawn frame instead of the shown
+    # one, the continuation column's own colours instead of its lead's, termisu's default
+    # instead of the theme's, or a wrap mark from a frame that is gone.
+
+    it "snapshots the frame on screen, not the one being drawn" do
+      fake = FakeTerm.new(12, 3)
+      backend = TermisuBackend.new(fake)
+      screen = Screen.new(backend)
+      Gori::Tui.draw_frame(screen, ["shown"])
+      backend.flush
+
+      # A verb runs partway through the NEXT tick: the fill has happened and the new text
+      # has not. @back holds that; the glass still holds the flushed frame.
+      Gori::Tui.draw_frame(screen, ["drawing now"])
+      frame = backend.snapshot.should_not be_nil
+      frame.cols.should eq(12)
+      frame.rows.should eq(3)
+      frame.row_text(0).rstrip.should eq("shown")
+
+      backend.flush
+      backend.snapshot.not_nil!.row_text(0).rstrip.should eq("drawing now")
+    end
+
+    it "gives a wide glyph a lead and a continuation carrying the lead's colours" do
+      fake = FakeTerm.new(8, 2)
+      backend = TermisuBackend.new(fake)
+      screen = Screen.new(backend)
+      screen.fill(Rect.new(0, 0, 8, 2), Theme.bg)
+      screen.text(1, 0, "中", Theme.red, Theme.accent_bg)
+      backend.flush
+
+      frame = backend.snapshot.not_nil!
+      frame.at(1, 0).grapheme.should eq("中")
+      frame.at(1, 0).cont?.should be_false
+      frame.at(2, 0).cont?.should be_true
+      frame.at(2, 0).grapheme.should eq("")
+      # The band under the glyph has to cover both halves.
+      frame.at(2, 0).bg.should eq(frame.at(1, 0).bg)
+      frame.row_text(0).rstrip.should eq(" 中")
+    end
+
+    it "resolves the terminal default to the ACTIVE theme's canvas and ink" do
+      was = Theme.active_name
+      begin
+        Theme.apply("goriday")
+        fake = FakeTerm.new(6, 2)
+        backend = TermisuBackend.new(fake)
+        backend.flush # forward the untouched grid: every cell is GridCell.blank
+
+        frame = backend.snapshot.not_nil!
+        frame.theme.should eq("goriday")
+        # GridCell.blank is a space with fg Color.white and bg Color.default. The DEFAULT is
+        # the one that must follow the theme — taking termisu's {0,0,0} for it would paint a
+        # paper-white screen's canvas black.
+        frame.bg.should eq(Gori::Screenshot::RGB.of(Theme.bg, Gori::Screenshot::RGB::BLACK))
+        frame.bg.to_hex.should eq("#faf9f7")
+        frame.fg.to_hex.should eq("#33322f")
+        frame.at(0, 0).bg.should eq(frame.bg)
+        frame.blank_row?(0).should be_true
+      ensure
+        Theme.apply(was)
+      end
+    end
+
+    it "carries a frame's wrap marks only until the next frame replaces them" do
+      fake = FakeTerm.new(10, 4)
+      backend = TermisuBackend.new(fake)
+      screen = Screen.new(backend)
+
+      # Marks belong to the frame being drawn, so nothing is visible before the flush.
+      screen.mark_continuation(0, 1, 10)
+      backend.snapshot.not_nil!.continuations.should be_empty
+      backend.flush
+      backend.snapshot.not_nil!.continuations
+        .should eq([Gori::Screenshot::WrapSpan.new(1, 0, 10)])
+
+      # A frame that does not re-report the mark drops it, exactly like an undrawn cell.
+      backend.flush
+      backend.snapshot.not_nil!.continuations.should be_empty
+    end
+
+    it "clips a wrap mark to the grid and drops one that lands off it" do
+      fake = FakeTerm.new(10, 4)
+      backend = TermisuBackend.new(fake)
+      screen = Screen.new(backend)
+      screen.mark_continuation(-3, 2, 20) # overhangs both edges
+      screen.mark_continuation(0, 9, 5)   # past the bottom
+      backend.flush
+      backend.snapshot.not_nil!.continuations
+        .should eq([Gori::Screenshot::WrapSpan.new(2, 0, 10)])
+    end
+
+    it "drops the wrap marks on resize along with the grids they described" do
+      fake = FakeTerm.new(10, 4)
+      backend = TermisuBackend.new(fake)
+      Screen.new(backend).mark_continuation(0, 1, 10)
+      backend.flush
+      backend.snapshot.not_nil!.continuations.size.should eq(1)
+
+      fake.resize(14, 6)
+      backend.resize(14, 6)
+      frame = backend.snapshot.not_nil!
+      frame.cols.should eq(14)
+      frame.continuations.should be_empty
+    end
+
+    it "answers nil from a backend with no front buffer" do
+      # The ~7 recording backends in spec/ and bench/ inherit this, which is why the base
+      # method is a default rather than an abstract one.
+      EagerRefBackend.new(4, 2).snapshot.should be_nil
+    end
+
     it "clips a fill that leaves the screen entirely without writing anything" do
       w, h = 10, 3
       fake = FakeTerm.new(w, h)

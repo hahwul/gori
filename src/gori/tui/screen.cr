@@ -1,4 +1,5 @@
 require "termisu"
+require "../screenshot/frame"
 
 module Gori::Tui
   # The cell sink Screen draws into. TermisuBackend targets the real terminal;
@@ -30,6 +31,28 @@ module Gori::Tui
     # trailing half of a wide glyph the span lands on: the orphaned lead is cleared.
     def fill_span(x : Int32, y : Int32, w : Int32, fg : Color, bg : Color) : Nil
       w.times { |i| put(x + i, y, ' ', fg, bg, Attribute::None) }
+    end
+
+    # What the terminal SHOWS, as a `Screenshot::Frame` — the whole of the screenshot
+    # subsystem's read side.
+    #
+    # The default is `nil`, not an abstract method, and that is deliberate: `Backend` has
+    # roughly seven subclasses across `spec/` and `bench/` whose job is to record draws, and
+    # making this abstract would break every one of them to give a screenshot of a harness
+    # nobody screenshots. `nil` is the honest answer for a backend with no front buffer —
+    # "this surface cannot be captured" — and the caller reports that rather than guessing.
+    def snapshot : Gori::Screenshot::Frame?
+      nil
+    end
+
+    # Record that `w` columns from (x, y) CONTINUE the row above — a soft wrap the caller
+    # performed, which the cell grid itself cannot express (it holds glyphs, not line
+    # structure). The screenshot redactor rejoins those rows before matching, so a secret
+    # broken across two screen rows is still found and masked on both halves.
+    #
+    # A no-op by default: a wrapping pane calls it on every frame, and a backend that keeps
+    # no marks must not have to care. Marks are FRAME-scoped — see `TermisuBackend#flush`.
+    def mark_continuation(x : Int32, y : Int32, w : Int32) : Nil
     end
   end
 
@@ -82,6 +105,46 @@ module Gori::Tui
       @back = Array(GridCell).new(@w * @h) { GridCell.blank }
       @front = Array(GridCell).new(@w * @h) { GridCell.blank }
       @full = true # first flush forwards the whole frame
+      # The wrap marks for the frame being drawn, and for the one on screen — the same
+      # front/back split the cells have, for the same reason: a snapshot taken mid-tick must
+      # describe the frame the terminal is showing, not the half-drawn one.
+      @back_marks = [] of Gori::Screenshot::WrapSpan
+      @front_marks = [] of Gori::Screenshot::WrapSpan
+    end
+
+    # See `Backend#mark_continuation`. Clipped to the grid here rather than trusted, because
+    # a pane that was just resized can still report a span from its previous geometry.
+    def mark_continuation(x : Int32, y : Int32, w : Int32) : Nil
+      return unless y >= 0 && y < @h
+      if x < 0
+        w += x
+        x = 0
+      end
+      w = @w - x if x + w > @w
+      return if w <= 0
+      @back_marks << Gori::Screenshot::WrapSpan.new(y, x, x + w)
+    end
+
+    # The frame the terminal is showing, built from @front.
+    #
+    # @front and NOT @back: `snapshot` is reached from a verb, which runs partway through a
+    # tick, and @back at that moment holds whatever the current frame has drawn so far —
+    # typically a full-screen fill and nothing else. @front is what the last `flush`
+    # forwarded, which is exactly what is on the glass.
+    #
+    # `Theme.bg` / `Theme.text` are what the terminal default MEANS on this screen, and they
+    # are also the frame's canvas and ink, so an unstyled cell and the padding around the
+    # capture come out the same colour. (`Theme.fg` does not exist; body text is `Theme.text`.)
+    def snapshot : Gori::Screenshot::Frame?
+      canvas = Gori::Screenshot::RGB.of(Theme.bg, Gori::Screenshot::RGB::BLACK)
+      ink = Gori::Screenshot::RGB.of(Theme.text, Gori::Screenshot::RGB::WHITE)
+      cells = Array(Gori::Screenshot::Cell).new(@w * @h)
+      @front.each do |g|
+        cells << Gori::Screenshot.cell(g.grapheme, g.fg, g.bg, g.attr, g.cont?,
+          canvas: canvas, ink: ink)
+      end
+      Gori::Screenshot::Frame.new(@w, @h, cells, bg: canvas, fg: ink,
+        theme: Theme.active_name, continuations: @front_marks.dup)
     end
 
     # The dims gori draws against. Returns the TRACKED size (updated only via `resize`,
@@ -202,6 +265,10 @@ module Gori::Tui
         end
       end
       @full = false
+      # The frame just forwarded is now the one on screen, so its wrap marks become the
+      # front's and the next frame starts with none. A mark that is not re-reported by the
+      # pane that drew it is therefore gone, exactly like a cell that is not re-drawn.
+      @front_marks, @back_marks = @back_marks, [] of Gori::Screenshot::WrapSpan
       sync ? @term.sync : @term.render
     end
 
@@ -215,6 +282,10 @@ module Gori::Tui
       @back = Array(GridCell).new(w * h) { GridCell.blank }
       @front = Array(GridCell).new(w * h) { GridCell.blank }
       @full = true
+      # Both grids were just discarded; the marks describe rows in them and are no more
+      # valid than the cells were. The next frame re-reports its own.
+      @back_marks.clear
+      @front_marks.clear
     end
   end
 
@@ -626,6 +697,21 @@ module Gori::Tui
 
     def cursor(x : Int32, y : Int32) : Nil
       @desired_cursor = {x, y}
+    end
+
+    # A wrapping pane says here that `w` columns from (x, y) continue the row above. Bounds
+    # checked like every other write on this surface, then handed to the backend (which
+    # clips again against ITS grid — `Screen`'s dims are sampled at construction and a resize
+    # between the two is exactly the case that needs both).
+    def mark_continuation(x : Int32, y : Int32, w : Int32) : Nil
+      return unless y >= 0 && y < @height
+      if x < 0
+        w += x
+        x = 0
+      end
+      w = @width - x if x + w > @width
+      return if w <= 0
+      @backend.mark_continuation(x, y, w)
     end
 
     # Draws a single-line editable field at (x, y): the committed `value` with an

@@ -62,6 +62,12 @@ module Gori::Screenshot
     def ==(other : RGB) : Bool
       @r == other.r && @g == other.g && @b == other.b
     end
+
+    # The two ends of the contrast axis. Named because they are used as ANSWERS, not as
+    # colours: `Chrome#ink` picks one to mix toward, and a live capture hands them to
+    # `RGB.of` as the fallback for a theme colour that is somehow the terminal default.
+    BLACK = new(0_u8, 0_u8, 0_u8)
+    WHITE = new(255_u8, 255_u8, 255_u8)
   end
 
   # One terminal cell as it was SHOWN — the unit every renderer consumes.

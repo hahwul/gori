@@ -56,7 +56,7 @@ module Gori::Screenshot
 
     # The colour to mix TOWARD for contrast: white on a dark canvas, black on a light one.
     def ink(bg : RGB) : RGB
-      dark?(bg) ? RGB.new(255_u8, 255_u8, 255_u8) : RGB.new(0_u8, 0_u8, 0_u8)
+      dark?(bg) ? RGB::WHITE : RGB::BLACK
     end
 
     # The title bar: one notch off the canvas, enough to read as a separate surface.
