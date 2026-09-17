@@ -468,8 +468,14 @@ module Gori
         end
         unless @form.empty?
           alt = @form.keys.map { |k| Regex.escape(k) }.join('|')
-          # `name=value` as it appears in a query string, a form body or a cookie run.
-          rules << {Regex.new("(?:\\A|[&?;\\s])(?:#{alt})=([^&;\\s\"']*)",
+          # `name=value` as it appears in a query string, a form body or a cookie run — and
+          # `name = value`, which is how a form body is DRAWN: `Pretty.try_form` reflows the
+          # pairs with spaces around the `=`, and `pretty_bodies` is on at the factory. A rule
+          # that required a bare `=` therefore matched what the copy menu parses and nothing on
+          # the screen a screenshot masks. Horizontal space only: a newline between the name
+          # and its value is not a pair any of these three shapes writes, and allowing one
+          # would let a rule reach across the line break into unrelated text.
+          rules << {Regex.new("(?:\\A|[&?;\\s])(?:#{alt})[ \\t]*=[ \\t]*([^&;\\s\"']*)",
             Regex::Options::IGNORE_CASE), "form_key (text fallback)"}
         end
         rules

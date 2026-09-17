@@ -55,6 +55,23 @@ describe Gori::Redact::Matcher do
       end
     end
 
+    it "finds a form key whose `=` is padded, the way a pretty-printed body renders it" do
+      with_salt do
+        # `Pretty.try_form` renders a form body as `key = value`, and `pretty_bodies` is ON at
+        # the factory — so this spelling, not `key=value`, is what is actually on the screen a
+        # screenshot masks. A rule that required a bare `=` matched the copy menu's structured
+        # pass and nothing on the glass.
+        text = "user = ada\npassword = correct-horse"
+        found = spans_of(text)
+        found.map { |s| text[s.range] }.should eq(["correct-horse"])
+        found.map(&.rule).should eq(["form_key (text fallback)"])
+        # …and the unpadded spelling still matches, because a query string and a cookie run
+        # never grew a space.
+        tight = "a=1&password=hunter2"
+        spans_of(tight).map { |s| tight[s.range] }.should eq(["hunter2"])
+      end
+    end
+
     it "names the same regions `value` replaces" do
       with_salt do
         text = %({"password": "hunter2"} #{JWT})

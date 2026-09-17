@@ -19,6 +19,24 @@ Spec.after_suite { FileUtils.rm_rf(SHOT_CA) }
 # reads as a truncated secret.
 private SECRET = "correct-horse-battery-staple-01"
 
+# The same secret in the shape the SCREEN draws it. `Pretty.try_form` reflows a form body to
+# `key = value` and `pretty_bodies` is on at the factory, so a mask that only knew `key=value`
+# found nothing here — while the copy menu, which parses the raw bytes, masked it.
+private def seed_form_flow(store) : Nil
+  body = "user=ada&password=#{SECRET}"
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: "shots.test", port: 443,
+    method: "POST", target: "/session", http_version: "HTTP/1.1",
+    head: "POST /session HTTP/1.1\r\nHost: shots.test\r\n" \
+          "Content-Type: application/x-www-form-urlencoded\r\n\r\n".to_slice,
+    body: body.to_slice, source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 302,
+    head: "HTTP/1.1 302 Found\r\nLocation: /home\r\n\r\n".to_slice,
+    body: nil, content_type: nil))
+  store.flush
+end
+
 private def seed_secret_flow(store) : Nil
   body = %({"user":"ada","password":"#{SECRET}"})
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -91,14 +109,14 @@ end
 
 # A booted Runner over a fresh project. `listen: false` keeps it socket-free (no capture lock,
 # no bind) — the whole reason a TUI shell can be driven from a spec at all.
-private def with_runner(*, seed = false, tab : Symbol? = nil, cols = 140, &)
+private def with_runner(*, seed = false, form = false, tab : Symbol? = nil, cols = 140, &)
   root = File.tempname("gori-shot")
   Dir.mkdir_p(root)
   FileUtils.rm_rf(Gori::Paths.screenshots_dir) # each example owns the convention dir
   project = Gori::ProjectRegistry.new(root).create("shotproj")
-  if seed
+  if seed || form
     store = Gori::Store.open(project.db_path)
-    seed_secret_flow(store)
+    form ? seed_form_flow(store) : seed_secret_flow(store)
     store.close
   end
   begin
@@ -259,6 +277,28 @@ describe "Runner#screenshot_capture" do
         svg.should contain("[REDACTED:")
         # …and the operator is told, with the count, in the same words a redacted copy uses.
         status_text(runner).should contain("SANITIZED (")
+      end
+    end
+  end
+
+  it "masks a form body drawn the way `pretty` reflows it, and counts it" do
+    # Wide enough for the toast's own text: the count is the assertion, and the status strip
+    # truncates. `pretty_bodies` is left at its factory ON, because that is the defect — the
+    # screen says `password = …` and the derived form rule only knew `password=…`, so the
+    # picture went to disk with the secret on it while the toast said SANITIZED (0).
+    with_runner(form: true, tab: :history, cols: 200) do |runner, session|
+      redacting(session.store) do
+        runner.feed(key(Termisu::Input::Key::Enter))
+        runner.settle_reads
+        drawn = status_text(runner)
+        drawn.should contain("password = ") # the PRETTY spelling really is what is drawn
+        drawn.should contain(SECRET)
+
+        runner.screenshot_capture
+        svg = File.read(only_shot)
+        svg.should_not contain(SECRET)
+        svg.should contain("[REDACTED:")
+        status_text(runner).should contain("SANITIZED (1)")
       end
     end
   end
