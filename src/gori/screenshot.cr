@@ -5,8 +5,9 @@
 # `frame.cr` is the model (a grid of styled cells plus the whole-screen facts), `chrome.cr`
 # the window dressing derived from the frame's own colours, `font.cr` the embedded bitmap
 # font, and `png.cr` a stdlib-only PNG encoder over the two. The capture side and the other
-# serializers hang off the same model. `font.cr` is NOT a stub — the line requiring it is what
-# the core package has to keep.
+# serializers hang off the same model. `font.cr` and `png.cr` are NOT stubs — the two lines
+# requiring them are what the core package has to keep.
 require "./screenshot/frame"
 require "./screenshot/chrome"
 require "./screenshot/font"
+require "./screenshot/png"
