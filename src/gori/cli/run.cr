@@ -81,6 +81,7 @@ require "./run/grpc"
 require "./run/rewriter"
 require "./run/colormarker"
 require "./run/views"
+require "./run/screenshot"
 require "./run/project"
 
 module Gori
@@ -1567,6 +1568,12 @@ module Gori
         end
       end
 
+      # `--format` as a symbol, refused when this command does not offer it.
+      #
+      # `svg` / `png` / `ansi` / `txt` are `gori run screenshot`'s. `txt` is deliberately NOT a
+      # spelling of `text`: `text` is the human table every read command prints, and `txt` is a
+      # frame's glyphs stripped of colour — two different documents that have to stay separately
+      # nameable.
       private def self.parse_format(v : String, allowed : Array(Symbol)) : Symbol
         sym = case v.downcase
               when "text"           then :text
@@ -1583,6 +1590,10 @@ module Gori
               when "paths"          then :paths
               when "markdown", "md" then :markdown
               when "sarif"          then :sarif
+              when "svg"            then :svg
+              when "png"            then :png
+              when "ansi"           then :ansi
+              when "txt"            then :txt
               else                       abort "gori run: unknown --format '#{v}'"
               end
         abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})" unless allowed.includes?(sym)
