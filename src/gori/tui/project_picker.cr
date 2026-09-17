@@ -103,10 +103,10 @@ module Gori::Tui
     # the update notice but in red, because without it a failed open is indistinguishable
     # from an empty gori: the operator lands on "no projects yet" and concludes their
     # capture is gone. See App#open_and_run.
-    def initialize(@term : Termisu, @registry : ProjectRegistry, notice : String? = nil)
+    def initialize(@term : TerminalPort, @registry : ProjectRegistry, notice : String? = nil)
       @open_error = notice
-      # Held as the base Backend: TermisuBackend is generic over the terminal type.
-      @backend = TermisuBackend.new(@term).as(Backend)
+      # The port builds its own backend — see `TerminalPort#make_backend`.
+      @backend = @term.make_backend
       @projects = @registry.list
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0

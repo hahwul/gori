@@ -158,10 +158,10 @@ module Gori::Tui
   class Runner < Verb::ExecContext
     include Host # the narrow facade per-tab controllers drive the shell through
 
-    def initialize(@session : Session, @term : Termisu)
-      # Held as the base Backend: TermisuBackend is generic over the terminal type so
-      # specs can drive its diff against a double (Termisu.new needs a live /dev/tty).
-      @backend = TermisuBackend.new(@term).as(Backend)
+    def initialize(@session : Session, @term : TerminalPort)
+      # The port builds its own backend, and hands it back as the base Backend — see
+      # `TerminalPort#make_backend` for why the generic instantiation belongs there.
+      @backend = @term.make_backend
       @keymap = Hotkeys.build_keymap(@session.registry) # base verbs + OS profile + user overrides
       TrafficEmptyState.registry = @session.registry    # the empty-state cards' chord chips
       @scope = @session.scope

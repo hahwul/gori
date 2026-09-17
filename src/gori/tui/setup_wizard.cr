@@ -135,9 +135,9 @@ module Gori::Tui
       Review # recap + finish
     end
 
-    def initialize(@term : Termisu, @tour_handoff : Tutorial::Handoff = Tutorial::Handoff::Shell)
-      # Held as the base Backend: TermisuBackend is generic over the terminal type.
-      @backend = TermisuBackend.new(@term).as(Backend)
+    def initialize(@term : TerminalPort, @tour_handoff : Tutorial::Handoff = Tutorial::Handoff::Shell)
+      # The port builds its own backend — see `TerminalPort#make_backend`.
+      @backend = @term.make_backend
       @step = Step::Bind
       # Bind step — staged values prefilled from the PERSISTED global, which is deliberately
       # NOT where a `gori tui -l/-p` override lives (that is `Settings.cli_bind_*`, a
