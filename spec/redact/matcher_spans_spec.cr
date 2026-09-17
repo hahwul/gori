@@ -88,17 +88,40 @@ describe Gori::Redact::Matcher do
       end
     end
 
-    it "names the same regions `value` replaces" do
+    it "mints the tag `value` wrote, for the text each span slices back to" do
       with_salt do
+        # NOT "the same regions": the fixture is `{…} <jwt>`, which is not valid JSON, so both
+        # engines take the TEXT pass and the two rule sets are trivially the same. What it
+        # actually proves is the pairing — the tag in `value`'s output is the tag for the text
+        # this span's range slices out — which is what a screenshot needs to be comparable with
+        # a copied body.
         text = %({"password": "hunter2"} #{JWT})
         matcher = Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE)
         replaced = matcher.value(text).text
         matcher.spans(text).each do |span|
-          # The tag `value` wrote for this region is in its output, and the region this span
-          # names is the text that produced it.
           replaced.should contain(span.placeholder)
           Gori::Redact.placeholder(text[span.range]).should eq(span.placeholder)
         end
+      end
+    end
+
+    it "agrees with `value` over a body the STRUCTURED pass parses" do
+      with_salt do
+        # The two engines really can diverge: `value` walks the parsed document and `spans`
+        # only ever sees text. So over a VALID body — one quoted value and one unquoted scalar,
+        # the second being what the text fallback used to miss entirely — the placeholder each
+        # writes for a field has to be the same string, or a screenshot and a copied body of
+        # one flow carry different tags for one secret and nothing correlates.
+        matcher = Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE)
+        text = %({"user":"ada","password":"hunter2","pin":9137})
+        JSON.parse(text) # the premise: this one really does parse
+        replaced = matcher.value(text).text
+
+        found = matcher.spans(text)
+        found.map { |s| text[s.range] }.should eq(["hunter2", "9137"])
+        found.each { |span| replaced.should contain(span.placeholder) }
+        replaced.should_not contain("hunter2")
+        replaced.should_not contain("9137")
       end
     end
 
