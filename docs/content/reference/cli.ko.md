@@ -91,6 +91,7 @@ gori run <subcommand> [verb] [options]
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | 저장된 History 뷰 관리: 목록을 좁히는 이름 붙은 QL 쿼리를 렌즈로 적용 |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | 세션 슬롯: 전송이나 Authorize 실행이 그 이름으로 나가는 신원 |
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
+| `screenshot` (`shot`) | 터미널 없이 TUI를 그려 SVG / PNG / ANSI / 텍스트로 저장 |
 | `project [list]` | 알려진 프로젝트 목록 |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
 | `project delete <name>` | 프로젝트와 그 안에 캡처된 모든 것 삭제 (`--yes`로 확인) |
@@ -1172,6 +1173,48 @@ gori run views rm 'acme 5xx' --scope global
 기본 제공 뷰는 편집도 삭제도 되지 않으며, 저장된 뷰가 기본 뷰의 이름을 가져갈 수도 없습니다. 가려 버리면 `--view`로 그 기본 뷰에 다시 닿을 수 없기 때문입니다.
 
 지금 보고 있는 뷰를 지우면 그 프로젝트는 `All`로 돌아갑니다. 지운 *글로벌* 뷰를 가리키던 다른 프로젝트의 포인터는 무해하게 남습니다. id는 단조 증가 카운터에서 나오고 재사용되지 않으므로 다른 뷰가 그 자리를 물려받을 수 없습니다. 대화형 피커는 [프록시 & History](/ko/guide/proxy/#views)를 보세요.
+
+### run screenshot {#run-screenshot}
+
+**터미널 없이** TUI를 그려 프레임을 파일로 씁니다. SVG나 PNG 그림, 다시 읽어 들일 수 있는 ANSI 덤프, 또는 평문입니다. 목업이 아니라 실제로 출시되는 껍데기입니다. `gori`가 띄우는 것과 같은 Runner를 오프스크린 터미널에 붙여 띄운 뒤 그 프레임을 받아 오므로, 버그 리포트나 README에 붙는 그림은 언제나 실제로 나간 버전입니다. 프로젝트는 **읽기 전용**으로 열립니다. 포트를 잡지 않고, 캡처 잠금도 가져가지 않으며, 활성 프로젝트 포인터도 건드리지 않습니다. 헤드리스 샷의 상태줄에서 캡처 칩이 `off`로 보이는 이유가 이것입니다. `-o` 없이 실행하면 `<GORI_HOME>/screenshots`에 `<프로젝트>-<탭>-<타임스탬프>.<확장자>`로 떨어지고, 쓴 경로를 stdout에 찍습니다.
+
+```bash
+gori run screenshot                                              # 현재 프로젝트의 SVG
+gori run screenshot --tab history --size 132x38 -o history.svg
+gori run screenshot --tab repeater --keys 'Down Down Enter' --title 'Repeater · acme'
+gori run screenshot --format png --scale 2 -o docs/shot.png
+gori run screenshot --format ansi --tail 1 -o statusline.ansi    # 한 줄만, 창 테두리 없이
+gori run screenshot --format txt -o - | head -5                  # 평문 글리프를 stdout으로
+tmux capture-pane -e -p -t gori | gori run screenshot --from-ansi - -o remote.svg
+gori run screenshot --redact --tab history -o safe.svg           # 프레임 위의 비밀값을 가리고
+```
+
+| Option | Description |
+|--------|-------------|
+| `--project=NAME` | 그릴 프로젝트(기본값: 가장 최근 활성). `--db PATH`가 대안이며 둘 다 넘기면 사용 오류입니다 |
+| `--db=PATH` | 그릴 SQLite db 파일을 직접 지정 |
+| `--tab=NAME` | 그리기 전에 열 탭을 카탈로그 이름(`history`, `repeater`, `probe`, …)으로. 숫자는 거절합니다. 탭 바의 번호는 사용자가 정한 표시 탭 설정이라 `--tab 3`은 다른 머신에서 다른 패널을 찍게 됩니다 |
+| `--keys=SCRIPT` | 그리기 전에 보낼 키. tmux `send-keys` 문법입니다(`C-p "acme" Enter Down Down`, 그리고 `SLEEP<초>`). **이동**을 위한 것입니다. 프레임은 지금 이 순간의 저장소를 찍으므로, Repeater 전송이나 스캔 같은 비동기 작업은 기다려 주지 않고 진행 중인 모습으로 찍힙니다 |
+| `--size=WxH` | 그릴 터미널 크기(기본값 `132x38`, 양쪽 최대 1000). 읽을 수 없는 값은 기본값으로 떨어지지 않고 거절합니다 |
+| `--theme=NAME` | 그릴 테마. 설치된 목록과 대조해 검사합니다(기본값: 설정된 테마) |
+| `--format=FMT` | `svg`(기본값), `png`, `ansi`, `txt` |
+| `-o`, `--out=PATH` | screenshots 디렉터리 대신 여기에 씁니다. `-`는 stdout이며, PNG 바이트를 터미널로 쓰는 것은 거절하므로 리다이렉트하거나 경로를 넘기세요 |
+| `--force` | 기존 파일 덮어쓰기. 없으면 그리기 전에 먼저 거절합니다 |
+| `--title=T` | 창 제목 표시줄의 텍스트(기본값: 프레임 자신의 제목) |
+| `--aria=A` | 스크린 리더가 읽을 라벨. `svg` 전용입니다 — 장식용 제목은 리더에게 아무 뜻도 되지 않습니다 |
+| `--font-size=F` | SVG 셀 폰트 크기(px, 기본값 `15`). `svg` 전용 |
+| `--pad=P` | SVG 여백(px, 기본값 `18`). `svg` 전용 |
+| `--tail=N` | 비어 있지 않은 마지막 `N`행만 남깁니다. SVG에서는 창 테두리도 함께 뗍니다. 한 줄짜리 조각이 조각처럼 보이는 이유입니다 |
+| `--scale=N` | PNG 슈퍼샘플, `1`~`8`(기본값 `2`). `png` 전용 |
+| `--font=PATH` | 글리프를 그릴 폰트 파일. `png` 전용 |
+| `--redact[=PROFILE]` / `--no-redact` | 쓰기 전에 레닥션 프로필로 프레임의 셀을 가립니다. 진행 중인 점검의 화면도 공개할 수 있게 됩니다. 가린 개수는 stderr로 보고합니다 |
+| `--from-ansi=FILE` | 프로젝트를 그리는 대신 `tmux capture-pane -e -p` 덤프를 읽어 들입니다(`-`는 stdin) |
+
+"X는 포맷 Y에서만"에 해당하는 조합은 무시하지 않고 **이름을 불러 거절**합니다. 포맷이 읽지도 않은 플래그를 삼키면, 멀쩡해 보이는데 요청한 것만 빠진 그림이 나오기 때문입니다. `--from-ansi`도 같습니다. 이 플래그는 명령의 프로젝트 쪽 절반을 꺼 버리므로 `--project`·`--db`·`--tab`·`--keys`·`--theme`는 조용히 버리지 않고 거절합니다.
+
+**덤프 읽어 들이기.** `--from-ansi`는 *다른* 터미널에서 돌고 있는 gori를, 또는 이미 끝난 세션을 찍는 방법입니다. 캡처는 그것을 그린 터미널이 이미 한 번 프레이밍한 결과이므로 행 구성은 덤프 자신의 것입니다. 폭은 `--size`를 주지 않는 한 가장 긴 행에서 오고, 행 수는 언제나 덤프의 줄 수에서 옵니다(`--size`의 높이가 아닙니다). 아무도 타이핑하지 않은 폭으로 덤프를 다시 프레이밍하면 첫 번째 긴 행 아래가 전부 밀립니다.
+
+**레닥션.** `--redact`는 그려진 셀 위에 프로젝트 프로필을 칠합니다. 화면 두 행에 걸쳐 접힌 비밀값도 포함하며, 그런 값은 반쪽만으로는 어느 쪽도 매칭되지 않습니다. 저장소는 캡처된 바이트를 그대로 갖고 있고, 바뀌는 것은 그림뿐입니다. `--redact-preview`는 여기서 거절합니다. 프레임은 셀 단위로 가려지므로 값별 목록을 찍을 방법이 없고, stderr의 개수가 그 답입니다.
 
 ### run project {#run-project}
 
