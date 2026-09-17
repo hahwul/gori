@@ -34,6 +34,21 @@ module Gori::Tui
   # session's layer in place (or nil'd it on close) would silently wipe every `$BIND.NAME` an
   # agent had extracted. `with_globals` saves and restores every one of them.
   #
+  # NOT SAFE ALONGSIDE A CONCURRENT FIBER THAT READS THOSE GLOBALS, and that is the sharp edge.
+  # `with_globals` restores on the way OUT, and in between this method yields many times —
+  # `settle_reads`, a `SLEEP` step's `sleep`, every store round-trip. Whatever the scheduler
+  # runs at one of those points reads the RENDER session's globals rather than the caller's: an
+  # empty `Bindings`, this project's theme, this session's network settings. For the duration
+  # of a render, this process has one identity and it is the render's.
+  #
+  # A shelf of class-level globals cannot be made per-fiber from the outside, so the CALLER
+  # owns that. `gori run screenshot` is a whole process doing nothing else. The TUI verb draws
+  # on the same fiber that would have drawn the frame anyway. `gori mcp` runs fuzz/mine/
+  # discover/authorize/sequence on spawned fibers and therefore REFUSES to render while one is
+  # live (`MCP::Tools#screenshot`) — a job fiber sending under the render's empty bindings
+  # would replay as the wrong identity and never say so. A fourth caller has to answer the
+  # same question before it calls this.
+  #
   # Two things it deliberately does NOT do: it never calls `Paths.write_active_project` (a
   # picture of a project is not a decision to work in it — that is `run`'s, and it is what
   # `gori mcp --use-active-project` follows), and it never announces agent presence. One thing

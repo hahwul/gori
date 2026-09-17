@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/mcp_harness"
 require "file_utils"
+require "socket"
 
 # The MCP `screenshot` tool: draw the real TUI over the bound project, write a file, and
 # optionally hand the picture back in the result.
@@ -32,6 +33,22 @@ private def with_project_db(&)
     store.close
     FileUtils.rm_rf(root)
   end
+end
+
+# A local origin for the one example that needs a REAL running job. Answers immediately; the
+# example never lets the job fiber reach it before the assertion, which is the point.
+private def shot_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      Gori::Proxy::Codec::Http1.read_head(conn)
+      conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+      conn.flush
+      conn.close
+    end
+  end
+  port
 end
 
 private def shot_tools(store, db_path : String) : Gori::MCP::Tools
@@ -211,6 +228,48 @@ describe "MCP screenshot" do
       r.error_code.should eq("INVALID_ARGUMENT")
       r.field.should eq("keys")
       r.text.should contain("one SLEEP may pause at most")
+    end
+  end
+
+  it "refuses to draw while a background job fiber is live, and writes nothing" do
+    port = shot_origin
+    with_project_db do |store, project|
+      dest = File.join(Dir.tempdir, "gori-mcp-shot-#{Random.rand(1_000_000)}.txt")
+      tools = shot_tools(store, project.db_path)
+      begin
+        started = tools.call("fuzz_start", JSON.parse({
+          "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+          "url"            => "http://127.0.0.1:#{port}",
+          "payloads"       => [{"list" => ["a", "b", "c"]}],
+          "allow_unscoped" => true,
+        }.to_json))
+        fail "fuzz_start errored: #{started.text}" if started.is_error
+        job_id = JSON.parse(started.text)["job_id"].as_s
+
+        # No `sleep` between these two calls, deliberately: the job fiber has not been
+        # scheduled yet, which is exactly the window this gate exists for. A render would swap
+        # `Env.layer` out from under that fiber's first send.
+        r = tools.call("screenshot",
+          JSON.parse(%({"cols":60,"rows":20,"format":"txt","path":#{dest.to_json}})))
+        r.is_error.should be_true
+        r.error_code.should eq("PROJECT_BUSY")
+        r.retryable.should be_true
+        r.text.should contain("binding layer")
+        File.exists?(dest).should be_false
+
+        # …and it is exactly a wait: once the job lands, the same call draws.
+        60.times do
+          sleep 0.02.seconds
+          status = JSON.parse(tools.call("fuzz_status", JSON.parse({job_id: job_id}.to_json)).text)
+          break unless status["status"].as_s == "running"
+        end
+        ok = tools.call("screenshot",
+          JSON.parse(%({"cols":60,"rows":20,"format":"txt","path":#{dest.to_json}})))
+        fail "screenshot errored after the job: #{ok.text}" if ok.is_error
+        File.exists?(dest).should be_true
+      ensure
+        File.delete?(dest)
+      end
     end
   end
 

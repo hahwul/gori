@@ -49,6 +49,34 @@ module Gori
                      "call switch_project first", "NO_PROJECT")
         end
 
+        # SECOND, and still before any side effect: a render is not safe to take while one of
+        # this server's job fibers is live.
+        #
+        # `Headless.render` swaps a shelf of process globals for the duration of the draw and
+        # puts them back after — `Env.layer` most sharply. That is correct for a call that
+        # RUNS TO COMPLETION without yielding, and the render does not: it settles reads, it
+        # sleeps a `SLEEP` step, it round-trips the store. Every one of those is a yield point,
+        # and the fibers that get scheduled there are `spawn(name: "mcp-…")`'s — fuzz, mine,
+        # discover, authorize, sequence. A job fiber that samples `Env.layer` mid-render sees
+        # the RENDER session's empty bindings, so `$BIND.NAME` expands to nothing and no
+        # session-slot overlay is applied: an authorize replay goes out as the wrong identity,
+        # silently, and the run's verdict is about a request nobody asked for.
+        #
+        # Those fibers are the only concurrency there is. `Server` reads on one fiber and runs
+        # requests on ONE worker, in arrival order (see `Server#work_loop`), so a synchronous
+        # tool call cannot overlap this one — only a job started by an earlier call can.
+        #
+        # Refused rather than serialized: a render is an observation an agent can simply take
+        # again, and PROJECT_BUSY/retryable is the answer every other "wait for the jobs" gate
+        # on this surface gives (`switch_project`, `delete_project`).
+        if jobs_running?
+          return busy("cannot draw the TUI while a background job is running " \
+                      "(fuzz/mine/discover/authorize/sequence): a headless render swaps this " \
+                      "process's binding layer for its duration, and the job's next send would " \
+                      "go out under the render's empty bindings. Wait for it, or stop it with " \
+                      "stop_job; list_jobs names what is running")
+        end
+
         a = screenshot_args(h)
         return a if a.is_a?(Result)
 
@@ -259,7 +287,10 @@ module Gori
           "every shot. Returns the path it wrote; pass inline:true to also get the picture " \
           "back in this result (an image block for png, the document as text for svg/ansi/txt). " \
           "Use it to SEE what an operator would see — a pane's layout, a chart, a rendered " \
-          "issue — when the JSON tools give you rows but not the shape." do |s|
+          "issue — when the JSON tools give you rows but not the shape. REFUSED while any " \
+          "fuzz/mine/discover/authorize/sequence job is running: drawing swaps this process's " \
+          "binding layer for the duration and that job's sends would go out under the wrong " \
+          "identity — wait for it or stop_job first." do |s|
           s.field "tab", enumprop("tab to open before drawing (default: the project's own home tab)",
             Tui::Chrome::TABS.map(&.first.to_s))
           s.field "keys", strprop("keys to send before drawing, in tmux send-keys grammar " \
