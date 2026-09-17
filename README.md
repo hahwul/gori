@@ -61,10 +61,12 @@ surface limits explicitly.
 - Command palette (`Ctrl-P`) and context space menu (`Space`) reach every action
 - Rebindable hotkeys and switchable colour themes
 - Mouse support, multi-line editing, and go-to-line navigation
+- Screenshot any pane to SVG / PNG / ANSI / text, redacted by your project's profile before it hits disk
 
 ### Headless & Scriptable
 - `gori run` exposes the core project and testing workflows for non-interactive use
 - MCP server (`gori mcp`) exposes those workflows to AI agents (it does not start a capture proxy)
+- `gori run screenshot` and the MCP `screenshot` tool render the same TUI headlessly to a file, for reports and agents that need to *see* a pane, not just read its rows
 
 </details>
 
