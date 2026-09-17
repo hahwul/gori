@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/png_reader"
 require "file_utils"
 
 include Gori::Tui
@@ -34,6 +35,23 @@ private def seed_form_flow(store) : Nil
     flow_id: id, status: 302,
     head: "HTTP/1.1 302 Found\r\nLocation: /home\r\n\r\n".to_slice,
     body: nil, content_type: nil))
+  store.flush
+end
+
+# A flow whose request body carries U+03A9. An ordinary printable letter — the body panes scrub
+# the private-use area to a space, so a PUA marker never reaches the grid — that appears nowhere
+# in gori's own chrome, so the one cell drawing it is unambiguous and an external `.hex` that
+# redefines it shows up in the rasterized pixels and nowhere else.
+private def seed_glyph_flow(store) : Nil
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: "shots.test", port: 443,
+    method: "POST", target: "/echo", http_version: "HTTP/1.1",
+    head: "POST /echo HTTP/1.1\r\nHost: shots.test\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+    body: "MARK\u{03A9}MARK".to_slice, source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200,
+    head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+    body: "ok".to_slice, content_type: "text/plain"))
   store.flush
 end
 
@@ -109,14 +127,19 @@ end
 
 # A booted Runner over a fresh project. `listen: false` keeps it socket-free (no capture lock,
 # no bind) — the whole reason a TUI shell can be driven from a spec at all.
-private def with_runner(*, seed = false, form = false, tab : Symbol? = nil, cols = 140, &)
+private def with_runner(*, seed = false, form = false, glyph = false,
+                        tab : Symbol? = nil, cols = 140, &)
   root = File.tempname("gori-shot")
   Dir.mkdir_p(root)
   FileUtils.rm_rf(Gori::Paths.screenshots_dir) # each example owns the convention dir
   project = Gori::ProjectRegistry.new(root).create("shotproj")
-  if seed || form
+  if seed || form || glyph
     store = Gori::Store.open(project.db_path)
-    form ? seed_form_flow(store) : seed_secret_flow(store)
+    if glyph
+      seed_glyph_flow(store)
+    else
+      form ? seed_form_flow(store) : seed_secret_flow(store)
+    end
     store.close
   end
   begin
@@ -179,6 +202,39 @@ end
 
 private def type_into(runner : Gori::Tui::Runner, text : String) : Nil
   text.each_char { |c| runner.feed(key(Termisu::Input::Key::Unknown, c)) }
+end
+
+# The grid coordinates of the one cell drawing `grapheme`. Fails loudly rather than returning
+# nil: an example that cannot find its marker on screen is asserting nothing.
+private def cell_at(frame : Gori::Screenshot::Frame, grapheme : String) : {Int32, Int32}
+  (0...frame.rows).each do |y|
+    (0...frame.cols).each do |x|
+      return {x, y} if frame.at(x, y).grapheme == grapheme
+    end
+  end
+  fail "#{grapheme.inspect} is not drawn anywhere on the frame"
+end
+
+private def shot_rgb(color : Gori::Screenshot::RGB) : {UInt8, UInt8, UInt8}
+  {color.r, color.g, color.b}
+end
+
+# An external Unifont `.hex` on `$GORI_SCREENSHOT_FONT`, torn down after. `Font`'s merged fonts
+# are process-wide and the suite is one process, so both the env var and the font table have to
+# go back the way they were found (`spec/screenshot/font_spec.cr`'s `after_each`).
+private def with_screenshot_font(hex : String, &)
+  path = File.tempname("gori-shot-font", ".hex")
+  File.write(path, hex)
+  before = ENV["GORI_SCREENSHOT_FONT"]?
+  ENV["GORI_SCREENSHOT_FONT"] = path
+  Gori::Screenshot::Font.reset!
+  begin
+    yield
+  ensure
+    before ? (ENV["GORI_SCREENSHOT_FONT"] = before) : ENV.delete("GORI_SCREENSHOT_FONT")
+    Gori::Screenshot::Font.reset!
+    File.delete?(path)
+  end
 end
 
 private def with_tmpdir(&)
@@ -331,6 +387,44 @@ describe "Runner#screenshot_capture" do
       path.should end_with(".txt")
       # A real render, not an empty file: the tab bar gori drew is in it.
       File.read(path).should contain("History")
+    end
+  end
+
+  it "merges the operator's external font before rasterizing the PNG" do
+    # `$GORI_SCREENSHOT_FONT` reached `gori run screenshot` and the MCP tool and stopped there:
+    # the verb went straight to `Png.render`, so the one surface an operator actually presses
+    # the key on drew tofu for the glyph they had installed a font to fix.
+    #
+    # An external font OVERRIDES the shipped subset — supplying one is correcting what gori
+    # draws. Without the merge the cell holds a whole Ω (or a tofu box, if the subset has no
+    # Ω): either way many pixels. With it, this file's two and no more.
+    with_screenshot_font("03A9:8001#{"00" * 14}\n") do
+      with_runner(glyph: true, tab: :history) do |runner|
+        Gori::Settings.screenshot_format = "png"
+        Gori::Settings.screenshot_png_scale = 1 # 1:1 with the glyph bitmap, so a pixel is a pixel
+        runner.feed(key(Termisu::Input::Key::Enter))
+        runner.settle_reads
+
+        frame = runner.frame
+        at = cell_at(frame, "\u{03A9}")
+        runner.screenshot_capture
+        image = PngReader.read(File.read(only_shot).to_slice)
+
+        x, y = at
+        ox = Gori::Screenshot::Png::DEFAULT_PAD + x * Gori::Screenshot::Font::CELL_W
+        oy = Gori::Screenshot::Png::DEFAULT_PAD + Gori::Screenshot::Png::TITLE_H +
+             y * Gori::Screenshot::Font::CELL_H
+        bg = shot_rgb(frame.at(x, y).bg)
+        inked = [] of {Int32, Int32}
+        Gori::Screenshot::Font::CELL_H.times do |gy|
+          Gori::Screenshot::Font::CELL_W.times do |gx|
+            inked << {gx, gy} if image.pixel(ox + gx, oy + gy) != bg
+          end
+        end
+        # Row 0 sets the leftmost pixel, row 1 the rightmost — this file's glyph and nothing
+        # else. Compared as the whole set, because "some ink" is also what tofu produces.
+        inked.should eq([{0, 0}, {7, 1}])
+      end
     end
   end
 

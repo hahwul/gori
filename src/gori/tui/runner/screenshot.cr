@@ -88,7 +88,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when "svg"  then File.write(path, Gori::Screenshot::Svg.render(frame))
     when "ansi" then File.write(path, Gori::Screenshot::Ansi.render(frame))
     when "txt"  then File.write(path, Gori::Screenshot::Text.render(frame))
-    when "png"  then File.write(path, Gori::Screenshot::Png.render(frame, scale: Settings.screenshot_png_scale))
+    when "png"
+      # The operator's own Unifont, merged before a glyph is rasterized: `$GORI_SCREENSHOT_FONT`,
+      # then `~/.gori/fonts/unifont.hex`, then the system install — `Font.resolve_extra`'s chain,
+      # which `gori run screenshot` and the MCP tool both already ask for. No explicit path:
+      # this verb has no `--font` to pass. Without the call the one surface an operator actually
+      # takes screenshots from was the one that ignored the font they installed to fix them.
+      Gori::Screenshot::Font.use
+      File.write(path, Gori::Screenshot::Png.render(frame, scale: Settings.screenshot_png_scale))
     else
       # Unreachable from either verb (both pick from `Screenshot::FORMATS`), so this is the
       # guard for a future caller rather than a branch an operator can drive.
