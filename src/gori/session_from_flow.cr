@@ -67,8 +67,12 @@ module Gori
     record Draft,
       set_headers : Array({String, String}),
       sources : Array(String) do
+      def literal_headers : Array(String)
+        set_headers.map(&.[0])
+      end
+
       def slot(name : String, baseline : Bool = false) : SessionSlot
-        SessionSlot.new(name, set_headers, [] of String, baseline, [] of String)
+        SessionSlot.new(name, set_headers, [] of String, baseline, [] of String, literal_headers)
       end
     end
 
@@ -83,6 +87,26 @@ module Gori
     # overlays, and dropping it silently would produce an unauthenticated `--slot` run that
     # reports "found nothing".
     UNSAFE_VALUE = "UNSAFE_VALUE"
+
+    # Refusals for the explicit request-header reader. These are deliberately separate from
+    # `NO_CREDENTIAL`: a caller supplied the credential names, so an empty selection, malformed
+    # name, or absent field is an argument/data error rather than a login-flow diagnosis.
+    EMPTY_HEADER_NAMES  = "EMPTY_HEADER_NAMES"
+    INVALID_HEADER_NAME = "INVALID_HEADER_NAME"
+    MISSING_HEADER      = "MISSING_HEADER"
+    # A named header that frames or routes the message rather than identifying its sender.
+    REFRAMING_HEADER = "REFRAMING_HEADER"
+
+    # Headers a slot may never carry, because a slot is applied to a DIFFERENT message than
+    # the one it was copied from. `SessionSlot` states the invariant — the overlay is
+    # header-only, so Content-Length never moves and the body stays byte-exact — and an
+    # upsert of a copied `Content-Length` breaks exactly that: every later send under this
+    # slot would declare a length its own body does not have. `Transfer-Encoding` is the same
+    # hazard spelled the other way, and `Host` re-points every send at the vhost that
+    # happened to be captured. None of the three is a credential, so refusing them costs the
+    # feature nothing. Refused rather than dropped: a caller that named one asked for it, and
+    # a silent drop is how a slot ends up not being the overlay its author read back.
+    REFRAMING_HEADERS = %w[content-length transfer-encoding host]
 
     # Build the overlay for `detail`, or say why not.
     def draft(detail : Store::FlowDetail) : Draft | Refusal
@@ -108,11 +132,76 @@ module Gori
       # The provenance guard. Refused as a whole rather than per header: a response that
       # smuggles a CR into its `Set-Cookie` is not a flow to build half a session from.
       headers.each do |(name, value)|
+        unless value.valid_encoding?
+          return Refusal.new(UNSAFE_VALUE,
+            "the captured #{name} value is not valid UTF-8 and cannot be persisted as a " \
+            "literal session value. Nothing was saved")
+        end
         next unless Bindings.boundary_forging?(value)
         return Refusal.new(UNSAFE_VALUE,
           "the captured #{name} value carries #{Bindings.boundary_bytes(value).join("/")}, which " \
           "would forge a header boundary in every request this slot overlays. Nothing was saved — " \
           "if that byte is the finding, keep it as evidence on the flow rather than in a slot")
+      end
+
+      Draft.new(headers, sources)
+    end
+
+    # Build an overlay from explicitly named headers on the captured REQUEST. The caller chooses
+    # the credential fields rather than gori guessing whether a Cookie jar or a custom header is
+    # meaningful. The request is the operator's captured evidence, but its values are still
+    # origin-chosen bytes: the same boundary-forging guard used by the response reader applies
+    # before those bytes can be persisted into a slot.
+    #
+    # Names are deduplicated case-insensitively in the order requested. For each name the last
+    # wire field wins, matching `HeaderList#get?` and `SessionSlot`'s case-insensitive upsert;
+    # the selected field's original casing is retained in the resulting overlay. The operation
+    # is atomic: a missing name or unsafe value returns a refusal and never a partial Draft.
+    def draft_request(detail : Store::FlowDetail, header_names : Array(String)) : Draft | Refusal
+      return Refusal.new(EMPTY_HEADER_NAMES,
+        "at least one request header name is required to build a session slot") if header_names.empty?
+
+      names = [] of String
+      header_names.each do |name|
+        unless Proxy::Codec::Http1.header_name_safe?(name)
+          return Refusal.new(INVALID_HEADER_NAME,
+            "request header name #{name.inspect} is not an RFC 7230 token")
+        end
+        if REFRAMING_HEADERS.includes?(name.downcase)
+          return Refusal.new(REFRAMING_HEADER,
+            "#{name.inspect} frames or routes the request rather than identifying its sender, " \
+            "and a slot is applied to messages with a different body and target. Copying it " \
+            "would make every later send under this slot misframe or misroute itself. Nothing " \
+            "was saved — copy the credential headers and leave framing to the message")
+        end
+        names << name unless names.any? { |seen| seen.compare(name, case_insensitive: true) == 0 }
+      end
+
+      request = Proxy::Codec::Http1.parse_request_head(detail.request_head)
+      headers = [] of {String, String}
+      sources = [] of String
+      names.each do |name|
+        captured = request.headers.entries.reverse_each.find do |header|
+          header.name.compare(name, case_insensitive: true) == 0
+        end
+        unless selected = captured
+          return Refusal.new(MISSING_HEADER,
+            "the captured request has no header named #{name.inspect}; nothing was saved")
+        end
+
+        unless selected.value.valid_encoding?
+          return Refusal.new(UNSAFE_VALUE,
+            "the captured request header #{selected.name.inspect} is not valid UTF-8 and " \
+            "cannot be persisted as a literal session value. Nothing was saved")
+        end
+        if Bindings.boundary_forging?(selected.value)
+          return Refusal.new(UNSAFE_VALUE,
+            "the captured request header #{selected.name.inspect} carries " \
+            "#{Bindings.boundary_bytes(selected.value).join("/")}, which would forge a header " \
+            "boundary in every request this slot overlays. Nothing was saved")
+        end
+        headers << {selected.name, selected.value}
+        sources << "#{selected.name} ← the captured request header"
       end
 
       Draft.new(headers, sources)
@@ -179,7 +268,10 @@ module Gori
       body = detail.response_body
       return nil if body.nil? || body.empty? || body.size > MAX_TOKEN_BODY
       decoded, _ = Proxy::Codec::ContentDecode.decode(detail.response_head, body)
-      text = String.new(decoded || body).scrub
+      text = String.new(decoded || body)
+      # Never repair origin bytes into a different credential. An invalid body simply is not
+      # a JSON token source; credentials carried by response headers remain usable.
+      return nil unless text.valid_encoding?
       obj = JSON.parse(text).as_h? || return nil
       TOKEN_KEYS.each do |key|
         v = obj[key]?.try(&.as_s?)

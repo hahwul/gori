@@ -549,6 +549,7 @@ gori run session rm admin
 | `show <name>` | `--show-values`, `--format text\|json` |
 | `add` | `--name`, `--set 'Name: value'` (repeatable), `--remove NAME` (repeatable), `--rule NAME` (repeatable), `--baseline` / `--no-baseline` (clear the flag; the first slot then inherits it) |
 | `from-flow <flow-id>` | `--name` (required), `--baseline`, `--show-values`. Build the overlay from a captured login exchange instead of typing it |
+| `from-request <flow-id>` | `--name` (required), `--copy-header NAME` (repeatable; at least one), `--baseline`, `--show-values`. Copy selected headers from a captured request |
 | `edit <name>` | The same flags, plus `--clear-set` / `--clear-remove` / `--clear-rules`. A collection flag REPLACES that whole collection; one you omit is left alone |
 | `rm`\|`delete <name>` | Any extract rule it claimed goes back to writing the global binding table |
 | `baseline <name>` | Move the Authorize baseline (exactly one slot holds it) |
@@ -565,6 +566,16 @@ gori run repeater 900 --slot admin        # re-send flow 900 as that identity
 ```
 
 The overlay is **literal**: the bytes login handed back, saved with the project. It does not re-authenticate, so a token that *rotates* (a short-lived JWT, a per-request CSRF value) belongs on the extract-rule path instead: `gori run rewriter extract` plus `--bind-from FLOW`, which re-mints the value once per run. The name is checked before the flow is read, so a duplicate is reported as a name clash rather than as "that flow is not a login".
+
+**`from-request` copies named headers from a captured request.** This is useful when the credential or CSRF material is already on the request, or when you need a deliberately small snapshot rather than every header in a login exchange. Repeat `--copy-header` once per header; at least one is required. `Content-Length`, `Transfer-Encoding` and `Host` are refused: a slot is applied to a message with a different body and target, so copying one would make every later send under the slot misframe or misroute itself. The saved values are literal bytes, stdout redacts them as `[REDACTED]` unless `--show-values` is passed, and provenance on STDERR names the copied headers without printing their values. Slots are **not host-scoped**: every send that explicitly uses `--slot NAME` receives the slot's headers, so keep each slot limited to its intended identity.
+
+```bash
+gori run session from-request 4211 --name admin \
+  --copy-header Cookie --copy-header X-CSRF-Token
+gori run repeater 900 --slot admin        # send with that header snapshot
+```
+
+This is a **literal snapshot**, not a login macro: it does not re-authenticate or refresh a rotating token. For short-lived JWTs, per-request CSRF values, or any credential that must be minted again, use `gori run rewriter extract` with `--bind-from FLOW` so the value is extracted anew for each run.
 
 **There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span, and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$BIND.SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `repeater`, `repeater send`, `repeater minimize`, `fuzz`, `mine`, `sequence` and `discover`. The run prints `slot: sending as NAME` on STDERR before its first request.
 

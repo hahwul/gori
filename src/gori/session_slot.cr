@@ -41,12 +41,17 @@ module Gori
     # slots had a binding half, and empty is the compatible answer: a slot that names no rule
     # is a pure header overlay, exactly what an Authorize identity always was.
     getter rules : Array(String)
+    # Header names whose values came from a captured flow and must stay byte-literal at send
+    # time. Names are compared case-insensitively; an empty list is the compatible default for
+    # slots written before captured-flow provenance existed.
+    getter literal_headers : Array(String)
 
     def initialize(@name : String,
                    @set_headers : Array({String, String}) = [] of {String, String},
                    @remove_headers : Array(String) = [] of String,
                    @baseline : Bool = false,
-                   @rules : Array(String) = [] of String)
+                   @rules : Array(String) = [] of String,
+                   @literal_headers : Array(String) = [] of String)
     end
 
     # The as-captured slot: no overlay at all, so the request goes out exactly as it was
@@ -78,13 +83,17 @@ module Gori
     # The same slot with a different baseline flag — the list editor's `b` key, which is the
     # ONLY place the flag moves, so two slots can never both claim it.
     def with_baseline(flag : Bool) : SessionSlot
-      SessionSlot.new(@name, @set_headers, @remove_headers, flag, @rules)
+      SessionSlot.new(@name, @set_headers, @remove_headers, flag, @rules, @literal_headers)
     end
 
     # The same slot claiming a different rule set. Membership is edited on the SLOT and not on
     # the rule so that a project with no slots has no membership state at all to migrate.
     def with_rules(names : Array(String)) : SessionSlot
-      SessionSlot.new(@name, @set_headers, @remove_headers, @baseline, names)
+      SessionSlot.new(@name, @set_headers, @remove_headers, @baseline, names, @literal_headers)
+    end
+
+    def literal_header?(name : String) : Bool
+      @literal_headers.any? { |literal| literal.compare(name, case_insensitive: true) == 0 }
     end
 
     # The same slot with every `set_headers` VALUE run through `resolve`. Used at the send seam
@@ -94,8 +103,10 @@ module Gori
     # one would make `$` in a name a silent rewrite rather than a visible byte.
     def resolve_values(& : String -> String) : SessionSlot
       return self if @set_headers.empty?
-      SessionSlot.new(@name, @set_headers.map { |(n, v)| {n, yield v} }, @remove_headers,
-        @baseline, @rules)
+      values = @set_headers.map do |(name, value)|
+        literal_header?(name) ? {name, value} : {name, yield(value)}
+      end
+      SessionSlot.new(@name, values, @remove_headers, @baseline, @rules, @literal_headers)
     end
 
     # A one-line summary of what this overlay does, header NAMES only. The identities list
@@ -145,6 +156,11 @@ module Gori
                   j.array { slot.rules.each { |name| j.string(name) } }
                 end
               end
+              unless slot.literal_headers.empty?
+                j.field "literal" do
+                  j.array { slot.literal_headers.each { |name| j.string(name) } }
+                end
+              end
             end
           end
         end
@@ -169,7 +185,8 @@ module Gori
         name = o["name"]?.try(&.as_s?)
         next if name.nil? || name.empty?
         list << SessionSlot.new(name, parse_set(o["set"]?), parse_strings(o["remove"]?),
-          o["baseline"]?.try(&.as_bool?) || false, parse_strings(o["rules"]?))
+          o["baseline"]?.try(&.as_bool?) || false, parse_strings(o["rules"]?),
+          parse_strings(o["literal"]?))
       end
       list
     end

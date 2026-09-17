@@ -51,7 +51,7 @@ module Gori::Discover
         name, sep, value = line.partition(':')
         name = name.strip
         value = value.strip
-        if sep.empty? || name.empty? || !valid_name?(name) || !safe_value?(value)
+        if sep.empty? || name.empty? || !Proxy::Codec::Http1.header_name_safe?(name) || !safe_value?(value)
           rejected.try(&.<<(line))
           next
         end
@@ -139,15 +139,6 @@ module Gori::Discover
         end
       end
       result
-    end
-
-    # RFC 7230 token: no whitespace, control chars, or separators.
-    private def self.valid_name?(name : String) : Bool
-      name.each_char do |c|
-        return false if c.ascii_whitespace? || c.control?
-        return false if ":/()<>@,;\\\"[]?={}".includes?(c)
-      end
-      true
     end
   end
 end

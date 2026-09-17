@@ -87,9 +87,10 @@ module Gori
         end
         built = slot_set_headers_or_flow(h)
         return built if built.is_a?(Result)
-        set_headers, sources = built
+        set_headers, sources, literal_headers = built
         slot = Gori::SessionSlot.new(name, set_headers, str_list(h, "remove_headers").map(&.strip).reject(&.empty?),
-          bool_arg(h, "baseline", false), str_list(h, "rules").map(&.strip).reject(&.empty?))
+          bool_arg(h, "baseline", false), str_list(h, "rules").map(&.strip).reject(&.empty?),
+          literal_headers)
         unless registry.add(slot)
           return busy("session slot NOT created (store busy or unwritable); no slot was added")
         end
@@ -100,20 +101,72 @@ module Gori
       end
 
       # The overlay a `create_session_slot` call asked for, plus one line per SOURCE when it
-      # was read off a flow. Two spellings and they are exclusive: `set_headers` is the caller
-      # dictating the overlay, `flow_id` is gori BUILDING it from a captured login exchange
-      # (`Gori::SessionFromFlow` — the same reader `gori run session from-flow` uses, so the
-      # two surfaces cannot build different identities from one flow).
+      # was read off a flow. There are three spellings and they are exclusive: `set_headers` is
+      # the caller dictating the overlay, `flow_id` builds it from a captured login response,
+      # and `from_request_flow_id` + `copy_headers` copies selected headers from a captured
+      # request. Both flow forms use `Gori::SessionFromFlow`, so the surfaces cannot build
+      # different identities from one flow.
       #
       # Passing both is refused rather than merged: an agent that sent both has one of the two
       # in mind, and silently picking either is how it ends up sending a credential it did not
       # choose.
-      private def slot_set_headers_or_flow(h) : {Array({String, String}), Array(String)} | Result
-        flow_id = optional_int_arg(h, "flow_id")
+      private def slot_set_headers_or_flow(h) : {Array({String, String}), Array(String), Array(String)} | Result
+        has_response_flow = present?(h, "flow_id")
+        has_request_flow = present?(h, "from_request_flow_id")
+        has_copy_headers = present?(h, "copy_headers")
+        has_set_headers = present?(h, "set_headers")
+        if conflict = slot_source_conflict(has_response_flow, has_request_flow, has_copy_headers, has_set_headers)
+          return conflict
+        end
+        return slot_request_flow(h) if has_request_flow
+        slot_response_or_manual(h)
+      end
+
+      private def slot_source_conflict(response_flow : Bool, request_flow : Bool,
+                                       copy_headers : Bool, set_headers : Bool) : Result?
+        return err("pass either 'from_request_flow_id' or 'flow_id', not both — the former " \
+                   "copies request headers and the latter builds an overlay from the response",
+          "INVALID_ARGUMENT", field: "from_request_flow_id") if request_flow && response_flow
+        return err("pass either 'copy_headers' with 'from_request_flow_id' or 'flow_id', not both",
+          "INVALID_ARGUMENT", field: "copy_headers") if copy_headers && response_flow
+        return err("pass either 'from_request_flow_id' with 'copy_headers' or 'set_headers', not both",
+          "INVALID_ARGUMENT", field: "set_headers") if request_flow && set_headers
+        return err("pass either 'copy_headers' with 'from_request_flow_id' or 'set_headers', not both",
+          "INVALID_ARGUMENT", field: "copy_headers") if copy_headers && set_headers
+        return err("'from_request_flow_id' and 'copy_headers' must be supplied together",
+          "INVALID_ARGUMENT", field: request_flow ? "copy_headers" : "from_request_flow_id") if request_flow != copy_headers
+        nil
+      end
+
+      private def slot_request_flow(h) : {Array({String, String}), Array(String), Array(String)} | Result
+        flow_id = slot_int_arg(h, "from_request_flow_id")
+        return flow_id if flow_id.is_a?(Result)
+        return err("'from_request_flow_id' must be an integer", "INVALID_ARGUMENT",
+          field: "from_request_flow_id") unless flow_id
+        # Preserve blank entries so the shared request-header grammar can refuse the whole
+        # selection atomically. Dropping one here would make ["Authorization", ""] succeed
+        # with only the first credential, which is a different request than the caller named.
+        copy_headers = str_list(h, "copy_headers").map(&.strip)
+        detail = store.get_flow(flow_id)
+        return not_found("no flow ##{flow_id} in this project (see list_history)") unless detail
+        drafted = Gori::SessionFromFlow.draft_request(detail, copy_headers)
+        if refusal = drafted.as?(Gori::SessionFromFlow::Refusal)
+          # Deterministic: the SAME flow and requested header list refuse the same way next
+          # time, so this must not be retryable — the #414 shape again.
+          return err("flow ##{flow_id} — #{refusal.message}", refusal.code,
+            field: "copy_headers")
+        end
+        draft = drafted.as(Gori::SessionFromFlow::Draft)
+        {draft.set_headers, draft.sources, draft.literal_headers}
+      end
+
+      private def slot_response_or_manual(h) : {Array({String, String}), Array(String), Array(String)} | Result
+        flow_id = slot_int_arg(h, "flow_id")
+        return flow_id if flow_id.is_a?(Result)
         unless flow_id
           headers = session_set_headers(h)
           return headers if headers.is_a?(Result)
-          return {headers, [] of String}
+          return {headers, [] of String, [] of String}
         end
         if present?(h, "set_headers")
           return err("pass either 'flow_id' or 'set_headers', not both — 'flow_id' BUILDS the " \
@@ -129,7 +182,14 @@ module Gori
           return err("flow ##{flow_id} — #{refusal.message}", refusal.code, field: "flow_id")
         end
         draft = drafted.as(Gori::SessionFromFlow::Draft)
-        {draft.set_headers, draft.sources}
+        {draft.set_headers, draft.sources, draft.literal_headers}
+      end
+
+      private def slot_int_arg(h, key : String) : Int64? | Result
+        optional_int_arg(h, key)
+      rescue ex : Gori::Error
+        err(ex.message || "invalid '#{key}' (expected an integer)",
+          "INVALID_ARGUMENT", field: key)
       end
 
       # A partial update: an argument left out keeps what the slot already has. That is the
@@ -142,22 +202,37 @@ module Gori
         registry = fresh_slots
         current = registry.find(name)
         return not_found("no session slot named '#{name}' (see list_session_slots)") unless current
-        renamed = (str(h, "new_name").try(&.strip)).presence
-        if renamed && renamed != name && (taken = registry.name_clash(renamed, except: name))
-          return err("another session slot is already called '#{taken}' (names are compared " \
-                     "case-insensitively)", "INVALID_ARGUMENT", field: "new_name")
-        end
-        set_headers = h.has_key?("set_headers") ? session_set_headers(h) : current.set_headers
-        return set_headers if set_headers.is_a?(Result)
-        updated = Gori::SessionSlot.new(renamed || name, set_headers,
+        target = update_slot_target(registry, name, h)
+        return target if target.is_a?(Result)
+        target_name = target[0]
+        headers = update_slot_headers(h, current)
+        return headers if headers.is_a?(Result)
+        set_headers, literal_headers = headers
+        updated = Gori::SessionSlot.new(target_name, set_headers,
           slot_names_arg(h, "remove_headers", current.remove_headers),
           bool_arg(h, "baseline", current.baseline?),
-          slot_names_arg(h, "rules", current.rules))
+          slot_names_arg(h, "rules", current.rules), literal_headers)
         unless registry.update(name, updated)
           return busy("session slot NOT updated (store busy or unwritable); it is unchanged")
         end
         # Re-read: dropping the baseline hands it to another row (see `create_session_slot`).
         Result.new(JSON.build { |j| emit_session_slot(j, registry.find(updated.name) || updated, false, registry.active_name) })
+      end
+
+      private def update_slot_target(registry : Gori::SessionSlots, name : String, h) : {String} | Result
+        renamed = (str(h, "new_name").try(&.strip)).presence
+        if renamed && renamed != name && (taken = registry.name_clash(renamed, except: name))
+          return err("another session slot is already called '#{taken}' (names are compared " \
+                     "case-insensitively)", "INVALID_ARGUMENT", field: "new_name")
+        end
+        {renamed || name}
+      end
+
+      private def update_slot_headers(h, current : Gori::SessionSlot) : {Array({String, String}), Array(String)} | Result
+        return {current.set_headers, current.literal_headers} unless h.has_key?("set_headers")
+        set_headers = session_set_headers(h)
+        return set_headers if set_headers.is_a?(Result)
+        {set_headers, [] of String}
       end
 
       @[Tool("delete_session_slot", gated: true, agent_action: true)]
@@ -303,12 +378,17 @@ module Gori
           "Pass 'flow_id' instead of 'set_headers' to BUILD the overlay from a captured login " \
           "exchange: gori copies the response's Set-Cookie pairs into one Cookie header and its " \
           "Authorization (or a top-level access_token/token/id_token string in a JSON body, as a " \
-          "Bearer token). That overlay is LITERAL — the bytes that login handed back — and does " \
-          "NOT re-authenticate; a token that ROTATES belongs on the extract-rule path " \
-          "(create_extract_rule) instead." do |s|
+          "Bearer token). That overlay is a LITERAL snapshot of the response bytes: it does " \
+          "NOT auto-reauthenticate or refresh. The slot is project-wide and its active overlay " \
+          "can affect every outbound request from this server, so consider the blast radius. " \
+          "For a token that ROTATES, use the extract-rule path (create_extract_rule) instead. " \
+          "Pass 'from_request_flow_id' together with 'copy_headers' to copy selected headers " \
+          "from the captured request; that is also a literal snapshot and never auto-reauthenticates." do |s|
           s.field "name", strprop("slot name (unique in the project; how every surface refers to it)"), required: true
-          s.field "flow_id", intprop("build the overlay from THIS captured flow's login response (see list_history); mutually exclusive with set_headers")
+          s.field "flow_id", intprop("build a literal overlay from THIS captured flow's login response (see list_history); mutually exclusive with set_headers and the request-source mode")
           s.field "set_headers", session_headers_prop
+          s.field "from_request_flow_id", intprop("copy selected request headers from THIS captured flow (see list_history); must be supplied with copy_headers and is mutually exclusive with flow_id and set_headers")
+          s.field "copy_headers", strarrprop("request header names to copy verbatim from from_request_flow_id; must be supplied with from_request_flow_id (values stay redacted in replies). Content-Length, Transfer-Encoding and Host are refused — a slot is applied to a message with a different body and target")
           s.field "remove_headers", strarrprop("header names to STRIP before sending (e.g. [\"Cookie\",\"Authorization\"] for an anonymous identity)")
           s.field "rules", strarrprop("extract-rule binding NAMES whose observed values belong to this slot instead of the global table (see list_extract_rules)")
           s.field "baseline", boolprop("make this the authorize BASELINE every other slot is judged against (exactly one slot holds it)")
