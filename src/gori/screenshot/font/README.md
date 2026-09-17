@@ -87,6 +87,17 @@ indexed by one scan rather than decoded, so a 13 MB `unifont_all.hex` costs mill
 
 <!-- everything below this line is hand-maintained; the generator preserves it -->
 
+## Fitting a glyph to a cell: squeeze, never clip
+
+Unifont's width and the terminal's column count disagree for some codepoints — the 𝓰𝓸𝓻𝓲
+wordmark at `U+1D4F0`… is drawn 16 px wide but gets one column. A glyph wider than the
+`columns × 8 px` cell it was given is therefore **squeezed by an integer factor** (16 px into
+8 px drops every other column), not clipped: half a letter reads as a broken renderer, a thin
+letter reads as the letter. A glyph that already fits is returned untouched and left-aligned,
+so the box drawing and block elements — all 8 px — keep tiling edge to edge, which is the
+reason for a bitmap font. The PNG title bar is not a terminal row and has no cell grid, so it
+lays every glyph out at its natural width instead.
+
 ## Build cost
 
 A compile-time `read_file` puts every byte of the asset in the binary and in every rebuild,

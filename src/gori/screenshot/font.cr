@@ -12,8 +12,8 @@ module Gori::Screenshot
   # meets the `├` in the next cell with no seam — which is the entire difference between a
   # screenshot of a TUI and a picture of some text. An outline font would need a rasteriser, a
   # hinting story and a system font path, and would still leave hairline gaps between cells at
-  # non-integer scales. Nothing here rescales: a glyph is blitted at an integer scale or it is
-  # clipped.
+  # non-integer scales. The only resampling anywhere is an integer squeeze of a glyph too wide
+  # for the cell it was given (`Glyph#squeezed_to`), which the 8-px box drawing never reaches.
   #
   # TOFU POLICY. A codepoint the font does not carry draws a hollow box, never a blank. A
   # screenshot is evidence; silently dropping a character the terminal actually showed would
@@ -61,6 +61,34 @@ module Gori::Screenshot
       def blank? : Bool
         @rows.all?(&.zero?)
       end
+
+      # The same glyph narrowed to *width* pixels by an integer nearest-neighbour squeeze:
+      # at 16 → 8 every other source column is dropped, so `squeezed.on?(x, y)` is
+      # `on?(x * 2, y)`. Pure — it returns a new Glyph and never touches this one.
+      #
+      # WHY SQUEEZE RATHER THAN CLIP. Unifont draws some codepoints 16 px wide that a terminal
+      # — and `Termisu::UnicodeWidth` with it — gives ONE column. gori's own 𝓰𝓸𝓻𝓲 wordmark
+      # (U+1D4F0…) is the case every screenshot contains. Keeping the left edge and dropping
+      # the overflow draws half of each letter, which reads as a broken renderer; the squeeze
+      # draws a thin letter, which reads as the letter.
+      #
+      # A glyph that already fits comes back as ITSELF, unsqueezed and left-aligned. That is
+      # the tiling guarantee: box drawing and the block elements are 8 px wide, so `─` still
+      # runs edge to edge and meets the `├` next door with no seam — the whole reason this
+      # renderer uses a bitmap font in the first place.
+      def squeezed_to(width : Int32) : Glyph
+        return self if width <= 0 || @width <= width
+        # Ceiling division, so the factor always covers the source rather than leaving a tail
+        # behind (which would be a clip again). For the only widths that occur, 16 → 8, it is 2.
+        factor = (@width + width - 1) // width
+        rows = StaticArray(UInt16, CELL_H).new(0_u16)
+        CELL_H.times do |y|
+          bits = 0_u16
+          width.times { |x| bits |= 1_u16 << (15 - x) if on?(x * factor, y) }
+          rows[y] = bits
+        end
+        Glyph.new(width, rows)
+      end
     end
 
     # Decoded asset text and its index, built on first use. `@@extra` holds any external font
@@ -74,17 +102,27 @@ module Gori::Screenshot
 
     # The glyph to draw for one grapheme cluster occupying *columns* terminal columns.
     #
+    # Contract: the result always FITS the cell — a glyph Unifont drew wider than
+    # `columns * CELL_W` comes back squeezed to it, never clipped (see `Glyph#squeezed_to`).
+    # A caller laying text out on its own metrics instead of the terminal's grid wants
+    # `natural_glyph_for`.
+    def self.glyph_for(grapheme : String, columns : Int32 = 1) : Glyph
+      natural_glyph_for(grapheme, columns).squeezed_to(cell_width(columns))
+    end
+
+    # The same lookup as `glyph_for` but at the width UNIFONT drew the glyph, so a 16-px glyph
+    # stays 16 px however many columns the terminal gives it. *columns* still decides the two
+    # fallbacks, which have no font glyph to take a natural width from.
+    #
     # LIMITATION, deliberate: only the cluster's FIRST codepoint is looked up, so a combining
     # mark, a VS16 or a ZWJ sequence draws its base character. Unifont is a per-codepoint
     # bitmap font with no composition; stacking the marks would need a shaping engine, and
     # drawing the base is closer to what the terminal showed than tofu would be.
-    def self.glyph_for(grapheme : String, columns : Int32 = 1) : Glyph
+    def self.natural_glyph_for(grapheme : String, columns : Int32 = 1) : Glyph
       return blank(columns) if grapheme.empty? || grapheme == " "
       first = grapheme[0]?
       return blank(columns) unless first
-      found = glyph(first.ord)
-      return tofu(columns) unless found
-      clip(found, columns)
+      glyph(first.ord) || tofu(columns)
     end
 
     # The raw glyph for a codepoint, or nil when neither the external font nor the subset has
@@ -202,20 +240,6 @@ module Gori::Screenshot
       end
       at = builtin_index[codepoint]?
       at ? decode_glyph(builtin_text, at) : nil
-    end
-
-    # A glyph wider than the cells it was given keeps its LEFT edge and loses the overflow. It
-    # is never rescaled: Unifont's value here is that its glyphs tile exactly on the 8×16 cell,
-    # and a resample would break every box-drawing join. The one place this shows is a glyph
-    # Unifont draws 16 wide that the terminal treats as one column (gori's own 𝓰𝓸𝓻𝓲 wordmark,
-    # U+1D4F0…): it renders as its left half.
-    private def self.clip(glyph : Glyph, columns : Int32) : Glyph
-      limit = cell_width(columns)
-      return glyph if glyph.width <= limit
-      mask = span_mask(0, limit - 1)
-      rows = StaticArray(UInt16, CELL_H).new(0_u16)
-      CELL_H.times { |y| rows[y] = glyph.rows[y] & mask }
-      Glyph.new(limit, rows)
     end
 
     private def self.cell_width(columns : Int32) : Int32

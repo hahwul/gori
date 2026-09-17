@@ -107,8 +107,9 @@ module Gori::Screenshot
     #
     # The image at scale 1, as palette ids. Everything is drawn once here and the scale is
     # applied only while emitting rows: that keeps the buffer small, makes an integer scale
-    # exactly a block replication (no resampling anywhere), and means the palette is built
-    # from the colours actually drawn rather than guessed up front.
+    # exactly a block replication (the one resample in the renderer is `Glyph#squeezed_to`,
+    # which has already happened on the 16-row bitmap by the time anything lands here), and
+    # means the palette is built from the colours actually drawn rather than guessed up front.
     class Canvas
       getter width : Int32
       getter height : Int32
@@ -201,33 +202,46 @@ module Gori::Screenshot
 
     # The title bar's text, in the same bitmap font as the body — a screenshot with one
     # typeface in it reads as one picture. An explicit `title:` overrides the frame's own.
+    #
+    # Laid out on the GLYPHS' own widths, not on terminal columns: the title bar is not a
+    # terminal row, so there is no cell grid to honour and nothing here is squeezed. A glyph
+    # Unifont drew 16 px wide simply takes 16 px and advances by 16 — which is what lets the
+    # 𝓰𝓸𝓻𝓲 wordmark in every frame title read as itself. The widths are therefore taken from
+    # the glyphs that will actually be drawn, so the centring below cannot drift from them.
     private def self.paint_title(canvas : Canvas, frame : Frame, layout : Layout,
                                  title : String?) : Nil
       text = (title || frame.title).try(&.strip)
       return if text.nil? || text.empty?
+      glyphs = title_glyphs(text)
+      return if glyphs.empty?
       ink = canvas.id_for(Chrome.label(frame.bg))
       # Centred, but never left of the traffic lights: on a narrow window the centre lands on
       # top of them, and a title drawn over the lights looks like a rendering fault rather
       # than a tight fit. Too narrow for both and the `break` below simply draws nothing.
-      x = Math.max((layout.width - text_width(text)) // 2, lights_end(layout))
+      x = Math.max((layout.width - glyphs.sum(&.width)) // 2, lights_end(layout))
       y = (TITLE_H - Font::CELL_H) // 2
       limit = layout.width - layout.pad
+      glyphs.each do |glyph|
+        break if x + glyph.width > limit
+        blit(canvas, glyph, x, y, ink)
+        x += glyph.width
+      end
+    end
+
+    # A zero-width codepoint (a combining mark) is dropped rather than drawn on its own: the
+    # font has no composition, so it would otherwise stack its base character's cell again.
+    private def self.title_glyphs(text : String) : Array(Font::Glyph)
+      glyphs = [] of Font::Glyph
       text.each_char do |ch|
         columns = char_columns(ch)
-        next if columns <= 0
-        break if x + columns * Font::CELL_W > limit
-        blit(canvas, Font.glyph_for(ch.to_s, columns), x, y, ink)
-        x += columns * Font::CELL_W
+        glyphs << Font.natural_glyph_for(ch.to_s, columns) if columns > 0
       end
+      glyphs
     end
 
     # The x just past the rightmost traffic light, plus one cell of breathing room.
     private def self.lights_end(layout : Layout) : Int32
       layout.pad + LIGHT_R * 2 + LIGHT_GAP * (Chrome::LIGHTS.size - 1) + Font::CELL_W
-    end
-
-    private def self.text_width(text : String) : Int32
-      text.chars.sum { |ch| char_columns(ch) } * Font::CELL_W
     end
 
     private def self.char_columns(ch : Char) : Int32
