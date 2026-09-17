@@ -46,6 +46,73 @@ describe Gori::Screenshot::Font do
     end
   end
 
+  # Unifont draws the Mathematical Bold Script letters of gori's own 𝓰𝓸𝓻𝓲 wordmark 16 px
+  # wide, but every terminal — and `Termisu::UnicodeWidth` with it — gives them ONE column.
+  # Keeping the left edge used to draw half of each letter; the cell gets the whole letter,
+  # squeezed 2:1.
+  describe "a glyph wider than the cell it is given" do
+    it "squeezes U+1D4F0 into one column instead of clipping it" do
+      squeezed = font.glyph_for("\u{1D4F0}", 1)
+      squeezed.width.should eq(8)
+      squeezed.blank?.should be_false
+    end
+
+    it "takes every other source column, so ink on the right half survives" do
+      source = font.glyph(0x1D4F0).not_nil!
+      source.width.should eq(16)
+      squeezed = font.glyph_for("\u{1D4F0}", 1)
+      Gori::Screenshot::Font::CELL_H.times do |y|
+        8.times { |x| squeezed.on?(x, y).should eq(source.on?(x * 2, y)) }
+      end
+      # Not vacuous: the right half of the source really is inked, so a clip would differ.
+      right = (8...16).any? { |x| (0...16).any? { |y| source.on?(x, y) } }
+      right.should be_true
+    end
+
+    it "leaves a wide glyph in a wide cell alone" do
+      wide = font.glyph_for("\u{3042}", 2) # HIRAGANA LETTER A
+      wide.should eq(font.glyph(0x3042).not_nil!)
+      wide.width.should eq(16)
+    end
+
+    # The tiling guarantee, and the whole reason for a bitmap font: box drawing and the block
+    # elements are 8 px wide, so they never reach the squeeze and `─` still meets `├`.
+    it "leaves an 8-px box-drawing glyph bit-for-bit alone" do
+      font.glyph_for("\u{2500}", 1).should eq(font.glyph(0x2500).not_nil!)
+      font.glyph_for("\u{2588}", 1).should eq(font.glyph(0x2588).not_nil!)
+    end
+
+    it "hands a caller with its own metrics the natural width" do
+      font.natural_glyph_for("\u{1D4F0}", 1).width.should eq(16)
+      font.natural_glyph_for("A", 1).width.should eq(8)
+      # The fallbacks have no font glyph to take a width from, so they follow the columns.
+      font.natural_glyph_for(" ", 1).should eq(font.blank(1))
+      font.natural_glyph_for("\u{4E00}", 1).should eq(font.tofu(1))
+    end
+  end
+
+  describe "Glyph#squeezed_to" do
+    it "returns the glyph itself when it already fits" do
+      narrow = font.glyph(0x0041).not_nil!
+      narrow.squeezed_to(8).should eq(narrow)
+      narrow.squeezed_to(16).should eq(narrow)
+    end
+
+    it "is pure — the source keeps its own bits" do
+      source = font.glyph(0x1D4F0).not_nil!
+      before = source.rows.dup
+      source.squeezed_to(8)
+      source.rows.should eq(before)
+      source.width.should eq(16)
+    end
+
+    it "ignores a nonsensical width rather than raising" do
+      wide = font.glyph(0x3042).not_nil!
+      wide.squeezed_to(0).should eq(wide)
+      wide.squeezed_to(-4).should eq(wide)
+    end
+  end
+
   describe "blank versus missing" do
     it "treats a space as blank" do
       font.glyph_for(" ").should eq(font.blank(1))

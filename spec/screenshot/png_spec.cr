@@ -45,6 +45,31 @@ private def count_pixels(image : PngReader::Image, color : {UInt8, UInt8, UInt8}
   total
 end
 
+# Leftmost and rightmost x of label-coloured ink inside the title band, or nil when the title
+# drew nothing. The extent is what the title's LAYOUT is measured through: the advances are
+# geometry the pixels have to agree with, not a number the renderer reports.
+private def title_ink_extent(image : PngReader::Image) : {Int32, Int32}?
+  label = rgb_of(Gori::Screenshot::Chrome.label(PNG_BG))
+  min_x = max_x = nil.as(Int32?)
+  Gori::Screenshot::Png::TITLE_H.times do |y|
+    image.width.times do |x|
+      next unless image.pixel(x, y) == label
+      min_x = x if min_x.nil? || x < min_x.not_nil!
+      max_x = x if max_x.nil? || x > max_x.not_nil!
+    end
+  end
+  from, to = min_x, max_x
+  from && to ? {from, to} : nil
+end
+
+# The first x the title may use: just past the rightmost traffic light, plus a cell of air.
+# Recomputed from the same constants `Png` lays out with, rather than hard-coded.
+private def title_left_bound : Int32
+  Gori::Screenshot::Png::DEFAULT_PAD + Gori::Screenshot::Png::LIGHT_R * 2 +
+    Gori::Screenshot::Png::LIGHT_GAP * (Gori::Screenshot::Chrome::LIGHTS.size - 1) +
+    Gori::Screenshot::Font::CELL_W
+end
+
 describe Gori::Screenshot::Png do
   png = Gori::Screenshot::Png
 
@@ -119,6 +144,25 @@ describe Gori::Screenshot::Png do
         8.times do |x|
           image.pixel(x, y).should eq(rgb_of(tofu.on?(x, y) ? PNG_FG : PNG_BG))
         end
+      end
+    end
+
+    # U+1D4F0, the first letter of gori's own 𝓰𝓸𝓻𝓲 wordmark: Unifont draws it 16 px wide,
+    # every terminal gives it ONE column. Clipping it to the cell drew half a letter, which
+    # reads as a broken renderer rather than as a tight fit.
+    it "squeezes a glyph wider than its cell into the cell, without spilling into the next" do
+      single = bare(frame_of([cell("\u{1D4F0}")], 1, 1))
+      single.width.should eq(8)
+      count_pixels(single, rgb_of(PNG_FG)).should be > 0
+
+      other = Gori::Screenshot::RGB.hex("#336699")
+      image = bare(frame_of([cell("\u{1D4F0}"), cell(" ", bg: other)], 2, 1))
+      glyph = Gori::Screenshot::Font.glyph_for("\u{1D4F0}", 1)
+      glyph.width.should eq(8)
+      16.times do |y|
+        8.times { |x| image.pixel(x, y).should eq(rgb_of(glyph.on?(x, y) ? PNG_FG : PNG_BG)) }
+        # Column 9 onward belongs to the neighbour and stays its own background.
+        8.times { |i| image.pixel(8 + i, y).should eq(rgb_of(other)) }
       end
     end
 
@@ -249,6 +293,38 @@ describe Gori::Screenshot::Png do
       label = rgb_of(Gori::Screenshot::Chrome.label(PNG_BG))
       count_pixels(titled, label).should be > 0
       count_pixels(untitled, label).should eq(0)
+    end
+
+    # The title bar is NOT a terminal row — it has no cell grid to honour — so it lays each
+    # glyph out at the width Unifont drew it and nothing is squeezed there. Four wordmark
+    # letters take four 16-px advances; four ASCII letters take four 8-px ones. The wordmark
+    # is the case that matters: it is in every frame title gori writes.
+    it "advances a title glyph by its natural width, and centres on what it will draw" do
+      mark = "\u{1D4F0}\u{1D4F8}\u{1D4FB}\u{1D4F2}"
+      wordmark = PngReader.read(png.render(frame, scale: 1, title: mark))
+      extent = title_ink_extent(wordmark)
+      extent.should_not be_nil
+      from, to = extent.not_nil!
+      span = to - from + 1
+      span.should be >= 48 # four 16-px advances, minus the outer side bearings
+      span.should be <= 64
+      # Centred on the total it will draw, and pushed right only if the lights need it.
+      box = Math.max((wordmark.width - 64) // 2, title_left_bound)
+      from.should be >= box
+      to.should be < box + 64
+      from.should be >= title_left_bound
+      to.should be < wordmark.width - Gori::Screenshot::Png::DEFAULT_PAD
+
+      ascii = PngReader.read(png.render(frame, scale: 1, title: "gori"))
+      ascii_extent = title_ink_extent(ascii)
+      ascii_extent.should_not be_nil
+      a_from, a_to = ascii_extent.not_nil!
+      (a_to - a_from + 1).should be <= 32 # four 8-px advances
+      a_box = Math.max((ascii.width - 32) // 2, title_left_bound)
+      a_from.should be >= a_box
+      a_to.should be < a_box + 32
+      a_from.should be >= title_left_bound
+      a_to.should be < ascii.width - Gori::Screenshot::Png::DEFAULT_PAD
     end
 
     it "rounds the corners by masking to the transparent palette entry" do
