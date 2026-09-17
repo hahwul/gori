@@ -116,6 +116,13 @@ module Gori::Tui
       connect_timeout = Settings.project_connect_timeout_secs
       io_timeout = Settings.project_io_timeout_secs
       capture_max = Settings.project_capture_max_mib
+      # The two class-level settings the shell itself writes, both unconditionally: the chord
+      # registry the empty-state cards resolve their chips through (`Runner.new`) and the
+      # per-frame overlay gate (`Runner#render_body`). A render that left them behind would
+      # leave a later card in the CALLING process pointing at this project's registry, or
+      # suppressed outright if the last frame drawn here had a modal up.
+      empty_state_registry = TrafficEmptyState.registry
+      empty_state_suppressed = TrafficEmptyState.suppressed?
       # A notification raised while drawing writes `\a` to `TtyOut`, which falls back to STDOUT
       # when there is no tty — a bell in whatever pipe the caller is writing the picture to.
       Settings.notify_bell = false
@@ -135,6 +142,8 @@ module Gori::Tui
         Settings.project_connect_timeout_secs = connect_timeout
         Settings.project_io_timeout_secs = io_timeout
         Settings.project_capture_max_mib = capture_max
+        TrafficEmptyState.registry = empty_state_registry
+        TrafficEmptyState.suppressed = empty_state_suppressed
         Settings.project_env_vars = env_vars
         # By NAME: a custom theme's palette may have been rebuilt under a stable name while we
         # were away, and `apply` compares content, so re-applying the name is what restores the

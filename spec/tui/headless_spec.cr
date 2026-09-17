@@ -210,6 +210,27 @@ describe Gori::Tui::Headless do
     end
   end
 
+  it "puts the empty-state card globals back" do
+    with_seeded_project do |project|
+      registry_before = TrafficEmptyState.registry
+      suppressed_before = TrafficEmptyState.suppressed?
+      sentinel = Gori::Verb::Registry.new
+      begin
+        TrafficEmptyState.registry = sentinel
+        TrafficEmptyState.suppressed = true
+        shoot(project, tab: :history, cols: 80, rows: 20)
+        # `Runner.new` assigns the registry and `Runner#render_body` the gate, both
+        # unconditionally — so a long-lived process that screenshots itself would otherwise be
+        # left drawing its own cards through this render's registry, or not drawing them at all.
+        TrafficEmptyState.registry.should be(sentinel)
+        TrafficEmptyState.suppressed?.should be_true
+      ensure
+        TrafficEmptyState.registry = registry_before
+        TrafficEmptyState.suppressed = suppressed_before
+      end
+    end
+  end
+
   it "leaves the store closed and the flows untouched" do
     with_seeded_project do |project|
       shoot(project, tab: :history, cols: 80, rows: 20)
