@@ -61,6 +61,7 @@ require "./tools/rules"
 require "./tools/color_rules"
 require "./tools/saved_views"
 require "./tools/scope"
+require "./tools/screenshot"
 require "./tools/send"
 require "./tools/sequence"
 require "./tools/sitemap"
@@ -909,6 +910,7 @@ module Gori
           list_evidence_tools j
           list_retest_tools j
           list_context_tools j
+          list_screenshot_tools j
           list_env_tools j
           list_host_overrides_tools j
           list_session_slots_tools j

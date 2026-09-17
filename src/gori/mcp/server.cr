@@ -398,7 +398,10 @@ module Gori
           "make real outbound requests or mutate issues/rules. Active requests " \
           "(send_request, send_websocket, fuzz, mine, authorize) are gated by the project scope: a target " \
           "outside — or without — a configured scope is refused (SCOPE_BLOCKED) unless you pass " \
-          "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project."
+          "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project. " \
+          "screenshot draws the real TUI over this project and writes a picture (view-only — it " \
+          "captures nothing and binds no port); reach for it when you need to SEE a pane's " \
+          "layout rather than read its rows, and pass inline:true to get the image back here."
         else
           "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, authorize_*, " \
           "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them. " \
