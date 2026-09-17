@@ -43,7 +43,12 @@ end
 
 describe Gori::Tui::ExportOverlay do
   it "titles and describes the card by export kind" do
-    {:note => "note", :issues_md => "issues (Markdown)", :issues_json => "issues (JSON)"}.each do |kind, want|
+    {:note        => "note",
+     :issues_md   => "issues (Markdown)",
+     :issues_json => "issues (JSON)",
+     # The one kind whose format is not fixed by the caller — the extension picks it, which is
+     # what the card's blurb has to say (see ExportOverlay#blurb).
+     :screenshot => "screenshot"}.each do |kind, want|
       ov = ExportOverlay.new(kind, "/tmp/x.md")
       ov.label.should eq(want)
       backend = MemoryBackend.new(100, 30)

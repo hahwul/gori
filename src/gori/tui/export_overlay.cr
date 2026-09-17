@@ -66,10 +66,14 @@ module Gori::Tui
       when :sequence_md   then "randomness report (Markdown)"
       when :sequence_json then "randomness report (JSON)"
       when :evidence_json then "evidence (JSON)"
+      when :screenshot    then "screenshot"
       else                     "file"
       end
     end
 
+    # What the card says the write will do. Every kind but one names a fixed format, because the
+    # caller chose it; :screenshot names the RULE instead — the frame was captured before this
+    # card went up and can be written four ways, so the typed extension is the choice.
     private def blurb : String
       case @kind
       when :note          then "Write the current note's text to a Markdown file."
@@ -79,6 +83,7 @@ module Gori::Tui
       when :sequence_md   then "Write this session's token-randomness report to a Markdown file (no token values)."
       when :sequence_json then "Write this session's token-randomness report to a JSON file (no token values)."
       when :evidence_json then "Write this immutable snapshot and provenance to a JSON file."
+      when :screenshot    then "Write the current screen to a file — the format follows the extension you type (.svg, .png, .ansi, .txt)."
       else                     "Write the export to a file."
       end
     end
