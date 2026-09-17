@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- TUI: two new palette verbs, **Screenshot** and **Screenshot to…**, write the current screen to SVG / PNG / ANSI / text — format, directory and PNG scale live in a new `screenshot` settings section, and the project's redaction profile is painted over the frame's cells before it reaches disk
+- CLI: `gori run screenshot` (alias `shot`) draws the shipping TUI with no terminal attached and writes the frame to a file, including `--from-ansi` to re-ingest a `tmux capture-pane` dump; PNG rendering uses an embedded Unifont subset, with an external `.hex` file as the escape hatch for CJK/emoji
+- MCP: a gated `screenshot` tool draws the bound project headlessly and returns the path, with `inline:true` for the picture itself in the result
+- Session: a view-only session (a second TUI on the same project) no longer marks the capturing instance's in-flight flows as failed when it closes
 - Project: the ACTIVITY feed reaches every row it holds — the `s` chip and MCP `list_events{source}` now offer the evidence-freeze rows, a burst that refills a narrowed, walked-back list no longer skips every event between page one and the walk, and the Sequencer stops writing a second spelling of `warn` (#1084)
 - Project: the event feed stops growing without bound in a project that captures no flows (an MCP server, a TUI with capture off) — its retention cap runs off event inserts too — and a scope lens or sandbox write that leaves the stored flag where it was is no longer recorded as a change (#1084)
 - Probe: a WebSocket carried by an HTTP/2 extended CONNECT (RFC 8441) is scanned like any other socket — its frames reach the payload rule, it is fingerprinted as a WebSocket endpoint, and its handshake stops collecting document-header findings; in the TUI, a Repeater send's BINARY frames reach the rule too, and a headless scan reads a Repeater tab's frames from the oldest instead of the newest 200 (#1083)
