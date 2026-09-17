@@ -1182,14 +1182,18 @@ List, create, or delete projects, or manage project-scoped config (scope rules, 
 gori run project --format json
 gori run project list
 gori run project list --all
+gori run project list --query=acme
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--all` | Include projects with nothing captured in them |
+| `--query=TEXT` | Keep only the projects whose display name, directory slug, short id or bound workspace path contains TEXT (case-insensitive) |
 | `--format=FMT` | `text` (default) or `json` |
 
 `list` hides the **empty** projects (zero captured flows), because a project per worktree or per checkout accumulates into hundreds of them and buries the two or three holding traffic. Emptiness is counted, not inferred from file size: a project created a second ago is the same size as a leftover from March. Two are always listed however empty they are, and marked: `◆` is the project a `--project`-less `gori run` reads, `◇` the one the TUI last opened. In `--format json` those are the `current` and `tui_active` fields, beside a `flows` count; the count of what was hidden goes to stderr, so a JSON pipe stays a clean array.
+
+`--query` is the other half of that: a **substring** of any spelling that addresses a project, so a half-remembered name finds it — looser than `--project`, which wants an exact name, slug or short id. It is applied **before** the flow census, which opens every listed project's database, so a query is also the fast path on a host holding hundreds. It is orthogonal to `--all`, and it narrows the row source rather than the display, so what it excludes is said on stderr: a query that matched nothing reports how many projects the host actually has, and a query that filtered out the `◆` project names it — unlike the empty-hiding default, `--query` does not pin that row. `--format json` carries the bound `workspace` beside the rest, so a consumer can filter on the same fact the query does. The same narrowing is MCP `list_projects{query}`, over the same predicate.
 
 #### project create
 

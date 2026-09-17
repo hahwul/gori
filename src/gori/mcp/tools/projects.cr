@@ -26,27 +26,71 @@ module Gori
           @authorize_jobs.each_value.any? { |j| j.status == :running }
       end
 
+      # How many projects one `list_projects` page carries, and the ceiling a caller may raise
+      # it to. A host accumulates a project per worktree — several hundred is ordinary — and
+      # serialising every one of them ran past an MCP client's per-tool-result budget, which
+      # spilled the listing to a temp file instead of handing it to the agent (#1085). The
+      # registry orders most-recently-active first, so the default page is the useful end of
+      # the list; `query` and `offset` reach the rest.
+      MCP_PROJECTS_DEFAULT =  50
+      MCP_PROJECTS_MAX     = 500
+
       @[Tool("list_projects", unbound: true)]
-      private def list_projects : Result
-        reg = registry
-        projects = reg.list
+      private def list_projects(h) : Result
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX)
+        query = str(h, "query").try(&.strip).presence
+        needle = ProjectRegistry.needle(query)
+
+        # `entries` reads each project's sidecars ONCE and carries them to both the match and
+        # the row they feed; `Entry#matches?` is the same predicate `gori run project list
+        # --query` narrows with, so the two surfaces cannot disagree about what "acme" means.
+        entries = registry.entries
+        matched = needle ? entries.select(&.matches?(needle)) : entries
+        page = offset < matched.size ? matched[offset, Math.min(limit, matched.size - offset)] : matched[0, 0]
         current = @db_path
         Result.new(JSON.build do |j|
           j.object do
             j.field "bound", !unbound?
             j.field "current_db_path", current
+            # The binding spelled out, not left to a `current:true` row that a narrowed or
+            # paged listing need not carry any more. "Which project am I on?" is the most
+            # common reason to call this tool, and it must not be answerable only by luck of
+            # the page — the same reason `gori run project list` PINS the current row into
+            # its own shortened default. Same three spellings project_info reports, so the
+            # two orienting calls cannot name a project differently.
+            j.field "current_project", @project_name
+            j.field "current_project_slug", @project_slug
+            j.field "current_project_id", @project_id
             j.field "projects_root", Paths.projects_dir
+            j.field "query", query if query
+            j.field "returned", page.size
+            j.field "offset", offset
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
+            j.field "total", matched.size
+            # The host's whole count beside the matched one, ALWAYS: an empty page under a
+            # query otherwise reads as "this host has no projects", which is the answer that
+            # sends an agent to create_project for a project that already exists.
+            j.field "total_projects", entries.size
+            j.field "has_more", offset + page.size < matched.size
+            if note = projects_listing_note(query, matched.size, entries.size, offset, page.size)
+              j.field "note", note
+            end
             j.field("projects") do
               j.array do
-                projects.each do |p|
+                page.each do |e|
+                  p = e.project
                   j.object do
                     j.field "name", p.name
-                    j.field "id", reg.id_of(p)
-                    j.field "slug", reg.slug_of(p)
+                    j.field "id", e.id
+                    j.field "slug", e.slug
                     j.field "db_path", p.db_path
                     j.field "db_size", p.db_size
                     j.field "current", !current.nil? && p.db_path == current
-                    j.field "workspace", reg.workspace_of(p)
+                    j.field "workspace", e.workspace
                     if lm = p.last_modified
                       j.field "last_modified", lm.to_unix
                       j.field "last_modified_iso", lm.to_rfc3339
@@ -57,6 +101,28 @@ module Gori
             end
           end
         end)
+      end
+
+      # The one sentence a shortened listing owes its caller, or nil when the page IS the whole
+      # answer. Three readings have to be closed, and each is the shape where an absence reads
+      # as a finding: a query that matched nothing is not "this host has no projects", a page
+      # with more behind it is not "these are all of them", and an empty page off the end of a
+      # non-empty match is neither.
+      private def projects_listing_note(query : String?, matched : Int32, total : Int32,
+                                        offset : Int32, returned : Int32) : String?
+        if query && matched.zero?
+          return "no project matched query #{query.inspect}; this host has #{total} " \
+                 "project#{total == 1 ? "" : "s"}. 'query' is a case-insensitive SUBSTRING of the " \
+                 "display name, directory slug, short id, or bound workspace path"
+        end
+        if returned.zero? && matched > 0
+          return "offset #{offset} is past the last of #{matched} matching project#{matched == 1 ? "" : "s"} " \
+                 "— this empty page is the cursor, not the host"
+        end
+        nxt = offset + returned
+        return nil if nxt >= matched
+        "showing #{returned} of #{matched}, most-recently-active first — narrow with 'query', " \
+        "or read the rest from offset:#{nxt}"
       end
 
       private def create_project(h) : Result
@@ -308,11 +374,19 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_projects_tools(j : JSON::Builder) : Nil
         tool j, "list_projects",
-          "List gori projects on this host (name, slug, db_path, db_size, last_modified, " \
-          "workspace binding) and which one this server is currently serving (current:true). " \
-          "Use switch_project to change the active project. When the server started unbound " \
-          "(no project), call list_projects then create_project or switch_project before " \
-          "traffic tools." { }
+          "Find a gori project on this host: one page of them (name, slug, short id, db_path, " \
+          "db_size, last_modified, workspace binding), MOST-RECENTLY-ACTIVE FIRST, plus the one " \
+          "this server is currently serving (current_project, and current:true on its row when " \
+          "the page carries it). A host accumulates a project per worktree, so this is a paged " \
+          "listing: pass 'query' to locate the one you mean before switch_project, and read " \
+          "'total' / 'has_more' rather than assuming the page is everything. Use switch_project " \
+          "to change the active project. When the server started unbound (no project), call " \
+          "list_projects then create_project or switch_project before traffic tools." do |s|
+          s.field "query", strprop("keep only projects whose display name, directory slug, short id, " \
+                                   "or bound workspace path CONTAINS this text (case-insensitive)")
+          s.field "limit", intprop("max projects returned (default #{MCP_PROJECTS_DEFAULT}, max #{MCP_PROJECTS_MAX})")
+          s.field "offset", intprop("skip this many matching projects — the page cursor (default 0)")
+        end
 
         tool j, "switch_project",
           "Point this server at a different project for all subsequent tools. Always available " \

@@ -144,7 +144,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `compare_flows` | 두 플로우의 요청 또는 응답 줄 단위 diff. 양쪽의 status/size/time과 A→B 델타 포함. `context:N`은 동일 구간을 `{kind:fold,hidden}` 마커로 접음 |
 | `diff_projects` | 리테스트 diff: **프로젝트 두 개**를 엔드포인트 단위로 비교. 지난 엔게이지먼트 이후 무엇이 새로 생겼고, 사라졌고, 다르게 응답하는지. 엔드포인트 키는 Sitemap의 폴딩된 템플릿을 그대로 쓰고, `removed`(새 캡처가 아예 요청한 적 없음)와 `gone`(요청했고 404/410을 받음)은 별개의 판정 |
 | `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
-| `list_projects` | 이 호스트의 모든 gori 프로젝트 |
+| `list_projects` | 이 호스트에서 프로젝트 **찾기**. 최근 활동순 **한 페이지**를 돌려줍니다. `query`는 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로에 포함되는지로 걸러내고, `limit`/`offset`으로 페이지를 넘깁니다(기본 50, 최대 500). 현재 서빙 중인 프로젝트는 페이지와 별개로 `current_project`에 실리므로 좁힌 목록에서도 "지금 어느 프로젝트인가"에 답할 수 있고, `total` 옆의 `total_projects` 덕분에 매치 0건이 "프로젝트가 하나도 없다"로 읽히지 않습니다 |
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
 | `list_rule_presets` | 응답 수정 [프리셋](/ko/guide/proxy/#rewriter-presets). 평범한 Match & Replace 규칙을 설치하는 이름 붙은 출발점(hidden 필드 드러내기, disabled 컨트롤 활성화, `maxlength` 제거, 클라이언트 검증 제거, CSP / 보안 헤더 제거, SRI 비활성화). 각 행이 설치할 규칙을 밝힙니다 |
 | `list_extract_rules` | 프로젝트의 **extract** 규칙. [세션 바인딩](/ko/guide/proxy/#session-bindings)의 읽는 쪽 절반. 각각 응답을 관찰해 `$BIND.NAME` 하나를 메모리에 묶고, Match & Replace 규칙이 그것을 주입합니다 |

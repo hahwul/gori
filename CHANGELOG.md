@@ -6,6 +6,8 @@
 - Project: the event feed stops growing without bound in a project that captures no flows (an MCP server, a TUI with capture off) — its retention cap runs off event inserts too — and a scope lens or sandbox write that leaves the stored flag where it was is no longer recorded as a change (#1084)
 - Probe: a WebSocket carried by an HTTP/2 extended CONNECT (RFC 8441) is scanned like any other socket — its frames reach the payload rule, it is fingerprinted as a WebSocket endpoint, and its handshake stops collecting document-header findings; in the TUI, a Repeater send's BINARY frames reach the rule too, and a headless scan reads a Repeater tab's frames from the oldest instead of the newest 200 (#1083)
 - TUI: The setup wizard explains local and device access at the listen step, and the guided tour ends with a first-session checklist for the screen it returns to (#1081)
+- MCP: `list_projects` narrows like every other listing tool — `query` (a substring of the display name, slug, short id or bound workspace path), `limit` and `offset` — so a host holding a project per worktree stops returning a result too large for the client to accept; the served project is named beside the page and the host's whole count beside the matched one (#1085)
+- CLI: `gori run project list --query=TEXT` keeps the projects whose display name, directory slug, short id or bound workspace path contains TEXT — the same narrowing MCP `list_projects` offers, over the same predicate — applied before the flow census, so it is also the fast path on a host holding hundreds (#1085)
 
 ## v0.6.1
 
