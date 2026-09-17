@@ -18,6 +18,14 @@ class MemoryBackend < Gori::Tui::Backend
   # caret erases the very wide glyph it is highlighting — every assertion would pass while
   # the real screen showed a blank.
   getter cont_grid : Array(Array(Bool))
+  # Style bits per cell, for `snapshot`: a screenshot has to carry bold / underline / dim,
+  # and until this existed the harness silently dropped every one of them.
+  getter attr_grid : Array(Array(Gori::Tui::Attribute))
+  # Wrap marks, ACCUMULATED rather than swapped per frame the way TermisuBackend does them:
+  # a recording backend never flushes, so there is no moment at which "the frame on screen"
+  # changes. `snapshot` de-duplicates instead, which is the same answer for a spec that
+  # draws its frame once (and a truer one for a spec that draws it twice).
+  getter marks : Array(Gori::Screenshot::WrapSpan)
 
   def initialize(@w : Int32, @h : Int32)
     @grid = Array.new(@h) { Array.new(@w, ' ') }
@@ -25,6 +33,8 @@ class MemoryBackend < Gori::Tui::Backend
     @cont_grid = Array.new(@h) { Array.new(@w, false) }
     @fg_grid = Array.new(@h) { Array.new(@w, Gori::Tui::Color.default) }
     @bg_grid = Array.new(@h) { Array.new(@w, Gori::Tui::Color.default) }
+    @attr_grid = Array.new(@h) { Array.new(@w, Gori::Tui::Attribute::None) }
+    @marks = [] of Gori::Screenshot::WrapSpan
   end
 
   def put(x : Int32, y : Int32, grapheme : Char | String, fg : Gori::Tui::Color, bg : Gori::Tui::Color, attr : Gori::Tui::Attribute) : Nil
@@ -37,7 +47,35 @@ class MemoryBackend < Gori::Tui::Backend
     @cluster_grid[y][x] = g
     @fg_grid[y][x] = fg
     @bg_grid[y][x] = bg
+    @attr_grid[y][x] = attr
     claim_trailing(y, x, g)
+  end
+
+  def mark_continuation(x : Int32, y : Int32, w : Int32) : Nil
+    @marks << Gori::Screenshot::WrapSpan.new(y, x, x + w)
+  end
+
+  # The recorded grid as a `Screenshot::Frame`, so a view's screenshot can be asserted
+  # against the same harness every other rendering assertion uses.
+  #
+  # A continuation column takes its fg/bg/attr from the LEAD at x-1, and it is done here
+  # rather than in `put`: `claim_trailing` only raises the cont flag and leaves whatever the
+  # preceding fill wrote in that cell's colours, and rewriting them in `put` would move every
+  # caret spec that asserts `bg_at` around a wide glyph.
+  def snapshot : Gori::Screenshot::Frame?
+    canvas = Gori::Screenshot::RGB.of(Gori::Tui::Theme.bg, Gori::Screenshot::RGB::BLACK)
+    ink = Gori::Screenshot::RGB.of(Gori::Tui::Theme.text, Gori::Screenshot::RGB::WHITE)
+    cells = Array(Gori::Screenshot::Cell).new(@w * @h)
+    @h.times do |y|
+      @w.times do |x|
+        cont = @cont_grid[y][x]
+        sx = cont && x > 0 ? x - 1 : x
+        cells << Gori::Screenshot.cell(cont ? "" : @cluster_grid[y][x],
+          @fg_grid[y][sx], @bg_grid[y][sx], @attr_grid[y][sx], cont, canvas: canvas, ink: ink)
+      end
+    end
+    Gori::Screenshot::Frame.new(@w, @h, cells, bg: canvas, fg: ink,
+      theme: Gori::Tui::Theme.active_name, continuations: @marks.uniq)
   end
 
   # A width-2 glyph claims x+1 as its continuation; a narrow one drawn over a wide glyph's
@@ -62,6 +100,7 @@ class MemoryBackend < Gori::Tui::Backend
     @cluster_grid[y][x] = " "
     @fg_grid[y][x] = Gori::Tui::Color.default
     @bg_grid[y][x] = Gori::Tui::Color.default
+    @attr_grid[y][x] = Gori::Tui::Attribute::None
   end
 
   def size : {Int32, Int32}
