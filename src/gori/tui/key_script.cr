@@ -45,10 +45,33 @@ module Gori::Tui
       t
     end
 
+    # The longest single `SLEEP`, and the longest a whole script may spend paused.
+    #
+    # A pause is the one token that costs WALL TIME, and it is unbounded input: `SLEEP99999` on
+    # the MCP tool parks that server's worker fiber — which dispatches one request at a time —
+    # for a day, and on `gori run screenshot` it hangs a script nobody can tell from a deadlock.
+    # Both caps, because one long pause and sixty short ones are the same outcome.
+    #
+    # 5s is far past what a render waits for anyway: the only thing a pause settles here is the
+    # scheduler (see `Headless.render`), and nothing arriving from outside is awaited at all.
+    MAX_SLEEP       = 5.seconds
+    MAX_TOTAL_PAUSE = 30.seconds
+
     def self.parse(script : String) : Array(Step)
       steps = [] of Step
+      total = Time::Span.zero
       each_token(script) do |token, quoted|
-        steps << (quoted ? typed_run(token) : key_step(token))
+        step = quoted ? typed_run(token) : key_step(token)
+        if pause = step.pause
+          total += pause
+          if total > MAX_TOTAL_PAUSE
+            raise Gori::Error.new(
+              "key script: the pauses add up to #{total.total_seconds.round(2)}s, past the " \
+              "#{MAX_TOTAL_PAUSE.total_seconds.to_i}s a script may spend waiting — a render " \
+              "only yields to the scheduler, it does not await anything arriving from outside")
+          end
+        end
+        steps << step
       end
       steps
     end
@@ -113,6 +136,12 @@ module Gori::Tui
       raw = token[5..]
       secs = raw.to_f64?
       raise Gori::Error.new("key script: #{token.inspect} — SLEEP takes seconds, e.g. SLEEP0.5") if secs.nil? || secs < 0
+      if secs > MAX_SLEEP.total_seconds
+        raise Gori::Error.new(
+          "key script: #{token.inspect} — one SLEEP may pause at most " \
+          "#{MAX_SLEEP.total_seconds.to_i}s. A render yields to the scheduler and awaits " \
+          "nothing arriving from outside, so a longer wait photographs the same frame")
+      end
       (secs * 1000).round.to_i64.milliseconds
     end
 

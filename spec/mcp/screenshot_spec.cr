@@ -181,6 +181,39 @@ describe "MCP screenshot" do
     end
   end
 
+  it "refuses a PNG canvas past the pixel budget, and writes nothing" do
+    with_project_db do |store, project|
+      dest = File.join(Dir.tempdir, "gori-mcp-shot-#{Random.rand(1_000_000)}.png")
+      begin
+        # Every argument is inside its own documented cap and their PRODUCT is not: 300x300 at
+        # scale 8 is a 19456x38912 canvas, three quarters of a billion pixels. Refused off
+        # `Png.dimensions`, which allocates nothing.
+        r = shot_call(store, project.db_path,
+          %({"cols":300,"rows":300,"scale":8,"format":"png","path":#{dest.to_json}}))
+        r.is_error.should be_true
+        r.error_code.should eq("BUDGET_EXHAUSTED")
+        r.field.should eq("scale")
+        r.text.should contain("px cap")
+        # A refusal that already put a file on disk is not a refusal.
+        File.exists?(dest).should be_false
+      ensure
+        File.delete?(dest)
+      end
+    end
+  end
+
+  it "refuses a key script whose pauses run past the cap, before it opens anything" do
+    with_project_db do |store, project|
+      # A pause is the one token that costs wall time, and this server dispatches one call at a
+      # time — `SLEEP99999` would park its worker fiber for a day.
+      r = shot_call(store, project.db_path, %({"keys":"SLEEP99999"}))
+      r.is_error.should be_true
+      r.error_code.should eq("INVALID_ARGUMENT")
+      r.field.should eq("keys")
+      r.text.should contain("one SLEEP may pause at most")
+    end
+  end
+
   it "refuses NO_PROJECT when the server was bound by store rather than by path" do
     with_store do |store|
       # `tools_for` binds a handle and no db_path — exactly the shape an embedder produces.

@@ -183,10 +183,22 @@ module Gori
         case fmt
         when "png"
           Screenshot::Font.use
+          # `cols`, `rows` and `scale` are each clamped on their own and their PRODUCT is not:
+          # 1000x1000 at scale 2 asks for a 516-million-pixel canvas, two gigabytes, from three
+          # arguments that were every one of them in range. Judged off `dimensions`, which draws
+          # nothing, and before the write — so a refusal leaves no file behind.
+          dims = Screenshot::Png.dimensions(frame, scale: scale, title: frame.title)
+          if msg = Screenshot::Png.pixel_budget_error(*dims)
+            return err("#{msg} — lower 'scale', narrow the shot with cols/rows, or ask for " \
+                       "format:\"svg\"", "BUDGET_EXHAUSTED", field: "scale")
+          end
           bytes = Screenshot::Png.render(frame, scale: scale, title: frame.title)
-          if bytes.empty?
-            return err("the PNG renderer produced no bytes — refusing to write an empty picture; " \
-                       "ask for format:\"svg\"", "INTERNAL", field: "format")
+          # The header read back off the bytes, against the geometry they were asked for — the
+          # one self-check a writer can make, and what would catch a truncated encode before the
+          # agent is handed a path to a picture nothing can open.
+          if msg = Screenshot::Png.output_error(bytes, dims)
+            return err("#{msg} — refusing to write it; ask for format:\"svg\"",
+              "INTERNAL", field: "format")
           end
           bytes
         when "ansi" then Screenshot::Ansi.render(frame).to_slice
@@ -251,7 +263,10 @@ module Gori
           s.field "tab", enumprop("tab to open before drawing (default: the project's own home tab)",
             Tui::Chrome::TABS.map(&.first.to_s))
           s.field "keys", strprop("keys to send before drawing, in tmux send-keys grammar " \
-                                  "(`C-p \"acme\" Enter Down Down`, plus SLEEP<secs>). Drives NAVIGATION: the frame " \
+                                  "(`C-p \"acme\" Enter Down Down`, plus SLEEP<secs> — at most " \
+                                  "#{Tui::KeyScript::MAX_SLEEP.total_seconds.to_i}s per pause and " \
+                                  "#{Tui::KeyScript::MAX_TOTAL_PAUSE.total_seconds.to_i}s over the script). " \
+                                  "Drives NAVIGATION: the frame " \
                                   "shows the store as it is now, so anything async (a Repeater send, a scan) is " \
                                   "photographed mid-flight rather than awaited")
           s.field "cols", intprop("terminal width to draw at (default 132, max #{SCREENSHOT_MAX_DIM})")

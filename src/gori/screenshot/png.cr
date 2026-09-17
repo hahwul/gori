@@ -64,6 +64,45 @@ module Gori::Screenshot
       {layout.width * scale, layout.height * scale}
     end
 
+    # The largest canvas any surface will rasterize. Not a format limit — PNG's own is 2^31 a
+    # side — but a memory one: `Canvas` holds one Int32 per pixel at scale 1 and `encode`
+    # builds a scaled row buffer on top, so the product is what a caller actually pays. The
+    # documented ceilings multiply: a 1000x1000 grid (`--size`'s cap) at scale 2 is 16064 x
+    # 32128 = 516 million pixels, two gigabytes of canvas for a picture no viewer opens. 64
+    # million is ~8000x8000, comfortably past any real screenshot and still a 256 MB canvas.
+    MAX_PIXELS = 64_000_000_i64
+
+    # Why this image is too big to draw, or nil. Named numbers, because "lower --scale" is not
+    # actionable without knowing which of the three inputs is the expensive one.
+    #
+    # A shared predicate rather than a check per surface: `gori run screenshot` and the MCP
+    # tool each multiply their own caps, and a second spelling of this arithmetic is a second
+    # answer to "how big is too big". Each caller supplies the sentence that names ITS flags.
+    def self.pixel_budget_error(width : Int32, height : Int32) : String?
+      pixels = width.to_i64 * height.to_i64
+      return nil if pixels <= MAX_PIXELS
+      "that PNG would be #{width}×#{height} = #{pixels} px, past the #{MAX_PIXELS} px cap"
+    end
+
+    # The signature and the IHDR read back off what `encode` just wrote, compared with the
+    # geometry it was asked for — the only self-check a writer can make without being a
+    # decoder, and the one a caller needs before it puts these bytes somewhere an operator
+    # will later trust. Returns the sentence to refuse with, or nil.
+    #
+    # It replaces an `bytes.empty?` guard that could never fire: `encode` writes the signature
+    # and an IHDR unconditionally, so "produced no bytes" named a state the renderer has no
+    # path to. A truncated or mis-sized image is the failure that IS reachable.
+    def self.output_error(bytes : Bytes, expect : {Int32, Int32}) : String?
+      unless bytes.size >= 8 + 8 + 13 && bytes[0, 8] == SIGNATURE
+        return "the PNG renderer produced #{bytes.size} bytes with no PNG signature"
+      end
+      # IHDR's payload opens at byte 16: 8 signature + 4 length + 4 type.
+      width = IO::ByteFormat::BigEndian.decode(Int32, bytes[16, 4])
+      height = IO::ByteFormat::BigEndian.decode(Int32, bytes[20, 4])
+      return nil if {width, height} == expect
+      "the PNG renderer wrote a #{width}×#{height} header for a #{expect[0]}×#{expect[1]} image"
+    end
+
     private def self.check_scale(scale : Int32) : Int32
       return scale if 1 <= scale <= MAX_SCALE
       raise Gori::Error.new("screenshot scale must be 1..#{MAX_SCALE}, got #{scale}")

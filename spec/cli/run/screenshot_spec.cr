@@ -300,6 +300,21 @@ describe "gori run screenshot" do
     end
   end
 
+  describe "--keys" do
+    it "refuses a script whose pauses run past the cap, before anything is opened" do
+      # `screenshot_refusal` is the whole "no" ladder and it runs before a session exists, so a
+      # `SLEEP` nobody would wait out costs a sentence rather than a hung command.
+      f = Gori::CLI::Run::ScreenshotFlags.new
+      f.keys = "SLEEP99999"
+      Gori::CLI::Run.screenshot_refusal(f).not_nil!.should contain("one SLEEP may pause at most")
+
+      ok = Gori::CLI::Run::ScreenshotFlags.new
+      ok.keys = "Down SLEEP0.5 Enter"
+      Gori::CLI::Run.screenshot_refusal(ok).should be_nil
+      ok.steps.size.should eq(3)
+    end
+  end
+
   describe "the stderr notes" do
     it "reports the pointer rules no frame could be asked for, beside the count" do
       # `--redact-preview` is refused here (a frame has no per-value list), so these sentences
