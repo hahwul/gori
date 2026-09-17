@@ -1,5 +1,7 @@
 require "./screenshot/frame"
 require "./screenshot/chrome"
+require "./screenshot/ansi"
+require "./screenshot/text"
 
 module Gori
   # Turning a drawn TUI frame into something that leaves the terminal: an SVG or PNG picture,
