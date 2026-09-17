@@ -46,6 +46,7 @@ private MAXIMAL_PROFILE = <<-JSON
     "pretty_bodies": false,
     "layout": { "history_preview": true, "history_list_order": "oldest" },
     "statusline": { "command": "echo hi" },
+    "screenshot": { "format": "png", "dir": "/tmp/shots", "png_scale": 4 },
     "display": { "history_time_format": "relative" },
     "companion": { "enabled": true, "notices": false },
     "notifications": { "bell": true, "toast": false },
@@ -87,6 +88,9 @@ private def with_every_section_populated(&)
   hist_preview = Gori::Settings.history_preview
   hist_order = Gori::Settings.history_list_order
   statusline = Gori::Settings.statusline_command
+  screenshot_format = Gori::Settings.screenshot_format
+  screenshot_dir = Gori::Settings.screenshot_dir
+  screenshot_scale = Gori::Settings.screenshot_png_scale
   time_format = Gori::Settings.history_time_format
   companion = Gori::Settings.companion?
   companion_notices = Gori::Settings.companion_notices?
@@ -133,6 +137,9 @@ private def with_every_section_populated(&)
     Gori::Settings.history_preview = hist_preview
     Gori::Settings.history_list_order = hist_order
     Gori::Settings.statusline_command = statusline
+    Gori::Settings.screenshot_format = screenshot_format
+    Gori::Settings.screenshot_dir = screenshot_dir
+    Gori::Settings.screenshot_png_scale = screenshot_scale
     Gori::Settings.history_time_format = time_format
     Gori::Settings.companion = companion
     Gori::Settings.companion_notices = companion_notices

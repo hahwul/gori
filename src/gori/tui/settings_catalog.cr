@@ -68,6 +68,10 @@ module Gori::Tui
         "History list Req/Res preview, Sitemap default expand depth, tab-bar numbers", :appearance, :form),
       Section.new(:companion, "settings.companion", "Companion",
         "Miss Ring — the mascot in the body's bottom-right corner, her motion, and her notices", :appearance, :form),
+      # Appearance and not General: what a screenshot LOOKS like is the question an operator
+      # asks here (which format, drawn how big), and the directory rides along with it.
+      Section.new(:screenshot, "settings.screenshot", "Screenshot",
+        "Format and destination directory for the screenshot commands", :appearance, :form),
       # Editor & Keys
       Section.new(:editor, "settings.editor", "Editor",
         "Set the external editor opened by ^E in editable fields", :editor, :form),

@@ -12,6 +12,7 @@ private RESET_FIXTURE = <<-JSON
     "pretty_bodies": false,
     "layout": { "history_preview": true, "history_list_order": "oldest" },
     "statusline": { "command": "echo hi" },
+    "screenshot": { "format": "ansi", "dir": "/tmp/shots", "png_scale": 5 },
     "display": { "history_time_format": "relative", "wrap_lines": false },
     "companion": { "enabled": true, "notices": false },
     "notifications": { "bell": true, "toast": false },

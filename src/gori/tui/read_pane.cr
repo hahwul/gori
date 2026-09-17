@@ -563,6 +563,11 @@ module Gori::Tui
           screen.text(rect.x, y, " " * {gw - 1, 0}.max, Theme.muted, width: gw)
         end
       end
+      # Soft wrap put the tail of a logical line on this row, and the break took its `Name:` /
+      # opening quote with it — a screenshot's redaction has to re-join the two before it can
+      # recognise a secret that straddles them (Screenshot::Mask). Reported EVERY frame: the
+      # marks are frame-scoped, and a pane that stops reporting stops being redactable.
+      screen.mark_continuation(rect.x + gw, y, cw) if vr.sub > 0
       whole = vr.a == 0 && vr.b >= plain.size
       if sl = styled
         # Char offsets, not columns: `Wrap::Layout` decided the break by walking clusters and

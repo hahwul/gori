@@ -464,6 +464,30 @@ Edits take effect immediately: saving a new `command`, `interval` or `timeout` r
 
 The [Statusline guide](/guide/statusline/) has the rest: the [JSON context](/guide/statusline/#context) every run reads on stdin, [commands to paste in](/guide/statusline/#presets) with a picture of the row each one produces, and [what the row says when a command fails](/guide/statusline/#failures).
 
+### screenshot
+
+Where the `screenshot` commands write, and in what format (command palette → **Settings: Screenshot**). Omitted when every value is a factory default.
+
+```json
+{
+  "screenshot": {
+    "format": "svg",
+    "dir": "",
+    "png_scale": 2
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `format` | string | `"svg"` | What **Screenshot** writes: `"svg"` (self-contained vector, text stays selectable), `"png"` (raster), `"ansi"` (a re-pasteable terminal dump) or `"txt"` (plain text). An unrecognised value reads as `"svg"` |
+| `dir` | string | `""` | Directory screenshots are written to. Blank means `$GORI_HOME/screenshots`, the owner-only (`0700`) convention dir. `~` and a relative path are expanded |
+| `png_scale` | integer | `2` | Pixels per terminal cell edge for the `png` format, clamped to `1`-`8`. Ignored by the other three formats |
+
+Two palette entries use this. **Screenshot** writes straight to `dir` as `<project>-<tab>-<YYYYmmdd-HHMMSS>.<format>`, adding a `-2`, `-3`… suffix rather than overwriting a name already taken in the same second. **Screenshot to…** opens the export card instead, and there the **extension you type picks the format** — `.svg`, `.png`, `.ansi` or `.txt` — so `format` only supplies the prefilled default. Neither has a key binding: the Global bare-letter budget is closed, and a picture of a live engagement is a deliberate act.
+
+A screenshot is taken of the frame on screen, with menus down, and the project's [redaction](#redaction) profile painted over it before it reaches disk — so a value the profile claims is covered in the picture too, and the toast says how many regions were covered. A region wide enough carries the same `[REDACTED:…]` correlation tag a redacted copy or export would.
+
 ### display
 
 Message-body and chrome prefs (command palette → **Settings: Display**). Omitted when every value is a factory default.
@@ -822,6 +846,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `companion` | Miss Ring, the mascot: `enabled` (off by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`) and `notices`. See the [Settings guide](/guide/settings/) |
 | `layout` | History / Probe / Issues previews, Sitemap expand depth, tab-bar numbers. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
+| `screenshot` | Where the screenshot commands write (`dir`), in what `format`, and the `png_scale`. See [screenshot](#screenshot) above |
 | `redaction` | Safe-export profiles, the active one, the on-by-default switch and the placeholder salt. See [redaction](#redaction) above |
 | `display` | Default detail pane, list time format, line-number gutter, `wrap_lines` (soft-wrap long lines, on by default), preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |
 

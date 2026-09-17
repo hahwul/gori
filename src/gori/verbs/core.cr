@@ -88,6 +88,25 @@ module Gori
         "view.refresh", "Refresh screen", "Force a full repaint — recover from terminal corruption / stray glyphs",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.refresh_screen; nil }
 
+      # Screenshots of the live screen (#1086). NO chord on either, for two reasons that point
+      # the same way. The Global bare-letter budget is closed — L2 is `c`/`i`/`s` and nothing
+      # else (see the key-budget note at the top of this file) — and a screenshot is a
+      # deliberate act, not a reflex: a picture of a live engagement lands on disk carrying
+      # whatever was on screen, so it should cost a palette entry rather than a stray keypress.
+      # Both are listed automatically in the palette, the space menu and Help by the registry.
+      #
+      # Two verbs rather than one with a prompt, unlike issues.export: the common case here is
+      # "take one now, settings already say where", and putting a path card in front of that
+      # would make the frequent gesture the slower one. The card is the OTHER verb.
+      r.register Verb::Definition.new(
+        "screenshot", "Screenshot",
+        "Write the current screen to a file (settings:screenshot decides format and directory)",
+        Verb::Scope::Global, [] of Verb::Chord) { |ctx| ctx.screenshot_capture; nil }
+      r.register Verb::Definition.new(
+        "screenshot.save-as", "Screenshot to…",
+        "Write the current screen to a path you choose (.svg, .png, .ansi or .txt)",
+        Verb::Scope::Global, [] of Verb::Chord) { |ctx| ctx.screenshot_save_as; nil }
+
       r.register Verb::Definition.new(
         "ca.export", "Copy CA certificate path", "Copy the path to gori's root CA (same as `gori ca`) for trust setup",
         Verb::Scope::Global) { |ctx| ctx.export_ca; nil }

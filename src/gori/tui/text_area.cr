@@ -1426,6 +1426,9 @@ module Gori::Tui
             screen.text(rect.x, rect.y + i, " " * {gw - 1, 0}.max, Theme.muted, width: gw)
           end
         end
+        # The soft-wrap mark a screenshot's redaction rejoins rows with — reported every frame,
+        # because the marks are frame-scoped (Backend#mark_continuation, ReadPane#draw_row).
+        screen.mark_continuation(cx0, rect.y + i, cw) if vr.sub > 0
         composing = li == @cy && !@preedit.empty?
         # `drawn_line` folds the IME preedit into the caret line: under wrap the composing
         # text is what shifts the break, so layout, draw, caret and click must all measure

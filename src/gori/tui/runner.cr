@@ -142,6 +142,7 @@ require "./runner/project"
 require "./runner/repeater"
 require "./runner/rewriter"
 require "./runner/scope"
+require "./runner/screenshot"
 require "./runner/search"
 require "./runner/sequencer"
 require "./runner/session_slots"
@@ -324,6 +325,10 @@ module Gori::Tui
       @title_text = nil.as(String?)                       # last string emitted as the terminal-window title (memo; see sync_terminal_title)
       @title_key = nil.as(Tuple(String, Symbol, String)?) # the inputs that title was built from
       @title_written = false                              # have we ever written a title? gates the neutral restore on leave when the pref is "off"
+      # Where the caret sat on the frame the last render put on screen, for the screenshot
+      # verbs (see runner/screenshot.cr). Declared here so the type is stated once rather than
+      # inferred from a single assignment inside `render`.
+      @last_cursor = nil.as(Tuple(Int32, Int32)?)
       # The circuit breaker behind `absorb_tick_error`: strikes inside TICK_ERROR_WINDOW.
       @breaker = TickBreaker.new(TICK_ERROR_LIMIT, TICK_ERROR_WINDOW)
       # The exception a full render last raised, while the reduced frame stands in for it —
@@ -2706,12 +2711,20 @@ module Gori::Tui
       title = case key[0]
               when "off" then @title_text.nil? ? return : "𝓰𝓸𝓻𝓲"
               when "tab" then "𝓰𝓸𝓻𝓲 - #{Chrome.tab_label(@active_tab)}"
-              else            "𝓰𝓸𝓻𝓲 - #{title_safe(@session.project.name)} - #{Chrome.tab_label(@active_tab)}"
+              else            project_tab_title
               end
       return if @title_text == title
       @title_text = title
       @title_written = true
       @term.title = title
+    end
+
+    # The full `𝓰𝓸𝓻𝓲 - <project> - <Tab>` caption. Shared by the terminal title above and the
+    # title bar a screenshot is rendered with (`Runner#capture_frame`), so the two cannot spell
+    # the same thing differently — and so a screenshot keeps naming its project even when
+    # settings:display has the terminal title switched off.
+    private def project_tab_title : String
+      "𝓰𝓸𝓻𝓲 - #{title_safe(@session.project.name)} - #{Chrome.tab_label(@active_tab)}"
     end
 
     # Project names are user-supplied and go out inside an OSC string, where a raw ESC or
@@ -2780,7 +2793,11 @@ module Gori::Tui
       # Kitty etc. The views paint their own visual (preedit underline or '_'
       # cell); we also position the real cursor so the *terminal* knows where
       # to draw its composition feedback for Hangul/CJK.
-      if pos = screen.desired_cursor
+      # Remembered as well as applied: `Backend#snapshot` reads the CELL GRID, and a terminal's
+      # cursor is not a cell — so a screenshot taken from a verb has no other way to know where
+      # the caret was on the frame it just photographed.
+      @last_cursor = screen.desired_cursor
+      if pos = @last_cursor
         @term.set_cursor(pos[0], pos[1], visible: true)
       else
         # No focused input this frame — hide the caret so it doesn't linger at a
@@ -5999,7 +6016,8 @@ module Gori::Tui
     # to the modal) would behave differently.
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
-      when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general
+      when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :screenshot,
+           :notifications, :general
         open_preferences(section)                       # the unified grouped modal, positioned at this section
       when :theme   then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
       when :tabs    then open_overlay(tabs_editor(back))

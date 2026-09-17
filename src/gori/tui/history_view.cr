@@ -3536,6 +3536,9 @@ module Gori::Tui
         li = vr.li
         y = body.y + i
         draw_detail_gutter(screen, body.x, y, gw, vr, focused)
+        # The soft-wrap mark a screenshot's redaction rejoins rows with — reported every frame,
+        # because the marks are frame-scoped (Backend#mark_continuation, ReadPane#draw_row).
+        screen.mark_continuation(body.x + gw, y, cw) if vr.sub > 0
         shown = Highlight.slice_chars(styled_detail_line(dv, li), vr.a, vr.b)
         shown = Highlight.slice_left(shown, xs) if xs > 0
         Highlight.draw(screen, body.x + gw, y, shown, width: cw)
@@ -3585,6 +3588,9 @@ module Gori::Tui
         y = body.y + i
         line = lines[vr.li]
         draw_detail_gutter(screen, body.x, y, gw, vr, focused)
+        # The soft-wrap mark a screenshot's redaction rejoins rows with — reported every frame,
+        # because the marks are frame-scoped (Backend#mark_continuation, ReadPane#draw_row).
+        screen.mark_continuation(body.x + gw, y, cw) if vr.sub > 0
         # `last` only on the row that actually ends the line — the ␊ marker belongs at the
         # true end of the line, not at every wrap break inside it.
         eol = vr.b >= line.size && vr.li < total - 1
