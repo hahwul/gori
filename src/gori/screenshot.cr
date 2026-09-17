@@ -1,5 +1,6 @@
 require "./screenshot/frame"
 require "./screenshot/chrome"
+require "./screenshot/svg"
 require "./screenshot/ansi"
 require "./screenshot/text"
 
