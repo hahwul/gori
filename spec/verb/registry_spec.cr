@@ -1215,6 +1215,14 @@ private class FakeContext < ExecContext
     @calls << :open_browser_picker
   end
 
+  def screenshot_capture : Nil
+    @calls << :screenshot_capture
+  end
+
+  def screenshot_save_as : Nil
+    @calls << :screenshot_save_as
+  end
+
   def authorize_seed_selected : Nil
     @calls << :authorize_seed_selected
   end
