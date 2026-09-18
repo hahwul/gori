@@ -276,15 +276,19 @@ module Gori::Agent
       changed = false
       n = 0
       while n < DRAIN_CAP
-        ev = @events.receive?
-        break if ev.nil?
-        apply(ev)
+        # NON-blocking: a bare `receive?` parks until something arrives, and this runs on
+        # the render fiber. The `else` arm is "nothing queued right now"; a nil from a
+        # closed channel means the reader is gone, and its Exited was applied already.
+        select
+        when got = @events.receive?
+          break if got.nil?
+          apply(got)
+        else
+          break
+        end
         changed = true
         n += 1
       end
-      # `Channel#receive?` returns nil on a CLOSED channel too, and a closed channel means
-      # the reader is gone — but the reader closes it only after sending Exited, so the
-      # Exited was applied above. Nothing to do here.
       if (deadline = @interrupt_deadline) && Time.instant >= deadline
         @interrupt_deadline = nil
         if running?
@@ -322,40 +326,46 @@ module Gori::Agent
       in Event::ToolResult
         persist(@transcript.append("tool", "tool_result", ev.content, created_at: now_us,
           tool_use_id: ev.tool_use_id, is_error: ev.is_error))
-      in Event::PermissionAsked
-        if @session_allow.includes?(ev.tool)
-          # Answered here, not by the controller: the grant is this session's own memory.
-          persist(@transcript.append("system", "permission", "allowed #{ev.tool} (session grant)",
-            created_at: now_us, tool_name: ev.tool, tool_use_id: ev.tool_use_id))
-          enqueue(@backend.permission_response(ev.request_id, true, ev.input_json, nil))
-        elsif @config.permission_policy == "deny"
-          persist(@transcript.append("system", "permission", "denied #{ev.tool} (policy)",
-            created_at: now_us, tool_name: ev.tool, tool_use_id: ev.tool_use_id))
-          enqueue(@backend.permission_response(ev.request_id, false, nil, "denied by gori's permission policy"))
-        else
-          @pending << ev
-        end
-      in Event::TurnDone
-        @transcript.clear_tail
-        @interrupt_deadline = nil
-        @cost_usd = ev.cost_usd if ev.cost_usd > 0
-        @turns += 1
-        if ev.subtype != "success" && !ev.text.empty?
-          persist(@transcript.append("system", "error", "#{ev.subtype}: #{ev.text}", created_at: now_us))
-        elsif ev.subtype != "success"
-          persist(@transcript.append("system", "error", ev.subtype, created_at: now_us))
-        end
-        persist(@transcript.append("system", "result", "", created_at: now_us))
-        if (id = @store_id) && (store = @store)
-          store.update_agent_session(id, cost_usd: @cost_usd, turns: @turns)
-        end
-        @state = State::Idle if running?
+      in Event::PermissionAsked then apply_permission(ev)
+      in Event::TurnDone        then apply_turn_done(ev)
       in Event::Raw
         persist(@transcript.append("system", "raw", ev.line, created_at: now_us, truncated: ev.truncated))
       in Event::Exited
         die(ev.reason) unless dead? && @stopping
         @dead_reason = ev.reason if @dead_reason.empty?
       end
+    end
+
+    private def apply_permission(ev : Event::PermissionAsked) : Nil
+      if @session_allow.includes?(ev.tool)
+        # Answered here, not by the controller: the grant is this session's own memory.
+        persist(@transcript.append("system", "permission", "allowed #{ev.tool} (session grant)",
+          created_at: now_us, tool_name: ev.tool, tool_use_id: ev.tool_use_id))
+        enqueue(@backend.permission_response(ev.request_id, true, ev.input_json, nil))
+      elsif @config.permission_policy == "deny"
+        persist(@transcript.append("system", "permission", "denied #{ev.tool} (policy)",
+          created_at: now_us, tool_name: ev.tool, tool_use_id: ev.tool_use_id))
+        enqueue(@backend.permission_response(ev.request_id, false, nil, "denied by gori's permission policy"))
+      else
+        @pending << ev
+      end
+    end
+
+    private def apply_turn_done(ev : Event::TurnDone) : Nil
+      @transcript.clear_tail
+      @interrupt_deadline = nil
+      @cost_usd = ev.cost_usd if ev.cost_usd > 0
+      @turns += 1
+      if ev.subtype != "success" && !ev.text.empty?
+        persist(@transcript.append("system", "error", "#{ev.subtype}: #{ev.text}", created_at: now_us))
+      elsif ev.subtype != "success"
+        persist(@transcript.append("system", "error", ev.subtype, created_at: now_us))
+      end
+      persist(@transcript.append("system", "result", "", created_at: now_us))
+      if (id = @store_id) && (store = @store)
+        store.update_agent_session(id, cost_usd: @cost_usd, turns: @turns)
+      end
+      @state = State::Idle if running?
     end
 
     # Go Dead: the reason, the orphaned permission requests (a `control_request` nobody
@@ -421,7 +431,7 @@ module Gori::Agent
         begin
           while (n = io.read(buf)) > 0
             chunk = buf[0, n]
-            while (idx = chunk.index(0x0a_u8))
+            while idx = chunk.index(0x0a_u8)
               take = chunk[0, idx]
               chunk = chunk + (idx + 1)
               if overflow
@@ -498,7 +508,7 @@ module Gori::Agent
         code = status.exit_code
         code == 0 ? "exited" : "exit #{code}"
       else
-        "killed by #{status.exit_signal}"
+        "killed by #{status.exit_signal?}"
       end
     end
 
