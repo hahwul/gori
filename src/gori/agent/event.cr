@@ -8,7 +8,10 @@ module Gori
   # Layering, top to bottom: `Event` (this file) is the backend-NEUTRAL vocabulary a session
   # consumes; `Claude::Protocol` (protocol.cr) is the one place that knows Claude Code's wire
   # format; `Backend` (backend.cr) is the seam an ACP-speaking agent plugs into later without
-  # touching `Session` or `Transcript`. Nothing under `Gori::Agent` may name a surface.
+  # touching `Session` or `Transcript`. Nothing under `Gori::Agent` may name a surface — with one
+  # named exception: `McpConfig` borrows `MCP::Install`'s argv builder and binary lookup, because a
+  # second spelling of `gori mcp`'s flags is how a flag gets validated in one place and dropped in
+  # the other.
   module Agent
     # One thing the child said, already lifted out of its wire framing. A union of records
     # rather than a kind-enum on one struct so that `case ev in …` is exhaustive at compile

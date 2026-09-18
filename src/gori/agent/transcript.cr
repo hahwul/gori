@@ -109,8 +109,12 @@ module Gori::Agent
     # A streamed delta: extends the in-flight block only.
     def push_delta(text : String) : Nil
       return if text.empty?
+      # Capped like a finished message, and split INCREMENTALLY: only the last line can grow,
+      # so a long streamed answer costs one line per delta rather than the whole tail again.
+      return if @tail.bytesize >= MAX_MESSAGE_BYTES
       @tail += text
-      @tail_lines = @tail.split('\n')
+      last = @tail_lines.pop? || ""
+      (last + text).split('\n') { |l| @tail_lines << l }
       bump
     end
 

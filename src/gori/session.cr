@@ -81,6 +81,7 @@ module Gori
       authorize_events = Channel(Store::FlowEvent).new(256)
       store = Store.open(project.db_path, events, probe_events, Settings.retention_flows,
         authorize_events: authorize_events)
+      store.agent_sessions_keep = Settings.agent_history_keep
       probe = nil.as(Probe::Analyzer?)
       begin
         # THE token-grammar reconcile, and it runs FIRST — before the rule sets, the slots, the

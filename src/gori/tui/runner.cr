@@ -4407,7 +4407,6 @@ module Gori::Tui
       rewriter_controller.commit if @active_tab == :rewriter
       notes_controller.save_notes if @active_tab == :notes
       issues_controller.commit if @active_tab == :issues
-      agent_controller.commit if @active_tab == :agent
     end
 
     def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil

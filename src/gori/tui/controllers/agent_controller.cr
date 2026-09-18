@@ -47,7 +47,7 @@ module Gori::Tui
       # set, one held tool call would post a notification on every tick.
       @notified = Set(String).new
       @notified_dead = false
-      @was_running = false
+      @turns_seen = 0
     end
 
     # ---- identity --------------------------------------------------------------------
@@ -77,7 +77,7 @@ module Gori::Tui
       @session = s
       @notified.clear
       @notified_dead = false
-      @was_running = false
+      @turns_seen = 0
       s.start
       @view.sync(s.transcript)
       s
@@ -116,7 +116,7 @@ module Gori::Tui
         return
       end
       unless s.interrupt
-        @host.status("this agent build did not advertise interrupt — {agent.stop} stops it instead")
+        @host.status(keys("this agent build did not advertise interrupt — {agent.stop} stops it instead"))
         return
       end
       @host.status("interrupt sent")
@@ -130,7 +130,7 @@ module Gori::Tui
       end
       @notified.clear
       @notified_dead = false
-      @was_running = false
+      @turns_seen = 0
       ok = s.restart(resume)
       exit_history
       @view.sync(s.transcript)
@@ -177,13 +177,16 @@ module Gori::Tui
       end
     end
 
-    # A turn's end is read off the state transition rather than the event, because `drain`
-    # applies the `result` frame inside the session and nothing surfaces it. The reply is the
-    # last assistant text in the transcript, which is the same line the pane just drew.
+    # A turn's end is read off the session's TURN COUNTER rather than a running→idle
+    # transition: a turn that starts and finishes inside one tick never shows the
+    # transition, and `drain` applies the `result` frame without surfacing it. The reply is
+    # the last assistant text in the transcript, which is the same line the pane just drew.
     private def notify_turn_done(s : Gori::Agent::Session) : Nil
-      was = @was_running
-      @was_running = s.running?
-      return unless was && !s.running?
+      seen = @turns_seen
+      @turns_seen = s.turns
+      return unless s.turns > seen
+      # The held requests of the finished turn are all answered; forget their ids.
+      @notified.clear if s.pending.empty?
       return if @host.active_tab == :agent
       reply = s.transcript.messages.reverse_each.find { |m| m.role == "assistant" && m.kind == "text" }
       line = reply ? Gori::Agent::Transcript.first_line(reply.text) : "turn finished"
@@ -592,14 +595,6 @@ module Gori::Tui
     # `data_version` bump could truncate the turn currently streaming into it (see the class
     # comment, and `Session`'s own PERSISTENCE note).
     def on_external_change : Nil
-    end
-
-    # Persist the unsent draft. Only once the conversation has a row — before the first turn
-    # there is nothing to attach it to, and the text is still on screen either way.
-    def commit : Nil
-      return unless s = @session
-      return unless id = s.store_id
-      @host.session.store.update_agent_session(id, draft: @view.input_text)
     end
   end
 end

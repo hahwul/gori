@@ -150,15 +150,17 @@ module Gori::Agent
     # case is `claude` not on PATH), and the tab draws guidance rather than a crash. The
     # raise is caught HERE, at the spawn site, so it never reaches the tick's own rescue.
     def start : Bool
-      mcp = McpConfig.write(@config.db_path, @config.mcp_read_only)
-      argv = @backend.argv(@config, @session_uuid, @resume_uuid, mcp)
       process =
         begin
+          # The MCP config file is part of the spawn: a read-only volume or a stolen
+          # `<db>.agent/` fails HERE, as a dead reason, not in the tick's rescue.
+          mcp = McpConfig.write(@config.db_path, @config.mcp_read_only)
+          argv = @backend.argv(@config, @session_uuid, @resume_uuid, mcp)
           Process.new(argv[0], argv[1..], shell: false, chdir: @config.cwd,
             input: Process::Redirect::Pipe, output: Process::Redirect::Pipe,
             error: Process::Redirect::Pipe)
         rescue ex : Exception
-          die(spawn_message(argv[0], ex))
+          die(spawn_message(@config.command, ex))
           return false
         end
       @process = process
@@ -375,6 +377,9 @@ module Gori::Agent
       @state = State::Dead
       @dead_reason = reason
       @transcript.clear_tail
+      # Release the writer fiber: on a natural exit nothing else closes the outbox, and a
+      # later `start` installs a fresh one — the old fiber would park on this forever.
+      @outbox.close rescue nil
       unless @pending.empty?
         @pending.each do |p|
           persist(@transcript.append("system", "error",
@@ -447,7 +452,7 @@ module Gori::Agent
             end
             next if chunk.empty? || overflow
             room = MAX_LINE - line.bytesize
-            if chunk.bytesize > room
+            if chunk.bytesize >= room
               line.write(chunk[0, {room, 0}.max])
               overflow = true
             else

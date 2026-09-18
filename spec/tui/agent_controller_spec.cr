@@ -329,17 +329,4 @@ describe Gori::Tui::AgentController do
       controller.view.transcript.not_nil!.lines.should contain("› live turn")
     end
   end
-
-  it "persists the unsent draft on commit, once the conversation has a row" do
-    with_agent_controller do |controller, host|
-      controller.view.set_input("half-written")
-      controller.commit # no session, no row: nothing to attach it to, and no crash
-      controller.submit("a turn").should be_true
-      controller.view.set_input("still half-written")
-      controller.commit
-
-      id = controller.session.not_nil!.store_id.not_nil!
-      host.session.store.agent_session(id).not_nil!.draft.should eq("still half-written")
-    end
-  end
 end

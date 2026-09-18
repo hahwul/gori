@@ -249,6 +249,10 @@ module Gori
     # Hard-coded for now. #1093 puts it behind a setting in a later slice; the number lives
     # here so there is one place for that to read.
     AGENT_SESSIONS_KEEP = 50
+
+    # Conversations kept per project. Set by the surface that opened the store from
+    # `Settings.agent_history_keep` — the store does not read Settings itself.
+    property agent_sessions_keep : Int32 = AGENT_SESSIONS_KEEP
     # Ids per statement when a batch write binds an `IN (?,?,…)` list. SQLite caps bound
     # parameters at SQLITE_MAX_VARIABLE_NUMBER, which is 999 on anything built before 3.32 —
     # so a set larger than that does not merely run slower, the statement RAISES and the whole
@@ -1484,7 +1488,7 @@ module Gori
       # their own (EVENTS_TRIM_INTERVAL) because every surface writes thousands of them; a
       # conversation is a handful per day and the overshoot is bounded by how fast an operator
       # can start them, so this rides the existing cadence until the setting lands.
-      trim_agent_sessions(conn, AGENT_SESSIONS_KEEP)
+      trim_agent_sessions(conn, @agent_sessions_keep)
       return if @writer_conn_suspect
       return if @retention_flows <= 0
       # Served by the primary key: a rightmost-leaf descending scan of @retention_flows rows.

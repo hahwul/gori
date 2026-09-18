@@ -43,7 +43,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "agent.copy", "Copy transcript", "Copy the transcript selection, or all of it",
-        Verb::Scope::Agent, [Verb::Chord.new("y")],
+        Verb::Scope::Agent, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
         mnemonic: 'y', group: :copy) { |ctx| ctx.agent_copy; nil }
 
       r.register Verb::Definition.new(

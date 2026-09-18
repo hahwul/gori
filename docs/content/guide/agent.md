@@ -35,7 +35,7 @@ Three parts, top to bottom:
 | `i` | Insert mode |
 | `esc` | Read mode |
 | `↵` (read mode) / `^S` | Send (`agent.send`) |
-| `^C` / `agent.interrupt` | Cancel the running turn |
+| `^X` / `agent.interrupt` | Cancel the running turn |
 | `agent.history` | Open a picker of past conversations for this project (read-only view) |
 | `agent.restart` | Resume the last conversation (`--resume`) |
 | `agent.new` | Start a fresh conversation |
@@ -70,7 +70,7 @@ Two things worth saying plainly:
 
 Conversations live in the project database (`agent_sessions`, `agent_messages`) — the same database as your captured traffic, so an agent conversation about this engagement travels with it. Streamed deltas are never stored; the completed message is, once it is whole.
 
-Reopening a conversation from `agent.history` resumes the CLI's own context with `--resume`, so the model picks back up where it left off, not just gori's transcript of it. gori's copy survives even if the CLI's own session state is later deleted — the two are related but the store row is not a cache of the CLI's file.
+`agent.history` opens a past conversation read-only; `esc` returns to the live one. `agent.restart` (`⇧R`) resumes the live conversation's CLI context with `--resume` after the child has exited, so the model picks back up where it left off, not just gori's transcript of it. gori's copy survives even if the CLI's own session state is later deleted — the two are related but the store row is not a cache of the CLI's file.
 
 `agent.history_keep` (default 50) bounds how many past conversations are kept per project; past that, the oldest are pruned.
 
@@ -94,7 +94,7 @@ Every key and its exact behavior: [`agent` in the configuration reference](/refe
 
 ## Miss Ring
 
-[Miss Ring](/guide/settings/#appearance), the companion mascot, reacts to the hosted agent when Companion is turned on (off by default, like every other companion behaviour): a warn face and bubble when a permission request is waiting, a happy face with the first line of the reply when a turn finishes while you're on another tab, and an error face when the child dies.
+[Miss Ring](/guide/settings/#appearance), the companion mascot, reacts to the hosted agent when Companion is turned on (off by default, like every other companion behaviour): a warn face and bubble when a permission request arrives while you're on another tab, a happy face with the first line of the reply when a turn finishes while you're on another tab, and an error face when the child dies.
 
 ## What Happens to the Child on Quit
 

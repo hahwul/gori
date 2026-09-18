@@ -108,6 +108,12 @@ module Gori
         stored = Store.truncate_utf8(text, AGENT_MESSAGE_MAX_BYTES)
         cut = true
       end
+      # The payload (a tool call's input) is bounded the same way: the wire line above it is
+      # capped at a megabyte, four times this, and a row is not the place to keep the excess.
+      if (pl = payload) && pl.bytesize > AGENT_MESSAGE_MAX_BYTES
+        payload = Store.truncate_utf8(pl, AGENT_MESSAGE_MAX_BYTES)
+        cut = true
+      end
       flag = (truncated || cut) ? 1_i64 : 0_i64
       exec_task ->(c : DB::Connection) {
         c.exec(

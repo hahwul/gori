@@ -7,9 +7,6 @@ require "../choice_picker"
 # palette and the tick reach it through, plus the two modals only the shell can raise: the
 # permission card and the one-line quick-ask prompt.
 class Gori::Tui::Runner < Gori::Verb::ExecContext
-  # Past conversations the history picker offers. Bounded by what one card can list.
-  AGENT_HISTORY_LIMIT = 30
-
   private def agent_controller : AgentController
     @tabs[:agent].as(AgentController)
   end
@@ -70,7 +67,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The past conversations, newest first; picking one loads it READ-ONLY beside the live
   # session (the controller's history mode; `esc` returns).
   def agent_history : Nil
-    rows = @session.store.list_agent_sessions(AGENT_HISTORY_LIMIT)
+    rows = @session.store.list_agent_sessions(Settings.agent_history_keep)
     return (@toast = "no past conversations in this project") if rows.empty?
     choices = rows.map_with_index do |row, i|
       stamp = Time.unix_ms(row.started_at // 1000).to_local.to_s("%m-%d %H:%M")

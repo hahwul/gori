@@ -235,8 +235,8 @@ module Gori::Tui
       Field.new("Permission policy",
         "ask = every tool call waits on you; deny = every tool call is refused outright — no allow: your own Claude settings can already auto-allow tools, and a second auto-allow layer here would be gori's fault — ←/→ cycles",
         choices: AGENT_PERMISSION_CHOICES, choice_labels: AGENT_PERMISSION_LABELS),
-      Field.new("History kept (turns)",
-        "how many turns of transcript the tab keeps once the live session is gone — count (1-1000)"),
+      Field.new("Conversations kept",
+        "past conversations kept per project before the oldest is pruned — count (1-1000)"),
     ]
     # Notifications: bell/toast toggles + ring-buffer retention.
     NOTIFICATIONS_FIELDS = [
