@@ -1393,8 +1393,78 @@ module Gori
         "ALTER TABLE repeaters ADD COLUMN response_request_sha256 TEXT",
       ]
 
+      # The Agent tab (#1093): one row per CONVERSATION with a coding agent, and its
+      # transcript beside it.
+      #
+      # `session_uuid` is the CURRENT spawn's uuid and is UPDATEd in place, which is the one
+      # thing about this table that looks wrong and is not. Claude Code REFUSES a `--session-id`
+      # it has already seen, so a conversation the operator continues after a restart cannot be
+      # resumed under the uuid it started with: every spawn mints a FRESH uuid and passes
+      # `--resume <the previous one>`. A row per SPAWN would therefore split one conversation —
+      # one scrollback, one cost total, one title — across as many rows as the operator happened
+      # to reopen it, and the transcript would have to be reassembled by chasing `resumed_from`
+      # backwards on every open. So the row is the conversation, `session_uuid` is "what to talk
+      # to right now", and `resumed_from` keeps the chain readable (which uuid this spawn
+      # continued, NULL for the first). UNIQUE on `session_uuid` because it is also the lookup
+      # key when a spawn reports the uuid it actually got.
+      #
+      # AUTOINCREMENT, for the reason V26 and V27 give: `agent_messages.session_id` points AT
+      # `agent_sessions.id`, and a reused id would silently re-parent an orphaned transcript
+      # onto a conversation that never produced it. `delete_agent_session` and
+      # `trim_agent_sessions` both delete the parent and its messages, so the window is real.
+      #
+      # `draft` is the unsent input buffer, persisted on tab switch — what the operator had
+      # typed and not sent is theirs, and losing it to a tab change is the kind of small
+      # betrayal that stops people using the pane. `title` is the first line of the first user
+      # turn; empty until there is one.
+      #
+      # `payload` on a message is the backend's own JSON for the frame (a tool call's input, a
+      # permission request) kept as TEXT beside the rendered `text`, on the P7 principle that
+      # the thing that arrived is canonical and the rendering is a projection. `truncated`
+      # marks a `text` cut at `Store::AGENT_MESSAGE_MAX_BYTES` — a tool result can be a whole
+      # file, and one row must not be able to bloat the project db.
+      #
+      # No REFERENCES clause anywhere, like every other table here: the deletes are explicit
+      # and ordered inside one writer transaction.
+      V29 = [
+        <<-SQL,
+          CREATE TABLE agent_sessions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_uuid TEXT    NOT NULL UNIQUE,
+            resumed_from TEXT,
+            backend      TEXT    NOT NULL,
+            model        TEXT,
+            title        TEXT    NOT NULL DEFAULT '',
+            draft        TEXT    NOT NULL DEFAULT '',
+            started_at   INTEGER NOT NULL,
+            ended_at     INTEGER,
+            cost_usd     REAL    NOT NULL DEFAULT 0,
+            turns        INTEGER NOT NULL DEFAULT 0
+          )
+          SQL
+        <<-SQL,
+          CREATE TABLE agent_messages (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            seq        INTEGER NOT NULL,
+            role       TEXT    NOT NULL,
+            kind       TEXT    NOT NULL,
+            text       TEXT    NOT NULL DEFAULT '',
+            payload    TEXT,
+            truncated  INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+          )
+          SQL
+        # The transcript is read whole, in order, on every open of a conversation — one
+        # covering index for that one read path.
+        "CREATE INDEX idx_agent_messages_session ON agent_messages (session_id, seq, id)",
+        # The session list is newest-first and nothing else; `id DESC` breaks the tie for two
+        # conversations started inside the same microsecond.
+        "CREATE INDEX idx_agent_sessions_started ON agent_sessions (started_at DESC, id DESC)",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

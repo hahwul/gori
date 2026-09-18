@@ -874,6 +874,77 @@ module Gori
       [] of EndpointObservation
     end
 
+    # --- agent conversations (V29, #1093) ------------------------------------
+
+    AGENT_SESSION_COLS = "id, session_uuid, resumed_from, backend, model, title, draft, " \
+                         "started_at, ended_at, cost_usd, turns"
+
+    # The Agent tab's session list, newest first. Served by `idx_agent_sessions_started`,
+    # whose `id DESC` tiebreak is what makes the order TOTAL: two conversations started in the
+    # same microsecond would otherwise come back in whatever order the scan produced, and the
+    # list would reshuffle under the cursor between two renders of the same data.
+    def list_agent_sessions(limit : Int32) : Array(AgentSessionRow)
+      rows = [] of AgentSessionRow
+      @db.query("SELECT #{AGENT_SESSION_COLS} FROM agent_sessions " \
+                "ORDER BY started_at DESC, id DESC LIMIT ?", limit.to_i64) do |rs|
+        rs.each { rows << read_agent_session(rs) }
+      end
+      rows
+    end
+
+    def agent_session(id : Int64) : AgentSessionRow?
+      @db.query("SELECT #{AGENT_SESSION_COLS} FROM agent_sessions WHERE id = ?", id) do |rs|
+        return read_agent_session(rs) if rs.move_next
+      end
+      nil
+    end
+
+    # The conversation a spawn's uuid belongs to. The lookup a reconnect makes: the backend
+    # reports the uuid it actually got, and that is the only handle it has on the row.
+    # `session_uuid` is UNIQUE, so this is one index probe and cannot be ambiguous.
+    def agent_session_by_uuid(uuid : String) : AgentSessionRow?
+      @db.query("SELECT #{AGENT_SESSION_COLS} FROM agent_sessions WHERE session_uuid = ?",
+        uuid) do |rs|
+        return read_agent_session(rs) if rs.move_next
+      end
+      nil
+    end
+
+    # One conversation's whole transcript, in order. Not paged: a transcript is bounded by
+    # `Store::AGENT_MESSAGE_MAX_BYTES` per line and by retention per conversation, and the
+    # pane scrolls the whole thing. `seq, id` is the index's own order (see
+    # `idx_agent_messages_session`), so this is a range scan with no sort.
+    def agent_messages(session_id : Int64) : Array(AgentMessageRow)
+      rows = [] of AgentMessageRow
+      @db.query("SELECT id, session_id, seq, role, kind, text, payload, truncated, created_at " \
+                "FROM agent_messages WHERE session_id = ? ORDER BY seq, id", session_id) do |rs|
+        rs.each { rows << read_agent_message(rs) }
+      end
+      rows
+    end
+
+    def count_agent_sessions : Int64
+      @db.scalar("SELECT COUNT(*) FROM agent_sessions").as(Int64)
+    end
+
+    # Column order MUST match AGENT_SESSION_COLS.
+    private def read_agent_session(rs : DB::ResultSet) : AgentSessionRow
+      AgentSessionRow.new(
+        rs.read(Int64), rs.read(String), rs.read(String?), rs.read(String), rs.read(String?),
+        rs.read(String), rs.read(String), rs.read(Int64), rs.read(Int64?),
+        # Safe as a plain Float64 despite SQLite's dynamic typing, and only because the column
+        # is declared REAL: REAL affinity converts an integer on the way IN, so the `DEFAULT 0`
+        # and an `INSERT … 0` both land as 0.0 and come back as a float.
+        rs.read(Float64),
+        rs.read(Int64).to_i32)
+    end
+
+    private def read_agent_message(rs : DB::ResultSet) : AgentMessageRow
+      AgentMessageRow.new(
+        rs.read(Int64), rs.read(Int64), rs.read(Int64).to_i32, rs.read(String), rs.read(String),
+        rs.read(String), rs.read(String?), rs.read(Int64) != 0, rs.read(Int64))
+    end
+
     # Passive-signal tags for a flow, fetched lazily per on-screen row (P8 pull,
     # not push). No tag producer exists this milestone, so this is always empty;
     # the call site is the seam.
