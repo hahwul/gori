@@ -71,24 +71,30 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       return :stay if ev.ctrl? || ev.alt?
       key = ev.key
-      case
-      when key.escape?
-        answer(Decision::Deny)
-      when key.left?, key.back_tab?
+      if key.left? || key.back_tab?
         @selected = (@selected - 1) % BUTTONS.size
-        :stay
-      when key.right?, key.tab?
+        return :stay
+      elsif key.right? || key.tab?
         @selected = (@selected + 1) % BUTTONS.size
-        :stay
-      when key.enter?
-        @drawn ? answer(BUTTONS[@selected][0]) : :stay
-        # The mnemonics are matched on the KEY, like `ConfirmDialog.affirmative?`: termisu's
-        # `key.a?` is case-insensitive and knows nothing about modifiers, which is why ctrl/alt
-        # were refused above — `^A`/`^D` are live chords elsewhere and must not answer a card.
-      when key.a? then @drawn ? answer(Decision::Allow) : :stay
-      when key.s? then @drawn ? answer(Decision::AllowForSession) : :stay
-      when key.d? then @drawn ? answer(Decision::Deny) : :stay
-      else             :stay
+        return :stay
+      end
+      decision = decision_for(key)
+      return :stay unless decision
+      # An answer to a card nobody could read is not an answer — except deny, which is the
+      # outcome of not answering anyway.
+      @drawn || decision.deny? ? answer(decision) : :stay
+    end
+
+    # The mnemonics are matched on the KEY, like `ConfirmDialog.affirmative?`: termisu's
+    # `key.a?` is case-insensitive and knows nothing about modifiers, which is why ctrl/alt
+    # were refused above — `^A`/`^D` are live chords elsewhere and must not answer a card.
+    private def decision_for(key : Termisu::Input::Key) : Decision?
+      case
+      when key.escape? then Decision::Deny
+      when key.enter?  then BUTTONS[@selected][0]
+      when key.a?      then Decision::Allow
+      when key.s?      then Decision::AllowForSession
+      when key.d?      then Decision::Deny
       end
     end
 
@@ -187,12 +193,12 @@ module Gori::Tui
     def button_rects(box : Rect) : Array(Rect)
       x = box.x + (box.w - button_row_width) // 2
       y = box.bottom - 3
-      BUTTONS.size.times.map do |i|
+      Array.new(BUTTONS.size) do |i|
         w = Screen.draw_width(button_text(i)) + 2
         r = Rect.new(x, y, w, 1)
         x += w + 2
         r
-      end.to_a
+      end
     end
   end
 end
