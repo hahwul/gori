@@ -72,6 +72,20 @@ describe "list_history{ids}" do
     end
   end
 
+  it "returns filtered_out_ids in the CALLER's order, like the other two lists" do
+    with_store do |store|
+      # `flows` is `order:"as_requested"` and `missing_ids` follows the request too, so a
+      # third list in SQLite rowid order would misalign an agent zipping it against its own
+      # marked list — the very workflow that ordering exists to enable.
+      keep = seed(store, 1, host: "keep.test")
+      a = seed(store, 1, host: "a.test")
+      b = seed(store, 1, host: "b.test")
+      asked = [b[0], keep[0], a[0]]
+      payload = history(store, %({"ids":#{asked.to_json},"query":"host:keep.test"}))
+      payload["filtered_out_ids"].as_a.map(&.as_i64).should eq([b[0], a[0]])
+    end
+  end
+
   it "refuses a cursor beside the set — the list IS the page" do
     with_store do |store|
       ids = seed(store, 2)

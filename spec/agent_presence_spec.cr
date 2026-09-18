@@ -310,6 +310,16 @@ describe "TUI window presence" do
     end
   end
 
+  it "refuses an unknown kind instead of quietly filing it under .agents" do
+    # The directory split is what makes the three confusions in the class comment impossible.
+    # A ternary's else-branch would make the mapping total: a typo or a future third kind
+    # would land in `.agents`, be folded into the picker's `mcp×N` chip, and be invisible to
+    # the TUI filter.
+    expect_raises(ArgumentError, /unknown marker kind/) do
+      Gori::AgentPresence.dir_for("/tmp/x/gori.db", "TUI")
+    end
+  end
+
   it "reports `holds_capture` as nil on an agent marker, which never claims one" do
     with_project do |_registry, project|
       agent = announce(project.db_path)

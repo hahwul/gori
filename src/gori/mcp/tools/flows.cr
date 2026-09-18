@@ -193,9 +193,14 @@ module Gori
 
         split = narrow_present_ids(by_id.keys, filter, narrowed, scope_unconfigured)
         return split if split.is_a?(Result)
-        kept, filtered_out = split
+        kept, dropped = split
         keep = kept.to_set
+        drop = dropped.to_set
         rows = ids.compact_map { |id| keep.includes?(id) ? by_id[id] : nil }
+        # Walked over `ids`, not over the SQL result set: `flows` is `order: "as_requested"`
+        # and `missing_ids` follows the caller's order too, so a third list in rowid order
+        # would silently misalign an agent zipping it against its own marked list.
+        filtered_out = ids.select { |id| drop.includes?(id) }
 
         Result.new(JSON.build do |j|
           j.object do

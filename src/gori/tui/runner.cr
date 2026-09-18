@@ -473,11 +473,6 @@ module Gori::Tui
       # integrations (`gori mcp --use-active-project`). Workspace-aware MCP launches use
       # their path binding instead, preventing a different repository from inheriting this.
       Paths.write_active_project(@session.project.db_path)
-      # "A gori TUI window is attached to this project" (#1091), for `get_current_context` to
-      # read cross-process. Announced here and released in this method's `ensure`, so its life
-      # is exactly this project visit; best effort, and a failure is a missing marker, never a
-      # session that will not start.
-      announce_tui_presence
       history_controller.view.reload(@session.store)
       notes_controller.view.reload(@session.store) # load persisted notes up front so the tab is ready before it's ever focused
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
@@ -534,6 +529,12 @@ module Gori::Tui
       last_bridge_pub = Time.instant                                        # #123: last bridge-heartbeat write (throttled so idle never churns the WAL)
       @intercept_cmd_watermark = @session.store.latest_intercept_command_id # tail agent commands from now
       begin
+        # "A gori TUI window is attached to this project" (#1091), for `get_current_context`
+        # to read cross-process. INSIDE this begin, not beside the setup above, so the same
+        # `ensure` that stops the statusline is what drops it — a marker released only because
+        # a raise happened to end the process is an invariant held by accident. Best effort:
+        # a failure is a missing marker, never a session that will not start.
+        announce_tui_presence
         loop do
           # Absorb a raise from THIS tick instead of letting it end the process. The loop
           # below is session-scoped: it holds unsaved Repeater/Fuzzer buffers and an
@@ -959,16 +960,11 @@ module Gori::Tui
     # is constant per session, so it's not part of the identity. A tuple, not an interpolated
     # string: this is read on every 50 ms tick, and the string was built (and thrown away)
     # even when nothing had moved and nothing would be written.
-    alias UiIdentity = {Symbol, Symbol, Int64?, Int32, SelectionIdent, Int32, Int64?}
+    alias UiIdentity = {Symbol, Symbol, Int64?, Int32, SelectionIdent, Int32}
 
-    # `detail_pinned_flow_id` is a component for a reason no other field covers: opening the
-    # History drill-in flips the published `target_source` from "marks" to "detail" and moves
-    # NOTHING else — not the tab, not `@focus`, not the cursor, not the mark set — so without
-    # it the row went on saying "marks" for the whole time the operator was reading one flow.
-    # The overlay is the Runner's state, which is also why it cannot ride in `SelectionIdent`.
     private def ui_state_identity : UiIdentity
       {@active_tab, @focus, current_selected_flow_id, current_subtab_index,
-       current_selection_ident, total_mark_count, detail_pinned_flow_id}
+       current_selection_ident, total_mark_count}
     end
 
     # The active tab's selection identity (#1091). Without this component the tuple above
@@ -1078,24 +1074,37 @@ module Gori::Tui
       end
     end
 
-    # The marked-but-not-here roll-up: every tab OTHER than the active one that still holds
-    # marks, as the kind it addresses plus how many. Counts only, never ids — the ids of a
-    # tab the operator is not looking at are a `switch_tab` away, and carrying them would put
-    # four selections in one row where the whole design has exactly one.
+    # The marked-but-not-here roll-up: every tab whose marks the `selection` block above did
+    # NOT carry, as the tab it is on plus how many. Counts only, never ids — the ids of a tab
+    # the operator is not looking at are a `switch_tab` away, and carrying them would put four
+    # selections in one row where the whole design has exactly one.
+    #
+    # The skip is "this tab already published its marks", not "this tab is active": Target is
+    # ONE registry tab over three children, and with Discover or Diff in front the parent
+    # publishes no selection at all — so a plain active-tab skip made four marked sitemap
+    # nodes vanish from both halves of the row, which is precisely the silence this feature
+    # exists to remove.
+    #
+    # `tab` always, `kind` only when the marks HAVE one. The kinds are a closed set
+    # (flow|issue|sitemap_node|intercept_item) and a sub-tab strip's marks are in none of
+    # them; inventing "repeater" as a kind would put a value in that field no reader can
+    # branch on. `mcp_mark_kind` rather than `selection_kind` because Target's marks can sit
+    # on a different child than the one on screen.
     private def write_marks_elsewhere(j : JSON::Builder) : Nil
-      rows = [] of {String, Int32}
+      rows = [] of {Symbol, String?, Int32}
       @tabs.each do |tab, ctl|
-        next if tab == @active_tab
-        n = ctl.mcp_mark_count
+        next if tab == @active_tab && ctl.mcp_selection?
+        n = ctl.mcp_marked_count
         next if n.zero?
-        rows << {ctl.selection_kind || tab.to_s, n}
+        rows << {tab, ctl.mcp_mark_kind, n}
       end
       return if rows.empty?
       j.field "marks_elsewhere" do
         j.array do
-          rows.each do |(kind, n)|
+          rows.each do |(tab, kind, n)|
             j.object do
-              j.field "kind", kind
+              j.field "tab", tab.to_s
+              j.field "kind", kind if kind
               j.field "marked_count", n
             end
           end

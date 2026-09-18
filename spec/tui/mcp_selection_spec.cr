@@ -175,6 +175,40 @@ describe "Sitemap selection" do
   end
 end
 
+# `marks_elsewhere` is the answer to "I marked four, then walked somewhere else". Its skip
+# rule is "this tab already published its marks", not "this tab is active" — Target is ONE
+# registry tab over three children, and with Discover in front the parent publishes no
+# selection at all.
+describe "marks the selection block did not carry" do
+  it "still names Sitemap's marks while the operator reads Discover beside them" do
+    TuiContract.with_session("sel-target-discover") do |session|
+      capture(session.store, "/dir/leaf", host: "a.test")
+      capture(session.store, "/dir/other", host: "a.test", at: 2_i64)
+      session.store.flush
+      host = TuiContract::Host.new(session)
+      host.tab = :target
+      ctl = TargetController.new(host)
+      ctl.on_enter
+      ctl.sitemap.view.move(1)
+      ctl.sitemap.view.toggle_mark
+      ctl.sitemap.mcp_marked_count.should eq(1)
+
+      # Sitemap in front: the parent publishes the selection, so the roll-up must not repeat it.
+      ctl.mcp_selection?.should be_true
+      ctl.selection_kind.should eq("sitemap_node")
+
+      ctl.jump_subtab(1) # → Discover
+      # Discover has no selection of its own AND cannot hold sub-tab marks (it never overrides
+      # `subtab_ref`), so the parent now publishes nothing — and a plain active-tab skip in the
+      # roll-up made four marked nodes vanish from both halves of the row.
+      ctl.mcp_selection?.should be_false
+      ctl.mcp_marked_count.should eq(1)
+      # …and the label follows the child HOLDING the marks, never the one on screen.
+      ctl.mcp_mark_kind.should eq("sitemap_node")
+    end
+  end
+end
+
 describe "Intercept selection" do
   it "publishes the hold filter under its own name, never as `query`" do
     TuiContract.with_session("sel-intercept") do |session|
@@ -206,6 +240,24 @@ describe "the sub-tab strip's marks" do
       sel["marked_subtab_count"].as_i.should eq(1)
       # The strip's marks move the identity too — otherwise marking a chip publishes nothing.
       ctl.selection_ident.subtabs.should eq(1)
+    end
+  end
+
+  it "never calls the ACTIVE chip marked when the mark set prunes to empty" do
+    TuiContract.with_session("sel-subtabs-prune") do |session|
+      host = TuiContract::Host.new(session)
+      host.tab = :repeater
+      ctl = RepeaterController.new(host)
+      ctl.repeater_new
+      ctl.repeater_new
+      # A mark on a view that is no longer on the strip — what a peer's `delete_repeater`
+      # leaves behind. `target_subtab_indices` falls back to the ACTIVE chip here, so reading
+      # it would have told an agent the session the operator happens to have open is marked.
+      ctl.toggle_subtab_mark(0)
+      ctl.close_subtab_at(0)
+      ctx = JSON.parse(JSON.build { |j| ctl.write_mcp_context(j) })
+      ctx.as_h.has_key?("marked_db_ids").should be_false
+      selection_of(ctl).as_h.has_key?("marked_subtabs").should be_false
     end
   end
 

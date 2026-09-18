@@ -17,17 +17,17 @@ describe Gori::Tui::SelectionIdent do
 
   it "compares field-wise, so any one field moving republishes" do
     base = SelectionIdent.new(marks: 2, cursor: 5, cursor_id: 41_i64, rows: 100,
-      query: "status:500", view: "p_3", scoped: true, subtabs: 1)
+      view: "3", scoped: true, subtabs: 1, pinned: 7_i64)
     base.should eq(base.copy_with)
     base.should_not eq(base.copy_with(marks: 3))
     base.should_not eq(base.copy_with(cursor: 6))
     base.should_not eq(base.copy_with(cursor_id: 42_i64))
     base.should_not eq(base.copy_with(cursor_key: "/v1/users"))
     base.should_not eq(base.copy_with(rows: 99))
-    base.should_not eq(base.copy_with(query: "status:501"))
-    base.should_not eq(base.copy_with(view: "p_4"))
+    base.should_not eq(base.copy_with(view: "4"))
     base.should_not eq(base.copy_with(scoped: false))
     base.should_not eq(base.copy_with(subtabs: 2))
+    base.should_not eq(base.copy_with(pinned: 8_i64))
   end
 
   it "defaults to the all-zero value every non-participating tab answers with" do
@@ -37,8 +37,19 @@ describe Gori::Tui::SelectionIdent do
     {d.marks, d.cursor, d.rows, d.subtabs}.should eq({0, 0, 0, 0})
     d.cursor_id.should eq(0_i64)
     d.cursor_key.should eq("")
-    d.query.should eq("")
     d.view.should eq("")
     d.scoped.should be_false
+    d.pinned.should eq(0_i64)
+  end
+end
+
+# The two things deliberately kept OUT of the identity, both about write RATE: including them
+# turned ordinary typing and ordinary capture into ~3 `settings` commits a second, each one
+# bumping `data_version` and making every watching TUI reload rules, scope and bindings.
+describe "what SelectionIdent does not carry" do
+  it "has no live filter text — that moves on every keystroke" do
+    # A method, not `instance_vars` (which a macro cannot read at the top level). `record`
+    # generates one getter per field, so this is the same question.
+    SelectionIdent.new.responds_to?(:query).should be_false
   end
 end

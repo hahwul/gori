@@ -199,10 +199,20 @@ module Gori::Tui
       active_child.list_selection_ident
     end
 
-    # The one hook that is NOT the active child's answer: marks on the Sitemap survive while
-    # the operator reads Discover beside it, and the roll-up exists to say so.
+    # The two hooks that are NOT the active child's answer: marks on the Sitemap survive while
+    # the operator reads Discover beside it, and the roll-up exists to say so. The KIND has to
+    # come from the child holding them for the same reason — labelling four sitemap nodes with
+    # whatever Discover would have called its own selection is worse than saying nothing.
     def mcp_mark_count : Int32
       @children.sum(&.mcp_mark_count)
+    end
+
+    def mcp_marked_count : Int32
+      @children.sum(&.mcp_marked_count)
+    end
+
+    def mcp_mark_kind : String?
+      @children.find { |c| c.mcp_marked_count > 0 }.try(&.mcp_mark_kind)
     end
 
     def body_hint(focus : Symbol) : String

@@ -34,14 +34,29 @@ describe "the ui-state identity" do
     RUNNER_CODE.should contain("def write_marks_elsewhere")
   end
 
-  it "moves when the History drill-in opens, which flips target_source and nothing else" do
-    # Opening the detail changes no tab, no focus, no cursor and no mark — so without this
-    # component the row went on saying `target_source:"marks"` for the whole time the
-    # operator was reading one flow, and an agent acting on "my selection" would have used
-    # four ids where every key on screen would have used one. Found end-to-end, not by a unit
-    # spec: the publish only exists on the tick.
-    body = RUNNER_CODE[/def ui_state_identity.*?\n {4}end\n/m].not_nil!
-    body.should contain("detail_pinned_flow_id")
+  it "moves when a drill-in opens, on BOTH tabs that have one" do
+    # Opening a detail changes no tab, no focus, no cursor (it opens ON the cursor row) and no
+    # mark — so without a component for it the row went on saying `target_source:"marks"` for
+    # the whole time the operator was reading one row, while every key on screen had collapsed
+    # to that one. History was found end-to-end (the publish only exists on the tick); Issues
+    # has the identical shape and is pinned here so it cannot regress separately.
+    hist = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "controllers", "history_controller.cr"))
+    hist[/def list_selection_ident.*?\n {4}end\n/m].not_nil!.should contain("detail_pinned_flow_id")
+    iss = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "controllers", "issues_controller.cr"))
+    iss[/def list_selection_ident.*?\n {4}end\n/m].not_nil!.should contain("detail_issue")
+  end
+
+  it "does not carry the live filter text, which would make typing a write loop" do
+    # Every keystroke in a `/` bar would otherwise fire the gate once per throttle window —
+    # ~3 `settings` commits a second, each bumping `data_version` and making every watching
+    # TUI reload rules, scope and bindings. `rows` covers the same ground at the moment the
+    # debounced search actually lands.
+    %w[history issues sitemap intercept].each do |tab|
+      src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "controllers", "#{tab}_controller.cr"))
+      body = src[/def list_selection_ident.*?\n {4}end\n/m]
+      body.should_not be_nil
+      body.not_nil!.should_not contain("query:")
+    end
   end
 end
 

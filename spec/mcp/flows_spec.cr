@@ -502,9 +502,11 @@ describe Gori::MCP::Server do
     it "carries marks the operator left on a tab they are not looking at" do
       with_store do |store|
         store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"repeater",) +
-                                                     %("marks_elsewhere":[{"kind":"flow","marked_count":4}]}))
+                                                     %("marks_elsewhere":[{"tab":"history","kind":"flow","marked_count":4}]}))
         payload = mcp_tool_payload(mcp_drive(store, CONTEXT_CALL)[0])
-        payload["marks_elsewhere"].as_a.first["marked_count"].as_i.should eq(4)
+        row = payload["marks_elsewhere"].as_a.first
+        row["tab"].as_s.should eq("history")
+        row["marked_count"].as_i.should eq(4)
       end
     end
 

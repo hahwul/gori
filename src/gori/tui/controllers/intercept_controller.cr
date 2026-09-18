@@ -804,8 +804,7 @@ module Gori::Tui
         marks: @intercept.mark_count,
         cursor: @intercept.selected_index,
         cursor_id: @intercept.selected_id || 0_i64,
-        rows: @intercept.row_count,
-        query: @intercept.query)
+        rows: @intercept.row_count)
     end
 
     def write_selection_fields(j : JSON::Builder) : Nil

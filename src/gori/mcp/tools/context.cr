@@ -702,13 +702,16 @@ module Gori
           "`selection_next_call` names the tool that turns them into data — only History has a " \
           "one-call form (`list_history{ids}`). SITEMAP SELECTS (host, path) PAIRS, not flow ids: " \
           "it reports `nodes` and no `ids` at all, which is what `kind` is there to tell you. " \
-          "Compare `marked_count` against the array's length — a bigger count means the set was " \
-          "cut here (`truncated`), and a partial list is not a safe thing to act on; " \
-          "`marked_hidden_count` is marks the operator's own filter is hiding. " \
+          "`truncated` is the ONLY signal that the array was cut, and a partial list is not a " \
+          "safe thing to act on. Do not infer it from `marked_count`, which describes the MARK " \
+          "SET and is reported even when `target_source` overrides it: with a drill-in open you " \
+          "get one id beside `marked_count:4` and nothing was cut. `marked_hidden_count` is " \
+          "marks the operator's own filter is hiding. " \
           "`marked_subtabs` are CHIP NUMBERS on a sub-tab strip, which shift whenever a session " \
           "is created, deleted or moved — cross-reference them through get_repeater_context " \
-          "before acting. `marks_elsewhere` names tabs the operator left marks on but is not " \
-          "looking at now. " \
+          "before acting. `marks_elsewhere` names tabs holding marks this `selection` does not " \
+          "carry — each row is a `tab` plus a count, and a `kind` only where those marks have " \
+          "one (a sub-tab strip's do not). " \
           "`tui.live` says a gori TUI window is attached to this project's database and " \
           "`tui.windows` how many (two windows share ONE state row, so a selection may be the " \
           "other one's). It is evidence, not proof: when this server cannot look you get " \

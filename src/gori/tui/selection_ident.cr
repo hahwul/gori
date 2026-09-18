@@ -30,14 +30,29 @@ module Gori::Tui
   # A `record`, so it is a STRUCT and `==` is field-wise. As a class `==` would be reference
   # equality and the gate would fire on every tick (or never) — `selection_ident_spec.cr`
   # pins that it is a value type.
+  # What is deliberately NOT here, and both omissions are about WRITE RATE, not cost:
+  #
+  #   * the live `/` filter text. It moves on every KEYSTROKE, and the row is rewritten
+  #     whenever this value does — so including it turned typing a query into ~3 `settings`
+  #     commits a second, each one bumping `data_version` and making every watching TUI
+  #     reload rules, scope and bindings. `rows` covers the same ground at the right moment:
+  #     it moves when the debounced search actually LANDS, which is when a typed query starts
+  #     describing the list. The payload still carries the text, read at write time.
+  #   * a detail/overlay flag as such. `pinned` carries the pinned row's id instead, so
+  #     opening one drill-in and stepping to another also moves it.
   record SelectionIdent,
     marks : Int32 = 0,        # mark_count on the tab's list
     cursor : Int32 = 0,       # the cursor's row INDEX (every list view keeps one)
     cursor_id : Int64 = 0,    # the cursor row's integer id; 0 where the tab has none
     cursor_key : String = "", # the cursor row's string key, where `cursor_id` cannot say it
     rows : Int32 = 0,         # rows the current narrowing shows
-    query : String = "",      # the live QL / filter text ("" = none)
-    view : String = "",       # the active saved view's key ("" = none)
+    view : String = "",       # the active saved view's id ("" = none)
     scoped : Bool = false,    # the `s` scope lens
-    subtabs : Int32 = 0       # marked chips on the strip (SubtabMarks#size)
+    subtabs : Int32 = 0,      # marked chips on the strip (SubtabMarks#size)
+    # The row an OPEN drill-in pins, 0 when none is. Its own field because opening one flips
+    # the published `target_source` from "marks" to "detail" and moves NOTHING else — not the
+    # tab, not the focus, not the cursor (the detail opens on the cursor row), not the mark
+    # set — so without it the row went on naming four marks while every key on screen acted
+    # on the one flow the operator was reading.
+    pinned : Int64 = 0
 end

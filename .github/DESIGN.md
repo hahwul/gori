@@ -2824,6 +2824,16 @@ element type depends on a sibling field. `kind` is what a reader branches on. It
 mark keys and not `target_endpoints`, which resolves through the current tree and silently drops
 a key the tree no longer holds — a narrowing of the operator's selection on its way out.
 
+**The gate is a change detector, not a heartbeat.** What it leaves OUT is as deliberate as
+what it holds: the live `/` filter text moves on every keystroke, and including it turned
+typing a query into ~3 `settings` commits a second — each one a commit that bumps
+`data_version` and makes every watching TUI reload rules, scope and bindings, which is the
+churn the 2026-08-27 presence entry gives as its reason for not being a DB row. The visible
+row count covers the same ground at the moment the debounced search actually lands, and the
+payload still carries the text, read at write time. The same line separates the two mark
+counts: the identity reads an O(1) unpruned size (a stale cache key is harmless, and the
+prune itself moves it) while the payload prunes, because a phantom there is a lie.
+
 **The publish gate is derived, not counted.** The row is rewritten only when
 `Runner#ui_state_identity` moves, and no mark gesture touches any of its four original members —
 which is why marking four rows published nothing at all. The added component reads the same

@@ -1091,9 +1091,13 @@ module Gori::Tui
       SelectionIdent.new(
         marks: @issues.mark_count,
         cursor: @issues.selected_index,
-        cursor_id: @issues.detail_issue.try(&.id) || @issues.selected_id || 0_i64,
+        cursor_id: @issues.selected_id || 0_i64,
         rows: @issues.row_count,
-        query: @issues.query)
+        # `pinned` and not folded into `cursor_id`: `open_detail` opens the row UNDER THE
+        # CURSOR, so the two are equal on the gesture that matters and the identity would not
+        # have moved at all — the row would keep naming the marks while every Issues verb on
+        # screen had collapsed to the one open issue.
+        pinned: @issues.detail_issue.try(&.id) || 0_i64)
     end
 
     def write_selection_fields(j : JSON::Builder) : Nil

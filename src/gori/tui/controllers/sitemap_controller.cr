@@ -481,7 +481,6 @@ module Gori::Tui
         # `cursor`, and a reload that reassigns a given index to another host moves `rows`.
         cursor_key: @sitemap.selected_mark_key.try(&.[1]) || "",
         rows: @sitemap.row_count,
-        query: @sitemap.query,
         scoped: @host.session.scope.active?)
     end
 

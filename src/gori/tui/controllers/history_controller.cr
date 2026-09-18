@@ -925,9 +925,13 @@ module Gori::Tui
         cursor: @history.selected,
         cursor_id: @history.selected_id || 0_i64,
         rows: @history.row_count,
-        query: @history.query,
-        view: @history.active_view.try(&.key) || "",
-        scoped: @host.session.scope.active?)
+        # `id`, never `key`: `SavedViews::View#key` INTERPOLATES (`"#{scope[0]}_#{id}"`), and
+        # this runs on the tick — the interpolated string this tuple exists to stop building.
+        # An id that collides across scopes is covered by `rows`, which a different view's
+        # row set moves.
+        view: @history.active_view.try(&.id) || "",
+        scoped: @host.session.scope.active?,
+        pinned: @host.detail_pinned_flow_id || 0_i64)
     end
 
     def write_selection_fields(j : JSON::Builder) : Nil

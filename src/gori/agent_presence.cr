@@ -62,8 +62,20 @@ module Gori
       # A DEFAULT, because ~a dozen construction sites (specs included) predate the field.
       holds_capture : Bool? = nil
 
+    # Exhaustive, and it RAISES on an unknown kind rather than defaulting. The split above is
+    # load-bearing, and a ternary's else-branch quietly makes the mapping total: a typo or a
+    # future third kind would land in `.agents`, where the picker's parse-free `count` folds
+    # it into the `mcp×N` chip and the TUI filter never finds it. Callers pass constants, so
+    # this is a compile-time-shaped mistake caught at the one place that can catch it —
+    # `announce` rescues everything anyway, so the worst case is a missing marker.
     def self.dir_for(db_path : String, kind : String = KIND_MCP) : String
-      "#{Paths.canonical_file(db_path)}#{kind == KIND_TUI ? TUI_DIR_SUFFIX : DIR_SUFFIX}"
+      suffix =
+        case kind
+        when KIND_MCP then DIR_SUFFIX
+        when KIND_TUI then TUI_DIR_SUFFIX
+        else               raise ArgumentError.new("agent-presence: unknown marker kind #{kind.inspect}")
+        end
+      "#{Paths.canonical_file(db_path)}#{suffix}"
     end
 
     # Is this a real file path we can put a marker directory next to? `:memory:` and the

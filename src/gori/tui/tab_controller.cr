@@ -969,11 +969,29 @@ module Gori::Tui
       SelectionIdent.new
     end
 
-    # How many rows are marked on this tab, for the "you also have marks over THERE" roll-up
-    # the Runner folds over every tab. O(1), and deliberately not `marked_subtab_indices.size`
-    # for the reason above — the strip's own count is `@subtab_marks.size`.
+    # How many rows are marked on this tab, for the IDENTITY roll-up the Runner folds over
+    # every tab. O(1) and deliberately not `marked_subtab_indices.size`, which allocates and
+    # prunes — this is on the 50 ms tick. It may therefore still count a chip a peer closed;
+    # that is harmless in a change detector (the value is stable until the prune, and the
+    # prune itself moves it), but NOT in the payload, which uses `mcp_marked_count` below.
     def mcp_mark_count : Int32
       @subtab_marks.size
+    end
+
+    # The same count for the PAYLOAD, where a phantom is a lie rather than a stale cache key:
+    # a strip whose marked sessions were all closed by a peer must not go on telling an agent
+    # it has two. Prunes (`marked_subtab_indices` → `SubtabMarks#retain`), so it is only ever
+    # called on the publish path, at most once per `UI_STATE_THROTTLE`.
+    def mcp_marked_count : Int32
+      @subtab_marks.empty? ? mcp_mark_count : marked_subtab_indices.size
+    end
+
+    # What this tab's MARKS address, for the roll-up's label. Separate from `selection_kind`
+    # because the two can disagree: `TargetController` publishes the ACTIVE child's selection
+    # while its marks may sit on a sibling, and labelling four sitemap nodes with whatever
+    # Discover happens to be is worse than saying nothing.
+    def mcp_mark_kind : String?
+      selection_kind
     end
 
     # --- base-owned; do NOT override -----------------------------------------
