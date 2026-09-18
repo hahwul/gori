@@ -89,7 +89,7 @@ module Gori::Tui
     # The hosted agent's held tool call (#1093): open the allow / deny / allow-for-session
     # card and hand the answer back. Concrete and empty here, like `sitemap_open_flow`: one
     # tab reaches it, and an abstract seam would tax every spec double that includes Host.
-    def open_agent_permission(req : Gori::Agent::Event::PermissionAsked, &answer : Gori::Agent::Decision -> Nil) : Nil
+    def open_agent_permission(req : Gori::Agent::Event::PermissionAsked, &_answer : Gori::Agent::Decision -> Nil) : Nil
     end
 
     # The Probe MODE picker (`probe.set-mode`), which the MODE band's chip raises on a click.
