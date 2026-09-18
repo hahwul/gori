@@ -63,6 +63,7 @@ If the card arrives while you are on another tab, a notification (`source: agent
 Two things worth saying plainly:
 
 - **A tool your own Claude Code settings already allow-list never produces a prompt.** gori can only gate what the CLI asks it about; a rule you've already trusted in your own settings runs without ever reaching this card.
+- **So does a permission mode that never asks.** With `permissions.defaultMode` set to `auto` or `bypassPermissions` in your own Claude Code settings, the CLI decides every tool call itself and the card never appears. To have gori ask, put `--permission-mode default` in `agent.args`.
 - **`agent.permission_policy = "deny"` auto-denies everything.** There is deliberately no policy value that auto-*allows* — the choice is "ask me" or "refuse it all", never "run whatever it wants."
 
 ## History and Resume
