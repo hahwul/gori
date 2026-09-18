@@ -1,6 +1,7 @@
 require "json"
 require "base64"
 require "../../store"
+require "../../agent_presence"
 require "../serialize"
 require "../../proxy/codec/http1"
 
@@ -93,11 +94,15 @@ module Gori
         end)
       end
 
-      # What the user is currently viewing in the gori TUI, recorded cross-process to the
-      # project store (Store::UI_STATE_KEY) by the running TUI. Read-only. The ui-state lives in
-      # THIS project's db, so it always describes this project — freshness is reported via
-      # age_seconds (there is no live-TUI heartbeat), not a name comparison that would skew on
-      # display-name-vs-slug.
+      # What the operator is viewing AND has selected in the gori TUI, recorded cross-process
+      # to the project store (Store::UI_STATE_KEY) by the running TUI. Read-only. The ui-state
+      # lives in THIS project's db, so it always describes this project — not a name
+      # comparison that would skew on display-name-vs-slug.
+      #
+      # Two independent signals, and they answer different questions (#1091): `age_seconds`
+      # says when the view last MOVED (the TUI writes only on change — there is still no
+      # heartbeat, deliberately), and the `tui` block says whether a window is attached RIGHT
+      # NOW, off the flock marker directory beside the database. Neither corrects the other.
       @[Tool("get_current_context")]
       private def get_current_context : Result
         raw = store.setting(Store::UI_STATE_KEY)
@@ -110,12 +115,18 @@ module Gori
         rescue
           nil
         end
+        windows = live_tui_windows
         Result.new(JSON.build do |j|
           j.object do
             j.field "project", @project_name # the project/db this server serves
+            # ABOVE the available/unavailable fork on purpose: "a window is attached but has
+            # not recorded a view yet" is a real state — a TUI opened seconds ago, or one
+            # sitting on a tab that publishes nothing — and it used to come out as "the gori
+            # TUI may not have run against it", which is a different and wrong claim.
+            emit_tui_presence(j, windows)
             if parsed.nil?
               j.field "available", false
-              j.field "note", raw.nil? ? "No UI state recorded for this project — the gori TUI may not have run against it." : "Recorded UI state was unreadable."
+              j.field "note", no_ui_state_note(raw, windows)
             else
               j.field "available", true
               # NB: "project" is emitted once, above this branch — repeating it here put a
@@ -140,20 +151,22 @@ module Gori
               if st = parsed["subtab"]?.try(&.as_i64?)
                 j.field "subtab", st
               end
-              if rec = parsed["recorded_at"]?.try(&.as_i64?)
-                j.field "recorded_at", rec
-                # A corrupt/out-of-range recorded_at must not sink the whole tool: Time.unix_ms
-                # raises on out-of-range, so guard it — keep the raw value, drop derived fields.
-                iso = begin
-                  Time.unix_ms(rec).to_rfc3339
-                rescue
-                  nil
-                end
-                if iso
-                  j.field "recorded_at_iso", iso
-                  j.field "age_seconds", (Time.utc.to_unix_ms - rec) // 1000
-                end
+              # The operator's SELECTION (#1091), relayed VERBATIM rather than field-by-field.
+              # A deliberate break from the hand-picked shape around it, for two reasons: the
+              # TUI owns this schema (a tab that learns to publish a selection must not also
+              # be a change here, with a silent drop as its failure mode), and there is nothing
+              # to redact — ids, node paths and chip numbers, no header bytes. The precedent is
+              # `emit_tui_repeater`, which only rebuilds its subtree because that one carries
+              # credentials. Size is already bounded by the writer's SELECTION_ID_CAP.
+              if sel = parsed["selection"]?
+                j.field "selection", sel
+                # The one thing only this side knows: which tool turns the selection into data.
+                emit_selection_next_call(j, sel)
               end
+              if elsewhere = parsed["marks_elsewhere"]?
+                j.field "marks_elsewhere", elsewhere
+              end
+              emit_recorded_at(j, parsed, windows)
             end
           end
         end)
@@ -542,6 +555,113 @@ module Gori
         end
       end
 
+      # How old a `ui_state` row has to be before a live window is worth explaining (see the
+      # freshness note). A minute: shorter and every ordinary pause earns a sentence.
+      STILL_WATCHING_SECONDS = 60
+
+      # The gori TUI windows attached to this project's database, or nil when this server
+      # cannot look at all (`--db :memory:`, an unbound start, a spec harness that passed no
+      # path). nil and empty are different answers and both reach the payload as such — the
+      # same rule `holds_capture` follows, where a guessed `false` would be a claim.
+      #
+      # Kind-filtered by DIRECTORY (`AgentPresence::KIND_TUI`), which matters: this very
+      # process announces its own `mcp` marker the moment it binds, so an unfiltered read is
+      # never empty and would report a live TUI in every session forever.
+      private def live_tui_windows : Array(AgentPresence::Entry)?
+        path = @db_path
+        return nil if path.nil? || path.empty?
+        AgentPresence.live(path, kind: AgentPresence::KIND_TUI)
+      end
+
+      # When the view last MOVED, and — only when it needs explaining — what an old timestamp
+      # under a live window actually means.
+      private def emit_recorded_at(j : JSON::Builder, parsed : JSON::Any,
+                                   windows : Array(AgentPresence::Entry)?) : Nil
+        rec = parsed["recorded_at"]?.try(&.as_i64?)
+        return if rec.nil?
+        j.field "recorded_at", rec
+        # A corrupt/out-of-range recorded_at must not sink the whole tool: Time.unix_ms raises
+        # on out-of-range, so guard it — keep the raw value, drop the derived fields.
+        iso = begin
+          Time.unix_ms(rec).to_rfc3339
+        rescue
+          return
+        end
+        age = (Time.utc.to_unix_ms - rec) // 1000
+        j.field "recorded_at_iso", iso
+        j.field "age_seconds", age
+        # The marker and this timestamp answer DIFFERENT questions and neither corrects the
+        # other: one says a window is attached, the other says when the view last MOVED — and
+        # the TUI records only on change. So a live window over an old row means the operator
+        # has not moved, which is the opposite of stale. Said as a note; `age_seconds` itself
+        # is never massaged.
+        return unless age > STILL_WATCHING_SECONDS && windows && !windows.empty?
+        j.field "freshness_note",
+          "a gori TUI is attached right now, and this row is old only because the TUI records " \
+          "when the view MOVES — the operator has been sitting on this one, not away from it"
+      end
+
+      # Why there is no view to report. A window that is attached but has not published one
+      # (just opened, or sitting on a tab that publishes nothing) is a different state from a
+      # project the TUI has never been pointed at — and before #1091 both came out as the
+      # latter, which is a claim rather than an absence.
+      private def no_ui_state_note(raw : String?, windows : Array(AgentPresence::Entry)?) : String
+        return "Recorded UI state was unreadable." unless raw.nil?
+        return "A gori TUI is attached to this project but has not recorded a view yet." if windows && !windows.empty?
+        "No UI state recorded for this project — the gori TUI may not have run against it."
+      end
+
+      private def emit_tui_presence(j : JSON::Builder, windows : Array(AgentPresence::Entry)?) : Nil
+        j.field("tui") do
+          j.object do
+            if windows.nil?
+              # Not `live:false`: "I cannot see" and "nobody is there" are different, and only
+              # one of them is safe to act on.
+              j.field "unknown", true
+              j.field "note", "this server has no database path to look beside, so it cannot tell whether a TUI is open"
+              next
+            end
+            j.field "live", !windows.empty?
+            j.field "windows", windows.size
+            windows.each do |w|
+              next unless w.holds_capture
+              j.field "holds_capture", true
+              w.pid.try { |p| j.field "pid", p }
+              break
+            end
+            if windows.size > 1
+              j.field "note",
+                "#{windows.size} gori TUI windows are attached to this project and they share ONE " \
+                "ui_state row (the window holding capture wins, and a view-only window takes it " \
+                "over after a minute of the holder not moving) — this selection may belong to the " \
+                "other window"
+            end
+          end
+        end
+      end
+
+      # Name the call that turns a selection into data. Only this side knows the tool names,
+      # and only History has a one-call form — saying so beats an agent discovering it by
+      # calling `get_flow` two hundred times.
+      private def emit_selection_next_call(j : JSON::Builder, selection : JSON::Any) : Nil
+        kind = selection.as_h?.try { |o| o["kind"]?.try(&.as_s?) }
+        note =
+          case kind
+          when "flow"
+            "list_history{ids: selection.ids} returns them all in one call, in this order"
+          when "issue"
+            "get_issue{id} per id in selection.ids (there is no batch form)"
+          when "sitemap_node"
+            "these are SITEMAP NODES, not flow ids — each is a {host, path}. " \
+            "list_history{query: \"host:H path:P\"} reaches the traffic behind one; " \
+            "list_sitemap{query: \"host:H\"} reads the node"
+          when "intercept_item"
+            "intercept_get{item_id} per id in selection.ids, valid only while the hold lasts " \
+            "(intercept_list says whether the bridge is still live)"
+          end
+        j.field "selection_next_call", note if note
+      end
+
       private def parse_ui_state : JSON::Any?
         store.setting(Store::UI_STATE_KEY).try do |r|
           obj = JSON.parse(r)
@@ -572,12 +692,30 @@ module Gori
           "Always verify this before reading or mutating security-test data." { }
 
         tool j, "get_current_context",
-          "What the user is currently viewing in the gori TUI: active tab, focused pane, the " \
-          "History-selected flow id (only when on the History tab), and sub-tab index — so you " \
-          "can act on \"what I'm looking at right now\" without the user pasting ids. Reflects an " \
-          "open (or last-open) gori TUI for THIS project. `age_seconds` shows how long since the " \
-          "TUI last recorded focus (there is no live-TUI heartbeat) — use it to judge freshness; " \
-          "`available:false` means the TUI never ran against this project." { }
+          "What the operator is looking at in the gori TUI — and WHAT THEY HAVE SELECTED, so " \
+          "\"do X with the rows I marked\" is one call instead of a request to paste ids. " \
+          "Reports the active tab, focused pane, sub-tab index and the History-selected flow id, " \
+          "plus — on the four list tabs (History, Issues, Sitemap, Intercept) — a `selection` " \
+          "block. `selection.ids` is the set every TUI batch verb would act on: the MARKED rows " \
+          "when any are marked, else the ONE row under the cursor, else the flow an open detail " \
+          "pins; `target_source` says which of the three, so do not re-derive that rule. " \
+          "`selection_next_call` names the tool that turns them into data — only History has a " \
+          "one-call form (`list_history{ids}`). SITEMAP SELECTS (host, path) PAIRS, not flow ids: " \
+          "it reports `nodes` and no `ids` at all, which is what `kind` is there to tell you. " \
+          "Compare `marked_count` against the array's length — a bigger count means the set was " \
+          "cut here (`truncated`), and a partial list is not a safe thing to act on; " \
+          "`marked_hidden_count` is marks the operator's own filter is hiding. " \
+          "`marked_subtabs` are CHIP NUMBERS on a sub-tab strip, which shift whenever a session " \
+          "is created, deleted or moved — cross-reference them through get_repeater_context " \
+          "before acting. `marks_elsewhere` names tabs the operator left marks on but is not " \
+          "looking at now. " \
+          "`tui.live` says a gori TUI window is attached to this project's database and " \
+          "`tui.windows` how many (two windows share ONE state row, so a selection may be the " \
+          "other one's). It is evidence, not proof: when this server cannot look you get " \
+          "`tui.unknown` rather than a false. `recorded_at`/`age_seconds` are when the view last " \
+          "MOVED — the TUI records on change, so an old timestamp under a live window means the " \
+          "operator is sitting still, not that this is stale. `available:false` means no TUI has " \
+          "published a view for this project yet." { }
 
         tool j, "get_repeater_context",
           "The Repeater workbench state. Defaults to metadata only so request headers, WebSocket " \

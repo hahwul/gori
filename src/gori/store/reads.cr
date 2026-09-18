@@ -286,6 +286,24 @@ module Gori
       nil
     end
 
+    # The same projection for a NAMED SET of ids, in one round trip — the read behind MCP
+    # `list_history{ids}`, which hands back the rows an operator marked in the TUI (#1091).
+    #
+    # Unordered, and deliberately uncapped: the caller's list IS the bound (the id-scoped
+    # `ids_matching` above documents the same contract), and the caller is the one that knows
+    # what order to put them back in — for a marked set that is the order the operator's own
+    # screen showed, which no `ORDER BY` here could reproduce.
+    def flow_rows(ids : Array(Int64)) : Array(FlowRow)
+      rows = [] of FlowRow
+      return rows if ids.empty?
+      args = ids.map(&.as(DB::Any))
+      placeholders = Array.new(ids.size, "?").join(',')
+      @db.query("#{SELECT_ROW} WHERE id IN (#{placeholders})", args: args) do |rs|
+        rs.each { rows << read_row(rs) }
+      end
+      rows
+    end
+
     # A representative flow id for a (host, method, target) Sitemap node — prefers a
     # completed flow (one with a response), newest first. Used by the Sitemap "Open flow" /
     # "Send to Repeater" / "Send to Sequencer" / "Discover here" actions, whose node carries

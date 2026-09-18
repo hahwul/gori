@@ -793,6 +793,38 @@ module Gori::Tui
       @intercept.mark_count
     end
 
+    # --- the MCP selection snapshot (#1091) -----------------------------------
+
+    def selection_kind : String?
+      "intercept_item"
+    end
+
+    def list_selection_ident : SelectionIdent
+      SelectionIdent.new(
+        marks: @intercept.mark_count,
+        cursor: @intercept.selected_index,
+        cursor_id: @intercept.selected_id || 0_i64,
+        rows: @intercept.row_count,
+        query: @intercept.query)
+    end
+
+    def write_selection_fields(j : JSON::Builder) : Nil
+      # `hidden: 0` is structural, not a shortcut: the queue renders every pending item and
+      # each refresh prunes marks whose hold is gone (`InterceptView#prune_marks`), so a mark
+      # is never off-window the way it can be in History / Issues / Sitemap.
+      TabController.write_id_targets(j, @intercept.target_ids,
+        marked: @intercept.mark_count, hidden: 0)
+      j.field "visible_rows", @intercept.row_count
+      # NOT `query`. This tab's `/` is the INTERCEPTOR's filter — it decides what gets held,
+      # not which of the held rows the list shows — so publishing it under the name the other
+      # three tabs use for a list narrowing would read as the latter.
+      j.field "hold_filter", @intercept.query unless @intercept.query.blank?
+    end
+
+    def mcp_mark_count : Int32
+      @intercept.mark_count
+    end
+
     # Shared mark toast. No "not visible" split (History's carries one): the queue renders
     # every pending item and reload prunes marks whose hold is gone, so the count always
     # describes rows that are on screen.

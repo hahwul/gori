@@ -255,6 +255,11 @@ module Gori::Tui
       @selected
     end
 
+    # Held messages currently in the queue (mirrors HistoryView#row_count / IssuesView's).
+    def row_count : Int32
+      @items.size
+    end
+
     def empty? : Bool
       @items.empty?
     end

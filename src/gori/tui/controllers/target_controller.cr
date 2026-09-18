@@ -182,6 +182,29 @@ module Gori::Tui
       active_child.body_badge
     end
 
+    # --- the MCP selection snapshot (#1091), forwarded like every other hook ---
+    # Sitemap is a CHILD here and is not registered in the Runner's @tabs, so without these
+    # three the shell would ask this parent (whose defaults say "nothing") and a marked
+    # sitemap would never reach an agent at all.
+
+    def selection_kind : String?
+      active_child.selection_kind
+    end
+
+    def write_selection_fields(j : JSON::Builder) : Nil
+      active_child.write_selection_fields(j)
+    end
+
+    def list_selection_ident : SelectionIdent
+      active_child.list_selection_ident
+    end
+
+    # The one hook that is NOT the active child's answer: marks on the Sitemap survive while
+    # the operator reads Discover beside it, and the roll-up exists to say so.
+    def mcp_mark_count : Int32
+      @children.sum(&.mcp_mark_count)
+    end
+
     def body_hint(focus : Symbol) : String
       active_child.body_hint(focus)
     end

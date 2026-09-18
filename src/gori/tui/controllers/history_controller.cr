@@ -910,6 +910,51 @@ module Gori::Tui
       @history.primary_target_id
     end
 
+    # --- the MCP selection snapshot (#1091) -----------------------------------
+
+    def selection_kind : String?
+      "flow"
+    end
+
+    def list_selection_ident : SelectionIdent
+      # `Scope#active?` takes the scope mutex. Uncontended, and `HistoryView#chips` already
+      # calls it once per FRAME, so reading it on the 50 ms identity tick costs strictly less
+      # than one render per second — noted here so the next P6 audit need not re-derive it.
+      SelectionIdent.new(
+        marks: @history.mark_count,
+        cursor: @history.selected,
+        cursor_id: @history.selected_id || 0_i64,
+        rows: @history.row_count,
+        query: @history.query,
+        view: @history.active_view.try(&.key) || "",
+        scoped: @host.session.scope.active?)
+    end
+
+    def write_selection_fields(j : JSON::Builder) : Nil
+      # An OPEN detail pins one flow and every detail verb acts on it rather than on the
+      # marks (Runner#history_target_flow_ids). Publishing the marks there would hand an
+      # agent a target set the keys on screen would not use.
+      if pinned = @host.detail_pinned_flow_id
+        TabController.write_id_targets(j, [pinned], marked: @history.mark_count,
+          hidden: @history.marked_hidden_count, source: "detail")
+        j.field "primary_id", pinned
+      else
+        TabController.write_id_targets(j, @history.target_ids, marked: @history.mark_count,
+          hidden: @history.marked_hidden_count)
+        @history.primary_target_id.try { |id| j.field "primary_id", id }
+      end
+      # The narrowing the operator is LOOKING at, so a selection too large to name is still
+      # reproducible from what is on their screen (list_history takes all three by these names).
+      j.field "visible_rows", @history.row_count
+      j.field "query", @history.query unless @history.query.blank?
+      @history.active_view.try { |v| j.field "view", v.name }
+      j.field "scope_lens", @host.session.scope.active?
+    end
+
+    def mcp_mark_count : Int32
+      @history.mark_count
+    end
+
     def history_mark_toggle : Nil
       return @host.status("no flow to mark") unless @history.selected_id
       @history.toggle_mark

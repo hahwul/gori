@@ -1,3 +1,4 @@
+require "json"
 require "termisu"
 require "../verb"
 require "../session"
@@ -5,6 +6,7 @@ require "../hotkeys"
 require "./keybind"
 require "../repeater/subtab_filter"
 require "./subtab_marks"
+require "./selection_ident"
 require "./controllers/tab_close"
 require "./screen"
 require "./line_edit"
@@ -57,6 +59,18 @@ module Gori::Tui
     end
 
     def discover_open_flow : Nil
+    end
+
+    # The flow an OPEN History detail is pinned to, or nil when none is. A History verb acts
+    # on this and not on the marks while the detail is up (`Runner#history_target_flow_ids`:
+    # live capture advances the list cursor while the detail stays on its flow), so the
+    # selection this tab publishes has to say the same thing the keys would do. The overlay
+    # state lives on the Runner and a controller cannot read it — hence the seam.
+    # A default and not an abstract, for `sitemap_open_flow`'s reason above: thirty spec
+    # doubles implement this module by hand, and a read only History reaches should not tax
+    # them all.
+    def detail_pinned_flow_id : Int64?
+      nil
     end
 
     def diff_to_comparer : Nil
@@ -913,6 +927,127 @@ module Gori::Tui
     end
 
     # ===== end sub-tab multi-select ==========================================
+
+    # ===== MCP selection snapshot (issue #1091) ==============================
+    # What the operator has SELECTED, published into the project's `ui_state` row by
+    # `Runner#ui_state_json` and read cross-process by `gori mcp get_current_context`. The
+    # agent-facing half of the mark model above (#442/#683): the TUI already knows which rows
+    # a verb would act on, and an operator saying "do X with the four I marked" had no way to
+    # hand that over except by reading ids off the screen.
+    #
+    # The contract is that the payload carries the ANSWER of the tab's own target rule
+    # (`target_ids` / `target_keys` / `target_subtab_indices` — marks if any, else the cursor)
+    # and never its inputs, so nothing downstream re-derives that rule and drifts from it.
+
+    # Cap on the ids / nodes / chips this block NAMES. `⇧T` over a captured History marks up
+    # to `HistoryView::PAGE` (1000) rows, and this JSON is rewritten into a `settings` row on
+    # the tick. 200 sits well above a `⇧T` over one screenful (a terminal shows ~60 rows), so
+    # it only trips on a deliberate mark-all over a long list — and it is NEVER a silent
+    # narrowing: `marked_count` stays the TRUE count and `truncated` says the list was cut,
+    # so a reader can tell "these are your marks" from "these are the first 200 of them".
+    SELECTION_ID_CAP = 200
+
+    # --- the four per-tab hooks; override THESE -------------------------------
+    # What this tab's selection ADDRESSES, or nil when it publishes no list selection. The
+    # closed set is "flow" | "issue" | "sitemap_node" | "intercept_item". A field rather than
+    # something inferred from the id type, because Sitemap's key is a {host, path} pair and
+    # not an integer — `kind` is what tells a reader which of `ids`/`nodes` to expect.
+    def selection_kind : String?
+      nil
+    end
+
+    # The per-tab selection body — FIELDS into an object the base has already opened. Called
+    # only when `selection_kind` is non-nil, and only on a tick that is about to write.
+    def write_selection_fields(j : JSON::Builder) : Nil
+    end
+
+    # The per-tab identity. Read on EVERY 50 ms tick: no allocation, no sort, no store round
+    # trip. In particular NOT `subtab_count` (it builds an `Array(String)` through
+    # `subtab_labels`) and NOT `marked_subtab_indices` (it allocates AND calls `retain`) —
+    # see the comment on `SelectionIdent` for why this is derived rather than a counter.
+    def list_selection_ident : SelectionIdent
+      SelectionIdent.new
+    end
+
+    # How many rows are marked on this tab, for the "you also have marks over THERE" roll-up
+    # the Runner folds over every tab. O(1), and deliberately not `marked_subtab_indices.size`
+    # for the reason above — the strip's own count is `@subtab_marks.size`.
+    def mcp_mark_count : Int32
+      @subtab_marks.size
+    end
+
+    # --- base-owned; do NOT override -----------------------------------------
+    # Crystal has no `override`, so a subclass defining one of these would silently REPLACE
+    # it and drop the strip marks (or the whole body) with no error anywhere.
+    # `spec/tui/ui_state_selection_spec.cr` fails if one ever does.
+
+    def selection_ident : SelectionIdent
+      ident = list_selection_ident
+      @subtab_marks.empty? ? ident : ident.copy_with(subtabs: @subtab_marks.size)
+    end
+
+    # Has this tab anything to publish? Asked by the Runner so a Help or Settings tab never
+    # writes an empty `selection` object into the row every throttle window.
+    def mcp_selection? : Bool
+      return true unless selection_kind.nil?
+      !@subtab_marks.empty? && !marked_subtab_indices.empty?
+    end
+
+    def write_mcp_selection(j : JSON::Builder) : Nil
+      j.object do
+        if kind = selection_kind
+          j.field "kind", kind
+          write_selection_fields(j)
+        end
+        write_subtab_marks(j)
+      end
+    end
+
+    # The GENERIC strip marks (#683), owned here because `@subtab_marks` is — so all nine
+    # strip-bearing tabs report them without each one remembering to.
+    #
+    # Indices and a label ONLY. The Repeater's own `write_mcp_context` already catalogues its
+    # chips with `db_id`/`flow_id`, and `subtab` is the join key between the two blocks; a
+    # second catalogue here would be a second source of truth for one strip. The other eight
+    # strips have no per-chip MCP catalogue yet, so index + label is all an agent gets for
+    # them — a known, bounded gap, said out loud in the tool description.
+    private def write_subtab_marks(j : JSON::Builder) : Nil
+      return if @subtab_marks.empty?
+      idxs = marked_subtab_indices
+      return if idxs.empty?
+      labels = subtab_labels
+      shown = idxs.first(SELECTION_ID_CAP)
+      j.field "marked_subtabs" do
+        j.array do
+          shown.each do |i|
+            j.object do
+              j.field "subtab", i
+              labels.try(&.[i]?).try { |l| j.field "label", l }
+            end
+          end
+        end
+      end
+      j.field "marked_subtab_count", idxs.size
+      j.field "marked_subtab_hidden_count", hidden_marked_count
+      j.field "marked_subtabs_truncated", true if shown.size < idxs.size
+    end
+
+    # The integer-id target block, written IDENTICALLY by History, Issues and Intercept so
+    # the three cannot drift on how `target_source` reads or on how a cut list is announced.
+    # Sitemap has its own shape (a {host, path} pair is not an id) and does not come here.
+    def self.write_id_targets(j : JSON::Builder, ids : Array(Int64), *,
+                              marked : Int32, hidden : Int32,
+                              source : String? = nil) : Nil
+      shown = ids.first(SELECTION_ID_CAP)
+      j.field "ids", shown
+      j.field "target_source", source || (marked > 0 ? "marks" : "cursor")
+      j.field "marked_count", marked
+      j.field "marked_hidden_count", hidden
+      j.field "id_cap", SELECTION_ID_CAP
+      j.field "truncated", shown.size < ids.size
+    end
+
+    # ===== end MCP selection snapshot ========================================
 
     # The sub-tab strip always carves its own hairline under the chip row. When a filter
     # bar is also shown it draws a SECOND hairline below itself, so the chrome reads

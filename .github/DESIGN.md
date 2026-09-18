@@ -507,7 +507,8 @@ window therefore publishes when no UI-bearing holder is: no row, a row a view-on
 wrote, or a holder's row older than `UI_STATE_TAKEOVER`. Both windows write only when their
 own view MOVES, so two idle windows never trade the row, and the holder's write is
 unconditional — any activity there reclaims it. The row carries `holds_capture` so the reader
-can weigh whose view it is.
+can weigh whose view it is. Since #1091 the row also carries the operator's SELECTION; the
+2026-09-18 entry below says why that is relayed as a resolved set rather than as its inputs.
 
 ### 2026-07-25: this document restored
 
@@ -1978,7 +1979,11 @@ watching TUI reload rules/scope/bindings on each beat. So presence is a per-proc
 `CaptureLock` + `CaptureStatus`: the flock is the truth about liveness (the kernel frees it on
 SIGKILL, where no `ensure` runs) and the JSON body is decoration. Readers sweep any marker whose
 lock they can take. The TUI polls the directory on the DV tick OUTSIDE `apply_external_change`,
-because a marker moves no `data_version`.
+because a marker moves no `data_version`. #1091 added a second kind — a gori TUI *window* — and
+gave it its own directory rather than a field in the body: `count` must stay parse-free for the
+project picker's render path, `parse_entry` has to fall back to a kind when a body will not
+parse, and a bound `Tools` always has its own `mcp` marker, so a body-carried kind would have
+made "is a window open?" answerable only by a reader that never forgets to filter.
 
 ### 2026-08-28: CVSS in issues — optional wire representation with live derivation
 
@@ -2785,3 +2790,58 @@ What this deliberately does not do: scope the slot to the flow's host. A slot ap
 send that names it with `--slot`, host-scoping would be a second scope language beside §3, and
 the honest answer for now is that one slot is one identity — said in the CLI banner, the MCP
 tool description and the reference docs rather than enforced.
+
+
+### 2026-09-18: the operator's selection is relayed, not re-derived
+
+Refines: [P4](#p4), [P5](#p5). Extends the 2026-07-26 *verb registry is a TUI concern* entry.
+Issue #1091.
+
+An operator who had marked four rows in History could not hand them to an agent. `ui_state`
+carried the active tab, the focused pane and ONE cursor flow id, so "do X with what I selected"
+ended in reading ids off the screen and pasting them — the exact move the whole MCP surface
+exists to remove, and the one an agent cannot make on its own.
+
+**The payload carries the ANSWER of the target rule, never its inputs.** Every batch-capable
+verb in the TUI reads one resolver — `Runner#history_target_flow_ids`, `IssuesView#target_ids`,
+`SitemapView#target_keys`, `InterceptView#target_ids`, `TabController#target_subtab_indices` —
+and each spells the same rule: the marks if any are set, else the cursor row (and, where a
+detail overlay is open, the flow it pins, which is what the keys on screen would act on). So the
+row publishes `ids` plus `target_source`, and deliberately not a `marked_ids`/`cursor_id` pair
+for the reader to combine. A rule re-derived on a second surface is a rule that drifts, and it
+would drift first in the case the feature was built for.
+
+**This is the argument the verb registry never had.** The 2026-07-26 entry names the blocker
+for reaching the 318 verbs from CLI or MCP: a verb takes its target from TUI selection state
+instead of naming it, and what is missing is an argument schema, not registry wiring.
+`list_history{ids}` is that argument for the one shape that matters most, supplied through the
+`ui_state` facade — the registry stays a TUI concern, and `Tui::` is still not reachable from
+`mcp/`.
+
+**Sitemap addresses pairs, so it gets its own key.** A sitemap mark is `{host, path}`, not an
+integer, and it reports `nodes` with no `ids` key at all rather than a polymorphic array whose
+element type depends on a sibling field. `kind` is what a reader branches on. It carries the raw
+mark keys and not `target_endpoints`, which resolves through the current tree and silently drops
+a key the tree no longer holds — a narrowing of the operator's selection on its way out.
+
+**The publish gate is derived, not counted.** The row is rewritten only when
+`Runner#ui_state_identity` moves, and no mark gesture touches any of its four original members —
+which is why marking four rows published nothing at all. The added component reads the same
+state the payload serialises (`SelectionIdent`: mark count, cursor, visible rows, query, view,
+scope lens, marked chips) rather than a revision counter bumped at each of the ~14 mutators.
+A counter is an unbounded obligation whose missed bump reproduces exactly this bug, and no
+payload spec can see the drift because the payload reads the state and the gate reads the
+counter. The audit that makes the derived form sound: in all four views an add only arrives from
+a gesture that moves the count, and a removal only from a prune that lowers it. The accepted
+residual is named rather than hidden — a reload that leaves count, cursor and row total
+identical while sliding one marked row out of the window leaves `marked_hidden_count` stale
+until the next gesture, which is a decoration field and self-healing.
+
+**Liveness is evidence, not proof.** A `ui_state` row has no expiry and the TUI writes it only
+when the view MOVES, so an old timestamp under a live window means the operator is sitting
+still, not that the row is stale. The window marker and `recorded_at` answer different questions
+and neither corrects the other: the tool reports both, adds a note when they look like they
+disagree, and answers `tui.unknown` rather than `live:false` when it has no database path to
+look beside. A selection is capped at 200 ids with `marked_count` kept true and `truncated` said
+out loud, and that cap sits under `list_history{ids}`'s own, so a relayed History selection is
+always fetchable in one call.

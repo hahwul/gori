@@ -1443,6 +1443,19 @@ module Gori::Tui
       @selected
     end
 
+    # Rows the tree currently SHOWS — folds and the `/` filter already applied. O(1) after
+    # the first call per reload (`visible_rows` memoises into @visible_cache), which is what
+    # makes it safe for the 50 ms ui-state identity (#1091).
+    def row_count : Int32
+      visible_rows.size
+    end
+
+    # The cursor row's mark key, or nil on a fold / empty tree — the public form of the
+    # `mark_key(visible_rows[@selected])` the mark gestures already take.
+    def selected_mark_key : {String, String}?
+      visible_rows[@selected]?.try { |r| mark_key(r) }
+    end
+
     # Mirrors `move`: set @selected clamped to the populated rows.
     def select_index(idx : Int32) : Nil
       rows = visible_rows

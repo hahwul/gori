@@ -1081,6 +1081,42 @@ module Gori::Tui
       @issues.primary_target_id
     end
 
+    # --- the MCP selection snapshot (#1091) -----------------------------------
+
+    def selection_kind : String?
+      "issue"
+    end
+
+    def list_selection_ident : SelectionIdent
+      SelectionIdent.new(
+        marks: @issues.mark_count,
+        cursor: @issues.selected_index,
+        cursor_id: @issues.detail_issue.try(&.id) || @issues.selected_id || 0_i64,
+        rows: @issues.row_count,
+        query: @issues.query)
+    end
+
+    def write_selection_fields(j : JSON::Builder) : Nil
+      # Same precedence `Runner#issues_target_ids` applies: an open detail is pinned to ONE
+      # issue and every batch verb collapses to it, so the published set must too. Read off
+      # the view here (unlike History, whose overlay state lives on the Runner).
+      if pinned = @issues.detail_issue
+        TabController.write_id_targets(j, [pinned.id], marked: @issues.mark_count,
+          hidden: @issues.marked_hidden_count, source: "detail")
+        j.field "primary_id", pinned.id
+      else
+        TabController.write_id_targets(j, @issues.target_ids, marked: @issues.mark_count,
+          hidden: @issues.marked_hidden_count)
+        @issues.primary_target_id.try { |id| j.field "primary_id", id }
+      end
+      j.field "visible_rows", @issues.row_count
+      j.field "query", @issues.query unless @issues.query.blank?
+    end
+
+    def mcp_mark_count : Int32
+      @issues.mark_count
+    end
+
     def issues_mark_toggle : Nil
       return @host.status("no issue to mark") unless @issues.selected_id
       @issues.toggle_mark
