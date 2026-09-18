@@ -7,7 +7,7 @@ include Gori::Tui
 # opening anything). If a catalog entry named a symbol outside this set, both the palette verb
 # and the tab opener would hit Runner's internal "unknown settings section" guard.
 KNOWN_SETTINGS_SECTIONS = [
-  :network, :editor, :mouse, :keys, :theme, :layout, :statusline, :display, :companion, :notifications,
+  :network, :editor, :mouse, :keys, :theme, :layout, :statusline, :display, :companion, :agent, :notifications,
   :general, :tabs, :hosts, :env, :hotkeys, :reset_all,
 ]
 

@@ -14,6 +14,7 @@ private RESET_FIXTURE = <<-JSON
     "statusline": { "command": "echo hi" },
     "display": { "history_time_format": "relative", "wrap_lines": false },
     "companion": { "enabled": true, "notices": false },
+    "agent": { "command": "custom-agent", "args": "--foo", "model": "opus", "mcp_read_only": true, "system_prompt_append": "be careful", "permission_policy": "deny", "history_keep": 10 },
     "notifications": { "bell": true, "toast": false },
     "general": { "confirm_quit": true, "clipboard_osc52": false },
     "update": { "notified_version": "9.9.9", "checked_at": 1234 },
@@ -132,6 +133,11 @@ describe "Settings.reset_to_factory" do
       Gori::Settings.editor.should eq(Gori::Settings::DEFAULT_EDITOR)
       Gori::Settings.wrap_lines?.should eq(Gori::Settings::DEFAULT_WRAP_LINES)
       Gori::Settings.command_modifier.should eq(Gori::Settings::DEFAULT_COMMAND_MODIFIER)
+      Gori::Settings.agent_command.should eq(Gori::Settings::DEFAULT_AGENT_COMMAND)
+      Gori::Settings.agent_args.should eq(Gori::Settings::DEFAULT_AGENT_ARGS)
+      Gori::Settings.agent_mcp_read_only?.should eq(Gori::Settings::DEFAULT_AGENT_MCP_READ_ONLY)
+      Gori::Settings.agent_permission_policy.should eq(Gori::Settings::DEFAULT_AGENT_PERMISSION_POLICY)
+      Gori::Settings.agent_history_keep.should eq(Gori::Settings::DEFAULT_AGENT_HISTORY_KEEP)
       Gori::Settings.keymap_overrides.should be_empty
       Gori::Settings.tab_prefs.should be_empty
       Gori::Settings.env_vars.should be_empty

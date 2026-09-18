@@ -1,16 +1,18 @@
 require "../process_hook"
+require "../settings"
 
 module Gori
   module Agent
     # Everything one agent spawn needs to know, decided by the caller rather than read from a
     # global.
     #
-    # NO `Settings` dependency, deliberately. The settings that will populate these arrive in a
-    # later slice of #1093, and the moment this record reaches for them it stops being a value
-    # a spec (or a headless caller, or a second concurrent session on a different project) can
-    # construct. The Store/Session layer that owns a tab is where a setting gets read and turned
-    # into one of these — the same split `Plan.build` has, where option PARSING is
-    # surface-specific and everything downstream of the normalized options has one implementation.
+    # The record ITSELF still takes no `Settings` dependency: every field above is a plain
+    # value a spec (or a headless caller, or a second concurrent session on a different
+    # project) can construct directly, with no global in the way. `from_settings` below is the
+    # one seam allowed to reach for `Settings` — the Store/Session layer that owns a tab calls
+    # it, once, at spawn time — the same split `Plan.build` has, where option PARSING is
+    # surface-specific and everything downstream of the normalized options has one
+    # implementation.
     #
     # `db_path` is not optional and comes first because it is what makes this spawn belong to a
     # project: it is the database the agent's own `gori` MCP server is pointed at
@@ -58,6 +60,26 @@ module Gori
       # the same branch ("no command"), and lands on the same right answer.
       def self.parse_args(spec : String) : Array(String)
         ProcessHook.argv?(spec) || [] of String
+      end
+
+      # One spawn's worth of `Settings.agent_*`, turned into a `Config` — the load-time half
+      # of the split this record's own comment names: parsing is the surface's job (here,
+      # `Settings`' tolerant JSON parse), and everything downstream of the normalized values
+      # has exactly one implementation, this record.
+      #
+      # `db_path`/`cwd` are NOT read from `Settings` — they name which project and which
+      # directory, the caller's business (see the comment above), never a global.
+      def self.from_settings(db_path : String, cwd : String? = nil) : Config
+        Config.new(
+          db_path: db_path,
+          command: Settings.agent_command,
+          args: parse_args(Settings.agent_args),
+          model: Settings.agent_model.presence,
+          mcp_read_only: Settings.agent_mcp_read_only?,
+          system_prompt_append: Settings.agent_system_prompt_append.presence,
+          permission_policy: Settings.agent_permission_policy,
+          cwd: cwd,
+        )
       end
     end
   end

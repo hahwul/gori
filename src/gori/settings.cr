@@ -27,6 +27,7 @@ require "./settings/discover"
 require "./settings/update"
 require "./settings/fuzzer"
 require "./settings/redaction"
+require "./settings/agent"
 
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
@@ -439,6 +440,7 @@ module Gori
       parse_statusline(root["statusline"]?)
       parse_display(root["display"]?)
       parse_companion(root["companion"]?)
+      parse_agent(root["agent"]?)
       parse_notifications(root["notifications"]?)
       parse_general(root["general"]?)
       parse_update(root["update"]?)
@@ -1082,17 +1084,20 @@ module Gori
     #   decoder     a `chains` spec with `exec:`  — argv, no shell
     #   statusline  `command`                     — /bin/sh -c, on a TIMER (see below)
     #   editor      `command`                     — argv, on `--edit` / the TUI's ^E
+    #   agent       command+args, argv, no shell, one long-lived child
     #
     # The last two were the hole this list was nearly shipped with, and `statusline` is the
     # sharpest thing on it: it is a FULL SHELL rather than ProcessHook's no-shell exec, it
     # carries its own `enabled` in the same section so it self-arms, and it fires on an
     # interval with no proxied traffic needed. Scoping this to "the #818 hook seams" would
-    # have gated the three guarded shapes and waved through the unguarded one.
+    # have gated the three guarded shapes and waved through the unguarded one. `agent` (#1093)
+    # spawns `claude` itself — argv, no shell, like `editor`, but the child lives for the
+    # whole tab session rather than one `--edit` round trip.
     #
     # NOT an exclusion list: `gori settings sections` marks these, `gori settings export`
     # counts what it wrote, and `gori settings import` lists them and refuses without
     # `--allow-commands`.
-    COMMAND_SECTIONS = ["rewriter", "scan_rules", "decoder", "statusline", "editor"]
+    COMMAND_SECTIONS = ["rewriter", "scan_rules", "decoder", "statusline", "editor", "agent"]
 
     # Every top-level key gori KNOWS, whether or not this install currently has a value for one.
     #
@@ -1116,7 +1121,7 @@ module Gori
       theme mouse mouse_drag pretty_bodies layout statusline display companion notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
-      hooks colormarker saved_views redaction
+      hooks colormarker saved_views redaction agent
     ]
 
     # Every top-level key the current settings would write — i.e. which sections this install
@@ -1233,6 +1238,7 @@ module Gori
           when "decoder"    then decoder_command_entries(node, acc)
           when "statusline" then statusline_command_entries(node, acc)
           when "editor"     then editor_command_entries(node, acc)
+          when "agent"      then agent_command_entries(node, acc)
           end
         end
       end
@@ -1339,6 +1345,20 @@ module Gori
       return unless o = node.as_h?
       cmd = o["command"]?.try(&.as_s?).try(&.presence)
       acc << CommandEntry.new("editor", "exec", "command", cmd, true) if cmd
+    end
+
+    # `agent`: the hosted coding-agent spawn (#1093). `serialize_agent` writes the whole
+    # section, all seven fields, the moment any one of them leaves its default — so a node
+    # here always carries a `command`, but a hand-written profile is read tolerantly the same
+    # way `parse_agent` is, falling back to the factory command rather than dropping the row.
+    # `args` is appended, space-joined, the way `Agent::Config.parse_args` will split it again
+    # at spawn — this is a REPORT of what would run, not a re-tokenization of it.
+    private def self.agent_command_entries(node : JSON::Any, acc : Array(CommandEntry)) : Nil
+      return unless o = node.as_h?
+      cmd = o["command"]?.try(&.as_s?).try(&.presence) || DEFAULT_AGENT_COMMAND
+      args = o["args"]?.try(&.as_s?).try(&.presence)
+      full = args ? "#{cmd} #{args}" : cmd
+      acc << CommandEntry.new("agent", "exec", "command", full, true)
     end
 
     # What `import_document` would do with `raw`, as three lists: the sections it would APPLY
@@ -1510,6 +1530,7 @@ module Gori
       reset_statusline
       reset_display
       reset_companion
+      reset_agent
       reset_notifications
       reset_general
       reset_update
@@ -1554,6 +1575,7 @@ module Gori
           serialize_statusline(j)
           serialize_display(j)
           serialize_companion(j)
+          serialize_agent(j)
           serialize_notifications(j)
           serialize_general(j)
           serialize_update(j)

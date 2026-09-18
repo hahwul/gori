@@ -68,6 +68,8 @@ module Gori::Tui
         "History list Req/Res preview, Sitemap default expand depth, tab-bar numbers", :appearance, :form),
       Section.new(:companion, "settings.companion", "Companion",
         "Miss Ring — the mascot in the body's bottom-right corner, her motion, and her notices", :appearance, :form),
+      Section.new(:agent, "settings.agent", "Agent",
+        "The hosted coding agent (#1093) — command, args, model, MCP read-only, permission policy", :appearance, :form),
       # Editor & Keys
       Section.new(:editor, "settings.editor", "Editor",
         "Set the external editor opened by ^E in editable fields", :editor, :form),

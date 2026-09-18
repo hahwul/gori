@@ -48,6 +48,7 @@ private MAXIMAL_PROFILE = <<-JSON
     "statusline": { "command": "echo hi" },
     "display": { "history_time_format": "relative" },
     "companion": { "enabled": true, "notices": false },
+    "agent": { "command": "custom-agent", "permission_policy": "deny", "history_keep": 10 },
     "notifications": { "bell": true, "toast": false },
     "general": { "confirm_quit": false, "clipboard_osc52": false },
     "update": { "notified_version": "9.9.9" },
@@ -90,6 +91,9 @@ private def with_every_section_populated(&)
   time_format = Gori::Settings.history_time_format
   companion = Gori::Settings.companion?
   companion_notices = Gori::Settings.companion_notices?
+  agent_command = Gori::Settings.agent_command
+  agent_permission_policy = Gori::Settings.agent_permission_policy
+  agent_history_keep = Gori::Settings.agent_history_keep
   bell = Gori::Settings.notify_bell?
   toast = Gori::Settings.notify_toast?
   osc52 = Gori::Settings.clipboard_osc52?
@@ -136,6 +140,9 @@ private def with_every_section_populated(&)
     Gori::Settings.history_time_format = time_format
     Gori::Settings.companion = companion
     Gori::Settings.companion_notices = companion_notices
+    Gori::Settings.agent_command = agent_command
+    Gori::Settings.agent_permission_policy = agent_permission_policy
+    Gori::Settings.agent_history_keep = agent_history_keep
     Gori::Settings.notify_bell = bell
     Gori::Settings.notify_toast = toast
     Gori::Settings.clipboard_osc52 = osc52
