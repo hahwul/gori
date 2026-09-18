@@ -63,7 +63,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def agent_permission : Nil
     req = agent_controller.pending_permission
     return (@toast = "no permission request is waiting") unless req
-    return if @overlay != :none
+    return unless @overlay.none?
     open_agent_permission(req) { |d| agent_controller.answer(req.request_id, d) }
   end
 
@@ -129,7 +129,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # a request never yanks the operator off another tab or steals an open modal.
   private def agent_tick : Bool
     changed = agent_controller.drain_events
-    if @active_tab == :agent && @overlay == :none && (req = agent_controller.pending_permission)
+    if @active_tab == :agent && @overlay.none? && (req = agent_controller.pending_permission)
       open_agent_permission(req) { |d| agent_controller.answer(req.request_id, d) }
       changed = true
     end
