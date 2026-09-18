@@ -1,4 +1,5 @@
 require "./bind_address"
+require "./stderr_tail"
 
 module Gori
   # Detect installed browsers and launch one pre-configured to trust gori's CA
@@ -256,7 +257,7 @@ module Gori
           raise ex
         end
       writer.close # our copy; the child holds the only remaining one, so EOF means it died
-      tail = StderrTail.new
+      tail = Gori::StderrTail.new(STDERR_CAP)
       eof = Channel(Nil).new
       spawn { drain_stderr(reader, tail, eof) }
       # WAIT on the child rather than sample `terminated?` after a fixed sleep. That
@@ -300,7 +301,7 @@ module Gori
     # Read the child's stderr until it ends or the reader is closed under us. Draining is
     # not optional: stop reading and a chatty browser fills the pipe and blocks on its own
     # logging, so this runs for the browser's whole life on the success path.
-    private def self.drain_stderr(reader : IO::FileDescriptor, tail : StderrTail, eof : Channel(Nil)) : Nil
+    private def self.drain_stderr(reader : IO::FileDescriptor, tail : Gori::StderrTail, eof : Channel(Nil)) : Nil
       buf = Bytes.new(1024)
       while (n = reader.read(buf)) > 0
         tail << buf[0, n]
@@ -310,26 +311,6 @@ module Gori
     ensure
       reader.close rescue nil
       eof.close # every writer is gone: `tail` is now the browser's complete account
-    end
-
-    # What the browser has written to stderr so far. Readable at any moment rather than
-    # only at EOF: on the failure path EOF may never arrive, and what has been read by
-    # then is the whole explanation the operator is ever going to get.
-    private class StderrTail
-      def initialize
-        @buf = IO::Memory.new
-        @mutex = Mutex.new
-      end
-
-      # Past the cap we keep reading and discard — a LIVE Chromium narrates crashpad
-      # warnings for as long as it runs, and this buffer outlives the grace window.
-      def <<(bytes : Bytes) : Nil
-        @mutex.synchronize { @buf.write(bytes) if @buf.bytesize < STDERR_CAP }
-      end
-
-      def text : String
-        @mutex.synchronize { @buf.to_s }
-      end
     end
 
     # The toast for a browser that quit on the spot: its own first words if it left any,
