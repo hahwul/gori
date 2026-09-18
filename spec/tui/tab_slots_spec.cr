@@ -150,17 +150,20 @@ describe "Runner.settle_tab_slots — the one-time migration" do
       Gori::Settings.tab_prefs.should be_empty # back to DEFAULT_HIDDEN's nine
       Chrome.visible_tabs(Gori::Settings.tab_prefs).map(&.first)
         .should eq([:project, :target, :history, :intercept, :repeater, :fuzzer,
-                    :probe, :issues, :notes])
+                    :probe, :issues, :agent])
     end
   end
 
-  it "keeps a CUSTOMISED operator's first nine, in their order, and names the six that folded" do
+  it "keeps a CUSTOMISED operator's first nine, in their order, and names the seven that folded" do
     with_tab_settings do
       Gori::Settings.tab_slots = true
       # Their own order, not the catalog's: Help first, then the rest of the old default.
+      # legacy_default_prefs is built from TODAY's TABS, so it carries Agent (#1093) as
+      # visible too — LEGACY_DEFAULT_HIDDEN never learned about it, same as any other tab
+      # added since the pre-slots default was frozen.
       custom = [{"help", true}, {"notes", true}] + legacy_default_prefs
       before = Chrome.reconcile(custom, capped: false).select { |(_, _, v)| v }.map(&.first)
-      before.size.should eq(15)
+      before.size.should eq(16)
 
       notice = Runner.settle_tab_slots(prefs: custom).not_nil!
 
@@ -169,8 +172,8 @@ describe "Runner.settle_tab_slots — the one-time migration" do
       kept.first.should eq(:help)
 
       folded = before[9..].map { |sym| Chrome.tab_label(sym) }
-      folded.size.should eq(6)
-      notice.should contain("6 tabs moved behind 0")
+      folded.size.should eq(7)
+      notice.should contain("7 tabs moved behind 0")
       folded.each { |label| notice.should contain(label) }
       notice.should contain("settings:tabs")
     end
@@ -191,7 +194,7 @@ describe "Runner.settle_tab_slots — the one-time migration" do
       custom = [{"help", true}] + legacy_default_prefs
       Gori::Settings.tab_prefs = custom
       Runner.settle_tab_slots.should be_nil
-      Chrome.visible_tabs(Gori::Settings.tab_prefs).size.should eq(15) # untouched
+      Chrome.visible_tabs(Gori::Settings.tab_prefs).size.should eq(16) # untouched
     end
   end
 end

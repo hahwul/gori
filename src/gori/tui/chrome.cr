@@ -27,6 +27,7 @@ module Gori::Tui
       {:probe, "Probe"},
       {:authorize, "Authorize"},
       {:issues, "Issues"},
+      {:agent, "Agent"},
       {:evidence, "Evidence"},
       {:notes, "Notes"},
       {:help, "Help"},
@@ -59,6 +60,7 @@ module Gori::Tui
       :probe       => "passive and active checks on captures",
       :authorize   => "replay one request as another identity",
       :issues      => "what you found, ranked and written up",
+      :agent       => "your coding agent, hosted in project",
       :evidence    => "frozen snapshots the project archived",
       :notes       => "scratch notes kept with the project",
       :help        => "the keyboard cheat-sheet — ? anywhere",
@@ -84,7 +86,7 @@ module Gori::Tui
     # order that leaves:
     #
     #   1 Project · 2 Target · 3 History · 4 Intercept · 5 Repeater · 6 Fuzzer · 7 Probe ·
-    #   8 Issues · 9 Notes
+    #   8 Issues · 9 Agent
     #
     # — the capture-triage-retest-record loop, end to end. OAST, Decoder, JWT, Comparer and
     # Rewriter are workbenches an operator reaches FOR, not ones they live in; they start
@@ -95,7 +97,11 @@ module Gori::Tui
     # to slot a NEW tab next to its catalog neighbours in an existing config, so it has to keep
     # meaning "where this tab lives relative to the others", not "the default bar".
     DEFAULT_HIDDEN = [:miner, :oast, :sequencer, :decoder, :jwt, :cookie, :comparer,
-                      :rewriter, :colormarker, :authorize, :evidence, :help]
+                      :rewriter, :colormarker, :authorize, :evidence, :help,
+                      # Notes gives up its default slot to Agent: the nine slots were already
+                      # full, so the new tab has to take one rather than grow the bar to ten.
+                      # Notes stays one key away via `0`/`^P` (the notes quick-open), not lost.
+                      :notes]
 
     # The default set BEFORE the nine slots. Kept so a saved layout that was never customised
     # can be RECOGNISED (`legacy_default?`) and handed the new default, rather than truncated
