@@ -443,6 +443,16 @@ migrations in `src/gori/store/schema.cr`.
   weeks later and a row that re-resolved would describe a request that never ran.
 - **Note**: the running scratchpad and report.
 - **Sessions**: persisted Repeater / Fuzzer / Miner / Sequencer / OAST workbench state.
+- **Agent session**: one hosted coding-agent process and its conversation (`agent_sessions`,
+  `agent_messages`, #1093) — Claude Code first, spawned as a gori child process over its
+  `stream-json` stdio protocol, with a `gori mcp` server bound to THIS project handed to it
+  at spawn. Distinct from the plain **Sessions** above: those are state a workbench tab
+  persists between opens, this is a live process gori pumps and a transcript written
+  through on message boundaries — streamed deltas are never stored, only the completed
+  message. Resuming one re-arms the CLI's OWN context (`--resume`), not just gori's copy of
+  it; the two survive independently, so the CLI deleting its own session state does not take
+  gori's row down with it, and gori's `history_keep` prunes its rows without touching the
+  CLI's.
 
 Directories are `0700` (`Paths::DIR_MODE`) and the DB, plus its `-wal` and `-shm`
 sidecars, are `0600` (`Store.harden_permissions`).

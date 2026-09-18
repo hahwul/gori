@@ -32,23 +32,29 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Probe** | Passive & light-touch active security scanner |
 | **Authorize** | Replay a request under several identities to find broken access control (hidden by default) |
 | **Issues** | Triage results by severity and status |
+| **Agent** | Host your own Claude Code as a child process, with this project's MCP tools from its first turn |
 | **Evidence** | Frozen request/response snapshots, project-wide (appears once one exists) |
-| **Notes** | Per-project Markdown notes |
+| **Notes** | Per-project Markdown notes (hidden by default) |
 | **Help** | Key bindings and links (behind `0` — or `?` from anywhere) |
 
 The tab bar is **nine numbered slots**, and a fresh install fills them with the loop you
 actually work in:
 
 ```text
-1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:Tabs
+1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Agent   0:Tabs
 ```
 
-Press `1`–`9` to jump to a slot and **`0`** to reach any of the other twelve — a type-to-filter
-list of the whole catalog. The tabs behind `0` are the ones you reach *for* rather than live
-in (OAST, Decoder, JWT, Comparer, Rewriter) plus the specialised workbenches (Miner,
-Sequencer, Cookie, Colormarker, Authorize) and Help, which `?` opens from anywhere.
-**Evidence** is behind `0` as well and is only offered once the project holds its first frozen
-snapshot — there is nothing to archive before that.
+Press `1`–`9` to jump to a slot and **`0`** to reach any of the other thirteen — a
+type-to-filter list of the whole catalog. The tabs behind `0` are the ones you reach *for*
+rather than live in (OAST, Decoder, JWT, Comparer, Rewriter, Notes) plus the specialised
+workbenches (Miner, Sequencer, Cookie, Colormarker, Authorize) and Help, which `?` opens from
+anywhere. **Evidence** is behind `0` as well and is only offered once the project holds its
+first frozen snapshot — there is nothing to archive before that.
+
+The default nine were already full, so **Agent** takes the slot **Notes** used to hold; Notes
+stays one key away, through the `0` picker or `Ctrl-P`. An operator with a saved tab layout
+keeps it exactly as arranged — nothing moves under them — and finds Agent behind `0` until
+they choose to give it a slot of its own.
 
 Rearrange the nine in Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**, or
 `settings:tabs` in the palette. **The list is the bar**: the rows above the seam are the nine
