@@ -293,7 +293,7 @@ module Gori::Tui
       @host.status("no tool call on this line") unless @view.toggle_fold
     end
 
-    def copy_text : String?
+    def transcript_text : String?
       @view.copy_text
     end
 

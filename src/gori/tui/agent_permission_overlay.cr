@@ -144,7 +144,7 @@ module Gori::Tui
       lines = display_lines
       content = {lines.max_of { |l| Screen.display_width(l) }, button_row_width,
                  Screen.draw_width(@request.display) + 16}.max
-      w = (content + 4).clamp(MIN_WIDTH, {area.w - 2, MAX_WIDTH}.min)
+      w = (content + 4).clamp(MIN_WIDTH, {area.w - 4, MAX_WIDTH}.min)
       h = {lines.size + CHROME_H, area.h - 2}.min
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
     end

@@ -365,7 +365,7 @@ module Gori
         :project => "Project", :target => "Target", :history => "History", :intercept => "Intercept",
         :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :oast => "OAST",
         :sequencer => "Sequencer", :decoder => "Decoder", :jwt => "JWT", :cookie => "Cookie",
-        :comparer => "Comparer", :evidence => "Evidence",
+        :comparer => "Comparer", :evidence => "Evidence", :agent => "Agent",
         :probe => "Probe", :authorize => "Authorize", :issues => "Issues", :notes => "Notes",
         :rewriter => "Rewriter", :colormarker => "Colormarker",
       }.each do |tab, label|
