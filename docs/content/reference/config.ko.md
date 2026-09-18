@@ -818,6 +818,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
 | `saved_views` | 전역 History **뷰** 라이브러리. 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고 |
 | `companion` | 마스코트 Miss Ring: `enabled`(기본 off), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
+| `agent` | 호스팅된 코딩 에이전트 탭: `command`(argv[0], 기본값 `claude`), `args`(마지막에 덧붙는 추가 argv), `model`(비어 있으면 CLI 자체 기본값), `mcp_read_only`(에이전트 자신의 `gori` MCP 서버를 `--read-only`로 시작, 기본 off), `system_prompt_append`, `permission_policy`(`ask` \| `deny`, `allow`은 없음 — [Settings 가이드](/ko/guide/settings/) 참고), `history_keep`(프로젝트당 보관할 대화 수, 기본 50, 1~1000으로 클램프) |
 | `layout` | History / Probe / Issues 미리보기, Sitemap 펼침 깊이, 탭 바 번호. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
 | `redaction` | 안전한 내보내기 프로파일, 활성 프로파일, 기본 적용 스위치, 자리표시자 salt. 위의 [redaction](#redaction) 참고 |

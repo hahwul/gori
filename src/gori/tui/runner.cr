@@ -20,6 +20,7 @@ require "./controllers/notes_controller"
 require "./controllers/history_controller"
 require "./controllers/issues_controller"
 require "./controllers/evidence_controller"
+require "./controllers/agent_controller"
 require "./controllers/probe_controller"
 require "./controllers/project_controller"
 require "./controllers/repeater_controller"
@@ -131,6 +132,7 @@ require "./runner/jwt"
 require "./runner/cookie"
 require "./runner/links"
 require "./runner/evidence"
+require "./runner/agent"
 require "./runner/retest"
 require "./runner/miner"
 require "./runner/mouse"
@@ -348,6 +350,7 @@ module Gori::Tui
         HistoryController.new(self),
         IssuesController.new(self),
         EvidenceController.new(self),
+        AgentController.new(self),
         ProbeController.new(self),
         ProjectController.new(self),
         RepeaterController.new(self),
@@ -583,6 +586,7 @@ module Gori::Tui
             dirty = true if sequencer_controller.drain_events
             dirty = true if discover_controller.drain_events
             dirty = true if authorize_controller.drain_events
+            dirty = true if agent_tick
             dirty = true if drain_retest_run
             # A finished gRPC reflection fetch (#827): applied on THIS fiber because
             # `Schemas.adopt` writes to the store, which the send fiber must never wait on.
@@ -796,6 +800,9 @@ module Gori::Tui
         #
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
+        # …and the hosted agent's child, for the same reason and one more: a process outliving
+        # the Runner keeps its MCP server, and its flock on the presence marker, alive.
+        agent_controller.stop_all
         # Drop this window's presence marker (#1091). The flock would release it on exit
         # anyway, but a project the operator LEFT for the picker keeps the process alive, and
         # an agent must not be told a window is up for a project nobody is looking at.
@@ -2947,7 +2954,7 @@ module Gori::Tui
     # which is only in lockstep with the chip because it is the same question and the same
     # counter, not a second guess at both.
     private def background_work? : Bool
-      @jobs.any_active? || repeater_controller.any_inflight?
+      @jobs.any_active? || repeater_controller.any_inflight? || agent_controller.turn_running?
     end
 
     # The bottom-bar background-activity chip (spinner + label), or nil when no job runs.
@@ -3290,6 +3297,8 @@ module Gori::Tui
       repeater_controller.stop_all
       oast_controller.stop_all
       authorize_controller.stop_all
+      # The hosted agent is a child PROCESS: stdin EOF, then the signal ladder, on its own fiber.
+      agent_controller.stop_all
       # A retest run is the Issues tab's one background sender (#1036). Cooperative like the
       # rest: the fiber owns its sockets and checks the flag between steps.
       issues_controller.halt_retest
@@ -6029,7 +6038,7 @@ module Gori::Tui
     # to the modal) would behave differently.
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
-      when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general
+      when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :agent, :notifications, :general
         open_preferences(section)                       # the unified grouped modal, positioned at this section
       when :theme   then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
       when :tabs    then open_overlay(tabs_editor(back))

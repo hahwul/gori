@@ -719,6 +719,71 @@ describe SettingsView do
     backend.contains?("Motion").should be_true
   end
 
+  it "round-trips the AGENT section" do
+    dir = File.tempname("gori-settings-agent")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = {Gori::Settings.agent_command, Gori::Settings.agent_args, Gori::Settings.agent_model,
+            Gori::Settings.agent_mcp_read_only?, Gori::Settings.agent_system_prompt_append,
+            Gori::Settings.agent_permission_policy, Gori::Settings.agent_history_keep}
+    begin
+      ENV["GORI_HOME"] = dir
+      v = SettingsView.new
+      v.reload(:agent)
+      set_text(v, "my-claude") # Command row (focused index 0) starts on "claude"
+      v.move_field(1)          # → Args (index 1)
+      set_text(v, "-x")
+      v.move_field(2)     # → MCP read-only (index 3)
+      v.toggle_or_move(1) # off → on
+      v.move_field(2)     # → Permission policy (index 5)
+      v.toggle_or_move(1) # ask → deny
+      v.save
+      Gori::Settings.agent_command.should eq("my-claude")
+      Gori::Settings.agent_args.should eq("-x")
+      Gori::Settings.agent_mcp_read_only?.should be_true
+      Gori::Settings.agent_permission_policy.should eq("deny")
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.agent_command.should eq(Gori::Settings::DEFAULT_AGENT_COMMAND)
+      Gori::Settings.agent_args.should eq(Gori::Settings::DEFAULT_AGENT_ARGS)
+      Gori::Settings.agent_mcp_read_only?.should eq(Gori::Settings::DEFAULT_AGENT_MCP_READ_ONLY)
+      Gori::Settings.agent_permission_policy.should eq(Gori::Settings::DEFAULT_AGENT_PERMISSION_POLICY)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.agent_command, Gori::Settings.agent_args, Gori::Settings.agent_model = prev[0], prev[1], prev[2]
+      Gori::Settings.agent_mcp_read_only, Gori::Settings.agent_system_prompt_append = prev[3], prev[4]
+      Gori::Settings.agent_permission_policy, Gori::Settings.agent_history_keep = prev[5], prev[6]
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  # The write surface that has to catch a malformed args string BEFORE it reaches
+  # `Agent::Config.parse_args` — see the comment on `Config.parse_args` for why: "the settings
+  # editor is where an operator learns their quote never closed", not a spawn six months later.
+  it "refuses to save an AGENT command left empty, or args that fail to tokenize" do
+    dir = File.tempname("gori-settings-agent-invalid")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      v = SettingsView.new
+      v.reload(:agent)
+      set_text(v, "") # clear the Command field
+      v.save.should_not eq("settings saved")
+      Gori::Settings.agent_command.should eq(Gori::Settings::DEFAULT_AGENT_COMMAND) # unsaved
+
+      v.reload(:agent)
+      v.move_field(1)  # Args row
+      set_text(v, "'") # an unterminated single quote
+      v.save.should_not eq("settings saved")
+      Gori::Settings.agent_args.should eq(Gori::Settings::DEFAULT_AGENT_ARGS) # unsaved
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   # @values is POSITIONAL: a section's Field array, its *_values reader, its
   # reset_to_defaults literal and its save branch all index the same Array(String) and
   # nothing type-checks that they agree. A mismatch is silent — either a wrong field is

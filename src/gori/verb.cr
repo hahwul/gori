@@ -32,6 +32,7 @@ module Gori
       Issues          # the Issues list has focus
       IssuesDetail    # an issue's detail is open
       Evidence        # project-wide immutable snapshot archive
+      Agent           # the Agent tab has focus (the hosted coding agent, #1093)
       Probe           # the Probe scan-issue list has focus
       ProbeDetail     # a Probe issue's detail is open
       ProbeRules      # the Probe tab's Rules sub-tab has focus (built-in + custom rule list)

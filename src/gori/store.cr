@@ -31,6 +31,7 @@ require "./store/oast_sessions"
 require "./store/sequencer_sessions"
 require "./store/fuzz_runs"
 require "./store/event_log"
+require "./store/agent_sessions"
 require "./store/intercept_bridge"
 require "./store/h2_frames"
 require "./store/reads"
@@ -237,6 +238,21 @@ module Gori
     # DELETE at all, so 1 000 keeps it far off the write path while bounding the overshoot to
     # 2% of the cap.
     EVENTS_TRIM_INTERVAL = 1_000
+    # Newest agent conversations kept (#1093).
+    #
+    # A COUNT, like EVENTS_RETENTION, and small for a reason the events cap does not have: an
+    # agent transcript is the only thing gori stores whose SIZE is set by another program's
+    # stdout. One conversation is comfortably a few hundred KiB of tool results, so a cap in
+    # the thousands would let the Agent tab outweigh the captured traffic the project exists
+    # for. Fifty is several weeks of daily use and a bounded database.
+    #
+    # Hard-coded for now. #1093 puts it behind a setting in a later slice; the number lives
+    # here so there is one place for that to read.
+    AGENT_SESSIONS_KEEP = 50
+
+    # Conversations kept per project. Set by the surface that opened the store from
+    # `Settings.agent_history_keep` — the store does not read Settings itself.
+    property agent_sessions_keep : Int32 = AGENT_SESSIONS_KEEP
     # Ids per statement when a batch write binds an `IN (?,?,…)` list. SQLite caps bound
     # parameters at SQLITE_MAX_VARIABLE_NUMBER, which is 999 on anything built before 3.32 —
     # so a set larger than that does not merely run slower, the statement RAISES and the whole
@@ -1462,6 +1478,18 @@ module Gori
       # would exempt exactly the case it exists for.
       trim_events(conn)
       return if @writer_conn_suspect # as above: do not run the retention sweep on a dead connection
+      # Beside `trim_events` and ahead of the flow retention early-return, for the same reason:
+      # agent transcripts have nothing to do with the FLOW cap, and a TUI running the Agent tab
+      # with capture off would otherwise never sweep them.
+      #
+      # KNOWN LIMITATION, and the same one `trim_events` was written to fix: `prune` is driven
+      # by the FLOW-insert cadence (PRUNE_INTERVAL), so a project that captures nothing sweeps
+      # agent sessions only when something else triggers a prune. Events earned a counter of
+      # their own (EVENTS_TRIM_INTERVAL) because every surface writes thousands of them; a
+      # conversation is a handful per day and the overshoot is bounded by how fast an operator
+      # can start them, so this rides the existing cadence until the setting lands.
+      trim_agent_sessions(conn, @agent_sessions_keep)
+      return if @writer_conn_suspect
       return if @retention_flows <= 0
       # Served by the primary key: a rightmost-leaf descending scan of @retention_flows rows.
       oldest_kept = conn.query_one?(
@@ -1547,6 +1575,38 @@ module Gori
       conn.exec("DELETE FROM events WHERE id <= ?", cutoff)
     rescue ex
       ::Log.warn { "event-log trim failed (will retry): #{ex.message}" } # gori.log (#411)
+      mark_writer_conn_suspect
+    end
+
+    # Keep the newest `keep` agent conversations and their transcripts (#1093). Shaped exactly
+    # like `trim_events`: find the oldest SURVIVOR by walking the primary key backwards, then
+    # delete strictly below it, so a project already under the cap costs one indexed lookup and
+    # no delete at all.
+    #
+    # By `id`, not by `started_at`, even though the LIST is ordered by `started_at`. `id` is
+    # AUTOINCREMENT — monotonic and never reused — so the cutoff is a clean boundary that no
+    # concurrent insert can straddle, where `started_at` is a clock and two rows may share a
+    # microsecond. The two orders agree for every row this process writes (`started_at` is
+    # `now_us` at insert), and where they could disagree, the id is the one that is safe.
+    #
+    # Messages go FIRST, in the same transaction, for the reason `delete_agent_session` gives:
+    # a transcript must never outlive its conversation and be adopted by a later one.
+    private def trim_agent_sessions(conn : DB::Connection, keep : Int32) : Nil
+      return if keep <= 0
+      oldest_kept = conn.query_one?(
+        "SELECT MIN(id) FROM (SELECT id FROM agent_sessions ORDER BY id DESC LIMIT ?)",
+        keep, as: Int64?)
+      return unless oldest_kept
+      cutoff = oldest_kept - 1
+      return if cutoff <= 0
+      write_transaction(conn) do |c|
+        c.exec("DELETE FROM agent_messages WHERE session_id <= ?", cutoff)
+        c.exec("DELETE FROM agent_sessions WHERE id <= ?", cutoff)
+      end
+    rescue ex
+      ::Log.warn { "agent-session trim failed (will retry): #{ex.message}" } # gori.log (#411)
+      # The sweep's transaction may not have rolled back, so this connection can still hold the
+      # write lock (#752) — the stance `prune` takes for the same reason.
       mark_writer_conn_suspect
     end
 

@@ -3117,9 +3117,41 @@ store.insert_event("oast", "callback", "warn", "OAST: HTTP callback from 203.0.1
   goto_tab: "oast")
 store.insert_event("repeater", "send", "info", "repeater \"IDOR probe\" → 200 in 34ms",
   goto_tab: "repeater", goto_session_id: ids[:repeater_idor])
+
+# --- Agent tab (#1093) — two hosted Claude Code conversations ---------------
+# No live child ever ran here; these rows are what `insert_agent_session` /
+# `insert_agent_message` would have written as one, so the Agent tab's history picker has a
+# finished conversation to resume AND a dead one to show what a killed child looks like.
+agent_done = store.insert_agent_session(UUID.random.to_s, "claude", "claude-sonnet-4-5",
+  "which endpoints on the target take a redirect parameter?")
+store.insert_agent_message(agent_done, 0, "user", "text",
+  "which endpoints on the target take a redirect parameter?")
+store.insert_agent_message(agent_done, 1, "assistant", "tool_use", "list_sitemap",
+  payload: %({"host":"shop.demo.test","query":"redirect"}))
+store.insert_agent_message(agent_done, 2, "tool", "tool_result",
+  "2 matches:\n- shop.demo.test/go?next= (open redirect, flagged by Probe)\n" \
+  "- api.demo.test/v1/import?url= (blind SSRF, flagged by Probe)")
+store.insert_agent_message(agent_done, 3, "system", "permission", "allowed Bash for this session")
+store.insert_agent_message(agent_done, 4, "assistant", "text",
+  "Two endpoints take a redirect-shaped parameter: `next` on shop.demo.test/go and `url` on " \
+  "api.demo.test/v1/import. Both already have a confirmed Probe finding — the first an open " \
+  "redirect, the second a blind SSRF.")
+store.insert_agent_message(agent_done, 5, "system", "result", "")
+store.update_agent_session(agent_done, cost_usd: 0.0312, turns: 1)
+store.finish_agent_session(agent_done)
+
+agent_dead = store.insert_agent_session(UUID.random.to_s, "claude", "claude-sonnet-4-5",
+  "check whether the cart endpoint is still vulnerable to the CORS issue")
+store.insert_agent_message(agent_dead, 0, "user", "text",
+  "check whether the cart endpoint is still vulnerable to the CORS issue")
+store.insert_agent_message(agent_dead, 1, "assistant", "tool_use", "send_request",
+  payload: %({"method":"GET","url":"https://api.demo.test/v1/cart","headers":{"Origin":"https://evil.example"}}))
+store.insert_agent_message(agent_dead, 2, "system", "error", "agent exited: killed by SIGTERM")
+store.finish_agent_session(agent_dead)
+
 store.flush
 
 store.close
-puts "• notes (4 tabs) + 7 scope patterns + 6 events written"
+puts "• notes (4 tabs) + 7 scope patterns + 6 events + 2 agent conversations written"
 puts "\n✓ demo project ready — launch ./bin/gori and pick 'demo'."
 puts "  Start with Notes → \"Start here — a 10-minute tour\"."

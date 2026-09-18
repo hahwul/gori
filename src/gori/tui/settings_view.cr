@@ -4,6 +4,7 @@ require "./frame"
 require "./overlay"
 require "./viewport"
 require "../settings"
+require "../process_hook"
 
 module Gori::Tui
   # The interactive form editor for gori's persisted config (Gori::Settings).
@@ -216,6 +217,27 @@ module Gori::Tui
         "announce new background results in a speech bubble, and react to them — independent of the bottom-bar toast — ←/→/space toggles",
         bool: true),
     ]
+    # Agent: the hosted coding-agent tab (#1093) — what `claude` gets launched with.
+    AGENT_PERMISSION_CHOICES = ["ask", "deny"]
+    AGENT_PERMISSION_LABELS  = {"ask" => "Ask", "deny" => "Deny"}
+    AGENT_FIELDS             = [
+      Field.new("Command",
+        "argv[0] for the hosted agent — a PATH name (\"claude\") or an absolute path"),
+      Field.new("Args",
+        "extra argv appended LAST, after everything gori builds — one text field, tokenized like a shell command line (quotes work, $VARS and ; and | do not)"),
+      Field.new("Model",
+        "model name passed straight through — blank defers to the CLI's own default"),
+      Field.new("MCP read-only",
+        "start the agent's own gori MCP server with --read-only, refusing every mutating tool at the source — ←/→/space toggles",
+        bool: true),
+      Field.new("System prompt (append)",
+        "appended to the agent's system prompt verbatim — house rules, scope reminders, anything every turn should carry"),
+      Field.new("Permission policy",
+        "ask = every tool call waits on you; deny = every tool call is refused outright — no allow: your own Claude settings can already auto-allow tools, and a second auto-allow layer here would be gori's fault — ←/→ cycles",
+        choices: AGENT_PERMISSION_CHOICES, choice_labels: AGENT_PERMISSION_LABELS),
+      Field.new("Conversations kept",
+        "past conversations kept per project before the oldest is pruned — count (1-1000)"),
+    ]
     # Notifications: bell/toast toggles + ring-buffer retention.
     NOTIFICATIONS_FIELDS = [
       Field.new("Bell on result",
@@ -254,6 +276,7 @@ module Gori::Tui
       :statusline    => STATUSLINE_FIELDS,
       :display       => DISPLAY_FIELDS,
       :companion     => COMPANION_FIELDS,
+      :agent         => AGENT_FIELDS,
       :notifications => NOTIFICATIONS_FIELDS,
       :general       => GENERAL_FIELDS,
     }
@@ -295,6 +318,7 @@ module Gori::Tui
                 when :statusline    then statusline_values
                 when :display       then display_values
                 when :companion     then companion_values
+                when :agent         then agent_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
                 when :general       then general_values
                 else                     network_values
@@ -361,6 +385,15 @@ module Gori::Tui
                   Settings::DEFAULT_COMPANION_PLACEMENT,
                   Settings::DEFAULT_COMPANION_MOTION,
                   Settings::DEFAULT_COMPANION_NOTICES ? "on" : "off",
+                ]
+                when :agent then [
+                  Settings::DEFAULT_AGENT_COMMAND,
+                  Settings::DEFAULT_AGENT_ARGS,
+                  Settings::DEFAULT_AGENT_MODEL,
+                  Settings::DEFAULT_AGENT_MCP_READ_ONLY ? "on" : "off",
+                  Settings::DEFAULT_AGENT_SYSTEM_PROMPT_APPEND,
+                  Settings::DEFAULT_AGENT_PERMISSION_POLICY,
+                  Settings::DEFAULT_AGENT_HISTORY_KEEP.to_s,
                 ]
                 when :notifications then [
                   Settings::DEFAULT_NOTIFY_BELL ? "on" : "off",
@@ -545,6 +578,20 @@ module Gori::Tui
         Settings.companion_placement,
         Settings.companion_motion,
         Settings.companion_notices? ? "on" : "off",
+      ]
+    end
+
+    # Positional, like every other *_values reader: a literal at each call site would drift
+    # from AGENT_FIELDS the moment a row is inserted.
+    private def agent_values : Array(String)
+      [
+        Settings.agent_command,
+        Settings.agent_args,
+        Settings.agent_model,
+        Settings.agent_mcp_read_only? ? "on" : "off",
+        Settings.agent_system_prompt_append,
+        Settings.agent_permission_policy,
+        Settings.agent_history_keep.to_s,
       ]
     end
 
@@ -789,6 +836,38 @@ module Gori::Tui
         Settings.companion_motion = Settings.normalize_companion_motion(@values[2])
         Settings.companion_notices = @values[3] == "on"
         @values = companion_values
+        return persist
+      end
+      if @section == :agent
+        cmd = @values[0].strip
+        if cmd.empty?
+          @status = "invalid command"
+          return "settings: agent command cannot be empty"
+        end
+        args = @values[1]
+        # Blank is valid — "no extra args" — the same branch `Agent::Config.parse_args` takes.
+        # A NON-empty one is validated with the same tokenizer the spawn will use, so an
+        # unterminated quote is caught HERE rather than read back as "no extra args" later.
+        unless args.strip.empty?
+          out = ProcessHook.parse_argv(args)
+          if out.is_a?(String)
+            @status = "invalid args"
+            return "settings: agent args — #{out}"
+          end
+        end
+        keep = @values[6].strip.to_i?
+        unless keep && 1 <= keep <= 1000
+          @status = "invalid history"
+          return "settings: invalid agent history count #{@values[6].inspect} (count, 1-1000)"
+        end
+        Settings.agent_command = cmd
+        Settings.agent_args = args
+        Settings.agent_model = @values[2].strip
+        Settings.agent_mcp_read_only = @values[3] == "on"
+        Settings.agent_system_prompt_append = @values[4]
+        Settings.agent_permission_policy = Settings.normalize_agent_permission_policy(@values[5])
+        Settings.agent_history_keep = Settings.normalize_agent_history_keep(keep)
+        @values = agent_values
         return persist
       end
       if @section == :notifications

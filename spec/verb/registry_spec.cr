@@ -1021,6 +1021,24 @@ private class FakeContext < ExecContext
     false
   end
 
+  def agent_alive? : Bool
+    false
+  end
+
+  def agent_running? : Bool
+    false
+  end
+
+  def agent_pending? : Bool
+    false
+  end
+
+  {% for name in %w[agent_send agent_interrupt agent_stop agent_restart agent_new agent_history agent_permission agent_copy agent_fold agent_ask] %}
+    def {{ name.id }} : Nil
+      @calls << :{{ name.id }}
+    end
+  {% end %}
+
   {% for name in %w[evidence_open evidence_filter evidence_compare evidence_open_issue evidence_open_source evidence_copy evidence_export evidence_duplicate_repeater evidence_link_issue evidence_unlink_issue evidence_delete] %}
     def {{ name.id }} : Nil
       @calls << :{{ name.id }}

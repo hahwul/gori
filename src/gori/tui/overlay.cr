@@ -50,6 +50,8 @@ module Gori::Tui
     # app.agents palette entry. Read-only, like Listeners — the rows are gori mcp processes,
     # not anything the TUI edits.
     Agents
+    # A hosted agent's held tool call (#1093): allow / deny / allow for this session.
+    AgentPermission
     ProbeActive
     DiscoverConfig
     DiscoverHeaders

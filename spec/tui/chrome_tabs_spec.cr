@@ -19,11 +19,11 @@ describe "Chrome.reconcile" do
   it "fills the nine slots with the capture → triage → record loop, and nothing else" do
     # The default set IS nine, chosen rather than truncated to: an operator's first session
     # goes Project → Target → History → Intercept → Repeater → Fuzzer → Probe → Issues →
-    # Notes and never touches `0`. OAST/Decoder/JWT/Comparer/Rewriter are workbenches you
+    # Agent and never touches `0`. OAST/Decoder/JWT/Comparer/Rewriter are workbenches you
     # reach FOR; Help is one `?` away from anywhere, which beats a slot.
     visible = Chrome.reconcile([] of {String, Bool}).select { |(_, _, v)| v }.map(&.first)
     visible.should eq([:project, :target, :history, :intercept, :repeater, :fuzzer,
-                       :probe, :issues, :notes])
+                       :probe, :issues, :agent])
     visible.size.should eq(Chrome::MAX_SLOTS) # the default never needs the cap to fire
   end
 
@@ -34,7 +34,7 @@ describe "Chrome.reconcile" do
     # DEFAULT_HIDDEN alone — and this pins that it still can be.
     slotted = Chrome::TABS.map(&.first).reject { |s| Chrome::DEFAULT_HIDDEN.includes?(s) }
     slotted.should eq([:project, :target, :history, :intercept, :repeater, :fuzzer,
-                       :probe, :issues, :notes])
+                       :probe, :issues, :agent])
   end
 
   it "caps a hand-written or older-build config by POSITION, in the USER's order" do
@@ -159,14 +159,16 @@ describe "Chrome.hidden_tabs" do
     # JWT was made visible by #747 and is behind `0` again now that the bar is nine slots:
     # it is a workbench you reach FOR once a Bearer token turns up, not one you live in.
     # Evidence is also hidden until the operator opts into the archive after freezing the
-    # first exchange (#1039).
+    # first exchange (#1039). Notes joins them for a different reason: the nine slots were
+    # already full when Agent (#1093) was added, so Agent took Notes' default slot instead
+    # of growing the bar to ten (see the comment on DEFAULT_HIDDEN).
     #
     # The list is longer than DEFAULT_HIDDEN because the bar is nine slots: the six above plus
-    # the six the cap pushed off a fifteen-tab default strip, in catalog order.
-    # Twelve, in catalog order — the six specialised tabs above plus the five workbenches
-    # and Help that the nine-slot default moved behind `0` (see DEFAULT_HIDDEN).
+    # the seven the cap pushed off a sixteen-tab default strip, in catalog order.
+    # Thirteen, in catalog order — the six specialised tabs above plus the five workbenches,
+    # Notes, and Help that the nine-slot default moved behind `0` (see DEFAULT_HIDDEN).
     hid.should eq([:miner, :oast, :sequencer, :decoder, :jwt, :cookie, :comparer,
-                   :rewriter, :colormarker, :authorize, :evidence, :help])
+                   :rewriter, :colormarker, :authorize, :evidence, :notes, :help])
     hid.size.should eq(Chrome::TABS.size - Chrome::MAX_SLOTS)
   end
 

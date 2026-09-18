@@ -282,6 +282,10 @@ module Gori::Tui
         # the menu entry `probe.scope-toggle` here. The token would have printed the Global
         # chord and been wrong on the one tab this row is about.
         Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · space → s scope · {probe.clear} clear issues"),
+        # Agent sits between Issues and Evidence in the catalog (#1093), so its row does too.
+        # `{agent.send}` doubles ↵ on purpose — the ↵ clause is what a reader skims first — and
+        # the rest is the turn lifecycle: stop, look back, fold the transcript, start over.
+        Item.new("Agent", "↵ send · {agent.send} send · {agent.interrupt} stop turn · {agent.history} history · {agent.fold} fold · {agent.restart} restart · space cmds"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here
@@ -393,6 +397,7 @@ module Gori::Tui
       :target      => "OTHER TABS",
       :sitemap     => "OTHER TABS",
       :issues      => "OTHER TABS",
+      :agent       => "OTHER TABS",
       :evidence    => "OTHER TABS",
       :probe       => "OTHER TABS",
       :authorize   => "OTHER TABS",

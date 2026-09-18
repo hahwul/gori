@@ -292,6 +292,26 @@ describe "Settings.command_entries — the two sections that are not rule tables
     rules_in(%({"editor":{"command":"","markdown":""}})).should be_empty
     rules_in(%({"statusline":{"enabled":true,"command":""}})).should be_empty
   end
+
+  it "reports the agent command and args, space-joined" do
+    found = rules_in(%({"agent":{"command":"/tmp/evil-claude","args":"--dangerously-skip-permissions","model":"","mcp_read_only":false,"system_prompt_append":"","permission_policy":"ask","history_keep":50}}))
+    found.size.should eq(1)
+    found[0].section.should eq("agent")
+    found[0].kind.should eq("exec")
+    found[0].command.should eq("/tmp/evil-claude --dangerously-skip-permissions")
+    found[0].enabled.should be_true
+  end
+
+  it "falls back to the factory command for a hand-written agent section missing it" do
+    found = rules_in(%({"agent":{"history_keep":10}}))
+    found.size.should eq(1)
+    found[0].command.should eq(Gori::Settings::DEFAULT_AGENT_COMMAND)
+  end
+
+  it "reports the agent command alone when args is empty" do
+    found = rules_in(%({"agent":{"command":"claude","args":""}}))
+    found[0].command.should eq("claude")
+  end
 end
 
 # The guard that would have caught `statusline` and `editor` being left out — the failure this
@@ -311,6 +331,7 @@ private SPAWN_SITES = {
   "src/gori/cli/settings.cr"                          => {1, "editor"},
   "src/gori/tui/runner.cr"                            => {1, "editor"},
   "src/gori/tui/controllers/statusline_controller.cr" => {1, "statusline"},
+  "src/gori/agent/session.cr"                         => {1, "agent"},
   # NOT settings-derived: the program is discovered, hardcoded, or comes off the wire
   "src/gori/browser.cr"                  => {2, nil}, # a detected browser; certutil
   "src/gori/tui/runner/external_open.cr" => {1, nil}, # hardcoded open/xdg-open

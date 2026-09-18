@@ -1947,6 +1947,61 @@ module Gori
       end
     end
 
+    # One conversation with a coding agent (V29, #1093) — NOT one spawn.
+    #
+    # `session_uuid` is whatever spawn is (or was) live for this conversation; it changes every
+    # time the operator resumes, because Claude Code refuses a `--session-id` it has already
+    # issued. `resumed_from` is the uuid this spawn continued, nil for the first one. See the
+    # V29 comment in schema.cr for why the row is the conversation.
+    #
+    # `ended_at` is nil while the conversation has never been finished off — a spawn that is
+    # still running, or one whose process died without the tab noticing. "Running" is a
+    # question about a live process, not about this row, so nothing here answers it.
+    struct AgentSessionRow
+      getter id : Int64
+      getter session_uuid : String
+      getter resumed_from : String?
+      getter backend : String
+      getter model : String?
+      getter title : String
+      # The unsent input buffer, persisted on tab switch. Empty is the normal state.
+      getter draft : String
+      getter started_at : Int64
+      getter ended_at : Int64?
+      getter cost_usd : Float64
+      getter turns : Int32
+
+      def initialize(@id, @session_uuid, @resumed_from, @backend, @model, @title, @draft,
+                     @started_at, @ended_at, @cost_usd, @turns)
+      end
+    end
+
+    # One rendered line of an agent transcript (V29, #1093).
+    #
+    # `seq` is the tab's own ordering within the conversation and is what the read sorts on;
+    # `id` breaks a tie, so two frames written under the same seq still come back in the order
+    # they arrived. `payload` is the backend's own JSON for the frame, kept beside the rendered
+    # `text` rather than instead of it (P7: what arrived is canonical, the rendering is a
+    # projection). `truncated` says `text` was cut at `Store::AGENT_MESSAGE_MAX_BYTES` — a real
+    # statement about these bytes, never a guess.
+    struct AgentMessageRow
+      getter id : Int64
+      getter session_id : Int64
+      getter seq : Int32
+      getter role : String
+      getter kind : String
+      getter text : String
+      getter payload : String?
+      # `getter?` like every other truncation flag in this file (`request_truncated?`,
+      # `body_truncated?`): the question a reader asks is "was this cut", not "give me the cut".
+      getter? truncated : Bool
+      getter created_at : Int64
+
+      def initialize(@id, @session_id, @seq, @role, @kind, @text, @payload, @truncated,
+                     @created_at)
+      end
+    end
+
     # One row of the intercept_commands queue (MCP -> TUI). Drained forward-cursored and
     # applied by the lock-holding TUI (#123).
     struct CommandRow

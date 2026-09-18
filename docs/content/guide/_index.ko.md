@@ -32,21 +32,27 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 | **Probe** | 패시브 및 light-touch 액티브 보안 스캐너 |
 | **Authorize** | 요청을 여러 아이덴티티로 재전송해 접근 제어 결함 탐지 (기본 숨김) |
 | **Issues** | 심각도와 상태로 결과 트리아지 |
+| **Agent** | 자신의 Claude Code를 자식 프로세스로 호스팅하고, 첫 턴부터 이 프로젝트의 MCP 도구를 쥐여 줌 |
 | **Evidence** | 동결된 요청/응답 스냅숏 보관함 (첫 스냅숏이 생기면 나타남) |
-| **Notes** | 프로젝트별 마크다운 노트 |
+| **Notes** | 프로젝트별 마크다운 노트 (기본 숨김) |
 | **Help** | 키 바인딩과 링크 (기본은 `0` 뒤 — 어디서든 `?`로도 열림) |
 
 탭 바는 **번호가 매겨진 아홉 개의 슬롯**이고, 새 설치는 실제로 작업하는 루프로 그 슬롯을 채웁니다.
 
 ```text
-1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:Tabs
+1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Agent   0:Tabs
 ```
 
-`1`–`9`로 슬롯에 점프하고, 나머지 열두 개는 **`0`**으로 갑니다 — 카탈로그 전체를 타이핑으로
+`1`–`9`로 슬롯에 점프하고, 나머지 열세 개는 **`0`**으로 갑니다 — 카탈로그 전체를 타이핑으로
 거르는 목록입니다. `0` 뒤에 있는 탭은 상주하기보다 필요할 때 꺼내 쓰는 것들(OAST, Decoder,
-JWT, Comparer, Rewriter)과 특수 워크벤치(Miner, Sequencer, Cookie, Colormarker, Authorize),
-그리고 어디서든 `?`로 열리는 Help입니다. **Evidence**도 `0` 뒤에 있으며, 프로젝트에 첫 동결
-스냅숏이 생긴 뒤에만 목록에 나타납니다. 그전에는 보관할 것이 없기 때문입니다.
+JWT, Comparer, Rewriter, Notes)과 특수 워크벤치(Miner, Sequencer, Cookie, Colormarker,
+Authorize), 그리고 어디서든 `?`로 열리는 Help입니다. **Evidence**도 `0` 뒤에 있으며, 프로젝트에
+첫 동결 스냅숏이 생긴 뒤에만 목록에 나타납니다. 그전에는 보관할 것이 없기 때문입니다.
+
+기본 아홉 슬롯은 이미 꽉 차 있었기 때문에, **Agent**가 예전에 **Notes**가 쓰던 슬롯을
+가져갑니다. Notes는 `0` 피커나 `Ctrl-P`로 한 키 거리에 그대로 있습니다. 저장된 탭 배치를 가진
+운영자는 그 배치를 그대로 유지합니다 — 아무것도 저절로 움직이지 않습니다 — 그리고 직접 슬롯을
+내주기 전까지는 Agent를 `0` 뒤에서 찾게 됩니다.
 
 아홉 개의 구성은 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs** 또는 팔레트의
 `settings:tabs`에서 바꿉니다. **목록이 곧 바입니다.** 이음선 위의 행들이 순서대로 아홉 슬롯이고
