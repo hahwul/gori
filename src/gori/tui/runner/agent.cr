@@ -74,7 +74,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return (@toast = "no past conversations in this project") if rows.empty?
     choices = rows.map_with_index do |row, i|
       stamp = Time.unix_ms(row.started_at // 1000).to_local.to_s("%m-%d %H:%M")
-      state = row.ended_at ? "" : " · live"
+      # "live" only for the conversation THIS session holds: a row with no end time can also
+      # be one whose child died with a killed gori, and that one is not live anywhere.
+      live = row.ended_at.nil? && row.id == agent_controller.session.try(&.store_id)
+      state = live ? " · live" : ""
       # `label`, NOT `title`: a block assigning to the parameter's name rewrites it.
       label = row.title.empty? ? "(untitled)" : row.title.gsub(/\s+/, " ")
       ChoicePicker::Choice.new("#{stamp}  #{label[0, 60]}  · #{row.turns} turns#{state}",
