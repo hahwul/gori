@@ -90,7 +90,7 @@ module Gori::Tui
       # `cwd` is deliberately left nil = inherit gori's own, which is what an operator who ran
       # `gori` in a repo means by "here" (Agent::Config's own comment). The project directory
       # would be the gori DB's folder, which is not a workspace anybody wants an agent in.
-      config = Gori::Agent::Config.new(db_path: @host.session.project.db_path)
+      config = Gori::Agent::Config.from_settings(@host.session.project.db_path)
       Gori::Agent::Session.new(Gori::Agent::ClaudeBackend.new, config, @host.session.store)
     end
 
@@ -206,7 +206,14 @@ module Gori::Tui
     # the operator's first keystroke in an untouched tab is the message itself.
     def submit(text : String) : Bool
       if text.strip.empty?
-        @host.status("nothing to send")
+        # An empty ↵ with no child yet is "start the agent" — what the guidance card
+        # promises. With a child already up there is nothing to do but say so.
+        if @session.nil?
+          s = ensure_session
+          @host.status(s.dead? ? "agent could not start: #{s.dead_reason}" : "agent started — type a prompt and ↵")
+        else
+          @host.status("nothing to send")
+        end
         return false
       end
       exit_history
