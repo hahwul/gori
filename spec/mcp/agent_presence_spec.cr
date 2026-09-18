@@ -185,3 +185,107 @@ describe "MCP agent presence over the wire" do
     end
   end
 end
+
+# `get_current_context` reports whether a gori TUI WINDOW is attached (#1091). This file
+# rather than `flows_spec.cr` because only its `tools_for` passes `db_path:` — the shared
+# harness leaves it nil, and a server with no path to look beside cannot answer at all.
+private def announce_window(db_path : String, holds_capture : Bool? = nil)
+  Gori::AgentPresence.announce(db_path, client: "gori tui", client_version: "1.0",
+    read_only: false, selection_source: nil,
+    kind: Gori::AgentPresence::KIND_TUI, holds_capture: holds_capture).not_nil!
+end
+
+private def context_of(tools : Gori::MCP::Tools) : JSON::Any
+  r = tools.call("get_current_context", JSON.parse("{}"))
+  r.is_error.should be_false
+  JSON.parse(r.text)
+end
+
+describe "get_current_context TUI liveness" do
+  it "does not count this server's OWN agent marker as a window" do
+    with_registry do |reg, _root|
+      project = reg.create("target")
+      tools = tools_for(project)
+      begin
+        # A bound `Tools` announces an `mcp` marker in its constructor, so an unfiltered
+        # `AgentPresence.live` is never empty — a reader that forgot the kind filter would
+        # report a live TUI in every session forever. This is that regression.
+        live(project.db_path).size.should eq(1)
+        ctx = context_of(tools)
+        ctx["tui"]["live"].as_bool.should be_false
+        ctx["tui"]["windows"].as_i.should eq(0)
+      ensure
+        tools.release_presence
+      end
+    end
+  end
+
+  it "sees a window, its pid and which one holds capture" do
+    with_registry do |reg, _root|
+      project = reg.create("target")
+      tools = tools_for(project)
+      window = announce_window(project.db_path, holds_capture: true)
+      begin
+        ctx = context_of(tools)
+        ctx["tui"]["live"].as_bool.should be_true
+        ctx["tui"]["windows"].as_i.should eq(1)
+        ctx["tui"]["holds_capture"].as_bool.should be_true
+        ctx["tui"]["pid"].as_i64.should eq(Process.pid.to_i64)
+      ensure
+        window.close
+        tools.release_presence
+      end
+    end
+  end
+
+  it "says two windows share ONE state row rather than leaving the count to be read" do
+    with_registry do |reg, _root|
+      project = reg.create("target")
+      tools = tools_for(project)
+      a = announce_window(project.db_path, holds_capture: true)
+      b = announce_window(project.db_path, holds_capture: false)
+      begin
+        ctx = context_of(tools)
+        ctx["tui"]["windows"].as_i.should eq(2)
+        ctx["tui"]["note"].as_s.should contain("ONE")
+      ensure
+        a.close
+        b.close
+        tools.release_presence
+      end
+    end
+  end
+
+  it "goes back to not-live once the window releases its marker" do
+    with_registry do |reg, _root|
+      project = reg.create("target")
+      tools = tools_for(project)
+      window = announce_window(project.db_path)
+      begin
+        context_of(tools)["tui"]["live"].as_bool.should be_true
+        window.close
+        context_of(tools)["tui"]["live"].as_bool.should be_false
+      ensure
+        tools.release_presence
+      end
+    end
+  end
+
+  it "distinguishes a window that has not published a view from one that never ran" do
+    with_registry do |reg, _root|
+      project = reg.create("target")
+      tools = tools_for(project)
+      window = announce_window(project.db_path)
+      begin
+        ctx = context_of(tools)
+        ctx["available"].as_bool.should be_false
+        # Pre-#1091 this said "the gori TUI may not have run against it" while a window sat
+        # on screen — a different claim, and the wrong one.
+        ctx["note"].as_s.should contain("has not recorded a view yet")
+      ensure
+        window.close
+        tools.release_presence
+      end
+    end
+  end
+end

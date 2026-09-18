@@ -26,6 +26,37 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     AgentsOverlay.chip_label(@agents.map(&.client))
   end
 
+  # --- this WINDOW's own marker (#1091) -------------------------------------------------
+  # The mirror image of the block above: `gori mcp` announces itself so the TUI can show it,
+  # and now the TUI announces itself so `get_current_context` can tell an agent whether the
+  # selection it is reading belongs to a window that is still on screen. A separate marker
+  # directory (`AgentPresence::TUI_DIR_SUFFIX`), so the `mcp:` chip above cannot start
+  # counting us and the picker's parse-free `count` stays exactly as it was.
+  @tui_presence : Gori::AgentPresence? = nil
+
+  # Owned by the RUNNER and not by `Session`: `Session.open` also backs headless
+  # `gori run capture`, and a marker announced there would tell an agent a TUI window is up
+  # when nothing is drawn at all. One Runner is one project visit — the picker leaving and
+  # re-entering builds a new one — so the marker's life is exactly "this project is on screen".
+  def announce_tui_presence : Nil
+    @tui_presence = Gori::AgentPresence.announce(@session.project.db_path,
+      client: "gori tui", client_version: Gori::VERSION, read_only: false,
+      selection_source: nil, kind: Gori::AgentPresence::KIND_TUI,
+      holds_capture: @session.capturing_lock_held?)
+  end
+
+  # Keep the marker's capture bit true to `c`, which moves the lock between windows. A no-op
+  # unless it actually moved, so an idle project writes nothing — and no heartbeat, because
+  # the flock is what says this window is alive.
+  def refresh_tui_presence : Nil
+    @tui_presence.try(&.update_capture(@session.capturing_lock_held?))
+  end
+
+  def release_tui_presence : Nil
+    @tui_presence.try(&.close)
+    @tui_presence = nil
+  end
+
   # The AGENTS card. Reads its rows through an injected probe (a fresh `live` scan) so the card
   # re-checks off the filesystem on `r`, not off the possibly-stale poll snapshot.
   def open_agents : Nil

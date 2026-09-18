@@ -205,6 +205,19 @@ module Gori::Tui
       j.object do
         j.field "count", @repeaters.size
         j.field "active_subtab", @current_repeater_idx
+        # The marked chips as the ids every repeater TOOL takes. The generic
+        # `selection.marked_subtabs` block beside this one can only carry chip numbers —
+        # `SubtabMarks` keys on view identity and there is no durable id in the general case
+        # — so the translation belongs here, where repeater addressing already lives. An
+        # ephemeral WS/gRPC tab has no `db_id` and simply drops out.
+        #
+        # `marked_subtab_indices`, NEVER `target_subtab_indices`: the latter falls back to the
+        # ACTIVE chip when nothing is marked, and it can reach that fallback even with a
+        # non-empty `@subtab_marks` — the prune inside it drops refs whose session a peer
+        # deleted. The field is named `marked_*`, so a fallback here would tell an agent the
+        # one session the operator happened to have open was marked.
+        marked = marked_subtab_indices.compact_map { |i| db_id_at(i) }
+        j.field "marked_db_ids", marked unless marked.empty?
         if tab = current_repeater_tab
           j.field "active" do
             j.object do

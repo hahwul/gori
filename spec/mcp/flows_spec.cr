@@ -1,5 +1,9 @@
 require "../spec_helper"
 require "../support/mcp_harness"
+require "../../src/gori/tui/tab_controller"
+
+# The zero-arg call every get_current_context example makes.
+private CONTEXT_CALL = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_current_context","arguments":{}}})
 
 private def gzip_bytes(text : String) : Bytes
   io = IO::Memory.new
@@ -467,6 +471,90 @@ describe Gori::MCP::Server do
         payload["active_tab"].as_s.should eq("history")
       end
     end
+
+    # The operator's selection (#1091). The TUI owns this schema and the tool relays it
+    # verbatim, so these examples seed the row by hand — which is also how the read side gets
+    # covered without a TUI process in the loop.
+    it "relays the selection and names the call that turns it into data" do
+      with_store do |store|
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"history","selection":) +
+                                                     %({"kind":"flow","ids":[7,9],"target_source":"marks","marked_count":2,"truncated":false}}))
+        payload = mcp_tool_payload(mcp_drive(store, CONTEXT_CALL)[0])
+        payload["selection"]["ids"].as_a.map(&.as_i64).should eq([7_i64, 9_i64])
+        payload["selection"]["target_source"].as_s.should eq("marks")
+        # Only History has a one-call form, and saying so beats an agent discovering it by
+        # calling get_flow once per id.
+        payload["selection_next_call"].as_s.should contain("list_history{ids")
+      end
+    end
+
+    it "points a sitemap selection at the query that reaches its traffic" do
+      with_store do |store|
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"target","selection":) +
+                                                     %({"kind":"sitemap_node","nodes":[{"host":"a.test","path":"/v1"}],"marked_count":1}}))
+        payload = mcp_tool_payload(mcp_drive(store, CONTEXT_CALL)[0])
+        # These are NOT flow ids and the payload must never let that be guessed.
+        payload["selection"].as_h.has_key?("ids").should be_false
+        payload["selection_next_call"].as_s.should contain("SITEMAP NODES")
+      end
+    end
+
+    it "carries marks the operator left on a tab they are not looking at" do
+      with_store do |store|
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"repeater",) +
+                                                     %("marks_elsewhere":[{"tab":"history","kind":"flow","marked_count":4}]}))
+        payload = mcp_tool_payload(mcp_drive(store, CONTEXT_CALL)[0])
+        row = payload["marks_elsewhere"].as_a.first
+        row["tab"].as_s.should eq("history")
+        row["marked_count"].as_i.should eq(4)
+      end
+    end
+
+    it "says a row predating the selection channel has none, rather than inventing one" do
+      with_store do |store|
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"history","focus_pane":"body"}))
+        payload = mcp_tool_payload(mcp_drive(store, CONTEXT_CALL)[0])
+        payload["available"].as_bool.should be_true
+        payload.as_h.has_key?("selection").should be_false
+        payload.as_h.has_key?("selection_next_call").should be_false
+      end
+    end
+
+    it "degrades a malformed selection instead of failing the whole call" do
+      with_store do |store|
+        # A row written by a future gori, a half-written one, or outside interference. Every
+        # field here is read through `.try(&.as_*?)`, and the block is relayed as data — none
+        # of it may reach a cast error.
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"history","selection":[1,2,3]}))
+        resp = mcp_drive(store, CONTEXT_CALL)[0]
+        resp["result"]["isError"]?.try(&.as_bool?).should_not be_true
+        mcp_tool_payload(resp)["available"].as_bool.should be_true
+
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"history","selection":{"kind":42,"ids":"nope"}}))
+        resp = mcp_drive(store, CONTEXT_CALL)[0]
+        resp["result"]["isError"]?.try(&.as_bool?).should_not be_true
+        # An unrecognised kind simply gets no next-call line; it never guesses one.
+        mcp_tool_payload(resp).as_h.has_key?("selection_next_call").should be_false
+      end
+    end
+
+    it "answers `unknown` rather than `false` when it cannot look for a window" do
+      with_store do |store|
+        # This harness binds no db_path, which is the shape a `--db :memory:` or an
+        # unbound-then-bound server has. "I cannot see" and "nobody is there" are different
+        # answers and only one of them is safe to act on — the same rule `holds_capture`
+        # follows by being omitted rather than guessed.
+        payload = mcp_tool_payload(mcp_drive(store, CONTEXT_CALL)[0])
+        payload["tui"]["unknown"].as_bool.should be_true
+        payload["tui"].as_h.has_key?("live").should be_false
+      end
+    end
+
+    it "keeps a relayed History selection fetchable in ONE list_history call" do
+      # The promise `selection_next_call` makes. Two constants in two files, and the wrong
+      # drift turns "here is the set you marked" into "here is part of it".
+      (Gori::Tui::TabController::SELECTION_ID_CAP <= Gori::MCP::Tools::MCP_HISTORY_IDS_MAX).should be_true
+    end
   end
 
   describe "project_info" do
@@ -656,6 +744,9 @@ describe "MCP get_current_context" do
       # A duplicate key is first/last-wins by parser and rejected outright by strict ones,
       # so count the RAW text — JSON.parse would silently collapse it.
       raw.scan(/"project":/).size.should eq 1
+      # The two keys #1091 added sit beside it and must not double either.
+      raw.scan(/"selection":/).size.should eq 0 # this row carries none
+      raw.scan(/"tui":/).size.should eq 1
       JSON.parse(raw)["project"].as_s.should eq "acme"
       JSON.parse(raw)["active_tab"].as_s.should eq "history"
     end

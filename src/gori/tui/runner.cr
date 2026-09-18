@@ -529,6 +529,12 @@ module Gori::Tui
       last_bridge_pub = Time.instant                                        # #123: last bridge-heartbeat write (throttled so idle never churns the WAL)
       @intercept_cmd_watermark = @session.store.latest_intercept_command_id # tail agent commands from now
       begin
+        # "A gori TUI window is attached to this project" (#1091), for `get_current_context`
+        # to read cross-process. INSIDE this begin, not beside the setup above, so the same
+        # `ensure` that stops the statusline is what drops it — a marker released only because
+        # a raise happened to end the process is an invariant held by accident. Best effort:
+        # a failure is a missing marker, never a session that will not start.
+        announce_tui_presence
         loop do
           # Absorb a raise from THIS tick instead of letting it end the process. The loop
           # below is session-scoped: it holds unsaved Repeater/Fuzzer buffers and an
@@ -629,6 +635,10 @@ module Gori::Tui
               # chip too. Reports dirty only when the rendered chip string actually changed, so an
               # idle project with a steady agent list does not repaint on the timer.
               dirty = true if refresh_agent_presence
+              # Our own marker's capture bit, on the same tick and for the same reason it is
+              # not in the data_version branch (#1091). Writes only when `c` actually moved
+              # the lock, and never reports dirty — nothing on screen reads it.
+              refresh_tui_presence
               # Peer-change announcements (#772). OUTSIDE the data_version branch for the same
               # class of reason as agent presence, but the opposite way round: the CHANGE is
               # spotted inside the branch (only a commit can move a peer's rules or probe mode),
@@ -786,6 +796,10 @@ module Gori::Tui
         #
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
+        # Drop this window's presence marker (#1091). The flock would release it on exit
+        # anyway, but a project the operator LEFT for the picker keeps the process alive, and
+        # an agent must not be told a window is up for a project nobody is looking at.
+        release_tui_presence
         @import_cancel = true
         history_controller.cancel_searches
         # Drop the per-tab window title back to a neutral "𝓰𝓸𝓻𝓲" on leave — the shared term
@@ -946,10 +960,32 @@ module Gori::Tui
     # is constant per session, so it's not part of the identity. A tuple, not an interpolated
     # string: this is read on every 50 ms tick, and the string was built (and thrown away)
     # even when nothing had moved and nothing would be written.
-    alias UiIdentity = {Symbol, Symbol, Int64?, Int32}
+    alias UiIdentity = {Symbol, Symbol, Int64?, Int32, SelectionIdent, Int32}
 
     private def ui_state_identity : UiIdentity
-      {@active_tab, @focus, current_selected_flow_id, current_subtab_index}
+      {@active_tab, @focus, current_selected_flow_id, current_subtab_index,
+       current_selection_ident, total_mark_count}
+    end
+
+    # The active tab's selection identity (#1091). Without this component the tuple above
+    # moves for none of the mark gestures — `t`, `⇧T`, mark-clear and `⇧arrow` all leave
+    # `active_tab`, `focus`, `selected_flow_id` and `subtab` exactly where they were — so
+    # marking four rows published NOTHING and `get_current_context` told an agent the
+    # operator had selected nothing while four rows sat banded on screen.
+    #
+    # A tab with neither marks nor a list answers the all-zero default, which is what every
+    # non-participating tab compares as — so the gate behaves for Help/Project/Settings
+    # exactly as it did before.
+    private def current_selection_ident : SelectionIdent
+      @tabs[@active_tab]?.try(&.selection_ident) || SelectionIdent.new
+    end
+
+    # Marks across EVERY tab, not just the active one, so that switching away from a marked
+    # History and marking something else republishes the `marks_elsewhere` roll-up. O(1) per
+    # tab (`TabController#mcp_mark_count` is a `size`), 21 tabs, on the same tick — far
+    # cheaper than the string this tuple replaced.
+    private def total_mark_count : Int32
+      @tabs.each_value.sum(&.mcp_mark_count)
     end
 
     # May THIS window write the project's single `ui_state` row?
@@ -1018,10 +1054,60 @@ module Gori::Tui
             j.field "selected_flow_id", fid
           end
           j.field "subtab", current_subtab_index
+          # What the operator has MARKED, or has the cursor on (#1091). One block, written by
+          # the ACTIVE tab through the base-class hook, so the four list tabs and the nine
+          # sub-tab strips all reach an agent through one shape. Gated so a tab with nothing
+          # to say writes no key at all rather than an empty object every throttle window.
+          if (tab = @tabs[@active_tab]?) && tab.mcp_selection?
+            j.field "selection" { tab.write_mcp_selection(j) }
+          end
+          # Marks the operator left on ANOTHER tab. Without it, marking four flows and then
+          # stepping over to Repeater to look at something makes "do X with the four I
+          # selected" read the Repeater's selection and answer confidently about the wrong
+          # thing — the active tab alone cannot say "your marks are over there".
+          write_marks_elsewhere(j)
           if @active_tab == :repeater
             j.field "repeater" { repeater_controller.write_mcp_context(j) }
           end
           j.field "recorded_at", Time.utc.to_unix_ms
+        end
+      end
+    end
+
+    # The marked-but-not-here roll-up: every tab whose marks the `selection` block above did
+    # NOT carry, as the tab it is on plus how many. Counts only, never ids — the ids of a tab
+    # the operator is not looking at are a `switch_tab` away, and carrying them would put four
+    # selections in one row where the whole design has exactly one.
+    #
+    # The skip is "this tab already published its marks", not "this tab is active": Target is
+    # ONE registry tab over three children, and with Discover or Diff in front the parent
+    # publishes no selection at all — so a plain active-tab skip made four marked sitemap
+    # nodes vanish from both halves of the row, which is precisely the silence this feature
+    # exists to remove.
+    #
+    # `tab` always, `kind` only when the marks HAVE one. The kinds are a closed set
+    # (flow|issue|sitemap_node|intercept_item) and a sub-tab strip's marks are in none of
+    # them; inventing "repeater" as a kind would put a value in that field no reader can
+    # branch on. `mcp_mark_kind` rather than `selection_kind` because Target's marks can sit
+    # on a different child than the one on screen.
+    private def write_marks_elsewhere(j : JSON::Builder) : Nil
+      rows = [] of {Symbol, String?, Int32}
+      @tabs.each do |tab, ctl|
+        next if tab == @active_tab && ctl.mcp_selection?
+        n = ctl.mcp_marked_count
+        next if n.zero?
+        rows << {tab, ctl.mcp_mark_kind, n}
+      end
+      return if rows.empty?
+      j.field "marks_elsewhere" do
+        j.array do
+          rows.each do |(tab, kind, n)|
+            j.object do
+              j.field "tab", tab.to_s
+              j.field "kind", kind if kind
+              j.field "marked_count", n
+            end
+          end
         end
       end
     end
@@ -4578,6 +4664,20 @@ module Gori::Tui
       end
       return [history_controller.view.detail_flow_id].compact if @overlay.detail?
       history_controller.target_flow_ids
+    end
+
+    # `Host#detail_pinned_flow_id` — the flow an OPEN History detail pins, for the selection
+    # `HistoryController` publishes (#1091). The ui-state row has to name the flow the keys on
+    # screen would act on, not the marks they would ignore.
+    #
+    # `@overlay.detail?` ALONE, deliberately unlike `history_target_flow_ids` above, which also
+    # honours `@detail_pin`. That pin is an INTRA-EVENT carrier: `close_detail` sets it so the
+    # jump verbs that close first still resolve to the flow they were reading, and `handle_key`
+    # drops it when the NEXT event arrives — which may be minutes later, or never. Reading it
+    # here left the row saying `target_source:"detail"` with one id after the operator pressed
+    # esc and was looking at their four marks again.
+    def detail_pinned_flow_id : Int64?
+      @overlay.detail? ? history_controller.view.detail_flow_id : nil
     end
 
     # Hard ceiling on batch verbs that spawn a sub-tab or a session per flow (Repeater,

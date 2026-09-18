@@ -7,6 +7,13 @@ require "../../redact/policy"
 module Gori
   module MCP
     class Tools
+      # Cap on `list_history{ids}` — one deliberate named set per call, not a table scan by
+      # another name. Above `TabController::SELECTION_ID_CAP` (200) ON PURPOSE: a selection
+      # relayed by `get_current_context` must always be fetchable in ONE call, and the two
+      # constants drifting the other way would quietly break that promise
+      # (`spec/mcp/flows_spec.cr` asserts the ordering).
+      MCP_HISTORY_IDS_MAX = 500
+
       # --- read tools ---------------------------------------------------------
 
       @[Tool("list_history")]
@@ -14,6 +21,32 @@ module Gori
         limit = clamp(optional_int_arg(h, "limit"), 50, 500)
         before_id = optional_int_arg(h, "before_id")
         since_id = optional_int_arg(h, "since")
+        # `ids` names an EXACT set — the rows the operator marked in the TUI, handed over by
+        # `get_current_context` (#1091). Validated first, and above `drain_fts_or_error`
+        # below, for that helper's own reason: a call that is going to be refused must not
+        # take a write lock on its way to the refusal.
+        ids = nil.as(Array(Int64)?)
+        if present?(h, "ids")
+          # An explicit empty list is REFUSED, never answered with the recent-flows firehose.
+          # A caller that named an empty selection would get every recent flow with no error
+          # on it, which is a wrong answer wearing a correct one's clothes.
+          return err("'ids' names no flow — pass at least one id, or omit 'ids' to page the list",
+            "INVALID_ARGUMENT", field: "ids") unless describes?(h, "ids")
+          ids = id_list_arg(h, "ids")
+          return err("'ids' names no flow — pass at least one id, or omit 'ids' to page the list",
+            "INVALID_ARGUMENT", field: "ids") if ids.empty?
+          if ids.size > MCP_HISTORY_IDS_MAX
+            return err("#{ids.size} ids is over the #{MCP_HISTORY_IDS_MAX}-flow cap for one call — " \
+                       "split it, so a short result is never mistaken for a complete one",
+              "INVALID_ARGUMENT", field: "ids")
+          end
+          if before_id || since_id
+            # There is nothing to page through: the list IS the page. A cursor beside it would
+            # silently shorten the operator's selection.
+            return err("'ids' names the whole page, so 'before_id' / 'since' do not apply — drop the cursor",
+              "INVALID_ARGUMENT", field: "ids")
+          end
+        end
         if before_id && since_id
           return err("pass only one of 'since' (tail newer, oldest-first) or 'before_id' (page older, newest-first)",
             "INVALID_ARGUMENT", field: "since")
@@ -85,6 +118,11 @@ module Gori
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
         end
+        # A named set is not a page: it has no cursor, no `limit` and no `has_more`, and its
+        # short answers have to name themselves. Branches here rather than earlier so `query`,
+        # `view` and `in_scope` are already compiled — they still narrow WITHIN the set.
+        return emit_history_ids(ids, filter, query, view_filter, in_scope, scope_unconfigured,
+          prepared, h) if ids
         # One row OVER the page, then dropped. The pagination contract was documented and
         # correct ("a page shorter than `limit` means no older rows") but it was an INFERENCE
         # the caller had to make and then act on with a second call: a query matching 51 flows
@@ -127,6 +165,92 @@ module Gori
             end
           end
         end)
+      end
+
+      # The `ids` path: an exact named set, returned IN THE ORDER IT WAS ASKED FOR (#1091).
+      #
+      # Three things this must keep apart, because "fewer rows than I asked for" has three
+      # different causes and only one of them is the caller's mistake:
+      #
+      #   * `missing_ids` — no such row. Reported, never dropped: `flows.id` is a REUSABLE
+      #     rowid, so a remembered id can be gone OR now belong to a different flow, and an
+      #     agent replaying a stale set needs to hear it. Not a whole-call refusal, unlike
+      #     `delete_repeaters`: this is a READ, retention or `clear_history` can legitimately
+      #     have eaten one row, and refusing would cost the caller the rows that do exist.
+      #   * `filtered_out_ids` — the row exists, and `query`/`view`/`in_scope` excluded it.
+      #     Two narrowings are two narrowings, the same rule `view` already carries — but a
+      #     narrowing that removed part of the operator's selection has to say so.
+      #   * `limit_ignored` — the caller passed a page size to a call that is not a page.
+      private def emit_history_ids(ids : Array(Int64), filter : QL::Filter, query : String?,
+                                   view_filter : QL::Filter, in_scope : Bool,
+                                   scope_unconfigured : Bool,
+                                   prepared : Gori::DisplayColumns::Prepared, h) : Result
+        narrowed = (query && !query.strip.empty?) || in_scope || view_filter != QL::EMPTY
+        found = store.flow_rows(ids)
+        by_id = {} of Int64 => Store::FlowRow
+        found.each { |r| by_id[r.id] = r }
+        missing = ids.reject { |id| by_id.has_key?(id) }
+
+        split = narrow_present_ids(by_id.keys, filter, narrowed, scope_unconfigured)
+        return split if split.is_a?(Result)
+        kept, dropped = split
+        keep = kept.to_set
+        drop = dropped.to_set
+        rows = ids.compact_map { |id| keep.includes?(id) ? by_id[id] : nil }
+        # Walked over `ids`, not over the SQL result set: `flows` is `order: "as_requested"`
+        # and `missing_ids` follows the caller's order too, so a third list in rowid order
+        # would silently misalign an agent zipping it against its own marked list.
+        filtered_out = ids.select { |id| drop.includes?(id) }
+
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "returned", rows.size
+            j.field "requested_ids", ids.size
+            # Not "newest_first": these come back the way they were asked for, so a caller can
+            # zip them against the id list it holds without re-sorting.
+            j.field "order", "as_requested"
+            j.field "has_more", false
+            if present?(h, "limit")
+              j.field "limit_ignored", true
+              j.field "limit_ignored_note",
+                "'ids' names the whole page, so 'limit' was not applied — all #{rows.size} matching rows are here"
+            end
+            unless missing.empty?
+              j.field "missing_ids", missing
+              j.field "missing_ids_note",
+                "#{missing.size} of the #{ids.size} ids have no flow — deleted, or lost to retention. " \
+                "flows.id is a reusable rowid, so re-read the set from get_current_context rather " \
+                "than replaying a remembered one"
+            end
+            unless filtered_out.empty?
+              j.field "filtered_out_ids", filtered_out
+              j.field "filtered_out_note",
+                scope_unconfigured ? "in_scope:true with no scope rules configured excludes every flow — add_scope_rule, or drop in_scope" : "#{filtered_out.size} of the ids exist but were excluded by 'query'/'view'/'in_scope' — " \
+                                                                                                                                             "drop the narrowing to see them"
+            end
+            j.field "flows" do
+              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared)) } }
+            end
+          end
+        end)
+      end
+
+      # Split the ids that DO have a row into {kept, excluded-by-the-filter}, or the Result that
+      # refuses the call. Its own method so `emit_history_ids` stays flat enough to read — the
+      # three-way distinction it feeds is the point of that method, not this arithmetic.
+      private def narrow_present_ids(present : Array(Int64), filter : QL::Filter,
+                                     narrowed : Bool,
+                                     scope_unconfigured : Bool) : {Array(Int64), Array(Int64)} | Result
+        # `in_scope` with no scope rules is empty everywhere else too; every id is excluded BY
+        # THE FILTER, not absent — keeping the two apart is the whole point of the caller.
+        return {[] of Int64, present} if scope_unconfigured
+        return {present, [] of Int64} unless narrowed && !present.empty?
+        matched = store.ids_matching(filter, present)
+        # nil is "no answer", and reporting it as "none matched" is exactly the confusion
+        # `Store#ids_matching` refuses to express through its return type.
+        return err("could not evaluate the query against 'ids' — see gori.log; retry, or drop the query",
+          "INTERNAL", field: "query") if matched.nil?
+        {present.select { |id| matched.includes?(id) }, present.reject { |id| matched.includes?(id) }}
       end
 
       # One row's user-column values as `{label, value}` pairs, or nil when none were asked for.
@@ -441,8 +565,23 @@ module Gori
           "OLDEST-first (`order` says which, per reply); tail by passing `next_since` back as " \
           "the next `since`; an empty page means no new flows (keep your cursor). `since` and " \
           "`before_id` are mutually exclusive. " \
+          "Pass `ids` to fetch an EXACT set in one call — the rows the operator marked in the " \
+          "TUI, which get_current_context hands back as `selection.ids`; it replaces the " \
+          "cursors rather than paging. " \
           "Call ql_reference for full QL syntax." do |s|
           s.field "query", strprop("gori QL filter; empty = most recent")
+          s.field "ids", id_list_prop(
+            "fetch EXACTLY these flow ids in ONE call — the set get_current_context returns as " \
+            "`selection.ids` (what the operator marked in the TUI). QL has no `id:` field, so this " \
+            "is the only way to name a set. Rows come back IN THE ORDER YOU ASKED (`order` reads " \
+            "\"as_requested\", not newest-first) and duplicates collapse to the first occurrence. " \
+            "`limit`, `before_id` and `since` do not apply — the list IS the page, and the two " \
+            "cursors are refused beside it. An id with no row is REPORTED in `missing_ids`, never " \
+            "dropped: flow ids are REUSED after a delete, so re-read the set from " \
+            "get_current_context rather than replaying a remembered one. `query`/`view`/`in_scope` " \
+            "still narrow WITHIN the set, and what they removed comes back as `filtered_out_ids` — " \
+            "so a short answer always says which kind of short it is. " \
+            "At most #{MCP_HISTORY_IDS_MAX} ids per call")
           s.field "limit", intprop("max rows (default 50, max 500)")
           s.field "before_id", intprop("cursor: page OLDER — only flows with id < this (newest-first; works with query too)")
           s.field "since", intprop("forward cursor: tail NEWER — only flows with id > this, oldest-first (mutually exclusive with before_id)")

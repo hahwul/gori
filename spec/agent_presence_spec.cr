@@ -221,3 +221,115 @@ describe Gori::AgentPresence do
     Gori::AgentPresence.live("").should be_empty
   end
 end
+
+# A gori TUI window announces itself with the same mechanism (#1091), so `get_current_context`
+# can tell an agent whether the selection it is relaying belongs to a window still on screen.
+# The kind lives in the DIRECTORY, not in the body, and these examples are why.
+describe "TUI window presence" do
+  it "lands in its own directory, invisible to every `mcp` reader" do
+    with_project do |_registry, project|
+      window = Gori::AgentPresence.announce(project.db_path, client: "gori tui",
+        client_version: "1.0", read_only: false, selection_source: nil,
+        kind: Gori::AgentPresence::KIND_TUI, holds_capture: true).not_nil!
+      begin
+        # The project picker's `mcp×N` chip and the TUI's own `mcp:` chip both read the
+        # default kind on the render path. A window counted there would be the TUI reporting
+        # itself as an attached agent.
+        Gori::AgentPresence.count(project.db_path).should eq(0)
+        Gori::AgentPresence.live(project.db_path).should be_empty
+
+        windows = Gori::AgentPresence.live(project.db_path, kind: Gori::AgentPresence::KIND_TUI)
+        windows.size.should eq(1)
+        windows.first.kind.should eq(Gori::AgentPresence::KIND_TUI)
+        windows.first.client.should eq("gori tui")
+        windows.first.holds_capture.should be_true
+        windows.first.pid.should eq(Process.pid.to_i64)
+      ensure
+        window.close
+      end
+      Gori::AgentPresence.live(project.db_path, kind: Gori::AgentPresence::KIND_TUI).should be_empty
+    end
+  end
+
+  it "keeps an `mcp` marker out of the window listing, and vice versa" do
+    with_project do |_registry, project|
+      agent = announce(project.db_path, client: "claude-code")
+      window = Gori::AgentPresence.announce(project.db_path, client: "gori tui",
+        client_version: nil, read_only: false, selection_source: nil,
+        kind: Gori::AgentPresence::KIND_TUI).not_nil!
+      begin
+        Gori::AgentPresence.live(project.db_path).map(&.client).should eq(["claude-code"])
+        Gori::AgentPresence.live(project.db_path,
+          kind: Gori::AgentPresence::KIND_TUI).map(&.client).should eq(["gori tui"])
+      ensure
+        window.close
+        agent.close
+      end
+    end
+  end
+
+  it "reads an unparseable window body as a WINDOW — the directory decides, not the body" do
+    with_project do |_registry, project|
+      window = Gori::AgentPresence.announce(project.db_path, client: "gori tui",
+        client_version: nil, read_only: false, selection_source: nil,
+        kind: Gori::AgentPresence::KIND_TUI).not_nil!
+      begin
+        path = Gori::AgentPresence.live(project.db_path,
+          kind: Gori::AgentPresence::KIND_TUI).first.path
+        File.write(path, "{ not json")
+        entry = Gori::AgentPresence.live(project.db_path,
+          kind: Gori::AgentPresence::KIND_TUI).first
+        # The LOCK said someone is here. Falling back to `mcp` (the pre-#1091 default) would
+        # make a half-written marker a window this process then reports as absent.
+        entry.kind.should eq(Gori::AgentPresence::KIND_TUI)
+        entry.client.should be_nil
+      ensure
+        window.close
+      end
+    end
+  end
+
+  it "follows the capture lock in place, keeping the same marker file" do
+    with_project do |_registry, project|
+      # `c` moves capture between windows mid-session, so the bit cannot be fixed at announce
+      # time — and it must not be rewritten via temp+rename, which would swap the inode and
+      # leave the flock guarding a file no reader can reach (see `update`).
+      window = Gori::AgentPresence.announce(project.db_path, client: "gori tui",
+        client_version: nil, read_only: false, selection_source: nil,
+        kind: Gori::AgentPresence::KIND_TUI, holds_capture: false).not_nil!
+      begin
+        before = Gori::AgentPresence.live(project.db_path, kind: Gori::AgentPresence::KIND_TUI).first
+        before.holds_capture.should be_false
+        window.update_capture(true)
+        after = Gori::AgentPresence.live(project.db_path, kind: Gori::AgentPresence::KIND_TUI).first
+        after.holds_capture.should be_true
+        after.path.should eq(before.path)
+      ensure
+        window.close
+      end
+    end
+  end
+
+  it "refuses an unknown kind instead of quietly filing it under .agents" do
+    # The directory split is what makes the three confusions in the class comment impossible.
+    # A ternary's else-branch would make the mapping total: a typo or a future third kind
+    # would land in `.agents`, be folded into the picker's `mcp×N` chip, and be invisible to
+    # the TUI filter.
+    expect_raises(ArgumentError, /unknown marker kind/) do
+      Gori::AgentPresence.dir_for("/tmp/x/gori.db", "TUI")
+    end
+  end
+
+  it "reports `holds_capture` as nil on an agent marker, which never claims one" do
+    with_project do |_registry, project|
+      agent = announce(project.db_path)
+      begin
+        # nil is "not reported", and it has to stay distinguishable from `false` ("this window
+        # is attached and is NOT the capture holder").
+        Gori::AgentPresence.live(project.db_path).first.holds_capture.should be_nil
+      ensure
+        agent.close
+      end
+    end
+  end
+end

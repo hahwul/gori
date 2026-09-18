@@ -465,6 +465,59 @@ module Gori::Tui
       @sitemap.mark_count
     end
 
+    # --- the MCP selection snapshot (#1091) -----------------------------------
+    # Reached through `TargetController`, which forwards these to its active child — Sitemap
+    # is not registered in the Runner's @tabs.
+
+    def selection_kind : String?
+      "sitemap_node"
+    end
+
+    def list_selection_ident : SelectionIdent
+      SelectionIdent.new(
+        marks: @sitemap.mark_count,
+        cursor: @sitemap.selected_index,
+        # The PATH half only. Crossing hosts necessarily crosses a depth-0 node, which moves
+        # `cursor`, and a reload that reassigns a given index to another host moves `rows`.
+        cursor_key: @sitemap.selected_mark_key.try(&.[1]) || "",
+        rows: @sitemap.row_count,
+        scoped: @host.session.scope.active?)
+    end
+
+    def write_selection_fields(j : JSON::Builder) : Nil
+      # NOT `ids`: a sitemap target is a {host, path} pair, which is the whole reason `kind`
+      # is a field. An array whose element type depends on a sibling field is how a reader
+      # ends up doing arithmetic on a hostname.
+      #
+      # The raw mark keys, never `target_endpoints` — that resolves through the current tree
+      # and DROPS a key the tree no longer holds, which would silently shrink the operator's
+      # selection on its way to the agent.
+      keys = @sitemap.target_keys
+      shown = keys.first(TabController::SELECTION_ID_CAP)
+      j.field "nodes" do
+        j.array do
+          shown.each do |(host, path)|
+            j.object do
+              j.field "host", host
+              j.field "path", path
+            end
+          end
+        end
+      end
+      j.field "target_source", @sitemap.mark_count > 0 ? "marks" : "cursor"
+      j.field "marked_count", @sitemap.mark_count
+      j.field "marked_hidden_count", @sitemap.marked_hidden_count
+      j.field "id_cap", TabController::SELECTION_ID_CAP
+      j.field "truncated", shown.size < keys.size
+      j.field "visible_rows", @sitemap.row_count
+      j.field "query", @sitemap.query unless @sitemap.query.blank?
+      j.field "scope_lens", @host.session.scope.active?
+    end
+
+    def mcp_mark_count : Int32
+      @sitemap.mark_count
+    end
+
     # `t` — flip the cursor row's mark and step down. A fold carries no path, so it can't be
     # marked (nor tagged, nor resolved to an endpoint) — say so rather than eat the key.
     def sitemap_mark_toggle : Nil
