@@ -69,5 +69,16 @@ module Gori
       alias Any = TurnStarted | TextDelta | ThinkingDelta | AssistantText | ToolUse | ToolResult |
                   PermissionAsked | TurnDone | Raw | Exited
     end
+
+    # What the operator decided about one `Event::PermissionAsked`.
+    enum Decision
+      Allow
+      Deny
+      # Allow, and stop asking for this tool for as long as THIS session lives. Kept in gori
+      # (`Session#session_allow`), never written to the operator's own agent settings — the
+      # `permission_suggestions` the CLI offers target `~/.claude/settings.json`, and gori
+      # mutating that behind the operator's back is not a favour.
+      AllowForSession
+    end
   end
 end
