@@ -86,6 +86,12 @@ module Gori::Tui
     def evidence_open : Nil
     end
 
+    # The hosted agent's held tool call (#1093): open the allow / deny / allow-for-session
+    # card and hand the answer back. Concrete and empty here, like `sitemap_open_flow`: one
+    # tab reaches it, and an abstract seam would tax every spec double that includes Host.
+    def open_agent_permission(req : Gori::Agent::Event::PermissionAsked, &answer : Gori::Agent::Decision -> Nil) : Nil
+    end
+
     # The Probe MODE picker (`probe.set-mode`), which the MODE band's chip raises on a click.
     # A Runner verb body like the three above — but it was never DECLARED here: the call in
     # `ProbeController#handle_click` compiled only because the Runner is the one production

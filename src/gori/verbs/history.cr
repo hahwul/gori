@@ -1001,6 +1001,7 @@ module Gori
       register_rewriter(r)
       register_colormarker(r)
       register_notes(r)
+      register_agent(r)
       register_host_overrides(r)
       register_env(r)
       register_activity(r)

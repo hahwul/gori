@@ -460,6 +460,17 @@ class FakeExecContext < Gori::Verb::ExecContext
   # `issue.retest`'s gate can be exercised.
   property? issue_retest_available : Bool = false
 
+  # The Agent tab (#1093): three availability gates plus the recording intents.
+  property? agent_alive : Bool = false
+  property? agent_running : Bool = false
+  property? agent_pending : Bool = false
+
+  {% for name in %w[agent_send agent_interrupt agent_stop agent_restart agent_new agent_history agent_permission agent_copy agent_fold agent_ask] %}
+    def {{ name.id }} : Nil
+      rec(:{{ name.id }})
+    end
+  {% end %}
+
   property selected_evidence : Int64? = nil
   property? evidence_has_links : Bool = false
   property? evidence_source_available : Bool = false
