@@ -99,7 +99,8 @@ describe Gori::MCP::Courier do
       rig.frames.size.should eq(1)
       f = JSON.parse(rig.frames[0])
       f["method"].should eq("notifications/claude/channel")
-      f["params"]["content"].should eq("fuzz the login")
+      f["params"]["content"].as_s.should start_with("fuzz the login")
+      f["params"]["content"].as_s.should end_with(Gori::MCP::ClaudeInbox::REPLY_HINT)
       f["params"]["meta"]["message_id"].should eq(m.to_s)
       f["params"]["meta"]["from_tab"].should eq("history")
       f["params"]["meta"]["flow_ids"].should eq("3,4")
@@ -133,7 +134,7 @@ describe Gori::MCP::Courier do
         # one user line, preceded by an auth line when this spec itself runs under a Claude
         # session that exports CLAUDE_CODE_MESSAGING_TOKEN
         got.size.should be >= 1
-        JSON.parse(got.last)["message"]["content"].should eq("[gori] The operator at the gori TUI says (from the issues tab): look at issue 4")
+        JSON.parse(got.last)["message"]["content"].as_s.should start_with("[gori] The operator at the gori TUI says (from the issues tab): look at issue 4")
         d = store.agent_deliveries_after(m, 10).rows.first
         d.via.should eq("socket")
         d.ok.should be_true

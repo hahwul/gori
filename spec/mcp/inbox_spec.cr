@@ -54,8 +54,11 @@ describe Gori::MCP::ClaudeInbox do
   end
 
   it "frames the line as relayed operator intent" do
-    Inbox.frame("fuzz it", "history").should eq("[gori] The operator at the gori TUI says (from the history tab): fuzz it")
-    Inbox.frame("fuzz it", nil).should eq("[gori] The operator at the gori TUI says: fuzz it")
+    Inbox.frame("fuzz it", "history").should start_with("[gori] The operator at the gori TUI says (from the history tab): fuzz it")
+    Inbox.frame("fuzz it", nil).should start_with("[gori] The operator at the gori TUI says: fuzz it")
+    # every line says where the answer goes — the live test's first lesson
+    Inbox.frame("x", nil).should end_with(Inbox::REPLY_HINT)
+    Inbox::REPLY_HINT.should contain("reply_to_operator")
   end
 
   it "writes the auth line when a token is known, then the user line, and closes" do

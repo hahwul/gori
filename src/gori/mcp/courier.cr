@@ -146,7 +146,7 @@ module Gori::MCP
           j.field "method", "notifications/claude/channel"
           j.field "params" do
             j.object do
-              j.field "content", m.text
+              j.field "content", m.text + ClaudeInbox::REPLY_HINT
               j.field "meta" do
                 j.object do
                   j.field "message_id", m.id.to_s
