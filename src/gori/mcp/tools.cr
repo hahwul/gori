@@ -31,6 +31,7 @@ require "./tools/authorize"
 require "./tools/compare"
 require "./tools/diff"
 require "./tools/context"
+require "./tools/messages"
 require "./tools/decode"
 require "./tools/cookie"
 require "./tools/discover"
@@ -313,6 +314,17 @@ module Gori
 
       def unbound? : Bool
         @store.nil?
+      end
+
+      # The LIVE store, or nil while unbound — for the courier, which must re-read it every
+      # tick because `bind_project` swaps it. Never cache the answer.
+      def current_store : Store?
+        @store
+      end
+
+      # The client's self-declared name from the handshake (`claude-code`, …), nil before it.
+      def client_name : String?
+        @client_name
       end
 
       # The LIVE project binding. `bind_project` (switch_project, and create_project when it

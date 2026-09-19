@@ -126,7 +126,7 @@ module Gori
     # every delivery row naming a message, regardless of route.
     def delivered_agent_message_ids(since_id : Int64) : Set(Int64)
       ids = Set(Int64).new
-      agent_deliveries_after(since_id, 500).each { |d| ids << d.message_id }
+      agent_deliveries_after(since_id, 500).each { |d| ids << d.message_id if d.ok }
       ids
     end
   end
