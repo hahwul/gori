@@ -111,6 +111,7 @@ require "./keybind"
 require "../scope"
 require "../rules"
 require "../import"
+require "./runner/agent_message"
 require "./runner/agent_presence"
 require "./runner/authorize"
 require "./runner/colormarker"
@@ -264,6 +265,10 @@ module Gori::Tui
       # (agent forward/drop/edit/toggle). Seeded to the current max at run start so a fresh
       # session never replays a prior command; advances monotonically as commands are consumed.
       @intercept_cmd_watermark = 0_i64
+      # #1090: same "seed at now" rule one line up, for the operator→agent channel's replies.
+      # A project keeps every delivery row a courier ever wrote; opening it must not replay them
+      # into the notification ring as things that just happened.
+      @agent_delivery_cursor = @session.store.last_agent_delivery_id
       # #123 safety net: auto-forward a held item nobody is watching after this many ms, so a
       # dead MCP client (hold() has no timeout) can't wedge a connection forever. 0 disables it.
       @intercept_max_hold_ms = 30_000_i64
@@ -635,6 +640,13 @@ module Gori::Tui
               # chip too. Reports dirty only when the rendered chip string actually changed, so an
               # idle project with a steady agent list does not repaint on the timer.
               dirty = true if refresh_agent_presence
+              # Courier replies to the lines `app.tell-agent` posted (#1090). Beside the presence
+              # scan and OUTSIDE the data_version branch for a different reason than it: the
+              # cursor is what makes this idempotent, so the DB-version gate buys nothing, and it
+              # costs the one case it gets wrong — a courier's commit coalescing with our own
+              # write's bump, after which the note waits for an unrelated commit that may never
+              # come. Reports dirty only when a note was actually pushed.
+              dirty = true if drain_agent_deliveries
               # Our own marker's capture bit, on the same tick and for the same reason it is
               # not in the data_version branch (#1091). Writes only when `c` actually moved
               # the lock, and never reports dirty — nothing on screen reads it.
