@@ -87,3 +87,32 @@ def mcp_seed_flow(store, target = "/a") : Int64
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
   id
 end
+
+# A `codex` on PATH that is a shell script: it records the argv and the CODEX_HOME it was
+# given, and exits with the code the caller asked for. The real CLI's contract is exactly
+# that much — argv in, exit code and a sentence out — so a stand-in pins the half gori owns.
+# Shared because both the CodexQueue spec (which reads the argv) and the Courier spec (which
+# only needs a `codex` that succeeds) need the same stand-in, and a second copy would drift.
+def mcp_with_fake_codex(exit_code : Int32 = 0, stderr : String = "", &)
+  dir = File.tempname("gori-fake-codex")
+  Dir.mkdir_p(dir)
+  log = File.join(dir, "argv.txt")
+  File.write(File.join(dir, "codex"), <<-SH)
+    #!/bin/sh
+    printf '%s\\n' "$@" > '#{log}'
+    printf 'CODEX_HOME=%s\\n' "$CODEX_HOME" >> '#{log}'
+    #{stderr.empty? ? "" : "echo #{stderr.inspect} >&2"}
+    exit #{exit_code}
+    SH
+  File.chmod(File.join(dir, "codex"), 0o755)
+  # `ENV["PATH"]?`, not `ENV["PATH"]`: a PATH-less environment must be restored to PATH-less
+  # rather than to the empty string, which is a search path (the cwd) and not "no path".
+  saved = ENV["PATH"]?
+  ENV["PATH"] = "#{dir}:#{saved}"
+  begin
+    yield log
+  ensure
+    saved ? (ENV["PATH"] = saved) : ENV.delete("PATH")
+    FileUtils.rm_rf(dir)
+  end
+end

@@ -5,10 +5,14 @@ module Gori
   # This is gori's whole extension axis. Burp answers "run MY code over these bytes" with
   # BApps/Bambdas, Caido with a JS plugin SDK; gori answers with the UNIX process boundary —
   # language-agnostic, reuses every script the operator already owns, and needs no in-process
-  # runtime, no stable ABI and no recompile (P0). Four seams call it and NONE re-implement it
+  # runtime, no stable ABI and no recompile (P0). Every seam calls it and NONE re-implements it
   # (P1/§2): the Rewriter `pipe` op (`rules.cr`), the Decoder chain `exec:` step
-  # (`decoder/chain.cr`), the Probe `exec` custom rule (`probe/custom_rule.cr`), and the Miner's
-  # per-probe request hook (`miner/inject.cr`, driven by `miner/hook_backend.cr`).
+  # (`decoder/chain.cr`), the Probe `exec` custom rule (`probe/custom_rule.cr`), the Miner's
+  # per-probe request hook (`miner/inject.cr`, driven by `miner/hook_backend.cr`), and — not an
+  # operator hook at all, but the same bounded-spawn need — the Codex delivery route's `lsof`
+  # and `codex queue` (`mcp/codex_queue.cr`). `spec/settings/profile_commands_spec.cr` counts
+  # these call sites the way it counts `Process.run`, so a sixth arrives with the same question
+  # asked of it: where does the program come from, and can a profile set it?
   #
   # TRUST: a hook runs with the OPERATOR'S OWN privileges. It is not sandboxed, jailed or
   # confined in any way, deliberately — the same trust level a `--config` file, a Rewriter

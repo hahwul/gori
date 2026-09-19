@@ -305,9 +305,18 @@ end
 #
 # Counts, not just filenames, so a SECOND spawn added to an already-classified file is caught
 # too. Comment lines are skipped: `process_hook.cr`'s own doc block quotes the call it makes.
+#
+# `ProcessHook.run` counts as a spawn site as well, and that is not pedantry: it IS the fork,
+# one indirection down, and a guard keyed only on the two `Process.*` spellings had already
+# stopped asking its question — the Codex delivery route reached `lsof` and `codex queue`
+# through the hook and never appeared here at all. Whether the program is settings-derived is
+# the same question either way; only the spelling differed.
 private SPAWN_SITES = {
   # settings-derived — every one of these sections MUST be in COMMAND_SECTIONS
   "src/gori/process_hook.cr"                          => {1, "rewriter/scan_rules/decoder"},
+  "src/gori/rules.cr"                                 => {1, "rewriter"},
+  "src/gori/decoder/chain.cr"                         => {1, "decoder"},
+  "src/gori/probe/custom_rule.cr"                     => {1, "scan_rules"},
   "src/gori/cli/settings.cr"                          => {1, "editor"},
   "src/gori/tui/runner.cr"                            => {1, "editor"},
   "src/gori/tui/controllers/statusline_controller.cr" => {1, "statusline"},
@@ -316,6 +325,8 @@ private SPAWN_SITES = {
   "src/gori/tui/runner/external_open.cr" => {1, nil}, # hardcoded open/xdg-open
   "src/gori/update.cr"                   => {3, nil}, # tar, and the release manifest's own step
   "src/gori/update/channel.cr"           => {1, nil}, # the platform package manager
+  "src/gori/miner/inject.cr"             => {1, nil}, # a mine RUN's own `hook` argument
+  "src/gori/mcp/codex_queue.cr"          => {2, nil}, # lsof, and the codex CLI found on PATH
 }
 
 describe "Settings::COMMAND_SECTIONS" do
@@ -335,8 +346,8 @@ describe "Settings::COMMAND_SECTIONS" do
   end
 
   it "has a spawn-site table that still matches the tree" do
-    # Fails on a NEW `Process.new`/`Process.run` anywhere under src/, and on one added to a
-    # file already listed. The fix is to classify it above — and if it reads a setting, to put
+    # Fails on a NEW `Process.new`/`Process.run`/`ProcessHook.run` anywhere under src/, and on
+    # one added to a file already listed. The fix is to classify it above — and if it reads a setting, to put
     # that section in COMMAND_SECTIONS so both ends of a profile report it.
     root = File.expand_path(File.join(__DIR__, "..", ".."))
     actual = Hash(String, Int32).new(0)
@@ -344,7 +355,8 @@ describe "Settings::COMMAND_SECTIONS" do
       rel = path.sub("#{root}/", "")
       File.read_lines(path).each do |line|
         next if line.lstrip.starts_with?('#')
-        actual[rel] += 1 if line.includes?("Process.new(") || line.includes?("Process.run(")
+        actual[rel] += 1 if line.includes?("Process.new(") || line.includes?("Process.run(") ||
+                            line.includes?("ProcessHook.run(")
       end
     end
     expected = SPAWN_SITES.transform_values { |(count, _)| count }

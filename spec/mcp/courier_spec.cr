@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../../src/gori/mcp/courier"
+require "../support/mcp_harness"
 
 private alias Courier = Gori::MCP::Courier
 
@@ -12,6 +13,7 @@ private class Rig
   property? channels = false
   property inbox : String? = nil
   property codex : Gori::MCP::CodexQueue::Session? = nil
+  getter codex_lookups = 0
 
   def initialize(@store)
   end
@@ -19,7 +21,7 @@ private class Rig
   def courier(pid = 77_i64) : Courier
     Courier.new(pid: pid, store: -> { @store.as(Gori::Store?) }, client: -> { @client },
       channels: -> { @channels }, emit: ->(f : String) { @frames << f; nil }, inbox: -> { @inbox },
-      codex: -> { @codex })
+      codex: -> { @codex_lookups += 1; @codex })
   end
 end
 
@@ -39,26 +41,6 @@ private def with_fake_inbox(&)
     yield path, got
   ensure
     server.close rescue nil
-    FileUtils.rm_rf(dir)
-  end
-end
-
-private def with_fake_codex(exit_code : Int32 = 0, &)
-  dir = File.tempname("gori-courier-codex")
-  Dir.mkdir_p(dir)
-  log = File.join(dir, "argv.txt")
-  File.write(File.join(dir, "codex"), <<-SH)
-    #!/bin/sh
-    printf '%s\\n' "$@" > #{log}
-    exit #{exit_code}
-    SH
-  File.chmod(File.join(dir, "codex"), 0o755)
-  saved = ENV["PATH"]
-  ENV["PATH"] = "#{dir}:#{saved}"
-  begin
-    yield log
-  ensure
-    ENV["PATH"] = saved
     FileUtils.rm_rf(dir)
   end
 end
@@ -187,20 +169,42 @@ describe Gori::MCP::Courier do
 
   it "queues into the parent Codex thread when the client is Codex, and that carries it" do
     with_store do |store|
-      with_fake_codex do |log|
+      mcp_with_fake_codex do |log|
         rig = Rig.new(store)
         rig.client = "codex-mcp-client"
         rig.codex = Gori::MCP::CodexQueue::Session.new("01a0b92e-f7d0-77d3-8ba9-61e53e67a768", "/tmp/h")
         c = rig.courier
         c.tick
-        m = store.post_agent_message("look at issue 4", "all", "issues")
+        m = store.post_agent_message("look at issue 4", "all", "issues", [12_i64, 13_i64])
         c.tick.should eq(1)
-        File.read(log).lines[4].should start_with("[gori] The operator at the gori TUI says (from the issues tab): look at issue 4")
+        queued = File.read(log).lines[4]
+        queued.should start_with("[gori] The operator at the gori TUI says (from the issues tab): look at issue 4")
+        # The row is retired by this route, so what it held has to be in the line.
+        queued.should contain("12, 13")
+        queued.should contain("in_reply_to #{m}")
         d = store.agent_deliveries_after(m, 10).rows.first
         d.via.should eq(Gori::AgentDelivery::VIA_CODEX_QUEUE)
         d.ok.should be_true
         # CARRIED: a hand-off the CLI accepted retires the message from the poll backstop.
         Gori::AgentDelivery::CARRIED.includes?(d.via).should be_true
+      end
+    end
+  end
+
+  it "looks the Codex thread up once per tick, not once per message" do
+    with_store do |store|
+      mcp_with_fake_codex do |_|
+        rig = Rig.new(store)
+        rig.client = "codex-mcp-client"
+        rig.codex = Gori::MCP::CodexQueue::Session.new("01a0b92e-f7d0-77d3-8ba9-61e53e67a768", "/tmp/h")
+        c = rig.courier
+        c.tick
+        before = rig.codex_lookups
+        3.times { |i| store.post_agent_message("m#{i}", "all", nil) }
+        c.tick.should eq(3)
+        # In production that proc forks an `lsof`; three rows of one broadcast go to the same
+        # parent and cannot disagree about which thread it is on.
+        (rig.codex_lookups - before).should eq(1)
       end
     end
   end

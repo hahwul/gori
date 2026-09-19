@@ -56,6 +56,8 @@ module Gori::MCP
       @stop = Channel(Nil).new(1)
       @running = false
       @warned_read_only = false
+      @codex_memo = nil.as(CodexQueue::Session?)
+      @codex_asked = false
       # Anchor the cursor NOW, when the presence marker that makes this process a target is
       # already up — not at the first tick, half a second after `initialized`. A message the
       # operator sends in between is owed a delivery, not a silent skip.
@@ -102,6 +104,12 @@ module Gori::MCP
       high = store.last_event_id
       return 0 if high <= @cursor
       page = store.agent_messages_after(@cursor, @pid, PAGE)
+      # One discovery per TICK, not per message: on a broadcast every row in this page goes to
+      # the same parent, and the Codex lookup is a fork. Cleared HERE rather than remembered,
+      # so it never outlives the pass — the thread under us can change between ticks, which is
+      # the whole reason the route refuses to cache.
+      @codex_memo = nil
+      @codex_asked = false
       page.rows.each do |m|
         deliver(store, m)
         @delivered += 1
@@ -121,11 +129,14 @@ module Gori::MCP
         record(store, m, route, label, true)
       elsif path = @inbox.call
         route = AgentDelivery::VIA_SOCKET
-        reason = ClaudeInbox.deliver(path, OperatorNote.frame(m.text, m.from_tab))
+        reason = ClaudeInbox.deliver(path, OperatorNote.frame(m.text, m.from_tab, m.flow_ids, m.id))
         record(store, m, route, label, reason.nil?, reason)
-      elsif queued = codex_delivery(m)
+      elsif session = codex_session
+        # Assigned BEFORE the hand-off, as the socket arm does: the rescue below can only name
+        # the route it was trying if the route is already on the local when the trying starts.
         route = AgentDelivery::VIA_CODEX_QUEUE
-        record(store, m, route, label, queued[0], queued[1])
+        reason = CodexQueue.deliver(session, OperatorNote.frame(m.text, m.from_tab, m.flow_ids, m.id))
+        record(store, m, route, label, reason.nil?, reason)
       else
         record(store, m, AgentDelivery::VIA_POLL, label, true, "no live route; left for operator_messages")
       end
@@ -138,16 +149,13 @@ module Gori::MCP
         "delivery raised: #{ex.message || ex.class.name}") rescue nil
     end
 
-    # The Codex arm: `{ok, reason}` when this session IS a Codex with a thread open, else nil
-    # so the caller falls through to the poll deposit. The two tests are asked in this order on
-    # purpose — `client?` is a string comparison and `discover` forks an `lsof`, so every other
-    # client pays nothing for this route. `CodexQueue.deliver` reports rather than raises, so
-    # there is no path here that loses the attempt.
-    private def codex_delivery(m : AgentMessage) : {Bool, String?}?
-      return nil unless CodexQueue.client?(@client.call)
-      return nil unless session = @codex.call
-      reason = CodexQueue.deliver(session, OperatorNote.frame(m.text, m.from_tab))
-      {reason.nil?, reason}
+    # This session's Codex thread, asked once per tick. The two tests are in this order on
+    # purpose — `client?` is a string comparison and `discover` forks an `lsof`, so every
+    # other client pays nothing for this route.
+    private def codex_session : CodexQueue::Session?
+      return @codex_memo if @codex_asked
+      @codex_asked = true
+      @codex_memo = CodexQueue.client?(@client.call) ? @codex.call : nil
     end
 
     # A `--read-only` server has no writer fiber: the message still goes out, but no row can

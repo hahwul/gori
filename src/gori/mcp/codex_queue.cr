@@ -42,18 +42,23 @@ module Gori::MCP
     # Listing a process's open files is a fork on macOS; keep it short.
     LSOF_TIMEOUT = 3.seconds
 
+    # `-n` (no reverse DNS) and `-P` (no port-name lookup) are not tidiness: without them lsof
+    # resolves every network fd the parent holds, which measured 15.06s against a process with
+    # six established connections versus 0.02s with them — past LSOF_TIMEOUT, which would have
+    # left this route silently inert on every session that talks to an API. `-F n` asks for the
+    # machine-readable form, one field per line.
+    LSOF_ARGS = ["-n", "-P", "-Fn"]
+
     # `<CODEX_HOME>/thread-writer-locks/<uuid>.lock`. The uuid shape is checked because the id
     # goes onto a command line: this is the one place the value crosses from "a path another
     # process happened to open" into gori's own argv, and a lock file is not a promise about
     # what is in its name.
     LOCK_PATH = %r{\A(?<home>/.+)/thread-writer-locks/(?<thread>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.lock\z}
 
-    # One addressable Codex session: which thread, and the home whose store holds it.
-    record Session, thread : String, home : String do
-      def label : String
-        "codex thread #{thread[0, 8]}"
-      end
-    end
+    # One addressable Codex session: which thread, and the home whose store holds it. A pure
+    # argv carrier — the delivery row's label is the client's handshake name, as it is for
+    # every other route.
+    record Session, thread : String, home : String
 
     # Whether this client's route is the Codex one. Asked before `discover` so the common
     # case — every other client — never forks an `lsof`.
@@ -69,15 +74,26 @@ module Gori::MCP
       session_in(open_files(pid))
     end
 
-    # The first path that is a thread-writer lock. Split out so a spec can pin the parsing
-    # without a Codex on the machine.
+    # The thread-writer lock among these paths, NEWEST first when there is more than one.
+    # Split out so a spec can pin the choosing without a Codex on the machine.
+    #
+    # "The first one" was wrong for the reason this module refuses to cache: a `/new` in the
+    # TUI opens the next thread's lock while the old fd is still open, and the platform hands
+    # the paths back in fd order (macOS) or in whatever order the directory has (Linux) — so
+    # first-match delivers the operator's line to the thread they just walked away from, and a
+    # CARRIED row then retires it before the live thread ever sees it. The lock is created with
+    # the thread, so the most recently created one IS the current one.
     def self.session_in(paths : Enumerable(String)) : Session?
-      paths.each do |path|
-        if m = LOCK_PATH.match(path)
-          return Session.new(m["thread"], m["home"])
-        end
-      end
-      nil
+      matches = paths.compact_map { |path| LOCK_PATH.match(path) }
+      return nil if matches.empty?
+      m = matches.size == 1 ? matches.first : newest(matches)
+      Session.new(m["thread"], m["home"])
+    end
+
+    # The match whose lock file was modified last. A lock that cannot be stat'd (it was just
+    # released) sorts oldest rather than raising — one unreadable path must not cost the route.
+    private def self.newest(matches : Array(Regex::MatchData)) : Regex::MatchData
+      matches.max_by { |m| File.info?(m[0]).try(&.modification_time) || Time.unix(0) }
     end
 
     # Hand one line to the session. `nil` on success, else the reason the operator should
@@ -88,10 +104,14 @@ module Gori::MCP
       result = ProcessHook.run([bin, "queue", "--thread", session.thread, "--message", text],
         Bytes.empty, timeout: timeout, env: {"CODEX_HOME" => session.home})
       return nil if result.ok?
-      # `failure` is "codex: exited 1 — <what codex said>". The child's own words are what
-      # make it actionable ("no rollout found for thread id …" is the whole diagnosis), and
-      # they are bounded the same way a hook's are.
-      result.failure || "codex queue failed"
+      # Built here rather than taken from `Result#failure`, which leads with the ABSOLUTE
+      # binary path: the notification ring caps a reason at a couple of dozen cells, and a
+      # sentence that opens with `/opt/homebrew/bin/codex` spends every one of them saying
+      # where codex lives instead of what it said. The child's own words are the diagnosis
+      # ("no rollout found for thread id …"), so they go first.
+      why = result.reason || "failed"
+      said = result.stderr.presence
+      said ? "codex queue #{why}: #{said}" : "codex queue #{why}"
     rescue ex
       "codex queue failed: #{ex.message || ex.class.name}"
     end
@@ -111,12 +131,15 @@ module Gori::MCP
       {% else %}
         bin = Process.find_executable("lsof")
         return [] of String unless bin
-        result = ProcessHook.run([bin, "-p", pid.to_s, "-Fn"], Bytes.empty, timeout: LSOF_TIMEOUT)
+        result = ProcessHook.run([bin, "-p", pid.to_s] + LSOF_ARGS,
+          Bytes.empty, timeout: LSOF_TIMEOUT)
         # NOT `ok?`: lsof exits non-zero when any one of the files it was asked about could not
         # be stat'd, which is ordinary for a process holding sockets and cryptex paths. What it
         # DID print is still the answer; only a spawn failure or a timeout leaves nothing.
         return [] of String if result.spawn_error || result.timed_out
-        String.new(result.stdout).each_line.compact_map do |line|
+        # `scrub`: a path is bytes, and one fd open on a name that is not valid UTF-8 must not
+        # make the lines around it unreadable.
+        String.new(result.stdout).scrub.each_line.compact_map do |line|
           line.starts_with?("n/") ? line[1..] : nil
         end.to_a
       {% end %}

@@ -428,12 +428,17 @@ module Gori
         @tools.advertises?("operator_messages") ? text + OPERATOR_MESSAGES_NOTE : text
       end
 
-      # #1090, the third route: every agent, whatever its client, can read what the operator
-      # said. The live routes (channel, inbox socket) make it immediate for Claude Code; this
-      # sentence is what makes it reachable for everyone else.
+      # #1090, the backstop route: every agent, whatever its client, can read what the operator
+      # said. The live routes make it immediate where one exists — a peer note in Claude Code,
+      # a queued turn in Codex, a channel event — and this sentence is what makes it reachable
+      # for everyone else. Route-agnostic ON PURPOSE: the handshake instructions go out once
+      # per session (#1003), so naming today's clients here would age into a wrong sentence
+      # nothing can correct, and an agent told only about Claude's routes has no model of the
+      # `[gori]` line that turns up in its own thread.
       OPERATOR_MESSAGES_NOTE = " The operator can message you from the gori TUI: such messages " \
-                               "arrive as a channel event or a peer note when a live route exists, and " \
-                               "are always readable with operator_messages — call it at the start of a " \
+                               "arrive in this session directly when gori has a live route to it " \
+                               "(a `[gori]` line in your own turn), and are always readable with " \
+                               "operator_messages — call it at the start of a " \
                                "turn, or whenever a note says gori has something for you, and act on it. " \
                                "Answer them with reply_to_operator (a one-line summary, optional detail): " \
                                "the operator is in gori, not in your terminal."

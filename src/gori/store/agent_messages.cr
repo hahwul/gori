@@ -46,14 +46,16 @@ module Gori
   end
 
   # What a courier (or the agent's own `operator_messages` call) reported about one message:
-  # which route carried it and whether it landed. `via` is `channel` / `socket` / `poll`;
-  # `ok: false` with `via: "poll"` means "no live route, left in the feed for the agent to read".
+  # which route carried it and whether it landed. `via` is one of the five `VIA_*` constants
+  # below, and which of them are CARRIED is the load-bearing part; `ok: false` with
+  # `via: "poll"` means "no live route, left in the feed for the agent to read".
   record AgentDelivery, id : Int64, message_id : Int64, via : String, target_label : String,
     ok : Bool, reason : String?, created_at : Int64, pid : Int64 = 0_i64 do
     KIND = "agent_delivery"
     # Routes. `poll` is the courier's DEPOSIT (no live route; the row waits in the feed) and is
     # `ok` — nothing failed. `picked_up` is the agent's own `operator_messages` read. `socket`
-    # is a peer-note write that landed; `channel` is a fire-and-forget push.
+    # is a peer-note write that landed; `codex_queue` is a line the `codex` CLI accepted for
+    # that session's thread; `channel` is a fire-and-forget push.
     VIA_POLL        = "poll"
     VIA_PICKED_UP   = "picked_up"
     VIA_SOCKET      = "socket"

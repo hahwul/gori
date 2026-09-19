@@ -4,31 +4,6 @@ require "../../src/gori/mcp/codex_queue"
 
 private alias CQ = Gori::MCP::CodexQueue
 
-# A `codex` on PATH that is a shell script: it records the argv and the CODEX_HOME it was
-# given, and exits with the code the caller asked for. The real CLI's contract is exactly
-# this much — argv in, exit code and a sentence out — so a stand-in pins the half gori owns.
-private def with_fake_codex(exit_code : Int32 = 0, stderr : String = "", &)
-  dir = File.tempname("gori-codex-bin")
-  Dir.mkdir_p(dir)
-  log = File.join(dir, "argv.txt")
-  File.write(File.join(dir, "codex"), <<-SH)
-    #!/bin/sh
-    printf '%s\\n' "$@" > #{log}
-    printf 'CODEX_HOME=%s\\n' "$CODEX_HOME" >> #{log}
-    #{stderr.empty? ? "" : "echo #{stderr.inspect} >&2"}
-    exit #{exit_code}
-    SH
-  File.chmod(File.join(dir, "codex"), 0o755)
-  saved = ENV["PATH"]
-  ENV["PATH"] = "#{dir}:#{saved}"
-  begin
-    yield log
-  ensure
-    ENV["PATH"] = saved
-    FileUtils.rm_rf(dir)
-  end
-end
-
 describe Gori::MCP::CodexQueue do
   it "claims the codex client family by prefix, and nothing else" do
     CQ.client?("codex-mcp-client").should be_true
@@ -46,6 +21,31 @@ describe Gori::MCP::CodexQueue do
     # Both halves come from the one path: queuing into the DEFAULT home would miss a session
     # started with its own.
     s.not_nil!.home.should eq("/Users/x/.codex")
+  end
+
+  it "takes the NEWEST lock when the parent holds more than one" do
+    # A `/new` in the Codex TUI opens the next thread's lock while the old fd is still open.
+    # First-match would hand the operator's line to the thread they just left — and a CARRIED
+    # row would then retire it before the live thread ever saw it.
+    dir = File.tempname("gori-codex-two")
+    locks = File.join(dir, "thread-writer-locks")
+    Dir.mkdir_p(locks)
+    old_thread = "01a0b92e-f7d0-77d3-8ba9-61e53e67a768"
+    new_thread = "01a0b945-4447-7101-8faa-4d09d25a3fd4"
+    old_path = File.join(locks, "#{old_thread}.lock")
+    new_path = File.join(locks, "#{new_thread}.lock")
+    File.write(old_path, "")
+    File.write(new_path, "")
+    File.touch(old_path, Time.utc - 10.minutes)
+    File.touch(new_path, Time.utc)
+    begin
+      # Listed oldest-first, which is the order both platforms actually hand back.
+      CQ.session_in([old_path, new_path]).not_nil!.thread.should eq(new_thread)
+      # And the answer must not depend on that order.
+      CQ.session_in([new_path, old_path]).not_nil!.thread.should eq(new_thread)
+    ensure
+      FileUtils.rm_rf(dir)
+    end
   end
 
   it "refuses a lock whose name is not a uuid — the id goes onto a command line" do
@@ -78,8 +78,16 @@ describe Gori::MCP::CodexQueue do
     end
   end
 
+  it "asks lsof not to resolve names or ports" do
+    # Measured on a developer mac against a process with six established connections:
+    # 15.06s without these flags, 0.02s with them. LSOF_TIMEOUT is 3s, so the difference is
+    # not speed — it is whether the Codex route runs at all.
+    CQ::LSOF_ARGS.should contain("-n")
+    CQ::LSOF_ARGS.should contain("-P")
+  end
+
   it "hands the line to `codex queue` with the thread's own home" do
-    with_fake_codex do |log|
+    mcp_with_fake_codex do |log|
       session = CQ::Session.new("01a0b92e-f7d0-77d3-8ba9-61e53e67a768", "/tmp/some-codex-home")
       CQ.deliver(session, "[gori] look at flow 12").should be_nil
       argv = File.read(log).lines
@@ -93,12 +101,15 @@ describe Gori::MCP::CodexQueue do
   end
 
   it "reports what the CLI said when it refuses, rather than claiming a delivery" do
-    with_fake_codex(exit_code: 1, stderr: "no rollout found for thread id 01a0b92e") do |_|
+    mcp_with_fake_codex(exit_code: 1, stderr: "no rollout found for thread id 01a0b92e") do |_|
       session = CQ::Session.new("01a0b92e-f7d0-77d3-8ba9-61e53e67a768", "/tmp/h")
       reason = CQ.deliver(session, "hi")
       reason.should_not be_nil
-      # The child's own words are the whole diagnosis; `failure` carries them after the code.
+      # The child's own words are the whole diagnosis, and they come FIRST: the ring caps a
+      # reason at a couple of dozen cells, so a sentence that opens with the absolute path to
+      # the codex binary says nothing at the only width the operator reads it at.
       reason.not_nil!.should contain("no rollout found")
+      reason.not_nil!.should start_with("codex queue ")
     end
   end
 
