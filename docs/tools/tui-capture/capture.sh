@@ -56,10 +56,11 @@ trap 'tmux kill-session -t goricap 2>/dev/null || true; rm -rf "$WORK"' EXIT
 # A minimal settings.json so the first-run wizard is skipped. The theme is
 # rewritten before each palette pass; the seed run below doesn't care which.
 # write_settings <theme> [companion] — pass "companion" to wake Miss Ring in the body's
-# bottom-right corner. She ships OFF, so only the hero shot asks for her; the
-# doc scenes document the default install.
+# bottom-right corner. She ships ON now, so the doc scenes write an explicit
+# `"enabled":false` to keep her out of them: she occludes three rows of exactly the corner
+# most scenes are photographing. Only the hero shot asks for her.
 write_settings() {
-  local companion=""
+  local companion='"companion":{"enabled":false},'
   if [ "${2:-}" = companion ]; then
     companion='"companion":{"enabled":true,"placement":"body","motion":"lively","notices":true},'
   fi
@@ -116,6 +117,8 @@ commands = {
 }
 json.dump({
     "theme": theme, "mouse": True, "pretty_bodies": True,
+    # Same as write_settings: the mascot ships on, and these scenes are shot without her.
+    "companion": {"enabled": False},
     "statusline": {"enabled": True, "command": commands[preset], "interval": 3, "timeout": 10},
     "network": {"bind_host": "127.0.0.1", "bind_port": 8070, "upstream_proxy": ""},
 }, open(path, "w"))
@@ -403,8 +406,9 @@ shoot_all() {
   # STARTS — typing leaves the view on its tail, which reads as a truncated blob.
   run_scene jwt          26 "gori · JWT"                       0 SLEEP0.6 jwt SLEEP0.5 Enter SLEEP1.2 Enter SLEEP0.3 "$JWT_SAMPLE" SLEEP1 Home SLEEP0.3 Escape SLEEP0.6
   run_tour  tutorial     26 "gori · Guided tour"               SLEEP1.5
-  # LAST, and it puts settings back: this is the only scene that edits settings.json, and
-  # every scene above documents the default install. Same History screen as the first shot
+  # LAST, and it puts settings back: this is the only scene that edits settings.json for a
+  # FEATURE, and every scene above is the plain install with the mascot switched off (see
+  # write_settings — she ships on, and she would cover the corner). Same History screen as the first shot
   # on purpose — the picture is about the extra row at the bottom, so the rest of the frame
   # has to be something the reader already recognises.
   write_demo_token
@@ -480,7 +484,9 @@ seed_readme_extra() {
 #
 # It shows plain History — no menu over it — with Miss Ring on: a hero should
 # read as the tool at rest, and she fills the corner the way an open Space menu
-# used to. Every other scene keeps her off, defaults being what docs document.
+# used to. She ships on, so this is the shot that is at the default; every other
+# scene turns her off explicitly, because she covers three rows of exactly the
+# corner those scenes are photographing.
 readme_seeded=0
 shoot_readme() {
   local theme="$1" out="$2"

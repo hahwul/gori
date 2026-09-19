@@ -30,7 +30,7 @@ module Gori::Tui
     COMPANION_PREVIEW_W   = Mascot::W + 2
     COMPANION_PREVIEW_GAP = 2 # min columns between the text column and her plate
     # Narrowest text column the COMPANION step will lay out AROUND her sprite: the width of its
-    # opening line ("A mascot in the corner, off unless you want her."), the one sentence
+    # opening line ("A mascot in the corner, yours unless you say no."), the one sentence
     # that says what the step is asking. Below it she is dropped and the copy takes the
     # card — see `self.companion_preview_x`. Coupled BY HAND to that sentence, exactly the way
     # BIND_ROWS/COMPANION_ROWS/REVIEW_ROWS are coupled to their renderers and just as unchecked:
@@ -350,8 +350,9 @@ module Gori::Tui
         # Motion is hers; with "No mascot" selected there is nothing to set a motion FOR,
         # and the row is hidden in that state. Accepting the key anyway let a user who
         # declined her still stage a non-default motion, which #finish would then persist —
-        # materializing a "companion" section in settings.json for someone who said no. Settings
-        # only omits that section while EVERY field is factory-default.
+        # writing a motion into settings.json for someone who said no, on top of the one
+        # field their answer is. Settings only omits that section while EVERY field is
+        # factory-default.
         cycle_companion_motion(key.left? ? -1 : 1)
       end
     end
@@ -519,9 +520,9 @@ module Gori::Tui
       Settings.command_modifier = Settings.normalize_command_modifier(@modifier)
       # Miss Ring — the ONE place the wizard writes her, so Esc can never persist a preview.
       # Motion is written only when she is ON: a user who declined her must not leave a
-      # non-default motion behind, which is what keeps a default install's settings.json
-      # free of a "companion" section entirely (Settings omits it only while every field is
-      # factory-default).
+      # non-default motion behind, so "No mascot" writes exactly one answer — `enabled: false`
+      # over three factory-default fields — and accepting her writes nothing at all (Settings
+      # omits the section while every field is factory-default, and she is one of them now).
       Settings.companion = @companion_enabled
       Settings.companion_motion = Settings.normalize_companion_motion(@companion_motion) if @companion_enabled
       if Settings.save
@@ -987,7 +988,7 @@ module Gori::Tui
       px = @companion_enabled ? SetupWizard.companion_preview_x(box) : nil
       band = px.try { |x| x - COMPANION_PREVIEW_GAP }
       iw = {(band || (box.right - 1)) - ix, 1}.max
-      screen.text(ix, box.y + 2, "A mascot in the corner, off unless you want her.",
+      screen.text(ix, box.y + 2, "A mascot in the corner, yours unless you say no.",
         Theme.text, Theme.panel, width: iw)
       ry = box.y + COMPANION_OFFER_ROW
       render_offer_row(screen, box, ry, "Show Miss Ring", @companion_enabled, band)
@@ -997,7 +998,8 @@ module Gori::Tui
       # does nothing in that state.
       screen.text(ix, box.y + COMPANION_MOTION_ROW, "Motion   #{companion_motion_recap}", Theme.muted, Theme.panel, width: iw) if @companion_enabled
       # Say the cost out loud: she is the one piece of chrome that repaints while you are
-      # at the keyboard, which is why she is opt-in at all.
+      # at the keyboard, which is why the step asks at all rather than leaving her to
+      # Preferences.
       screen.text(ix, ry + 4, "She reacts to results, then dozes off after 90s idle.",
         Theme.muted, Theme.panel, width: iw)
       px.try { |x| draw_companion_preview(screen, x, ry) }

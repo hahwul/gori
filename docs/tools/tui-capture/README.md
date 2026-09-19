@@ -114,7 +114,8 @@ nothing out loud, so the shot passes `SHOT_ARIA` and `ansi2svg.py` writes that
 as the SVG's `aria-label` instead of the title.
 
 It is also the only shot with Miss Ring on (`write_settings <theme> companion`); she
-ships off, and the doc scenes document the default install. Her corner is why
+ships on now, so the doc scenes switch her off explicitly instead — she occupies
+three rows of exactly the corner most of them are photographing. Her corner is why
 `seed_readme_extra` stops at ten: the flow list has to end a few rows short of
 the bottom or she covers live SIZE/DUR cells.
 

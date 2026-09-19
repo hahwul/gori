@@ -817,7 +817,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `colormarker` | 전역 History 행 색상 규칙. `rewriter`와 동일한 전역/프로젝트 분리 구조입니다. 표시 전용이며 트래픽을 수정하지 않습니다. [run colormarker](/ko/reference/cli/#run-colormarker) 참고 |
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
 | `saved_views` | 전역 History **뷰** 라이브러리. 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고 |
-| `companion` | 마스코트 Miss Ring: `enabled`(기본 off), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
+| `companion` | 마스코트 Miss Ring: `enabled`(기본 on), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
 | `layout` | History / Probe / Issues 미리보기, Sitemap 펼침 깊이, 탭 바 번호. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
 | `redaction` | 안전한 내보내기 프로파일, 활성 프로파일, 기본 적용 스위치, 자리표시자 salt. 위의 [redaction](#redaction) 참고 |

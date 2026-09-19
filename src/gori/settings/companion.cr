@@ -4,11 +4,17 @@ require "json"
 # settings.cr for the module-level overview and the load/save/serialize orchestration,
 # and tui/companion.cr for what these actually drive.
 module Gori::Settings
-  # OFF by default, unlike every other display pref. She covers three rows of the body's
-  # bottom-right corner and — unique among gori's chrome — costs periodic repaints while
-  # someone is at the keyboard (~1/s on "lively", ~0.3/s on "calm"; zero once she dozes
-  # off after 90s of inactivity). That is an explicit opt-in, never a surprise.
-  DEFAULT_COMPANION = false
+  # ON by default: she is part of what gori looks like, not an extra someone has to find.
+  # She covers three rows of the body's bottom-right corner and — unique among gori's
+  # chrome — costs periodic repaints while someone is at the keyboard (~1/s on "lively",
+  # ~0.3/s on "calm"; zero once she dozes off after 90s of inactivity). Everyone who does
+  # not want that says so ONCE: turning her off no longer matches the factory default, so
+  # serialize_companion writes `"enabled": false` and the answer survives every upgrade.
+  # (Under the old default the same answer was written by omitting the section, which is
+  # why this flip reaches an install that declined her in the wizard.) The two costs have
+  # a setting each short of turning her off: motion "still" drops every repaint she starts
+  # herself, and placement "bar" gives the three body rows back.
+  DEFAULT_COMPANION = true
   # "lively" = blinks, winks, a glint sweep, and about every 25 seconds one of seven idle
   # gestures (a yawn, a smile, a squint, a deadpan, a curious look, a huff, an "hmm").
   # "calm" halves the blink rate and drops the rest — for SSH sessions and battery.

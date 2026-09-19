@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: Miss Ring is on by default — the mascot in the body's bottom-right corner ships switched on, and turning her off is now written to `settings.json`, so an install that had already declined her meets her once more (#1096)
 - MCP: `get_current_context` reports what the operator has MARKED in the TUI — the marked rows on History, Issues, Sitemap and Intercept (or the cursor row when nothing is marked, or the flow an open detail pins), the marked chips on every sub-tab strip, the filter they were marked under, and marks left on a tab the operator has since walked away from. It also says whether a gori TUI window is attached at all, and `list_history{ids}` fetches a whole marked set in one call, naming any id that no longer exists instead of dropping it (#1091)
 - Session: `gori run session from-request` and MCP `create_session_slot{from_request_flow_id, copy_headers}` build a named slot from selected captured request headers, with redacted output and provenance that never prints values; `Content-Length`, `Transfer-Encoding` and `Host` are refused, since a slot is applied to a message with a different body and target (#1086)
 - Session: a header value a slot copied off the wire stays byte-literal at send time instead of being re-read as `$BIND.`/`$GEN.` syntax — a captured cookie that happens to contain a `$` is a cookie, not a reference. This covers `from-flow` as well as the new request source; an overlay the operator typed expands as it always did (#1086)

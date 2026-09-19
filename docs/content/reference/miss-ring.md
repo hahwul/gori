@@ -4,7 +4,7 @@ description = "gori's companion: where the character came from, and the eight ce
 weight = 50
 +++
 
-Miss Ring is gori's companion — off by default, and switched on in
+Miss Ring is gori's companion — on by default, and switched off in
 **Preferences → Appearance → Companion**. The [Settings guide](/guide/settings/)
 covers what she does and the [`companion` key](/reference/config/) covers how to
 configure her. This page is about how she is drawn.

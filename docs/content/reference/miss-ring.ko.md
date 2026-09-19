@@ -4,8 +4,8 @@ description = "gori의 컴패니언. 캐릭터가 어디서 왔는지, 그리고
 weight = 50
 +++
 
-Miss Ring은 gori의 컴패니언입니다. 기본값은 off이고 **Preferences → Appearance →
-Companion**에서 켭니다. 무엇을 하는지는 [설정 가이드](/ko/guide/settings/)가,
+Miss Ring은 gori의 컴패니언입니다. 기본값은 on이고 **Preferences → Appearance →
+Companion**에서 끕니다. 무엇을 하는지는 [설정 가이드](/ko/guide/settings/)가,
 어떻게 설정하는지는 [`companion` 키](/ko/reference/config/)가 다룹니다. 이 페이지는
 Miss Ring이 어떻게 그려지는지에 대한 것입니다.
 

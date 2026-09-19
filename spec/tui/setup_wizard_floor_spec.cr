@@ -106,9 +106,9 @@ describe Gori::Tui::SetupWizard do
     it "seats her on a card that can hold the step's opening line beside her" do
       # 69 columns is the first width whose card leaves COMPANION_TEXT_MIN for the text, and 68 the
       # last that doesn't — the pair is what stops the constant from being quietly padded.
-      # COMPANION_TEXT_MIN is the width of that opening line ("A mascot in the corner, off unless
-      # you want her.", 48 columns) and is coupled to it BY HAND, so a reword of the sentence
-      # is a reason to revisit the constant and therefore these two numbers.
+      # COMPANION_TEXT_MIN is the width of that opening line ("A mascot in the corner, yours
+      # unless you say no.", 48 columns) and is coupled to it BY HAND, so a reword of the
+      # sentence is a reason to revisit the constant and therefore these two numbers.
       SW.companion_preview_x(private_box.call(69)).should_not be_nil
       SW.companion_preview_x(private_box.call(68)).should be_nil
       SW.companion_preview_x(private_box.call(80)).should_not be_nil
