@@ -156,14 +156,6 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
         available: history_targets, mnemonic: 'r', group: :send) { |ctx| ctx.repeater_selected; nil }
 
-      # The same intent as the Global `app.tell-agent`, on the space menu where the rows are
-      # (#1090): the marked flows ride along as context. `g` (aGent) is the free mnemonic here — T is mark-all — and ⇧G its chord;
-      # Issues has its own copy without one.
-      r.register Verb::Definition.new(
-        "history.tell-agent", "Tell the agent about these", "Send one line to an attached agent, with the marked flows as context",
-        Verb::Scope::Body, [Verb::Chord.new("g", shift: true)],
-        available: history_targets, mnemonic: 'g', group: :send) { |ctx| ctx.tell_agent; nil }
-
       # Spider + brute-force the selected flow's host (opens the Discover config popup; the
       # run streams into the Target → Discover sub-tab). Menu-only (no chord).
       r.register Verb::Definition.new(

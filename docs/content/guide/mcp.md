@@ -251,7 +251,7 @@ One safety rule is worth knowing before you leave an agent running. A held messa
 
 ## Messages from gori {#messages-from-gori}
 
-Live Intercept lets an agent watch you work; the palette verb **"Tell the agent…"** (`app.tell-agent`) is the other direction — a one-line message you send from any gori tab to an attached agent's own session. Pick one of the MCP clients attached to the project (the same list the `mcp:` chip and the "Attached agents" card show), or all of them, type the line, and gori delivers it. On the History list the same thing sits in the space menu as **Tell the agent about these** (`⇧G`), with the marked flows attached as context; the Issues list has it too.
+Live Intercept lets an agent watch you work; the palette verb **"Tell the agent…"** (`app.tell-agent`) is the other direction — a one-line message you send from any gori tab to an attached agent's own session. Pick one of the MCP clients attached to the project (the same list the `mcp:` chip and the "Attached agents" card show), or all of them, type the line, and gori delivers it. When you send it from the History list with rows marked, those flows ride along as context so the agent can act on exactly what you had selected.
 
 Delivery tries three layers, best available first:
 
