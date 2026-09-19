@@ -20,11 +20,14 @@ module Gori::Tui
       # human can see what the AI did). A String (not a Symbol like `level`) to carry the
       # open-ended agent:<name> form. (#124)
       getter source : String
+      # The LONG form, when the producer had one (#1090). `message` is the one line the ring
+      # row and Miss Ring's bubble show; this is what the operator opens to read — an agent's
+      # reply body, the paragraph a one-line summary had to drop. nil for every note that is
+      # only its summary, which is most of them, and the ring row says which is which.
+      getter detail : String?
       property read : Bool
-      # STUB — the ring slice in 1090/reply-ui replaces this with a getter + constructor arg
-      property detail : String?
 
-      def initialize(@id, @level, @message, @goto = nil, @source = "app")
+      def initialize(@id, @level, @message, @goto = nil, @source = "app", @detail = nil)
         @created_at = Time.instant
         @read = false
       end
@@ -40,10 +43,12 @@ module Gori::Tui
       @next_id = 0
     end
 
+    # `detail` is a TRAILING keyword with a default, so the ~200 pushes that only have a
+    # summary keep compiling untouched — a note carries a long form only when its producer
+    # had one to carry (see Note#detail).
     def push(level : Symbol, message : String, goto : Jobs::Goto? = nil, source : String = "app",
              detail : String? = nil) : Note
-      n = Note.new((@next_id += 1), level, message, goto, source)
-      n.detail = detail
+      n = Note.new((@next_id += 1), level, message, goto, source, detail)
       @notes << n
       # Drain to the live retention setting (CAP is the default; user may lower it).
       while @notes.size > Settings.notify_retention

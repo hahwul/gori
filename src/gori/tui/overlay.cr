@@ -44,6 +44,8 @@ module Gori::Tui
     # ONE member for both pages: they never coexist, and an overlay's `title` is per instance.
     Help
     Notifications
+    # One notification's long form (#1090), opened with ↵ on a ring row that carries a detail.
+    NoteDetail
     Passthrough
     Listeners
     # The MCP clients bound to this project (#815), opened from the `mcp:` top-bar chip or the

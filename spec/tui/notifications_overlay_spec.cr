@@ -214,6 +214,24 @@ describe Gori::Tui::NotificationsOverlay do
     ov.selected_note.not_nil!.message.should eq("fresh") # clamped, never an index error
   end
 
+  it "anchors the cursor on a named note, for the card that hands the operator back" do
+    # The detail card (#1090) reopens the centre when it closes, and "back" has to mean the
+    # row it was opened from. A fresh overlay anchors to `latest`, so without this the
+    # operator lands on whatever drained while they were reading.
+    s = store("a", "b", "c") # newest-first: c, b, a
+    target = s.all.last      # "a", the oldest
+    ov = NotificationsOverlay.new(s)
+    ov.anchor_to(target.id)
+    ov.selected_note.not_nil!.message.should eq("a")
+
+    s.push(:success, "Probe: issue on GET /x") # a drain lands while the card was up
+    ov.selected_note.not_nil!.message.should eq("a")
+
+    # A note that aged out of the ring leaves the cursor where it was, never raising.
+    ov.anchor_to(target.id + 9_999)
+    ov.selected_note.not_nil!.message.should eq("a")
+  end
+
   it "clamps the selection on an empty store instead of raising" do
     h = OverlayHarness.new(NotificationsOverlay.new(Notifications.new))
     h.press(Termisu::Input::Key::Down).should eq(:open)
