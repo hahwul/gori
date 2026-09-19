@@ -624,6 +624,20 @@ module Gori
           s.field "include_delivered", boolprop("also return messages a live route already carried (default false)")
         end
 
+        tool j, "reply_to_operator",
+          "Answer the operator in the gori TUI. `summary` (required) is ONE line they read at a " \
+          "glance — it shows in the notification ring and on Miss Ring; put anything longer in " \
+          "`detail` (markdown-ish plain text, opened from the ring with ↵). `level` colours it: " \
+          "info (default) | success | warn | error. `in_reply_to` links it to the operator_messages " \
+          "id you are answering. Use it for the answer to a question they sent, the outcome of a " \
+          "task they asked for, or anything they must see without switching to your terminal — " \
+          "not for narration." do |s|
+          s.field "summary", strprop("one line, ≤200 characters; the rest goes in detail"), required: true
+          s.field "detail", strprop("the long form; optional, ≤32 KiB")
+          s.field "level", enumprop("how the ring colours it", %w[info success warn error])
+          s.field "in_reply_to", intprop("the operator_messages id this answers, when it does")
+        end
+
         tool j, "get_flow",
           "Full request+response for one flow id (heads + decoded bodies). " \
           "Bodies are de-chunked/decompressed and summarised: inline text when " \

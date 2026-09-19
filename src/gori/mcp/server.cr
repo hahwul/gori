@@ -434,7 +434,9 @@ module Gori
       OPERATOR_MESSAGES_NOTE = " The operator can message you from the gori TUI: such messages " \
                                "arrive as a channel event or a peer note when a live route exists, and " \
                                "are always readable with operator_messages — call it at the start of a " \
-                               "turn, or whenever a note says gori has something for you, and act on it."
+                               "turn, or whenever a note says gori has something for you, and act on it. " \
+                               "Answer them with reply_to_operator (a one-line summary, optional detail): " \
+                               "the operator is in gori, not in your terminal."
 
       # Start carrying operator messages once the client is initialized. `send` is this
       # server's frame writer (the lock, the UTF-8 guard); the store and client name are read

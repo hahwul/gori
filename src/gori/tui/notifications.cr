@@ -21,6 +21,8 @@ module Gori::Tui
       # open-ended agent:<name> form. (#124)
       getter source : String
       property read : Bool
+      # STUB — the ring slice in 1090/reply-ui replaces this with a getter + constructor arg
+      property detail : String?
 
       def initialize(@id, @level, @message, @goto = nil, @source = "app")
         @created_at = Time.instant
@@ -38,8 +40,10 @@ module Gori::Tui
       @next_id = 0
     end
 
-    def push(level : Symbol, message : String, goto : Jobs::Goto? = nil, source : String = "app") : Note
+    def push(level : Symbol, message : String, goto : Jobs::Goto? = nil, source : String = "app",
+             detail : String? = nil) : Note
       n = Note.new((@next_id += 1), level, message, goto, source)
+      n.detail = detail
       @notes << n
       # Drain to the live retention setting (CAP is the default; user may lower it).
       while @notes.size > Settings.notify_retention

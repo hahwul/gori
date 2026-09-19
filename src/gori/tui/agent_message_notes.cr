@@ -62,9 +62,22 @@ module Gori::Tui
         {:info, "left for #{who} to pick up (operator_messages)"}
       when Gori::AgentDelivery::VIA_PICKED_UP
         {:success, "→ #{who} picked it up (operator_messages)"}
+      when "channel"
+        # A channel push is fire-and-forget: the server cannot tell whether that session was
+        # launched with channels, and a push to one that was not is dropped without a word.
+        # Say so on the row rather than let "got it" promise what nobody checked.
+        {:success, "→ #{who} got it (channel — only if that session runs with channels)"}
       else
         {:success, "→ #{who} got it (#{safe(delivery.via) || "?"})"}
       end
+    end
+
+    # `{level, message}` for one reply: the client's name and the one line it sent. The level
+    # is the agent's own, already clamped to the feed's four by the store.
+    def self.reply_line(reply : Gori::AgentReply) : {Symbol, String}
+      who = AgentsOverlay.safe_client(reply.target_label.split(" pid ").first?) || "agent"
+      level = {"success" => :success, "warn" => :warn, "error" => :error}[reply.level]? || :info
+      {level, "#{who}: #{safe(reply.summary) || ""}"}
     end
 
     # `target_label`, `via` and `reason` are all written by ANOTHER process. Same stance as a

@@ -69,6 +69,35 @@ module Gori
     end
   end
 
+  # The agent's answer to the operator (#1090): one line for the ring and Miss Ring's bubble,
+  # an optional long form the ring opens on ↵. `source: "agent"`, `kind: "agent_reply"`,
+  # `actor: "mcp"` — the same row shape the agent's other actions already leave in the feed.
+  record AgentReply, id : Int64, summary : String, detail : String?, level : String,
+    target_label : String, pid : Int64, in_reply_to : Int64?, created_at : Int64 do
+    KIND   = "agent_reply"
+    LEVELS = %w[info success warn error]
+    # A summary is ONE line for a one-row ring; a detail is bounded like any stored blob.
+    SUMMARY_MAX = 200
+    DETAIL_MAX  = 32 * 1024
+
+    def self.from_row(row : Store::EventRow) : AgentReply?
+      return nil unless row.kind == KIND
+      h = row.payload.try { |p| JSON.parse(p).as_h? } || {} of String => JSON::Any
+      new(row.id, row.message, h["detail"]?.try(&.as_s?), row.level,
+        h["target"]?.try(&.as_s?) || "agent", h["pid"]?.try(&.as_i64?) || 0_i64,
+        h["in_reply_to"]?.try(&.as_i64?), row.created_at)
+    rescue JSON::ParseException
+      nil
+    end
+
+    # The first line of what the agent sent, capped — the rest belongs in `detail`.
+    def self.summary_line(text : String) : String
+      line = text.each_line.first? || ""
+      line = line.strip
+      line.size > SUMMARY_MAX ? line[0, SUMMARY_MAX - 1] + "…" : line
+    end
+  end
+
   class Store
     # Post one operator message. `from_tab` and `flow_ids` are context for the reader (which
     # tab the operator was on, what they had marked), never inlined into the text.
@@ -104,6 +133,36 @@ module Gori
         end
       end
       insert_event("operator", AgentDelivery::KIND, level, summary, payload: payload)
+    end
+
+    # The agent's reply. `level` outside `AgentReply::LEVELS` becomes `info`; `detail` is cut
+    # to `DETAIL_MAX` on a character boundary (the row says so with a trailing marker).
+    def record_agent_reply(summary : String, detail : String?, level : String, target : String,
+                           pid : Int64, in_reply_to : Int64? = nil) : Int64
+      level = AgentReply::LEVELS.includes?(level) ? level : "info"
+      if (d = detail) && d.bytesize > AgentReply::DETAIL_MAX
+        # Cut on a character boundary: `scrub` turns a split sequence into U+FFFD, dropped.
+        detail = String.new(d.to_slice[0, AgentReply::DETAIL_MAX]).scrub.rchop('\uFFFD') + "\n… (cut)"
+      end
+      payload = JSON.build do |j|
+        j.object do
+          j.field "target", target
+          j.field "pid", pid
+          j.field "detail", detail if detail
+          j.field "in_reply_to", in_reply_to if in_reply_to
+        end
+      end
+      insert_event("agent", AgentReply::KIND, level, AgentReply.summary_line(summary), payload: payload, actor: "mcp")
+    end
+
+    record ReplyPage, rows : Array(AgentReply), scanned_max : Int64, full : Bool
+
+    def agent_replies_after(since_id : Int64, limit : Int32 = 100) : ReplyPage
+      rows = [] of AgentReply
+      scanned, full = each_event_of_kind(AgentReply::KIND, since_id, limit) do |row|
+        AgentReply.from_row(row).try { |r| rows << r }
+      end
+      ReplyPage.new(rows, scanned, full)
     end
 
     # One page of the kind-filtered feed. `scanned_max` is the id of the LAST ROW THE SQL PAGE

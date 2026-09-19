@@ -269,6 +269,7 @@ module Gori::Tui
       # A project keeps every delivery row a courier ever wrote; opening it must not replay them
       # into the notification ring as things that just happened.
       @agent_delivery_cursor = @session.store.last_agent_delivery_id
+      @agent_reply_cursor = @agent_delivery_cursor
       # #123 safety net: auto-forward a held item nobody is watching after this many ms, so a
       # dead MCP client (hold() has no timeout) can't wedge a connection forever. 0 disables it.
       @intercept_max_hold_ms = 30_000_i64
@@ -647,6 +648,7 @@ module Gori::Tui
               # write's bump, after which the note waits for an unrelated commit that may never
               # come. Reports dirty only when a note was actually pushed.
               dirty = true if drain_agent_deliveries
+              dirty = true if drain_agent_replies
               # Our own marker's capture bit, on the same tick and for the same reason it is
               # not in the data_version branch (#1091). Writes only when `c` actually moved
               # the lock, and never reports dirty — nothing on screen reads it.

@@ -50,6 +50,30 @@ module Gori
           end
         end)
       end
+
+      # #1090: the way back. One line for the ring (and Miss Ring's bubble), an optional long
+      # form the ring opens on ↵. Works for every agent — no socket, no channel, just a row —
+      # which is why it, and not a Claude-only route, is what closes the loop.
+      @[Tool("reply_to_operator")]
+      private def reply_to_operator(h) : Result
+        summary = str(h, "summary").try(&.strip).presence
+        return Result.new("reply_to_operator: `summary` is required — one line the operator can read at a glance", is_error: true, error_code: "INVALID_ARGUMENT", field: "summary") unless summary
+        if store.read_only?
+          return Result.new("reply_to_operator: this server is read-only (gori mcp --read-only) and cannot write a reply; tell the operator in your own output", is_error: true, error_code: "TOOL_DISABLED")
+        end
+        pid = Process.pid.to_i64
+        label = "#{@client_name || "agent"} pid #{pid}"
+        id = store.record_agent_reply(summary, str(h, "detail").presence, str(h, "level") || "info",
+          label, pid, optional_int_arg(h, "in_reply_to"))
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "ok", id > 0
+            j.field "id", id
+            j.field "summary", Serialize.text(AgentReply.summary_line(summary))
+            j.field "note", "the operator sees the summary in gori's notification ring (and Miss Ring's bubble); the detail opens from the ring"
+          end
+        end)
+      end
     end
   end
 end
