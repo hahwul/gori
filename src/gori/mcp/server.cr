@@ -437,7 +437,8 @@ module Gori
       # `[gori]` line that turns up in its own thread.
       OPERATOR_MESSAGES_NOTE = " The operator can message you from the gori TUI: such messages " \
                                "arrive in this session directly when gori has a live route to it " \
-                               "(a `[gori]` line in your own turn), and are always readable with " \
+                               "(a `[gori]` line in your own turn, or beside the result of a gori " \
+                               "tool you called), and are always readable with " \
                                "operator_messages — call it at the start of a " \
                                "turn, or whenever a note says gori has something for you, and act on it. " \
                                "Answer them with reply_to_operator (a one-line summary, optional detail): " \
@@ -470,11 +471,18 @@ module Gori
         return write_error(id, -32602,
           "tools/call: 'arguments' must be an object (or a JSON-encoded one)") unless args
         result = @tools.call(name, args)
+        # #1090: anything the operator said that no route has carried rides back HERE, beside
+        # the tool's own answer — a second content block, never mixed into the first, so
+        # `structuredContent` still parses and no tool's output is rewritten by a message that
+        # has nothing to do with it. Asked after the call, so a message sent WHILE a long tool
+        # ran goes out with that tool's result instead of waiting for the next one.
+        note = @tools.pending_operator_note(name)
         write_result(id) do |j|
           j.object do
             j.field("content") do
               j.array do
                 j.object { j.field "type", "text"; j.field "text", result.text }
+                j.object { j.field "type", "text"; j.field "text", note } if note
               end
             end
             if result.is_error && (code = result.error_code)
