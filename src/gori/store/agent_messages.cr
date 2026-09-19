@@ -122,6 +122,13 @@ module Gori
       0_i64
     end
 
+    # The delivery tail's starting cursor: the feed's end. A delivery is a feed row, so the
+    # high-water mark of the feed is the high-water mark of deliveries too; one number, so the
+    # TUI's tail and the courier's cursor can never disagree about where "now" is.
+    def last_agent_delivery_id : Int64
+      last_event_id
+    end
+
     # Which message ids the agent's own poll has already been handed, for `operator_messages`:
     # every delivery row naming a message, regardless of route.
     def delivered_agent_message_ids(since_id : Int64) : Set(Int64)
