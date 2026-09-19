@@ -271,6 +271,19 @@ A few limits worth knowing before you rely on this:
 - **It is a request, not consent.** Whichever layer carries it, a peer-framed message asks the model to do something; it does not authorize anything on its own, and the agent may decline exactly as it would any other instruction it disagrees with.
 - **Channel delivery is a research preview.** It depends on an unreleased Claude Code flag and Anthropic's own curated allowlist, both of which can change out from under `mcp.channels` — the inbox socket and the poll tool exist so the feature still works the day that flag does not.
 
+## Protocol Revisions
+
+gori speaks both eras of MCP from one process, and each request decides which one answers it.
+
+- **`2026-07-28`** — the stateless revision. A request carries its protocol version, the client's capabilities and (optionally) the client's name in `_meta`; there is no handshake to open and none to miss. Results come back with `resultType`, the server's identity under `_meta["io.modelcontextprotocol/serverInfo"]`, and — on `tools/list` — the `ttlMs` / `cacheScope` hints a client caches by. `server/discover` answers the supported versions, the capabilities and the instructions in a single call, and may be the first thing you send.
+- **`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`** — the handshake revisions. `initialize` opens a session exactly as it always has, and is answered with the revision you asked for, or with the newest handshake one when gori does not know the version you named.
+
+A version gori does not speak is refused with `-32022` and the list of versions it does, so a client retries instead of guessing. The tool surface is identical either way: the era decides the envelope, never what a tool does.
+
+## Tool Hints
+
+Every tool in `tools/list` carries `annotations.readOnlyHint`, so a client can tell the tools that only read this project's capture from the ones that write to it or send traffic at a target — the difference between a call worth running unattended and one worth asking about. It is derived from the same declaration [`--read-only`](#read-only-mode) enforces, so the hint and the gate cannot disagree, and a read-only tool also carries `openWorldHint: false`: it answers from the project store and never dials.
+
 ## One Call at a Time
 
 Tools run one at a time, in the order they arrive; a fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are answered immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call and declares the server dead, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling does not abort work already in flight: an in-progress request finishes, its answer is simply not sent.
