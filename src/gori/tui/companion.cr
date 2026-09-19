@@ -14,15 +14,20 @@ module Gori::Tui
   # always-animating widget would defeat the design it lives in. Three layers keep that
   # honest:
   #
-  #   1. She is OFF by default. A default install takes the first line of #tick and
-  #      returns false, exactly like a disabled ResourceMeter.
+  #   1. She can be switched OFF, and then #tick returns false on its first line, exactly
+  #      like a disabled ResourceMeter. She SHIPS ON now (Settings::DEFAULT_COMPANION), so
+  #      this is no longer the default install's path and 2 and 3 are what carry it —
+  #      but it is still the whole answer for anyone who says no, and motion "still" is
+  #      the same zero for someone who wants her face and none of the cost.
   #   2. She DOZES. After SLEEP_AFTER with no key, no click and no notification she
   #      freezes into one static frame and #tick returns false forever — an unattended
   #      gori is back to genuinely zero animation work. #poke re-arms her.
   #   3. Even awake, #tick reports a change only when the frame that would be DRAWN
   #      differs — roughly 1 repaint/second on "lively", 0.3 on "calm", each forwarding
-  #      a handful of changed cells through the backend's diff. Turning her on is an
-  #      explicit opt-in to that, and the settings hint says so.
+  #      a handful of changed cells through the backend's diff. That is what a default
+  #      install now pays while someone is at the keyboard, and it is small: .draw costs
+  #      7.8µs idle against the 218µs a body wipe already costs on the same frame
+  #      (bench/companion_draw_bench.cr, M-series, --release).
   #
   # SINGLE FIBER, NO LOCKS — the same invariant Notifications documents. #tick runs on
   # the render loop, #poke on the input handler, .draw on render; all the main fiber. The

@@ -722,7 +722,14 @@ describe Gori::Settings do
     end
   end
 
-  it "persists and reloads companion prefs; omits the section at factory defaults (false survives)" do
+  # Miss Ring SHIPS ON, so "off" is the answer that has to reach disk — under the old default
+  # it was written by OMITTING the section, which is exactly why flipping the default reaches
+  # an install that had already declined her (a deliberate one-off; see CHANGELOG). Both
+  # directions are pinned here: an explicit off survives a reload, and a file that says
+  # nothing about her does not take her away.
+  it "persists and reloads companion prefs; ships her on, so \"off\" is what reaches the file" do
+    Gori::Settings::DEFAULT_COMPANION.should be_true
+
     dir = File.tempname("gori-settings-companion")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
@@ -756,6 +763,26 @@ describe Gori::Settings do
       File.write(Gori::Settings.path, %({"companion":{"enabled":true,"placement":"corner"}}))
       Gori::Settings.load
       Gori::Settings.companion_placement.should eq(Gori::Settings::DEFAULT_COMPANION_PLACEMENT)
+
+      # An explicit OFF differs from the factory default now, so it is written out and read
+      # back — the answer someone gives once has to survive every later upgrade.
+      Gori::Settings.companion = false
+      Gori::Settings.companion_placement = Gori::Settings::DEFAULT_COMPANION_PLACEMENT
+      Gori::Settings.companion_motion = Gori::Settings::DEFAULT_COMPANION_MOTION
+      Gori::Settings.companion_notices = Gori::Settings::DEFAULT_COMPANION_NOTICES
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should contain(%("companion"))
+      Gori::Settings.companion = true # what the next process would start at
+      Gori::Settings.load
+      Gori::Settings.companion?.should be_false
+
+      # ...and a file that says NOTHING about her leaves her where a fresh process starts,
+      # which is on. `load` is tolerant of an absent section rather than resetting it, so the
+      # assignment below is the fresh-process value, not a shortcut around the assertion.
+      File.write(Gori::Settings.path, %({})) # a whole file that names no section at all
+      Gori::Settings.companion = Gori::Settings::DEFAULT_COMPANION
+      Gori::Settings.load
+      Gori::Settings.companion?.should be_true
 
       # Back to defaults → section omitted, so a default install's file stays quiet
       Gori::Settings.companion = Gori::Settings::DEFAULT_COMPANION
