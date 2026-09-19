@@ -72,11 +72,13 @@ describe AgentMessageNotes do
         .should eq({:success, "→ claude-code got it (socket)"})
     end
 
-    it "calls a poll hand-off left, not delivered" do
+    it "calls a poll hand-off left, not delivered — and a pickup picked up" do
       # `poll` means the courier wrote the line into a table its session reads when it next
-      # looks — which may be never. Info, and it names where the line is waiting.
+      # looks (which may be never); `picked_up` is that read happening.
       AgentMessageNotes.line(delivery(via: "poll"))
         .should eq({:info, "left for claude-code to pick up (operator_messages)"})
+      AgentMessageNotes.line(delivery(via: "picked_up"))
+        .should eq({:success, "→ claude-code picked it up (operator_messages)"})
     end
 
     it "reports a refusal with the courier's reason" do

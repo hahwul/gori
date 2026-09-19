@@ -13,7 +13,8 @@ module Gori::Settings
   DEFAULT_MCP_CHANNELS = false
 
   # Read live wherever `gori mcp` decides how to deliver an operator message, so flipping
-  # this in Preferences takes effect on the next delivery without a restart.
+  # this in Preferences takes effect when the agent next connects: the capability is declared
+  # at the handshake, and a running session keeps the answer it was given.
   class_property? mcp_channels : Bool = DEFAULT_MCP_CHANNELS
 
   # Tolerant mcp section: absent/non-object keeps current.

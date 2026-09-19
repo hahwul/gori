@@ -49,16 +49,21 @@ module Gori
   # which route carried it and whether it landed. `via` is `channel` / `socket` / `poll`;
   # `ok: false` with `via: "poll"` means "no live route, left in the feed for the agent to read".
   record AgentDelivery, id : Int64, message_id : Int64, via : String, target_label : String,
-    ok : Bool, reason : String?, created_at : Int64 do
+    ok : Bool, reason : String?, created_at : Int64, pid : Int64 = 0_i64 do
     KIND = "agent_delivery"
+    # Routes. `poll` is the courier's DEPOSIT (no live route; the row waits in the feed) and is
+    # `ok` — nothing failed. `picked_up` is the agent's own `operator_messages` read.
+    VIA_POLL      = "poll"
+    VIA_PICKED_UP = "picked_up"
 
     def self.from_row(row : Store::EventRow) : AgentDelivery?
       return nil unless row.kind == KIND
       h = row.payload.try { |p| JSON.parse(p).as_h? }
       return nil unless h
       mid = h["message_id"]?.try(&.as_i64?) || return nil
-      new(row.id, mid, h["via"]?.try(&.as_s?) || "poll", h["target"]?.try(&.as_s?) || "agent",
-        h["ok"]?.try(&.as_bool?) || false, h["reason"]?.try(&.as_s?), row.created_at)
+      new(row.id, mid, h["via"]?.try(&.as_s?) || VIA_POLL, h["target"]?.try(&.as_s?) || "agent",
+        h["ok"]?.try(&.as_bool?) || false, h["reason"]?.try(&.as_s?), row.created_at,
+        h["pid"]?.try(&.as_i64?) || 0_i64)
     rescue JSON::ParseException
       nil
     end
@@ -74,44 +79,74 @@ module Gori
     end
 
     # Record how a message was (or was not) delivered. `via` names the route, `target` the
-    # session as the operator would recognise it (`claude-code pid 48213`).
+    # session as the operator would recognise it (`claude-code pid 48213`), `pid` the courier
+    # process that handled it — a broadcast has one row PER recipient, and the poll layer must
+    # not read claude-code's socket delivery as "codex already has it".
     def record_agent_delivery(message_id : Int64, via : String, target : String, ok : Bool,
-                              reason : String? = nil) : Int64
-      level = ok ? "success" : (via == "poll" ? "info" : "warn")
-      summary = ok ? "delivered to #{target} (#{via})" : "#{target}: #{reason || "not delivered"}"
+                              reason : String? = nil, pid : Int64 = 0_i64) : Int64
+      level = !ok ? "warn" : (via == AgentDelivery::VIA_POLL ? "info" : "success")
+      summary =
+        if !ok
+          "#{target}: #{reason || "not delivered"}"
+        elsif via == AgentDelivery::VIA_POLL
+          "left for #{target} to pick up"
+        else
+          "delivered to #{target} (#{via})"
+        end
       payload = JSON.build do |j|
         j.object do
           j.field "message_id", message_id
           j.field "via", via
           j.field "target", target
           j.field "ok", ok
+          j.field "pid", pid
           j.field "reason", reason if reason
         end
       end
       insert_event("operator", AgentDelivery::KIND, level, summary, payload: payload)
     end
 
+    # One page of the kind-filtered feed. `scanned_max` is the id of the LAST ROW THE SQL PAGE
+    # RETURNED, matching or not, and `full` says the page hit its limit — a cursor must advance
+    # to `scanned_max` when full (there may be more behind it) and may jump to the feed's
+    # high-water mark only when it was not. Advancing only past MATCHING rows is how a courier
+    # starves behind fifty messages for someone else (the review's repro).
+    record MessagePage, rows : Array(AgentMessage), scanned_max : Int64, full : Bool
+    record DeliveryPage, rows : Array(AgentDelivery), scanned_max : Int64, full : Bool
+
     # Messages after `since_id` (feed cursor), oldest first, addressed to `pid` or to all.
-    def agent_messages_after(since_id : Int64, pid : Int64, limit : Int32 = 100) : Array(AgentMessage)
+    def agent_messages_after(since_id : Int64, pid : Int64, limit : Int32 = 100) : MessagePage
       rows = [] of AgentMessage
+      scanned = since_id
+      count = 0
       @db.query("SELECT #{EVENT_COLS} FROM events WHERE id > ? AND kind = ? ORDER BY id ASC LIMIT ?",
         args: [since_id, AgentMessage::KIND, limit.to_i64] of DB::Any) do |rs|
         rs.each do
-          if (m = AgentMessage.from_row(read_event(rs))) && m.for?(pid)
+          row = read_event(rs)
+          scanned = row.id
+          count += 1
+          if (m = AgentMessage.from_row(row)) && m.for?(pid)
             rows << m
           end
         end
       end
-      rows
+      MessagePage.new(rows, scanned, count >= limit)
     end
 
-    def agent_deliveries_after(since_id : Int64, limit : Int32 = 100) : Array(AgentDelivery)
+    def agent_deliveries_after(since_id : Int64, limit : Int32 = 100) : DeliveryPage
       rows = [] of AgentDelivery
+      scanned = since_id
+      count = 0
       @db.query("SELECT #{EVENT_COLS} FROM events WHERE id > ? AND kind = ? ORDER BY id ASC LIMIT ?",
         args: [since_id, AgentDelivery::KIND, limit.to_i64] of DB::Any) do |rs|
-        rs.each { AgentDelivery.from_row(read_event(rs)).try { |d| rows << d } }
+        rs.each do
+          row = read_event(rs)
+          scanned = row.id
+          count += 1
+          AgentDelivery.from_row(row).try { |d| rows << d }
+        end
       end
-      rows
+      DeliveryPage.new(rows, scanned, count >= limit)
     end
 
     # The feed's high-water mark — where a courier or a delivery tail STARTS, so a session that
@@ -129,11 +164,18 @@ module Gori
       last_event_id
     end
 
-    # Which message ids the agent's own poll has already been handed, for `operator_messages`:
-    # every delivery row naming a message, regardless of route.
-    def delivered_agent_message_ids(since_id : Int64) : Set(Int64)
+    # Which message ids THIS session (`pid`) has already been handed by a live route or its
+    # own poll, for `operator_messages`: only rows that landed (`ok`), and only this
+    # recipient's — a broadcast delivered to another session is still owed to this one.
+    def delivered_agent_message_ids(since_id : Int64, pid : Int64) : Set(Int64)
       ids = Set(Int64).new
-      agent_deliveries_after(since_id, 500).each { |d| ids << d.message_id if d.ok }
+      cursor = since_id
+      loop do
+        page = agent_deliveries_after(cursor, 500)
+        page.rows.each { |d| ids << d.message_id if d.ok && d.pid == pid && d.via != AgentDelivery::VIA_POLL }
+        break unless page.full
+        cursor = page.scanned_max
+      end
       ids
     end
   end

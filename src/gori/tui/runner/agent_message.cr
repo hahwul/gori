@@ -95,7 +95,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def open_agent_message_prompt(name : String, target : String,
                                         ids : Array(Int64), from : String) : Nil
     np = NamePromptOverlay.new("TELL #{name}",
-      "sent to the agent's session; delivery shows in the notification ring", "", "send")
+      "sent to the agent's session; delivery shows in the notification ring", "", "send", "message")
     np.on_commit = -> {
       text = np.name
       if text.empty?
@@ -117,12 +117,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Turn every courier reply we have not announced yet into a notification. Returns true when
   # anything was pushed (the poll loop repaints on that). Called every DV_POLL_INTERVAL tick.
   def drain_agent_deliveries : Bool
-    rows = @session.store.agent_deliveries_after(@agent_delivery_cursor, AGENT_DELIVERY_BATCH)
-    return false if rows.empty?
-    rows.each do |row|
-      # Advance per row and take the MAX, not `rows.last`: the cursor is the one thing standing
-      # between a hiccup in the read order and a note announced twice.
-      @agent_delivery_cursor = row.id if row.id > @agent_delivery_cursor
+    # High-water first, then the page (the courier's rule): the feed has no index on `kind`,
+    # so a cursor that only moved on a delivery would re-walk everything the project wrote
+    # since the TUI opened, every 750 ms, on the normal day when nobody is talking.
+    high = @session.store.last_agent_delivery_id
+    page = @session.store.agent_deliveries_after(@agent_delivery_cursor, AGENT_DELIVERY_BATCH)
+    @agent_delivery_cursor = page.full ? {@agent_delivery_cursor, page.scanned_max}.max : {@agent_delivery_cursor, page.scanned_max, high}.max
+    return false if page.rows.empty?
+    page.rows.each do |row|
       level, message = AgentMessageNotes.line(row)
       @notifications.push(level, message, nil, source: "app")
     end

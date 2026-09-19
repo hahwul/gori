@@ -47,7 +47,10 @@ module Gori::MCP
     # end it. Bounded: connect + write + close inside `timeout`.
     def self.deliver(path : String, text : String, *, token : String? = ENV["CLAUDE_CODE_MESSAGING_TOKEN"]?,
                      timeout : Time::Span = 3.seconds) : String?
-      sock = UNIXSocket.new(path)
+      # `UNIXSocket.new(path)` has no connect timeout; a session whose accept backlog is full
+      # would park the courier for good. Connect by hand, bounded.
+      sock = Socket.unix(Socket::Type::STREAM)
+      sock.connect(Socket::UNIXAddress.new(path), timeout: timeout)
       sock.write_timeout = timeout
       begin
         if token && !token.empty?

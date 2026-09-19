@@ -327,6 +327,11 @@ module Gori
         @client_name
       end
 
+      # Whether `tools/list` would show `name` under the active `--tools` filter.
+      def advertises?(name : String) : Bool
+        (f = @tool_filter).nil? || f.allows?(name)
+      end
+
       # The LIVE project binding. `bind_project` (switch_project, and create_project when it
       # auto-binds) rewrites every one of these mid-session, so anything that reports the
       # binding has to ask HERE rather than keep the copy it was constructed with — a second

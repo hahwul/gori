@@ -57,10 +57,14 @@ module Gori::Tui
       # "poll" is not a delivery, it is a deposit: the courier wrote the line where its session
       # will read it next time it looks, which may be never. Info, not success, and it names the
       # table so the operator knows where to look when it is never picked up.
-      if delivery.via == "poll"
-        return {:info, "left for #{who} to pick up (operator_messages)"}
+      case delivery.via
+      when Gori::AgentDelivery::VIA_POLL
+        {:info, "left for #{who} to pick up (operator_messages)"}
+      when Gori::AgentDelivery::VIA_PICKED_UP
+        {:success, "→ #{who} picked it up (operator_messages)"}
+      else
+        {:success, "→ #{who} got it (#{safe(delivery.via) || "?"})"}
       end
-      {:success, "→ #{who} got it (#{safe(delivery.via) || "?"})"}
     end
 
     # `target_label`, `via` and `reason` are all written by ANOTHER process. Same stance as a

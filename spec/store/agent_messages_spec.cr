@@ -25,28 +25,46 @@ describe Gori::Store, "#1090 operator messages" do
       a = store.post_agent_message("to everyone", "all", nil)
       store.post_agent_message("to someone else", "pid:9", nil)
       b = store.post_agent_message("to me", "pid:4242", "issues")
-      mine = store.agent_messages_after(0, 4242)
-      mine.map(&.id).should eq([a, b])
-      store.agent_messages_after(a, 4242).map(&.text).should eq(["to me"])
-      store.agent_messages_after(b, 4242).should be_empty
+      page = store.agent_messages_after(0, 4242)
+      page.rows.map(&.id).should eq([a, b])
+      page.scanned_max.should eq(b)
+      page.full.should be_false
+      store.agent_messages_after(a, 4242).rows.map(&.text).should eq(["to me"])
+      store.agent_messages_after(b, 4242).rows.should be_empty
+      # a full page reports its last SCANNED id, matching or not, so a cursor can advance past
+      # fifty messages for someone else instead of jumping to the feed's end over them
+      60.times { store.post_agent_message("noise", "pid:9", nil) }
+      c = store.post_agent_message("behind the noise", "pid:4242", nil)
+      p1 = store.agent_messages_after(b, 4242, 50)
+      p1.rows.should be_empty
+      p1.full.should be_true
+      p1.scanned_max.should be < c
+      p2 = store.agent_messages_after(p1.scanned_max, 4242, 50)
+      p2.rows.map(&.id).should eq([c])
+      p2.full.should be_false
     end
   end
 
   it "records deliveries with a level per outcome and reads them back" do
     with_store do |store|
       m = store.post_agent_message("hi", "all", nil)
-      store.record_agent_delivery(m, "socket", "claude-code pid 1", true)
-      store.record_agent_delivery(m, "poll", "codex pid 2", false, "no live route")
-      store.record_agent_delivery(m, "channel", "claude-code pid 3", false, "write failed")
+      store.record_agent_delivery(m, "socket", "claude-code pid 1", true, pid: 1)
+      store.record_agent_delivery(m, "poll", "codex pid 2", true, "no live route", pid: 2)
+      store.record_agent_delivery(m, "channel", "claude-code pid 3", false, "write failed", pid: 3)
       rows = store.events_after(m, 10)
       rows.map(&.level).should eq(%w[success info warn])
       rows.all? { |r| r.kind == "agent_delivery" }.should be_true
-      ds = store.agent_deliveries_after(m, 10)
+      ds = store.agent_deliveries_after(m, 10).rows
       ds.map(&.via).should eq(%w[socket poll channel])
-      ds.map(&.ok).should eq([true, false, false])
+      ds.map(&.ok).should eq([true, true, false])
+      ds.map(&.pid).should eq([1, 2, 3])
       ds[1].reason.should eq("no live route")
       ds.map(&.target_label).first.should eq("claude-code pid 1")
-      store.delivered_agent_message_ids(0).should eq(Set{m})
+      # "delivered" is per RECIPIENT and only for a live route: the socket landing at pid 1 does
+      # not make pid 2's poll deposit a delivery, so pid 2's own read still returns the message
+      store.delivered_agent_message_ids(0, 1).should eq(Set{m})
+      store.delivered_agent_message_ids(0, 2).should be_empty
+      store.delivered_agent_message_ids(0, 3).should be_empty
     end
   end
 

@@ -82,8 +82,12 @@ module Gori
         # assumption `Tools::FuzzJob` documents for its own cross-fiber fields.
         @pending = Set(String).new
         @cancelled = Set(String).new
-        # The operator-message courier (#1090), started when the client says `initialized`.
+        # The operator-message courier (#1090), started when the client says `initialized`,
+        # and whether THIS session's handshake declared the channel capability — the courier
+        # keys off that, never off the live setting: a toggle after the handshake cannot
+        # register a channel the client already did not take.
         @courier = nil.as(Courier?)
+        @channel_declared = false
       end
 
       # Reads until EOF on `input` (client closed the pipe). Each line is parsed
@@ -341,7 +345,8 @@ module Gori
                 # Claude Code's channel capability (#1090), declared only when the operator says
                 # their Claude is launched with channels: a client that did not register it drops
                 # every push silently, and the socket route would then carry the same line.
-                if Settings.mcp_channels?
+                @channel_declared = Settings.mcp_channels?
+                if @channel_declared
                   j.field("experimental") { j.object { j.field("claude/channel") { j.object { } } } }
                 end
               end
@@ -420,7 +425,7 @@ module Gori
                  "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them. " \
                  "switch_project (and create_project when unbound) remain available so you can still pick a project to inspect."
                end
-        text + OPERATOR_MESSAGES_NOTE
+        @tools.advertises?("operator_messages") ? text + OPERATOR_MESSAGES_NOTE : text
       end
 
       # #1090, the third route: every agent, whatever its client, can read what the operator
@@ -439,7 +444,7 @@ module Gori
         courier = Courier.new(pid: Process.pid.to_i64,
           store: -> { @tools.current_store },
           client: -> { @tools.client_name },
-          channels: -> { Settings.mcp_channels? },
+          channels: -> { @channel_declared },
           emit: ->(frame : String) { send(frame) })
         courier.start
         @courier = courier

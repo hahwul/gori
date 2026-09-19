@@ -9,9 +9,10 @@ module Gori::MCP
   #
   # Three routes, best available first, and never two for one message:
   #   1. a `notifications/claude/channel` frame on this JSON-RPC stream — only when the
-  #      operator has said their Claude is launched with channels (`Settings.mcp_channels`),
-  #      because a push to a session that did not register the channel is dropped without a
-  #      word, and combined with the socket it would say the same thing twice;
+  #      capability was DECLARED at this session's handshake (the operator's
+  #      `Settings.mcp_channels` as it stood then, latched by the server), because a push to a
+  #      session that did not register the channel is dropped without a word, and combined
+  #      with the socket it would say the same thing twice;
   #   2. the session's inbox socket (`ClaudeInbox`) — GA, no flags, framed as a peer's note;
   #   3. nothing — the row stays in the feed for `operator_messages`, and a delivery row says so.
   # Every message gets exactly one delivery row, which is what the TUI turns into
@@ -72,29 +73,37 @@ module Gori::MCP
       store = @store.call
       return 0 unless store
       rebase(store)
-      rows = store.agent_messages_after(@cursor, @pid, PAGE)
-      # The cursor is the max SCANNED id, not the last delivered: a page can be empty because
-      # nothing was addressed here, and the next tick must not rescan those rows.
-      @cursor = {@cursor, store.last_event_id}.max if rows.empty?
-      rows.each do |m|
-        @cursor = m.id
+      # The high-water mark is read BEFORE the page: the TUI is another process, and a row it
+      # commits between the two queries must land inside the next page, not behind the cursor.
+      high = store.last_event_id
+      page = store.agent_messages_after(@cursor, @pid, PAGE)
+      page.rows.each do |m|
         deliver(store, m)
         @delivered += 1
       end
-      rows.size
+      # A full page may hide more behind it: advance only to what was scanned. A short page
+      # has shown everything up to `high`.
+      @cursor = page.full ? {@cursor, page.scanned_max}.max : {@cursor, page.scanned_max, high}.max
+      page.rows.size
     end
 
     private def deliver(store : Store, m : AgentMessage) : Nil
       label = "#{@client.call || "agent"} pid #{@pid}"
       if @channels.call && @client.call == "claude-code"
         @emit.call(Courier.channel_frame(m))
-        store.record_agent_delivery(m.id, "channel", label, true)
+        store.record_agent_delivery(m.id, "channel", label, true, pid: @pid)
       elsif path = @inbox.call
         reason = ClaudeInbox.deliver(path, ClaudeInbox.frame(m.text, m.from_tab))
-        store.record_agent_delivery(m.id, "socket", label, reason.nil?, reason)
+        store.record_agent_delivery(m.id, "socket", label, reason.nil?, reason, pid: @pid)
       else
-        store.record_agent_delivery(m.id, "poll", label, false, "no live route; left for operator_messages")
+        store.record_agent_delivery(m.id, AgentDelivery::VIA_POLL, label, true,
+          "no live route; left for operator_messages", pid: @pid)
       end
+    rescue ex
+      # The cursor has already passed this row; a raise here would lose it silently. A row
+      # that says why is the only honest outcome.
+      store.record_agent_delivery(m.id, "socket", "#{@client.call || "agent"} pid #{@pid}", false,
+        "delivery raised: #{ex.message || ex.class.name}", pid: @pid) rescue nil
     end
 
     # The channel event. `meta` keys must be `[A-Za-z0-9_]` — a hyphen is silently dropped by

@@ -63,9 +63,10 @@ describe Gori::MCP::Courier do
       c.tick
       m = store.post_agent_message("hi codex", "pid:9", "history")
       c.tick.should eq(1)
-      d = store.agent_deliveries_after(m, 10).first
+      d = store.agent_deliveries_after(m, 10).rows.first
       d.via.should eq("poll")
-      d.ok.should be_false
+      d.ok.should be_true # a deposit is not a failure
+      d.pid.should eq(9)
       d.target_label.should eq("codex pid 9")
       d.reason.not_nil!.should contain("operator_messages")
       rig.frames.should be_empty
@@ -79,7 +80,7 @@ describe Gori::MCP::Courier do
       c.tick
       store.post_agent_message("not for you", "pid:10", nil)
       c.tick.should eq(0)
-      store.agent_deliveries_after(0, 10).should be_empty
+      store.agent_deliveries_after(0, 10).rows.should be_empty
       # …and the cursor still moved past it: the next tick does not rescan
       mine = store.post_agent_message("for you", "pid:9", nil)
       c.tick.should eq(1)
@@ -103,7 +104,7 @@ describe Gori::MCP::Courier do
       f["params"]["meta"]["from_tab"].should eq("history")
       f["params"]["meta"]["flow_ids"].should eq("3,4")
       f["id"]?.should be_nil # a notification, never a request
-      d = store.agent_deliveries_after(m, 10).first
+      d = store.agent_deliveries_after(m, 10).rows.first
       d.via.should eq("channel")
       d.ok.should be_true
 
@@ -133,7 +134,7 @@ describe Gori::MCP::Courier do
         # session that exports CLAUDE_CODE_MESSAGING_TOKEN
         got.size.should be >= 1
         JSON.parse(got.last)["message"]["content"].should eq("[gori] The operator at the gori TUI says (from the issues tab): look at issue 4")
-        d = store.agent_deliveries_after(m, 10).first
+        d = store.agent_deliveries_after(m, 10).rows.first
         d.via.should eq("socket")
         d.ok.should be_true
         rig.frames.should be_empty
@@ -149,10 +150,28 @@ describe Gori::MCP::Courier do
       c.tick
       m = store.post_agent_message("x", "all", nil)
       c.tick.should eq(1)
-      d = store.agent_deliveries_after(m, 10).first
+      d = store.agent_deliveries_after(m, 10).rows.first
       d.via.should eq("socket")
       d.ok.should be_false
       d.reason.should_not be_nil
+    end
+  end
+
+  it "does not starve behind a full page of messages for other sessions" do
+    with_store do |store|
+      rig = Rig.new(store)
+      rig.client = "codex"
+      c = rig.courier(9_i64)
+      c.tick
+      first = store.post_agent_message("one for me", "pid:9", nil)
+      60.times { store.post_agent_message("someone else", "pid:10", nil) }
+      last = store.post_agent_message("also for me", "pid:9", nil)
+      c.tick.should eq(1)        # the first page (50 rows) held only the first
+      c.cursor.should be < last  # …and the cursor stopped at what was scanned, not the feed's end
+      c.tick.should eq(1)        # the next page finds the one behind the noise
+      c.cursor.should be >= last # its own delivery rows land after the high-water it read
+      store.agent_deliveries_after(0, 100).rows.map(&.message_id).should eq([first, last])
+      c.tick.should eq(0)
     end
   end
 
