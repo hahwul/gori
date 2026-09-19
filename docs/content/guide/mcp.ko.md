@@ -251,7 +251,7 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 ## gori가 보내는 메시지 {#messages-from-gori}
 
-라이브 인터셉트가 에이전트더러 사용자가 일하는 모습을 지켜보게 한다면, 팔레트 verb **"Tell the agent…"**(`app.tell-agent`)는 반대 방향입니다 — 어느 gori 탭에서든 붙어 있는 에이전트 자신의 세션으로 한 줄짜리 메시지를 보냅니다. 프로젝트에 붙은 MCP 클라이언트 중 하나(`mcp:` 칩과 "Attached agents" 카드가 보여주는 것과 같은 목록)를 고르거나 전체를 고르고, 한 줄을 입력하면 gori가 전달합니다.
+라이브 인터셉트가 에이전트더러 사용자가 일하는 모습을 지켜보게 한다면, 팔레트 verb **"Tell the agent…"**(`app.tell-agent`)는 반대 방향입니다 — 어느 gori 탭에서든 붙어 있는 에이전트 자신의 세션으로 한 줄짜리 메시지를 보냅니다. 프로젝트에 붙은 MCP 클라이언트 중 하나(`mcp:` 칩과 "Attached agents" 카드가 보여주는 것과 같은 목록)를 고르거나 전체를 고르고, 한 줄을 입력하면 gori가 전달합니다. History 목록에서는 같은 동작이 스페이스 메뉴의 **Tell the agent about these**(`⇧G`)로 있고, 마크한 flow가 문맥으로 붙습니다. Issues 목록에도 있습니다.
 
 전달은 세 층을 순서대로 시도하며, 더 나은 것을 먼저 씁니다.
 

@@ -366,6 +366,13 @@ module Gori
         "issues.export-key", "Export issues…", "Write all issues to a file (asks for the format, then the path)",
         Verb::Scope::Issues, [Verb::Chord.new("e", shift: true)],
         mnemonic: 'E') { |ctx| ctx.issues_export_pick; nil }
+
+      # #1090: the operator→agent line from the Issues list's space menu (the Global
+      # `app.tell-agent` is the palette entry). Menu-only — ⇧T and both `t` mnemonics are
+      # taken in this scope — so it carries a mnemonic the list does not use.
+      r.register Verb::Definition.new(
+        "issues.tell-agent", "Tell the agent…", "Send one line to an attached agent's session",
+        Verb::Scope::Issues, mnemonic: 'g') { |ctx| ctx.tell_agent; nil }
     end
   end
 end
