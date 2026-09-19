@@ -1,13 +1,14 @@
 require "json"
 require "../store"
 require "./inbox"
+require "./codex_queue"
 
 module Gori::MCP
   # Carries operator messages from the project's event feed to THIS server's client session
   # (#1090). One per `gori mcp` process, started once the client says `initialized`, stopped
   # when the reader hits EOF.
   #
-  # Three routes, best available first. Only a CONFIRMED route retires a message from the poll
+  # Four routes, best available first. Only a CONFIRMED route retires a message from the poll
   # backstop (`AgentDelivery::CARRIED`): the socket write either lands or reports why, so it
   # carries the message; the channel push cannot be confirmed, so it does NOT — a session that
   # was not launched with channels drops the frame without a word, and the message must stay
@@ -20,7 +21,10 @@ module Gori::MCP
   #      the delivery row reads "got it (channel)", but the message is left for poll all the same.
   #   2. the session's inbox socket (`ClaudeInbox`) — GA, no flags, framed as a peer's note; a
   #      write that lands carries the message and retires it.
-  #   3. nothing — the row stays in the feed for `operator_messages`, and a poll deposit row
+  #   3. `codex queue` against the parent Codex session's own thread (`CodexQueue`) — the same
+  #      bargain as the socket through a different door: the CLI accepts the line or says why
+  #      not, so an accepted hand-off carries the message.
+  #   4. nothing — the row stays in the feed for `operator_messages`, and a poll deposit row
   #      says so.
   # Each recipient gets its own delivery row (a broadcast has one per session), which is what
   # the TUI turns into "→ claude-code got it (socket)" in the notification ring.
@@ -41,7 +45,8 @@ module Gori::MCP
 
     def initialize(*, @pid : Int64, @store : Proc(Store?), @client : Proc(String?),
                    @channels : Proc(Bool), @emit : Proc(String, Nil),
-                   @inbox : Proc(String?) = -> { ClaudeInbox.discover })
+                   @inbox : Proc(String?) = -> { ClaudeInbox.discover },
+                   @codex : Proc(CodexQueue::Session?) = -> { CodexQueue.discover })
       @cursor = 0_i64
       # The store the cursor was taken against — a REFERENCE, never its object_id: a bare id
       # can be reused by the next store the GC hands out at the same address, and a cursor
@@ -51,6 +56,8 @@ module Gori::MCP
       @stop = Channel(Nil).new(1)
       @running = false
       @warned_read_only = false
+      @codex_memo = nil.as(CodexQueue::Session?)
+      @codex_asked = false
       # Anchor the cursor NOW, when the presence marker that makes this process a target is
       # already up — not at the first tick, half a second after `initialized`. A message the
       # operator sends in between is owed a delivery, not a silent skip.
@@ -97,6 +104,12 @@ module Gori::MCP
       high = store.last_event_id
       return 0 if high <= @cursor
       page = store.agent_messages_after(@cursor, @pid, PAGE)
+      # One discovery per TICK, not per message: on a broadcast every row in this page goes to
+      # the same parent, and the Codex lookup is a fork. Cleared HERE rather than remembered,
+      # so it never outlives the pass — the thread under us can change between ticks, which is
+      # the whole reason the route refuses to cache.
+      @codex_memo = nil
+      @codex_asked = false
       page.rows.each do |m|
         deliver(store, m)
         @delivered += 1
@@ -116,7 +129,13 @@ module Gori::MCP
         record(store, m, route, label, true)
       elsif path = @inbox.call
         route = AgentDelivery::VIA_SOCKET
-        reason = ClaudeInbox.deliver(path, ClaudeInbox.frame(m.text, m.from_tab))
+        reason = ClaudeInbox.deliver(path, OperatorNote.frame(m.text, m.from_tab, m.flow_ids, m.id))
+        record(store, m, route, label, reason.nil?, reason)
+      elsif session = codex_session
+        # Assigned BEFORE the hand-off, as the socket arm does: the rescue below can only name
+        # the route it was trying if the route is already on the local when the trying starts.
+        route = AgentDelivery::VIA_CODEX_QUEUE
+        reason = CodexQueue.deliver(session, OperatorNote.frame(m.text, m.from_tab, m.flow_ids, m.id))
         record(store, m, route, label, reason.nil?, reason)
       else
         record(store, m, AgentDelivery::VIA_POLL, label, true, "no live route; left for operator_messages")
@@ -128,6 +147,15 @@ module Gori::MCP
       # values the method starts with.
       record(store, m, route || "poll", label || "#{@client.call || "agent"} pid #{@pid}", false,
         "delivery raised: #{ex.message || ex.class.name}") rescue nil
+    end
+
+    # This session's Codex thread, asked once per tick. The two tests are in this order on
+    # purpose — `client?` is a string comparison and `discover` forks an `lsof`, so every
+    # other client pays nothing for this route.
+    private def codex_session : CodexQueue::Session?
+      return @codex_memo if @codex_asked
+      @codex_asked = true
+      @codex_memo = CodexQueue.client?(@client.call) ? @codex.call : nil
     end
 
     # A `--read-only` server has no writer fiber: the message still goes out, but no row can
@@ -153,7 +181,7 @@ module Gori::MCP
           j.field "method", "notifications/claude/channel"
           j.field "params" do
             j.object do
-              j.field "content", m.text + ClaudeInbox::REPLY_HINT
+              j.field "content", m.text + OperatorNote::REPLY_HINT
               j.field "meta" do
                 j.object do
                   j.field "message_id", m.id.to_s

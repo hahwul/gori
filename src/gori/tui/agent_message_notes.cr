@@ -62,6 +62,10 @@ module Gori::Tui
         {:info, "left for #{who} to pick up (operator_messages)"}
       when Gori::AgentDelivery::VIA_PICKED_UP
         {:success, "→ #{who} picked it up (operator_messages)"}
+      when Gori::AgentDelivery::VIA_CODEX_QUEUE
+        # The CLI took it and said so, which is as far as any route can see: the session runs a
+        # turn on it now if it is idle, after the current one if it is not.
+        {:success, "→ #{who} got it (queued in codex)"}
       when Gori::AgentDelivery::VIA_CHANNEL
         # A channel push is fire-and-forget: the server cannot tell whether that session was
         # launched with channels, and a push to one that was not is dropped without a word.

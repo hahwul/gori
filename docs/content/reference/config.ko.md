@@ -822,7 +822,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
 | `redaction` | 안전한 내보내기 프로파일, 활성 프로파일, 기본 적용 스위치, 자리표시자 salt. 위의 [redaction](#redaction) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, `wrap_lines`(긴 줄 접기, 기본 켜짐), 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |
-| `mcp` | `gori mcp`가 "Tell the agent…" 메시지를 전달하는 방식: `channels`(기본 off)는 항상 동작하는 inbox-socket 및 `operator_messages` poll 계층 위에 `claude/channel` push를 켭니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori) 참고 |
+| `mcp` | `gori mcp`가 "Tell the agent…" 메시지를 전달하는 방식: `channels`(기본 off)는 항상 동작하는 inbox-socket · Codex queue · `operator_messages` poll 계층 위에 `claude/channel` push를 켭니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori) 참고 |
 
 ## 프로젝트별 오버라이드 {#per-project-overrides}
 

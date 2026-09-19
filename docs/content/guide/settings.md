@@ -114,7 +114,7 @@ Network here is the **global default**. A project can pin its own bind address, 
 |---------|--------|
 | **Agent messaging** | Channel delivery (off) |
 
-How `gori mcp` delivers a "Tell the agent…" message to an attached agent. The inbox-socket and `operator_messages`-poll layers always run; **Channel delivery** adds the `claude/channel` push on top, and is off by default because it is a research preview that needs Claude Code launched with a development-channels flag. See [Messages from gori](/guide/mcp/#messages-from-gori).
+How `gori mcp` delivers a "Tell the agent…" message to an attached agent. The inbox-socket, Codex-queue and `operator_messages`-poll layers always run; **Channel delivery** adds the `claude/channel` push on top, and is off by default because it is a research preview that needs Claude Code launched with a development-channels flag. See [Messages from gori](/guide/mcp/#messages-from-gori).
 
 ## In the Project Picker
 
