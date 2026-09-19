@@ -40,7 +40,7 @@ describe Gori::Store, "#1090 operator messages" do
       store.record_agent_delivery(m, "channel", "claude-code pid 3", false, "write failed")
       rows = store.events_after(m, 10)
       rows.map(&.level).should eq(%w[success info warn])
-      rows.map(&.kind).uniq.should eq(["agent_delivery"])
+      rows.all? { |r| r.kind == "agent_delivery" }.should be_true
       ds = store.agent_deliveries_after(m, 10)
       ds.map(&.via).should eq(%w[socket poll channel])
       ds.map(&.ok).should eq([true, false, false])

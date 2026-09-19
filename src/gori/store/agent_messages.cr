@@ -79,16 +79,16 @@ module Gori
                               reason : String? = nil) : Int64
       level = ok ? "success" : (via == "poll" ? "info" : "warn")
       summary = ok ? "delivered to #{target} (#{via})" : "#{target}: #{reason || "not delivered"}"
-      insert_event("operator", AgentDelivery::KIND, level, summary,
-        payload: JSON.build { |j|
-          j.object do
-            j.field "message_id", message_id
-            j.field "via", via
-            j.field "target", target
-            j.field "ok", ok
-            j.field "reason", reason if reason
-          end
-        })
+      payload = JSON.build do |j|
+        j.object do
+          j.field "message_id", message_id
+          j.field "via", via
+          j.field "target", target
+          j.field "ok", ok
+          j.field "reason", reason if reason
+        end
+      end
+      insert_event("operator", AgentDelivery::KIND, level, summary, payload: payload)
     end
 
     # Messages after `since_id` (feed cursor), oldest first, addressed to `pid` or to all.
