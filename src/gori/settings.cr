@@ -28,7 +28,6 @@ require "./settings/discover"
 require "./settings/update"
 require "./settings/fuzzer"
 require "./settings/redaction"
-require "./settings/mcp"
 
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
