@@ -108,6 +108,14 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 
 여기의 Network는 **전역 기본값**입니다. 프로젝트는 **Project** 탭에서 자체 바인드 주소, 포트, 업스트림을 고정할 수 있고 그 프로젝트에서는 그쪽이 우선합니다. 전체 우선순위는 [설정](/ko/getting-started/configuration/#network)을 참고하세요.
 
+### AI {#ai}
+
+| 섹션 | 필드 |
+|------|------|
+| **Agent messaging** | Channel delivery (off) |
+
+`gori mcp`가 "Tell the agent…" 메시지를 붙어 있는 에이전트에게 전달하는 방식입니다. inbox-socket과 `operator_messages` poll 계층은 항상 동작하고, **Channel delivery**는 그 위에 `claude/channel` push를 얹습니다. 개발 채널 플래그로 Claude Code를 띄워야 하는 research preview라 기본은 off입니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori)를 참고하세요.
+
 ## 프로젝트 선택기에서 {#in-the-project-picker}
 
 `Ctrl-,`는 프로젝트를 열기 전, 프로젝트 선택기에서도 같은 모달을 엽니다. 첫 실행에서 테마를 정할 수 있습니다. 폼 섹션은 모두 그곳에서도 편집할 수 있고, 오프너 중에서는 **Theme**만 동작합니다. 실행 중인 프로젝트가 필요한 섹션(Tabs, Env, Hotkeys, 호스트네임 오버라이드)은 숨겨지거나 프로젝트를 먼저 열라고 안내합니다. **Reset**도 마찬가지입니다. 공장 초기화는 실행 중인 세션에 적용되어야 하기 때문입니다.
