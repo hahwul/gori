@@ -11,10 +11,22 @@ module Gori
       # a High issue only when the server both ECHOES that probe origin AND allows credentials
       # — the definitive, exploitable reflected-origin CORS misconfiguration.
       #
-      # Gated hard to keep the scan light and low-FP: only endpoints that ALREADY do CORS (the
-      # captured response carried an Access-Control-Allow-Origin header) are probed, and only
-      # GET/HEAD (no state mutation). A well-behaved allowlist rejects the probe origin, so it is
-      # never flagged.
+      # Gated hard to keep the scan light and low-FP: only endpoints that demonstrably DO CORS,
+      # and only GET/HEAD (no state mutation). A well-behaved allowlist rejects the probe origin,
+      # so it is never flagged.
+      #
+      # "Demonstrably does CORS" is Access-Control-Allow-Origin OR `Vary: Origin`, and the second
+      # half is not optional. A server only emits ACAO when the REQUEST carried an Origin, and a
+      # browser sends no Origin on a same-origin GET — which is most of what a proxied browse
+      # captures for an API. Gating on ACAO alone therefore probed only the endpoints whose
+      # capture had already been driven cross-origin, i.e. it mostly re-confirmed CORS that was
+      # visible in the capture already, and skipped the reflecting endpoint nobody had happened
+      # to drive from another origin. `Vary: Origin` is the standing advertisement of exactly the
+      # behaviour this rule tests — the response DEPENDS on Origin — and every framework that
+      # does dynamic CORS (rack-cors, django-cors-headers, Spring, Express cors) emits it whether
+      # or not an Origin arrived. Widening the gate cannot manufacture a false positive:
+      # `detections` still fires only when the PROBE response echoes PROBE_ORIGIN back with
+      # credentials, so a gate that opens too eagerly costs one request, not a finding.
       class CorsReflection < Rule
         def info : RuleInfo
           RuleInfo.new("cors_reflection", "CORS arbitrary origin",
@@ -38,7 +50,7 @@ module Gori
           rhead = detail.response_head
           return nil unless rhead
           resp = Proxy::Codec::Http1.parse_response_head(rhead)
-          return nil unless resp.headers.get?("Access-Control-Allow-Origin")
+          return nil unless does_cors?(resp.headers)
           key_string(detail, method.upcase, target)
         end
 
@@ -46,13 +58,26 @@ module Gori
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           return nil if req.malformed?
           return nil unless method_allowed?(req.method.upcase, opts)
-          # Only probe endpoints that demonstrably do CORS (response already carried an ACAO).
+          # Only probe endpoints that demonstrably do CORS (ACAO, or a standing `Vary: Origin`).
           rhead = detail.response_head
           return nil unless rhead
           resp = Proxy::Codec::Http1.parse_response_head(rhead)
-          return nil unless resp.headers.get?("Access-Control-Allow-Origin")
+          return nil unless does_cors?(resp.headers)
           request = rebuild_with_origin(detail.request_head, detail.request_body, PROBE_ORIGIN)
           Plan.new(request, [] of Param, key_string(detail, req.method.upcase, req.target))
+        end
+
+        # The captured response proves this endpoint participates in CORS — see the gate note in
+        # the class comment for why `Vary: Origin` counts alongside ACAO.
+        #
+        # `HeaderList#lists?` is the one home of the list-valued-field question, and Vary is
+        # exactly that: a comma-joined token list a proxy may also split across several field
+        # lines. It compares WHOLE members, so the ordinary `Vary: X-Origin-Hint` does not read
+        # as a match — the token-vs-substring confusion `weak_csp?` had to be corrected for once
+        # already — and it reads every line, where `get?` would return only the last.
+        private def does_cors?(headers : Proxy::Codec::HeaderList) : Bool
+          return true if headers.get?("Access-Control-Allow-Origin")
+          headers.lists?("Vary", "origin")
         end
 
         # The single key expression both `plan` and `dedup_key` use, so they can't drift.

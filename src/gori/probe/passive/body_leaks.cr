@@ -77,6 +77,18 @@ module Gori
           {/\bActiveRecord::[A-Z]\w+(?::|\r?\n\s*at )/, "Rails error"},
           {/\b(?:NoMethodError|NameError|NoMatchingPatternError)(?::| \()/, "Ruby error"},
           {/PHP (?:Fatal error|Parse error|Warning|Notice):/, "PHP error"},
+          # The same errors as rendered TO A BROWSER, which the `PHP ` prefix above never sees.
+          # That prefix is the LOG spelling (error_log, or display_errors with html_errors=Off);
+          # a page served by the web SAPI with display_errors on emits
+          # `<b>Warning</b>:  mysqli_connect(): … in <b>/var/www/db.php</b> on line <b>12</b>`
+          # — the string "PHP " appears nowhere in it. So the single most common PHP disclosure
+          # there is, the one that actually reaches a client, was the one shape no signature here
+          # matched. Anchored on the emitted `<path>.php … on line <N>` tail rather than on the
+          # severity word: `.php` is the literal PCRE skips on, where an alternation of
+          # Warning/Notice/Fatal would anchor on prose. The optional `</b>`/`<b>` admit both
+          # html_errors settings from one pattern. Precision tier is the `\.php\(\d+\)` frame
+          # below: a page QUOTING the error matches too, exactly as it does there.
+          {/\.php(?:<\/b>)? on line (?:<b>)?\d+/, "PHP error output"},
           # A real PHP stack/trace frame ("… /var/www/app.php(42): …") — the paren+line form
           # a path reference lacks; keeps the FP-prone bare "app.php:42" colon form out.
           {/\.php\(\d+\)/, "PHP stack frame"},

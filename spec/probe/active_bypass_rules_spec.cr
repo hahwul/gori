@@ -472,6 +472,58 @@ describe "Gori::Probe::Active::NginxAliasTraversal" do
     end
   end
 
+  # The fold has to land on the `location` prefix EXACTLY, so a one-segment guess only ever
+  # tested `location /static`. Against `location /assets/js` the single probe asked a question the
+  # server was always going to answer 404 to — a question never asked, not a clean result.
+  it "also probes the two-segment location boundary as a follow-up" do
+    with_store do |store|
+      deep = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/assets/js/app.js?v=3",
+        status: 200, content_type: "application/javascript")
+      plan = probe.plan(deep).not_nil!
+      plan.followups.size.should eq(1)
+      String.new(plan.request).each_line.first.should start_with("GET /assets../assets/js/app.js?v=3 ")
+      String.new(plan.followups[0]).each_line.first.should start_with("GET /assets/js../assets/js/app.js?v=3 ")
+
+      # Two segments only: `/static/main.css` has nothing UNDER a two-segment prefix, so the
+      # deeper leg is not built and the rule still spends one request.
+      shallow = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/static/main.css",
+        status: 200, content_type: "text/css")
+      probe.plan(shallow).not_nil!.followups.should be_empty
+      # …and a trailing-slash directory under two segments likewise has no resource to re-fetch.
+      dir = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/assets/js/",
+        status: 200, content_type: "application/javascript")
+      probe.plan(dir).not_nil!.followups.should be_empty
+
+      probe.requests_per_flow.should eq(1..2)
+    end
+  end
+
+  it "confirms on EITHER leg, naming the boundary that matched" do
+    with_store do |store|
+      deep = probe_capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n",
+        target: "/assets/js/app.js", status: 200, content_type: "application/javascript", body: "var a=1;")
+      plan = probe.plan(deep).not_nil!
+      same = Gori::Repeater::Result.new(
+        "HTTP/1.1 200 OK\r\n\r\n".to_slice, "var a=1;".to_slice, nil, 1_i64)
+      miss = Gori::Repeater::Result.new(
+        "HTTP/1.1 404 Not Found\r\n\r\n".to_slice, "nope".to_slice, nil, 1_i64)
+
+      # Only the DEEPER boundary is the real one: the first leg 404s, the follow-up matches.
+      dets = probe.detections_all(plan, [miss, same], deep)
+      dets.size.should eq(1)
+      dets.first.severity.should eq(Gori::Store::Severity::High)
+      dets.first.evidence.not_nil!.should contain("/assets/js../assets/js/app.js")
+
+      # The outer boundary matching names the outer target instead, and reports once either way.
+      outer = probe.detections_all(plan, [same, same], deep)
+      outer.size.should eq(1)
+      outer.first.evidence.not_nil!.should contain("/assets../assets/js/app.js")
+
+      # Neither leg matching is a clean result.
+      probe.detections_all(plan, [miss, miss], deep).should be_empty
+    end
+  end
+
   it "flags High only when the folded path returns byte-identical content" do
     with_store do |store|
       css = probe_capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\n\r\n",
