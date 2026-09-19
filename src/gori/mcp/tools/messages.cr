@@ -61,9 +61,14 @@ module Gori
         if store.read_only?
           return Result.new("reply_to_operator: this server is read-only (gori mcp --read-only) and cannot write a reply; tell the operator in your own output", is_error: true, error_code: "TOOL_DISABLED")
         end
+        # Refused, not clamped: an enum the schema advertises is a closed set on every tool
+        # (spec/mcp/enum_schema_spec.cr), and a silently downgraded level is a wrong answer
+        # with no error on it.
+        level = closed_filter(h, "level", AgentReply::LEVELS)
+        return level if level.is_a?(Result)
         pid = Process.pid.to_i64
         label = "#{@client_name || "agent"} pid #{pid}"
-        id = store.record_agent_reply(summary, str(h, "detail").presence, str(h, "level") || "info",
+        id = store.record_agent_reply(summary, str(h, "detail").presence, level || "info",
           label, pid, optional_int_arg(h, "in_reply_to"))
         Result.new(JSON.build do |j|
           j.object do
