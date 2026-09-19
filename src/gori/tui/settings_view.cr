@@ -244,6 +244,12 @@ module Gori::Tui
         "write every Repeater send into History as a flow (SRC column: RPTR) so it can be filtered, compared and exported — TUI only; gori run and MCP take their own per-call argument; ←/→/space toggles",
         bool: true),
     ]
+    # MCP: how `gori mcp` talks back to an attached agent ("Tell the agent…").
+    MCP_FIELDS = [
+      Field.new("Channel delivery",
+        "push \"Tell the agent…\" messages as a claude/channel event, on top of the inbox socket and operator_messages poll — research preview, needs Claude Code launched with --dangerously-load-development-channels server:gori; off leaves the socket + poll layers as-is — ←/→/space toggles",
+        bool: true),
+    ]
     SECTIONS = {
       :network       => NETWORK_FIELDS,
       :editor        => EDITOR_FIELDS,
@@ -256,6 +262,7 @@ module Gori::Tui
       :companion     => COMPANION_FIELDS,
       :notifications => NOTIFICATIONS_FIELDS,
       :general       => GENERAL_FIELDS,
+      :mcp           => MCP_FIELDS,
     }
 
     # Max theme rows shown at once before the list scrolls (the box also shrinks to the
@@ -297,6 +304,7 @@ module Gori::Tui
                 when :companion     then companion_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
                 when :general       then general_values
+                when :mcp           then mcp_values
                 else                     network_values
                 end
       @focused = 0
@@ -373,6 +381,9 @@ module Gori::Tui
                   Settings::DEFAULT_UPDATE_CHECK_ENABLED ? "on" : "off",
                   Settings::DEFAULT_RETENTION_FLOWS.to_s,
                   Settings::DEFAULT_REPEATER_RECORD_HISTORY ? "on" : "off",
+                ]
+                when :mcp then [
+                  Settings::DEFAULT_MCP_CHANNELS ? "on" : "off",
                 ]
                 else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s,
                       "none", "", "",
@@ -545,6 +556,14 @@ module Gori::Tui
         Settings.companion_placement,
         Settings.companion_motion,
         Settings.companion_notices? ? "on" : "off",
+      ]
+    end
+
+    # Positional, like every other *_values reader: a literal at each call site would drift
+    # from MCP_FIELDS the moment a row is inserted.
+    private def mcp_values : Array(String)
+      [
+        Settings.mcp_channels? ? "on" : "off",
       ]
     end
 
@@ -814,6 +833,11 @@ module Gori::Tui
         Settings.retention_max_flows = @values[3].strip.to_i
         Settings.repeater_record_history = @values[4] == "on"
         @values = general_values
+        return persist
+      end
+      if @section == :mcp
+        Settings.mcp_channels = @values[0] == "on"
+        @values = mcp_values
         return persist
       end
       if err = Settings.bind_host_error(@values[NETWORK_BIND_HOST])

@@ -95,6 +95,8 @@ module Gori::Tui
       # keeps its palette verb but is not given its own tab row (in_tab: false).
       Section.new(:hosts, "settings.host-overrides", "Hostnames",
         "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials", :network, :opener, in_tab: false, resettable: false),
+      Section.new(:mcp, "settings.mcp", "MCP",
+        "How gori mcp delivers \"Tell the agent…\" messages — enable the claude/channel push on top of the inbox socket and operator_messages poll", :network, :form),
     ]
 
     # Every section, in registration order — drives the palette verb loop.
