@@ -52,9 +52,19 @@ module Gori
     ok : Bool, reason : String?, created_at : Int64, pid : Int64 = 0_i64 do
     KIND = "agent_delivery"
     # Routes. `poll` is the courier's DEPOSIT (no live route; the row waits in the feed) and is
-    # `ok` — nothing failed. `picked_up` is the agent's own `operator_messages` read.
+    # `ok` — nothing failed. `picked_up` is the agent's own `operator_messages` read. `socket`
+    # is a peer-note write that landed; `channel` is a fire-and-forget push.
     VIA_POLL      = "poll"
     VIA_PICKED_UP = "picked_up"
+    VIA_SOCKET    = "socket"
+    VIA_CHANNEL   = "channel"
+    # The routes that CONFIRM a message reached the session, so `operator_messages` need not
+    # carry it again: a socket write that landed, or the agent's own poll pickup. A `channel`
+    # push is unverifiable (a session that never registered the channel drops it without a
+    # word) and a `poll` deposit is not a delivery — neither retires the message, so a dropped
+    # channel can never turn into a silently lost message. An unknown via is treated the same,
+    # the safe way: re-deliverable, never lost.
+    CARRIED = {VIA_SOCKET, VIA_PICKED_UP}
 
     def self.from_row(row : Store::EventRow) : AgentDelivery?
       return nil unless row.kind == KIND
@@ -226,15 +236,27 @@ module Gori
       last_event_id
     end
 
-    # Which message ids THIS session (`pid`) has already been handed by a live route or its
-    # own poll, for `operator_messages`: only rows that landed (`ok`), and only this
-    # recipient's — a broadcast delivered to another session is still owed to this one.
-    def delivered_agent_message_ids(since_id : Int64, pid : Int64) : Set(Int64)
+    # Which message ids THIS session (`pid`) has already been CARRIED to by a confirmed route
+    # (socket or its own poll pickup), for `operator_messages`: only rows that landed (`ok`),
+    # only this recipient's (a broadcast carried to another session is still owed to this one),
+    # and only the confirmed routes (`AgentDelivery::CARRIED`) — a fire-and-forget channel push
+    # never retires the message.
+    #
+    # `wanted`, when given, is the caller's candidate set (the page it is about to hand over):
+    # the scan then collects only those ids and stops as soon as every candidate is accounted
+    # for, so the work is bounded by the page rather than by the whole session's delivery tail.
+    def delivered_agent_message_ids(since_id : Int64, pid : Int64, wanted : Set(Int64)? = nil) : Set(Int64)
       ids = Set(Int64).new
+      return ids if wanted && wanted.empty?
       cursor = since_id
       loop do
         page = agent_deliveries_after(cursor, 500)
-        page.rows.each { |d| ids << d.message_id if d.ok && d.pid == pid && d.via != AgentDelivery::VIA_POLL }
+        page.rows.each do |d|
+          next unless d.ok && d.pid == pid && AgentDelivery::CARRIED.includes?(d.via)
+          next if wanted && !wanted.includes?(d.message_id)
+          ids << d.message_id
+        end
+        break if wanted && ids.size >= wanted.size # every candidate accounted for
         break unless page.full
         cursor = page.scanned_max
       end

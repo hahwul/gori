@@ -108,6 +108,11 @@ describe Gori::MCP::Courier do
       d = store.agent_deliveries_after(m, 10).rows.first
       d.via.should eq("channel")
       d.ok.should be_true
+      # A channel push is unverifiable, so it must NOT retire the message: operator_messages
+      # still owes it (a session that never registered the channel would otherwise lose it
+      # silently). Only a confirmed route — socket or the agent's own pickup — carries it.
+      store.delivered_agent_message_ids(0_i64, 77_i64).includes?(m).should be_false
+      store.agent_messages_after(0_i64, 77_i64).rows.map(&.id).should contain(m)
 
       # channels on, but a client that is not Claude Code: no push, socket/poll instead
       rig.client = "codex"

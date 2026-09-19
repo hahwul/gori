@@ -62,7 +62,7 @@ module Gori::Tui
         {:info, "left for #{who} to pick up (operator_messages)"}
       when Gori::AgentDelivery::VIA_PICKED_UP
         {:success, "→ #{who} picked it up (operator_messages)"}
-      when "channel"
+      when Gori::AgentDelivery::VIA_CHANNEL
         # A channel push is fire-and-forget: the server cannot tell whether that session was
         # launched with channels, and a push to one that was not is dropped without a word.
         # Say so on the row rather than let "got it" promise what nobody checked.

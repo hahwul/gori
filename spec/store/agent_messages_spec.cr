@@ -68,6 +68,22 @@ describe Gori::Store, "#1090 operator messages" do
     end
   end
 
+  it "counts only confirmed routes as carried: a successful channel push does not retire the message" do
+    with_store do |store|
+      m = store.post_agent_message("hi", "pid:1", nil)
+      # An ok channel push to pid 1 — but a channel is unverifiable, so it is NOT carried.
+      store.record_agent_delivery(m, Gori::AgentDelivery::VIA_CHANNEL, "claude-code pid 1", true, pid: 1)
+      store.delivered_agent_message_ids(0, 1).should be_empty
+      # Now a socket write that landed for the same session: that one is confirmed and carries it.
+      store.record_agent_delivery(m, Gori::AgentDelivery::VIA_SOCKET, "claude-code pid 1", true, pid: 1)
+      store.delivered_agent_message_ids(0, 1).should eq(Set{m})
+      # The page-bounded overload agrees, and returns nothing for a candidate set that excludes m.
+      store.delivered_agent_message_ids(0, 1, Set{m}).should eq(Set{m})
+      store.delivered_agent_message_ids(0, 1, Set{m + 999}).should be_empty
+      store.delivered_agent_message_ids(0, 1, Set(Int64).new).should be_empty
+    end
+  end
+
   it "reports the feed's high-water mark for a cursor that starts at now" do
     with_store do |store|
       store.last_event_id.should eq(0)

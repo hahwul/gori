@@ -18,9 +18,12 @@ module Gori
         limit = clamp(optional_int_arg(h, "limit"), 50, 200)
         include_delivered = bool_arg(h, "include_delivered", false)
         page = store.agent_messages_after(since, pid, limit)
-        # Always known, whatever the caller asked for: marking is only ever for rows no
-        # route has carried yet, or every repeat call would stack a "picked it up" per row.
-        already = store.delivered_agent_message_ids(since, pid)
+        # Marking is only ever for rows no confirmed route has carried yet, or every repeat
+        # call would stack a "picked it up" per row. Ask only about THIS page's ids (and not at
+        # all when the page is empty — the common "start of turn, nothing new" case), so the
+        # delivery scan is bounded by what we are handing over, not by the session's history.
+        candidates = page.rows.map(&.id).to_set
+        already = candidates.empty? ? Set(Int64).new : store.delivered_agent_message_ids(since, pid, candidates)
         fresh = page.rows.reject { |m| already.includes?(m.id) }
         rows = include_delivered ? page.rows : fresh
         can_mark = !store.read_only?

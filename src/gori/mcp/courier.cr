@@ -7,16 +7,23 @@ module Gori::MCP
   # (#1090). One per `gori mcp` process, started once the client says `initialized`, stopped
   # when the reader hits EOF.
   #
-  # Three routes, best available first, and never two for one message:
+  # Three routes, best available first. Only a CONFIRMED route retires a message from the poll
+  # backstop (`AgentDelivery::CARRIED`): the socket write either lands or reports why, so it
+  # carries the message; the channel push cannot be confirmed, so it does NOT — a session that
+  # was not launched with channels drops the frame without a word, and the message must stay
+  # readable through `operator_messages` rather than vanish. The cost of that safety is that a
+  # channel which DOES work may be read a second time by a polling agent; the silent-loss it
+  # prevents is the worse outcome, and channels are an opt-in preview besides.
   #   1. a `notifications/claude/channel` frame on this JSON-RPC stream — only when the
   #      capability was DECLARED at this session's handshake (the operator's
-  #      `Settings.mcp_channels` as it stood then, latched by the server), because a push to a
-  #      session that did not register the channel is dropped without a word, and combined
-  #      with the socket it would say the same thing twice;
-  #   2. the session's inbox socket (`ClaudeInbox`) — GA, no flags, framed as a peer's note;
-  #   3. nothing — the row stays in the feed for `operator_messages`, and a delivery row says so.
-  # Every message gets exactly one delivery row, which is what the TUI turns into
-  # "→ claude-code got it (socket)" in the notification ring.
+  #      `Settings.mcp_channels` as it stood then, latched by the server). A best-effort nudge:
+  #      the delivery row reads "got it (channel)", but the message is left for poll all the same.
+  #   2. the session's inbox socket (`ClaudeInbox`) — GA, no flags, framed as a peer's note; a
+  #      write that lands carries the message and retires it.
+  #   3. nothing — the row stays in the feed for `operator_messages`, and a poll deposit row
+  #      says so.
+  # Each recipient gets its own delivery row (a broadcast has one per session), which is what
+  # the TUI turns into "→ claude-code got it (socket)" in the notification ring.
   #
   # The cursor starts at the feed's high-water mark when the courier starts: a client that
   # attaches later is not handed what the operator said before it arrived. The store is
@@ -102,13 +109,13 @@ module Gori::MCP
 
     private def deliver(store : Store, m : AgentMessage) : Nil
       label = "#{@client.call || "agent"} pid #{@pid}"
-      route = "poll"
+      route = AgentDelivery::VIA_POLL
       if @channels.call && @client.call == "claude-code"
-        route = "channel"
+        route = AgentDelivery::VIA_CHANNEL
         @emit.call(Courier.channel_frame(m))
         record(store, m, route, label, true)
       elsif path = @inbox.call
-        route = "socket"
+        route = AgentDelivery::VIA_SOCKET
         reason = ClaudeInbox.deliver(path, ClaudeInbox.frame(m.text, m.from_tab))
         record(store, m, route, label, reason.nil?, reason)
       else
