@@ -52,7 +52,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ids = @active_tab == :history ? history_target_flow_ids : [] of Int64
     from = @active_tab.to_s
     # One agent is not a choice. The picker would be a card whose only content is the answer.
-    if rows.size == 1
+    # One addressable agent: no picker. One agent whose marker carries no pid cannot be
+    # addressed, and the "all" row only exists on the picker — so it gets the picker.
+    if rows.size == 1 && AgentTargets.target_for(rows.first)
       prompt_agent_message(rows.first, ids, from)
       return
     end

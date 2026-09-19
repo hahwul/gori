@@ -36,10 +36,18 @@ module Gori::MCP
                    @channels : Proc(Bool), @emit : Proc(String, Nil),
                    @inbox : Proc(String?) = -> { ClaudeInbox.discover })
       @cursor = 0_i64
-      @cursor_store = nil.as(UInt64?)
+      # The store the cursor was taken against — a REFERENCE, never its object_id: a bare id
+      # can be reused by the next store the GC hands out at the same address, and a cursor
+      # from one feed applied to another either replays or skips (the bare-id cache trap).
+      @cursor_store = nil.as(Store?)
       @delivered = 0
       @stop = Channel(Nil).new(1)
       @running = false
+      @warned_read_only = false
+      # Anchor the cursor NOW, when the presence marker that makes this process a target is
+      # already up — not at the first tick, half a second after `initialized`. A message the
+      # operator sends in between is owed a delivery, not a silent skip.
+      @store.call.try { |st| rebase(st) }
     end
 
     def start : Nil
@@ -75,7 +83,12 @@ module Gori::MCP
       rebase(store)
       # The high-water mark is read BEFORE the page: the TUI is another process, and a row it
       # commits between the two queries must land inside the next page, not behind the cursor.
+      # It is also the idle gate: one `MAX(id)` off the rowid index per tick, and the page
+      # query only when the feed grew — a host full of idle servers costs a scalar each.
+      # (Not `PRAGMA data_version`: it does not reliably move for a write from this process's
+      # own writer connection, which the courier's delivery rows are.)
       high = store.last_event_id
+      return 0 if high <= @cursor
       page = store.agent_messages_after(@cursor, @pid, PAGE)
       page.rows.each do |m|
         deliver(store, m)
@@ -89,21 +102,39 @@ module Gori::MCP
 
     private def deliver(store : Store, m : AgentMessage) : Nil
       label = "#{@client.call || "agent"} pid #{@pid}"
+      route = "poll"
       if @channels.call && @client.call == "claude-code"
+        route = "channel"
         @emit.call(Courier.channel_frame(m))
-        store.record_agent_delivery(m.id, "channel", label, true, pid: @pid)
+        record(store, m, route, label, true)
       elsif path = @inbox.call
+        route = "socket"
         reason = ClaudeInbox.deliver(path, ClaudeInbox.frame(m.text, m.from_tab))
-        store.record_agent_delivery(m.id, "socket", label, reason.nil?, reason, pid: @pid)
+        record(store, m, route, label, reason.nil?, reason)
       else
-        store.record_agent_delivery(m.id, AgentDelivery::VIA_POLL, label, true,
-          "no live route; left for operator_messages", pid: @pid)
+        record(store, m, AgentDelivery::VIA_POLL, label, true, "no live route; left for operator_messages")
       end
     rescue ex
       # The cursor has already passed this row; a raise here would lose it silently. A row
-      # that says why is the only honest outcome.
-      store.record_agent_delivery(m.id, "socket", "#{@client.call || "agent"} pid #{@pid}", false,
-        "delivery raised: #{ex.message || ex.class.name}", pid: @pid) rescue nil
+      # that names the route it was trying is the only honest outcome.
+      # Locals assigned before a raise are nilable inside the rescue; the fallbacks are the
+      # values the method starts with.
+      record(store, m, route || "poll", label || "#{@client.call || "agent"} pid #{@pid}", false,
+        "delivery raised: #{ex.message || ex.class.name}") rescue nil
+    end
+
+    # A `--read-only` server has no writer fiber: the message still goes out, but no row can
+    # say so, and the operator's ring stays silent. Said once, in the log, rather than never.
+    private def record(store : Store, m : AgentMessage, via : String, label : String, ok : Bool,
+                       reason : String? = nil) : Nil
+      if store.read_only?
+        unless @warned_read_only
+          @warned_read_only = true
+          Log.warn { "mcp: read-only server delivered an operator message but cannot record it; the ring will not show it" }
+        end
+        return
+      end
+      store.record_agent_delivery(m.id, via, label, ok, reason, pid: @pid)
     end
 
     # The channel event. `meta` keys must be `[A-Za-z0-9_]` — a hyphen is silently dropped by
@@ -131,9 +162,8 @@ module Gori::MCP
 
     # A different store object than the cursor was taken against → start from its end.
     private def rebase(store : Store) : Nil
-      key = store.object_id
-      return if @cursor_store == key
-      @cursor_store = key
+      return if @cursor_store.same?(store)
+      @cursor_store = store
       @cursor = store.last_event_id
     end
   end

@@ -281,6 +281,11 @@ module Gori
         @client_name = nil.as(String?)
         @client_version = nil.as(String?)
         @presence = nil.as(AgentPresence?)
+        # #1090: the feed's end when this store was bound. `operator_messages{since:0}` reads
+        # from here, never from the project's first day — taken NOW, at bind, not at the first
+        # call: a message the operator sends between attach and the agent's first poll is
+        # exactly the one the poll layer exists to carry.
+        @messages_floor = @store.try(&.last_event_id) || 0_i64
         if s = @store
           reconcile_env_syntax(s)
           bind_project_network(s)
@@ -330,6 +335,11 @@ module Gori
       # Whether `tools/list` would show `name` under the active `--tools` filter.
       def advertises?(name : String) : Bool
         (f = @tool_filter).nil? || f.allows?(name)
+      end
+
+      # Where `operator_messages` starts reading (see `initialize` / `bind_project`).
+      def messages_floor : Int64
+        @messages_floor
       end
 
       # The LIVE project binding. `bind_project` (switch_project, and create_project when it

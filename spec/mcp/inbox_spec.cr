@@ -40,9 +40,12 @@ describe Gori::MCP::ClaudeInbox do
     begin
       Inbox.discover(1_i64 << 40).should be_nil # no such pid, no such file
       with_inbox do |path, _|
-        # discovery is by pid; point the candidate list at the fake through the env override
+        # the env override is trusted only when it names THIS parent pid (the fake is 1.sock):
+        # a server under Codex, or under a nested Claude session, inherits the OUTER session's
+        # socket and must not write there
         ENV["CLAUDE_CODE_MESSAGING_SOCKET"] = path
-        Inbox.discover(1_i64 << 40).should eq(path)
+        Inbox.discover(1_i64).should eq(path)
+        Inbox.discover(1_i64 << 40).should be_nil
       end
     ensure
       ENV.delete("CLAUDE_CODE_MESSAGING_SOCKET")

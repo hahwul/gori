@@ -117,36 +117,39 @@ module Gori
     # Messages after `since_id` (feed cursor), oldest first, addressed to `pid` or to all.
     def agent_messages_after(since_id : Int64, pid : Int64, limit : Int32 = 100) : MessagePage
       rows = [] of AgentMessage
-      scanned = since_id
-      count = 0
-      @db.query("SELECT #{EVENT_COLS} FROM events WHERE id > ? AND kind = ? ORDER BY id ASC LIMIT ?",
-        args: [since_id, AgentMessage::KIND, limit.to_i64] of DB::Any) do |rs|
-        rs.each do
-          row = read_event(rs)
-          scanned = row.id
-          count += 1
-          if (m = AgentMessage.from_row(row)) && m.for?(pid)
-            rows << m
-          end
+      scanned, full = each_event_of_kind(AgentMessage::KIND, since_id, limit) do |row|
+        if (m = AgentMessage.from_row(row)) && m.for?(pid)
+          rows << m
         end
       end
-      MessagePage.new(rows, scanned, count >= limit)
+      MessagePage.new(rows, scanned, full)
     end
 
     def agent_deliveries_after(since_id : Int64, limit : Int32 = 100) : DeliveryPage
       rows = [] of AgentDelivery
+      scanned, full = each_event_of_kind(AgentDelivery::KIND, since_id, limit) do |row|
+        AgentDelivery.from_row(row).try { |d| rows << d }
+      end
+      DeliveryPage.new(rows, scanned, full)
+    end
+
+    # One SQL page of one kind, oldest first. Yields every row the page returned and answers
+    # {last scanned id, page was full} — the two facts every cursor over this feed needs, in
+    # one place, so the "advance past what was scanned, not past what matched" rule cannot
+    # drift between the readers.
+    private def each_event_of_kind(kind : String, since_id : Int64, limit : Int32, & : EventRow ->) : {Int64, Bool}
       scanned = since_id
       count = 0
       @db.query("SELECT #{EVENT_COLS} FROM events WHERE id > ? AND kind = ? ORDER BY id ASC LIMIT ?",
-        args: [since_id, AgentDelivery::KIND, limit.to_i64] of DB::Any) do |rs|
+        args: [since_id, kind, limit.to_i64] of DB::Any) do |rs|
         rs.each do
           row = read_event(rs)
           scanned = row.id
           count += 1
-          AgentDelivery.from_row(row).try { |d| rows << d }
+          yield row
         end
       end
-      DeliveryPage.new(rows, scanned, count >= limit)
+      {scanned, count >= limit}
     end
 
     # The feed's high-water mark — where a courier or a delivery tail STARTS, so a session that

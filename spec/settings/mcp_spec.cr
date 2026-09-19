@@ -9,6 +9,7 @@ private def with_mcp_home(&)
   dir = File.tempname("gori-mcp-settings")
   Dir.mkdir_p(dir)
   prev_home = ENV["GORI_HOME"]?
+  prev_cfg = ENV["GORI_CONFIG"]?
   prev_channels = Gori::Settings.mcp_channels?
   begin
     ENV["GORI_HOME"] = dir
@@ -19,6 +20,7 @@ private def with_mcp_home(&)
   ensure
     Gori::Settings.path_override = nil
     prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+    prev_cfg ? (ENV["GORI_CONFIG"] = prev_cfg) : ENV.delete("GORI_CONFIG")
     Gori::Settings.mcp_channels = prev_channels
     FileUtils.rm_rf(dir)
   end
