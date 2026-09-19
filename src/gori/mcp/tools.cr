@@ -440,10 +440,15 @@ module Gori
           selection_source: @selection_source)
       end
 
-      # The `initialize` handshake carries the peer's name; the server hands it here (it may
-      # arrive before or after a bind). Store it for the next announce and, if a marker already
-      # exists, fill its name in place.
+      # The peer's name: carried once by the `initialize` handshake, and on EVERY request
+      # under the stateless revision (`_meta["io.modelcontextprotocol/clientInfo"]`), which
+      # is why this returns early when nothing moved — `update` rewrites the marker file,
+      # and a per-call rewrite would put a file write on the hot path of every tool call.
+      # Same shape `AgentPresence#update_capture` already keeps for the capture bit.
+      #
+      # Store it for the next announce and, if a marker already exists, fill its name in place.
       def client_seen(name : String?, version : String?) : Nil
+        return if @client_name == name && @client_version == version
         @client_name = name
         @client_version = version
         @presence.try(&.update(name, version))
