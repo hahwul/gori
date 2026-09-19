@@ -81,7 +81,7 @@ module Gori
         end
       end
 
-      @[Tool("mine_status", gated: true)]
+      @[Tool("mine_status", gated: true, read_only: true)]
       private def mine_status(h) : Result
         mjob = lookup_mine_job(h)
         return mjob if mjob.is_a?(Result)
@@ -150,7 +150,7 @@ module Gori
         end
       end
 
-      @[Tool("mine_results", gated: true)]
+      @[Tool("mine_results", gated: true, read_only: true)]
       private def mine_results(h) : Result
         mjob = lookup_mine_job(h)
         return mjob if mjob.is_a?(Result)

@@ -160,7 +160,7 @@ module Gori
         end
       end
 
-      @[Tool("authorize_status", gated: true)]
+      @[Tool("authorize_status", gated: true, read_only: true)]
       private def authorize_status(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
@@ -197,7 +197,7 @@ module Gori
       # The verdicts, per replayed request. The headline fields come FIRST and are computed
       # over the whole job, never over the page: a bypass on request 40 must not be invisible
       # to a caller who read page 1 and stopped.
-      @[Tool("authorize_results", gated: true)]
+      @[Tool("authorize_results", gated: true, read_only: true)]
       private def authorize_results(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)

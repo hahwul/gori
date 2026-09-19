@@ -119,3 +119,40 @@ describe "MCP tool registry" do
     end
   end
 end
+
+# The third contract the generation carries: `annotations.readOnlyHint`, which is what an
+# MCP client reads to decide whether a call needs the human. It defaults to `!gated` — the
+# same declaration `--read-only` enforces, so the hint and the gate cannot drift — and the
+# `read_only:` flag spells the two populations where they disagree (mcp/tool.cr).
+describe "MCP tool annotations" do
+  it "hints read-only on the tools that neither mutate nor dial, and on no others" do
+    with_store do |store|
+      listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+      by_name = listed.to_h { |t| {t["name"].as_s, t} }
+
+      {"list_history", "get_flow", "ql_reference", "fuzz_status", "list_jobs"}.each do |name|
+        by_name[name]["annotations"]["readOnlyHint"].as_bool.should be_true
+        # A read tool answers from this project's store and never dials.
+        by_name[name]["annotations"]["openWorldHint"].as_bool.should be_false
+      end
+
+      # The ungated writers. They gate themselves rather than being gated, so the hint
+      # cannot be read off `gated:` alone — which is the whole reason the flag exists.
+      {"send_request", "create_issue", "probe_scan", "oast_poll",
+       "switch_project", "reply_to_operator"}.each do |name|
+        by_name[name]["annotations"]["readOnlyHint"].as_bool.should be_false
+        # Left unstated, so the spec's conservative default (true) stands: an action tool
+        # may or may not reach the network, and the population that does includes the fuzzer.
+        by_name[name]["annotations"]["openWorldHint"]?.should be_nil
+      end
+
+      listed.each { |t| t["annotations"]["readOnlyHint"].raw.should be_a(Bool) }
+    end
+  end
+
+  # An agent action is by definition a mutation or an outbound send. The macro refuses the
+  # combination on the declaration; this is the same statement read off the built sets.
+  it "never calls an agent action read-only" do
+    (Gori::MCP::Tools::READ_ONLY_TOOLS & Gori::MCP::Tools::AGENT_ACTION_TOOLS).should be_empty
+  end
+end

@@ -284,7 +284,7 @@ module Gori
         djob.persist_buf.clear # a store failure must not wedge the crawl or grow forever
       end
 
-      @[Tool("discover_status", gated: true)]
+      @[Tool("discover_status", gated: true, read_only: true)]
       private def discover_status(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)
@@ -323,7 +323,7 @@ module Gori
         end)
       end
 
-      @[Tool("discover_results", gated: true)]
+      @[Tool("discover_results", gated: true, read_only: true)]
       private def discover_results(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)

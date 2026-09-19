@@ -166,7 +166,7 @@ module Gori
         err(ex.message || "could not create project", "INVALID_ARGUMENT", field: "name")
       end
 
-      @[Tool("switch_project", unbound: true)]
+      @[Tool("switch_project", read_only: false, unbound: true)]
       private def switch_project(h) : Result
         name = str(h, "project")
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
