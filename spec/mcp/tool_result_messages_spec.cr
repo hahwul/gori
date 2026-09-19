@@ -25,15 +25,14 @@ describe "MCP operator messages on a tool result" do
       tools = tools_for(store)
       id = store.post_agent_message("check the login flow", "all", "history", [7_i64, 9_i64])
 
-      note = tools.pending_operator_note("list_history")
-      note.should_not be_nil
-      note = note.not_nil!
-      note.should contain("check the login flow")
+      note = tools.pending_operator_note("list_history").not_nil!
+      tools.commit_operator_note(note)
+      note.text.should contain("check the login flow")
       # Everything the row holds that the agent cannot get back once the route retires it:
       # where it was sent from, what was marked, and which message to answer.
-      note.should contain("from the history tab")
-      note.should contain("7, 9")
-      note.should contain("in_reply_to #{id}")
+      note.text.should contain("from the history tab")
+      note.text.should contain("7, 9")
+      note.text.should contain("in_reply_to #{id}")
 
       d = deliveries(store, id).find { |row| row.message_id == id }.not_nil!
       d.via.should eq(Gori::AgentDelivery::VIA_TOOL_RESULT)
@@ -92,7 +91,9 @@ describe "MCP operator messages on a tool result" do
     begin
       tools = tools_for(store, allow_actions: false)
       id = writer.post_agent_message("read-only all the same", "all", nil)
-      tools.pending_operator_note("list_history").not_nil!.should contain("read-only all the same")
+      ro = tools.pending_operator_note("list_history").not_nil!
+      tools.commit_operator_note(ro)
+      ro.text.should contain("read-only all the same")
       deliveries(writer, id).select { |d| d.message_id == id }.should be_empty
       tools.pending_operator_note("list_history").should be_nil
     ensure
@@ -101,6 +102,50 @@ describe "MCP operator messages on a tool result" do
       File.delete?(path)
       File.delete?("#{path}-wal")
       File.delete?("#{path}-shm")
+    end
+  end
+
+  # The other half of the read/commit split: a response that never went out (a cancelled
+  # request, a client that vanished mid-call) must leave the message exactly where it was.
+  # Marking at READ time meant the ring said "got it" for a line nothing carried, and the
+  # cursor had already moved past it — a silent loss with a success row on top of it.
+  it "retires nothing until the response it rode on was actually emitted" do
+    with_store do |store|
+      tools = tools_for(store)
+      id = store.post_agent_message("only if you got it", "all", nil)
+
+      first = tools.pending_operator_note("list_history").not_nil!
+      first.text.should contain("only if you got it")
+      # The frame was never emitted, so nothing is committed.
+      deliveries(store, id).select { |d| d.message_id == id }.should be_empty
+
+      second = tools.pending_operator_note("list_issues").not_nil!
+      second.ids.should eq([id])
+      tools.commit_operator_note(second)
+      deliveries(store, id).count { |d| d.message_id == id }.should eq(1)
+    end
+  end
+
+  # A backlog longer than one page: the cursor may only advance past what was SCANNED, and the
+  # note has to say that it is holding some back — nothing else will tell the model.
+  it "carries one page, says more is waiting, and hands the rest over next call" do
+    with_store do |store|
+      tools = tools_for(store)
+      ids = (1..7).map { |n| store.post_agent_message("line #{n}", "all", nil) }
+
+      first = tools.pending_operator_note("list_history").not_nil!
+      tools.commit_operator_note(first)
+      first.ids.size.should eq(Gori::MCP::Tools::TOOL_RESULT_MESSAGES)
+      first.ids.should eq(ids.first(5))
+      first.text.should contain("More operator messages are waiting")
+      first.text.should contain("line 5")
+      first.text.should_not contain("line 6")
+
+      second = tools.pending_operator_note("list_history").not_nil!
+      tools.commit_operator_note(second)
+      second.ids.should eq(ids.last(2))
+      second.text.should_not contain("More operator messages are waiting")
+      tools.pending_operator_note("list_history").should be_nil
     end
   end
 

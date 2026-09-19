@@ -110,7 +110,16 @@ module Gori::MCP
       # the whole reason the route refuses to cache.
       @codex_memo = nil
       @codex_asked = false
+      # What a confirmed route already carried to THIS session is not ours to deliver again.
+      # The courier used to skip this test because it was the only route that ran on its own
+      # clock — but `operator_messages` has always been able to pick a message up inside the
+      # 500ms before a tick, and the tool-result carry (#1090 layer four) now does so on every
+      # call the agent makes. Without the test, a message the agent already has is written to
+      # its inbox socket or queued into its Codex thread a second time, which for Codex is a
+      # whole extra turn spent on an instruction it already acted on.
+      already = claimed(store, page)
       page.rows.each do |m|
+        next if already.includes?(m.id)
         deliver(store, m)
         @delivered += 1
       end
@@ -118,6 +127,14 @@ module Gori::MCP
       # has shown everything up to `high`.
       @cursor = page.full ? {@cursor, page.scanned_max}.max : {@cursor, page.scanned_max, high}.max
       page.rows.size
+    end
+
+    # The ids on this page a confirmed route has already delivered to this session. Scanned
+    # from just below the oldest row on the page: a delivery is written after the message it
+    # reports, so nothing older can answer for one of these.
+    private def claimed(store : Store, page : Store::MessagePage) : Set(Int64)
+      return Set(Int64).new if page.rows.empty?
+      store.delivered_agent_message_ids(page.rows.min_of(&.id) - 1, @pid, page.rows.map(&.id).to_set)
     end
 
     private def deliver(store : Store, m : AgentMessage) : Nil

@@ -613,8 +613,10 @@ module Gori
         tool j, "operator_messages",
           "Messages the OPERATOR typed for you in the gori TUI (\"Tell the agent…\"), addressed " \
           "to this session or to every attached agent. gori delivers them live when it can (a " \
-          "channel event or a peer message in Claude Code); this is the fallback every agent has: " \
-          "call it at the start of a turn, or when a channel/peer note points here, and act on " \
+          "channel event or a peer message in Claude Code, a queued turn in Codex) and otherwise " \
+          "attaches them to the result of the next gori tool you call, as a `[gori]` block beside " \
+          "that tool's own answer; this is the fallback every agent has: " \
+          "call it at the start of a turn, or when a `[gori]` note points here, and act on " \
           "what comes back. Messages already carried by a live route are omitted unless " \
           "`include_delivered` is true. Forward-cursored like list_events: pass `next_cursor` " \
           "back as `since`. Each message names the tab the operator was on and any flow ids " \
