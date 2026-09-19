@@ -77,7 +77,16 @@ module Gori::Tui
     def self.reply_line(reply : Gori::AgentReply) : {Symbol, String}
       who = AgentsOverlay.safe_client(reply.target_label.split(" pid ").first?) || "agent"
       level = {"success" => :success, "warn" => :warn, "error" => :error}[reply.level]? || :info
-      {level, "#{who}: #{safe(reply.summary) || ""}"}
+      # The client NAME is width-capped (`safe`), but the SUMMARY is not: it is the message,
+      # and the surfaces size it themselves — the ring row truncates to one line, Miss Ring's
+      # bubble wraps it to three. Capping it here would flatten both to a client-name width.
+      {level, "#{who}: #{scrub_line(reply.summary)}"}
+    end
+
+    # Peer-written text with the control characters removed and whitespace collapsed, but no
+    # width cap — for a line the drawing surface will size.
+    private def self.scrub_line(text : String) : String
+      text.scrub.gsub(/\p{C}/, "").gsub(/\s+/, " ").strip
     end
 
     # `target_label`, `via` and `reason` are all written by ANOTHER process. Same stance as a

@@ -1190,16 +1190,24 @@ describe Gori::Tui::Companion do
       end
     end
 
-    it "truncates a long bubble inside the body" do
+    it "wraps a long bubble across up to three rows, marking the tail, inside the body" do
       backend = MemoryBackend.new(80, 24)
       long = "probe " * 60
       Companion.draw(Screen.new(backend), body, Mascot::Frame.new(bubble: long))
       rect = Companion.place(body).not_nil!
-      text_row = rect.y - Companion::BUBBLE_H + 1
-      backend.row(text_row).should contain("…")
+      box = Companion.bubble_box(body, rect, long).not_nil!
+      box.h.should eq(Companion::BUBBLE_MAX_LINES + Companion::BUBBLE_CHROME) # grew to the ceiling
+      rows = (box.y + 1...box.bottom - 1).map { |y| backend.row(y) }
+      rows.join.should contain("…") # the cut is marked
       (0...24).each do |y|
         Screen.draw_width(backend.row(y).rstrip).should be <= body.right
       end
+    end
+
+    it "keeps a short bubble to one row" do
+      rect = Companion.place(body).not_nil!
+      box = Companion.bubble_box(body, rect, "done").not_nil!
+      box.h.should eq(1 + Companion::BUBBLE_CHROME)
     end
 
     # The width guard has to stay calibrated against what Layout can actually hand us:
