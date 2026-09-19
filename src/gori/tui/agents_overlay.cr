@@ -19,6 +19,8 @@ module Gori::Tui
   class AgentsOverlay < Overlay
     # ^P leaves for the command palette, like every other list overlay.
     property on_palette : Proc(Nil)?
+    # Bare `t` on the selected row: message that agent without leaving for the palette (#1090).
+    property on_tell : Proc(Gori::AgentPresence::Entry, Nil)?
 
     def initialize(@probe : Proc(Array(Gori::AgentPresence::Entry)))
       @selected = 0
@@ -34,6 +36,11 @@ module Gori::Tui
 
     def rows : Array(Gori::AgentPresence::Entry)
       @rows
+    end
+
+    # The row the cursor is on, for the tell affordance.
+    def selected_entry : Gori::AgentPresence::Entry?
+      @rows[@selected]?
     end
 
     # The top-bar chip label for a set of attached clients (#815). Pure so a spec pins it
@@ -84,7 +91,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ scroll · r re-check · esc close"
+      "↑/↓ scroll · t tell · r re-check · esc close"
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -93,6 +100,10 @@ module Gori::Tui
         on_palette.try(&.call)
       elsif k.escape?
         return :cancel
+      elsif tell?(ev)
+        # Same shape as on_palette: the callback drops this modal and raises the prompt, so
+        # this returns :stay rather than asking the shell to close on top of it.
+        (entry = selected_entry) && on_tell.try(&.call(entry))
       else
         handle_nav(ev)
       end
@@ -103,6 +114,12 @@ module Gori::Tui
     # documents at length: `Event::Key#char` folds ^R back to 'r' and the termisu parser emits
     # ^K as `Key::LowerK + Ctrl`, so a chord would otherwise trigger the letter arms. Claimed
     # and dropped rather than fallen through, because this overlay returns :stay either way.
+    # Bare `t` — a mnemonic, so the ctrl/alt guard keeps `^T` off it, same as the `r` arm.
+    private def tell?(ev : Termisu::Event::Key) : Bool
+      return false if ev.ctrl? || ev.alt?
+      (ev.char || ev.key.to_char) == 't' && !on_tell.nil? && !selected_entry.nil?
+    end
+
     private def handle_nav(ev : Termisu::Event::Key) : Nil
       k = ev.key
       if k.up?

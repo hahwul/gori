@@ -64,6 +64,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # Same ordering rule as open_listeners: drop this modal BEFORE raising the palette, via
     # leave_overlay so no pop-back lands on top of it.
     ov.on_palette = -> { leave_overlay; open_palette }
+    # Message the highlighted agent straight from the card (#1090): drop the modal first
+    # (same ordering as on_palette), then raise the one-line prompt for exactly that entry.
+    ov.on_tell = ->(entry : Gori::AgentPresence::Entry) {
+      leave_overlay
+      ids = @active_tab == :history ? history_target_flow_ids : [] of Int64
+      prompt_agent_message(entry, ids, @active_tab.to_s)
+    }
     open_overlay(ov)
   end
 end

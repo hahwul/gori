@@ -25,6 +25,14 @@ private def delivery(via : String = "socket", ok : Bool = true, reason : String?
     ok: ok, reason: reason, created_at: 0_i64)
 end
 
+private def agents_overlay(entries) : Gori::Tui::AgentsOverlay
+  Gori::Tui::AgentsOverlay.new(-> { entries })
+end
+
+private def tkey(mods : Termisu::Input::Modifier = :none) : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key::LowerT, mods, 't')
+end
+
 describe AgentTargets do
   describe ".label" do
     it "names the client, its pid and how long it has been attached" do
@@ -124,5 +132,31 @@ describe "the delivery drain's wiring" do
       l.includes?("@agent_delivery_cursor = @session.store.last_agent_delivery_id")
     end
     seeded.should be_true
+  end
+end
+
+describe Gori::Tui::AgentsOverlay, "tell affordance (#1090)" do
+  it "hands the selected entry to on_tell on bare t, and closes nothing itself" do
+    a = mcp_entry("claude-code", 1_i64)
+    b = mcp_entry("codex", 2_i64)
+    ov = agents_overlay([a, b])
+    told = [] of Gori::AgentPresence::Entry
+    ov.on_tell = ->(e : Gori::AgentPresence::Entry) { told << e; nil }
+    ov.handle_key(tkey).should eq(:stay)
+    told.map(&.pid).should eq([1_i64]) # the first row, where the cursor rests
+    ov.hint.should contain("t tell")
+  end
+
+  it "ignores t when nothing is attached or the chord is modified" do
+    ov = agents_overlay([] of Gori::AgentPresence::Entry)
+    told = 0
+    ov.on_tell = ->(_e : Gori::AgentPresence::Entry) { told += 1; nil }
+    ov.handle_key(tkey)
+    ov.selected_entry.should be_nil
+    told.should eq(0)
+    one = agents_overlay([mcp_entry])
+    one.on_tell = ->(_e : Gori::AgentPresence::Entry) { told += 1; nil }
+    one.handle_key(tkey(:ctrl))
+    told.should eq(0) # ^T is not the mnemonic
   end
 end
