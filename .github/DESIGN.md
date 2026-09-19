@@ -2890,17 +2890,21 @@ semantics to a client that has already opened a session and has no way to switch
 we do not speak is refused with `-32022` and the list we do — and that refusal is load-bearing
 in the other direction too: for a dual-era client probing us on stdio, a *recognised* modern
 error is how it learns the server is modern and must NOT fall back to `initialize`. Which is
-also why `server/discover` is answered even when the request names no version at all:
+also why `server/discover` is the one request exempted from the metadata gate — answered
+when it names no version at all, and when it names one but declares no capabilities:
 refusing "tell me what to say" for not having said it first sends that client back to the
-handshake for no reason.
+handshake for no reason, and a bootstrap probe has nothing to declare yet. The VERSION half
+of the gate still applies to it, because that refusal is the signal.
 
 **Cache hints are `private`, and discovery's TTL is zero.** A cached response is keyed by
 method plus params, and `{"method":"tools/list"}` is the same key for every gori on the
 machine — so `public` would let a shared cache serve one operator's `--tools`-narrowed
 catalogue to a different server's client. Nothing there is user-specific; it is
-SERVER-specific, which the cache key cannot see. `tools/list` is otherwise honestly cacheable
-(the catalogue is a pure function of the start-up flags and cannot move while the process
-lives), while `server/discover` gets `ttlMs: 0` because its `instructions` name the bound
+SERVER-specific, which the cache key cannot see. `tools/list` is otherwise cacheable, because the
+catalogue is a pure function of the start-up flags — with one exception that the TTL is read
+off rather than asserted beside: a read-only server that is still unbound advertises
+`create_project` and loses it on the first bind, so while that is ahead of us the answer is
+zero. `server/discover` gets `ttlMs: 0` outright, because its `instructions` name the bound
 project and `switch_project` moves that mid-session — the same drift `instructions_text`
 already warns every client about (#1003), answered here by refusing to let a client cache the
 sentence that would go stale.

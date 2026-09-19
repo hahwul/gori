@@ -132,9 +132,12 @@ module Gori
             {% if ann[:read_only] == !ann[:gated] %}
               {% raise "#{m.name}: @[Tool] read_only: #{ann[:read_only]} is what `gated: #{ann[:gated] ? true : false}` already implies — drop it, or the exception list stops being readable" %}
             {% end %}
-            {% if ann[:read_only] && ann[:agent_action] %}
-              {% raise "#{m.name}: @[Tool] cannot be both read_only and agent_action — an agent action is a mutation or an outbound send" %}
-            {% end %}
+          {% end %}
+          # On the EFFECTIVE value, not on the spelled one: the default (`!gated`) is where
+          # this fails open. `agent_action: true` with no `gated: true` would otherwise land
+          # in READ_ONLY_TOOLS and tell a client it may run an outbound send unattended.
+          {% if (ann.named_args.keys.map(&.stringify).includes?("read_only") ? ann[:read_only] : !ann[:gated]) && ann[:agent_action] %}
+            {% raise "#{m.name}: @[Tool] agent_action is read-only here — an agent action is a mutation or an outbound send, so it needs `gated: true` (and must not carry `read_only: true`)" %}
           {% end %}
         {% end %}
 

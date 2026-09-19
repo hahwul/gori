@@ -204,8 +204,11 @@ module Gori
         # `resultType` a modern client parses is owed here too. `ping` itself was REMOVED in
         # 2026-07-28 — we go on answering it, because a server that does is breaking nothing
         # and a dual-era client's legacy half still sends it.
-        gate = era_of(id, obj["params"]?)
+        gate = era_of(id, method, obj["params"]?)
         return true if gate.refused
+        # No `note_modern_client` here, deliberately: that writes the presence marker and
+        # starts the courier, and the whole point of this path is that a liveness probe is
+        # answered without the reader doing work. The worker's path takes the note.
         write_result(id, gate.version) { }
         true
       end
@@ -231,7 +234,7 @@ module Gori
       #     the client can retry instead of guess. That error is also the signal a dual-era
       #     client probing us needs: a recognised modern error means "modern server, pick
       #     another version" and explicitly NOT "fall back to initialize".
-      private def era_of(id : JSON::Any, params : JSON::Any?) : EraGate
+      private def era_of(id : JSON::Any, method : String, params : JSON::Any?) : EraGate
         meta = obj_field(params, "_meta")
         requested = obj_field(meta, Protocol::META_PROTOCOL_VERSION).try(&.as_s?)
         return EraGate.new(nil, false) if requested.nil? || Protocol.legacy?(requested)
@@ -250,12 +253,18 @@ module Gori
         # silently accepts a malformed request teaches the client its requests are fine, and
         # the next server it meets will not agree. The refusal names the key, which is the
         # only thing that makes it recoverable.
-        unless obj_field(meta, Protocol::META_CLIENT_CAPS).try(&.as_h?)
+        #
+        # `server/discover` is the exception, and for the same reason it is answered without
+        # a version at all: it is the request a client sends to find out what to send, and a
+        # bootstrap probe that has stamped its version but has no capabilities to declare yet
+        # would be refused by the one RPC that exists to unblock it. The VERSION half above
+        # still applies — a discovery naming a revision we do not speak is what tells a
+        # dual-era client we are modern.
+        unless method == "server/discover" || obj_field(meta, Protocol::META_CLIENT_CAPS).try(&.as_h?)
           write_error(id, -32602, "#{Protocol::META_CLIENT_CAPS} is required in _meta " \
                                   "on every #{requested} request")
           return EraGate.new(nil, true)
         end
-        note_modern_client(meta)
         EraGate.new(requested, false)
       end
 
@@ -358,9 +367,10 @@ module Gori
         # The era gate runs BEFORE the method is looked at: a request naming a revision we
         # do not speak is refused whatever it was asking for, and the one naming a revision
         # we do decides the envelope every branch below writes.
-        gate = era_of(id, params)
+        gate = era_of(id, method, params)
         return if gate.refused
         era = gate.version
+        note_modern_client(obj_field(params, "_meta")) if era
         case method
         when "server/discover" then handle_discover(id)
         when "initialize"      then handle_initialize(id, params)
@@ -570,15 +580,26 @@ module Gori
       private def handle_tools_list(id : JSON::Any, era : String? = nil) : Nil
         write_result(id, era) do |j|
           j.field("tools") { @tools.list(j) }
-          # Cache hints are REQUIRED on a modern `tools/list`. The catalogue cannot change
-          # while this process lives (it is a pure function of `--read-only` and `--tools`),
-          # so the hint is honest rather than a guess — see `Protocol::TOOLS_LIST_TTL_MS`
-          # for why it is still not forever.
+          # Cache hints are REQUIRED on a modern `tools/list`.
           if era
-            j.field "ttlMs", Protocol::TOOLS_LIST_TTL_MS
+            j.field "ttlMs", tool_list_ttl_ms
             j.field "cacheScope", Protocol::CACHE_SCOPE
           end
         end
+      end
+
+      # How long the catalogue may be treated as fresh — a promise about the catalogue, so it
+      # is read OFF the catalogue rather than asserted beside it.
+      #
+      # It is fixed for the life of the process, a pure function of `--read-only` and
+      # `--tools`, with one exception: a READ-ONLY server that is still unbound advertises
+      # `create_project` (it is the one tool whose listing asks a live question,
+      # `tools/projects.cr`), and loses it the moment a bind lands. While that is still
+      # ahead of us the honest answer is zero — a client holding a five-minute copy would go
+      # on offering the model a tool that now answers TOOL_DISABLED, and nothing invalidates
+      # it: we advertise no `listChanged`, so the TTL is the only signal there is.
+      private def tool_list_ttl_ms : Int32
+        (@allow_actions || !@tools.unbound?) ? Protocol::TOOLS_LIST_TTL_MS : 0
       end
 
       private def handle_tools_call(id : JSON::Any, era : String?, params : JSON::Any?) : Nil

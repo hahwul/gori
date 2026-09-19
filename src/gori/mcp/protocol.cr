@@ -64,12 +64,12 @@ module Gori
       # and MUST use the ones defined there only with their defined meaning.
       UNSUPPORTED_PROTOCOL_VERSION = -32022
 
-      # How long a client MAY treat `tools/list` as fresh. The catalogue is a pure function
-      # of this process's start-up flags (`--read-only`, `--tools`) — nothing a tool call
-      # can reach changes it — so the honest answer is "until this process ends", which is
-      # not expressible. Five minutes is the compromise: it spares a long agent session the
-      # re-fetch, and an operator who restarts gori with a different `--tools` sees the new
-      # catalogue within one.
+      # How long a client MAY treat `tools/list` as fresh, ONCE the catalogue has settled —
+      # `Server#tool_list_ttl_ms` answers zero while it can still move. Settled, it is a pure
+      # function of this process's start-up flags (`--read-only`, `--tools`), so the honest
+      # answer is "until this process ends", which is not expressible. Five minutes is the
+      # compromise: it spares a long agent session the re-fetch, and an operator who restarts
+      # gori with a different `--tools` sees the new catalogue within one.
       TOOLS_LIST_TTL_MS = 300_000
 
       # …and `server/discover` gets zero, because its `instructions` name the project this

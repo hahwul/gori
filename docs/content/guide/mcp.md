@@ -276,7 +276,7 @@ A few limits worth knowing before you rely on this:
 gori speaks both eras of MCP from one process, and each request decides which one answers it.
 
 - **`2026-07-28`** — the stateless revision. A request carries its protocol version, the client's capabilities and (optionally) the client's name in `_meta`; there is no handshake to open and none to miss. Results come back with `resultType`, the server's identity under `_meta["io.modelcontextprotocol/serverInfo"]`, and — on `tools/list` — the `ttlMs` / `cacheScope` hints a client caches by. `server/discover` answers the supported versions, the capabilities and the instructions in a single call, and may be the first thing you send.
-- **`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`** — the handshake revisions. `initialize` opens a session exactly as it always has, and is answered with the revision you asked for, or with the newest handshake one when gori does not know the version you named.
+- **`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`** — the handshake revisions. `initialize` opens a session exactly as it always has, and is answered with the revision you asked for. Anything else — a version gori does not know, *and* a stateless one — is answered with the newest handshake revision: a session opened by `initialize` cannot switch to per-request semantics, so naming one back would be a promise gori could not keep.
 
 A version gori does not speak is refused with `-32022` and the list of versions it does, so a client retries instead of guessing. The tool surface is identical either way: the era decides the envelope, never what a tool does.
 

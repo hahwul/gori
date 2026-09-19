@@ -75,6 +75,30 @@ describe "MCP protocol version negotiation" do
     end
   end
 
+  # …except on the one request that exists to tell a client what to send. A bootstrap probe
+  # that has stamped its version but has nothing to declare yet would otherwise be refused
+  # by the RPC that would have unblocked it.
+  it "answers server/discover for a modern probe that declares no capabilities" do
+    with_store do |store|
+      line = %({"jsonrpc":"2.0","id":7,"method":"server/discover","params":) +
+             %({"_meta":{"io.modelcontextprotocol/protocolVersion":"#{VERSION}"}}})
+      res = mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!
+      res["error"]?.should be_nil
+      res["result"]["supportedVersions"].as_a.map(&.as_s).should contain(VERSION)
+    end
+  end
+
+  # The version half of the gate still applies there — that refusal is how a dual-era client
+  # learns the server is modern and must not fall back to `initialize`.
+  it "still refuses a server/discover that names a version it does not speak" do
+    with_store do |store|
+      line = %({"jsonrpc":"2.0","id":7,"method":"server/discover","params":) +
+             %({"_meta":{"io.modelcontextprotocol/protocolVersion":"1999-01-01"}}})
+      err = mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!["error"]
+      err["code"].as_i.should eq(-32022)
+    end
+  end
+
   # A handshake revision named in `_meta` is a version we support spelled in a slot its own
   # revision does not define. Decoration, not an error — and not a promotion to modern.
   it "serves a legacy revision named in _meta under legacy semantics" do
@@ -135,5 +159,20 @@ describe "MCP result envelope" do
       result["cacheScope"].as_s.should eq("private")
       legacy(store, "tools/list")["result"]["cacheScope"]?.should be_nil
     end
+  end
+
+  # The TTL is a promise about the catalogue. A read-only server that is still unbound
+  # advertises `create_project` and loses it on the first bind, so while that is ahead of us
+  # the only honest answer is zero — a client holding a five-minute copy would go on offering
+  # the model a tool that now refuses, and no `listChanged` exists to invalidate it.
+  it "promises no freshness while the catalogue can still change under it" do
+    line = %({"jsonrpc":"2.0","id":7,"method":"tools/list","params":{#{META}}})
+    input = IO::Memory.new("#{line}\n")
+    output = IO::Memory.new
+    Gori::MCP::Server.new(nil, allow_actions: false, verify_upstream: false,
+      input: input, output: output).run
+    result = JSON.parse(output.to_s.each_line.reject(&.strip.empty?).first)["result"]
+    result["tools"].as_a.map(&.["name"].as_s).should contain("create_project")
+    result["ttlMs"].as_i.should eq(0)
   end
 end
