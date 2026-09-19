@@ -38,7 +38,8 @@ private RESET_FIXTURE = <<-JSON
     "rewriter": { "next_rule_id": 7, "rules": [] },
     "colormarker": { "next_rule_id": 7, "rules": [], "colors": [ { "name": "mine", "hex": "#ff0000" } ] },
     "saved_views": { "next_view_id": 7, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
-    "redaction": { "active": "p1", "default": true, "salt": "abcd", "profiles": [ { "name": "p1", "json_fields": ["password"] } ] }
+    "redaction": { "active": "p1", "default": true, "salt": "abcd", "profiles": [ { "name": "p1", "json_fields": ["password"] } ] },
+    "mcp": { "channels": true }
   }
   JSON
 

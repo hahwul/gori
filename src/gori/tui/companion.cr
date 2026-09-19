@@ -1,4 +1,5 @@
 require "./mascot"
+require "./wrap"
 require "./notifications"
 require "./frame"
 require "./geometry"
@@ -144,8 +145,13 @@ module Gori::Tui
     # sitting inside the pane.
     BOTTOM_MARGIN = 2
 
-    BUBBLE_H     =  3
     BUBBLE_MIN_W = 14 # narrower than this is unreadable — drop the bubble, keep the pose
+    # She may speak up to three rows now — an agent's reply is often a sentence, not a
+    # headline, and a one-line cap cut it with an '…' the operator then had to chase through
+    # the notification ring. Past three rows a bubble stops reading as speech and becomes a
+    # banner over the tab, so the ceiling holds there; a shorter body lowers it to fit.
+    BUBBLE_MAX_LINES = 3
+    BUBBLE_CHROME    = 2 # the card's top and bottom border rows
     # The bubble's cap is FLUID: it tracks the body, floored at BUBBLE_BASE_W and ceilinged
     # at BUBBLE_MAX_W. A flat cap sized for the narrow case truncated notices with an '…'
     # on terminals with columns to spare, which is where most of her lines actually get
@@ -736,12 +742,35 @@ module Gori::Tui
     def self.bubble_box(body : Rect, plate : Rect, msg : String) : Rect?
       cap = {bubble_cap(body.w), body.w - 4}.min
       return nil if cap < BUBBLE_MIN_W
-      want = {Screen.display_width(msg) + 4, BUBBLE_MIN_W}.max
-      w = {want, cap}.min
+      # How many text rows fit ABOVE the sprite, bounded by the three-line ceiling.
+      room = plate.y - body.y - BUBBLE_CHROME
+      return nil if room < 1
+      lines = bubble_lines(msg, cap - 4, {BUBBLE_MAX_LINES, room}.min)
+      return nil if lines.empty?
+      content = lines.max_of { |l| Screen.display_width(l) }
+      w = { {content + 4, BUBBLE_MIN_W}.max, cap }.min
+      h = lines.size + BUBBLE_CHROME
       x = {plate.right - w, body.x + 1}.max
-      y = plate.y - BUBBLE_H
+      y = plate.y - h
       return nil if y < body.y
-      Rect.new(x, y, w, BUBBLE_H)
+      Rect.new(x, y, w, h)
+    end
+
+    # The message split into at most `max` visual rows at `width` columns. Column-aware
+    # (via Wrap.layout), so a spaceless Korean run wraps by character and a spaced line by
+    # its grid; the last row is marked '…' when the message did not fit. Pure — the box math
+    # and the draw both call it, so they can never disagree about the line count.
+    def self.bubble_lines(msg : String, width : Int32, max : Int32) : Array(String)
+      return [] of String if width <= 0 || max < 1
+      lay = Wrap.layout(msg, width)
+      n = {lay.rows, max}.min
+      lines = Array(String).new(n) { |r| msg[lay.start_of(r)...lay.end_of(r)] }
+      if lay.rows > max && !lines.empty?
+        last = lines[-1]
+        cut = Screen.column_for(last, {width - 1, 1}.max)
+        lines[-1] = last[0, cut].rstrip + "…"
+      end
+      lines
     end
 
     def self.draw(screen : Screen, body : Rect, frame : Mascot::Frame) : Nil
@@ -776,10 +805,11 @@ module Gori::Tui
     private def self.draw_bubble(screen : Screen, box : Rect, msg : String,
                                  plate : Rect, pal : Mascot::Palette) : Nil
       Tui::Frame.card(screen, box, bg: Theme.elevated, border: pal.ring)
-      # Screen#text already does grapheme-aware truncation with a trailing '…' — hand-rolled
-      # clipping here is how the width bugs (#278/#285) happened in the first place.
-      screen.text(box.x + 2, box.y + 1, msg, Theme.text_bright, Theme.elevated,
-        width: box.w - 4)
+      # The same split the box was sized from, so a row can never render wider than it.
+      bubble_lines(msg, box.w - 4, box.h - BUBBLE_CHROME).each_with_index do |line, i|
+        screen.text(box.x + 2, box.y + 1 + i, line, Theme.text_bright, Theme.elevated,
+          width: box.w - 4)
+      end
       # Tail: one '─' of the bottom rule becomes '┬' over her cap, clamped inside the
       # corners so it can never eat a ╰ or ╯.
       tail = (plate.x + 4).clamp(box.x + 2, box.right - 3)

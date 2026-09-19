@@ -8,7 +8,7 @@ include Gori::Tui
 # and the tab opener would hit Runner's internal "unknown settings section" guard.
 KNOWN_SETTINGS_SECTIONS = [
   :network, :editor, :mouse, :keys, :theme, :layout, :statusline, :display, :companion, :notifications,
-  :general, :tabs, :hosts, :env, :hotkeys, :reset_all,
+  :general, :tabs, :hosts, :env, :hotkeys, :reset_all, :mcp,
 ]
 
 # SettingsCatalog is the single source of truth both the Ctrl-P palette and the Settings

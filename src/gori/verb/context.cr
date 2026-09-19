@@ -1,4 +1,5 @@
 require "./context/activity"
+require "./context/agent_message"
 require "./context/authorize"
 require "./context/comparer"
 require "./context/cookie"

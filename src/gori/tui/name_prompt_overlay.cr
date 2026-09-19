@@ -23,7 +23,8 @@ module Gori::Tui
     getter subject : String # one dim line describing what gets saved (a chain spec, a rule summary)
     getter action : String  # the ↵ verb, so the card hint and the shell's bottom row agree
 
-    def initialize(@title : String, @subject : String, initial : String, @action : String = "save")
+    def initialize(@title : String, @subject : String, initial : String, @action : String = "save",
+                   @noun : String = "name")
       @field = TextField.new(initial)
     end
 
@@ -44,7 +45,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "type a name · ↵ #{@action} · esc cancel"
+      "type a #{@noun} · ↵ #{@action} · esc cancel"
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -61,6 +62,15 @@ module Gori::Tui
 
     # --- rendering -----------------------------------------------------------
     LABEL_W = 7 # value column offset ("Name" + padding)
+
+    # The value column for THIS card's label: "Name" fits LABEL_W, a longer noun does not.
+    private def label_w : Int32
+      {LABEL_W, label.size + 3}.max
+    end
+
+    private def label : String
+      @noun == "name" ? "Name" : @noun.capitalize
+    end
 
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 72}.min
@@ -84,14 +94,15 @@ module Gori::Tui
 
       y = box.y + 3
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), Theme.accent_bg)
-      screen.text(box.x + 2, y, "Name", Theme.text_bright, Theme.accent_bg)
-      vx = box.x + 2 + LABEL_W
+      screen.text(box.x + 2, y, label, Theme.text_bright, Theme.accent_bg)
+      vx = box.x + 2 + label_w
       @field.render(screen, vx, y, {box.right - 2 - vx, 1}.max, true, Theme.text_bright, Theme.accent_bg)
 
       # Spelled out rather than left to the shell row alone: overwriting a same-named entry
       # is silent, and this is the only place it is stated before it happens.
-      screen.text(box.x + 2, box.bottom - 2,
-        "#{hint} · an existing name is overwritten", Theme.muted, Theme.bg, width: iw)
+      # …and only for a NAME: a message prompt reuses this card and overwrites nothing.
+      tail = @noun == "name" ? " · an existing name is overwritten" : ""
+      screen.text(box.x + 2, box.bottom - 2, "#{hint}#{tail}", Theme.muted, Theme.bg, width: iw)
     end
 
     private def oneline(s : String) : String

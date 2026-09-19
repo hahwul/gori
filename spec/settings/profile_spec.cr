@@ -72,12 +72,13 @@ private MAXIMAL_PROFILE = <<-JSON
     "rewriter": { "next_rule_id": 2, "rules": [] },
     "colormarker": { "next_rule_id": 2, "rules": [] },
     "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
-    "redaction": { "active": "p1", "default": true, "profiles": [ { "name": "p1", "json_fields": ["password"] } ] }
+    "redaction": { "active": "p1", "default": true, "profiles": [ { "name": "p1", "json_fields": ["password"] } ] },
+    "mcp": { "channels": true }
   }
   JSON
 
 # Settings are class_properties — process-global, not per-example — so an example that
-# populates all 28 sections would leak every one of them into whatever spec file runs next.
+# populates all 29 sections would leak every one of them into whatever spec file runs next.
 # `with_config_home` already resets the handful its own examples touch; this restores the rest
 # by SNAPSHOT rather than by naming defaults, so it stays correct whatever state it inherits.
 private def with_every_section_populated(&)
@@ -124,6 +125,7 @@ private def with_every_section_populated(&)
   redaction_profiles = Gori::Settings.redaction_profiles
   redaction_active = Gori::Settings.redaction_active
   redaction_default = Gori::Settings.redaction_default?
+  mcp_channels = Gori::Settings.mcp_channels?
   begin
     yield
   ensure
@@ -167,6 +169,7 @@ private def with_every_section_populated(&)
     Gori::Settings.redaction_profiles = redaction_profiles
     Gori::Settings.redaction_active = redaction_active
     Gori::Settings.redaction_default = redaction_default
+    Gori::Settings.mcp_channels = mcp_channels
   end
 end
 

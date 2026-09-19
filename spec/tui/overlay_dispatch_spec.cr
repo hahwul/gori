@@ -29,7 +29,7 @@ end
 private EXPECTED_OVERLAY_SYMS = {
   :none, :detail, :palette, :issue_new, :confirm, :browser, :choice, :tab_goto,
   :comparer_pick, :repeater_subtab, :links, :link_pick, :preferences,
-  :settings, :tabs, :hosts, :env, :hotkeys, :help, :notifications, :passthrough, :listeners, :agents, :probe_active,
+  :settings, :tabs, :hosts, :env, :hotkeys, :help, :notifications, :note_detail, :passthrough, :listeners, :agents, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :oast_provider_pick, :oast_session,
   :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :authorize_identities, :authorize_identity, :ca_import, :import, :export, :scope_rule, :sequence_config,
@@ -63,6 +63,9 @@ private MIGRATED_KINDS = [
   OverlayKind::Import,
   # C1 — scan/fuzz config forms
   OverlayKind::Notifications,
+  # NoteDetail (#1090) — one notification's long form, born on the seam (↵ on a ring row that
+  # carries a detail), so likewise never in MODAL_OVERLAYS.
+  OverlayKind::NoteDetail,
   OverlayKind::ProbeActive,
   OverlayKind::DiscoverConfig,
   OverlayKind::DiscoverHeaders,

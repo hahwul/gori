@@ -12,6 +12,7 @@
 - TUI: The setup wizard explains local and device access at the listen step, and the guided tour ends with a first-session checklist for the screen it returns to (#1081)
 - MCP: `list_projects` narrows like every other listing tool — `query` (a substring of the display name, slug, short id or bound workspace path), `limit` and `offset` — so a host holding a project per worktree stops returning a result too large for the client to accept; the served project is named beside the page and the host's whole count beside the matched one (#1085)
 - CLI: `gori run project list --query=TEXT` keeps the projects whose display name, directory slug, short id or bound workspace path contains TEXT — the same narrowing MCP `list_projects` offers, over the same predicate — applied before the flow census, so it is also the fast path on a host holding hundreds (#1085)
+- MCP: **Messages to the agent** — from the command palette ("Tell the agent…") or the Attached-agents card (`t`), send a one-line message to an attached agent's own session, with any marked flows as context; it is delivered by whichever of three routes is available — a research-preview `claude/channel` push (the **AI → Agent messaging** setting, off by default), the Claude Code inbox socket, or the `operator_messages` poll tool every other agent has — and each attempt is reported in the notification ring. The agent answers with `reply_to_operator`: a one-line summary in the ring and in Miss Ring's bubble (up to three lines), the full detail behind `↵` in a scrollable card (#1090)
 
 ## v0.6.1
 

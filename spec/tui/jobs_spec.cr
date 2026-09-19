@@ -44,6 +44,18 @@ describe Gori::Tui::Notifications do
     n.empty?.should be_true
   end
 
+  it "carries an optional detail, defaulting to nil" do
+    # The long form an agent's reply brings with it (#1090). It is a TRAILING keyword with a
+    # default because every other producer pushes a summary and nothing else — a note with no
+    # detail is what the ring row jumps from, one with a detail is what it opens.
+    n = Notifications.new
+    n.push(:info, "Miner: 3 params found").detail.should be_nil
+    note = n.push(:warn, "claude-code: the login flow still 302s",
+      nil, source: "agent", detail: "Retried with the captured jar.\nSet-Cookie never arrives.")
+    note.detail.should eq("Retried with the captured jar.\nSet-Cookie never arrives.")
+    n.all.first.detail.should eq(note.detail) # …and it survives into the ring, not just the return
+  end
+
   it "rings the buffer at the cap" do
     n = Notifications.new
     (Notifications::CAP + 10).times { |i| n.push(:info, "m#{i}") }

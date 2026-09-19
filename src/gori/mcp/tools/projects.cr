@@ -222,6 +222,7 @@ module Gori
         # instance" — by this server, which no longer serves it and offers no way to let go.
         @store.try(&.close)
         @store = new_store
+        @messages_floor = new_store.last_event_id # a new feed, a new "now" (#1090)
         @owns_store = true
         # A RESUMED OAST handle is bound to the project it was resumed in: its row id means
         # nothing in the new DB, and oast_poll would file its callbacks under a stranger's

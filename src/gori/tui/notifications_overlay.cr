@@ -45,6 +45,20 @@ module Gori::Tui
       @anchor = @store.latest.try(&.id)
     end
 
+    # Put the cursor back on ONE note by id, rather than on the newest (#1090). The detail
+    # card hands the operator back here when it closes, and "back" has to mean the row they
+    # were reading: a fresh overlay anchors to `latest`, which is a different note whenever
+    # anything drained while the card was up. A no-op when that note has aged out of the
+    # ring: the cursor then stays wherever it already was, which is the same choice
+    # `index_in` makes when an anchor stops resolving. Writing the id in regardless would be
+    # worse than a no-op — @selected is a ROW NUMBER, and re-seeding it from a list the note
+    # has left points it at whichever note has since taken that row.
+    def anchor_to(id : Int32) : Nil
+      return unless i = notes.index { |n| n.id == id }
+      @anchor = id
+      @selected = i
+    end
+
     def reset : Nil
       @selected = 0
       @anchor = @store.latest.try(&.id)
@@ -89,6 +103,10 @@ module Gori::Tui
       "NOTIFICATIONS"
     end
 
+    # `↵ open` covers both of the things ↵ does — jump to a note's result, or open the long
+    # form of a note that carries one (#1090). The row itself says which, with the `›`
+    # marker draw_row puts before the age; naming both here would make the hint longer than
+    # the card for a distinction the row already draws.
     def hint : String
       if flash = @flash
         return "#{flash} · ↑/↓ select · ↵ open · esc close"
@@ -251,8 +269,15 @@ module Gori::Tui
         screen.text(msg_x, py, tag, Theme.accent, bg, Attribute::Bold)
         msg_x += tag.size + 1
       end
-      msg_w = {box.right - 1 - msg_x - (stamp.size + 1), 1}.max
+      # A note that carries a long form gets a `›` in front of its age (#1090): ↵ on this row
+      # opens a card rather than jumping to a result, and those are different enough that the
+      # row has to say which one it is before the operator presses it. The message gives up
+      # the two columns it takes, so the marker cannot land on top of the text.
+      marker = note.detail ? "›" : ""
+      tail = stamp.size + 1 + (marker.empty? ? 0 : 2)
+      msg_w = {box.right - 1 - msg_x - tail, 1}.max
       screen.text(msg_x, py, note.message, fg, bg, bold, width: msg_w)
+      screen.text(box.right - 1 - stamp.size - 2, py, marker, Theme.muted, bg) unless marker.empty?
       screen.text(box.right - 1 - stamp.size, py, stamp, Theme.muted, bg)
     end
 

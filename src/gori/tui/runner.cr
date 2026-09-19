@@ -84,6 +84,7 @@ require "./jobs"
 require "./notifications"
 require "./companion"
 require "./notifications_overlay"
+require "./note_detail_overlay"
 require "./passthrough_overlay"
 require "./listeners_overlay"
 require "./agents_overlay"
@@ -111,6 +112,7 @@ require "./keybind"
 require "../scope"
 require "../rules"
 require "../import"
+require "./runner/agent_message"
 require "./runner/agent_presence"
 require "./runner/authorize"
 require "./runner/colormarker"
@@ -264,6 +266,11 @@ module Gori::Tui
       # (agent forward/drop/edit/toggle). Seeded to the current max at run start so a fresh
       # session never replays a prior command; advances monotonically as commands are consumed.
       @intercept_cmd_watermark = 0_i64
+      # #1090: same "seed at now" rule one line up, for the operator→agent channel's replies.
+      # A project keeps every delivery row a courier ever wrote; opening it must not replay them
+      # into the notification ring as things that just happened.
+      @agent_delivery_cursor = @session.store.last_agent_delivery_id
+      @agent_reply_cursor = @agent_delivery_cursor
       # #123 safety net: auto-forward a held item nobody is watching after this many ms, so a
       # dead MCP client (hold() has no timeout) can't wedge a connection forever. 0 disables it.
       @intercept_max_hold_ms = 30_000_i64
@@ -635,6 +642,14 @@ module Gori::Tui
               # chip too. Reports dirty only when the rendered chip string actually changed, so an
               # idle project with a steady agent list does not repaint on the timer.
               dirty = true if refresh_agent_presence
+              # Courier replies to the lines `app.tell-agent` posted (#1090). Beside the presence
+              # scan and OUTSIDE the data_version branch for a different reason than it: the
+              # cursor is what makes this idempotent, so the DB-version gate buys nothing, and it
+              # costs the one case it gets wrong — a courier's commit coalescing with our own
+              # write's bump, after which the note waits for an unrelated commit that may never
+              # come. Reports dirty only when a note was actually pushed.
+              dirty = true if drain_agent_deliveries
+              dirty = true if drain_agent_replies
               # Our own marker's capture bit, on the same tick and for the same reason it is
               # not in the data_version branch (#1091). Writes only when `c` actually moved
               # the lock, and never reports dirty — nothing on screen reads it.
@@ -3677,12 +3692,38 @@ module Gori::Tui
     # Open the notification center (the app.notifications verb + the clickable top-bar
     # badge). Marks everything read, clearing the unread badge.
     def open_notifications : Nil
+      open_notifications_at(nil)
+    end
+
+    # `anchor` is the id of the note the centre puts its cursor on, instead of the newest.
+    # Only the detail card passes one: it hands the operator back to the row they opened it
+    # from, which a fresh overlay would otherwise miss whenever a drain landed while the card
+    # was up. The verb, the badge and the chip want the newest, so they pass nil.
+    private def open_notifications_at(anchor : Int32?) : Nil
       ov = NotificationsOverlay.new(@notifications)
+      ov.anchor_to(anchor) if anchor
+      # ↵ on a row means "open this one", and what that opens depends on what the note
+      # carries. A note with a `detail` (#1090) has a long form the 60-column row could only
+      # clip, so it raises the detail card; a note with only a `goto` still jumps.
+      #
+      # The card is raised from on_close, not from here — Runner#confirm's rule. The shell
+      # runs `commit` BEFORE it drops this modal, so a card opened here would be overwritten
+      # by the close that follows it. So the commit only RECORDS which note to open, and
+      # on_close — which runs after the drop — is what raises it.
+      detail_note = nil.as(Notifications::Note?)
       # The jump itself lands on the target tab, and focus_tab already clears @overlay —
       # so the shell's close-on-commit is a no-op after it, not a second dismissal.
       ov.on_commit = -> {
-        run_goto(ov.selected_note.try(&.goto))
+        note = ov.selected_note
+        if note && note.detail
+          detail_note = note
+        else
+          run_goto(note.try(&.goto))
+        end
         true
+      }
+      ov.on_close = -> {
+        (note = detail_note) ? open_note_detail(note, from_ring: true) : nil
       }
       # Close BEFORE raising the palette: the reverse order would drop @active_overlay on
       # top of the modal we just opened.
@@ -3692,6 +3733,20 @@ module Gori::Tui
       ov.on_palette = -> { leave_overlay; open_palette }
       open_overlay(ov)
       @notifications.mark_all_read
+    end
+
+    # One notification's long form (#1090), opened with ↵ on a ring row that carries a
+    # `detail`. Read-only, so there is no on_commit.
+    #
+    # `from_ring` is what decides whether esc lands back in the notification center: the
+    # card pops back only when the ring is where it came from, so a later open-site (a
+    # toast's "read it", the Activity pane) does not conjure a modal the operator never
+    # opened. Raising it from `on_close` is the same ordering rule the open-site above
+    # states — the shell has dropped the previous modal by the time this runs.
+    private def open_note_detail(note : Notifications::Note, *, from_ring : Bool = false) : Nil
+      ov = NoteDetailOverlay.new(note)
+      ov.on_close = -> { open_notifications_at(note.id) } if from_ring
+      open_overlay(ov)
     end
 
     # Open the TLS-passthrough list (the `bypass:N` top-bar chip + the app.passthrough verb).
@@ -6029,7 +6084,7 @@ module Gori::Tui
     # to the modal) would behave differently.
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
-      when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general
+      when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general, :mcp
         open_preferences(section)                       # the unified grouped modal, positioned at this section
       when :theme   then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
       when :tabs    then open_overlay(tabs_editor(back))

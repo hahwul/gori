@@ -64,6 +64,14 @@ module Gori
         "app.agents", "Attached agents", "List the MCP clients bound to this project (the mcp: chip)",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_agents; nil }
 
+      # Say something to one of those agents (#1090). Palette-only, and deliberately without a
+      # chord: every free Global letter is worth more to a verb the operator reaches mid-flow,
+      # and this one opens two cards before anything happens. Sits beside app.agents because
+      # the card above is where you find out who is listening.
+      r.register Verb::Definition.new(
+        "app.tell-agent", "Tell the agent…", "Send one line to an attached agent's session (delivery shows in the ring)",
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.tell_agent; nil }
+
       # The ACTIVE session slot — which identity the next Repeater/Fuzzer/intercept-forward
       # send goes out as. Global and palette-only, with the `session:NAME` chip as the other
       # way in: it is a session-wide send context, not a tab's action, and it is deliberately

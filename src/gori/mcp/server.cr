@@ -2,6 +2,8 @@ require "json"
 require "log"
 require "../store"
 require "./tools"
+require "./courier"
+require "../settings"
 
 module Gori
   module MCP
@@ -80,6 +82,12 @@ module Gori
         # assumption `Tools::FuzzJob` documents for its own cross-fiber fields.
         @pending = Set(String).new
         @cancelled = Set(String).new
+        # The operator-message courier (#1090), started when the client says `initialized`,
+        # and whether THIS session's handshake declared the channel capability — the courier
+        # keys off that, never off the live setting: a toggle after the handshake cannot
+        # register a channel the client already did not take.
+        @courier = nil.as(Courier?)
+        @channel_declared = false
       end
 
       # Reads until EOF on `input` (client closed the pipe). Each line is parsed
@@ -105,6 +113,7 @@ module Gori
         rescue ex : IO::Error
           Log.info { "mcp: input stream closed (#{ex.message})" }
         ensure
+          @courier.try(&.stop)
           work.close
           drained.receive
           # After the worker has drained, so a still-running switch_project cannot re-announce
@@ -299,6 +308,7 @@ module Gori
         case method
         when "notifications/initialized"
           @initialized = true
+          start_courier
         when "notifications/cancelled"
           # The client has stopped waiting for a request we are still holding. A fiber
           # cannot be interrupted, so the work itself runs to completion — what this buys
@@ -329,7 +339,18 @@ module Gori
         write_result(id) do |j|
           j.object do
             j.field "protocolVersion", version
-            j.field("capabilities") { j.object { j.field("tools") { j.object { } } } }
+            j.field("capabilities") do
+              j.object do
+                j.field("tools") { j.object { } }
+                # Claude Code's channel capability (#1090), declared only when the operator says
+                # their Claude is launched with channels: a client that did not register it drops
+                # every push silently, and the socket route would then carry the same line.
+                @channel_declared = Settings.mcp_channels?
+                if @channel_declared
+                  j.field("experimental") { j.object { j.field("claude/channel") { j.object { } } } }
+                end
+              end
+            end
             j.field "serverInfo" do
               j.object do
                 j.field "name", "gori"
@@ -390,20 +411,45 @@ module Gori
                "pure `decoder` encode/decode/hash tool. Call ql_reference before " \
                "writing list_history/list_sitemap queries. Timestamps include unix " \
                "microseconds plus *_iso RFC3339 fields where available.#{failure}#{selected}#{drift}"
-        if @allow_actions
-          "#{base} Action tools are enabled: send_request (supports flow_id/repeater_id), " \
-          "send_websocket (executes a persisted WS repeater), " \
-          "fuzz_*, mine_*, authorize_* (replay captured requests under several identities to " \
-          "find broken access control), create/update_issue, and create/delete_rule + set_rule_enabled " \
-          "make real outbound requests or mutate issues/rules. Active requests " \
-          "(send_request, send_websocket, fuzz, mine, authorize) are gated by the project scope: a target " \
-          "outside — or without — a configured scope is refused (SCOPE_BLOCKED) unless you pass " \
-          "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project."
-        else
-          "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, authorize_*, " \
-          "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them. " \
-          "switch_project (and create_project when unbound) remain available so you can still pick a project to inspect."
-        end
+        text = if @allow_actions
+                 "#{base} Action tools are enabled: send_request (supports flow_id/repeater_id), " \
+                 "send_websocket (executes a persisted WS repeater), " \
+                 "fuzz_*, mine_*, authorize_* (replay captured requests under several identities to " \
+                 "find broken access control), create/update_issue, and create/delete_rule + set_rule_enabled " \
+                 "make real outbound requests or mutate issues/rules. Active requests " \
+                 "(send_request, send_websocket, fuzz, mine, authorize) are gated by the project scope: a target " \
+                 "outside — or without — a configured scope is refused (SCOPE_BLOCKED) unless you pass " \
+                 "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project."
+               else
+                 "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, authorize_*, " \
+                 "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them. " \
+                 "switch_project (and create_project when unbound) remain available so you can still pick a project to inspect."
+               end
+        @tools.advertises?("operator_messages") ? text + OPERATOR_MESSAGES_NOTE : text
+      end
+
+      # #1090, the third route: every agent, whatever its client, can read what the operator
+      # said. The live routes (channel, inbox socket) make it immediate for Claude Code; this
+      # sentence is what makes it reachable for everyone else.
+      OPERATOR_MESSAGES_NOTE = " The operator can message you from the gori TUI: such messages " \
+                               "arrive as a channel event or a peer note when a live route exists, and " \
+                               "are always readable with operator_messages — call it at the start of a " \
+                               "turn, or whenever a note says gori has something for you, and act on it. " \
+                               "Answer them with reply_to_operator (a one-line summary, optional detail): " \
+                               "the operator is in gori, not in your terminal."
+
+      # Start carrying operator messages once the client is initialized. `send` is this
+      # server's frame writer (the lock, the UTF-8 guard); the store and client name are read
+      # live from Tools on every tick, never copied (#1003's lesson).
+      private def start_courier : Nil
+        return if @courier
+        courier = Courier.new(pid: Process.pid.to_i64,
+          store: -> { @tools.current_store },
+          client: -> { @tools.client_name },
+          channels: -> { @channel_declared },
+          emit: ->(frame : String) { send(frame) })
+        courier.start
+        @courier = courier
       end
 
       private def handle_tools_list(id : JSON::Any) : Nil

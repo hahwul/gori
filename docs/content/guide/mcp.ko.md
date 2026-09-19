@@ -128,6 +128,8 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 |------|---------|
 | `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req\|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 *거를* 수는 있어도 볼 수는 없던 값을 [보여 주는](/ko/guide/proxy/#columns) 쪽입니다. 행마다 읽기가 한 번 늘어나므로 명시할 때만 동작합니다. `ids`를 주면 정확히 그 집합을 한 번에 가져옵니다 — `get_current_context`가 `selection.ids`로 돌려주는, 사용자가 마크한 행들입니다. 요청한 순서 그대로 오고, `limit`과 두 커서는 적용되지 않으며, 행이 없는 id는 `missing_ids`로, `query`가 뺀 것은 `filtered_out_ids`로 이름을 부릅니다. 답이 짧으면 어느 쪽 때문에 짧은지 항상 말해 줍니다 |
 | `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음. 모든 이벤트가 `actor`(행위 표면: `tui` / `cli` / `mcp`)를 담고 있어 에이전트가 자기 쓰기와 운영자의 쓰기를 구분할 수 있으며, 설정 변경은 누가 하든 기록됩니다. 사람은 같은 피드를 **Project → Activity** 패널에서 읽습니다 |
+| `operator_messages` | 오퍼레이터가 gori TUI에서 여러분에게 입력한 메시지("Tell the agent…")입니다. 이 세션 또는 붙어 있는 모든 에이전트에게 보낸 것을 전방 커서로 읽습니다. gori는 가능하면 즉시 전달하고(채널 이벤트, 또는 Claude Code의 피어 메시지), 이 도구는 모든 에이전트가 가진 폴백입니다 — 턴을 시작할 때 호출하세요. 반환한 메시지는 전달됨으로 표시되어 오퍼레이터의 알림 링에 "picked up"으로 보입니다 |
+| `reply_to_operator` | gori의 오퍼레이터에게 답합니다. `summary`는 알림 링과 Miss Ring 말풍선에 보이는 한 줄, `detail`은 링에서 ↵로 여는 긴 본문, `level`은 색, `in_reply_to`는 답하는 오퍼레이터 메시지 id입니다. 여러분의 터미널이 아니라 gori에 있는 사람에게 답이 닿는 방법입니다 |
 | `list_views` | 프로젝트의 History [뷰](/ko/guide/proxy/#views). `list_history{view}`가 렌즈로 적용하는 이름 붙은 QL 쿼리로, `query`를 대체하지 않고 그 위에 AND로 얹힙니다. 기본 뷰 7종(`All`, `History`, `History + Repeater`(기본값), `WebSocket`, `gRPC`, `SSE`, `Errors`) → 글로벌 라이브러리 → 프로젝트 순이며, `active`는 TUI가 보고 있는 뷰를 표시할 뿐 `list_history`에 적용되지 **않습니다**. 그쪽은 넘긴 `view`로만 거릅니다 |
 | `get_flow` | 한 플로우의 전체 요청 + 응답. [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아옵니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
@@ -246,6 +248,26 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 반대 방향도 마찬가지입니다. `intercept_list`가 `operator_editing: true`로 돌려주는 행은 지금 사용자가 편집 중인, 아직 저장하지 않은 내용이 들어 있는 메시지입니다. 에이전트는 포워드·편집·드롭으로 그 작업을 지워버리는 대신 사용자에게 남겨둘 수 있습니다.
 
 에이전트를 켜둔 채 자리를 뜨기 전에 알아둘 안전 규칙이 하나 있습니다. 홀드된 메시지는 원래 사람의 결정을 무한히 기다립니다. 키보드 앞에 사람만 있을 때는 그게 맞는 동작입니다. 하지만 해당 세션에서 에이전트가 인터셉트 큐에 붙고 나면, gori는 아무도 보고 있지 않은 항목에 대해 30초 자동 포워드를 켭니다. 홀드 도중 죽은 클라이언트가 연결을 영영 막아버리지 못하게 하기 위해서입니다. 에이전트가 붙지 않은 세션은 자동 포워드를 하지 않습니다.
+
+## gori가 보내는 메시지 {#messages-from-gori}
+
+라이브 인터셉트가 에이전트더러 사용자가 일하는 모습을 지켜보게 한다면, 팔레트 verb **"Tell the agent…"**(`app.tell-agent`)는 반대 방향입니다 — 어느 gori 탭에서든 붙어 있는 에이전트 자신의 세션으로 한 줄짜리 메시지를 보냅니다. 프로젝트에 붙은 MCP 클라이언트 중 하나(`mcp:` 칩과 "Attached agents" 카드가 보여주는 것과 같은 목록)를 고르거나 전체를 고르고, 한 줄을 입력하면 gori가 전달합니다. "Attached agents" 카드에서 바로 `t`를 누르면 커서가 놓인 에이전트에게 곧장 메시지를 보냅니다. History 목록에서 행을 마크한 채 보내면 그 flow들이 문맥으로 함께 실려, 에이전트가 여러분이 고른 바로 그 대상에 대해 움직일 수 있습니다.
+
+전달은 세 층을 순서대로 시도하며, 더 나은 것을 먼저 씁니다.
+
+1. **Channel** — Settings의 `mcp.channels`가 켜져 있으면 `gori mcp`가 `claude/channel` capability를 선언하고 메시지를 channel event로 push합니다. Claude Code는 이를 `← gori: …`로 보여주고, 세션이 idle이 되는 즉시 그 위에서 turn을 시작합니다 — 그래서 모델은 이것을 그냥 지나가는 메모가 아니라 지시로 읽습니다. 이 경로는 Claude Code를 `claude --dangerously-load-development-channels server:gori`로 띄워야 동작하는데, 이는 research-preview 플래그로 클라이언트 쪽에 한 번짜리 확인 대화상자가 뜨고, 이 플래그가 함께 갖고 오는 `--channels` 허용 목록은 gori가 아니라 Anthropic이 정한 것입니다. **기본은 off**입니다. channel을 등록한 적 없는 세션으로의 push는 조용히 버려지고, 아래 2번 층과 함께 켜 두면 같은 메시지가 두 번 전달될 수 있습니다. 실제 테스트에서 Opus 5의 세이프가드가 채널로 주입된 메시지를 내용과 무관하게 플래그해 모델 전환 대화상자에서 세션을 멈추는 것도 확인했습니다. 아래 소켓 경로는 걸리지 않습니다. 시험할 때가 아니면 채널은 꺼 두세요.
+2. **Inbox socket** — 그렇지 않을 때, 대상이 Claude Code라면 `gori mcp`가 그 세션의 inbox socket(`/tmp/cc-socks/<pid>.sock`, 클라이언트 프로세스에서 부모 쪽으로 거슬러 올라가 찾습니다)에 메시지를 씁니다. 이 경로는 GA입니다 — 플래그도, opt-in도 필요 없습니다. 메시지는 다른 세션이 보낸 노트로 프레이밍되어 `[gori] The operator at the gori TUI says:` 접두어를 달고 도착합니다. idle 세션은 그 위에서 turn을 시작하고, 바쁜 세션은 tool call 사이사이에 읽습니다. 받아들일지, 나중으로 보류할지, 아예 거절할지는 Claude Code 자신의 `crossSessionInbound` 설정이 정하며, gori는 어느 쪽이든 socket에 쓸 뿐 셋 중 무엇이 일어났는지는 볼 수 없습니다.
+3. **Poll** — 항상 쓸 수 있고, Claude가 아닌 에이전트(Codex, Gemini, …)가 받는 유일한 층입니다. 메시지는 프로젝트 이벤트 피드의 한 행이 되고, MCP 도구 `operator_messages`가 호출한 세션에 남아 있는 메시지를 돌려줍니다. 핸드셰이크 `instructions`가 모델에게 turn을 시작할 때 이를 확인하라고 알려주므로, 자기 instructions를 읽는 에이전트라면 socket도 channel도 없어도 다음 호출에서 메시지를 집어갑니다.
+
+전달 시도마다 `agent_delivery` 행이 하나씩 기록되고, 탭을 옮기지 않아도 결과를 볼 수 있습니다. TUI의 알림 링이 `→ claude-code got it (socket)`, `left for codex to pick up (operator_messages)` 같은 문구나 전달이 실패한 이유를 보여주고, Companion(Miss Ring)을 켜 두었다면 같은 알림에 반응합니다. Activity 페인은 이 모두를 새로운 `operator` source 아래 나열하므로, 메시지와 그 전달 결과가 프로젝트에서 일어난 다른 모든 일과 함께 기록에 남습니다 — [Activity](/ko/guide/proxy/#project-tab) 참고.
+
+돌아오는 길은 `reply_to_operator`입니다. 핸드셰이크 instructions가 에이전트에게, 여러분이 그 터미널로 옮겨가지 않고도 봐야 하는 것은 이 도구로 답하라고 알려줍니다. 한 줄 `summary`는 클라이언트 이름과 함께 링(그리고 Miss Ring)에 뜨고, `detail`은 링에서 `↵`로 열립니다 — 발견 사항, diff, 엔드포인트 목록 같은 것. 같은 피드의 행이라 Claude가 아닌 에이전트에서도 동작하고, `agent` 소스로 프로젝트 기록에 남습니다.
+
+의지하기 전에 알아둘 한계가 몇 가지 있습니다.
+
+- **재전송되지 않습니다.** 메시지는 *보내는 그 순간* 붙어 있던 에이전트에게만 전달됩니다. 그 뒤에 붙은 에이전트는 소급해서 받지 않습니다 — `operator_messages`는 언제나 그 세션에 아직 남아 있는 것만 돌려주고, 이미 전달한 것을 두 번 전달하지 않습니다.
+- **동의가 아니라 요청입니다.** 어느 층으로 가든, 피어가 프레이밍한 메시지는 모델에게 뭔가를 해 달라고 요청할 뿐 그 자체로 무언가를 승인하지 않으며, 에이전트는 자신이 동의하지 않는 다른 지시와 똑같이 이를 거절할 수 있습니다.
+- **Channel 전달은 research preview입니다.** 아직 출시되지 않은 Claude Code 플래그와 Anthropic이 정한 허용 목록에 의존하며, 둘 다 `mcp.channels`가 모르는 사이 바뀔 수 있습니다 — inbox socket과 poll 도구가 따로 존재하는 이유는 그 플래그가 사라지는 날에도 기능이 계속 동작하게 하기 위해서입니다.
 
 ## 한 번에 한 호출 {#one-call-at-a-time}
 

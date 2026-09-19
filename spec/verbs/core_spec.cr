@@ -37,6 +37,15 @@ describe "Gori::Verbs.register_core" do
       verb_intents(r, "app.notifications").should eq([:open_notifications])
     end
 
+    it "leaves Tell the agent palette-only, next to the card that names who is listening" do
+      # No chord on purpose (#1090): the gesture opens two cards before anything is sent, so
+      # it is not worth one of the few free Global letters — same call app.agents made.
+      r["app.tell-agent"].chords.should be_empty
+      r["app.tell-agent"].scope.should eq(Gori::Verb::Scope::Global)
+      r["app.tell-agent"].category.should eq(Gori::Verb::Category::Action)
+      verb_intents(r, "app.tell-agent").should eq([:tell_agent])
+    end
+
     it "routes capture / reveal-whitespace / refresh to their own intents" do
       verb_intents(r, "capture.toggle").should eq([:toggle_capture])
       verb_intents(r, "view.reveal-ws").should eq([:toggle_reveal])

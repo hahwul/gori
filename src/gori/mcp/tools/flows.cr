@@ -610,6 +610,34 @@ module Gori
           s.field "kind", strprop("filter to one kind (e.g. job_done, agent_action, scope_add)")
         end
 
+        tool j, "operator_messages",
+          "Messages the OPERATOR typed for you in the gori TUI (\"Tell the agent…\"), addressed " \
+          "to this session or to every attached agent. gori delivers them live when it can (a " \
+          "channel event or a peer message in Claude Code); this is the fallback every agent has: " \
+          "call it at the start of a turn, or when a channel/peer note points here, and act on " \
+          "what comes back. Messages already carried by a live route are omitted unless " \
+          "`include_delivered` is true. Forward-cursored like list_events: pass `next_cursor` " \
+          "back as `since`. Each message names the tab the operator was on and any flow ids " \
+          "they had marked — the same set get_current_context reports." do |s|
+          s.field "since", intprop("feed cursor from the previous call (0 = from the start)")
+          s.field "limit", intprop("max messages to return (default 50, max 200)")
+          s.field "include_delivered", boolprop("also return messages a live route already carried (default false)")
+        end
+
+        tool j, "reply_to_operator",
+          "Answer the operator in the gori TUI. `summary` (required) is ONE line they read at a " \
+          "glance — it shows in the notification ring and on Miss Ring; put anything longer in " \
+          "`detail` (markdown-ish plain text, opened from the ring with ↵). `level` colours it: " \
+          "info (default) | success | warn | error. `in_reply_to` links it to the operator_messages " \
+          "id you are answering. Use it for the answer to a question they sent, the outcome of a " \
+          "task they asked for, or anything they must see without switching to your terminal — " \
+          "not for narration." do |s|
+          s.field "summary", strprop("one line, ≤200 characters; the rest goes in detail"), required: true
+          s.field "detail", strprop("the long form; optional, ≤32 KiB")
+          s.field "level", enumprop("how the ring colours it", %w[info success warn error])
+          s.field "in_reply_to", intprop("the operator_messages id this answers, when it does")
+        end
+
         tool j, "get_flow",
           "Full request+response for one flow id (heads + decoded bodies). " \
           "Bodies are de-chunked/decompressed and summarised: inline text when " \
