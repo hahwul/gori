@@ -1,13 +1,14 @@
 require "json"
 require "../store"
 require "./inbox"
+require "./codex_queue"
 
 module Gori::MCP
   # Carries operator messages from the project's event feed to THIS server's client session
   # (#1090). One per `gori mcp` process, started once the client says `initialized`, stopped
   # when the reader hits EOF.
   #
-  # Three routes, best available first. Only a CONFIRMED route retires a message from the poll
+  # Four routes, best available first. Only a CONFIRMED route retires a message from the poll
   # backstop (`AgentDelivery::CARRIED`): the socket write either lands or reports why, so it
   # carries the message; the channel push cannot be confirmed, so it does NOT — a session that
   # was not launched with channels drops the frame without a word, and the message must stay
@@ -20,7 +21,10 @@ module Gori::MCP
   #      the delivery row reads "got it (channel)", but the message is left for poll all the same.
   #   2. the session's inbox socket (`ClaudeInbox`) — GA, no flags, framed as a peer's note; a
   #      write that lands carries the message and retires it.
-  #   3. nothing — the row stays in the feed for `operator_messages`, and a poll deposit row
+  #   3. `codex queue` against the parent Codex session's own thread (`CodexQueue`) — the same
+  #      bargain as the socket through a different door: the CLI accepts the line or says why
+  #      not, so an accepted hand-off carries the message.
+  #   4. nothing — the row stays in the feed for `operator_messages`, and a poll deposit row
   #      says so.
   # Each recipient gets its own delivery row (a broadcast has one per session), which is what
   # the TUI turns into "→ claude-code got it (socket)" in the notification ring.
@@ -41,7 +45,8 @@ module Gori::MCP
 
     def initialize(*, @pid : Int64, @store : Proc(Store?), @client : Proc(String?),
                    @channels : Proc(Bool), @emit : Proc(String, Nil),
-                   @inbox : Proc(String?) = -> { ClaudeInbox.discover })
+                   @inbox : Proc(String?) = -> { ClaudeInbox.discover },
+                   @codex : Proc(CodexQueue::Session?) = -> { CodexQueue.discover })
       @cursor = 0_i64
       # The store the cursor was taken against — a REFERENCE, never its object_id: a bare id
       # can be reused by the next store the GC hands out at the same address, and a cursor
@@ -116,8 +121,11 @@ module Gori::MCP
         record(store, m, route, label, true)
       elsif path = @inbox.call
         route = AgentDelivery::VIA_SOCKET
-        reason = ClaudeInbox.deliver(path, ClaudeInbox.frame(m.text, m.from_tab))
+        reason = ClaudeInbox.deliver(path, OperatorNote.frame(m.text, m.from_tab))
         record(store, m, route, label, reason.nil?, reason)
+      elsif queued = codex_delivery(m)
+        route = AgentDelivery::VIA_CODEX_QUEUE
+        record(store, m, route, label, queued[0], queued[1])
       else
         record(store, m, AgentDelivery::VIA_POLL, label, true, "no live route; left for operator_messages")
       end
@@ -128,6 +136,18 @@ module Gori::MCP
       # values the method starts with.
       record(store, m, route || "poll", label || "#{@client.call || "agent"} pid #{@pid}", false,
         "delivery raised: #{ex.message || ex.class.name}") rescue nil
+    end
+
+    # The Codex arm: `{ok, reason}` when this session IS a Codex with a thread open, else nil
+    # so the caller falls through to the poll deposit. The two tests are asked in this order on
+    # purpose — `client?` is a string comparison and `discover` forks an `lsof`, so every other
+    # client pays nothing for this route. `CodexQueue.deliver` reports rather than raises, so
+    # there is no path here that loses the attempt.
+    private def codex_delivery(m : AgentMessage) : {Bool, String?}?
+      return nil unless CodexQueue.client?(@client.call)
+      return nil unless session = @codex.call
+      reason = CodexQueue.deliver(session, OperatorNote.frame(m.text, m.from_tab))
+      {reason.nil?, reason}
     end
 
     # A `--read-only` server has no writer fiber: the message still goes out, but no row can
@@ -153,7 +173,7 @@ module Gori::MCP
           j.field "method", "notifications/claude/channel"
           j.field "params" do
             j.object do
-              j.field "content", m.text + ClaudeInbox::REPLY_HINT
+              j.field "content", m.text + OperatorNote::REPLY_HINT
               j.field "meta" do
                 j.object do
                   j.field "message_id", m.id.to_s

@@ -100,7 +100,7 @@ module Gori::Tui
       # not a row under Network — an operator looking for "how do I message my agent" should
       # not have to open the proxy-address section to find it.
       Section.new(:mcp, "settings.mcp", "Agent messaging",
-        "How gori mcp delivers \"Tell the agent…\" messages — enable the claude/channel push on top of the inbox socket and operator_messages poll", :ai, :form),
+        "How gori mcp delivers \"Tell the agent…\" messages — enable the claude/channel push on top of the inbox socket, codex queue and operator_messages poll", :ai, :form),
     ]
 
     # Every section, in registration order — drives the palette verb loop.

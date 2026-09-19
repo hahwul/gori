@@ -54,17 +54,19 @@ module Gori
     # Routes. `poll` is the courier's DEPOSIT (no live route; the row waits in the feed) and is
     # `ok` — nothing failed. `picked_up` is the agent's own `operator_messages` read. `socket`
     # is a peer-note write that landed; `channel` is a fire-and-forget push.
-    VIA_POLL      = "poll"
-    VIA_PICKED_UP = "picked_up"
-    VIA_SOCKET    = "socket"
-    VIA_CHANNEL   = "channel"
+    VIA_POLL        = "poll"
+    VIA_PICKED_UP   = "picked_up"
+    VIA_SOCKET      = "socket"
+    VIA_CHANNEL     = "channel"
+    VIA_CODEX_QUEUE = "codex_queue"
     # The routes that CONFIRM a message reached the session, so `operator_messages` need not
-    # carry it again: a socket write that landed, or the agent's own poll pickup. A `channel`
-    # push is unverifiable (a session that never registered the channel drops it without a
-    # word) and a `poll` deposit is not a delivery — neither retires the message, so a dropped
-    # channel can never turn into a silently lost message. An unknown via is treated the same,
-    # the safe way: re-deliverable, never lost.
-    CARRIED = {VIA_SOCKET, VIA_PICKED_UP}
+    # carry it again: a socket write that landed, the agent's own poll pickup, or a `codex
+    # queue` the CLI accepted (it exits non-zero and says why when the thread cannot take it).
+    # A `channel` push is unverifiable (a session that never registered the channel drops it
+    # without a word) and a `poll` deposit is not a delivery — neither retires the message, so
+    # a dropped channel can never turn into a silently lost message. An unknown via is treated
+    # the same, the safe way: re-deliverable, never lost.
+    CARRIED = {VIA_SOCKET, VIA_PICKED_UP, VIA_CODEX_QUEUE}
 
     def self.from_row(row : Store::EventRow) : AgentDelivery?
       return nil unless row.kind == KIND

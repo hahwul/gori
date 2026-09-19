@@ -247,7 +247,7 @@ module Gori::Tui
     # MCP: how `gori mcp` talks back to an attached agent ("Tell the agent…").
     MCP_FIELDS = [
       Field.new("Channel delivery",
-        "push \"Tell the agent…\" messages as a claude/channel event, on top of the inbox socket and operator_messages poll — research preview, needs Claude Code launched with --dangerously-load-development-channels server:gori; off leaves the socket + poll layers as-is — ←/→/space toggles",
+        "push \"Tell the agent…\" messages as a claude/channel event, on top of the inbox socket, codex queue and operator_messages poll — research preview, needs Claude Code launched with --dangerously-load-development-channels server:gori; off leaves the socket, queue and poll layers as-is — ←/→/space toggles",
         bool: true),
     ]
     SECTIONS = {

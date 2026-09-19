@@ -11,13 +11,15 @@ private class Rig
   property client : String? = "claude-code"
   property? channels = false
   property inbox : String? = nil
+  property codex : Gori::MCP::CodexQueue::Session? = nil
 
   def initialize(@store)
   end
 
   def courier(pid = 77_i64) : Courier
     Courier.new(pid: pid, store: -> { @store.as(Gori::Store?) }, client: -> { @client },
-      channels: -> { @channels }, emit: ->(f : String) { @frames << f; nil }, inbox: -> { @inbox })
+      channels: -> { @channels }, emit: ->(f : String) { @frames << f; nil }, inbox: -> { @inbox },
+      codex: -> { @codex })
   end
 end
 
@@ -37,6 +39,26 @@ private def with_fake_inbox(&)
     yield path, got
   ensure
     server.close rescue nil
+    FileUtils.rm_rf(dir)
+  end
+end
+
+private def with_fake_codex(exit_code : Int32 = 0, &)
+  dir = File.tempname("gori-courier-codex")
+  Dir.mkdir_p(dir)
+  log = File.join(dir, "argv.txt")
+  File.write(File.join(dir, "codex"), <<-SH)
+    #!/bin/sh
+    printf '%s\\n' "$@" > #{log}
+    exit #{exit_code}
+    SH
+  File.chmod(File.join(dir, "codex"), 0o755)
+  saved = ENV["PATH"]
+  ENV["PATH"] = "#{dir}:#{saved}"
+  begin
+    yield log
+  ensure
+    ENV["PATH"] = saved
     FileUtils.rm_rf(dir)
   end
 end
@@ -100,7 +122,7 @@ describe Gori::MCP::Courier do
       f = JSON.parse(rig.frames[0])
       f["method"].should eq("notifications/claude/channel")
       f["params"]["content"].as_s.should start_with("fuzz the login")
-      f["params"]["content"].as_s.should end_with(Gori::MCP::ClaudeInbox::REPLY_HINT)
+      f["params"]["content"].as_s.should end_with(Gori::MCP::OperatorNote::REPLY_HINT)
       f["params"]["meta"]["message_id"].should eq(m.to_s)
       f["params"]["meta"]["from_tab"].should eq("history")
       f["params"]["meta"]["flow_ids"].should eq("3,4")
@@ -160,6 +182,55 @@ describe Gori::MCP::Courier do
       d.via.should eq("socket")
       d.ok.should be_false
       d.reason.should_not be_nil
+    end
+  end
+
+  it "queues into the parent Codex thread when the client is Codex, and that carries it" do
+    with_store do |store|
+      with_fake_codex do |log|
+        rig = Rig.new(store)
+        rig.client = "codex-mcp-client"
+        rig.codex = Gori::MCP::CodexQueue::Session.new("01a0b92e-f7d0-77d3-8ba9-61e53e67a768", "/tmp/h")
+        c = rig.courier
+        c.tick
+        m = store.post_agent_message("look at issue 4", "all", "issues")
+        c.tick.should eq(1)
+        File.read(log).lines[4].should start_with("[gori] The operator at the gori TUI says (from the issues tab): look at issue 4")
+        d = store.agent_deliveries_after(m, 10).rows.first
+        d.via.should eq(Gori::AgentDelivery::VIA_CODEX_QUEUE)
+        d.ok.should be_true
+        # CARRIED: a hand-off the CLI accepted retires the message from the poll backstop.
+        Gori::AgentDelivery::CARRIED.includes?(d.via).should be_true
+      end
+    end
+  end
+
+  it "leaves the message for polling when the parent is a Codex with no thread open" do
+    with_store do |store|
+      rig = Rig.new(store)
+      rig.client = "codex-mcp-client"
+      rig.codex = nil
+      c = rig.courier
+      c.tick
+      m = store.post_agent_message("x", "all", nil)
+      c.tick.should eq(1)
+      d = store.agent_deliveries_after(m, 10).rows.first
+      d.via.should eq(Gori::AgentDelivery::VIA_POLL)
+      d.ok.should be_true
+    end
+  end
+
+  it "never looks for a Codex thread on behalf of another client" do
+    with_store do |store|
+      rig = Rig.new(store)
+      rig.client = "antigravity"
+      # A session is there for the taking; the client name is what says it is not ours.
+      rig.codex = Gori::MCP::CodexQueue::Session.new("01a0b92e-f7d0-77d3-8ba9-61e53e67a768", "/tmp/h")
+      c = rig.courier
+      c.tick
+      m = store.post_agent_message("x", "all", nil)
+      c.tick.should eq(1)
+      store.agent_deliveries_after(m, 10).rows.first.via.should eq(Gori::AgentDelivery::VIA_POLL)
     end
   end
 
