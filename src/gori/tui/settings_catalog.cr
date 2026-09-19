@@ -43,6 +43,7 @@ module Gori::Tui
       {:appearance, "Appearance"},
       {:editor, "Editor & Keys"},
       {:network, "Network & Tabs"},
+      {:ai, "AI"},
     ]
 
     # Every settings section. Order here is the palette registration order (grouped, so
@@ -95,8 +96,11 @@ module Gori::Tui
       # keeps its palette verb but is not given its own tab row (in_tab: false).
       Section.new(:hosts, "settings.host-overrides", "Hostnames",
         "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials", :network, :opener, in_tab: false, resettable: false),
-      Section.new(:mcp, "settings.mcp", "MCP",
-        "How gori mcp delivers \"Tell the agent…\" messages — enable the claude/channel push on top of the inbox socket and operator_messages poll", :network, :form),
+      # AI: how gori talks to the coding agents attached over MCP (#1090). Its own group,
+      # not a row under Network — an operator looking for "how do I message my agent" should
+      # not have to open the proxy-address section to find it.
+      Section.new(:mcp, "settings.mcp", "Agent messaging",
+        "How gori mcp delivers \"Tell the agent…\" messages — enable the claude/channel push on top of the inbox socket and operator_messages poll", :ai, :form),
     ]
 
     # Every section, in registration order — drives the palette verb loop.
