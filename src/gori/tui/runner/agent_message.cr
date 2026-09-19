@@ -43,7 +43,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def tell_agent : Nil
     rows = Gori::AgentPresence.live(@session.project.db_path).select { |e| e.kind == Gori::AgentPresence::KIND_MCP }
     if rows.empty?
-      @toast = "no agent is attached — gori mcp --install-claude-code shows how"
+      # Not `--install-claude-code`: gori installs into seven clients and this verb works with
+      # every one of them, so the empty state names the flag family rather than one vendor's.
+      @toast = "no agent is attached — gori mcp --help lists the --install-… clients"
       return
     end
     # Resolved HERE, before any card is up, and carried into the commit closure. The marks are

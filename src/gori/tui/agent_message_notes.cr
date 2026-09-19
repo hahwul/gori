@@ -62,6 +62,11 @@ module Gori::Tui
         {:info, "left for #{who} to pick up (operator_messages)"}
       when Gori::AgentDelivery::VIA_PICKED_UP
         {:success, "→ #{who} picked it up (operator_messages)"}
+      when Gori::AgentDelivery::VIA_TOOL_RESULT
+        # The agent asked gori something and the answer carried the line back. As confirmed as
+        # a socket write — the client had it — and it names the seam so the operator knows the
+        # message went out on the agent's own next call rather than waking it.
+        {:success, "→ #{who} got it (on its next tool result)"}
       when Gori::AgentDelivery::VIA_CODEX_QUEUE
         # The CLI took it and said so, which is as far as any route can see: the session runs a
         # turn on it now if it is idle, after the current one if it is not.

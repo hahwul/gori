@@ -59,6 +59,29 @@ describe Gori::MCP::Courier do
     end
   end
 
+  # The courier is not the only reader any more: `operator_messages` has always been able to
+  # pick a message up inside the 500ms before a tick, and the tool-result carry (#1090 layer
+  # four) does so on every call the agent makes. A route that skips this test writes the same
+  # instruction to the session twice — for Codex, a second turn spent acting on it again.
+  it "does not deliver a message a confirmed route already carried to this session" do
+    with_fake_inbox do |path, got|
+      with_store do |store|
+        rig = Rig.new(store)
+        rig.inbox = path
+        c = rig.courier(5_i64)
+        c.tick
+        m = store.post_agent_message("already carried", "pid:5", nil)
+        carried = store.record_agent_delivery(m, Gori::AgentDelivery::VIA_TOOL_RESULT,
+          "grok pid 5", true, pid: 5_i64)
+        c.tick.should eq(1) # the page held it…
+        c.delivered.should eq(0)
+        Fiber.yield
+        got.should be_empty                                            # …and nothing was written to the session
+        store.agent_deliveries_after(carried, 10).rows.should be_empty # nor claimed a second time
+      end
+    end
+  end
+
   it "leaves a message for polling when there is no live route, and records why" do
     with_store do |store|
       rig = Rig.new(store)

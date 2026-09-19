@@ -437,7 +437,8 @@ module Gori
       # `[gori]` line that turns up in its own thread.
       OPERATOR_MESSAGES_NOTE = " The operator can message you from the gori TUI: such messages " \
                                "arrive in this session directly when gori has a live route to it " \
-                               "(a `[gori]` line in your own turn), and are always readable with " \
+                               "(a `[gori]` line in your own turn, or beside the result of a gori " \
+                               "tool you called), and are always readable with " \
                                "operator_messages — call it at the start of a " \
                                "turn, or whenever a note says gori has something for you, and act on it. " \
                                "Answer them with reply_to_operator (a one-line summary, optional detail): " \
@@ -470,11 +471,26 @@ module Gori
         return write_error(id, -32602,
           "tools/call: 'arguments' must be an object (or a JSON-encoded one)") unless args
         result = @tools.call(name, args)
-        write_result(id) do |j|
+        # #1090: anything the operator said that no route has carried rides back HERE, beside
+        # the tool's own answer — a second content block, never mixed into the first, so
+        # `structuredContent` still parses and no tool's output is rewritten by a message that
+        # has nothing to do with it. Asked after the call, so a message sent WHILE a long tool
+        # ran goes out with that tool's result instead of waiting for the next one.
+        #
+        # Read here, RETIRED only once the frame is out. Reading and marking in one step meant
+        # a cancelled request (`write_result` writes nothing for a cancelled id) or a client
+        # that vanished mid-call left the message marked delivered and behind the cursor — the
+        # ring saying "got it" for a line nothing ever carried. The side effect follows the
+        # emit, as every guard in this codebase follows its refusal (#724).
+        pending = @tools.pending_operator_note(name)
+        emitted = write_result(id) do |j|
           j.object do
             j.field("content") do
               j.array do
                 j.object { j.field "type", "text"; j.field "text", result.text }
+                if p = pending
+                  j.object { j.field "type", "text"; j.field "text", p.text }
+                end
               end
             end
             if result.is_error && (code = result.error_code)
@@ -487,6 +503,7 @@ module Gori
             j.field "isError", result.is_error
           end
         end
+        @tools.commit_operator_note(pending) if pending && emitted
       end
 
       # `params.arguments` as the object the tools layer reads, or nil when it is a shape that
@@ -581,8 +598,11 @@ module Gori
         any.try(&.as_h?).try(&.[key]?)
       end
 
-      private def write_result(id : JSON::Any?, &block : JSON::Builder ->) : Nil
-        return if cancelled?(id)
+      # `true` when the frame actually went out — a cancelled request and a closed stream both
+      # answer `false`. Every caller but one ignores it; `handle_tools_call` must not retire an
+      # operator message onto a response that was never emitted.
+      private def write_result(id : JSON::Any?, &block : JSON::Builder ->) : Bool
+        return false if cancelled?(id)
         send(JSON.build do |j|
           j.object do
             j.field "jsonrpc", "2.0"
@@ -664,8 +684,10 @@ module Gori
         payload.scrub
       end
 
-      private def send(payload : String) : Nil
-        return if @closed
+      # `true` when the payload was written (or buffered into an open batch), `false` when the
+      # stream is already closed or the write failed. Callers that only emit ignore it.
+      private def send(payload : String) : Bool
+        return false if @closed
         # Inside a batch this is one member's response, not a frame: buffer it for
         # handle_batch, which emits the array through this same method once. Deliberately
         # NOT wire_safe'd here — the joined array gets one pass below, and `[`, `,` and `]`
@@ -677,7 +699,7 @@ module Gori
         # send.
         if (batch = @batch) && @batch_fiber == Fiber.current
           batch << payload
-          return
+          return true
         end
         # One writer at a time. A payload larger than the pipe buffer yields mid-write, and
         # a second fiber's line landing in that gap would corrupt both frames.
@@ -685,11 +707,13 @@ module Gori
           @output.puts(wire_safe(payload)) # newline framing
           @output.flush                    # or the client blocks on the unterminated line
         end
+        true
       rescue ex : IO::Error
         # The client is gone (broken pipe). Stop writing and let the run loop end
         # cleanly instead of unwinding an unhandled exception out of a handler.
         @closed = true
         Log.info { "mcp: output stream closed (#{ex.message})" }
+        false
       end
     end
   end

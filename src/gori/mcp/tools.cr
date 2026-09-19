@@ -286,6 +286,11 @@ module Gori
         # call: a message the operator sends between attach and the agent's first poll is
         # exactly the one the poll layer exists to carry.
         @messages_floor = @store.try(&.last_event_id) || 0_i64
+        # Where the piggyback (`pending_operator_note`) has read to. Its own cursor rather than
+        # the floor: it must never re-attach a message it already handed over, and a read-only
+        # server — which cannot record the delivery that would retire it — would otherwise put
+        # the same line on every tool result for the rest of the session.
+        @messages_cursor = @messages_floor
         if s = @store
           reconcile_env_syntax(s)
           bind_project_network(s)

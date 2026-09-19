@@ -61,14 +61,20 @@ module Gori
     VIA_SOCKET      = "socket"
     VIA_CHANNEL     = "channel"
     VIA_CODEX_QUEUE = "codex_queue"
+    # `tool_result` is the same pickup the agent's own `operator_messages` call makes, minus
+    # the remembering: the message rode back on the result of whatever gori tool the agent
+    # called next. The client returned that result to its model, which is exactly as far as
+    # the socket route can see too.
+    VIA_TOOL_RESULT = "tool_result"
     # The routes that CONFIRM a message reached the session, so `operator_messages` need not
-    # carry it again: a socket write that landed, the agent's own poll pickup, or a `codex
-    # queue` the CLI accepted (it exits non-zero and says why when the thread cannot take it).
+    # carry it again: a socket write that landed, the agent's own poll pickup, a `codex
+    # queue` the CLI accepted (it exits non-zero and says why when the thread cannot take it),
+    # or a tool result the client asked for and was answered.
     # A `channel` push is unverifiable (a session that never registered the channel drops it
     # without a word) and a `poll` deposit is not a delivery — neither retires the message, so
     # a dropped channel can never turn into a silently lost message. An unknown via is treated
     # the same, the safe way: re-deliverable, never lost.
-    CARRIED = {VIA_SOCKET, VIA_PICKED_UP, VIA_CODEX_QUEUE}
+    CARRIED = {VIA_SOCKET, VIA_PICKED_UP, VIA_CODEX_QUEUE, VIA_TOOL_RESULT}
 
     def self.from_row(row : Store::EventRow) : AgentDelivery?
       return nil unless row.kind == KIND

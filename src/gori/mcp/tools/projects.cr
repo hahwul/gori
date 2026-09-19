@@ -223,6 +223,7 @@ module Gori
         @store.try(&.close)
         @store = new_store
         @messages_floor = new_store.last_event_id # a new feed, a new "now" (#1090)
+        @messages_cursor = @messages_floor        # …and the piggyback reads from the same "now"
         @owns_store = true
         # A RESUMED OAST handle is bound to the project it was resumed in: its row id means
         # nothing in the new DB, and oast_poll would file its callbacks under a stranger's
