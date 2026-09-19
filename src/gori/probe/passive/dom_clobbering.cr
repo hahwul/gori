@@ -27,9 +27,23 @@ module Gori
         # client_code, which blanks a string's contents but KEEPS its opening quote, so the
         # quoted form still matches post-strip (`document.forms['x']` → `document.forms['']`).
         NAMED_COLLECTION = /\bdocument\.(?:forms|images|embeds|links|anchors|scripts|applets|all)\s*(?:\[\s*["'`]|\.namedItem\b)/
-        # `window.foo = window.foo || …` — reads a global back before defining it; a clobbering
+        # `window.foo = window.foo || "…"` — reads a global back before defining it; a clobbering
         # element with that id/name can have already set it. Backreference pins both sides.
-        CLOBBER_GUARD = /\bwindow\.([A-Za-z_$][\w$]*)\s*=\s*window\.\1\s*\|\|/
+        #
+        # The trailing `["'`]` is what makes this a finding rather than a description of every
+        # bundle on the web. What a clobbering element puts in a global is an ELEMENT (or an
+        # HTMLCollection), so the idiom is only a gadget when the code goes on to use the value
+        # AS A STRING — a CDN base, an API URL, a template path — because that is where an
+        # `<a id=cdnBase href="//evil">` stringifies into the slot. The namespace-initialising
+        # forms (`|| {}`, `|| []`, `|| require(…)`, `|| someIdentifier`) are the UMD / polyfill /
+        # analytics preamble: `window.dataLayer = window.dataLayer || []` is Google Tag Manager's
+        # documented snippet, and `window.X = window.X || {}` opens essentially every UMD bundle.
+        # Matching those made this rule fire on every script on the internet — against the
+        # "two high-precision code patterns" this file's header promises — while clobbering one
+        # of them with an element breaks the page loudly instead of exploiting it. Runs over
+        # stripped client_code, which blanks a string's CONTENTS but keeps its opening quote,
+        # so the string-literal form still matches post-strip.
+        CLOBBER_GUARD = /\bwindow\.([A-Za-z_$][\w$]*)\s*=\s*window\.\1\s*\|\|\s*["'`]/
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           scripts = ctx.client_code

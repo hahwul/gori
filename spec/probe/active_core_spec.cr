@@ -175,6 +175,29 @@ describe Gori::Probe::Active do
     end
   end
 
+  # A server emits ACAO only when the REQUEST carried an Origin, and a browser sends none on a
+  # same-origin GET — so gating on ACAO alone skipped the reflecting endpoint nobody had happened
+  # to drive cross-origin, and mostly re-confirmed CORS the capture already showed. `Vary: Origin`
+  # is the standing advertisement of the very behaviour this rule tests.
+  it "gates cors_reflection on Vary: Origin as well as ACAO, and keeps both paths in step" do
+    with_store do |store|
+      cors = Gori::Probe::Active::CorsReflection.new
+      vary_only = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nVary: Accept-Encoding, Origin\r\n\r\n"
+      d = probe_capture_flow(store, vary_only, host: "t.example", target: "/api/items?q=1")
+      cors.plan(d).should_not be_nil
+      cors.dedup_key(d).should eq(cors.plan(d).try(&.dedup_key))
+      # Whole TOKEN, not substring: a Vary naming some other origin-ish header is not a CORS
+      # endpoint, and neither is a response with no Vary at all.
+      ["HTTP/1.1 200 OK\r\nVary: X-Origin-Hint\r\n\r\n",
+       "HTTP/1.1 200 OK\r\nVary: Accept-Encoding\r\n\r\n",
+       "HTTP/1.1 200 OK\r\n\r\n"].each do |resp|
+        nd = probe_capture_flow(store, resp, host: "t.example", target: "/api/items?q=1")
+        cors.plan(nd).should be_nil
+        cors.dedup_key(nd).should be_nil
+      end
+    end
+  end
+
   # The equivalence invariant must hold PER-opts: threading allow_unsafe/aggressive into plan and
   # dedup_key together keeps them from drifting, and the widened method gate / raised caps make the
   # previously-nil POST + over-cap flows non-nil (so both paths must agree on the SAME non-nil key).

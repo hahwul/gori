@@ -66,16 +66,35 @@ describe Gori::Probe::Passive::DomXss do
 end
 
 describe Gori::Probe::Passive::DomClobbering do
-  it "flags named HTMLCollection access and the window-global fallback idiom" do
+  it "flags named HTMLCollection access and a STRING-valued window-global fallback" do
     with_store do |store|
       probe_codes_of(probe_analyze_html(store, html_with_script("var f = document.forms['login'];"))).should contain("dom_clobbering")
-      probe_codes_of(probe_analyze_html(store, html_with_script("window.cfg = window.cfg || {};"))).should contain("dom_clobbering")
+      probe_codes_of(probe_analyze_html(store, html_with_script(%(window.cdnBase = window.cdnBase || "https://cdn.test";)))).should contain("dom_clobbering")
+      # Single-quoted and template-literal fallbacks are the same gadget.
+      probe_codes_of(probe_analyze_html(store, html_with_script("window.api = window.api || 'https://a.test';"))).should contain("dom_clobbering")
+      probe_codes_of(probe_analyze_html(store, html_with_script("window.tpl = window.tpl || `/t`;"))).should contain("dom_clobbering")
     end
   end
 
   it "does not flag ordinary DOM lookups" do
     with_store do |store|
       probe_codes_of(probe_analyze_html(store, html_with_script("var a = document.getElementById('a');"))).should_not contain("dom_clobbering")
+    end
+  end
+
+  # The namespace-initialising fallbacks are the UMD / polyfill / analytics preamble, not a
+  # gadget: what a clobbering element leaves in the global is an ELEMENT, so only a slot the
+  # code then uses AS A STRING is exploitable. Matching these made the rule fire on essentially
+  # every bundle on the web, which is the opposite of the "high-precision" contract the rule's
+  # own header claims.
+  it "does not flag the object/array/identifier fallback idioms every bundle ships" do
+    with_store do |store|
+      ["window.App = window.App || {};",
+       "window.dataLayer = window.dataLayer || [];",
+       "window.fetch = window.fetch || whatwgFetch;",
+       %(window.Promise = window.Promise || require("promise-polyfill");)].each do |src|
+        probe_codes_of(probe_analyze_html(store, html_with_script(src))).should_not contain("dom_clobbering")
+      end
     end
   end
 end

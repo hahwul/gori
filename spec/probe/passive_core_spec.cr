@@ -212,6 +212,34 @@ describe "Gori::Probe::Passive (FP reduction)" do
     end
   end
 
+  # PHP's browser-visible error output carries no "PHP " prefix — that spelling belongs to the
+  # log / html_errors=Off form — so the shape that actually reaches a client used to be the one
+  # PHP disclosure no signature matched.
+  it "flags PHP display_errors output in both html_errors spellings" do
+    with_store do |store|
+      bolded = probe_analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "<br />\n<b>Warning</b>:  mysqli_connect(): Access denied for user " \
+              "in <b>/var/www/db.php</b> on line <b>12</b><br />")
+      bolded.select(&.code.==("error_stack_leak")).map(&.evidence).should contain("PHP error output")
+      plain = probe_analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "Notice: Undefined index: id in /srv/app/index.php on line 87")
+      plain.select(&.code.==("error_stack_leak")).map(&.evidence).should contain("PHP error output")
+      # The `PHP `-prefixed log spelling keeps matching its own, older signature.
+      logged = probe_analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/plain",
+        body: "PHP Warning:  fopen(): failed to open stream in /srv/a.php")
+      logged.select(&.code.==("error_stack_leak")).map(&.evidence).should contain("PHP error")
+    end
+  end
+
+  it "does not flag a page that merely LINKS to .php, only the emitted error tail" do
+    with_store do |store|
+      links = probe_analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: %(<a href="/index.php">Home</a><form action="/login.php"></form>) +
+              "<p>Our app runs on PHP 8.2; see index.php for the entry point.</p>")
+      probe_codes_of(links).should_not contain("error_stack_leak")
+    end
+  end
+
   it "does not flag prose that merely NAMES a Python traceback, but flags a real one" do
     with_store do |store|
       # A tutorial ABOUT tracebacks reproduces the header in prose. Every other entry in
