@@ -247,6 +247,24 @@ It reads the other way too. A row `intercept_list` returns with `operator_editin
 
 One safety rule is worth knowing before you leave an agent running. A held message normally waits forever for a human decision, which is what you want when you are the only one at the keyboard. Once an agent attaches to the intercept queue in that session, gori arms a 30 second auto-forward for items nobody is watching, so a client that dies mid-hold cannot wedge the connection indefinitely. A session with no agent attached never auto-forwards.
 
+## Messages from gori {#messages-from-gori}
+
+Live Intercept lets an agent watch you work; the palette verb **"Tell the agent…"** (`app.tell-agent`) is the other direction — a one-line message you send from any gori tab to an attached agent's own session. Pick one of the MCP clients attached to the project (the same list the `mcp:` chip and the "Attached agents" card show), or all of them, type the line, and gori delivers it.
+
+Delivery tries three layers, best available first:
+
+1. **Channel** — when `mcp.channels` is on in Settings, `gori mcp` declares the `claude/channel` capability and pushes the message as a channel event. Claude Code shows it as `← gori: …` and starts a turn on it once the session is idle, so the model reads it as an instruction rather than a passive note. This needs Claude Code launched with `claude --dangerously-load-development-channels server:gori`, a research-preview flag with a one-time confirm dialog on the client side, and the curated `--channels` allowlist that flag ships with is Anthropic's, not gori's. It is **off by default**: a push to a session that never registered the channel is dropped silently, and left on alongside layer 2 below it would deliver the same message twice.
+2. **Inbox socket** — otherwise, when the target is Claude Code, `gori mcp` writes the message to that session's inbox socket (`/tmp/cc-socks/<pid>.sock`, found by walking up from the client's own process). This is GA — no flag, no opt-in. The message arrives framed as a note from another session, prefixed `[gori] The operator at the gori TUI says:`; an idle session starts a turn on it, a busy one reads it between tool calls. Claude Code's own `crossSessionInbound` setting decides whether to accept it, hold it for later, or refuse it outright — gori writes the socket either way and cannot see which of the three happened.
+3. **Poll** — always available, and the only layer a non-Claude agent (Codex, Gemini, …) gets: the message is a row in the project's event feed, and the MCP tool `operator_messages` returns what is pending for the calling session. The handshake `instructions` tell the model to check it at the start of a turn, so an agent that reads its own instructions picks the message up on its next call even with no socket and no channel.
+
+Each delivery attempt writes an `agent_delivery` row, and you see the outcome without switching tabs: the TUI's notification ring shows `→ claude-code got it (socket)`, `left for codex to pick up (operator_messages)`, or the reason a delivery failed, and Companion (Miss Ring) reacts to the same notice if she's on. The Activity pane lists every one of these under a new `operator` source, so the message and its delivery outcome stay on the record alongside everything else that happened to the project — see [Activity](/guide/proxy/#project-tab).
+
+A few limits worth knowing before you rely on this:
+
+- **Nothing is replayed.** A message is delivered to the agents attached *at the moment you send it*. An agent that attaches afterward does not receive it retroactively — `operator_messages` only ever answers with what is still pending for that session, and a delivery already made is not made twice.
+- **It is a request, not consent.** Whichever layer carries it, a peer-framed message asks the model to do something; it does not authorize anything on its own, and the agent may decline exactly as it would any other instruction it disagrees with.
+- **Channel delivery is a research preview.** It depends on an unreleased Claude Code flag and Anthropic's own curated allowlist, both of which can change out from under `mcp.channels` — the inbox socket and the poll tool exist so the feature still works the day that flag does not.
+
 ## One Call at a Time
 
 Tools run one at a time, in the order they arrive; a fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are answered immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call and declares the server dead, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling does not abort work already in flight: an in-progress request finishes, its answer is simply not sent.

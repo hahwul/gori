@@ -247,6 +247,24 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 에이전트를 켜둔 채 자리를 뜨기 전에 알아둘 안전 규칙이 하나 있습니다. 홀드된 메시지는 원래 사람의 결정을 무한히 기다립니다. 키보드 앞에 사람만 있을 때는 그게 맞는 동작입니다. 하지만 해당 세션에서 에이전트가 인터셉트 큐에 붙고 나면, gori는 아무도 보고 있지 않은 항목에 대해 30초 자동 포워드를 켭니다. 홀드 도중 죽은 클라이언트가 연결을 영영 막아버리지 못하게 하기 위해서입니다. 에이전트가 붙지 않은 세션은 자동 포워드를 하지 않습니다.
 
+## gori가 보내는 메시지 {#messages-from-gori}
+
+라이브 인터셉트가 에이전트더러 사용자가 일하는 모습을 지켜보게 한다면, 팔레트 verb **"Tell the agent…"**(`app.tell-agent`)는 반대 방향입니다 — 어느 gori 탭에서든 붙어 있는 에이전트 자신의 세션으로 한 줄짜리 메시지를 보냅니다. 프로젝트에 붙은 MCP 클라이언트 중 하나(`mcp:` 칩과 "Attached agents" 카드가 보여주는 것과 같은 목록)를 고르거나 전체를 고르고, 한 줄을 입력하면 gori가 전달합니다.
+
+전달은 세 층을 순서대로 시도하며, 더 나은 것을 먼저 씁니다.
+
+1. **Channel** — Settings의 `mcp.channels`가 켜져 있으면 `gori mcp`가 `claude/channel` capability를 선언하고 메시지를 channel event로 push합니다. Claude Code는 이를 `← gori: …`로 보여주고, 세션이 idle이 되는 즉시 그 위에서 turn을 시작합니다 — 그래서 모델은 이것을 그냥 지나가는 메모가 아니라 지시로 읽습니다. 이 경로는 Claude Code를 `claude --dangerously-load-development-channels server:gori`로 띄워야 동작하는데, 이는 research-preview 플래그로 클라이언트 쪽에 한 번짜리 확인 대화상자가 뜨고, 이 플래그가 함께 갖고 오는 `--channels` 허용 목록은 gori가 아니라 Anthropic이 정한 것입니다. **기본은 off**입니다. channel을 등록한 적 없는 세션으로의 push는 조용히 버려지고, 아래 2번 층과 함께 켜 두면 같은 메시지가 두 번 전달될 수 있습니다.
+2. **Inbox socket** — 그렇지 않을 때, 대상이 Claude Code라면 `gori mcp`가 그 세션의 inbox socket(`/tmp/cc-socks/<pid>.sock`, 클라이언트 프로세스에서 부모 쪽으로 거슬러 올라가 찾습니다)에 메시지를 씁니다. 이 경로는 GA입니다 — 플래그도, opt-in도 필요 없습니다. 메시지는 다른 세션이 보낸 노트로 프레이밍되어 `[gori] The operator at the gori TUI says:` 접두어를 달고 도착합니다. idle 세션은 그 위에서 turn을 시작하고, 바쁜 세션은 tool call 사이사이에 읽습니다. 받아들일지, 나중으로 보류할지, 아예 거절할지는 Claude Code 자신의 `crossSessionInbound` 설정이 정하며, gori는 어느 쪽이든 socket에 쓸 뿐 셋 중 무엇이 일어났는지는 볼 수 없습니다.
+3. **Poll** — 항상 쓸 수 있고, Claude가 아닌 에이전트(Codex, Gemini, …)가 받는 유일한 층입니다. 메시지는 프로젝트 이벤트 피드의 한 행이 되고, MCP 도구 `operator_messages`가 호출한 세션에 남아 있는 메시지를 돌려줍니다. 핸드셰이크 `instructions`가 모델에게 turn을 시작할 때 이를 확인하라고 알려주므로, 자기 instructions를 읽는 에이전트라면 socket도 channel도 없어도 다음 호출에서 메시지를 집어갑니다.
+
+전달 시도마다 `agent_delivery` 행이 하나씩 기록되고, 탭을 옮기지 않아도 결과를 볼 수 있습니다. TUI의 알림 링이 `→ claude-code got it (socket)`, `left for codex to pick up (operator_messages)` 같은 문구나 전달이 실패한 이유를 보여주고, Companion(Miss Ring)을 켜 두었다면 같은 알림에 반응합니다. Activity 페인은 이 모두를 새로운 `operator` source 아래 나열하므로, 메시지와 그 전달 결과가 프로젝트에서 일어난 다른 모든 일과 함께 기록에 남습니다 — [Activity](/ko/guide/proxy/#project-tab) 참고.
+
+의지하기 전에 알아둘 한계가 몇 가지 있습니다.
+
+- **재전송되지 않습니다.** 메시지는 *보내는 그 순간* 붙어 있던 에이전트에게만 전달됩니다. 그 뒤에 붙은 에이전트는 소급해서 받지 않습니다 — `operator_messages`는 언제나 그 세션에 아직 남아 있는 것만 돌려주고, 이미 전달한 것을 두 번 전달하지 않습니다.
+- **동의가 아니라 요청입니다.** 어느 층으로 가든, 피어가 프레이밍한 메시지는 모델에게 뭔가를 해 달라고 요청할 뿐 그 자체로 무언가를 승인하지 않으며, 에이전트는 자신이 동의하지 않는 다른 지시와 똑같이 이를 거절할 수 있습니다.
+- **Channel 전달은 research preview입니다.** 아직 출시되지 않은 Claude Code 플래그와 Anthropic이 정한 허용 목록에 의존하며, 둘 다 `mcp.channels`가 모르는 사이 바뀔 수 있습니다 — inbox socket과 poll 도구가 따로 존재하는 이유는 그 플래그가 사라지는 날에도 기능이 계속 동작하게 하기 위해서입니다.
+
 ## 한 번에 한 호출 {#one-call-at-a-time}
 
 도구는 도착한 순서대로 하나씩 실행되고, 응답도 그 순서로 돌아옵니다. 퍼즈나 느린 `send_request`가 다음 호출과 겹치지 않습니다. 다만 두 메시지는 항상 즉시 응답합니다. `ping`은 클라이언트의 생존 확인이 긴 호출 뒤에 밀려 "서버가 죽었다"는 판정을 받지 않도록, `notifications/cancelled`는 더 이상 기다리지 않는 요청의 응답을 보내지 않도록 하기 위해서입니다. 취소는 이미 진행 중인 작업을 중단시키지는 않습니다. 그 요청은 끝까지 실행되고, 응답만 전송되지 않습니다.

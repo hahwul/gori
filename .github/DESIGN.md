@@ -443,6 +443,8 @@ migrations in `src/gori/store/schema.cr`.
   weeks later and a row that re-resolved would describe a request that never ran.
 - **Note**: the running scratchpad and report.
 - **Sessions**: persisted Repeater / Fuzzer / Miner / Sequencer / OAST workbench state.
+- **Operator message**: a line the operator sends from the TUI to an attached agent session;
+  delivered by channel, inbox socket or poll, and recorded as an `agent_delivery` event.
 
 Directories are `0700` (`Paths::DIR_MODE`) and the DB, plus its `-wal` and `-shm`
 sidecars, are `0600` (`Store.harden_permissions`).

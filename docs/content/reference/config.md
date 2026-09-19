@@ -824,6 +824,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
 | `redaction` | Safe-export profiles, the active one, the on-by-default switch and the placeholder salt. See [redaction](#redaction) above |
 | `display` | Default detail pane, list time format, line-number gutter, `wrap_lines` (soft-wrap long lines, on by default), preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |
+| `mcp` | How `gori mcp` delivers "Tell the agent…" messages: `channels` (off by default) enables the `claude/channel` push on top of the inbox-socket and `operator_messages`-poll layers, which always run. See [Messages from gori](/guide/mcp/#messages-from-gori) |
 
 ## Per-Project Overrides
 
