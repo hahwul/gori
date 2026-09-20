@@ -163,40 +163,34 @@ subsystems at once and so mirrors no single file (`layering_spec.cr`, `send_seam
 
 ## House rules
 
-### Commit messages: short
-
-One subject line carries the change:
+### Commit messages
 
 ```
 type(scope): what changed, imperative (#123)
 ```
 
+- One subject line, under ~72 characters, ending with the issue or PR number.
 - `type` is `feat`, `fix`, `refactor`, `docs`, `style` or `chore`. `scope` is the subsystem
-  (`proxy`, `store`, `tui`, `history`, `cli/mcp`, …), comma-joined only when a change really
-  spans two. Keep the line under ~72 characters and end it with the issue or PR numbers.
-- A body is optional. When there is one, a few lines: what changed, plus the *why* a reader of
-  the diff cannot reconstruct. It is not the place for the investigation that produced the
-  change — that belongs in the PR description, and a decision that refines a principle belongs
-  in DESIGN.md §7.
-- `git log` contains multi-page commit bodies. They are history, not a template. Do not match
-  their length.
+  (`proxy`, `store`, `tui`, `cli`, `mcp`, …), comma-joined only when a change really spans two.
+- A body is optional, and a few lines when there is one: what changed, plus the *why* the diff
+  cannot show. The investigation that produced the change belongs in the PR body; a decision
+  that refines a principle belongs in DESIGN.md §7. `git log` has multi-page bodies — those are
+  history, not a template.
 - One theme per commit. A drive-by format or rename of unrelated files goes in its own commit.
-- **No AI attribution anywhere** — commit, PR body, or issue. No `Claude-Session:` line, no
-  "Generated with …", no bot co-author. End after the content and any real human
-  `Co-authored-by:` trailer.
+- **No AI attribution anywhere** — commit, PR body or issue. End after the content and any real
+  human `Co-authored-by:` trailer.
 
-### CHANGELOG: shorter
+### CHANGELOG
 
-`CHANGELOG.md` is the source for release notes, so an entry has to be liftable exactly as
-written.
+`CHANGELOG.md` is the source for release notes, so an entry has to be liftable exactly as written.
 
-- Add a line under `## Unreleased` for anything a user would notice. A refactor, a spec, an
-  internal cleanup gets no entry.
-- **One line per theme**, plain prose, issue/PR numbers in parentheses at the end. One or two
-  sentences. If it has to be read twice, it is too long (#709).
-- Join the existing theme line instead of adding a fourth bullet about the same area.
-- Fixing something that is still under `## Unreleased` means **editing the line already there**,
-  not appending "…and then fixed it". The section says what will ship, not what happened.
+- One line under `## Unreleased` for anything a user would notice. A refactor, a spec or an
+  internal cleanup gets none.
+- **One line per theme**, plain prose, one or two sentences, issue/PR numbers in parentheses at
+  the end. If it has to be read twice, it is too long (#709).
+- Join the existing theme line instead of adding another bullet about the same area.
+- Fixing something still under `## Unreleased` means **editing the line already there**, not
+  appending "…and then fixed it". The section says what will ship, not what happened.
 - The reasoning that justifies a change is not a changelog entry. PR body, or DESIGN.md §7.
 
 ### Branches and PRs
