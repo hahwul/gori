@@ -30,6 +30,15 @@ module Gori
     # Lives inside the project dir, so it is never itself listed as a project.
     ID_FILE = ".id"
 
+    # Why a name gori will not make a directory out of was refused, in the one sentence the
+    # three surfaces print verbatim ("gori run project create: …", MCP's INVALID_ARGUMENT,
+    # the TUI picker's flash row). Bare "invalid project name" named the verdict and not the
+    # rule, so `!!!` and `...` read as gori being broken rather than as a name it cannot
+    # slugify; `#slugify` keeps any name carrying a non-ASCII character, so "a letter or a
+    # digit" is the whole of what is missing. See `#slugify` for why a dot-run must never
+    # become a path.
+    UNSLUGGABLE_NAME = "invalid project name: it needs at least one letter or digit"
+
     def initialize(@root : String)
     end
 
@@ -181,7 +190,7 @@ module Gori
     def create_or_reopen(name : String, description : String = "") : {Project, Bool}
       display = name.strip
       slug = slugify(display)
-      raise Gori::Error.new("invalid project name") if slug.empty?
+      raise Gori::Error.new(UNSLUGGABLE_NAME) if slug.empty?
       slug = unique_slug(slug, display) # don't merge into a DIFFERENT project that slugifies alike
       dir = File.join(@root, slug)
       db_path = File.join(dir, Project::DB_FILE)
@@ -232,7 +241,7 @@ module Gori
 
       display = name.strip
       base_slug = slugify(display)
-      raise Gori::Error.new("invalid project name") if base_slug.empty?
+      raise Gori::Error.new(UNSLUGGABLE_NAME) if base_slug.empty?
 
       # The projects ROOT, not the project dir: the leaf below is claimed with a bare
       # `Dir.mkdir` for its atomicity, and that fails outright (ENOENT) when the root does
@@ -415,7 +424,7 @@ module Gori
     # names are rejected the same way create() rejects an unslugifiable name.
     def rename(project : Project, new_name : String) : Project
       display = new_name.strip
-      raise Gori::Error.new("invalid project name") if display.empty?
+      raise Gori::Error.new("invalid project name: it cannot be blank") if display.empty?
       raise Gori::Error.new("project directory missing") unless Dir.exists?(project.dir)
       # A rename replaces a name that is already there, so it gets the same durable
       # replace as `create`'s — and unlike that one it is NOT best-effort: a rename the

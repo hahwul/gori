@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: the project picker says why a create or a rename did not happen — `↵` on a name gori cannot make a directory out of, on a full disk, or on an emptied rename field used to leave the form exactly as it was and report nothing, which reads as a dead key; the refusal now names the rule (“it needs at least one letter or digit”) on every surface that prints it (#1107)
 - CLI: `gori run project delete`'s preview reports whether another gori instance has the project open, not only whether one is capturing into it — it used to say “not running … re-run with `--yes`” for a project an MCP server was serving, and `--yes` then refused it (#1107)
 - TUI: a misspelled filter field stops reading as an empty list — History, Sitemap, Issues, Probe and the Intercept catch gate now name it (“unknown field `hostt:` — did you mean `host:`?”), the way `gori run` and MCP already refuse it. A pasted URL, an authority (`acme.test:8443`) or `localhost:8080` is no longer painted as a typo’d field either: the bars read a token the way the query compiler reports it (#1106)
 - MCP: `gori mcp --read-only --tools=SPEC` starts — naming an action tool in SPEC was reported as `"send_request" matches no tool`, the sentence a misspelling gets, so both of the `--tools` examples in the command's own help aborted when combined with `--read-only`; only a spec that leaves nothing at all to serve is refused, and it says why (#1105)

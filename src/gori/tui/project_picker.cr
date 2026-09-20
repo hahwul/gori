@@ -606,6 +606,7 @@ module Gori::Tui
     private def handle_rename(ev : Termisu::Event::Key) : Project | Symbol?
       key = ev.key
       @preedit = ""
+      @flash = nil # a fresh keystroke dismisses the last refusal, as on the list
       if key.escape?
         cancel_rename
       elsif key.enter?
@@ -650,16 +651,31 @@ module Gori::Tui
       @registry.temp(Random::Secure.hex(4))
     end
 
-    # Create a project, swallowing an invalid-name error (e.g. a symbol-only name
-    # that slugifies to empty) so the picker stays up instead of crashing the TUI.
-    # Description is optional and passed through to init the project metadata.
+    # Create a project, keeping the picker up when it cannot be done — an invalid name (a
+    # punctuation-only name that slugifies to empty) OR a filesystem/DB failure (mkdir_p on
+    # an unwritable root, Store.open on a full or locked disk) must not unwind to the event
+    # loop and crash the whole TUI.
+    #
+    # …and SAYING so. Swallowed silently, `↵` on the New form did nothing whatsoever: the
+    # form sat there with the operator's name still in it and no hint that gori had refused
+    # it, which reads as a broken key rather than a rejected name — and the disk-full case
+    # read the same way as the typo. The raised sentence is the reason, because only it can
+    # tell "invalid project name" from "no space left on device".
     private def safe_create(name : String, description : String = "") : Project?
       @registry.create(name, description)
-    rescue Gori::Error | IO::Error | DB::Error | SQLite3::Exception
-      # An invalid name (Gori::Error) OR a filesystem/DB failure — mkdir_p on an
-      # unwritable root, Store.open on a full/locked disk — must keep the picker up
-      # instead of unwinding to the event loop and crashing the whole TUI.
+    rescue ex : Gori::Error | IO::Error | DB::Error | SQLite3::Exception
+      set_flash(ProjectPicker.failed_flash("create", name, ex), ok: false)
       nil
+    end
+
+    # Why a create or a rename did not happen, in the picker's one message row. Pure +
+    # class-level so a spec can pin the sentence: the picker holds a live Termisu and cannot
+    # be built in one.
+    def self.failed_flash(verb : String, name : String, ex : Exception) : String
+      # The class name as the last resort: an exception with no message still has to produce
+      # a sentence, since the whole point here is that silence is not an option.
+      reason = ex.message.presence || ex.class.to_s
+      %(can't #{verb} "#{name}" — #{reason})
     end
 
     # Open the delete-confirmation modal for the target set — the marks if any are set, else
@@ -962,22 +978,35 @@ module Gori::Tui
 
     private def commit_rename : Nil
       project = @pending_rename
+      return cancel_rename unless project
       name = @rename_name.strip
-      if project && !name.empty?
-        begin
-          renamed = @registry.rename(project, name)
-          reload_projects # the dir slug is untouched by a rename, so any mark on it survives
-          # Keep the cursor on the renamed project when it still matches the filter;
-          # otherwise clamp so we don't land past the end of a shrunken list.
-          if idx = filtered_projects.index { |p| p.dir == renamed.dir }
-            @selected = idx + 3
-          else
-            @selected = @selected.clamp(0, {entry_count - 1, 0}.max)
-          end
-        rescue Gori::Error | IO::Error
-          # invalid name or write failure — stay in rename so the user can fix it
-          return
+      if name.empty?
+        # ↵ on an emptied field used to fall straight through to `cancel_rename`: the prompt
+        # CLOSED and the name was unchanged, which is indistinguishable from a rename that
+        # was accepted and then lost. Refuse it here the same way `ProjectRegistry#rename`
+        # would if it were reached, and stay, so `esc` remains the only way to back out.
+        set_flash(ProjectPicker.failed_flash("rename", project.name,
+          Gori::Error.new("the new name cannot be blank")), ok: false)
+        return
+      end
+      begin
+        renamed = @registry.rename(project, name)
+        reload_projects # the dir slug is untouched by a rename, so any mark on it survives
+        # Keep the cursor on the renamed project when it still matches the filter;
+        # otherwise clamp so we don't land past the end of a shrunken list.
+        if idx = filtered_projects.index { |p| p.dir == renamed.dir }
+          @selected = idx + 3
+        else
+          @selected = @selected.clamp(0, {entry_count - 1, 0}.max)
         end
+      rescue ex : Gori::Error | IO::Error
+        # An invalid name or a write failure — stay in rename so the operator can fix it, and
+        # SAY which, for the same reason `safe_create` does: `↵` that leaves the prompt
+        # exactly as it was, with nothing written anywhere, is indistinguishable from a dead
+        # key. `rename` is deliberately not best-effort (see ProjectRegistry#rename), so
+        # there is always a sentence to show here.
+        set_flash(ProjectPicker.failed_flash("rename", name, ex), ok: false)
+        return
       end
       cancel_rename
     end
@@ -1105,6 +1134,7 @@ module Gori::Tui
     private def handle_new(ev : Termisu::Event::Key) : Project | Symbol?
       key = ev.key
       @preedit = "" # any committed key ends an in-progress IME composition
+      @flash = nil  # …and dismisses the last refusal, as on the list
       if key.escape?
         @mode = :list
       elsif key.enter?
@@ -1119,7 +1149,9 @@ module Gori::Tui
           if !name.empty? && (proj = safe_create(name, desc))
             return proj
           end
-          # invalid → stay
+          # Refused → stay on the form. `safe_create` has already put the reason in the
+          # flash row; an EMPTY name is the one case with nothing to report, because the
+          # form's own `name ›` row is showing it.
         end
       elsif key.backspace?
         if @new_field == :name
@@ -1826,7 +1858,18 @@ module Gori::Tui
       nbase = cx + 2 + Screen.display_width(prefix)
       nwidth = {cw - Screen.display_width(prefix) - 2, 1}.max
       screen.input_line(nbase, iy, @rename_name, @rename_name.size, @preedit, Theme.text_bright, Theme.panel, width: nwidth)
+      render_form_flash(screen, w, h)
       centered(screen, h - 2, "↵ save   esc cancel", Theme.muted, w)
+    end
+
+    # The refusal row for the two FORM modes (:new, :rename), which draw alone — `render_list`
+    # and its `render_notice_row` are not on screen there, so without this the flash a refused
+    # create or rename sets would be written and never painted. Same row and same colour as
+    # the list's notice, so one message row means one thing on every screen of this picker.
+    # Capped: a filesystem error carries a path of unbounded length.
+    private def render_form_flash(screen : Screen, w : Int32, h : Int32) : Nil
+      return unless flash = @flash
+      centered(screen, h - 3, flash, @flash_ok ? Theme.green : Theme.red, w, width: w - 2)
     end
 
     # One action/result row inside the picker card: selection band + ▎ bar, label
@@ -1898,6 +1941,7 @@ module Gori::Tui
         end
       end
 
+      render_form_flash(screen, w, h)
       hint = "↵ next/create   ↑/↓ fields   esc cancel"
       centered(screen, h - 2, hint, Theme.muted, w)
     end
