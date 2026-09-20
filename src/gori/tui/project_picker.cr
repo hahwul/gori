@@ -23,8 +23,11 @@ require "./viewport"
 module Gori::Tui
   # The startup screen: choose a project to open. New + Temp are always shown at
   # the top. Below them is a Search row (the "search area"). Arrow down to it to
-  # "enter" search, then typing does fuzzy filter (Gori::Fuzzy, best-first) on the
-  # projects listed below the search row. Search is *not* live on every keystroke
+  # "enter" search, then typing narrows the list below it: fuzzy (Gori::Fuzzy,
+  # best-first) on the display name, then a substring of the directory slug, the short
+  # id or the bound workspace path — the same vocabulary `gori run project list
+  # --query` and MCP `list_projects{query}` accept (see ProjectPicker.narrow).
+  # Search is *not* live on every keystroke
   # from anywhere (avoids the previous always-on filter which felt inconvenient).
   # On a project row, Space opens a small action menu (open / rename / delete) —
   # same discovery surface as the in-session space menu, scoped to the picker.
@@ -107,7 +110,10 @@ module Gori::Tui
       @open_error = notice
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
-      @projects = @registry.list
+      # ENTRIES, not `list`: the search narrows on the same four spellings the two headless
+      # listings do (see `ProjectPicker.narrow`), and those live in sidecars the registry
+      # reads once per project here rather than per keystroke.
+      @entries = @registry.entries
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
@@ -390,17 +396,77 @@ module Gori::Tui
       3 + fp.size
     end
 
-    # Saved projects filtered by @query using Gori::Fuzzy.
+    # Saved projects filtered by @query (see `ProjectPicker.narrow`).
     # List layout: 0=New, 1=Temp, 2=Search bar (typing only active here), 3+=projects.
     private def filtered_projects : Array(Project)
-      return @projects if @query.empty?
-      q = @query.downcase
-      scored = @projects.compact_map do |p|
-        if score = Gori::Fuzzy.score(q, p.name.downcase)
-          {p, score}
+      filtered_entries.map(&.project)
+    end
+
+    private def filtered_entries : Array(ProjectRegistry::Entry)
+      ProjectPicker.narrow(@entries, @query)
+    end
+
+    # Which projects the search keeps, and in what order.
+    #
+    # TWO passes, because a picker has to be reachable by everything that ADDRESSES a
+    # project. `gori run project list --query` and MCP `list_projects{query}` both narrow on
+    # the display name, the directory slug, the short id AND the bound workspace path — one
+    # predicate, `ProjectRegistry::Entry#matches?`, written so the two cannot disagree about
+    # what "acme" means. This screen looked at the display NAME and nothing else, so a
+    # project could not be found by the worktree it is bound to, by the short id every other
+    # surface prints, or by the slug — and display names are deliberately NOT unique
+    # (`create_for_workspace` names a project after its workspace basename, so two checkouts
+    # called `api` share a display name while living in `api` and `api-2`), which made the
+    # slug the ONLY way to tell them apart and the one spelling that was not accepted.
+    #
+    # Fuzzy on the name FIRST and ranked exactly as it always was, so the common gesture is
+    # byte-identical. The other three spellings then follow, below every fuzzy hit, matched
+    # by plain SUBSTRING: a subsequence matcher over an absolute path matches very nearly any
+    # query, so fuzzing those would fill the list with noise instead of finding anything. A
+    # name that fails the fuzzy pass cannot pass a name-substring test either (a substring is
+    # a subsequence), so nothing is listed twice.
+    #
+    # Folded through `ProjectRegistry.needle`, the same one-line folding the two listings
+    # use, so a query that is trimmed on one surface and not on this one is the same drift as
+    # a second predicate.
+    def self.narrow(entries : Array(ProjectRegistry::Entry), query : String) : Array(ProjectRegistry::Entry)
+      q = ProjectRegistry.needle(query)
+      return entries unless q
+      named = [] of {ProjectRegistry::Entry, Int32}
+      addressed = [] of ProjectRegistry::Entry
+      entries.each do |e|
+        if score = Gori::Fuzzy.score(q, e.project.name.downcase)
+          named << {e, score}
+        elsif e.matches?(q)
+          addressed << e
         end
       end
-      scored.sort_by! { |(_, score)| -score }.map { |(p, _)| p }
+      named.sort_by! { |(_, score)| -score }
+      named.map { |(e, _)| e } + addressed
+    end
+
+    # The label each project row shows: its display name, plus the directory slug when
+    # another project on this host carries the SAME name.
+    #
+    # Display names are not unique by design — `ProjectRegistry#create_for_workspace` names a
+    # project after its workspace basename, so two checkouts called `api` both display "api"
+    # while living in slugs `api` and `api-2` (the registry's own `#find` comment says so, and
+    # `gori run project delete` refuses such a name outright rather than guess). Two
+    # identical rows is the one ambiguity this list cannot let the operator resolve before
+    # pressing `↵` on an irreversible delete. ONLY when it is ambiguous: a slug beside every
+    # row is noise, and for a hand-created project the slug is just the name again.
+    #
+    # Judged over the WHOLE registry rather than the filtered view, because the delete confirm
+    # reaches marks the current search is hiding — and keyed on the project DIRECTORY, which
+    # is unique, so the row render and that confirm read one map instead of each deriving the
+    # rule.
+    def self.row_labels(entries : Array(ProjectRegistry::Entry)) : Hash(String, String)
+      counts = Hash(String, Int32).new(0)
+      entries.each { |e| counts[e.project.name.downcase] += 1 }
+      entries.to_h do |e|
+        name = e.project.name
+        {e.project.dir, counts[name.downcase] > 1 ? "#{name}  ·  #{e.slug}" : name}
+      end
     end
 
     private def handle_list(ev : Termisu::Event::Key) : Project | Symbol?
@@ -695,18 +761,23 @@ module Gori::Tui
         blocked << p if in_use
         in_use
       end
+      # The SAME labels the rows carry, so a confirm over two projects that share a display
+      # name names each one unambiguously — `Delete "api"?` for one of a pair is exactly the
+      # sentence an irreversible wipe must not print (see `ProjectPicker.row_labels`).
+      labels = ProjectPicker.row_labels(@entries)
+      name_of = ->(p : Project) { labels[p.dir]? || p.name }
       if deletable.empty?
         # Said out loud even for the capture-lock case the green "● on" dot already flags:
         # a ctrl-d that does nothing at all reads as delete being broken rather than refused
         # — the same reasoning the post-confirm refusal below is written for.
-        set_flash(ProjectPicker.delete_blocked_flash(blocked.map(&.name)), ok: false)
+        set_flash(ProjectPicker.delete_blocked_flash(blocked.map { |p| name_of.call(p) }), ok: false)
         return
       end
       # Hoisted: `filtered_projects` re-runs the fuzzy scoring on every call.
       shown = filtered_projects.map(&.dir).to_set
       hidden = deletable.count { |p| !shown.includes?(p.dir) }
       dialog = ConfirmDialog.new(deletable.size == 1 ? "DELETE PROJECT" : "DELETE PROJECTS",
-        ProjectPicker.delete_confirm_body(deletable.map(&.name), hidden, blocked.size),
+        ProjectPicker.delete_confirm_body(deletable.map { |p| name_of.call(p) }, hidden, blocked.size),
         confirm_label: "delete", cancel_label: "cancel", danger: true)
       # ConfirmDialog DECLINES to draw on a terminal too small for its card (render and
       # overlay_box share the guard, the latter answering with a 0×0 rect). Its mouse path
@@ -780,6 +851,10 @@ module Gori::Tui
         # stale confirm frame and reads as hung rather than as working.
         @mode = :deleting
         render
+        # Built BEFORE the loop: `row_labels` reads `@entries`, and `reload_projects` below
+        # replaces them with a registry the deleted projects are gone from — after which a
+        # refusal could not be named the way the confirm the operator just read named it.
+        labels = ProjectPicker.row_labels(@entries)
         targets.each do |project|
           @registry.delete(project) # refuses if it went live since request_delete
           deleted << project.dir
@@ -788,7 +863,7 @@ module Gori::Tui
           # message names WHICH, and it has to reach the screen: swallowed, the dialog just
           # closed with the project still listed and nothing said, so the operator saw delete
           # as broken rather than as refused.
-          refused << project.name
+          refused << (labels[project.dir]? || project.name)
           first_error ||= ex.message
         rescue ex : IO::Error
           # rm_rf hit a real filesystem failure (permission, locked file) — keep the TUI
@@ -796,8 +871,9 @@ module Gori::Tui
           # Its message is captured too: reported as the generic refusal it is NOT, this
           # reads as "close the other gori" and sends the operator after an instance that
           # was never there.
-          refused << project.name
-          first_error ||= %(can't delete "#{project.name}" — #{ex.message})
+          label = labels[project.dir]? || project.name
+          refused << label
+          first_error ||= %(can't delete "#{label}" — #{ex.message})
         end
         @marks.unmark(deleted)
         reload_projects
@@ -892,14 +968,14 @@ module Gori::Tui
     # out in the confirm (see delete_confirm_body).
     private def target_projects : Array(Project)
       return [selected_project].compact if @marks.empty?
-      by_dir = @projects.to_h { |p| {p.dir, p} }
+      by_dir = @entries.to_h { |e| {e.project.dir, e.project} }
       @marks.ordered(filtered_projects.map(&.dir)).compact_map { |dir| by_dir[dir]? }
     end
 
     # Re-read the registry after a mutation, dropping marks whose project is gone with it.
     private def reload_projects : Nil
-      @projects = @registry.list
-      @marks.retain(@projects.map(&.dir))
+      @entries = @registry.entries
+      @marks.retain(@entries.map(&.project.dir))
       invalidate_running_cache
     end
 
@@ -1525,6 +1601,7 @@ module Gori::Tui
 
     private def render_list(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
       fp = filtered_projects
+      labels = ProjectPicker.row_labels(@entries)
 
       # One rounded card holds the actions (New / Temp / Search), a tee divider,
       # then the scrollable project list — the same header + divider + list shape
@@ -1586,7 +1663,8 @@ module Gori::Tui
           # Width of the whole meta cell: every segment plus a " · " separator between each.
           mdw = segments.sum { |(text, _)| Screen.display_width(text) } + 3 * (segments.size - 1)
           name_w = cw - 3 - (mdw + 2)
-          screen.text(box.x + 3, py, proj.name, is_selected || marked ? Theme.text_bright : Theme.text, bg, width: [name_w, 1].max)
+          label = labels[proj.dir]? || proj.name
+          screen.text(box.x + 3, py, label, is_selected || marked ? Theme.text_bright : Theme.text, bg, width: [name_w, 1].max)
           mx = box.right - mdw - 2
           segments.each_with_index do |(text, fg), si|
             mx = screen.text(mx, py, " · ", Theme.muted, bg) if si > 0
@@ -1900,7 +1978,10 @@ module Gori::Tui
       if selected
         screen.input_line(qx, y, @query, @query.size, @preedit, Theme.text_bright, bg, width: box.w - 7)
       elsif @query.empty?
-        screen.text(qx, y, "search projects...", Theme.muted, bg)
+        # Names the four spellings that ADDRESS a project rather than just "projects": the
+        # slug and the short id are what tell apart two checkouts sharing a display name,
+        # and nothing else on this screen says they are accepted here.
+        screen.text(qx, y, "search name, slug, id or path…", Theme.muted, bg)
       else
         screen.text(qx, y, @query, Theme.text, bg, width: box.w - 7)
       end

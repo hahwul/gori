@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: the project picker finds a project by its directory slug, short id or bound workspace path, not only by display name — the same narrowing `gori run project list --query` and MCP `list_projects` offer — and two projects that share a display name (two checkouts with the same basename do, by design) now carry their slug on the row and in the delete confirm, so an irreversible wipe never reads as `Delete "api"?` for one of a pair (#1107)
 - TUI: the project picker says why a create or a rename did not happen — `↵` on a name gori cannot make a directory out of, on a full disk, or on an emptied rename field used to leave the form exactly as it was and report nothing, which reads as a dead key; the refusal now names the rule (“it needs at least one letter or digit”) on every surface that prints it (#1107)
 - CLI: `gori run project delete`'s preview reports whether another gori instance has the project open, not only whether one is capturing into it — it used to say “not running … re-run with `--yes`” for a project an MCP server was serving, and `--yes` then refused it (#1107)
 - TUI: a misspelled filter field stops reading as an empty list — History, Sitemap, Issues, Probe and the Intercept catch gate now name it (“unknown field `hostt:` — did you mean `host:`?”), the way `gori run` and MCP already refuse it. A pasted URL, an authority (`acme.test:8443`) or `localhost:8080` is no longer painted as a typo’d field either: the bars read a token the way the query compiler reports it (#1106)
