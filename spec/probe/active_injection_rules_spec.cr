@@ -708,6 +708,26 @@ describe "Gori::Probe::Active::CrlfInjection" do
       probe.plan(post).should be_nil
     end
   end
+
+  it "injects into form and JSON bodies under allow_unsafe (broadened surfaces)" do
+    with_store do |store|
+      unsafe = Gori::Probe::Active::Options.new(allow_unsafe: true)
+
+      form = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s", method: "POST",
+        req_headers: "Content-Type: application/x-www-form-urlencoded\r\n", req_body: "a=1&b=2")
+      fplan = probe.plan(form, unsafe).not_nil!
+      fplan.params.map(&.name).sort!.should eq(["a", "b"])
+      fplan.params.map(&.location).uniq!.should eq(["form"])
+      String.new(fplan.request).should contain("a=1%0d%0aGori-Probe:%20")
+
+      json = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s", method: "POST",
+        req_headers: "Content-Type: application/json\r\n", req_body: %({"u":"x"}))
+      jplan = probe.plan(json, unsafe).not_nil!
+      jplan.params.map(&.name).should eq(["u"])
+      jplan.params.map(&.location).should eq(["json"])
+      String.new(jplan.request).should contain(jplan.params.first.canary)
+    end
+  end
 end
 
 describe "Gori::Probe::Active::Ssti" do

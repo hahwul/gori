@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Probe: new passive rules — exposed API documentation and schemas (Swagger UI, OpenAPI/Swagger specs, GraphiQL, GraphQL Playground, ReDoc), a known framework session identifier carried in the request URL, and a permissive Flash/Silverlight cross-domain policy (`domain="*"`) (#1109)
+- Probe: new active rules — a 429 rate-limit bypass and an HTTP-method access-control bypass (a method case variant by default; method-override headers and alternate verbs under unsafe), each confirmed against a clean control; an insecure-HTTP-methods probe (TRACE / Cross-Site Tracing and dangerous methods advertised in `Allow`); and CRLF/response-header injection now also probes form and JSON body values under unsafe methods (#1109)
 - TUI: the project picker finds a project by its directory slug, short id or bound workspace path, not only by display name, and two projects sharing a display name carry what tells them apart on the row and in the delete confirm. A create or a rename it refuses now says why instead of leaving the form unchanged (#1108)
 - Project: the `description` a project is created with is readable again outside the TUI — `gori run project list --format json` and MCP `project_info` both report it (#1108)
 - CLI: `gori run project delete`'s preview reports both locks the delete honours, so it no longer invites `--yes` for a project another gori instance has open or whose capture lock it could not read (#1108)
