@@ -430,24 +430,32 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "returns isError (not a protocol error) for an unknown tool" do
+    # An unknown tool is a PROTOCOL error, which is where the spec puts it by name
+    # ("Protocol Errors … Unknown tool"): the call never reached a tool, so there is no tool
+    # result to carry. It used to come back `isError` — the full reasoning, and the line
+    # between this and a tool that ran and failed, is in spec/mcp/protocol_spec.cr.
+    it "returns -32602 for an unknown tool, in either era" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"nope","arguments":{}}})
         resp = mcp_drive(store, call)[0]
-        resp["result"]["isError"].as_bool.should be_true
-        resp["error"]?.should be_nil
+        resp["result"]?.should be_nil
+        resp["error"]["code"].as_i.should eq(-32602)
+        resp["error"]["message"].as_s.should contain("nope")
       end
     end
   end
 
   describe "structured error contract" do
-    it "codes an unknown tool UNKNOWN_TOOL with a structured error object" do
+    # UNKNOWN_TOOL is still the tools-layer code — `Tools#call` answers it, and the
+    # registry spec drives every name through that path — but it no longer reaches the wire
+    # as a tool result: the server maps it to `-32602` above. The structured-error contract
+    # covers the codes that DO, which is every one that came out of a tool that ran.
+    it "codes an unknown tool UNKNOWN_TOOL at the tools layer" do
       with_store do |store|
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"nope","arguments":{}}})
-        err = mcp_drive(store, call)[0]["result"]["structuredContent"]
-        err["error_code"].as_s.should eq("UNKNOWN_TOOL")
-        err["message"].as_s.should contain("nope")
-        err["retryable"].as_bool.should be_false
+        r = tools_for(store).call("nope", JSON.parse("{}"))
+        r.error_code.should eq("UNKNOWN_TOOL")
+        r.text.should contain("nope")
+        r.retryable.should be_false
       end
     end
 

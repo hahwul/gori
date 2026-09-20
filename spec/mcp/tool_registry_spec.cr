@@ -46,11 +46,14 @@ describe "MCP tool registry" do
       # Project selection is not `gated:` because an install on a fresh machine needs it
       # under --read-only too: `switch_project` always runs, and `create_project` runs while
       # UNBOUND and self-gates once a project is bound (`create_project_entry`). Bound and
-      # read-only, as here, it is therefore both hidden from the listing and refused — the
-      # one tool whose gate is decided by state rather than by its flag.
+      # read-only, as here, it is therefore refused — but still ADVERTISED, which is the
+      # deliberate part: the listing withheld it before, and a catalogue that loses a tool
+      # when a client binds a project is one that "varies as a side effect of other requests
+      # on the connection", which 2026-07-28 spells MUST NOT. The gate moved to the call; it
+      # did not move to the listing.
       self_gated = ["create_project"]
       runnable = Gori::MCP::Tools::TOOL_NAMES.reject { |n| Gori::MCP::Tools::GATED_TOOLS.includes?(n) }
-      advertised(tools).sort.should eq((runnable - self_gated).sort)
+      advertised(tools).sort.should eq(runnable.sort)
 
       Gori::MCP::Tools::TOOL_NAMES.each do |name|
         r = tools.call(name, EMPTY_ARGS)

@@ -2909,6 +2909,37 @@ project and `switch_project` moves that mid-session — the same drift `instruct
 already warns every client about (#1003), answered here by refusing to let a client cache the
 sentence that would go stale.
 
+**What a stateless server may write to stdout closes three doors, and gori walked through
+all three.** The revision allows exactly a response, a notification belonging to a request
+in flight, and a notification on an acknowledged `subscriptions/listen` stream. A
+conformance sweep found gori doing none of those correctly: the `claude/channel` push
+(#1090) is a free-running courier frame, so the capability is now declared to the handshake
+era only — the socket, Codex-queue and poll routes carry the same message off-stream, for
+every client, which is why nothing the operator can see is lost. `subscriptions/listen` is
+answered rather than refused, with the empty filter the spec asks for when a server supports
+no notification type, then closed the way a server closes a stream it is ending itself;
+holding it open was never an option, because one worker fiber runs one request at a time and
+a stream that never delivers would starve every tool call behind it. And a batch member that
+has declared a modern revision is refused, because the array frame does not exist there —
+receiving batches stays, since `2025-03-26` made that mandatory and we still advertise it.
+
+**The catalogue may not move, so the one tool that moved it stopped.** `tools/list` "MUST
+NOT vary per-connection or as a side effect of other requests on the connection", and
+`create_project` was listed on a live `unbound?` — a read-only client that bound a project
+lost a tool mid-session. It is now advertised always and refuses at call time, which is
+where its gate always was; the listing was only ever telling the client what exists. That
+is also what lets the cache hint be a flat number instead of a state-dependent one, and
+`spec/mcp/protocol_spec.cr` asserts the invariant rather than a comment claiming it — the
+failure is invisible from inside one connection, because the client is holding a list it was
+told to trust.
+
+**An unknown tool is a protocol error, and a tool that ran and failed is not.** The spec
+names the split and puts "Unknown tool" on the protocol side with the code. gori answered
+both with `isError`, which files a name that never reached a tool in the bucket a client is
+told to hand back to the model for a retry. The `--tools` refusal moves with it, and its
+sentence — written to tell an agent where the rest of the catalogue went — survives as the
+error's `message`. What stays a tool result is every code from a tool that actually ran.
+
 **`readOnlyHint` is derived from the gate, with the exceptions spelled.** The hint a client
 uses to decide what it may run unattended defaults to `!gated`, because `--read-only` serves
 exactly the tools that neither mutate nor dial — one declaration, so the hint and the gate

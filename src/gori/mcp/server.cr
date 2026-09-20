@@ -236,8 +236,30 @@ module Gori
       #     another version" and explicitly NOT "fall back to initialize".
       private def era_of(id : JSON::Any, method : String, params : JSON::Any?) : EraGate
         meta = obj_field(params, "_meta")
-        requested = obj_field(meta, Protocol::META_PROTOCOL_VERSION).try(&.as_s?)
-        return EraGate.new(nil, false) if requested.nil? || Protocol.legacy?(requested)
+        # ABSENT is the legacy era. PRESENT is a client speaking the modern one, whatever it
+        # managed to put in the slot — so a non-string there is a malformed MODERN request,
+        # not a legacy one, and reading it as legacy would serve a client its own
+        # serialisation bug with a straight face (`20260728` unquoted, a `null` from an
+        # absent config). The key is reserved by the spec; no handshake client writes it.
+        slot = obj_field(meta, Protocol::META_PROTOCOL_VERSION)
+        return EraGate.new(nil, false) if slot.nil?
+        requested = slot.as_s?
+        unless requested
+          write_error(id, -32602, "#{Protocol::META_PROTOCOL_VERSION} must be a string " \
+                                  "naming a protocol revision (got #{json_type_of(slot)})")
+          return EraGate.new(nil, true)
+        end
+        return EraGate.new(nil, false) if Protocol.legacy?(requested)
+        # JSON-RPC batching was removed in 2025-06-18 and the modern schema has no frame for
+        # it: one message per line, and an array is not one. We still RECEIVE batches, because
+        # 2025-03-26 made that mandatory and we advertise it — but answering a member that has
+        # declared a revision where the array does not exist would put a frame on stdout that
+        # the client which sent it cannot legally read.
+        if @batch && Protocol.modern?(requested)
+          write_error(id, -32600, "JSON-RPC batching does not exist in #{requested} " \
+                                  "(removed in 2025-06-18) — send one message per line")
+          return EraGate.new(nil, true)
+        end
         unless Protocol.modern?(requested)
           write_error(id, Protocol::UNSUPPORTED_PROTOCOL_VERSION, "Unsupported protocol version",
             data: ->(j : JSON::Builder) do
@@ -254,18 +276,38 @@ module Gori
         # the next server it meets will not agree. The refusal names the key, which is the
         # only thing that makes it recoverable.
         #
-        # `server/discover` is the exception, and for the same reason it is answered without
-        # a version at all: it is the request a client sends to find out what to send, and a
-        # bootstrap probe that has stamped its version but has no capabilities to declare yet
-        # would be refused by the one RPC that exists to unblock it. The VERSION half above
-        # still applies — a discovery naming a revision we do not speak is what tells a
-        # dual-era client we are modern.
-        unless method == "server/discover" || obj_field(meta, Protocol::META_CLIENT_CAPS).try(&.as_h?)
-          write_error(id, -32602, "#{Protocol::META_CLIENT_CAPS} is required in _meta " \
-                                  "on every #{requested} request")
+        # `server/discover` is NOT exempt from this, though it IS exempt from having to name
+        # a version at all — a request carrying no `_meta` is served as the probe it is. The
+        # line between those two is what a client can legitimately be missing: an era it has
+        # not declared yet, versus a required field of an era it just did. `ClientCapabilities`
+        # has no required member — `{}` is valid, and is what the spec's own examples send —
+        # so there is nothing a bootstrap probe could fail to have here, and being lenient
+        # would only teach one client that its malformed requests are fine everywhere.
+        caps = obj_field(meta, Protocol::META_CLIENT_CAPS)
+        unless caps.try(&.as_h?)
+          # Two different mistakes, said differently: a client that never sent the field
+          # needs to be told it is required, and one that sent the wrong shape needs to be
+          # told which shape. "is required" for a field plainly present reads as a server
+          # that cannot see it.
+          write_error(id, -32602, caps.nil? ? "#{Protocol::META_CLIENT_CAPS} is required in _meta on every #{requested} request" : "#{Protocol::META_CLIENT_CAPS} must be a JSON object (got #{json_type_of(caps)})")
           return EraGate.new(nil, true)
         end
         EraGate.new(requested, false)
+      end
+
+      # What a `_meta` slot turned out to hold, for a refusal that has to name it. The
+      # client cannot fix a shape it is not told, and "invalid params" alone has cost more
+      # than one agent a retry loop against an argument it had spelled correctly.
+      private def json_type_of(any : JSON::Any) : String
+        case raw = any.raw
+        when Nil                     then "null"
+        when Bool                    then "a boolean"
+        when Int64, Float64          then "a number"
+        when String                  then "a string"
+        when Array(JSON::Any)        then "an array"
+        when Hash(String, JSON::Any) then "an object"
+        else                              raw.class.to_s
+        end
       end
 
       # What the handshake used to do with `clientInfo`, done per request because that is
@@ -372,12 +414,13 @@ module Gori
         era = gate.version
         note_modern_client(obj_field(params, "_meta")) if era
         case method
-        when "server/discover" then handle_discover(id)
-        when "initialize"      then handle_initialize(id, params)
-        when "ping"            then write_result(id, era) { }
-        when "tools/list"      then handle_tools_list(id, era)
-        when "tools/call"      then handle_tools_call(id, era, params)
-        else                        write_error(id, -32601, "Method not found: #{method}")
+        when "server/discover"      then handle_discover(id)
+        when "subscriptions/listen" then handle_subscriptions_listen(id)
+        when "initialize"           then handle_initialize(id, params)
+        when "ping"                 then write_result(id, era) { }
+        when "tools/list"           then handle_tools_list(id, era, params)
+        when "tools/call"           then handle_tools_call(id, era, params)
+        else                             write_error(id, -32601, "Method not found: #{method}")
         end
       rescue ex
         Log.error(exception: ex) { "request #{method} failed" }
@@ -422,7 +465,7 @@ module Gori
         @tools.client_seen(obj_field(info, "name").try(&.as_s?), obj_field(info, "version").try(&.as_s?))
         write_result(id) do |j|
           j.field "protocolVersion", version
-          j.field("capabilities") { emit_capabilities(j) }
+          j.field("capabilities") { emit_capabilities(j, channel: true) }
           j.field("serverInfo") { emit_implementation(j) }
           j.field "instructions", instructions_text
         end
@@ -441,7 +484,7 @@ module Gori
       private def handle_discover(id : JSON::Any) : Nil
         write_result(id, Protocol::LATEST) do |j|
           j.field("supportedVersions") { j.array { Protocol::SUPPORTED_VERSIONS.each { |v| j.string v } } }
-          j.field("capabilities") { emit_capabilities(j) }
+          j.field("capabilities") { emit_capabilities(j, channel: false) }
           j.field "instructions", instructions_text
           j.field "ttlMs", Protocol::DISCOVER_TTL_MS
           j.field "cacheScope", Protocol::CACHE_SCOPE
@@ -451,17 +494,60 @@ module Gori
         start_courier
       end
 
+      # `subscriptions/listen` — the modern revision's one server-to-client push channel,
+      # which replaced the HTTP GET endpoint and `resources/subscribe`. gori has nothing to
+      # push: it declares no `listChanged`, serves no resources or prompts, and its one
+      # vendor notification is now confined to the handshake era (`emit_capabilities`).
+      #
+      # So the conformant answer is the empty one, and it is a REAL answer rather than
+      # `-32601`. The acknowledgement goes out first, as the spec requires, carrying the
+      # subset the server agreed to honour — which is none, because "notification types the
+      # server does not support are omitted" — and then the subscription is closed the way a
+      # server closes one it is ending itself: with the successful response to the original
+      # request. A client reads that as a clean end and falls back on the `ttlMs` it was
+      # already given, instead of holding a promise nothing will resolve.
+      #
+      # Closing it immediately is not a shortcut, it is the only safe shape here. This
+      # server runs ONE request at a time on a single worker fiber (see the class header), so
+      # a `subscriptions/listen` left open would park that worker and starve every tool call
+      # behind it — a stream that never delivers anything, blocking the ones that would.
+      private def handle_subscriptions_listen(id : JSON::Any) : Nil
+        return if cancelled?(id)
+        write_notification("notifications/subscriptions/acknowledged") do |j|
+          # Inside `_meta`, not beside it: the subscription id is protocol metadata, and a
+          # client demultiplexing a stdio channel looks for it in exactly one place.
+          j.field("_meta") { j.object { emit_subscription_id(j, id) } }
+          j.field("notifications") { j.object { } }
+        end
+        write_result(id, Protocol::LATEST, meta: ->(j : JSON::Builder) { emit_subscription_id(j, id) }) { }
+      end
+
+      # Every message on a subscription carries the id of the request that opened it — on
+      # stdio that is the only way a client can tell one stream's frames from another's.
+      private def emit_subscription_id(j : JSON::Builder, id : JSON::Any) : Nil
+        j.field(Protocol::META_SUBSCRIPTION_ID) { id.to_json(j) }
+      end
+
       # What this server offers, written once for the two places that advertise it — the
       # handshake and discovery — so the two can never describe different servers.
-      private def emit_capabilities(j : JSON::Builder) : Nil
+      #
+      # `channel` is the one thing they differ on, and it is not a difference in what gori
+      # can do. The `claude/channel` push (#1090) is an unsolicited notification on stdout,
+      # and `2026-07-28` closed that door: a stdio server may write responses, notifications
+      # belonging to an IN-FLIGHT request, and notifications on an acknowledged
+      # `subscriptions/listen` stream — and a free-running courier frame is none of the
+      # three. So the capability is declared to the handshake era, which still allows it,
+      # and never to a stateless client. Nothing is lost that the operator can see: the
+      # channel was always the unconfirmable route, and the socket, the Codex queue and the
+      # `operator_messages` poll all carry the same message off-stdout, for every client.
+      private def emit_capabilities(j : JSON::Builder, *, channel : Bool) : Nil
         j.object do
           j.field("tools") { j.object { } }
-          # Claude Code's channel capability (#1090), declared only when the operator says
-          # their Claude is launched with channels: a client that did not register it drops
-          # every push silently, and the socket route would then carry the same line.
-          # Latched HERE, on the declaration itself, so the courier pushes only to a client
-          # that has actually been handed it.
-          @channel_declared = Settings.mcp_channels?
+          # Declared only when the operator says their Claude is launched with channels: a
+          # client that did not register it drops every push silently, and the socket route
+          # would then carry the same line. Latched HERE, on the declaration itself, so the
+          # courier pushes only to a client that has actually been handed it.
+          @channel_declared = channel && Settings.mcp_channels?
           if @channel_declared
             j.field("experimental") { j.object { j.field("claude/channel") { j.object { } } } }
           end
@@ -577,29 +663,30 @@ module Gori
         @courier = courier
       end
 
-      private def handle_tools_list(id : JSON::Any, era : String? = nil) : Nil
+      private def handle_tools_list(id : JSON::Any, era : String? = nil, params : JSON::Any? = nil) : Nil
+        # `tools/list` is paginated in the spec and NOT paginated here: the catalogue leaves
+        # in one page and no result ever carries a `nextCursor`, so the only cursor a client
+        # can hand us is one we never minted. Answering it with page one anyway is the shape
+        # of a silent loop — a client resuming from a cursor it believes in gets the head of
+        # the list back and no way to tell. "Invalid cursors SHOULD result in an error with
+        # code -32602" is the spec's answer and it is also the honest one.
+        if cursor = obj_field(params, "cursor")
+          return write_error(id, -32602,
+            "tools/list: unknown cursor #{cursor.to_json} — this server returns the whole " \
+            "catalogue in one page and never issues a nextCursor")
+        end
         write_result(id, era) do |j|
           j.field("tools") { @tools.list(j) }
-          # Cache hints are REQUIRED on a modern `tools/list`.
+          # Cache hints are REQUIRED on a modern `tools/list`. A flat constant is honest only
+          # because the catalogue cannot move: it is a function of `--read-only` and `--tools`
+          # and of nothing a call can reach, which the spec states as a MUST NOT ("the set …
+          # MUST NOT vary per-connection or as a side effect of other requests on the
+          # connection") and which `spec/mcp/protocol_spec.cr` asserts rather than claims.
           if era
-            j.field "ttlMs", tool_list_ttl_ms
+            j.field "ttlMs", Protocol::TOOLS_LIST_TTL_MS
             j.field "cacheScope", Protocol::CACHE_SCOPE
           end
         end
-      end
-
-      # How long the catalogue may be treated as fresh — a promise about the catalogue, so it
-      # is read OFF the catalogue rather than asserted beside it.
-      #
-      # It is fixed for the life of the process, a pure function of `--read-only` and
-      # `--tools`, with one exception: a READ-ONLY server that is still unbound advertises
-      # `create_project` (it is the one tool whose listing asks a live question,
-      # `tools/projects.cr`), and loses it the moment a bind lands. While that is still
-      # ahead of us the honest answer is zero — a client holding a five-minute copy would go
-      # on offering the model a tool that now answers TOOL_DISABLED, and nothing invalidates
-      # it: we advertise no `listChanged`, so the TTL is the only signal there is.
-      private def tool_list_ttl_ms : Int32
-        (@allow_actions || !@tools.unbound?) ? Protocol::TOOLS_LIST_TTL_MS : 0
       end
 
       private def handle_tools_call(id : JSON::Any, era : String?, params : JSON::Any?) : Nil
@@ -609,6 +696,17 @@ module Gori
         return write_error(id, -32602,
           "tools/call: 'arguments' must be an object (or a JSON-encoded one)") unless args
         result = @tools.call(name, args)
+        # "Protocol Errors indicate issues with the request structure itself that models are
+        # less likely to be able to fix: Unknown tool …" — the spec names this one and gives
+        # the code. A name that is not in `tools/list` is not a tool that ran and failed, and
+        # answering it with `isError` puts it in the bucket a client is told to hand back to
+        # the model for a retry. The sentence survives as the error's `message`, which is what
+        # `--tools`'s "everything available is in tools/list" was written to say; what it
+        # stops being is a tool RESULT. Read before the operator note, so a message the
+        # operator sent is not spent on a call that never reached a tool.
+        if result.is_error && result.error_code == "UNKNOWN_TOOL"
+          return write_error(id, -32602, result.text)
+        end
         # #1090: anything the operator said that no route has carried rides back HERE, beside
         # the tool's own answer — a second content block, never mixed into the first, so
         # `structuredContent` still parses and no tool's output is rewritten by a message that
@@ -682,10 +780,17 @@ module Gori
         end
       end
 
-      # MCP structuredContent is an object. Preserve the text block for older
-      # clients, while giving newer clients parsed data directly so callers do
-      # not have to JSON-decode content[0].text a second time. Array/scalar tool
-      # payloads are wrapped to satisfy the object shape required by MCP.
+      # Preserve the text block for older clients, while giving newer clients parsed data
+      # directly so callers do not have to JSON-decode content[0].text a second time.
+      #
+      # Array/scalar tool payloads are WRAPPED (`{items: …}`, `{value: …}`) because through
+      # `2025-11-25` `structuredContent` is typed as an object and nothing else may go there.
+      # `2026-07-28` widened it to any JSON value, so the wrapper is no longer required —
+      # but it is still emitted, for both eras, because the alternative is one tool with two
+      # output shapes depending on which revision asked. A client that has learned
+      # `list_history` answers `{items: […]}` is not helped by the same server answering a
+      # bare array to the same call on a different day, and gori declares no `outputSchema`
+      # that the wrapper could contradict. Revisit that the day it declares one.
       #
       # The tool's text is COPIED THROUGH rather than decoded and re-encoded. It is already
       # valid JSON text; `JSON.parse` built a whole JSON::Any tree of it only to serialise
@@ -743,7 +848,9 @@ module Gori
       # modern revision, and the result then carries `resultType` and the server's identity
       # — which a legacy result must NOT, and does not need to: the spec's own rule is that
       # a missing `resultType` reads as `complete`.
-      private def write_result(id : JSON::Any?, era : String? = nil, &block : JSON::Builder ->) : Bool
+      private def write_result(id : JSON::Any?, era : String? = nil,
+                               meta : Proc(JSON::Builder, Nil)? = nil,
+                               &block : JSON::Builder ->) : Bool
         return false if cancelled?(id)
         send(JSON.build do |j|
           j.object do
@@ -754,8 +861,15 @@ module Gori
                 # First, because it is what a client reads to decide how to parse the rest.
                 j.field "resultType", Protocol::RESULT_COMPLETE if era
                 block.call(j)
-                if era
-                  j.field("_meta") { j.object { j.field(Protocol::META_SERVER_INFO) { emit_implementation(j) } } }
+                # ONE `_meta`, whoever contributes to it: two `j.field("_meta")` calls would
+                # emit a duplicate key, which is a frame some clients reject outright.
+                if era || meta
+                  j.field("_meta") do
+                    j.object do
+                      meta.try(&.call(j))
+                      j.field(Protocol::META_SERVER_INFO) { emit_implementation(j) } if era
+                    end
+                  end
                 end
               end
             end
@@ -767,6 +881,17 @@ module Gori
       # carries its `supported` list in. A Proc rather than a block so the one method serves
       # both callers; JSON-RPC makes the member optional and most errors here have nothing
       # to put in it.
+      # A one-way message: no id, and the receiver must not answer it.
+      private def write_notification(method : String, &block : JSON::Builder ->) : Nil
+        send(JSON.build do |j|
+          j.object do
+            j.field "jsonrpc", "2.0"
+            j.field "method", method
+            j.field("params") { j.object { block.call(j) } }
+          end
+        end)
+      end
+
       private def write_error(id : JSON::Any?, code : Int32, message : String,
                               data : Proc(JSON::Builder, Nil)? = nil) : Nil
         return if cancelled?(id)
