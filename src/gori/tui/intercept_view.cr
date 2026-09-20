@@ -49,6 +49,12 @@ module Gori::Tui
     # accepts (the comment there requires it to stay in lockstep with `field_symbol`), so unlike
     # History there is no wider accepted set to reach for.
     GATE_KNOWN = ->(f : String, op : Char) { InterceptFilter.known_field?(f, regex: op == '~') }
+    # …and the predicate the TYPO row asks, which is a different question: the row above it
+    # already answers for every field QL has and this gate refuses (`UNSUPPORTED_FIELDS`), so
+    # what is left for a typo is "QL does not have this name either". Asking GATE_KNOWN here
+    # instead filed `scope:` — a refusal with a sentence of its own — as a misspelling, and
+    # said it was searched as text when it compiles to a never-match.
+    QL_NAME_KNOWN = ->(f : String, op : Char) { QL.known_field?(f, regex: op == '~') }
     # The editing bar's label — a constant because `render_query_popup` lines the dropdown up
     # under the token, which means knowing how far the condition text is indented.
     QUERY_PREFIX = "catch › "
@@ -1082,7 +1088,7 @@ module Gori::Tui
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
           width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, known: GATE_KNOWN))
+          colors: Highlight.filter_query(@query, Theme.text_bright, known: GATE_KNOWN, shaped: InterceptFilter::FIELD_SHAPED))
         return
       end
 
@@ -1115,7 +1121,7 @@ module Gori::Tui
         # The committed condition stays highlighted — this readout is what you scan to
         # check WHY something is (or isn't) being held.
         x = screen.text(x, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: GATE_KNOWN),
+        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: GATE_KNOWN, shaped: InterceptFilter::FIELD_SHAPED),
           Theme.text, width: {rect.right - 1 - x, 0}.max)
       end
     end
@@ -1154,6 +1160,22 @@ module Gori::Tui
       if bad = InterceptFilter.unsupported_fields(@query).first?
         screen.text(rect.x + 1, y, "`#{bad}:` is not available here — History and colour rules answer it",
           Theme.orange, width: {rect.w - 2, 0}.max)
+        return
+      end
+      # A name QL does not have EITHER is a typo, and on a hold gate it is the worst of the
+      # three: an unknown field free-texts the whole token, so the condition holds nothing and
+      # the only symptom is a queue that never fills. Said on the same row and in the same
+      # sentence the lists use, below the refusal above (which is about a field that EXISTS).
+      # Judged against QL's vocabulary, the same one `InterceptFilter::FIELD_SHAPED` paints
+      # from. Narrowing this to the gate's own nine names made the two rows disagree about one
+      # token: `sizee:8080` was painted muted by the bar and passed over in silence here (QL is
+      # one edit from `size`, the gate's pool is nowhere near it). A suggestion this gate then
+      # refuses is not a dead end — the branch above answers it, in a sentence that teaches
+      # where the field DOES live.
+      if u = FilterAst.unknown_field(@query, FilterAst::SEPS_FIELD_REGEX, QL_NAME_KNOWN,
+           QL::SIDE_PREFIXES, QL::CANDIDATE_FIELDS)
+        screen.text(rect.x + 1, y, FilterAst.unknown_field_note(u), Theme.orange,
+          width: {rect.w - 2, 0}.max)
         return
       end
       return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)

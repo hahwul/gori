@@ -527,6 +527,15 @@ module Gori
       !regex || REGEX_FIELDS.includes?(field_symbol(name))
     end
 
+    # Is reading this token as a field a reading of what was typed at all? See
+    # `FilterAst.field_shaped?`. Judged against QL's vocabulary, not this gate's, and that is
+    # the point: `scope:in` names a field this backend REFUSES (`UNSUPPORTED_FIELDS`), and a
+    # refusal it has a sentence for must not be swallowed as free text on the way. The shape
+    # question is "does this name a field at all"; which fields run here is `known_field?`.
+    FIELD_SHAPED = ->(f : String, _op : Char, v : String) do
+      FilterAst.field_shaped?(f, v, QL.known_field?(f), QL::SIDE_PREFIXES) { QL.suggest_field(f) }
+    end
+
     # Case-fold a term's value ONCE, at parse time, into the form `raw_match?` compares
     # against. `:status` is folded too — `status_match?` tests a literal lowercase 'x',
     # so `status:5XX` matched nothing at all before this. `:proto` is CANONICALIZED

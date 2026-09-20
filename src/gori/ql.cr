@@ -1,5 +1,4 @@
 require "db"
-require "levenshtein"
 require "./filter_ast"
 require "./proto"       # Proto::Kind, used by the `proto:` term below
 require "./flow_source" # FlowSource::Kind, used by the `src:` term below
@@ -425,19 +424,29 @@ module Gori
     #
     # Every typo of a real field passes all of this — `methd`, `hsot`, `resp.bdy`, `xyzzy` are
     # field-shaped, unknown, and still refused, which is the whole point of the refusal.
+    # The rule itself now lives in `FilterAst.field_shaped?` — the Issues and Probe bars ask the
+    # identical question of their own vocabularies, and the span highlighter asks it of all of
+    # them, so a copy here would be the fourth spelling of one predicate. QL keeps the NAME
+    # (every caller and its specs read `QL.field_shaped?`) and supplies the three things that
+    # are its own: what it knows, the namespaces it advertises, and its suggester.
+    # The `req.`/`resp.`/`res.` prefixes as an ARRAY, built once: `SIDES.each_key` is a
+    # single-use Iterator (see `FilterAst.field_shaped?`), and this is read per token.
+    SIDE_PREFIXES = SIDES.keys
+
     def self.field_shaped?(name : String, value : String) : Bool
-      return true if known_field?(name)
-      return false if value.starts_with?("//")
-      return false unless name[0]?.try(&.ascii_letter?)
-      return false unless name.each_char.all? { |c| c.ascii_alphanumeric? || c == '_' || c == '.' }
-      return SIDES.each_key.any? { |prefix| name.starts_with?(prefix) } if name.includes?('.')
-      !(port_like?(value) && suggest_field(name).nil?)
+      FilterAst.field_shaped?(name, value, known_field?(name), SIDE_PREFIXES) { suggest_field(name) }
     end
 
-    # One to five ASCII digits — the shape of a TCP port, and of nothing a QL field value has to
-    # be that a known field would not already have claimed.
-    private def self.port_like?(value : String) : Bool
-      value.size.in?(1..5) && value.each_char.all?(&.ascii_number?)
+    # The shape the span highlighter wants: name, separator and value, one proc.
+    #
+    # `known_field?` is asked WITHOUT the operator, and that is the whole division of labour
+    # between this and `spans`' `known`: the shape question is "does this name a QL field at
+    # all", the known question is "do I implement it with THIS operator". Asking the shape
+    # question with the operator loses the one signal `REGEX_FIELDS` exists to give — QL has
+    # `status:` and no `status~`, so `status~404` is a field name whose term gets DROPPED, and
+    # the bar must paint it muted rather than as plain text that will be searched.
+    FIELD_SHAPED = ->(f : String, _op : Char, v : String) do
+      FilterAst.field_shaped?(f, v, known_field?(f), SIDE_PREFIXES) { suggest_field(f) }
     end
 
     # The spelling a name QL does NOT implement most likely meant, or nil when nothing is close
@@ -453,16 +462,14 @@ module Gori
     # `hsot` → `host` work at all: a transposition costs two edits and Levenshtein's own default
     # tolerance refuses it. Wider than that stops being a suggestion — `ext` is within 3 of both
     # `dur` and `url`, and naming either would be inventing an intent.
+    # `FIELDS` first so a tie resolves to the name completion OFFERS, not to an alias. The
+    # prefix/distance rule itself is `FilterAst.suggest`, shared with the two bars that have
+    # their own vocabulary; what QL owns is the pool.
+    CANDIDATE_FIELDS = FIELDS + FIELD_ALIASES.keys
+
     def self.suggest_field(name : String) : String?
       return nil if name.empty? || known_field?(name)
-      # `FIELDS` first so a tie resolves to the name completion OFFERS, not to an alias.
-      candidates = FIELDS + FIELD_ALIASES.keys
-      # Exactly one, or none: `s` prefixes `scheme` `status` `size` `stub`, and picking one of
-      # four is a coin flip printed as advice. An ambiguous prefix falls through to distance,
-      # which answers nothing for a stub that short — the honest answer.
-      prefixed = candidates.select(&.starts_with?(name))
-      return prefixed.first if prefixed.size == 1
-      Levenshtein.find(name, candidates, name.size < 4 ? 1 : 2)
+      FilterAst.suggest(name, CANDIDATE_FIELDS)
     end
 
     # One line per field, for the surfaces that TEACH this language rather than parse it — the

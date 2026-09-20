@@ -101,6 +101,44 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  # The same silence History carries, one tab over: an unknown `field:` free-texts the whole
+  # token and matches nothing, which on an empty tree reads as "nothing was mapped".
+  it "names a misspelled filter field in the empty-state" do
+    with_store do |store|
+      capture(store, "api.acme.test", "GET", "/v1/users")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      "pth:/v1".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      rows = (0...20).map { |y| b.row(y) }.join("\n")
+      rows.should contain("unknown field `pth:`")
+      rows.should contain("did you mean `path:`")
+    end
+  end
+
+  # `tag:` is this bar's own field and QL knows nothing about it, so a pool taken from QL alone
+  # left the one field this surface adds as the one field it could never diagnose a typo of.
+  it "suggests its own tag: field, which QL has never heard of" do
+    with_store do |store|
+      capture(store, "api.acme.test", "GET", "/v1/users")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      "tagg:prod".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      (0...20).map { |y| b.row(y) }.join("\n").should contain("did you mean `tag:`")
+    end
+  end
+
   it "rejects an all-invalid QL query instead of showing the whole tree" do
     with_store do |store|
       capture(store, "api.acme.test", "GET", "/v1/users")

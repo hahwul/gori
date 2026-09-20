@@ -1334,8 +1334,11 @@ module Gori
       # one shouts about a term QL DROPS, which broadens the result and leaves something to look
       # at. This one has nothing to look at.
       #
-      # Deliberately NOT applied to the TUI filter bar: an operator types `meth` on the way to
-      # `method:`, and a live filter re-evaluates every keystroke.
+      # REFUSAL is deliberately not applied to the TUI filter bar: an operator types `meth` on
+      # the way to `method:`, and a live filter re-evaluates every keystroke. The DIAGNOSIS is —
+      # the bars name the field once the list they produced is empty (`FilterAst.unknown_field`,
+      # same sentence, `QL.suggest_field` behind it), so the silence this refusal exists to break
+      # is broken there too, without a keystroke ever being rejected.
       #
       # MCP was exempted here on the grounds that its `strict:` argument already offered this.
       # It did not, and could not: an unknown field free-texts, so it COMPILES, so `QL.analyze`

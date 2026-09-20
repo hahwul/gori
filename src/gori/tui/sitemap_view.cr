@@ -57,6 +57,16 @@ module Gori::Tui
     # is only what Tab offers here) plus this surface's own `tag:`, which QL knows nothing about
     # because `partition` pulls it out before the query ever reaches the parser.
     QL_KNOWN = ->(f : String, op : Char) { (f == "tag" && op == ':') || QL.known_field?(f, regex: op == '~') }
+    # QL's names plus this bar's own `tag`, which every question below has to know about:
+    # without it `tagg:prod` gets no suggestion and `tagg:8080` is read as an authority, so the
+    # one field this surface adds is the one field it could never diagnose a typo of.
+    CANDIDATE_FIELDS = QL::CANDIDATE_FIELDS + ["tag"]
+    # The shape half of the pair (`FilterAst.field_shaped?`), with `tag` folded in the same way
+    # — and asked WITHOUT the operator, for the reason `QL::FIELD_SHAPED` gives.
+    QL_SHAPED = ->(f : String, _op : Char, v : String) do
+      known = f == "tag" || QL.known_field?(f)
+      FilterAst.field_shaped?(f, v, known, QL::SIDE_PREFIXES) { FilterAst.suggest(f, CANDIDATE_FIELDS) }
+    end
     # The editing bar's label — a constant because `render_query_popup` lines the dropdown up
     # under the token, which means knowing how far the query text is indented.
     QUERY_PREFIX = "filter › "
@@ -324,6 +334,12 @@ module Gori::Tui
       return "invalid filter — no valid terms" if residual_has_terms?(residual) && QL.reject_empty?(residual, filter)
       bad = QL.invalid_regex_terms(residual)
       return "invalid regex in #{bad.first}" unless bad.empty?
+      # Same note History carries, and for the same reason it carries the unknown-field one:
+      # a typo free-texts, matches nothing, and reads exactly like an empty sitemap.
+      if u = FilterAst.unknown_field(residual, FilterAst::SEPS_FIELD_REGEX, QL_KNOWN,
+           QL::SIDE_PREFIXES, CANDIDATE_FIELDS)
+        return FilterAst.unknown_field_note(u)
+      end
       # Same note History carries, for the same reason: an empty tree cannot say WHY it is empty.
       return "no scope rules — nothing is in scope" if QL.uses_scope?(residual) && !lens.try(&.configured?)
       nil
@@ -1296,7 +1312,7 @@ module Gori::Tui
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
           width: rect.w - QUERY_PREFIX.size - 2,
-          colors: Highlight.filter_query(@query, Theme.text_bright, known: QL_KNOWN))
+          colors: Highlight.filter_query(@query, Theme.text_bright, known: QL_KNOWN, shaped: QL_SHAPED))
         return
       end
 
@@ -1308,7 +1324,7 @@ module Gori::Tui
         # The committed query stays highlighted — this readout is what you scan to
         # check how the active filter is actually being read.
         qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: QL_KNOWN),
+        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: QL_KNOWN, shaped: QL_SHAPED),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         # No QL query typed — whether or not a Scope lens is active. Surface the filter

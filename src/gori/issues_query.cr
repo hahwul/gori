@@ -41,6 +41,28 @@ module Gori
         !regex && KNOWN.includes?(name.downcase)
       end
 
+      # The vocabulary a typo is measured against: every spelling `build_term` dispatches on,
+      # bare (no separator), because `FilterAst.suggest` compares NAMES. The completion list
+      # `FIELDS` carries its `:` and canonical names only, so suggesting out of it would both
+      # miss `sev` and hand back a name with punctuation glued on.
+      CANDIDATE_FIELDS = ALIASES.values.flatten
+
+      # The spelling a name this bar does not implement most likely meant — `FilterAst.suggest`
+      # over the pool above. Shared rule, OWN vocabulary: `QL.suggest_field` answers out of QL's
+      # fields, which hold nothing near `sevrity`, so a bar that borrowed it would stay silent
+      # about its own `severity:` — and would name QL fields this bar cannot filter on.
+      def self.suggest_field(name : String) : String?
+        return nil if name.empty? || known_field?(name)
+        FilterAst.suggest(name.downcase, CANDIDATE_FIELDS)
+      end
+
+      # The span highlighter's shape — see `QL::FIELD_SHAPED`, including why the operator is
+      # not part of the SHAPE question. No namespaces: this bar has no dotted field, so a
+      # dotted name is an authority (`acme.test:8443`) and never a namespace guess.
+      FIELD_SHAPED = ->(f : String, _op : Char, v : String) do
+        FilterAst.field_shaped?(f, v, known_field?(f)) { suggest_field(f) }
+      end
+
       # Canonical name for a spelling — `sev` is `severity`. The completion row asks for help
       # by the name the OPERATOR typed (`QuerySuggest.field_of`), so a table keyed only by
       # canonical names would leave every alias in `ALIASES` undescribed.

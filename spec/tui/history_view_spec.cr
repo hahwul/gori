@@ -110,6 +110,37 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a literal
+  # substring search, matches nothing, and is indistinguishable on this list from "this project
+  # has no such traffic". `gori run history` refuses it outright and MCP errors on it; a live bar
+  # must not (an operator types `meth` on the way to `method:`), so it is named once the list the
+  # query produced is empty.
+  it "names a misspelled filter field instead of reporting an empty list" do
+    with_store do |store|
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.acme.test", port: 443,
+        method: "GET", target: "/v1/me", http_version: "HTTP/1.1",
+        head: "GET /v1/me HTTP/1.1\r\nHost: api.acme.test\r\n\r\n".to_slice,
+        body: nil, source: Gori::FlowSource::Kind::Proxy))
+
+      view = HistoryView.new
+      view.start_query
+      "hostt:api".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      view.@rows.should be_empty
+      view.@query_note.not_nil!.should eq("unknown field `hostt:` — did you mean `host:`?")
+
+      # A pasted URL names no field (`QL.fields_used` says so), so it earns no such note — it
+      # is a free-text search that legitimately found nothing.
+      pasted = HistoryView.new
+      pasted.start_query
+      "http://api.acme.test/nope".each_char { |c| pasted.query_insert(c) }
+      pasted.reload(store)
+      pasted.@query_note.should be_nil
+    end
+  end
+
   # `scope:` in the filter bar (#754). The view already holds the Scope it applies for `s`, so a
   # scope TERM is that same predicate asked as a question — including with the lens OFF, which is
   # the state that makes the term worth having at all.

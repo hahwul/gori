@@ -1337,8 +1337,24 @@ module Gori::Tui
       # chars overran a 36-column interior at every height.
       return if top >= rect.bottom
       hint = querying? ? "esc clears the filter" : "/ to edit the filter"
-      screen.text(rect.x + 1, top, "no issues match · #{hint}", Theme.muted,
+      # A `field:` this bar does not implement free-texts the WHOLE token (see
+      # `Issues::Filter.build_term`'s else), so `sevrity:high` searches title+host for that
+      # literal, matches nothing, and reads exactly like "nothing was found". Name it instead
+      # — the same sentence History and the gate say, out of the same `FilterAst` home.
+      msg = if u = unknown_query_field
+              FilterAst.unknown_field_note(u)
+            else
+              "no issues match"
+            end
+      screen.text(rect.x + 1, top, "#{msg} · #{hint}", Theme.muted,
         width: {rect.w - 2, 0}.max)
+    end
+
+    # The first token in the bar that is shaped like a field this backend does not have.
+    private def unknown_query_field : FilterAst::UnknownField?
+      return nil if @query.blank?
+      FilterAst.unknown_field(@query, FilterAst::SEPS_FIELD, QUERY_KNOWN,
+        FilterAst::EMPTY_NAMESPACES, Issues::Filter::CANDIDATE_FIELDS)
     end
 
     private def render_preview_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -1408,7 +1424,7 @@ module Gori::Tui
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
           colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
-            known: QUERY_KNOWN))
+            known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED))
         return
       end
       # One right-anchored chain — see HistoryView#render_ql_bar.
@@ -1422,7 +1438,7 @@ module Gori::Tui
         # check how the active filter is actually being read.
         qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
         screen.styled_text(qx, rect.y, @query,
-          Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN),
+          Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
