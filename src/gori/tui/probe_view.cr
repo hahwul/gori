@@ -999,6 +999,13 @@ module Gori::Tui
       screen.text(title_x, y, issue.title, selected ? Theme.text_bright : Theme.text, bg, width: tw)
     end
 
+    # The first token in the bar that is shaped like a field this backend does not have.
+    private def unknown_query_field : FilterAst::UnknownField?
+      return nil if @query.blank?
+      FilterAst.unknown_field(@query, FilterAst::SEPS_FIELD, QUERY_KNOWN,
+        FilterAst::EMPTY_NAMESPACES, Probe::Filter::CANDIDATE_FIELDS)
+    end
+
     private def render_empty(screen : Screen, rect : Rect, top : Int32, *,
                              listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       # Branch on a real `/` query FIRST (querying-aware hint): a blank-query empty set
@@ -1012,7 +1019,14 @@ module Gori::Tui
       return if top >= rect.bottom
       w = {rect.w - 2, 0}.max
       if !@query.blank?
-        msg = @querying ? "no issues match · esc clears the filter" : "no issues match · / to edit the filter"
+        # An unknown `field:` free-texts the whole token and matches nothing — the same
+        # silence the Issues bar carries, named with the same sentence.
+        lead = if u = unknown_query_field
+                 FilterAst.unknown_field_note(u)
+               else
+                 "no issues match"
+               end
+        msg = "#{lead} · #{@querying ? "esc clears the filter" : "/ to edit the filter"}"
         screen.text(rect.x + 1, top, msg, Theme.muted, width: w)
       elsif @pre_scope_empty && !@all.empty? && !@show_closed
         screen.text(rect.x + 1, top, "no open issues · all #{@all.size} triaged · press a to show closed",
@@ -1106,7 +1120,7 @@ module Gori::Tui
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
           colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
-            known: QUERY_KNOWN))
+            known: QUERY_KNOWN, shaped: Probe::Filter::FIELD_SHAPED))
         return
       end
       # Right cluster: a scope-lens chip (always shown so the `s` toggle is discoverable,

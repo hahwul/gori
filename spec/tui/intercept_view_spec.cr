@@ -80,6 +80,58 @@ describe Gori::Tui::InterceptView do
     end
   end
 
+  # A name QL does not have EITHER is a typo, and on a hold gate it is the worst of the three:
+  # an unknown field free-texts the whole token, so the condition holds nothing and the only
+  # symptom is a queue that never fills.
+  it "says so when the catch condition misspells a field" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+      "hostt:api".each_char { |c| view.query_insert(c) }
+      backend = MemoryBackend.new(100, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.contains?("unknown field `hostt:`").should be_true
+      backend.contains?("did you mean `host:`").should be_true
+    end
+  end
+
+  # The bar and the row under it judge one token with one vocabulary — QL's, which is what
+  # `InterceptFilter::FIELD_SHAPED` paints from. Narrowed to the gate's own nine names, the two
+  # disagreed: `sizee:8080` was painted muted and then passed over in silence.
+  it "diagnoses the same token the bar paints, out of the same vocabulary" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+      "sizee:8080".each_char { |c| view.query_insert(c) }
+      backend = MemoryBackend.new(100, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      x, y = 0, 0
+      (0...12).each do |row|
+        at = backend.row(row).index("sizee:8080")
+        x, y = at, row if at
+      end
+      backend.fg_at(x, y).should eq(Theme.muted) # SpanKind::UnknownField
+      backend.contains?("did you mean `size:`").should be_true
+    end
+  end
+
+  # ...and a field QL HAS that this gate refuses keeps its own sentence: it is not a typo, and
+  # calling it one would say it is searched as text when it compiles to a never-match.
+  it "does not file a refused field as a misspelling" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+      "scope:in".each_char { |c| view.query_insert(c) }
+      backend = MemoryBackend.new(100, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.contains?("`scope:` is not available here").should be_true
+      backend.contains?("unknown field").should be_false
+    end
+  end
+
   it "syntax-highlights the held request bytes in the detail pane" do
     tmp_interceptor do |ic|
       hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")

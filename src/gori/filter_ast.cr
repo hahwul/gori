@@ -1,3 +1,5 @@
+require "levenshtein"
+
 module Gori
   # The boolean grammar shared by every filter surface — History QL, Intercept catch
   # rules, Repeater sub-tabs, Issues and Probe. It owns ONLY the shape of a query
@@ -509,6 +511,146 @@ module Gori
       {taken, kept.join(' ')}
     end
 
+    # --- is this token a field use at all? -----------------------------------
+
+    # A backend with no dotted field at all — the Issues and Probe bars.
+    EMPTY_NAMESPACES = [] of String
+
+    # Is a `name<sep>value` token even SHAPED like a field query — i.e. is reading `name` as a
+    # field name a reading of what the operator wrote at all?
+    #
+    # Every backend cuts at the first separator unconditionally, which is right for MATCHING:
+    # an unknown name free-texts the whole token, so the predicate is the same either way. It
+    # is not right for DIAGNOSIS, which is the half that says "you spelled a field wrong" — and
+    # said about `http://acme.test/x`, the commonest paste a proxy's filter bar ever takes, it
+    # is a lie. So the three shapes below say the token was never meant as a field:
+    #
+    #   * a value starting `//`: the token is `scheme://…`, a URL;
+    #   * a name that is not an identifier: it must begin with an ASCII letter (so `12:34` — a
+    #     timestamp, a port, an IPv6 run — is free text) and hold only letters, digits and `_`,
+    #     plus `.` ONLY behind one of the `namespaces` this backend advertises, since a dotted
+    #     name is otherwise an authority (`acme.test:8443`) and not a namespace guess;
+    #   * an UNDOTTED name nothing in the vocabulary is close to, over a value that is nothing
+    #     but a PORT: the token is `host:port` for a host with no dot in it — `localhost:8080`,
+    #     `api:3000`, the address of every dev server a proxy ever fronts — which the dot rule
+    #     cannot see. "Close to" is the backend's own suggester, so a typo with a numeric value
+    #     (`stauts:500`) stays field-shaped with its suggestion attached.
+    #
+    # `known` is passed already answered and the suggester as a BLOCK, because the block runs
+    # only on the port branch: this is called per token on a path that also paints every frame.
+    #
+    # Lives here rather than beside one backend for the reason the rest of this module does:
+    # it was written once for QL's refusals, and the highlighter — a second surface asking the
+    # identical question — re-derived it from the separator alone and painted every pasted URL
+    # as a typo. One home, five bars.
+    #
+    # `namespaces` is an ARRAY and not an Enumerable on purpose: `Hash#each_key` hands back a
+    # single-use Iterator, and one passed down a loop over several terms answers the first and
+    # is exhausted for the rest — a dotted name in the second term would read as an authority.
+    def self.field_shaped?(name : String, value : String, known : Bool,
+                           namespaces : Array(String) = EMPTY_NAMESPACES, &) : Bool
+      return true if known
+      return false if value.starts_with?("//")
+      return false unless name[0]?.try(&.ascii_letter?)
+      return false unless name.each_char.all? { |c| c.ascii_alphanumeric? || c == '_' || c == '.' }
+      return namespaces.any? { |prefix| name.starts_with?(prefix) } if name.includes?('.')
+      !(port_like?(value) && yield.nil?)
+    end
+
+    # One to five ASCII digits — the shape of a TCP port, and of nothing a field value has to
+    # be that a known field would not already have claimed.
+    def self.port_like?(value : String) : Bool
+      value.size.in?(1..5) && value.each_char.all?(&.ascii_number?)
+    end
+
+    # The spelling a name a backend does NOT implement most likely meant, or nil when nothing
+    # is close enough that printing it would be help rather than a guess.
+    #
+    # An UNAMBIGUOUS prefix before edit distance, because the two disagree about the commonest
+    # typo there is — a field name typed short. `meth` is two edits from `method` and two from
+    # `path`, so distance alone answers `path`; `method` is the only candidate `meth` prefixes.
+    #
+    # Tolerance 2 (1 under four characters, where two edits is most of the word) is what makes
+    # `hsot` → `host` work at all: a transposition costs two edits and Levenshtein's own default
+    # tolerance refuses it. Wider than that stops being a suggestion.
+    #
+    # `candidates` is the backend's pool, passed rather than looked up: QL's is `FIELDS` plus
+    # its aliases, the Issues bar's is five names, and a shared list would suggest a field the
+    # bar in front of the operator does not have.
+    # Reached from the span highlighter, which repaints the bar EVERY FRAME — so its cost was
+    # measured rather than assumed (`bench/filter_shape_bench.cr`): 8.6 µs and 1.15 kB on the
+    # one road that gets here, and the allocation is `Levenshtein.find`'s, not this `select`'s.
+    # Rewriting the prefix pass as a loop moved neither number, so it stayed a `select`.
+    def self.suggest(name : String, candidates : Array(String)) : String?
+      return nil if name.empty?
+      prefixed = candidates.select(&.starts_with?(name))
+      near = prefixed.size == 1 ? prefixed.first : Levenshtein.find(name, candidates, name.size < 4 ? 1 : 2)
+      # Never the name itself. A caller may hold a name the pool contains — the gate's own
+      # `status` under `~`, say — and "did you mean `status~`?" about `status~` is noise that
+      # reads like a bug, because it is one.
+      near == name ? nil : near
+    end
+
+    # The first token in `query` that is SHAPED like a field but names one this backend does
+    # not implement, with the separator it was written with and the spelling it most likely
+    # meant. nil when every field-shaped token is known.
+    #
+    # This is the answer an empty list owes its operator. Every backend here free-texts an
+    # unknown field, so `hostt:api` runs a literal substring search, matches nothing, and reads
+    # exactly like "this project has no such traffic" — the two answers a filter bar must never
+    # give in the same words. `gori run` has refused it since #884 and MCP errors on it; the
+    # TUI is interactive and must NOT refuse (an operator types `meth` on the way to `method:`),
+    # so it says so once the list it produced is empty.
+    #
+    # Driven by the same lexer the backends compile through, so what is reported as a field is
+    # exactly what would ACT as one — a quoted `"hsot:a"` included, since the grammar strips
+    # quotes before any backend splits a token.
+    record UnknownField, name : String, sep : Char, suggestion : String?
+
+    def self.unknown_field(query : String, seps : String,
+                           known : Proc(String, Char, Bool),
+                           namespaces : Array(String),
+                           candidates : Array(String)) : UnknownField?
+      terms(parse(query)).each do |term|
+        text = term.text
+        sep = nil.as(Int32?)
+        text.each_char_with_index do |ch, i|
+          next if i == 0 # a leading separator is free text, not an empty field name
+          if seps.includes?(ch)
+            sep = i
+            break
+          end
+        end
+        next unless si = sep
+        name = text[0...si].downcase
+        op = text[si]
+        value = text[(si + 1)..]
+        # Unknown under EVERY separator this bar accepts, not merely under the one typed. A
+        # name the backend HAS but not under `~` (QL's `status~`) is a wrong-operator term that
+        # the backend DROPS rather than free-texts, so it is a different diagnosis with a
+        # different fix — and reported here it came out as "did you mean `status~`?".
+        next if seps.each_char.any? { |c| known.call(name, c) }
+        # Computed once and handed to both: the shape rule consults it (an undotted name no
+        # field is close to, over a port, is an authority) and the note prints it.
+        near = suggest(name, candidates)
+        next unless field_shaped?(name, value, false, namespaces) { near }
+        return UnknownField.new(name, op, near)
+      end
+      nil
+    end
+
+    # The one sentence every surface says about it. ONE wording, here rather than at each bar,
+    # for the reason `InterceptFilter.unsupported_reason` gives: an operator who reads it on one
+    # surface must recognise it on the next.
+    def self.unknown_field_note(u : UnknownField) : String
+      bad = "#{u.name}#{u.sep}"
+      if near = u.suggestion
+        "unknown field `#{bad}` — did you mean `#{near}#{u.sep}`?"
+      else
+        "unknown field `#{bad}` — it is searched as text, and matched nothing"
+      end
+    end
+
     # --- syntax highlighting -------------------------------------------------
 
     enum SpanKind
@@ -553,8 +695,17 @@ module Gori
     #
     # Nil (the default) keeps the old behaviour for a caller that has no such predicate, so a
     # backend opts in rather than being told what its vocabulary is.
+    #
+    # `shaped` is the second half of the same honesty, and the one the `known` predicate alone
+    # cannot deliver: it takes the VALUE as well, and answers "is reading this token as a field
+    # a reading of what was written at all?" (`field_shaped?`). Without it every bar painted
+    # `http://acme.test/x` — a pasted URL, the commonest thing anyone drops into a proxy's
+    # filter — in the same muted colour as `hsot:acme`, claiming a typo about a token the
+    # backend free-texts BY DESIGN and `QL.fields_used` already reports as naming no field.
+    # Nil keeps the old reading, so a backend opts in exactly as it does for `known`.
     def self.spans(query : String, seps : String = SEPS_FIELD_REGEX,
-                   known : Proc(String, Char, Bool)? = nil) : Array(Span)
+                   known : Proc(String, Char, Bool)? = nil,
+                   shaped : Proc(String, Char, String, Bool)? = nil) : Array(Span)
       acc = [] of Span
       lex(query).each do |lexeme|
         case lexeme.tok
@@ -563,7 +714,7 @@ module Gori
         when .and?, .or?, .not?
           acc << Span.new(lexeme.start, lexeme.size, SpanKind::Operator)
         else
-          word_spans(query, lexeme, acc, seps, known)
+          word_spans(query, lexeme, acc, seps, known, shaped)
         end
       end
       acc
@@ -595,7 +746,8 @@ module Gori
     # Sub-classify one word: an optional `-`, an optional `field:`/`field~` prefix, then
     # the remainder with any quote marks called out.
     private def self.word_spans(query : String, lexeme : Lexeme, acc : Array(Span), seps : String,
-                                known : Proc(String, Char, Bool)? = nil) : Nil
+                                known : Proc(String, Char, Bool)? = nil,
+                                shaped : Proc(String, Char, String, Bool)? = nil) : Nil
       s = lexeme.start
       e = s + lexeme.size
       i = s
@@ -614,9 +766,15 @@ module Gori
         # dispatches: `HOST:x` compiles, so it must not be painted as a typo. Quote marks are
         # dropped from the name the way the lexer drops them from `Term#text`.
         name = query[i...sep].delete('"').downcase
-        real = known.nil? || known.call(name, query[sep])
-        quoted_runs(query, i, sep + 1, real ? SpanKind::Field : SpanKind::UnknownField, acc)
-        i = sep + 1
+        value = query[(sep + 1)...e].delete('"')
+        # Not field-shaped at all → the whole token is free text, and what looked like a
+        # separator is part of it. Asked BEFORE `known`, so a backend is never consulted
+        # about `http`; the tail below then paints the token Plain, `real` still false.
+        if shaped.nil? || shaped.call(name, query[sep], value)
+          real = known.nil? || known.call(name, query[sep])
+          quoted_runs(query, i, sep + 1, real ? SpanKind::Field : SpanKind::UnknownField, acc)
+          i = sep + 1
+        end
       end
 
       # A value under an UNKNOWN field is not a value — the backend free-texts the whole token,

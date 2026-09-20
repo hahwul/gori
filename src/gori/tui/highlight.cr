@@ -242,11 +242,15 @@ module Gori::Tui
     # Without it an unrecognised `hsot:` renders in the same confident blue as a real field,
     # which is the one visible signal an operator has while typing, and it says the opposite of
     # the truth.
+    # `shaped` is what keeps a pasted URL out of the muted colour: `known` alone cannot tell
+    # `hsot:acme` (a typo) from `http://acme.test/x` (a token the backend free-texts by design
+    # and reports as naming no field), because it never sees the value. See `FilterAst.spans`.
     def self.filter_query(query : String, base : Color = Theme.text,
                           seps : String = FilterAst::SEPS_FIELD_REGEX,
-                          known : Proc(String, Char, Bool)? = nil) : Array(Color)
+                          known : Proc(String, Char, Bool)? = nil,
+                          shaped : Proc(String, Char, String, Bool)? = nil) : Array(Color)
       colors = Array(Color).new(query.size, base)
-      FilterAst.spans(query, seps, known).each do |span|
+      FilterAst.spans(query, seps, known, shaped).each do |span|
         fg = case span.kind
              in .operator? then Theme.syn_keyword
              in .paren?    then Theme.syn_keyword

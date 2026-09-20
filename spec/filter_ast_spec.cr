@@ -112,6 +112,150 @@ describe Gori::FilterAst do
     end
   end
 
+  # `known` answers "do I implement this NAME"; it never sees the VALUE, and without the value
+  # every bar painted `http://acme.test/x` — a pasted URL, the commonest thing anyone drops into
+  # a proxy's filter — in the same muted colour as a typo. `QL.fields_used` has reported those
+  # tokens as naming NO field since #884; this is the highlighter catching up to it.
+  describe ".spans with a field-shaped predicate" do
+    private_known = ->(f : String, _op : Char) { f == "host" }
+    ql_shaped = ->(f : String, _op : Char, v : String) do
+      Gori::FilterAst.field_shaped?(f, v, f == "host") { Gori::FilterAst.suggest(f, ["host", "path"]) }
+    end
+
+    it "paints a token that names no field as free text, separator included" do
+      %w[http://acme.test/x acme.test:8443 localhost:8080 12:34].each do |q|
+        Gori::FilterAst.spans(q, ":~", private_known, ql_shaped).map(&.kind)
+          .should eq([Gori::FilterAst::SpanKind::Plain]), q
+      end
+    end
+
+    it "still calls a real typo a typo" do
+      Gori::FilterAst.spans("hsot:acme", ":~", private_known, ql_shaped).map(&.kind)
+        .should eq([Gori::FilterAst::SpanKind::UnknownField, Gori::FilterAst::SpanKind::Plain])
+    end
+
+    it "leaves a known field alone whatever its value holds" do
+      Gori::FilterAst.spans("host:8080", ":~", private_known, ql_shaped).map(&.kind)
+        .should eq([Gori::FilterAst::SpanKind::Field, Gori::FilterAst::SpanKind::Value])
+    end
+
+    it "keeps the old reading when no predicate is given" do
+      Gori::FilterAst.spans("http://acme.test/x", ":~", private_known).map(&.kind)
+        .should eq([Gori::FilterAst::SpanKind::UnknownField, Gori::FilterAst::SpanKind::Plain])
+    end
+  end
+
+  # The predicate itself, which QL now delegates to (`spec/ql_spec.cr` pins QL's own answers
+  # against the same table, so the two cannot drift).
+  describe ".field_shaped?" do
+    near = ->(n : String) { Gori::FilterAst.suggest(n, ["host", "method", "status", "size"]) }
+
+    it "reads a `//` value as a URL, not a field" do
+      Gori::FilterAst.field_shaped?("http", "//acme.test/x", false) { near.call("http") }.should be_false
+    end
+
+    it "requires an identifier for the name" do
+      Gori::FilterAst.field_shaped?("12", "34", false) { near.call("12") }.should be_false
+      Gori::FilterAst.field_shaped?("acme.test", "8443", false) { near.call("acme.test") }.should be_false
+    end
+
+    it "admits a dotted name only behind a namespace the backend advertises" do
+      Gori::FilterAst.field_shaped?("resp.bdy", "x", false, ["req.", "resp."]) { nil }.should be_true
+      Gori::FilterAst.field_shaped?("resp.bdy", "x", false) { nil }.should be_false
+    end
+
+    it "reads `name:port` as an authority unless a field is close to the name" do
+      Gori::FilterAst.field_shaped?("localhost", "8080", false) { near.call("localhost") }.should be_false
+      # ...but a typo with a numeric value is still a typo, because the suggester recognises it.
+      Gori::FilterAst.field_shaped?("stauts", "500", false) { near.call("stauts") }.should be_true
+      # A non-port value never takes that road.
+      Gori::FilterAst.field_shaped?("localhost", "x", false) { near.call("localhost") }.should be_true
+    end
+
+    it "calls a KNOWN field a field use whatever its value holds" do
+      Gori::FilterAst.field_shaped?("host", "//x", true) { nil }.should be_true
+    end
+  end
+
+  describe ".suggest" do
+    pool = ["host", "method", "path", "status", "size", "scheme", "stub"]
+
+    it "prefers an unambiguous prefix over edit distance" do
+      Gori::FilterAst.suggest("meth", pool).should eq("method") # two edits from `path` too
+    end
+
+    it "takes a transposition, which the default tolerance would refuse" do
+      Gori::FilterAst.suggest("hsot", pool).should eq("host")
+    end
+
+    it "stays quiet when the stub prefixes four candidates" do
+      Gori::FilterAst.suggest("s", pool).should be_nil
+    end
+
+    it "never suggests the name back to itself" do
+      # A caller may hold a name the pool contains — a field known under `:` but not under `~`.
+      Gori::FilterAst.suggest("status", pool).should be_nil
+    end
+  end
+
+  # What an empty list owes its operator. Every backend here free-texts an unknown field, so a
+  # typo runs a literal substring search, matches nothing, and is indistinguishable from "this
+  # project has no such traffic" — the two answers a filter bar must never give in one sentence.
+  describe ".unknown_field" do
+    known = ->(f : String, op : Char) { f == "host" || (f == "status" && op == ':') }
+    pool = ["host", "status", "path"]
+
+    it "names the first field-shaped token the backend does not implement" do
+      u = Gori::FilterAst.unknown_field("host:a hsot:b pth:c", ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).not_nil!
+      u.name.should eq("hsot")
+      u.sep.should eq(':')
+      u.suggestion.should eq("host")
+      Gori::FilterAst.unknown_field_note(u).should eq("unknown field `hsot:` — did you mean `host:`?")
+    end
+
+    it "echoes the operator it was written with" do
+      u = Gori::FilterAst.unknown_field("hsot~b", ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).not_nil!
+      u.sep.should eq('~')
+      Gori::FilterAst.unknown_field_note(u).should contain("`hsot~`")
+    end
+
+    it "says the token is searched as text when nothing is close enough" do
+      u = Gori::FilterAst.unknown_field("xyzzy:abc", ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).not_nil!
+      u.suggestion.should be_nil
+      Gori::FilterAst.unknown_field_note(u).should contain("searched as text")
+    end
+
+    it "reports nothing for a query that names no field" do
+      ["host:a", "plain words", "http://acme.test/x", "localhost:8080", ""].each do |q|
+        Gori::FilterAst.unknown_field(q, ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).should be_nil, q
+      end
+    end
+
+    it "skips a name the backend HAS under another separator" do
+      # `status~` is a WRONG-OPERATOR term the backend drops rather than free-texts, so it is a
+      # different diagnosis with a different fix — and reported here it came out as the nonsense
+      # "did you mean `status~`?".
+      Gori::FilterAst.unknown_field("status~5..", ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).should be_nil
+    end
+
+    it "still reads a dotted name in the SECOND term" do
+      # `namespaces` used to be an Enumerable, and `Hash#each_key` hands back a single-use
+      # Iterator: `acme.test:8443` consumed it on the dotted branch, so every dotted token
+      # after it read as an authority and its typo went unreported.
+      u = Gori::FilterAst.unknown_field("acme.test:8443 resp.bdy:x", ":~", known,
+        ["req.", "resp."], pool).not_nil!
+      u.name.should eq("resp.bdy")
+    end
+
+    it "reads a quoted token the way the parser does" do
+      Gori::FilterAst.unknown_field(%("hsot:b"), ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).not_nil!.name.should eq("hsot")
+    end
+
+    it "ignores a leading separator, which is free text and not an empty field name" do
+      Gori::FilterAst.unknown_field(":foo", ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).should be_nil
+    end
+  end
+
   it "treats NOT on a single term as identical to the - prefix" do
     parse("NOT host:cdn").should eq("-host:cdn")
     parse("-host:cdn").should eq("-host:cdn")

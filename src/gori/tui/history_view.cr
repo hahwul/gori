@@ -812,10 +812,23 @@ module Gori::Tui
       return "invalid filter — no valid terms" if QL.reject_empty?(@query, filter)
       bad = QL.invalid_regex_terms(@query)
       return "invalid regex in #{bad.first}" unless bad.empty?
-      # The index-lag note comes FIRST, and that order is the point: it is the one note here that
-      # is TRUE ONLY RIGHT NOW (the backlog drains), it explains an empty list on its own, and a
-      # scope note returning ahead of it made it unreachable for every query naming `scope:` —
-      # sending an operator to the lens for a list that was merely still indexing.
+      # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a
+      # literal substring search, matches nothing, and is indistinguishable on this list from
+      # "no such traffic". `gori run history` refuses it outright and MCP errors on it; the bar
+      # must not (an operator types `meth` on the way to `method:`), so it is named HERE, once
+      # the list the query produced is empty. Ahead of the backlog and lens notes, which send
+      # the operator to a control that is not the problem — those are about a query that RAN,
+      # this is about one that was mistyped.
+      if u = FilterAst.unknown_field(@query, FilterAst::SEPS_FIELD_REGEX, QL_KNOWN,
+           QL::SIDE_PREFIXES, QL::CANDIDATE_FIELDS)
+        return FilterAst.unknown_field_note(u)
+      end
+      # First of the notes that describe a query which RAN, and that order is the point: the
+      # index lag is the one note here that is TRUE ONLY RIGHT NOW (the backlog drains), it
+      # explains an empty list on its own, and a scope note returning ahead of it made it
+      # unreachable for every query naming `scope:` — sending an operator to the lens for a
+      # list that was merely still indexing. The unknown-field note above outranks even this
+      # one, because a typo will not start matching when the index catches up.
       if note = fts_backlog_note(filter, store)
         return note
       end
@@ -3689,7 +3702,7 @@ module Gori::Tui
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
           width: rect.w - QUERY_PREFIX.size - 2 - state_width,
-          colors: Highlight.filter_query(@query, Theme.text_bright, known: QL_KNOWN))
+          colors: Highlight.filter_query(@query, Theme.text_bright, known: QL_KNOWN, shaped: QL::FIELD_SHAPED))
         return
       end
 
@@ -3701,7 +3714,7 @@ module Gori::Tui
         # The committed query stays highlighted — this readout is what you scan to
         # check how the active filter is actually being read.
         qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: QL_KNOWN),
+        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: QL_KNOWN, shaped: QL::FIELD_SHAPED),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         # No QL query typed — whether or not a Scope lens is active. Surface the filter

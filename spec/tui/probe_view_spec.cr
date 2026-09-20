@@ -85,6 +85,26 @@ describe Gori::Tui::ProbeView do
     end
   end
 
+  # The other half of the same signal: once the query is committed and the list is empty, the
+  # muted paint is gone from view and "no issues match" is all that is left — the same words a
+  # correct query with no findings earns.
+  it "names a misspelled filter field in the empty-state" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      view = Gori::Tui::ProbeView.new
+      view.reload(store)
+      view.start_query
+      "catgory:xss".each_char { |c| view.query_insert(c) }
+      view.stop_query
+
+      backend = MemoryBackend.new(80, 10)
+      view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 80, 10))
+      rows = (0...10).map { |y| backend.row(y) }.join("\n")
+      rows.should contain("unknown field `catgory:`")
+      rows.should contain("did you mean `category:`")
+    end
+  end
+
   it "still paints a real field, alias included, as a field" do
     view_store do |store|
       seed(store, "missing_hsts", "a.test")

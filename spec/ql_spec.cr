@@ -852,6 +852,36 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.field_shaped?("status", "500").should be_true
       Gori::QL.field_shaped?("dur", "5").should be_true
     end
+
+    # The SHAPE question is asked without the operator, and that division is load-bearing:
+    # `status~404` names a field QL has under `:` and not under `~`, so the term is DROPPED and
+    # the bar owes it the muted colour. Asking the shape question with the operator made the
+    # name unknown, the value port-shaped, the suggester silent (the name IS known) — and the
+    # whole token came back as plain text that would be searched.
+    it "keeps a known name under the wrong operator field-shaped" do
+      %w[status size dur respsize].each do |f|
+        Gori::QL::FIELD_SHAPED.call(f, '~', "404").should be_true, f
+      end
+    end
+
+    # `FIELD_SHAPED` is the same predicate in the shape the span highlighter takes, and its
+    # whole job is to keep the BAR and the REFUSALS reading one query the same way: whatever
+    # `fields_used` reports as naming a field is what the bar may paint as one.
+    it "agrees with fields_used about which tokens name a field at all" do
+      {
+        "host:api"           => true,
+        "hsot:api"           => true,
+        "resp.body:x"        => true,
+        "http://acme.test/x" => false,
+        "acme.test:8443"     => false,
+        "localhost:8080"     => false,
+        "12:34"              => false,
+      }.each do |token, names_a_field|
+        name, _, value = token.partition(':')
+        Gori::QL::FIELD_SHAPED.call(name, ':', value).should eq(names_a_field), token
+        Gori::QL.fields_used(token).empty?.should eq(!names_a_field), token
+      end
+    end
   end
 
   # A substring field folds BOTH sides — needle and haystack — and folding is only a fold if it

@@ -64,6 +64,25 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  # Painting it muted is the signal while you TYPE; this is the one for after you pressed ↵ and
+  # got an empty list, where "no issues match" and "you spelled the field wrong" were one answer.
+  it "names a misspelled filter field instead of reporting an empty list" do
+    with_store do |store|
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      view.start_query
+      "sevrity:high".each_char { |c| view.query_insert(c) }
+      view.stop_query
+
+      b = MemoryBackend.new(80, 10)
+      view.render(Screen.new(b), Rect.new(0, 0, 80, 10))
+      rows = (0...10).map { |y| b.row(y) }.join("\n")
+      rows.should contain("unknown field `sevrity:`")
+      rows.should contain("did you mean `severity:`")
+    end
+  end
+
   it "still paints a real field, alias included, as a field" do
     with_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
