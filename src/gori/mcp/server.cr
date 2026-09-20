@@ -255,7 +255,15 @@ module Gori
         # 2025-03-26 made that mandatory and we advertise it — but answering a member that has
         # declared a revision where the array does not exist would put a frame on stdout that
         # the client which sent it cannot legally read.
-        if @batch && Protocol.modern?(requested)
+        #
+        # …but only for the fiber that is IN that batch, the same test `send` makes for the
+        # same reason. `@batch` is a worker-fiber local in all but name, and this method also
+        # runs on the READER, which answers `ping` ahead of the queue: a modern liveness probe
+        # arriving while the worker happened to be mid-batch was refused for being inside an
+        # array it was never in. That is the one message the reader/worker split exists to
+        # keep answering — a client whose pings go unanswered concludes the server is dead and
+        # kills it mid-call.
+        if @batch && @batch_fiber == Fiber.current && Protocol.modern?(requested)
           write_error(id, -32600, "JSON-RPC batching does not exist in #{requested} " \
                                   "(removed in 2025-06-18) — send one message per line")
           return EraGate.new(nil, true)
@@ -471,9 +479,17 @@ module Gori
         # `clientInfo.name` cannot smuggle a container in.
         info = obj_field(params, "clientInfo")
         @tools.client_seen(obj_field(info, "name").try(&.as_s?), obj_field(info, "version").try(&.as_s?))
+        # The handshake IS the declaration, so the latch the courier reads is written HERE and
+        # nowhere else. It used to be written inside `emit_capabilities`, which `server/discover`
+        # also calls — with `channel: false`, because the stateless era forbids an unsolicited
+        # frame — so one discovery probe from a dual-era client silently RETIRED the channel a
+        # handshake had just handed it. The operator's `Settings.mcp_channels` is read once,
+        # here: a toggle afterwards cannot register a channel with a client that already did not
+        # take one, and cannot withdraw one it did.
+        @channel_declared = Settings.mcp_channels?
         write_result(id) do |j|
           j.field "protocolVersion", version
-          j.field("capabilities") { emit_capabilities(j, channel: true) }
+          j.field("capabilities") { emit_capabilities(j, channel: @channel_declared) }
           j.field("serverInfo") { emit_implementation(j) }
           j.field "instructions", instructions_text
         end
@@ -548,15 +564,19 @@ module Gori
       # and never to a stateless client. Nothing is lost that the operator can see: the
       # channel was always the unconfirmable route, and the socket, the Codex queue and the
       # `operator_messages` poll all carry the same message off-stdout, for every client.
+      #
+      # A pure emitter: `channel` is DECIDED by the caller (`handle_initialize` reads the
+      # operator's setting and latches it; `handle_discover` passes false), because a builder
+      # that also writes session state is one that rewrites it every time something asks the
+      # server to describe itself — which is how a discovery probe came to retire a channel
+      # the handshake had declared.
       private def emit_capabilities(j : JSON::Builder, *, channel : Bool) : Nil
         j.object do
           j.field("tools") { j.object { } }
           # Declared only when the operator says their Claude is launched with channels: a
           # client that did not register it drops every push silently, and the socket route
-          # would then carry the same line. Latched HERE, on the declaration itself, so the
-          # courier pushes only to a client that has actually been handed it.
-          @channel_declared = channel && Settings.mcp_channels?
-          if @channel_declared
+          # would then carry the same line.
+          if channel
             j.field("experimental") { j.object { j.field("claude/channel") { j.object { } } } }
           end
         end
