@@ -335,6 +335,13 @@ module Gori
         # Set for the duration of ONE `call` when the surface can answer "has the client
         # cancelled the request I am serving?" — see `call` and `cancel_signal`.
         @cancelled = nil.as(Proc(Bool)?)
+        # #1090: operator messages a route in THIS process is mid-way through handing over.
+        # Three readers share one feed — the courier, the tool-result carry and
+        # `operator_messages` — and the delivery ROW that keeps them from repeating each other
+        # is only written once a hand-off has finished. A `codex queue` parks its fiber for up
+        # to ten seconds; the tool call the agent makes in that window would find the message
+        # unclaimed and carry it a second time. An id in here is "somebody is already on it".
+        @in_flight_messages = Set(Int64).new
       end
 
       # Bound-only helpers call this after the unbound gate; raises only on internal misuse.
@@ -403,6 +410,28 @@ module Gori
       # Where `operator_messages` starts reading (see `initialize` / `bind_project`).
       def messages_floor : Int64
         @messages_floor
+      end
+
+      # Take an operator message out of the other readers' hands for the length of one
+      # hand-off, or answer false when somebody already has it. Released in the caller's
+      # `ensure`: a claim that leaks is a message this process would never carry again, which
+      # is the one direction this layer must not err in.
+      def claim_message(id : Int64) : Bool
+        return false if @in_flight_messages.includes?(id)
+        @in_flight_messages << id
+        true
+      end
+
+      def release_message(id : Int64) : Nil
+        @in_flight_messages.delete(id)
+      end
+
+      # How far the tool-result carry has read. Exposed for the reason `Courier#cursor` is: the
+      # rule this cursor keeps — advance past what was SCANNED, never past what matched, and
+      # advance even when nothing goes out — is only observable from here, and the one time it
+      # was not pinned it silently stopped advancing at all.
+      def messages_cursor : Int64
+        @messages_cursor
       end
 
       # The LIVE project binding. `bind_project` (switch_project, and create_project when it

@@ -444,7 +444,10 @@ migrations in `src/gori/store/schema.cr`.
 - **Note**: the running scratchpad and report.
 - **Sessions**: persisted Repeater / Fuzzer / Miner / Sequencer / OAST workbench state.
 - **Operator message**: a line the operator sends from the TUI to an attached agent session;
-  delivered by channel, inbox socket or poll, and recorded as an `agent_delivery` event.
+  delivered by the first route that answers — inbox socket, `codex queue`, then the
+  unconfirmable `claude/channel` push — and, for anything none of them carried, by the next
+  tool result or the `operator_messages` poll. Every attempt is recorded as an
+  `agent_delivery` event.
 
 Directories are `0700` (`Paths::DIR_MODE`) and the DB, plus its `-wal` and `-shm`
 sidecars, are `0600` (`Store.harden_permissions`).
@@ -2914,7 +2917,7 @@ all three.** The revision allows exactly a response, a notification belonging to
 in flight, and a notification on an acknowledged `subscriptions/listen` stream. A
 conformance sweep found gori doing none of those correctly: the `claude/channel` push
 (#1090) is a free-running courier frame, so the capability is now declared to the handshake
-era only — the socket, Codex-queue and poll routes carry the same message off-stream, for
+era only — the socket, Codex-queue, tool-result and poll routes carry the same message off-stream, for
 every client, which is why nothing the operator can see is lost. `subscriptions/listen` is
 answered rather than refused, with the empty filter the spec asks for when a server supports
 no notification type, then closed the way a server closes a stream it is ending itself;
@@ -3031,3 +3034,41 @@ place a stop had to be given a new refusal is `minimize_repeater`'s `apply`: a s
 calibration aborts, but a stop mid-search returns `aborted: false` with the removals proven so
 far, and applying those would rewrite the stored request under a caller who will never learn
 the session changed.
+
+### 2026-09-20: a delivery route is ranked by what it can confirm, and a shut door is not the end of the chain
+
+Four routes carry an operator message to an attached agent (#1090), and "best available first"
+turned out to name two different orderings. The one that shipped put the `claude/channel` push
+at the head because it is the newest and the most native; the ordering that survives review
+puts it LAST, because it is the only one that cannot say whether it landed.
+
+**The route that reports back outranks the one that does not.** The inbox socket and `codex
+queue` both answer — a write that lands or a CLI that says why not — so either of them retires
+the message from the poll backstop (`AgentDelivery::CARRIED`). A channel push to a session that
+never registered the channel is dropped without a word. Putting it first meant `mcp.channels`,
+an opt-in preview, silently took the socket away from every Claude Code session not launched
+with the development-channels flag: the one route that wakes an idle session, traded for a
+frame nobody could tell had been discarded. The setting's own description said the push rides
+"on top of" the socket; the code said "instead of". Confirmability is what breaks the tie, and
+it is the same axis `CARRIED` already uses — the ordering and the retirement rule now read off
+one fact instead of two.
+
+**A route that fails falls through; only a route that ANSWERS ends the chain.** The socket
+route used to commit on the existence of the path. A path is not a listener:
+`/tmp/cc-socks/<pid>.sock` outlives the process that bound it and pids are reused, so a `gori
+mcp` under another client can find a dead Claude socket at its parent's pid — and committing to
+it cost the `codex queue` hand-off that would have worked. What the failed attempt said is
+carried into whatever row does land, because the operator gets one delivery row per message and
+a refusal the chain walked away from is otherwise invisible.
+
+**A cursor that only advances when something goes out does not advance.** The tool-result carry
+(layer four) computed its next cursor and then discarded it on the `nil` return — the path it
+takes on nearly every call. Its idle gate (`high <= @messages_cursor`) therefore never closed
+against a feed that grows for any other reason, and the event feed is the firehose every gori
+action writes to: each tool call on the surface paid an unindexed `kind = 'agent_message'` walk
+of the whole feed rather than the one `MAX(id)` scalar it advertised (0.96ms against 0.005ms
+over 50k rows, growing with the project), and five of another session's messages wedged the
+layer for good. Advancing a cursor past rows that will never be sent is not marking them
+delivered — nothing is emitted on that path, so there is nothing a failed emit could take back.
+The courier and `operator_messages` had the rule right; the third reader of the same feed did
+not, which is the argument for `each_event_of_kind` owning it.

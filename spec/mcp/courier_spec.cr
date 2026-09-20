@@ -14,6 +14,10 @@ private class Rig
   property inbox : String? = nil
   property codex : Gori::MCP::CodexQueue::Session? = nil
   getter codex_lookups = 0
+  # The in-flight ledger the other readers in the process share with the courier.
+  property? claimable = true
+  getter claimed_ids = [] of Int64
+  getter released_ids = [] of Int64
 
   def initialize(@store)
   end
@@ -21,7 +25,9 @@ private class Rig
   def courier(pid = 77_i64) : Courier
     Courier.new(pid: pid, store: -> { @store.as(Gori::Store?) }, client: -> { @client },
       channels: -> { @channels }, emit: ->(f : String) { @frames << f; nil }, inbox: -> { @inbox },
-      codex: -> { @codex_lookups += 1; @codex })
+      codex: -> { @codex_lookups += 1; @codex },
+      claim: ->(id : Int64) { @claimed_ids << id; @claimable },
+      release: ->(id : Int64) { @released_ids << id; nil })
   end
 end
 
@@ -184,9 +190,59 @@ describe Gori::MCP::Courier do
       m = store.post_agent_message("x", "all", nil)
       c.tick.should eq(1)
       d = store.agent_deliveries_after(m, 10).rows.first
-      d.via.should eq("socket")
+      # Nothing else could take it, so the row is the poll deposit — and it is a WARNING, not
+      # the reassuring "left for … to pick up": a door was shut, which is not the same thing as
+      # this client having no door.
+      d.via.should eq(Gori::AgentDelivery::VIA_POLL)
       d.ok.should be_false
-      d.reason.should_not be_nil
+      d.reason.not_nil!.should contain("socket:")
+      d.reason.not_nil!.should contain("operator_messages")
+    end
+  end
+
+  # A socket PATH that exists is not a session that is listening: `/tmp/cc-socks/<pid>.sock`
+  # outlives the process that bound it and pids are reused, so a `gori mcp` under another
+  # client can find a dead Claude socket at its parent's pid. Committing to it used to cost the
+  # hand-off that would have worked.
+  it "falls through to the next route when the socket it found is dead" do
+    with_store do |store|
+      mcp_with_fake_codex do |log|
+        rig = Rig.new(store)
+        rig.client = "codex"
+        rig.inbox = "/nonexistent/stale.sock" # a leftover from a session that is gone
+        rig.codex = Gori::MCP::CodexQueue::Session.new("01a0b92e-f7d0-77d3-8ba9-61e53e67a768", "/tmp/h")
+        c = rig.courier
+        c.tick
+        m = store.post_agent_message("still reaches codex", "all", nil)
+        c.tick.should eq(1)
+        File.read(log).lines[4].should contain("still reaches codex")
+        d = store.agent_deliveries_after(m, 10).rows.first
+        d.via.should eq(Gori::AgentDelivery::VIA_CODEX_QUEUE)
+        d.ok.should be_true
+      end
+    end
+  end
+
+  # The channel is the only route that cannot say whether it landed, so it goes LAST. An
+  # operator turning the preview on must not lose the socket: a Claude Code session launched
+  # without the development-channels flag drops the push without a word, and the socket is the
+  # one route that would have woken it.
+  it "prefers the confirmed inbox socket over the channel push when both are available" do
+    with_fake_inbox do |path, _got|
+      with_store do |store|
+        rig = Rig.new(store)
+        rig.channels = true
+        rig.inbox = path
+        c = rig.courier
+        c.tick
+        m = store.post_agent_message("fuzz the login", "all", nil)
+        c.tick.should eq(1)
+        rig.frames.should be_empty # no push: the confirmed door answered
+        d = store.agent_deliveries_after(m, 10).rows.first
+        d.via.should eq(Gori::AgentDelivery::VIA_SOCKET)
+        # …and the socket RETIRES it, which the push would not have done.
+        store.delivered_agent_message_ids(0_i64, 77_i64).includes?(m).should be_true
+      end
     end
   end
 
@@ -291,6 +347,49 @@ describe Gori::MCP::Courier do
         c.tick.should eq(0) # not "old in b"
         b.post_agent_message("new in b", "all", nil)
         c.tick.should eq(1)
+      end
+    end
+  end
+
+  # The delivery ROW is written when a hand-off finishes, and `codex queue` parks the fiber for
+  # up to ten seconds before it does. Whoever else in this process reads the same feed in that
+  # window has to be told the message is already on its way, or the agent gets it twice.
+  it "announces a message as in flight for the length of the hand-off, and gives it back" do
+    with_fake_inbox do |path, _got|
+      with_store do |store|
+        rig = Rig.new(store)
+        rig.inbox = path
+        c = rig.courier
+        c.tick
+        m = store.post_agent_message("one line", "all", nil)
+        c.tick.should eq(1)
+        rig.claimed_ids.should eq([m])
+        rig.released_ids.should eq([m]) # the durable row answers for it from here on
+      end
+    end
+  end
+
+  it "leaves a message alone while another route in this process is handing it over" do
+    with_fake_inbox do |path, got|
+      with_store do |store|
+        rig = Rig.new(store)
+        rig.inbox = path
+        rig.claimable = false
+        c = rig.courier
+        c.tick
+        m = store.post_agent_message("somebody else has it", "all", nil)
+        c.tick.should eq(1)
+        c.delivered.should eq(0)
+        Fiber.yield
+        got.should be_empty
+        store.agent_deliveries_after(m, 10).rows.should be_empty
+        # …and the cursor stopped below it. A claim is TEMPORARY — the holder may fail — so
+        # unlike a row a confirmed route already carried, this one is still owed.
+        c.cursor.should be < m
+        rig.claimable = true
+        c.tick.should eq(1)
+        c.delivered.should eq(1)
+        store.agent_deliveries_after(m, 10).rows.first.via.should eq(Gori::AgentDelivery::VIA_SOCKET)
       end
     end
   end

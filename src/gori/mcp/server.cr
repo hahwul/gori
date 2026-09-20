@@ -817,7 +817,9 @@ module Gori
           store: -> { @tools.current_store },
           client: -> { @tools.client_name },
           channels: -> { @channel_declared },
-          emit: ->(frame : String) { send(frame) })
+          emit: ->(frame : String) { send(frame) },
+          claim: ->(mid : Int64) { @tools.claim_message(mid) },
+          release: ->(mid : Int64) { @tools.release_message(mid) })
         courier.start
         @courier = courier
       end
@@ -878,6 +880,18 @@ module Gori
         # ring saying "got it" for a line nothing ever carried. The side effect follows the
         # emit, as every guard in this codebase follows its refusal (#724).
         pending = @tools.pending_operator_note(name)
+        begin
+          emit_tool_result(id, era, result, pending)
+        ensure
+          @tools.release_operator_note(pending) if pending
+        end
+      end
+
+      # The result frame, plus the operator note riding beside it. Split from
+      # `handle_tools_call` so the claim those pending ids hold has one `ensure` to be given
+      # back from, whatever this does.
+      private def emit_tool_result(id : JSON::Any, era : String?, result : Tools::Result,
+                                   pending : Tools::PendingNote?) : Nil
         emitted = write_result(id, era) do |j|
           j.field("content") do
             j.array do

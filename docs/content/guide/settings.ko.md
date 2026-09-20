@@ -114,7 +114,7 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 |------|------|
 | **Agent messaging** | Channel delivery (off) |
 
-`gori mcp`가 "Tell the agent…" 메시지를 붙어 있는 에이전트에게 전달하는 방식입니다. inbox-socket, Codex queue, `operator_messages` poll 계층은 항상 동작하고, **Channel delivery**는 그 위에 `claude/channel` push를 얹습니다. 개발 채널 플래그로 Claude Code를 띄워야 하는 research preview라 기본은 off입니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori)를 참고하세요.
+`gori mcp`가 "Tell the agent…" 메시지를 붙어 있는 에이전트에게 전달하는 방식입니다. inbox socket, Codex queue, tool-result, `operator_messages` poll 계층은 항상 동작하고, **Channel delivery**는 그 *뒤에* `claude/channel` push를 놓습니다 — 스스로를 확인할 수 있는 경로가 하나도 답하지 않았을 때에만 시도합니다. 개발 채널 플래그로 Claude Code를 띄워야 하는 research preview라 기본은 off입니다. 이 값은 `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 받았던 답을 그대로 유지합니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori)를 참고하세요.
 
 ## 프로젝트 선택기에서 {#in-the-project-picker}
 

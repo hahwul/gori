@@ -31,9 +31,11 @@ module Gori
       # A tool result is the one thing every client puts in front of its model on gori's behalf
       # without being asked, so it is where the message goes.
       #
-      # PURE: it reads, it builds a string, it marks nothing and moves no cursor. The carry is
-      # confirmed only when the response is actually emitted, and this method cannot see that
-      # — `Server#handle_tools_call` calls `commit_operator_note` once it has.
+      # It marks NOTHING: the carry is confirmed only when the response is actually emitted,
+      # and this method cannot see that — `Server#handle_tools_call` calls
+      # `commit_operator_note` once it has. The one thing it does move is the cursor on the
+      # path where it returns `nil`, and only there; see below for why that is not the same
+      # thing as marking.
       #
       # `nil` when there is nothing to say, which is the overwhelmingly common case and costs
       # one `MAX(id)` scalar (the courier's idle gate, for the same reason).
@@ -47,6 +49,10 @@ module Gori
         pid = Process.pid.to_i64
         page = s.agent_messages_after(@messages_cursor, pid, TOOL_RESULT_MESSAGES)
         fresh = unclaimed(s, page, pid)
+        # The oldest row another route in this process is still handing over. A claim is
+        # TEMPORARY — that route may fail, and then this layer owes the message again — so it
+        # is the one reason a row may be skipped without the cursor being allowed past it.
+        held = page.rows.select { |m| @in_flight_messages.includes?(m.id) }.min_of?(&.id)
         # Advance past what was SCANNED, never past what matched — a page full of another
         # session's messages must not strand this session's behind it (the courier's rule).
         cursor =
@@ -55,6 +61,26 @@ module Gori
           else
             {@messages_cursor, page.scanned_max, high}.max
           end
+        cursor = {@messages_cursor, {cursor, held - 1}.min}.max if held
+        if fresh.empty?
+          # Nothing is going out, so there is nothing a failed emit could have to take back:
+          # the cursor moves HERE or it never moves at all. It used to be computed and then
+          # thrown away with the `nil`, which left the `high <= @messages_cursor` gate above
+          # permanently open — the feed is the firehose every gori action writes to, so `high`
+          # climbs all session while the cursor sat at the floor it was constructed with. Every
+          # tool call on the surface then paid a `kind = 'agent_message'` walk of the whole feed
+          # (there is no index on `kind`) instead of the one scalar this method advertises:
+          # 0.96ms against 0.005ms over a 50k-row feed, and it grows with the project.
+          @messages_cursor = cursor
+          return nil
+        end
+        # Announce them to the rest of the process BEFORE the frame is built. Emitting a
+        # response yields (`send` takes the write lock and flushes), and the courier's next
+        # tick lands in that gap: with no claim it would find these rows unclaimed — the
+        # delivery row that answers for them is not written until `commit_operator_note` — and
+        # write the same line to the session's inbox socket as well. `release_operator_note`
+        # gives them back from `Server#handle_tools_call`'s `ensure`, on every exit.
+        fresh = fresh.select { |m| claim_message(m.id) }
         return nil if fresh.empty?
         lines = fresh.map { |m| OperatorNote.frame(Serialize.text(m.text), m.from_tab, m.flow_ids, m.id) }
         # A full page may be hiding more behind it, and this carrier is the one the model did
@@ -67,6 +93,15 @@ module Gori
         # answer the agent asked for — and the message stays in the feed for the poll tool.
         Log.warn(exception: ex) { "mcp: could not read pending operator messages" }
         nil
+      end
+
+      # Give back what `pending_operator_note` claimed, whatever happened to the response. From
+      # an `ensure`, so a raise between the read and the emit cannot leave an id held for the
+      # life of the session — a leaked claim is a message this process would never carry again,
+      # which is the one direction this layer must not err in. Idempotent, and safe to call
+      # after `commit_operator_note`: by then the delivery row is what answers for these ids.
+      def release_operator_note(note : PendingNote) : Nil
+        note.ids.each { |id| release_message(id) }
       end
 
       # The note went out: move the cursor past it and record the deliveries.
@@ -102,7 +137,10 @@ module Gori
         candidates = page.rows.map(&.id).to_set
         floor = {page.rows.min_of(&.id) - 1, @messages_floor}.max
         already = s.delivered_agent_message_ids(floor, pid, candidates)
-        page.rows.reject { |m| already.includes?(m.id) }
+        # `@in_flight_messages` is the same question asked of the hand-off that has not
+        # finished yet: the courier holds an id while its socket write or `codex queue` runs,
+        # and the delivery row that would answer here is not written until that returns.
+        page.rows.reject { |m| already.includes?(m.id) || @in_flight_messages.includes?(m.id) }
       end
 
       # This session as the operator would recognise it on a delivery row.
@@ -132,8 +170,24 @@ module Gori
         rows = include_delivered ? page.rows : fresh
         can_mark = !store.read_only?
         label = session_label
-        fresh.each { |m| store.record_agent_delivery(m.id, AgentDelivery::VIA_PICKED_UP, label, true, pid: pid) } if can_mark
+        # Read BEFORE this call takes claims of its own: the oldest row somebody ELSE is still
+        # handing over. The cursor the agent is told to come back with obeys the same rule the
+        # courier's and the carry's do — it may not step past one, because that claim is
+        # temporary (the holder may fail and deposit a `poll` row, which retires nothing) and a
+        # `next_cursor` above it would send this agent back for a page starting after the one
+        # message it is still owed.
+        held = page.rows.select { |m| @in_flight_messages.includes?(m.id) }.min_of?(&.id)
         next_cursor = {since, page.scanned_max}.max
+        next_cursor = {since, {next_cursor, held - 1}.min}.max if held
+        # Held while the marks commit. `record_agent_delivery` goes through the store's writer
+        # fiber, which YIELDS: without this the courier's 500ms tick lands between two marks and
+        # writes to the session's socket a line this very result is handing over.
+        fresh.each { |m| claim_message(m.id) }
+        begin
+          fresh.each { |m| store.record_agent_delivery(m.id, AgentDelivery::VIA_PICKED_UP, label, true, pid: pid) } if can_mark
+        ensure
+          fresh.each { |m| release_message(m.id) }
+        end
         Result.new(JSON.build do |j|
           j.object do
             j.field "messages" do

@@ -94,4 +94,33 @@ describe "MCP operator_messages (#1090)" do
       op["inputSchema"]["properties"].as_h.keys.sort!.should eq(%w[include_delivered limit since])
     end
   end
+
+  # The cursor the agent is told to come back with obeys the same rule the courier's and the
+  # tool-result carry's do: it may not step past a row another route in this process is still
+  # handing over. That claim is temporary — a `codex queue` that is refused deposits a `poll`
+  # row, which retires nothing — so a `next_cursor` above it would send this agent back for a
+  # page starting after the one message it is still owed, and the tool's own schema tells it to
+  # pass that cursor.
+  it "will not cursor past a message another route is still handing over" do
+    with_store do |store|
+      t = tools_for(store)
+      t.call("operator_messages", JSON.parse("{}"))
+      held = store.post_agent_message("mid hand-off", "all", nil)
+      later = store.post_agent_message("said after", "all", nil)
+      t.claim_message(held).should be_true
+
+      j = JSON.parse(t.call("operator_messages", JSON.parse("{}")).text)
+      j["messages"].as_a.map(&.["text"]).should eq(["said after"])
+      j["next_cursor"].as_i64.should eq(held - 1)
+
+      # The hand-off failed and left a poll deposit, which carries nothing. Coming back with
+      # the cursor it was given, the agent still finds the line.
+      store.record_agent_delivery(held, Gori::AgentDelivery::VIA_POLL, "x", true, pid: Process.pid.to_i64)
+      t.release_message(held)
+      back = JSON.parse(t.call("operator_messages",
+        JSON.parse(%({"since":#{j["next_cursor"]}}))).text)
+      back["messages"].as_a.map(&.["id"].as_i64).should contain(held)
+      later.should be > held
+    end
+  end
 end

@@ -133,6 +133,19 @@ describe "the delivery drain's wiring" do
     end
     seeded.should be_true
   end
+
+  # The reply half had neither of the two assertions above, although it is the half the
+  # operator is actually waiting on — a drain left out of the loop is an answer that never
+  # arrives, and a cursor seeded at 0 replays every reply the project ever collected as
+  # something that just happened.
+  it "drains the agent's replies on the same tick, from the same seeded cursor" do
+    lines = src("tui", "runner.cr")
+    deliveries = lines.index(&.includes?("dirty = true if drain_agent_deliveries")).not_nil!
+    replies = lines.index(&.includes?("dirty = true if drain_agent_replies")).not_nil!
+    lines[replies][/\A\s*/].should eq(lines[deliveries][/\A\s*/])
+    (replies - deliveries).should be < 3
+    lines.any?(&.includes?("@agent_reply_cursor = @agent_delivery_cursor")).should be_true
+  end
 end
 
 describe Gori::Tui::AgentsOverlay, "tell affordance (#1090)" do

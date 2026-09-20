@@ -166,4 +166,47 @@ describe "ChoicePicker — Overlay contract" do
     p.overlay_box(tiny).should be_nil
     p.handle_click(tiny, 8, 2).should eq(:cancel)
   end
+
+  # The agent-target picker (#1090) is the first ChoicePicker whose rows carry a name the PEER
+  # chose, and the first whose labels routinely outrun the card: `overlay_box` never widens
+  # past `area.w - 4`, while the label was drawn with `Screen#text`'s default limit — the
+  # terminal width — so it ran straight over the card's right border into the backdrop.
+  it "keeps a label longer than the card inside the card's border" do
+    long = "claude-code-very-long-name · pid 48213 · attached 3m ago"
+    p = ChoicePicker.new("TELL WHICH AGENT",
+      [ChoicePicker::Choice.new(long, '1', Theme.text, 0),
+       ChoicePicker::Choice.new("all attached agents", '2', Theme.accent, 1)], -1, :agent_target)
+    area = Rect.new(0, 0, 60, 20)
+    backend = MemoryBackend.new(60, 20)
+    p.render(Screen.new(backend), area)
+    box = p.overlay_box(area).not_nil!
+    row = backend.row(box.y + 1)
+    # The border is still the border, and nothing was painted outside the card.
+    row[box.right - 1].should eq('│')
+    row[box.right...].strip.should eq("")
+    row[...box.x].strip.should eq("")
+  end
+
+  # The `● current` marker keeps a blank column on each side. Reserving only its own width
+  # plus one left a truncated label touching the bullet (`…● current`).
+  it "keeps a gap between a truncated label and the current marker" do
+    long = "a name far too long for this card to hold at all"
+    p = ChoicePicker.new("PICK", [ChoicePicker::Choice.new(long, '1', Theme.text, 7)], 7, :agent_target)
+    area = Rect.new(0, 0, 44, 20)
+    backend = MemoryBackend.new(44, 20)
+    p.render(Screen.new(backend), area)
+    box = p.overlay_box(area).not_nil!
+    row = backend.row(box.y + 1)
+    row.should contain("● current")
+    row[row.index("● current").not_nil! - 1].should eq(' ')
+  end
+
+  # `overlay_box` sizes the card from the widest label. Measured in CHARACTERS it under-sizes
+  # by half for a CJK or emoji name, which is the same overflow one step earlier.
+  it "sizes the card by display columns, not by character count" do
+    wide = ChoicePicker.new("T", [ChoicePicker::Choice.new("가" * 20, '1', Theme.text, 0)], -1, :agent_target)
+    narrow = ChoicePicker.new("T", [ChoicePicker::Choice.new("a" * 20, '1', Theme.text, 0)], -1, :agent_target)
+    area = Rect.new(0, 0, 120, 20)
+    wide.overlay_box(area).not_nil!.w.should eq(narrow.overlay_box(area).not_nil!.w + 20)
+  end
 end
