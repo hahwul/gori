@@ -41,7 +41,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the filter is spelled anyway: `kind` is what a half-written marker body falls back to, and a
   # TUI window in the list would be a row that can never receive anything.
   def tell_agent : Nil
-    rows = Gori::AgentPresence.live(@session.project.db_path).select { |e| e.kind == Gori::AgentPresence::KIND_MCP }
+    rows = attached_agents
     if rows.empty?
       # Not `--install-claude-code`: gori installs into seven clients and this verb works with
       # every one of them, so the empty state names the flag family rather than one vendor's.
@@ -107,13 +107,43 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         # esc is how the operator backs out, and it already says so on the hint row.
         @toast = "type the message first — esc cancels"
         false
+      elsif !still_attached?(target)
+        # Re-read at the SIDE EFFECT, where a guard belongs (#724). The picker's list was a
+        # snapshot, and the operator may have spent a minute on the card since: a session that
+        # has exited in between leaves a row no courier will ever read, and NOTHING downstream
+        # says so — no courier means no delivery row, and the ring is silent for good. The one
+        # moment gori can tell the operator is before it writes the row.
+        @toast = "#{name} is no longer attached — nothing would read that message"
+        true
+      elsif @session.store.post_agent_message(text, target, from, ids) == 0
+        # The row is the WHOLE mechanism — gori never talks to the agent's session, it leaves a
+        # line for the courier to find — so a rolled-back batch (another process holding the
+        # write lock, a closing store) means nothing was sent and nothing ever will be. And it
+        # is the one failure the ring cannot report afterwards: no row, no courier, no delivery
+        # row, silence for good. Every sibling write in the Runner says "project busy" here.
+        @toast = "not sent — project busy; try again"
+        true
       else
-        @session.store.post_agent_message(text, target, from, ids)
         @toast = "sent to #{name}"
         true
       end
     }
     open_overlay(np)
+  end
+
+  # Every `gori mcp` process attached to THIS project. The `kind` filter is spelled even though
+  # `live` defaults to that directory: `kind` is what a half-written marker body falls back to.
+  private def attached_agents : Array(Gori::AgentPresence::Entry)
+    Gori::AgentPresence.live(@session.project.db_path).select { |e| e.kind == Gori::AgentPresence::KIND_MCP }
+  end
+
+  # Is there still somebody behind this address? The flock is the truth about liveness, so this
+  # is the same question `live` answers for the picker — asked again at the moment it matters.
+  # A broadcast needs one live session, not a particular one.
+  private def still_attached?(target : String) : Bool
+    live = attached_agents
+    return !live.empty? if target == AgentTargets::ALL
+    live.any? { |e| AgentTargets.target_for(e) == target }
   end
 
   # --- receiving -------------------------------------------------------------------------

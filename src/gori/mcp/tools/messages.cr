@@ -31,9 +31,11 @@ module Gori
       # A tool result is the one thing every client puts in front of its model on gori's behalf
       # without being asked, so it is where the message goes.
       #
-      # PURE: it reads, it builds a string, it marks nothing and moves no cursor. The carry is
-      # confirmed only when the response is actually emitted, and this method cannot see that
-      # — `Server#handle_tools_call` calls `commit_operator_note` once it has.
+      # It marks NOTHING: the carry is confirmed only when the response is actually emitted,
+      # and this method cannot see that — `Server#handle_tools_call` calls
+      # `commit_operator_note` once it has. The one thing it does move is the cursor on the
+      # path where it returns `nil`, and only there; see below for why that is not the same
+      # thing as marking.
       #
       # `nil` when there is nothing to say, which is the overwhelmingly common case and costs
       # one `MAX(id)` scalar (the courier's idle gate, for the same reason).
@@ -47,6 +49,10 @@ module Gori
         pid = Process.pid.to_i64
         page = s.agent_messages_after(@messages_cursor, pid, TOOL_RESULT_MESSAGES)
         fresh = unclaimed(s, page, pid)
+        # The oldest row another route in this process is still handing over. A claim is
+        # TEMPORARY — that route may fail, and then this layer owes the message again — so it
+        # is the one reason a row may be skipped without the cursor being allowed past it.
+        held = page.rows.select { |m| @in_flight_messages.includes?(m.id) }.min_of?(&.id)
         # Advance past what was SCANNED, never past what matched — a page full of another
         # session's messages must not strand this session's behind it (the courier's rule).
         cursor =
@@ -55,7 +61,19 @@ module Gori
           else
             {@messages_cursor, page.scanned_max, high}.max
           end
-        return nil if fresh.empty?
+        cursor = {@messages_cursor, {cursor, held - 1}.min}.max if held
+        if fresh.empty?
+          # Nothing is going out, so there is nothing a failed emit could have to take back:
+          # the cursor moves HERE or it never moves at all. It used to be computed and then
+          # thrown away with the `nil`, which left the `high <= @messages_cursor` gate above
+          # permanently open — the feed is the firehose every gori action writes to, so `high`
+          # climbs all session while the cursor sat at the floor it was constructed with. Every
+          # tool call on the surface then paid a `kind = 'agent_message'` walk of the whole feed
+          # (there is no index on `kind`) instead of the one scalar this method advertises:
+          # 0.96ms against 0.005ms over a 50k-row feed, and it grows with the project.
+          @messages_cursor = cursor
+          return nil
+        end
         lines = fresh.map { |m| OperatorNote.frame(Serialize.text(m.text), m.from_tab, m.flow_ids, m.id) }
         # A full page may be hiding more behind it, and this carrier is the one the model did
         # not ask for: if it does not say so here, nothing does, and the rest waits for a tool
@@ -102,7 +120,10 @@ module Gori
         candidates = page.rows.map(&.id).to_set
         floor = {page.rows.min_of(&.id) - 1, @messages_floor}.max
         already = s.delivered_agent_message_ids(floor, pid, candidates)
-        page.rows.reject { |m| already.includes?(m.id) }
+        # `@in_flight_messages` is the same question asked of the hand-off that has not
+        # finished yet: the courier holds an id while its socket write or `codex queue` runs,
+        # and the delivery row that would answer here is not written until that returns.
+        page.rows.reject { |m| already.includes?(m.id) || @in_flight_messages.includes?(m.id) }
       end
 
       # This session as the operator would recognise it on a delivery row.

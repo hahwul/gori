@@ -817,7 +817,9 @@ module Gori
           store: -> { @tools.current_store },
           client: -> { @tools.client_name },
           channels: -> { @channel_declared },
-          emit: ->(frame : String) { send(frame) })
+          emit: ->(frame : String) { send(frame) },
+          claim: ->(mid : Int64) { @tools.claim_message(mid) },
+          release: ->(mid : Int64) { @tools.release_message(mid) })
         courier.start
         @courier = courier
       end

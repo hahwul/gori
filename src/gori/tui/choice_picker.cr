@@ -205,16 +205,24 @@ module Gori::Tui
         screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
         screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
         screen.text(box.x + 3, ry, ch.key.to_s, Theme.accent, bg, Attribute::Bold)
-        screen.text(box.x + 6, ry, ch.label, ch.color, bg, Attribute::Bold)
-        if ch.value == @current
-          marker = "● current"
+        # Bounded to the CARD, not to the screen. `Screen#text` defaults its limit to the
+        # terminal width, so a label wider than the box ran over the right border and into the
+        # backdrop — the box only ever widens to `area.w - 4`, and `label_w` cannot make it
+        # wider than that. Unreachable while every picker's rows were gori's own words; the
+        # agent-target picker (#1090) is the first whose rows carry a name the peer chose.
+        marker = ch.value == @current ? "● current" : nil
+        room = box.right - 1 - (box.x + 6) - (marker ? marker.size + 1 : 0)
+        screen.text(box.x + 6, ry, ch.label, ch.color, bg, Attribute::Bold, width: room)
+        if marker
           screen.text(box.right - marker.size - 2, ry, marker, active ? Theme.text_bright : Theme.muted, bg)
         end
       end
     end
 
+    # Display COLUMNS, not characters: a CJK or emoji label occupies twice the cells `.size`
+    # counts, and a box sized from `.size` is a box the label then overflows.
     private def label_w : Int32
-      @choices.max_of(&.label.size)
+      @choices.max_of { |c| Screen.display_width(c.label) }
     end
   end
 end

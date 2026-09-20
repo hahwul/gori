@@ -182,4 +182,66 @@ describe "MCP operator messages on a tool result" do
       end
     end
   end
+
+  # The cursor has to move on the path where NOTHING goes out, or it never moves at all — and
+  # then the `high <= @messages_cursor` idle gate above it never closes. Two ways to be stuck,
+  # both of them shipped: a feed that grows without a message in it (the ordinary case: the
+  # event feed is the firehose every gori action writes to), and a page filled by rows that
+  # belong to somebody else. The cost was a `kind = 'agent_message'` walk of the whole feed on
+  # EVERY tool call — 0.96ms against 0.005ms over a 50k-row feed — and, for the second case,
+  # layer four wedged for the rest of the session behind five of another session's lines.
+  it "advances its cursor past a feed that grew without anything to say" do
+    with_store do |store|
+      tools = tools_for(store)
+      start = tools.messages_cursor
+      20.times { |i| store.insert_event("probe", "probe_finding", "info", "row #{i}") }
+      tools.pending_operator_note("list_history").should be_nil
+      tools.messages_cursor.should eq(store.last_event_id)
+      tools.messages_cursor.should be > start
+    end
+  end
+
+  it "does not wedge behind a page of messages addressed to another session" do
+    with_store do |store|
+      tools = tools_for(store)
+      mine = Gori::MCP::Tools::TOOL_RESULT_MESSAGES + 1
+      mine.times { store.post_agent_message("not for you", "pid:#{Process.pid + 1}", nil) }
+      id = store.post_agent_message("for you", "all", nil)
+
+      # The first page is all somebody else's: nothing to carry, but the cursor must still step
+      # over what it scanned.
+      tools.pending_operator_note("list_history").should be_nil
+      tools.messages_cursor.should be > 0
+      note = tools.pending_operator_note("list_history").not_nil!
+      note.ids.should eq([id])
+      tools.commit_operator_note(note)
+    end
+  end
+
+  # A message a confirmed route already carried is not ours to attach — and it is not ours to
+  # rescan on every call for the rest of the session either.
+  it "advances past a message the socket route already carried" do
+    with_store do |store|
+      tools = tools_for(store)
+      id = store.post_agent_message("already landed", "all", nil)
+      store.record_agent_delivery(id, Gori::AgentDelivery::VIA_SOCKET, "claude-code",
+        true, pid: Process.pid.to_i64)
+      tools.pending_operator_note("list_history").should be_nil
+      tools.messages_cursor.should be >= id
+    end
+  end
+
+  # The other half of the same ledger: the carry must not attach a line the courier is at that
+  # moment writing to the session's socket or queueing into its Codex thread.
+  it "does not carry a message another route in this process is handing over" do
+    with_store do |store|
+      tools = tools_for(store)
+      id = store.post_agent_message("in flight", "all", nil)
+      tools.claim_message(id).should be_true
+      tools.claim_message(id).should be_false # one holder at a time
+      tools.pending_operator_note("list_history").should be_nil
+      tools.release_message(id)
+      tools.pending_operator_note("list_history").not_nil!.ids.should eq([id])
+    end
+  end
 end

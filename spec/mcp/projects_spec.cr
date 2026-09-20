@@ -308,6 +308,49 @@ describe "Gori::MCP::Tools unbound mode" do
       end
     end
 
+    # #1090: a switch is a new feed, and both operator-message cursors have to be re-anchored
+    # to ITS end. Left at the old project's numbers, the server either replays the new
+    # project's whole message backlog into the agent's next tool result (an id below the stale
+    # floor) or reads a feed through a cursor that belongs to another one. Nothing else in the
+    # suite touched these two lines.
+    it "re-anchors both operator-message cursors on a project switch" do
+      root = File.tempname("gori-msg-switch")
+      Dir.mkdir_p(root)
+      prev = ENV["GORI_HOME"]?
+      ENV["GORI_HOME"] = root
+      prev_layer = Gori::Env.layer
+      tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false,
+        selection_source: "unbound")
+      begin
+        tools.call("create_project", JSON.parse(%({"name":"Alpha"})))
+        alpha = tools.current_store.not_nil!
+        # Alpha's feed is driven WELL past Beta's and the carry is READ there, so the cursor
+        # this server holds is unmistakably Alpha's. Two projects created a moment apart
+        # otherwise sit at the same id, and a spec on them passes whether the cursors were
+        # re-anchored or not.
+        40.times { |i| alpha.insert_event("probe", "probe_finding", "info", "alpha #{i}") }
+        tools.pending_operator_note("list_history").should be_nil
+        tools.messages_cursor.should eq(alpha.last_event_id)
+        alpha.post_agent_message("said in alpha", "all", nil)
+        tools.call("create_project", JSON.parse(%({"name":"Beta"})))
+        JSON.parse(tools.call("switch_project", JSON.parse(%({"project":"Beta"}))).text)["switched"].as_bool.should be_true
+
+        beta = tools.current_store.not_nil!
+        tools.messages_floor.should eq(beta.last_event_id)
+        tools.messages_cursor.should eq(tools.messages_floor)
+        beta.last_event_id.should be < alpha.last_event_id # the cursors really had to move
+        # Nothing Alpha said is owed here…
+        tools.pending_operator_note("list_history").should be_nil
+        # …and a line said in Beta, whose id is far below Alpha's cursor, is still carried.
+        id = beta.post_agent_message("said in beta", "all", nil)
+        tools.pending_operator_note("list_history").not_nil!.ids.should eq([id])
+      ensure
+        Gori::Env.layer = prev_layer
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(root)
+      end
+    end
+
     # The other path that rebinds, and the only one create_project takes: it auto-binds when
     # the server started unbound, so it owes the same receipt as a switch.
     it "gives create_project's auto-bind the same rebind receipt as a switch" do
