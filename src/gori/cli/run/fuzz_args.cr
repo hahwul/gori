@@ -85,8 +85,19 @@ module Gori
 
       private def self.parse_rate(v : String) : Float64?
         n = v.to_f?
-        abort "gori run fuzz: invalid --rate '#{v}' (a non-negative number)" unless n && n >= 0
+        if msg = fuzz_rate_error(v, n)
+          abort msg
+        end
         n == 0 ? nil : n
+      end
+
+      # The decision is separate from `abort` so the invalid boundary is regression-testable.
+      # Crystal accepts Infinity as a Float64; treating it as an RPS cap makes the reciprocal
+      # pacing interval zero and silently turns the requested limiter off. MCP already refuses
+      # the same value at its argument boundary.
+      def self.fuzz_rate_error(v : String, n : Float64? = v.to_f?) : String?
+        return nil if n && n.finite? && n >= 0
+        "gori run: invalid --rate '#{v}' (a finite non-negative number)"
       end
 
       private def self.parse_nonneg(v : String, flag : String? = nil) : Int32

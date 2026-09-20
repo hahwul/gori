@@ -54,9 +54,7 @@ module Gori
           p.on("--allow-unscoped", "Send even when the target is outside the project scope") { allow_unscoped = true }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SECONDS", "Per-operation timeout (default: the project's io timeout)") do |v|
-            n = v.to_f?
-            abort "gori run grpc reflect: invalid --timeout '#{v}'" if n.nil? || n <= 0
-            timeout = n.seconds
+            timeout = grpc_timeout(v) || abort("gori run grpc reflect: invalid --timeout '#{v}'")
           end
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -135,6 +133,19 @@ module Gori
           puts "  ! not saved (project busy); it reverts when you reopen this project" unless committed
         end
         exit(outcome.ok? ? 0 : 1)
+      end
+
+      # A positive timeout that Time::Span can represent, or nil for a clean usage refusal.
+      # `String#to_f?` accepts NaN and infinities, and `Float64#seconds` raises OverflowError
+      # for those and for a finite value outside Time::Span's range. That exception otherwise
+      # escapes both CLI rescue layers and prints a Crystal backtrace for ordinary argv.
+      def self.grpc_timeout(v : String) : Time::Span?
+        n = v.to_f?
+        return nil unless n && n.finite? && n > 0
+        span = n.seconds
+        span > Time::Span.zero ? span : nil
+      rescue OverflowError
+        nil
       end
 
       private def self.cmd_grpc_schema(args : Array(String)) : Nil
