@@ -211,7 +211,10 @@ module Gori::Tui
         # wider than that. Unreachable while every picker's rows were gori's own words; the
         # agent-target picker (#1090) is the first whose rows carry a name the peer chose.
         marker = ch.value == @current ? "● current" : nil
-        room = box.right - 1 - (box.x + 6) - (marker ? marker.size + 1 : 0)
+        # `marker.size + 2`, not `+ 1`: the marker's own trailing column is the gap on its
+        # right, and a truncated label needs one on its left too, or the row reads `…● current`
+        # with the ellipsis touching the bullet.
+        room = box.right - 1 - (box.x + 6) - (marker ? marker.size + 2 : 0)
         screen.text(box.x + 6, ry, ch.label, ch.color, bg, Attribute::Bold, width: room)
         if marker
           screen.text(box.right - marker.size - 2, ry, marker, active ? Theme.text_bright : Theme.muted, bg)

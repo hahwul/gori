@@ -27,7 +27,11 @@ module Gori::MCP
   #      but the message is left for poll all the same.
   #   4. nothing — the row stays in the feed for `operator_messages` and the tool-result carry
   #      (`Tools#pending_operator_note`), and a poll deposit row says so.
-  # Never two for one message: `deliver` returns on the first route that takes it.
+  # Never two for one message: `deliver` returns on the first route that takes it, and the
+  # other two readers of the same feed — the tool-result carry and `operator_messages`, both on
+  # `Tools` — stand down while a hand-off is in flight (`claim`/`release`). The durable
+  # delivery row is what answers once the hand-off returns; the claim is what answers before it
+  # does, which for a `codex queue` is ten seconds of `Process.run`.
   # Each recipient gets its own delivery row (a broadcast has one per session), which is what
   # the TUI turns into "→ claude-code got it (socket)" in the notification ring.
   #

@@ -187,6 +187,20 @@ describe "ChoicePicker — Overlay contract" do
     row[...box.x].strip.should eq("")
   end
 
+  # The `● current` marker keeps a blank column on each side. Reserving only its own width
+  # plus one left a truncated label touching the bullet (`…● current`).
+  it "keeps a gap between a truncated label and the current marker" do
+    long = "a name far too long for this card to hold at all"
+    p = ChoicePicker.new("PICK", [ChoicePicker::Choice.new(long, '1', Theme.text, 7)], 7, :agent_target)
+    area = Rect.new(0, 0, 44, 20)
+    backend = MemoryBackend.new(44, 20)
+    p.render(Screen.new(backend), area)
+    box = p.overlay_box(area).not_nil!
+    row = backend.row(box.y + 1)
+    row.should contain("● current")
+    row[row.index("● current").not_nil! - 1].should eq(' ')
+  end
+
   # `overlay_box` sizes the card from the widest label. Measured in CHARACTERS it under-sizes
   # by half for a CJK or emoji name, which is the same overflow one step earlier.
   it "sizes the card by display columns, not by character count" do

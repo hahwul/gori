@@ -113,16 +113,23 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         # has exited in between leaves a row no courier will ever read, and NOTHING downstream
         # says so — no courier means no delivery row, and the ring is silent for good. The one
         # moment gori can tell the operator is before it writes the row.
+        #
+        # `false`, like the empty-field branch: a refusal is not a reason to throw away what
+        # the operator typed. The card stays up with the line in it, esc is still the way out,
+        # and if that agent comes back ↵ sends it.
         @toast = "#{name} is no longer attached — nothing would read that message"
-        true
+        false
       elsif @session.store.post_agent_message(text, target, from, ids) == 0
         # The row is the WHOLE mechanism — gori never talks to the agent's session, it leaves a
         # line for the courier to find — so a rolled-back batch (another process holding the
         # write lock, a closing store) means nothing was sent and nothing ever will be. And it
         # is the one failure the ring cannot report afterwards: no row, no courier, no delivery
         # row, silence for good. Every sibling write in the Runner says "project busy" here.
+        #
+        # `false` for the same reason, and here it is what makes the advice true: a card that
+        # closed on "try again" would leave nothing to try again WITH.
         @toast = "not sent — project busy; try again"
-        true
+        false
       else
         @toast = "sent to #{name}"
         true

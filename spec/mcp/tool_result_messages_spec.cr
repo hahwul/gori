@@ -116,12 +116,15 @@ describe "MCP operator messages on a tool result" do
 
       first = tools.pending_operator_note("list_history").not_nil!
       first.text.should contain("only if you got it")
-      # The frame was never emitted, so nothing is committed.
+      # The frame was never emitted, so nothing is committed — and the claim the read took is
+      # given back, which is what `Server#handle_tools_call`'s `ensure` does on this exit.
+      tools.release_operator_note(first)
       deliveries(store, id).select { |d| d.message_id == id }.should be_empty
 
       second = tools.pending_operator_note("list_issues").not_nil!
       second.ids.should eq([id])
       tools.commit_operator_note(second)
+      tools.release_operator_note(second)
       deliveries(store, id).count { |d| d.message_id == id }.should eq(1)
     end
   end
@@ -242,6 +245,22 @@ describe "MCP operator messages on a tool result" do
       tools.pending_operator_note("list_history").should be_nil
       tools.release_message(id)
       tools.pending_operator_note("list_history").not_nil!.ids.should eq([id])
+    end
+  end
+
+  # …and the carry claims what it is about to hand over, for the length of the emit. Emitting
+  # a response yields (the write lock, then a flush), and the courier's tick lands in that gap:
+  # with no claim it would find the row unclaimed — `commit_operator_note` has not written the
+  # delivery yet — and write the same line to the session's socket as well.
+  it "holds its ids while the frame is on the wire, and gives them back on every exit" do
+    with_store do |store|
+      tools = tools_for(store)
+      id = store.post_agent_message("riding back", "all", nil)
+      note = tools.pending_operator_note("list_history").not_nil!
+      note.ids.should eq([id])
+      tools.claim_message(id).should be_false # the courier would stand down here
+      tools.release_operator_note(note)
+      tools.claim_message(id).should be_true
     end
   end
 end

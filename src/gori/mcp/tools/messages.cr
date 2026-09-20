@@ -74,6 +74,14 @@ module Gori
           @messages_cursor = cursor
           return nil
         end
+        # Announce them to the rest of the process BEFORE the frame is built. Emitting a
+        # response yields (`send` takes the write lock and flushes), and the courier's next
+        # tick lands in that gap: with no claim it would find these rows unclaimed — the
+        # delivery row that answers for them is not written until `commit_operator_note` — and
+        # write the same line to the session's inbox socket as well. `release_operator_note`
+        # gives them back from `Server#handle_tools_call`'s `ensure`, on every exit.
+        fresh = fresh.select { |m| claim_message(m.id) }
+        return nil if fresh.empty?
         lines = fresh.map { |m| OperatorNote.frame(Serialize.text(m.text), m.from_tab, m.flow_ids, m.id) }
         # A full page may be hiding more behind it, and this carrier is the one the model did
         # not ask for: if it does not say so here, nothing does, and the rest waits for a tool
@@ -85,6 +93,15 @@ module Gori
         # answer the agent asked for — and the message stays in the feed for the poll tool.
         Log.warn(exception: ex) { "mcp: could not read pending operator messages" }
         nil
+      end
+
+      # Give back what `pending_operator_note` claimed, whatever happened to the response. From
+      # an `ensure`, so a raise between the read and the emit cannot leave an id held for the
+      # life of the session — a leaked claim is a message this process would never carry again,
+      # which is the one direction this layer must not err in. Idempotent, and safe to call
+      # after `commit_operator_note`: by then the delivery row is what answers for these ids.
+      def release_operator_note(note : PendingNote) : Nil
+        note.ids.each { |id| release_message(id) }
       end
 
       # The note went out: move the cursor past it and record the deliveries.
@@ -153,8 +170,24 @@ module Gori
         rows = include_delivered ? page.rows : fresh
         can_mark = !store.read_only?
         label = session_label
-        fresh.each { |m| store.record_agent_delivery(m.id, AgentDelivery::VIA_PICKED_UP, label, true, pid: pid) } if can_mark
+        # Read BEFORE this call takes claims of its own: the oldest row somebody ELSE is still
+        # handing over. The cursor the agent is told to come back with obeys the same rule the
+        # courier's and the carry's do — it may not step past one, because that claim is
+        # temporary (the holder may fail and deposit a `poll` row, which retires nothing) and a
+        # `next_cursor` above it would send this agent back for a page starting after the one
+        # message it is still owed.
+        held = page.rows.select { |m| @in_flight_messages.includes?(m.id) }.min_of?(&.id)
         next_cursor = {since, page.scanned_max}.max
+        next_cursor = {since, {next_cursor, held - 1}.min}.max if held
+        # Held while the marks commit. `record_agent_delivery` goes through the store's writer
+        # fiber, which YIELDS: without this the courier's 500ms tick lands between two marks and
+        # writes to the session's socket a line this very result is handing over.
+        fresh.each { |m| claim_message(m.id) }
+        begin
+          fresh.each { |m| store.record_agent_delivery(m.id, AgentDelivery::VIA_PICKED_UP, label, true, pid: pid) } if can_mark
+        ensure
+          fresh.each { |m| release_message(m.id) }
+        end
         Result.new(JSON.build do |j|
           j.object do
             j.field "messages" do
