@@ -104,8 +104,19 @@ module Gori::CLI
     end
 
     resolved = selection.db_path.not_nil!
+    # The catalogue is the first thing this server spends, and it spends it on the operator's
+    # behalf before a question is asked: an MCP client loads every tool description into the
+    # model's context and keeps it there for the session. Said on EVERY start, not only when
+    # `--tools` is passed — the narrowing flag is the lever for this cost, and it was
+    # announced only to the operators who had already found it.
     if f = tool_filter
       Log.info { "mcp: --tools=#{f.spec} advertises #{f.size} of #{MCP::Tools::TOOL_NAMES.size} tools: #{f.names.join(", ")}" }
+    else
+      Log.info do
+        "mcp: advertising all #{MCP::Tools::TOOL_NAMES.size} tools#{" (--read-only)" if read_only}; " \
+        "narrow the catalogue with --tools=SPEC (e.g. --tools='list_*,get_*,send_request') " \
+        "to spend less of the model's context on it"
+      end
     end
     Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name}#{" [#{project_slug}]" if project_slug} source=#{selection.source} (actions=#{!read_only})" }
     if selection.auto_created
