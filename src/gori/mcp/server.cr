@@ -574,63 +574,162 @@ module Gori
         # The bind failure comes FIRST when there is one: it is why the traffic tools are
         # refusing, and an agent that reads only the head of `instructions` still gets it.
         failure = @tools.bind_error.try { |reason| " The configured project could not be opened: #{reason}." }
+        ql = @tools.advertises?("ql_reference") ? " Call ql_reference before writing " \
+                                                  "#{advertised("list_history", "list_sitemap") || "filter"} queries." : ""
+        decoder = @tools.advertises?("decode") ? ", plus a pure `decoder` encode/decode/hash tool" : ""
+        base = "gori MCP exposes the selected project's captured HTTP traffic " \
+               "(history, flows, sitemap, scope, issues, notes, match&replace rules)" \
+               "#{decoder}.#{ql} Timestamps include unix " \
+               "microseconds plus *_iso RFC3339 fields where available.#{failure}#{binding_note}"
+        text = @allow_actions ? "#{base}#{actions_note}#{projects_note}" : "#{base}#{read_only_note}#{projects_note}"
+        text += OPERATOR_MESSAGES_NOTE if @tools.advertises?("operator_messages")
+        # The backstop for every name above, and for any added later without this treatment:
+        # when a filter is in force at all, say so and name the authority. A sentence that
+        # survives a future edit while its tool does not is then at least contradicted.
+        text + (filter_note || "")
+      end
+
+      # Which project this server is on, and the warning that the answer moves. Split out of
+      # `instructions_text`, and split again below, because both halves grew a conditional per
+      # tool name once the text had to stop naming tools that are not there.
+      private def binding_note : String
+        "#{@tools.unbound? ? unbound_note : bound_note}#{drift_note}"
+      end
+
+      # No project yet. Each clause names a tool, so each clause goes when that tool does.
+      private def unbound_note : String
+        hints = [] of String
+        hints << "list_projects to see available projects" if @tools.advertises?("list_projects")
+        hints << "create_project to make one (auto-binds when unbound)" if @tools.advertises?("create_project")
+        hints << "switch_project to pick an existing one" if @tools.advertises?("switch_project")
+        pure = advertised("decode", "jwt_decode", "ql_reference")
+        String.build do |b|
+          b << " No project is bound yet."
+          b << " Call " << hints.join(", or ") << " before using traffic tools." unless hints.empty?
+          b << " Pure tools (" << pure << ") work immediately." if pure
+        end
+      end
+
+      # "registered to", not "for": at start-up `workspace_root` is the git root that SELECTED
+      # the project and `bind_project` overwrites it with `ProjectRegistry#workspace_of` — the
+      # workspace the project belongs to. Those coincide only until a switch, and "for
+      # workspace X" would then have this server claiming to serve a directory it has never
+      # been run in. The project's registration is what both values actually are.
+      private def bound_note : String
         slug = @tools.project_slug
         name = @tools.project_name || slug
+        unless name
+          return " Project selection source: #{@tools.selection_source || "unknown"}." +
+            (@tools.advertises?("project_info") ? " Call project_info before using data." : "")
+        end
         root = @tools.workspace_root
-        selected = if @tools.unbound?
-                     " No project is bound yet. Call list_projects to see available projects, " \
-                     "create_project to make one (auto-binds when unbound), or switch_project " \
-                     "before using traffic tools (list_history, send_request, …). Pure tools " \
-                     "(decode, jwt_*, ql_reference) work immediately."
-                   elsif name
-                     # "registered to", not "for": at start-up `workspace_root` is the git root
-                     # that SELECTED the project and `bind_project` overwrites it with
-                     # `ProjectRegistry#workspace_of` — the workspace the project belongs to.
-                     # Those coincide only until a switch, and "for workspace X" would then have
-                     # this server claiming to serve a directory it has never been run in. The
-                     # project's registration is what both values actually are.
-                     " As of this call the server is bound to project #{name}#{" [#{slug}]" if slug}" \
-                     " via #{@tools.selection_source || "an explicit database"}#{", registered to workspace #{root}" if root}."
-                   else
-                     " Project selection source: #{@tools.selection_source || "unknown"}; call project_info before using data."
-                   end
-        # "as of this call", not "at this handshake": the same text answers `server/discover`,
-        # which a stateless client may send at any point and more than once — there is no
-        # handshake in that era to date the sentence from.
-        #
-        # …and that binding is a SNAPSHOT, not a pin. `switch_project` repoints the server for
-        # every later call, MCP has no notification that refreshes `instructions`, and a client
-        # caches this text for the whole session — so a sentence that reads as configuration
-        # ("this server is pinned to X") went on naming X while writes landed in Y. Name the
-        # authority instead: what a call actually touches is what project_info reports (#1003).
-        #
-        # "nothing pushes an update", NOT "never re-sent": a second `initialize` DOES rebuild
-        # this text, which is the whole point of reading the binding live above. Overstating it
-        # would be the same unkeepable claim one sentence further on.
-        drift = " That is the binding as of this call and nothing pushes an update: " \
-                "switch_project (and create_project when it auto-binds) repoints the server " \
-                "mid-session without the client seeing new instructions. project_info — or the " \
-                "switch's own result — is the live answer; re-check it before recording evidence."
-        base = "gori MCP exposes the selected project's captured HTTP traffic " \
-               "(history, flows, sitemap, scope, issues, notes, match&replace rules), plus a " \
-               "pure `decoder` encode/decode/hash tool. Call ql_reference before " \
-               "writing list_history/list_sitemap queries. Timestamps include unix " \
-               "microseconds plus *_iso RFC3339 fields where available.#{failure}#{selected}#{drift}"
-        text = if @allow_actions
-                 "#{base} Action tools are enabled: send_request (supports flow_id/repeater_id), " \
-                 "send_websocket (executes a persisted WS repeater), " \
-                 "fuzz_*, mine_*, authorize_* (replay captured requests under several identities to " \
-                 "find broken access control), create/update_issue, and create/delete_rule + set_rule_enabled " \
-                 "make real outbound requests or mutate issues/rules. Active requests " \
-                 "(send_request, send_websocket, fuzz, mine, authorize) are gated by the project scope: a target " \
-                 "outside — or without — a configured scope is refused (SCOPE_BLOCKED) unless you pass " \
-                 "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project."
+        " As of this call the server is bound to project #{name}#{" [#{slug}]" if slug}" \
+        " via #{@tools.selection_source || "an explicit database"}#{", registered to workspace #{root}" if root}."
+      end
+
+      # "as of this call", not "at this handshake": the same text answers `server/discover`,
+      # which a stateless client may send at any point and more than once — there is no
+      # handshake in that era to date the sentence from.
+      #
+      # …and that binding is a SNAPSHOT, not a pin. `switch_project` repoints the server for
+      # every later call, MCP has no notification that refreshes `instructions`, and a client
+      # caches this text for the whole session — so a sentence that reads as configuration
+      # ("this server is pinned to X") went on naming X while writes landed in Y. Name the
+      # authority instead: what a call actually touches is what project_info reports (#1003).
+      #
+      # "nothing pushes an update", NOT "never re-sent": a second `initialize` DOES rebuild
+      # this text, which is the whole point of reading the binding live above. Overstating it
+      # would be the same unkeepable claim one sentence further on.
+      #
+      # The whole sentence is about the tools that move the binding and the tool that reports
+      # it, so it is dropped when neither is reachable: warning a client about drift it cannot
+      # cause, and pointing it at an authority it cannot call, is worse than silence.
+      private def drift_note : String
+        reporter = @tools.advertises?("project_info") ? " project_info — or the switch's own result — is the live answer; " \
+                                                        "re-check it before recording evidence." : ""
+        if movers = advertised("switch_project", "create_project")
+          " That is the binding as of this call and nothing pushes an update: #{movers} " \
+          "repoints the server mid-session without the client seeing new instructions." + reporter
+        elsif @tools.advertises?("project_info")
+          " Nothing pushes an update to this text; project_info is the live answer."
+        else
+          ""
+        end
+      end
+
+      # Only the tools in `names` this server actually advertises, joined for prose — or nil
+      # when the `--tools` filter removed every one of them, so the sentence naming them can
+      # be dropped whole.
+      #
+      # `instructions` is the first thing the model reads and it is read as FACT. A sentence
+      # naming a tool `tools/list` does not carry sends the agent to call something that
+      # answers "unknown tool", and this text used to do exactly that: under
+      # `--tools='list_*'` it went on saying "Call ql_reference before writing queries" — the
+      # very first instruction — while advertising neither ql_reference nor nine other names
+      # it mentioned. The mechanism was already here; it reached one sentence (the
+      # operator-messages note) and none of the rest.
+      private def advertised(*names : String) : String?
+        kept = names.to_a.select { |n| @tools.advertises?(n) }
+        kept.empty? ? nil : kept.join(", ")
+      end
+
+      # The action paragraph, naming only what is reachable. Each clause carries its own
+      # tool, so a filtered server describes the workbench it actually has.
+      private def actions_note : String
+        clauses = [] of String
+        clauses << "send_request (supports flow_id/repeater_id)" if @tools.advertises?("send_request")
+        clauses << "send_websocket (executes a persisted WS repeater)" if @tools.advertises?("send_websocket")
+        clauses << "fuzz_*" if @tools.advertises?("fuzz_start")
+        clauses << "mine_*" if @tools.advertises?("mine_start")
+        clauses << "authorize_* (replay captured requests under several identities to find " \
+                   "broken access control)" if @tools.advertises?("authorize_start")
+        clauses << "create/update_issue" if advertised("create_issue", "update_issue")
+        clauses << "create/delete_rule + set_rule_enabled" if advertised("create_rule", "delete_rule", "set_rule_enabled")
+        return "" if clauses.empty?
+        gated = advertised("send_request", "send_websocket", "fuzz_start", "mine_start", "authorize_start")
+        " Action tools are enabled: #{clauses.join(", ")} make real outbound requests or " \
+        "mutate issues/rules." + (gated ? " Active requests are gated by the project scope: a target outside — or without — a " \
+                                          "configured scope is refused (SCOPE_BLOCKED) unless you pass allow_unscoped:true." : "")
+      end
+
+      # …and its `--read-only` counterpart, where naming an ABSENT tool is the whole point:
+      # the sentence exists to say what restarting would restore. The two reasons a tool is
+      # missing are not the same, and `advertises?` is exactly the one that separates them —
+      # it reads the `--tools` filter only, so it answers "would this be here if the gate
+      # were lifted". A tool the FILTER removed is not coming back either way, so it is not
+      # promised.
+      private def read_only_note : String
+        disabled = [] of String
+        disabled << "send_request" if @tools.advertises?("send_request")
+        disabled << "send_websocket" if @tools.advertises?("send_websocket")
+        disabled << "fuzz_*" if @tools.advertises?("fuzz_start")
+        disabled << "mine_*" if @tools.advertises?("mine_start")
+        disabled << "authorize_*" if @tools.advertises?("authorize_start")
+        disabled << "create/update_issue" if advertised("create_issue", "update_issue")
+        disabled << "create/delete_rule" if advertised("create_rule", "delete_rule")
+        head = if disabled.empty?
+                 " Read-only mode: this server cannot write or send."
                else
-                 "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, authorize_*, " \
-                 "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them. " \
-                 "switch_project (and create_project when unbound) remain available so you can still pick a project to inspect."
+                 " Read-only mode: action tools (#{disabled.join(", ")}) are disabled — " \
+                 "restart without --read-only to enable them."
                end
-        @tools.advertises?("operator_messages") ? text + OPERATOR_MESSAGES_NOTE : text
+        pickers = advertised("switch_project", "create_project")
+        pickers ? "#{head} #{pickers} remain available so you can still pick a project to inspect." : head
+      end
+
+      private def projects_note : String
+        picks = advertised("list_projects", "create_project", "switch_project", "delete_project")
+        picks ? " Projects can be managed via #{picks}." : ""
+      end
+
+      # Said once, when `--tools` narrowed the catalogue: whatever the prose above named, the
+      # list is the authority. Also the only place the agent learns the surface is deliberate
+      # rather than broken.
+      private def filter_note : String?
+        f = @tools.tool_filter
+        return nil unless f
+        " This server was started with --tools=#{f.spec.inspect} and advertises #{f.size} of " \
+        "#{Tools::TOOL_NAMES.size} tools; tools/list is the authority on what it has."
       end
 
       # #1090, the backstop route: every agent, whatever its client, can read what the operator

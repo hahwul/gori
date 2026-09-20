@@ -2952,3 +2952,32 @@ with `agent_action` is a compile error: an agent action is by definition a mutat
 outbound send. `openWorldHint` is emitted only where it can be answered — `false` beside a
 read tool, and left to the spec's conservative default everywhere else, because an action
 tool may or may not reach the network and the population that does includes the fuzzer.
+
+### 2026-09-20: absent is not one thing — a filtered tool and a gated tool differ
+
+Refines: [P1](#p1), [P4](#p4). `--tools` + `instructions`.
+
+`instructions` is the first thing an MCP client hands the model, and it is read as fact. Under
+`--tools='list_*'` it named ten tools `tools/list` did not carry, beginning with the sentence
+that opens it: "Call ql_reference before writing queries", on a server with no ql_reference.
+The mechanism to prevent that already existed and was already used — the operator-messages
+note asks `advertises?` before it is appended — it had simply never reached the rest of the
+text.
+
+**Every sentence that names a tool is now assembled from the tools that exist**, clause by
+clause, and a sentence whose subject is entirely absent is dropped rather than shipped naming
+nothing. The backstop for a name added later without that treatment is one sentence that
+appears only under a filter: the surface was narrowed on purpose, and `tools/list` is the
+authority.
+
+**But `--read-only` is not `--tools`, and the difference is the whole point of that
+paragraph.** A gated tool is absent and restorable — saying so is why the read-only sentence
+exists, and it legitimately names tools the current listing does not carry. A filtered tool is
+absent and not coming back. `Tools#advertises?` reads the `--tools` filter *only*, which makes
+it exactly the predicate for "would this be here if the gate were lifted" — so the read-only
+paragraph runs its names through the same call and promises only what a restart would
+actually restore.
+
+**And the catalogue's cost is now said out loud on every start.** 179 tools is ~197 KB, about
+50,000 tokens an MCP client loads before the first question and keeps for the session;
+`--tools` is the lever, and it was announced only to the operators who had already found it.

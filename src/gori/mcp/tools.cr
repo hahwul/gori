@@ -356,6 +356,10 @@ module Gori
         @client_name
       end
 
+      # The active `--tools` filter, or nil when the whole catalogue is served. Read by
+      # `Server#filter_note`, which has to say that the surface was narrowed on purpose.
+      getter tool_filter : ToolFilter?
+
       # Whether `tools/list` would show `name` under the active `--tools` filter.
       def advertises?(name : String) : Bool
         (f = @tool_filter).nil? || f.allows?(name)
