@@ -1,6 +1,7 @@
 require "json"
 require "log"
 require "../store"
+require "./protocol"
 require "./tools"
 require "./courier"
 require "../settings"
@@ -28,18 +29,9 @@ module Gori
       # tools can answer SHOULD feel. Deep enough that no ordinary burst reaches it.
       WORK_QUEUE = 64
 
-      # Newest spec revision we implement. Our surface (initialize/tools.list/
-      # tools.call/ping) is identical across recent revisions, so we echo the
-      # client's requested version when it is one we recognise, and never
-      # hard-fail on a mismatch.
-      PROTOCOL_VERSION = "2025-06-18"
-
-      # Revisions whose surface we're compatible with. Per the MCP lifecycle the
-      # server MUST answer initialize with a version it actually supports: we
-      # echo the client's version only when it's in this set, else fall back to
-      # PROTOCOL_VERSION — so a client probing "1999-01-01" can't conclude we
-      # speak a revision we don't.
-      SUPPORTED_VERSIONS = {"2025-06-18", "2025-03-26", "2024-11-05"}
+      # WHICH revisions this server speaks lives in `mcp/protocol.cr`, one home for a set
+      # that is now read from three places — the handshake, `server/discover`, and the
+      # per-request gate below. Three copies would be three answers.
 
       EMPTY_ARGS = JSON::Any.new({} of String => JSON::Any)
 
@@ -207,8 +199,88 @@ module Gori
           return true
         end
         return false unless method == "ping"
-        write_result(id) { |j| j.object { } }
+        # Through the same gate as every other request: a liveness probe that names a
+        # revision we do not speak deserves the same answer a tool call would get, and the
+        # `resultType` a modern client parses is owed here too. `ping` itself was REMOVED in
+        # 2026-07-28 — we go on answering it, because a server that does is breaking nothing
+        # and a dual-era client's legacy half still sends it.
+        gate = era_of(id, method, obj["params"]?)
+        return true if gate.refused
+        # No `note_modern_client` here, deliberately: that writes the presence marker and
+        # starts the courier, and the whole point of this path is that a liveness probe is
+        # answered without the reader doing work. The worker's path takes the note.
+        write_result(id, gate.version) { }
         true
+      end
+
+      # The outcome of reading one request's era: the revision it is speaking (nil for the
+      # legacy era), and whether the gate has already ANSWERED the request and the caller
+      # must stop.
+      private record EraGate, version : String?, refused : Bool
+
+      # Reads the era off one request's `_meta` and enforces it.
+      #
+      # `2026-07-28` moved version, identity and capabilities INTO every request, so this is
+      # what the handshake used to do, done per call. Four outcomes:
+      #
+      #   - no `io.modelcontextprotocol/protocolVersion`: the LEGACY era — every client that
+      #     opened with `initialize`, and every one that never negotiated at all. A dual-era
+      #     server serves it exactly as it always did; there is nothing here to enforce.
+      #   - a modern revision we implement: answered statelessly, with the modern envelope.
+      #   - a LEGACY revision spelled in `_meta`: that revision defines no per-request
+      #     metadata, so the field is decoration — but it names a version we do support, so
+      #     it is not an error either. Served legacy.
+      #   - anything else: `UnsupportedProtocolVersionError`, carrying what we DO support so
+      #     the client can retry instead of guess. That error is also the signal a dual-era
+      #     client probing us needs: a recognised modern error means "modern server, pick
+      #     another version" and explicitly NOT "fall back to initialize".
+      private def era_of(id : JSON::Any, method : String, params : JSON::Any?) : EraGate
+        meta = obj_field(params, "_meta")
+        requested = obj_field(meta, Protocol::META_PROTOCOL_VERSION).try(&.as_s?)
+        return EraGate.new(nil, false) if requested.nil? || Protocol.legacy?(requested)
+        unless Protocol.modern?(requested)
+          write_error(id, Protocol::UNSUPPORTED_PROTOCOL_VERSION, "Unsupported protocol version",
+            data: ->(j : JSON::Builder) do
+              j.object do
+                j.field("supported") { j.array { Protocol::SUPPORTED_VERSIONS.each { |v| j.string v } } }
+                j.field "requested", requested
+              end
+            end)
+          return EraGate.new(nil, true)
+        end
+        # Required on every modern request, and required of us to check. gori relies on no
+        # client capability, so the absence costs it nothing to serve — but a server that
+        # silently accepts a malformed request teaches the client its requests are fine, and
+        # the next server it meets will not agree. The refusal names the key, which is the
+        # only thing that makes it recoverable.
+        #
+        # `server/discover` is the exception, and for the same reason it is answered without
+        # a version at all: it is the request a client sends to find out what to send, and a
+        # bootstrap probe that has stamped its version but has no capabilities to declare yet
+        # would be refused by the one RPC that exists to unblock it. The VERSION half above
+        # still applies — a discovery naming a revision we do not speak is what tells a
+        # dual-era client we are modern.
+        unless method == "server/discover" || obj_field(meta, Protocol::META_CLIENT_CAPS).try(&.as_h?)
+          write_error(id, -32602, "#{Protocol::META_CLIENT_CAPS} is required in _meta " \
+                                  "on every #{requested} request")
+          return EraGate.new(nil, true)
+        end
+        EraGate.new(requested, false)
+      end
+
+      # What the handshake used to do with `clientInfo`, done per request because that is
+      # where the modern revision put it: the agent-presence marker (#815) is named from it,
+      # and the courier that carries operator messages (#1090) has no `initialized` to start
+      # on any more. `client_seen` is a no-op when nothing moved, so a busy session does not
+      # rewrite the marker once per call.
+      #
+      # The channel capability is deliberately NOT read from here. It is the SERVER that
+      # declares it, at the handshake or at `server/discover`, and a client that has been
+      # handed no declaration must not be pushed to — see `emit_capabilities`.
+      private def note_modern_client(meta : JSON::Any?) : Nil
+        info = obj_field(meta, Protocol::META_CLIENT_INFO)
+        @tools.client_seen(obj_field(info, "name").try(&.as_s?), obj_field(info, "version").try(&.as_s?))
+        start_courier
       end
 
       # The id of a lone request (not a batch, not a notification) — what a client names in
@@ -292,12 +364,20 @@ module Gori
       end
 
       private def handle_request(id : JSON::Any, method : String, params : JSON::Any?) : Nil
+        # The era gate runs BEFORE the method is looked at: a request naming a revision we
+        # do not speak is refused whatever it was asking for, and the one naming a revision
+        # we do decides the envelope every branch below writes.
+        gate = era_of(id, method, params)
+        return if gate.refused
+        era = gate.version
+        note_modern_client(obj_field(params, "_meta")) if era
         case method
-        when "initialize" then handle_initialize(id, params)
-        when "ping"       then write_result(id) { |j| j.object { } }
-        when "tools/list" then handle_tools_list(id)
-        when "tools/call" then handle_tools_call(id, params)
-        else                   write_error(id, -32601, "Method not found: #{method}")
+        when "server/discover" then handle_discover(id)
+        when "initialize"      then handle_initialize(id, params)
+        when "ping"            then write_result(id, era) { }
+        when "tools/list"      then handle_tools_list(id, era)
+        when "tools/call"      then handle_tools_call(id, era, params)
+        else                        write_error(id, -32601, "Method not found: #{method}")
         end
       rescue ex
         Log.error(exception: ex) { "request #{method} failed" }
@@ -327,9 +407,13 @@ module Gori
         # All other notifications are accepted silently (no response, ever).
       end
 
+      # The LEGACY opening. A client that sends `initialize` has chosen handshake semantics
+      # for itself, so it is answered with a handshake revision even when it asked for a
+      # modern one: naming `2026-07-28` here would promise per-request semantics to a
+      # session that has already been opened as a session and cannot switch.
       private def handle_initialize(id : JSON::Any, params : JSON::Any?) : Nil
         client_ver = obj_field(params, "protocolVersion").try(&.as_s?)
-        version = client_ver && SUPPORTED_VERSIONS.includes?(client_ver) ? client_ver : PROTOCOL_VERSION
+        version = client_ver && Protocol.legacy?(client_ver) ? client_ver : Protocol::LEGACY_LATEST
         # The client's self-description feeds the agent-presence marker's name (#815). Same
         # arg-reader stance as everywhere else on this surface: a non-string slot is ABSENT,
         # never coerced — `as_s?` returns nil for a number/object/null, so a hostile
@@ -337,28 +421,59 @@ module Gori
         info = obj_field(params, "clientInfo")
         @tools.client_seen(obj_field(info, "name").try(&.as_s?), obj_field(info, "version").try(&.as_s?))
         write_result(id) do |j|
-          j.object do
-            j.field "protocolVersion", version
-            j.field("capabilities") do
-              j.object do
-                j.field("tools") { j.object { } }
-                # Claude Code's channel capability (#1090), declared only when the operator says
-                # their Claude is launched with channels: a client that did not register it drops
-                # every push silently, and the socket route would then carry the same line.
-                @channel_declared = Settings.mcp_channels?
-                if @channel_declared
-                  j.field("experimental") { j.object { j.field("claude/channel") { j.object { } } } }
-                end
-              end
-            end
-            j.field "serverInfo" do
-              j.object do
-                j.field "name", "gori"
-                j.field "version", Gori::VERSION
-              end
-            end
-            j.field "instructions", instructions_text
+          j.field "protocolVersion", version
+          j.field("capabilities") { emit_capabilities(j) }
+          j.field("serverInfo") { emit_implementation(j) }
+          j.field "instructions", instructions_text
+        end
+      end
+
+      # `server/discover`: the one RPC the modern revision says a server MUST implement.
+      # Everything the handshake used to hand over — supported versions, capabilities,
+      # identity, instructions — as a RESULT a client can ask for whenever it likes, rather
+      # than a state it has to open a session to obtain.
+      #
+      # Answered in both eras, and with or without modern `_meta`, because this is also the
+      # probe a dual-era client sends before it knows what we are: refusing "tell me what to
+      # say" for not having said it first would send that client back to `initialize` for no
+      # reason. A version it names that we do not speak is still refused, by the gate above
+      # — which is exactly how that client learns we are modern.
+      private def handle_discover(id : JSON::Any) : Nil
+        write_result(id, Protocol::LATEST) do |j|
+          j.field("supportedVersions") { j.array { Protocol::SUPPORTED_VERSIONS.each { |v| j.string v } } }
+          j.field("capabilities") { emit_capabilities(j) }
+          j.field "instructions", instructions_text
+          j.field "ttlMs", Protocol::DISCOVER_TTL_MS
+          j.field "cacheScope", Protocol::CACHE_SCOPE
+        end
+        # A modern client has no `initialized` to send, so discovery is where this session
+        # becomes one the operator can message.
+        start_courier
+      end
+
+      # What this server offers, written once for the two places that advertise it — the
+      # handshake and discovery — so the two can never describe different servers.
+      private def emit_capabilities(j : JSON::Builder) : Nil
+        j.object do
+          j.field("tools") { j.object { } }
+          # Claude Code's channel capability (#1090), declared only when the operator says
+          # their Claude is launched with channels: a client that did not register it drops
+          # every push silently, and the socket route would then carry the same line.
+          # Latched HERE, on the declaration itself, so the courier pushes only to a client
+          # that has actually been handed it.
+          @channel_declared = Settings.mcp_channels?
+          if @channel_declared
+            j.field("experimental") { j.object { j.field("claude/channel") { j.object { } } } }
           end
+        end
+      end
+
+      # `Implementation`: who this is. The handshake carries it as `serverInfo`, the modern
+      # revision as `_meta["io.modelcontextprotocol/serverInfo"]` on every result.
+      private def emit_implementation(j : JSON::Builder) : Nil
+        j.object do
+          j.field "name", "gori"
+          j.field "version", Gori::VERSION
         end
       end
 
@@ -388,11 +503,15 @@ module Gori
                      # Those coincide only until a switch, and "for workspace X" would then have
                      # this server claiming to serve a directory it has never been run in. The
                      # project's registration is what both values actually are.
-                     " At this handshake the server is bound to project #{name}#{" [#{slug}]" if slug}" \
+                     " As of this call the server is bound to project #{name}#{" [#{slug}]" if slug}" \
                      " via #{@tools.selection_source || "an explicit database"}#{", registered to workspace #{root}" if root}."
                    else
                      " Project selection source: #{@tools.selection_source || "unknown"}; call project_info before using data."
                    end
+        # "as of this call", not "at this handshake": the same text answers `server/discover`,
+        # which a stateless client may send at any point and more than once — there is no
+        # handshake in that era to date the sentence from.
+        #
         # …and that binding is a SNAPSHOT, not a pin. `switch_project` repoints the server for
         # every later call, MCP has no notification that refreshes `instructions`, and a client
         # caches this text for the whole session — so a sentence that reads as configuration
@@ -402,7 +521,7 @@ module Gori
         # "nothing pushes an update", NOT "never re-sent": a second `initialize` DOES rebuild
         # this text, which is the whole point of reading the binding live above. Overstating it
         # would be the same unkeepable claim one sentence further on.
-        drift = " That is the binding at handshake time and nothing pushes an update: " \
+        drift = " That is the binding as of this call and nothing pushes an update: " \
                 "switch_project (and create_project when it auto-binds) repoints the server " \
                 "mid-session without the client seeing new instructions. project_info — or the " \
                 "switch's own result — is the live answer; re-check it before recording evidence."
@@ -458,13 +577,32 @@ module Gori
         @courier = courier
       end
 
-      private def handle_tools_list(id : JSON::Any) : Nil
-        write_result(id) do |j|
-          j.object { j.field("tools") { @tools.list(j) } }
+      private def handle_tools_list(id : JSON::Any, era : String? = nil) : Nil
+        write_result(id, era) do |j|
+          j.field("tools") { @tools.list(j) }
+          # Cache hints are REQUIRED on a modern `tools/list`.
+          if era
+            j.field "ttlMs", tool_list_ttl_ms
+            j.field "cacheScope", Protocol::CACHE_SCOPE
+          end
         end
       end
 
-      private def handle_tools_call(id : JSON::Any, params : JSON::Any?) : Nil
+      # How long the catalogue may be treated as fresh — a promise about the catalogue, so it
+      # is read OFF the catalogue rather than asserted beside it.
+      #
+      # It is fixed for the life of the process, a pure function of `--read-only` and
+      # `--tools`, with one exception: a READ-ONLY server that is still unbound advertises
+      # `create_project` (it is the one tool whose listing asks a live question,
+      # `tools/projects.cr`), and loses it the moment a bind lands. While that is still
+      # ahead of us the honest answer is zero — a client holding a five-minute copy would go
+      # on offering the model a tool that now answers TOOL_DISABLED, and nothing invalidates
+      # it: we advertise no `listChanged`, so the TTL is the only signal there is.
+      private def tool_list_ttl_ms : Int32
+        (@allow_actions || !@tools.unbound?) ? Protocol::TOOLS_LIST_TTL_MS : 0
+      end
+
+      private def handle_tools_call(id : JSON::Any, era : String?, params : JSON::Any?) : Nil
         name = obj_field(params, "name").try(&.as_s?)
         return write_error(id, -32602, "tools/call: missing 'name'") unless name
         args = tool_arguments(params)
@@ -483,25 +621,23 @@ module Gori
         # ring saying "got it" for a line nothing ever carried. The side effect follows the
         # emit, as every guard in this codebase follows its refusal (#724).
         pending = @tools.pending_operator_note(name)
-        emitted = write_result(id) do |j|
-          j.object do
-            j.field("content") do
-              j.array do
-                j.object { j.field "type", "text"; j.field "text", result.text }
-                if p = pending
-                  j.object { j.field "type", "text"; j.field "text", p.text }
-                end
+        emitted = write_result(id, era) do |j|
+          j.field("content") do
+            j.array do
+              j.object { j.field "type", "text"; j.field "text", result.text }
+              if p = pending
+                j.object { j.field "type", "text"; j.field "text", p.text }
               end
             end
-            if result.is_error && (code = result.error_code)
-              # Machine-processable error alongside the human `text` (the tools
-              # layer guarantees a stable code on every plain-message error).
-              j.field("structuredContent") { emit_error_object(j, result, code) }
-            else
-              emit_structured(j, result.text)
-            end
-            j.field "isError", result.is_error
           end
+          if result.is_error && (code = result.error_code)
+            # Machine-processable error alongside the human `text` (the tools
+            # layer guarantees a stable code on every plain-message error).
+            j.field("structuredContent") { emit_error_object(j, result, code) }
+          else
+            emit_structured(j, result.text)
+          end
+          j.field "isError", result.is_error
         end
         @tools.commit_operator_note(pending) if pending && emitted
       end
@@ -601,24 +737,50 @@ module Gori
       # `true` when the frame actually went out — a cancelled request and a closed stream both
       # answer `false`. Every caller but one ignores it; `handle_tools_call` must not retire an
       # operator message onto a response that was never emitted.
-      private def write_result(id : JSON::Any?, &block : JSON::Builder ->) : Bool
+      #
+      # The block writes the result's FIELDS; the envelope is this method's, because the
+      # envelope is where the two eras differ. `era` non-nil means the request named a
+      # modern revision, and the result then carries `resultType` and the server's identity
+      # — which a legacy result must NOT, and does not need to: the spec's own rule is that
+      # a missing `resultType` reads as `complete`.
+      private def write_result(id : JSON::Any?, era : String? = nil, &block : JSON::Builder ->) : Bool
         return false if cancelled?(id)
         send(JSON.build do |j|
           j.object do
             j.field "jsonrpc", "2.0"
             emit_id(j, id)
-            j.field("result") { block.call(j) }
+            j.field("result") do
+              j.object do
+                # First, because it is what a client reads to decide how to parse the rest.
+                j.field "resultType", Protocol::RESULT_COMPLETE if era
+                block.call(j)
+                if era
+                  j.field("_meta") { j.object { j.field(Protocol::META_SERVER_INFO) { emit_implementation(j) } } }
+                end
+              end
+            end
           end
         end)
       end
 
-      private def write_error(id : JSON::Any?, code : Int32, message : String) : Nil
+      # `data` is the error's machine-readable half — what `UnsupportedProtocolVersionError`
+      # carries its `supported` list in. A Proc rather than a block so the one method serves
+      # both callers; JSON-RPC makes the member optional and most errors here have nothing
+      # to put in it.
+      private def write_error(id : JSON::Any?, code : Int32, message : String,
+                              data : Proc(JSON::Builder, Nil)? = nil) : Nil
         return if cancelled?(id)
         send(JSON.build do |j|
           j.object do
             j.field "jsonrpc", "2.0"
             emit_id(j, id)
-            j.field("error") { j.object { j.field "code", code; j.field "message", message } }
+            j.field("error") do
+              j.object do
+                j.field "code", code
+                j.field "message", message
+                j.field("data") { data.call(j) } if data
+              end
+            end
           end
         end)
       end

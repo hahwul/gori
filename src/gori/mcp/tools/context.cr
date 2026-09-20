@@ -687,8 +687,9 @@ module Gori
           "Project totals: flow count, issue count, captured bytes, earliest capture time, " \
           "plus which project/db is being served and how it was selected. When unbound " \
           "(bound:false), call list_projects / create_project / switch_project first. " \
-          "This is the LIVE binding, and it overrides the handshake instructions — those " \
-          "describe the binding at handshake time and no switch_project updates them. " \
+          "This is the LIVE binding, and it overrides the server instructions — those " \
+          "describe the binding as of the call that produced them and no switch_project " \
+          "updates them. " \
           "Always verify this before reading or mutating security-test data." { }
 
         tool j, "get_current_context",

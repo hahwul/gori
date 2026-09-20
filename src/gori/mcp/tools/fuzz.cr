@@ -347,7 +347,7 @@ module Gori
         fjob.result_flow_ids << flow_id
       end
 
-      @[Tool("fuzz_status", gated: true)]
+      @[Tool("fuzz_status", gated: true, read_only: true)]
       private def fuzz_status(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)
@@ -428,7 +428,7 @@ module Gori
         end)
       end
 
-      @[Tool("fuzz_results", gated: true)]
+      @[Tool("fuzz_results", gated: true, read_only: true)]
       private def fuzz_results(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)

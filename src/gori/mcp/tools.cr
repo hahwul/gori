@@ -124,9 +124,20 @@ module Gori
             {% raise "#{m.name}: @[Tool] takes the tool name as its one positional argument" %}
           {% end %}
           {% for key in ann.named_args.keys %}
-            {% unless %w[gated agent_action env_refresh unbound].includes?(key.stringify) %}
-              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound" %}
+            {% unless %w[gated agent_action env_refresh unbound read_only].includes?(key.stringify) %}
+              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound, read_only" %}
             {% end %}
+          {% end %}
+          {% if ann.named_args.keys.map(&.stringify).includes?("read_only") %}
+            {% if ann[:read_only] == !ann[:gated] %}
+              {% raise "#{m.name}: @[Tool] read_only: #{ann[:read_only]} is what `gated: #{ann[:gated] ? true : false}` already implies — drop it, or the exception list stops being readable" %}
+            {% end %}
+          {% end %}
+          # On the EFFECTIVE value, not on the spelled one: the default (`!gated`) is where
+          # this fails open. `agent_action: true` with no `gated: true` would otherwise land
+          # in READ_ONLY_TOOLS and tell a client it may run an outbound send unattended.
+          {% if (ann.named_args.keys.map(&.stringify).includes?("read_only") ? ann[:read_only] : !ann[:gated]) && ann[:agent_action] %}
+            {% raise "#{m.name}: @[Tool] agent_action is read-only here — an agent action is a mutation or an outbound send, so it needs `gated: true` (and must not carry `read_only: true`)" %}
           {% end %}
         {% end %}
 
@@ -159,6 +170,14 @@ module Gori
 
         # Tools that work with no project store open; `unbound: true`.
         UNBOUND_SAFE = Set(String){ {{ tools.select { |m| m.annotation(Tool)[:unbound] }.map { |m| m.annotation(Tool)[0] }.splat }} }
+
+        # Tools that neither mutate anything nor dial out — what `annotations.readOnlyHint`
+        # tells a client, and what decides whether it can run one without asking the human.
+        # `!gated` by default (that IS what `--read-only` serves), overridden by the
+        # `read_only:` flag on the two populations where the two disagree; reasoning and the
+        # whole exception list in mcp/tool.cr.
+        {% read_only = tools.select { |m| m.annotation(Tool).named_args.keys.map(&.stringify).includes?("read_only") ? m.annotation(Tool)[:read_only] : !m.annotation(Tool)[:gated] } %}
+        READ_ONLY_TOOLS = Set(String){ {{ read_only.map { |m| m.annotation(Tool)[0] }.splat }} }
       end
 
       # A live OAST listening session held server-side across tool calls (oast_start →
@@ -440,10 +459,15 @@ module Gori
           selection_source: @selection_source)
       end
 
-      # The `initialize` handshake carries the peer's name; the server hands it here (it may
-      # arrive before or after a bind). Store it for the next announce and, if a marker already
-      # exists, fill its name in place.
+      # The peer's name: carried once by the `initialize` handshake, and on EVERY request
+      # under the stateless revision (`_meta["io.modelcontextprotocol/clientInfo"]`), which
+      # is why this returns early when nothing moved — `update` rewrites the marker file,
+      # and a per-call rewrite would put a file write on the hot path of every tool call.
+      # Same shape `AgentPresence#update_capture` already keeps for the capture bit.
+      #
+      # Store it for the next announce and, if a marker already exists, fill its name in place.
       def client_seen(name : String?, version : String?) : Nil
+        return if @client_name == name && @client_version == version
         @client_name = name
         @client_version = version
         @presence.try(&.update(name, version))
@@ -1204,7 +1228,7 @@ module Gori
         Result.new({session_id: str(h, "session_id"), payload_url: s.provider.generate_payload(s.session)}.to_json)
       end
 
-      @[Tool("oast_poll", unbound: true)]
+      @[Tool("oast_poll", read_only: false, unbound: true)]
       private def oast_poll(h) : Result
         s = oast_session(h)
         return s if s.is_a?(Result)
@@ -1242,7 +1266,7 @@ module Gori
         Result.new({stopped: sid}.to_json)
       end
 
-      @[Tool("create_project", unbound: true)]
+      @[Tool("create_project", read_only: false, unbound: true)]
       private def create_project_entry(h) : Result
         return create_project(h) if unbound? || @allow_actions
         err("tool disabled (gori mcp --read-only)", "TOOL_DISABLED")
@@ -1963,9 +1987,28 @@ module Gori
         return if (f = @tool_filter) && !f.allows?(name)
         sb = SchemaBuilder.new
         yield sb
+        read_only = READ_ONLY_TOOLS.includes?(name)
         j.object do
           j.field "name", name
           j.field "description", description
+          # The hints a client uses to decide what it may run unattended. `readOnlyHint` is
+          # the one that matters here — a workbench whose action tools send attack traffic
+          # has to be able to say which of its 179 tools only read — and it is derived from
+          # the same declaration `--read-only` enforces, so the hint and the gate cannot
+          # drift apart.
+          #
+          # `openWorldHint` is emitted only where we can answer it. A read tool answers from
+          # this project's store and never dials, so it is closed-world; an action tool may
+          # or may not reach the network (send_request does, create_note does not), and the
+          # spec's default for an unstated hint is `true` — the conservative answer, and the
+          # right one for the population that includes the fuzzer. `destructiveHint` is left
+          # unstated for the same reason: its default is also the safe side.
+          j.field("annotations") do
+            j.object do
+              j.field "readOnlyHint", read_only
+              j.field "openWorldHint", false if read_only
+            end
+          end
           j.field "inputSchema" do
             j.object do
               j.field "type", "object"

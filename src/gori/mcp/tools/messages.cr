@@ -115,7 +115,7 @@ module Gori
       # already carried, and marks them delivered (`via: "poll"`) so the operator's ring can
       # say "picked up". A read-only server has no writer fiber and cannot mark; the result
       # says so rather than pretending.
-      @[Tool("operator_messages")]
+      @[Tool("operator_messages", read_only: false)]
       private def operator_messages(h) : Result
         pid = Process.pid.to_i64
         # Nothing before this session bound the project is replayed (the courier keeps the same rule).
@@ -161,7 +161,7 @@ module Gori
       # #1090: the way back. One line for the ring (and Miss Ring's bubble), an optional long
       # form the ring opens on ↵. Works for every agent — no socket, no channel, just a row —
       # which is why it, and not a Claude-only route, is what closes the loop.
-      @[Tool("reply_to_operator")]
+      @[Tool("reply_to_operator", read_only: false)]
       private def reply_to_operator(h) : Result
         summary = str(h, "summary").try(&.strip).presence
         return Result.new("reply_to_operator: `summary` is required — one line the operator can read at a glance", is_error: true, error_code: "INVALID_ARGUMENT", field: "summary") unless summary

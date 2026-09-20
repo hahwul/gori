@@ -293,7 +293,7 @@ module Gori
       # transform the live proxy uses (regex / header ops / host-scope all reflected)
       # over recent flows. Nothing is written. Approximate: response bodies are scanned
       # as STORED (possibly compressed) wire bytes.
-      @[Tool("preview_rule", gated: true)]
+      @[Tool("preview_rule", gated: true, read_only: true)]
       private def preview_rule(h) : Result
         pattern = str(h, "pattern")
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?

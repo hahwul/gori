@@ -2857,3 +2857,67 @@ disagree, and answers `tui.unknown` rather than `live:false` when it has no data
 look beside. A selection is capped at 200 ids with `marked_count` kept true and `truncated` said
 out loud, and that cap sits under `list_history{ids}`'s own, so a relayed History selection is
 always fetchable in one call.
+
+### 2026-09-20: MCP has two eras, and the request says which one
+
+Refines: [P1](#p1). MCP `2026-07-28`.
+
+MCP removed its own handshake. Through `2025-11-25` a session opened with `initialize` and
+everything after it inherited the version negotiated there; `2026-07-28` made the protocol
+stateless — every request carries its protocol version and the client's capabilities in
+`_meta`, every result names a `resultType`, list results carry cache hints, and
+`server/discover` is the one RPC a server MUST implement so a client can ask what it is
+talking to before it commits. gori now serves both, from one stdio process.
+
+**The era is read per request and never latched.** Under the modern revision there is
+nothing to latch it to: the spec is explicit that an open connection is not a session and
+that a client may interleave unrelated conversations over one stdio process. `Server#era_of`
+reads `_meta` on every request, and the only server-side state left is what it always was —
+job handles, OAST sessions, the project binding — each named by an explicit identifier the
+client passes back, which is what the statelessness rule actually asks for.
+
+**The era decides the envelope, never what a tool does.** `tools/call` dispatches into the
+same handler either way; what changes is `resultType`, the `_meta` server identity and the
+cache hints around it. That is deliberate: a second surface for a second revision is a second
+thing to keep in step, and [§2](#s2)'s whole argument is that parity survives only
+where there is one implementation under the surfaces. A legacy result is byte-identical to
+what it was, which is not politeness but the spec's own rule — a missing `resultType` reads as
+`complete`.
+
+**A handshake client is answered with a handshake revision, even when it asks for a modern
+one.** `initialize` IS the legacy opening; naming `2026-07-28` back would promise per-request
+semantics to a client that has already opened a session and has no way to switch. A version
+we do not speak is refused with `-32022` and the list we do — and that refusal is load-bearing
+in the other direction too: for a dual-era client probing us on stdio, a *recognised* modern
+error is how it learns the server is modern and must NOT fall back to `initialize`. Which is
+also why `server/discover` is the one request exempted from the metadata gate — answered
+when it names no version at all, and when it names one but declares no capabilities:
+refusing "tell me what to say" for not having said it first sends that client back to the
+handshake for no reason, and a bootstrap probe has nothing to declare yet. The VERSION half
+of the gate still applies to it, because that refusal is the signal.
+
+**Cache hints are `private`, and discovery's TTL is zero.** A cached response is keyed by
+method plus params, and `{"method":"tools/list"}` is the same key for every gori on the
+machine — so `public` would let a shared cache serve one operator's `--tools`-narrowed
+catalogue to a different server's client. Nothing there is user-specific; it is
+SERVER-specific, which the cache key cannot see. `tools/list` is otherwise cacheable, because the
+catalogue is a pure function of the start-up flags — with one exception that the TTL is read
+off rather than asserted beside: a read-only server that is still unbound advertises
+`create_project` and loses it on the first bind, so while that is ahead of us the answer is
+zero. `server/discover` gets `ttlMs: 0` outright, because its `instructions` name the bound
+project and `switch_project` moves that mid-session — the same drift `instructions_text`
+already warns every client about (#1003), answered here by refusing to let a client cache the
+sentence that would go stale.
+
+**`readOnlyHint` is derived from the gate, with the exceptions spelled.** The hint a client
+uses to decide what it may run unattended defaults to `!gated`, because `--read-only` serves
+exactly the tools that neither mutate nor dial — one declaration, so the hint and the gate
+cannot drift apart. The flag exists for the two populations where they disagree, and is
+refused by the macro anywhere it would be redundant: gated READS (`fuzz_status`, `list_jobs`,
+`preview_rule` — gated because the workbench they report on is), and ungated WRITERS that
+gate themselves (`switch_project`, `create_project`, `probe_scan` whose `active: true` sends,
+`oast_poll` which dials and files what it catches, and the two message tools). `read_only`
+with `agent_action` is a compile error: an agent action is by definition a mutation or an
+outbound send. `openWorldHint` is emitted only where it can be answered — `false` beside a
+read tool, and left to the spec's conservative default everywhere else, because an action
+tool may or may not reach the network and the population that does includes the fuzzer.

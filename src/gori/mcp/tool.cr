@@ -57,6 +57,25 @@ module Gori
     #   every buffer verbatim (`Fuzz::Backend.all_verbatim`, see `Authorize::Engine#send_one`).
     #   A refresh there would re-read the store for a value nothing on that path reads.
     #
+    # - `read_only` — the `annotations.readOnlyHint` an MCP client reads to decide whether a
+    #   call needs the human's approval. DEFAULTS to `!gated`, which is right for the great
+    #   majority: `--read-only` serves exactly the tools that neither mutate nor dial. The
+    #   flag is for the two populations where the gate and the hint disagree, and it is
+    #   spelled on those and refused as redundant anywhere else, so the exceptions stay a
+    #   short readable list instead of rotting into noise:
+    #
+    #   - `read_only: true` on a GATED read — the `*_status` / `*_results` pollers,
+    #     `list_jobs`, `get_job`, `preview_rule`. These are gated because the workbench they
+    #     report on is, not because they change anything.
+    #   - `read_only: false` on an UNGATED writer — the handful that gate themselves instead
+    #     of being gated: `switch_project` and `create_project` (so install-and-use works on
+    #     a fresh machine), `probe_scan` (whose `active: true` mode SENDS), `oast_poll`
+    #     (which dials the provider and files what it catches), and the two message tools,
+    #     which write delivery rows.
+    #
+    #   `read_only: true` with `agent_action: true` is a contradiction the macro refuses: an
+    #   agent action is by definition a mutation or an outbound send.
+    #
     # - `unbound` — works with no project store open; every other tool is answered with
     #   NO_PROJECT (`Tools#no_project`) before dispatch. `diff_projects` qualifies because
     #   both sides can be NAMED, and then the diff needs no binding at all — an agent

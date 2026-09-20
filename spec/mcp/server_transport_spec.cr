@@ -234,10 +234,12 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "falls back to our version for an unsupported/garbage protocolVersion" do
+    # The rest of the era negotiation — the modern `_meta` path, `server/discover`, the
+    # version refusal — lives in spec/mcp/protocol_spec.cr beside the module that owns it.
+    it "falls back to the newest handshake revision for an unsupported/garbage protocolVersion" do
       with_store do |store|
         line = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}})
-        mcp_drive(store, line)[0]["result"]["protocolVersion"].as_s.should eq(Gori::MCP::Server::PROTOCOL_VERSION)
+        mcp_drive(store, line)[0]["result"]["protocolVersion"].as_s.should eq(Gori::MCP::Protocol::LEGACY_LATEST)
       end
     end
 

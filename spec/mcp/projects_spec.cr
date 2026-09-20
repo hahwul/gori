@@ -204,8 +204,9 @@ describe "Gori::MCP::Tools unbound mode" do
     end
   end
 
-  # `instructions` is delivered ONCE, at the handshake, and the client caches that text for
-  # the whole session — MCP has no way to re-send it. So the sentence naming the project must
+  # `instructions` is delivered at the handshake and the client caches that text for the whole
+  # session; nothing pushes an update (a stateless client can re-ask with `server/discover`,
+  # but no server-initiated refresh exists in either era). So the sentence naming the project must
   # not read as a permanent pin ("this server is pinned to X" went on naming X while every
   # later call read and wrote Y), and a client that DOES re-handshake has to be told the
   # binding in force now rather than the one the process booted with (#1003).
