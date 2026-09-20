@@ -49,7 +49,7 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 
 **선택된 프로젝트를 열 수 없으면**(데이터베이스가 없거나 깨졌거나 읽을 수 없을 때, 프로젝트 이름이 더 이상 존재하지 않을 때) 서버는 종료하지 않고 핸드셰이크를 마친 뒤 unbound로 시작합니다. 실패 이유는 stderr에 기록되고, 핸드셰이크 `instructions`에 실리며, 모든 `NO_PROJECT` 도구 오류에 함께 반환되고, `project_info`의 `bind_error` 필드로도 보고됩니다. 에이전트는 재시작 없이 `list_projects`와 `switch_project`로 복구할 수 있습니다.
 
-데이터를 사용하기 전에 `project_info`를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처를 보고합니다.
+데이터를 사용하기 전에 `project_info`를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 그리고 프로젝트 `description`—`create_project`가 저장하는 "이 프로젝트가 무엇을 위한 것인가"—을 보고합니다. 그 설명을 되읽어 주는 호출은 이것뿐입니다.
 
 **`instructions`에 적힌 프로젝트는 핸드셰이크 시점의 바인딩입니다.** 이 텍스트는 한 번만 전달되고 갱신을 밀어주는 수단이 없어서, `switch_project` 이후에도 그때의 바인딩을 계속 설명합니다. 실제 읽기와 쓰기는 새 프로젝트로 갑니다. 현재 값은 `project_info`가 답합니다. `switch_project`(그리고 자동 바인딩하는 `create_project`)는 같은 정정을 결과에 담아, 직전 바인딩을 `previous_project`로 함께 돌려줍니다.
 
@@ -164,7 +164,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | [Cookie 워크벤치](/ko/guide/cookie/)를 순수 오프라인 연산으로: Flask / Rack / Django 서명 세션 쿠키 파싱, 후보 시크릿으로 검증, 워드리스트로 시크릿 브루트포스, 편집한 페이로드 재서명. 네트워크를 쓰지 않으므로 네 개 모두 `--read-only`에서도 살아남습니다 |
 | `sequence_analyze` | 붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수) |
 | `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 현재 페이로드 조회, 실행 중인 리스너의 콜백 폴링 |
-| `project_info` | 플로우 / 이슈 개수, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
+| `project_info` | 플로우 / 이슈 개수, 캡처 구간, 프로젝트 `description`, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것, **그리고 무엇을 선택했는지**. `selection.ids`는 History / Issues / Sitemap / Intercept에서 마크한 행이고, 마크가 없으면 커서 행, 디테일이 열려 있으면 거기 고정된 플로우입니다. `target_source`가 셋 중 무엇인지 말해 주므로 에이전트가 규칙을 다시 유도할 필요가 없습니다. Sitemap은 플로우 id가 아니라 `{host, path}` 쌍을 고르며 `kind`가 그걸 알려 줍니다. 배열이 잘렸다는 신호는 `truncated` 하나뿐입니다 — `marked_count`는 마크 집합을 말하는 값이라 드릴인이 그걸 덮어쓴 경우에도 그대로 실립니다. `marks_elsewhere`는 이 selection이 싣지 못한 마크가 어느 탭에 있는지를(`tab`과 개수, 그리고 그 마크에 kind가 있을 때만 `kind`), `tui.live`는 gori TUI 창이 붙어 있는지를 말합니다 — 증거이지 증명은 아닙니다. History 선택은 `list_history{ids}`에 그대로 넘기면 됩니다 |
 | `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $ENV.AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
 | `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다. `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 말해 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시됩니다 |

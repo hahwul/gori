@@ -457,7 +457,21 @@ module Gori
     # list` sort a project by one time and print another, and every later reader (MCP
     # `list_projects`, the TUI picker) would see the older time for good.
     def self.captured_flows(path : String) : Int64?
-      return nil unless File.exists?(path)
+      project_census(path).flows
+    end
+
+    # What one pass over another project's database is worth reading while it is open: the
+    # flow count above, and the operator's `description`. A LISTING wants both and must not
+    # pay two opens for them — on a host holding a project per worktree that is hundreds of
+    # extra file opens, which is the cost #1085 went to some trouble to remove.
+    #
+    # The description read has its own rescue, deliberately: it is the OPTIONAL half, and a
+    # database old enough to have no `settings` table must still yield its flow count rather
+    # than have the outer rescue turn the whole census into "could not measure".
+    record ProjectCensus, flows : Int64?, description : String?
+
+    def self.project_census(path : String) : ProjectCensus
+      return ProjectCensus.new(nil, nil) unless File.exists?(path)
       # Same pre-flight `Store.open` and `Compact.measure` run, and for the first of their
       # two reasons: a non-database file leaks the driver's fd inside `DB.open`, and this
       # is a path that opens hundreds of files in one command.
@@ -468,7 +482,14 @@ module Gori
       db = DB.open("sqlite3:#{path}?busy_timeout=2000")
       begin
         db.exec("PRAGMA query_only = ON")
-        db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
+        flows = db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
+        desc = begin
+          db.query_one?("SELECT value FROM settings WHERE key = ?", Project::DESCRIPTION_KEY,
+            as: String).try(&.presence)
+        rescue
+          nil
+        end
+        ProjectCensus.new(flows, desc)
       ensure
         db.close
         # Both files, each to what a reader must still get. The db file goes to the ACTIVITY
@@ -484,7 +505,7 @@ module Gori
         put_back(wal, wal_before, wal_before || activity)
       end
     rescue
-      nil
+      ProjectCensus.new(nil, nil)
     end
 
     private def self.mtime_of(file : String) : Time?
