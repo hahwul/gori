@@ -67,8 +67,16 @@ module Gori
         # read a second time could disagree with it (a rule toggled between the two reads, or a
         # busy store making only one of them `degraded`).
         rules = Probe::Scan::RuleConfig.load(store)
+        # `stop:` is what makes a cancelled call stop SENDING (#1103). An active scan is the
+        # one tool here whose runaway cost is a third party's server, and a cancel used to buy
+        # only silence: the client stopped waiting and up to PROBE_ACTIVE_MAX_FLOWS flows of
+        # real probes went out anyway. Polled between flows, so the bound is "at most one more
+        # flow's probes". Nothing is written mid-scan, so a stopped scan leaves no partial
+        # state to reconcile — and it is owed no response, so there is no partial report to
+        # shape either.
         dets, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_budget: budget, rules: rules,
+          stop: cancel_signal,
           on_error: ->(_where : String, _ex : Exception) { scan_errors += 1; nil })
         capped = budget.exhausted?
 

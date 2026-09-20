@@ -92,6 +92,12 @@ module Gori::Repeater
     # calls `#stop` from another fiber; `run` reads `stopped?` immediately before every network
     # send and returns a partial Report instead of issuing it.
     #
+    # A caller that cannot FLIP a flag hands a PREDICATE instead (`Stop.new(-> { … })`). That
+    # is the MCP server: a `notifications/cancelled` is recorded by its reader fiber into a set
+    # keyed by JSON-RPC id, which the tools layer neither holds nor should learn — so it asks
+    # the question rather than answering it. Both arms are read at the same three points, so
+    # `run` cannot tell which way a stop was armed.
+    #
     # A cap is not a stop. `SEND_CAP` bounds a run, but "bounded" is not "over": an operator who
     # closes the repeater tab or leaves the project believes they disconnected from the target,
     # and up to SEND_CAP further probes against that origin is the one thing a pentest tool must
@@ -104,7 +110,7 @@ module Gori::Repeater
     # `@stop_requested` and `Discover::Engine#stop`: fibers here are cooperative and the flag is
     # only ever written by the stopper and read by the run.
     class Stop
-      def initialize
+      def initialize(@ask : Proc(Bool)? = nil)
         @stopped = false
       end
 
@@ -113,7 +119,7 @@ module Gori::Repeater
       end
 
       def stopped? : Bool
-        @stopped
+        @stopped || !!@ask.try(&.call)
       end
     end
 

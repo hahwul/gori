@@ -119,11 +119,41 @@ describe Gori::Repeater::Minimize::Stop do
   end
 
   it "is optional — a surface with no way to cancel still runs unchanged" do
-    # The CLI and MCP minimize paths pass no `stop:`; a nil token must never look stopped.
+    # Every production caller now arms one (the TUI on pane close, `gori run repeater minimize`
+    # on SIGINT, MCP on `notifications/cancelled`), but the argument stays optional and a nil
+    # token must never look stopped.
     backend = CountingBackend.new { }
     report = run_minimize(backend, nil)
     backend.sends.should eq(Gori::Repeater::Minimize::CALIBRATION_ROUNDS + 20)
     report.aborted.should be_false
+  end
+
+  # The second way to arm one (#1103). MCP cannot FLIP a flag: a `notifications/cancelled` is
+  # recorded by the server's reader fiber into a set keyed by JSON-RPC id, which the tools layer
+  # neither holds nor should learn — so it hands `Stop` a predicate and lets it ask. `run` must
+  # not be able to tell the two arms apart.
+  it "reads a predicate as its stop, for a caller that can only be asked" do
+    asked = 0
+    stop = Gori::Repeater::Minimize::Stop.new(-> { asked += 1; false })
+    backend = CountingBackend.new { }
+    run_minimize(backend, stop)
+    # A predicate that never says yes is exactly a run with no stop…
+    backend.sends.should eq(Gori::Repeater::Minimize::CALIBRATION_ROUNDS + 20)
+    asked.should be > 20 # …and it really was polled, per send, rather than once
+
+    sends = 0
+    stop = Gori::Repeater::Minimize::Stop.new(-> { sends >= 5 })
+    backend = CountingBackend.new { |n| sends = n }
+    report = run_minimize(backend, stop)
+    backend.sends.should eq(5) # …the same 5 the flag arm produces
+    report.note.should contain("stopped")
+  end
+
+  it "latches on the flag even while its predicate says no" do
+    stop = Gori::Repeater::Minimize::Stop.new(-> { false })
+    stop.stopped?.should be_false
+    stop.stop
+    stop.stopped?.should be_true
   end
 
   it "starts unstopped and latches once stopped" do

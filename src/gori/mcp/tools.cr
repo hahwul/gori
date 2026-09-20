@@ -332,6 +332,9 @@ module Gori
         # Short-lived confirmation tokens issued by delete_project(dry_run) →
         # {db_path, issued_at_ms}. A real delete must present a matching, unexpired one.
         @delete_tokens = {} of String => {String, Int64}
+        # Set for the duration of ONE `call` when the surface can answer "has the client
+        # cancelled the request I am serving?" — see `call` and `cancel_signal`.
+        @cancelled = nil.as(Proc(Bool)?)
       end
 
       # Bound-only helpers call this after the unbound gate; raises only on internal misuse.
@@ -981,7 +984,35 @@ module Gori
 
       # Dispatches a tools/call by name. Any store/repeater exception is converted to
       # an is_error Result so one bad call never tears down the server loop.
-      def call(name : String, args : JSON::Any) : Result
+      #
+      # `cancelled` is the ONE seam for `notifications/cancelled` (#1103): a predicate the
+      # transport builds over the JSON-RPC id, held here for the life of this call and read
+      # by the long tools through `cancel_signal` / `cancelled?`. It is an argument to THIS
+      # method and to nothing else — a cancel token threaded through 179 handlers would be a
+      # parameter 176 of them ignore. A caller with no cancellation channel (`gori run`, a
+      # spec) passes nothing and every tool behaves exactly as before.
+      #
+      # WHICH TOOLS STOP, and why the rest do not:
+      #
+      #   probe_scan        yes — polled between flows and between repeater tabs. The only
+      #                     tool whose runaway cost lands on a THIRD PARTY (up to
+      #                     PROBE_ACTIVE_MAX_FLOWS flows of real active probes).
+      #   minimize_repeater yes — `Minimize::Stop` polls it before every send, and `apply` is
+      #                     additionally refused after a cancel (see the tool).
+      #   run_retest        yes — `Retest::Engine` polls it before every step; the steps that
+      #                     did run keep their History rows (P7: record the wire).
+      #   cookie_crack      NO. It is pure CPU over a wordlist with no outbound and no yield
+      #                     point, so the reader fiber never runs during it and the
+      #                     notification is not even PARSED until it finishes — a check there
+      #                     would be code that cannot fire. The cost is local.
+      #   send_request /    NO. One request, or one socket bounded by `idle_ms`; a cancel
+      #   send_websocket    cannot beat a single send, and there is no loop to leave.
+      #   fuzz/mine/        NO, by design. They return a `job_id` immediately and are stopped
+      #   discover/         with `stop_job` — cancelling the *call* that started one would
+      #   sequence/         suppress the id and leave the job running, which is the opposite
+      #   authorize _start  of what the client asked for.
+      def call(name : String, args : JSON::Any, cancelled : Proc(Bool)? = nil) : Result
+        @cancelled = cancelled
         h = args.as_h? || EMPTY_HASH
         if unbound? && !UNBOUND_SAFE.includes?(name)
           return no_project
@@ -1019,6 +1050,25 @@ module Gori
       rescue ex
         Log.warn(exception: ex) { "tool #{name} failed" }
         err("tool error: #{ex.message}", "INTERNAL")
+      ensure
+        # Never outlives its call. The worker fiber serves one request at a time, so a stale
+        # predicate would answer the NEXT tool's poll with a previous caller's cancellation.
+        @cancelled = nil
+      end
+
+      # The cancellation predicate for the call in flight, for an engine that polls one
+      # itself (`Probe::Scan`, `Retest::Engine`, `Minimize::Stop`), and the same question as
+      # a plain answer for a tool deciding one thing at one point.
+      #
+      # nil when this surface has no cancellation channel — which is what makes `stop:` a
+      # no-op rather than a behaviour change for `gori run` and for every spec that drives
+      # `Tools#call` directly.
+      private def cancel_signal : Proc(Bool)?
+        @cancelled
+      end
+
+      private def cancelled? : Bool
+        !!@cancelled.try(&.call)
       end
 
       # Whether this CALL (not just this tool) is an agent action worth recording. Most are a
