@@ -305,7 +305,20 @@ module Gori
         if arr = raw.as_a?
           arr.each do |entry|
             if o = entry.as_h?
-              n = o["name"]?.try(&.as_s?).try(&.strip) || ""
+              # An object entry with no `name` is the OTHER object an agent reaches for — the
+              # `{"Cookie": "session=…"}` map, which this surface does not take here. Refused
+              # by its own shape rather than folded into `": "`: that empty pair is then what
+              # the rejection quotes back, and the caller cannot find in its own call an entry
+              # it never wrote.
+              # `presence` closes the same hole the guard opens on: an empty or whitespace-only
+              # name folds to the very `": value"` this refusal exists to stop quoting back.
+              n = o["name"]?.try(&.as_s?).try(&.strip).presence
+              unless n
+                return err("'set_headers' entry #{entry.to_json} names no header — an object " \
+                           "entry is {\"name\": \"Cookie\", \"value\": \"session=…\"}, or pass " \
+                           "the line \"Cookie: session=…\" as a string",
+                  "INVALID_ARGUMENT", field: "set_headers")
+              end
               v = o["value"]?.try(&.as_s?) || ""
               lines << "#{n}: #{v}"
             else

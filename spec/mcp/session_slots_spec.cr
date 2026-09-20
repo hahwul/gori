@@ -106,6 +106,29 @@ describe "MCP session slots" do
     end
   end
 
+  # The other object an agent reaches for is the name->value MAP, and folding it into an
+  # empty `": "` pair meant the refusal quoted back an entry the caller never wrote — it
+  # could not find `": "` anywhere in its own call. Name the shape instead.
+  it "refuses an object entry that is a map, naming the shape it does take" do
+    with_store do |store|
+      t = tools_for(store)
+      text, err = call_raw(t, "create_session_slot",
+        %({"name":"mapped","set_headers":[{"Cookie":"a=1"}]}))
+      err.should be_true
+      text.should contain(%({"Cookie":"a=1"}))
+      text.should contain(%("name"))
+      Gori::SessionSlots.load(store).slots.should be_empty
+
+      # An EMPTY name folds to the same `": value"`, so it is the same refusal, not a header
+      # with no name — `.strip` alone left this one going through.
+      empty, err2 = call_raw(t, "create_session_slot",
+        %({"name":"blank","set_headers":[{"name":"  ","value":"a=1"}]}))
+      err2.should be_true
+      empty.should contain("names no header")
+      Gori::SessionSlots.load(store).slots.should be_empty
+    end
+  end
+
   it "reports a missing slot as NOT_FOUND rather than creating one" do
     with_store do |store|
       t = tools_for(store)

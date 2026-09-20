@@ -26,6 +26,16 @@ describe Gori::MCP::RequestBuilder do
     String.new(Gori::MCP::RequestBuilder.build(args).bytes).should contain("Authorization: Bearer T\r\n")
   end
 
+  # The OTHER array spelling of a header set, and the one this same server teaches: it is
+  # what `create_session_slot{set_headers}` and `authorize_start{identities}` take, so an
+  # agent that has read one of those schemas sends it here too. Refusing it made
+  # `send_request` the odd tool out for a shape gori itself had shown the model.
+  it "accepts headers as an array of {name, value} objects" do
+    args = JSON.parse({"url"     => "http://h.test/x",
+                       "headers" => [{"name" => "Authorization", "value" => "Bearer T"}]}.to_json).as_h
+    String.new(Gori::MCP::RequestBuilder.build(args).bytes).should contain("Authorization: Bearer T\r\n")
+  end
+
   # BEHAVIOUR CHANGE, pinned deliberately: an unusable `headers` must RAISE, never vanish.
   # Silently dropping it is what made the bug invisible on both surfaces.
   it "raises rather than silently dropping an unusable headers value" do
@@ -34,6 +44,21 @@ describe Gori::MCP::RequestBuilder do
       expect_raises(Gori::Error, /headers/) { Gori::MCP::RequestBuilder.build(args) }
     end
     args = JSON.parse({"url" => "http://h.test/x", "headers" => [["only-one"]]}.to_json).as_h
+    expect_raises(Gori::Error, /headers/) { Gori::MCP::RequestBuilder.build(args) }
+    # …and an object entry that is a name->value MAP rather than the {name, value} pair is
+    # still refused: there is no defensible reading of it that is not a guess.
+    args = JSON.parse({"url" => "http://h.test/x", "headers" => [{"Authorization" => "Bearer T"}]}.to_json).as_h
+    expect_raises(Gori::Error, /name/) { Gori::MCP::RequestBuilder.build(args) }
+    # A JSON `null` is PRESENT as far as `o["name"]?` is concerned — JSON::Any wrapping nil is
+    # truthy — so without the presence read these reach the wire as `": Bearer T"`, and
+    # discover_start formats that into a line naming nothing the caller wrote.
+    [nil, "", "  "].each do |name|
+      args = JSON.parse({"url"     => "http://h.test/x",
+                         "headers" => [{"name" => name, "value" => "Bearer T"}]}.to_json).as_h
+      expect_raises(Gori::Error, /name/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+    args = JSON.parse({"url"     => "http://h.test/x",
+                       "headers" => [{"name" => "Authorization", "value" => nil}]}.to_json).as_h
     expect_raises(Gori::Error, /headers/) { Gori::MCP::RequestBuilder.build(args) }
   end
 

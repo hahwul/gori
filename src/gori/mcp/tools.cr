@@ -2143,6 +2143,18 @@ module Gori
         JSON.parse(%({"type":"object","description":#{desc.to_json},"additionalProperties":{"type":"string"}}))
       end
 
+      # A `headers` argument, declared in both shapes `RequestBuilder.header_pairs` reads: the
+      # name->value map these tools have always taken, and the `[{name, value}]` list
+      # `create_session_slot{set_headers}` and `authorize_start{identities}` take — which is
+      # what an agent reaches for once it has read one of those schemas. Declaring only the
+      # map left a validating client rejecting that call before gori ever saw it, and left the
+      # model never told the shape was legal; same reasoning as `session_headers_prop`.
+      private def header_map_prop(desc : String) : JSON::Any
+        JSON.parse(%({"description":#{desc.to_json},"oneOf":[) +
+                   %({"type":"object","additionalProperties":{"type":"string"}},) +
+                   %({"type":"array","items":{"type":"object"}}]}))
+      end
+
       private def arrprop(desc : String) : JSON::Any
         JSON.parse(%({"type":"array","description":#{desc.to_json},"items":{"type":"object"}}))
       end
