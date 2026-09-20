@@ -63,11 +63,26 @@ module Gori::CLI
     # simply does not have the feature.
     tool_filter = nil.as(MCP::ToolFilter?)
     if spec = tools_spec.try(&.strip).presence
-      known = MCP::Tools::TOOL_NAMES.reject { |n| read_only && MCP::Tools::GATED_TOOLS.includes?(n) }
-      case parsed = MCP::ToolFilter.parse(spec, known)
+      # Resolved against the WHOLE catalogue, never against the read-only subset. The two
+      # flags describe different things — `--tools` names tools, `--read-only` withholds
+      # them — and folding the gate into the name table made every action tool read as a
+      # MISSPELLING: `--read-only --tools='list_*,get_*,send_request'`, the example in this
+      # command's own `--tools` help, aborted with `"send_request" matches no tool`, which
+      # sent the operator hunting for a typo in a name they had spelled correctly. The gate
+      # is applied after the spec resolves, exactly where it is applied everywhere else
+      # (`Tools#list`).
+      case parsed = MCP::ToolFilter.parse(spec, MCP::Tools::TOOL_NAMES)
       in String          then abort parsed
       in MCP::ToolFilter then tool_filter = parsed
       end
+    end
+    # …and the "you would advertise nothing" refusal the filter makes on its own, for the
+    # one way the gate can still empty the set: a spec that names only action tools on a
+    # read-only server. Said with the reason, because the names in it are all real.
+    advertised = MCP::Tools.served_names(tool_filter, !read_only)
+    if tool_filter && advertised.empty?
+      abort "gori mcp: --tools=#{tools_spec} selects only tools that --read-only disables, " \
+            "so the server would advertise nothing. Name a read tool, or drop --read-only."
     end
 
     unless install_targets.empty?
@@ -81,6 +96,25 @@ module Gori::CLI
     # Logs to STDERR ONLY — STDOUT is reserved for the JSON-RPC stream.
     Log.setup(:info, Log::IOBackend.new(STDERR))
     Settings.load # send_request's repeater engines read the upstream-proxy setting from here
+
+    # The catalogue is the first thing this server spends, and it spends it on the operator's
+    # behalf before a question is asked: an MCP client loads every tool description into the
+    # model's context and keeps it there for the session. Said on EVERY start — which is why
+    # it is HERE and not beside the bound server below: an unbound start (outside a git
+    # workspace, `--no-project`, or a database that would not open) spends exactly the same
+    # context and used to say nothing at all. The count is what this process will actually
+    # advertise, gate included; "all 179 tools (--read-only)" overstated a 62-tool catalogue
+    # by threefold, on the one line whose whole job is that number.
+    if f = tool_filter
+      Log.info { "mcp: --tools=#{f.spec} advertises #{advertised.size} of #{MCP::Tools::TOOL_NAMES.size} tools: #{advertised.sort.join(", ")}" }
+    else
+      Log.info do
+        served = advertised.size == MCP::Tools::TOOL_NAMES.size ? "all #{advertised.size}" : "#{advertised.size} of #{MCP::Tools::TOOL_NAMES.size}"
+        "mcp: advertising #{served} tools#{" (--read-only)" if read_only}; " \
+        "narrow the catalogue with --tools=SPEC (e.g. --tools='list_*,get_*,send_request') " \
+        "to spend less of the model's context on it"
+      end
+    end
 
     selection, bind_error = if no_project
                               {MCP::ProjectResolver::Selection.new(nil, nil, nil, "unbound"), nil}
@@ -104,20 +138,6 @@ module Gori::CLI
     end
 
     resolved = selection.db_path.not_nil!
-    # The catalogue is the first thing this server spends, and it spends it on the operator's
-    # behalf before a question is asked: an MCP client loads every tool description into the
-    # model's context and keeps it there for the session. Said on EVERY start, not only when
-    # `--tools` is passed — the narrowing flag is the lever for this cost, and it was
-    # announced only to the operators who had already found it.
-    if f = tool_filter
-      Log.info { "mcp: --tools=#{f.spec} advertises #{f.size} of #{MCP::Tools::TOOL_NAMES.size} tools: #{f.names.join(", ")}" }
-    else
-      Log.info do
-        "mcp: advertising all #{MCP::Tools::TOOL_NAMES.size} tools#{" (--read-only)" if read_only}; " \
-        "narrow the catalogue with --tools=SPEC (e.g. --tools='list_*,get_*,send_request') " \
-        "to spend less of the model's context on it"
-      end
-    end
     Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name}#{" [#{project_slug}]" if project_slug} source=#{selection.source} (actions=#{!read_only})" }
     if selection.auto_created
       Log.warn { "mcp: created an isolated project for workspace #{selection.workspace_root}; use --project/--db to override" }

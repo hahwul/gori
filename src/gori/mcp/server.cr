@@ -590,11 +590,19 @@ module Gori
                "#{decoder}.#{ql} Timestamps include unix " \
                "microseconds plus *_iso RFC3339 fields where available.#{failure}#{binding_note}"
         text = @allow_actions ? "#{base}#{actions_note}#{projects_note}" : "#{base}#{read_only_note}#{projects_note}"
-        text += OPERATOR_MESSAGES_NOTE if @tools.advertises?("operator_messages")
+        text += operator_messages_note
         # The backstop for every name above, and for any added later without this treatment:
         # when a filter is in force at all, say so and name the authority. A sentence that
         # survives a future edit while its tool does not is then at least contradicted.
         text + (filter_note || "")
+      end
+
+      # The operator-messages paragraph, one clause per tool it names — the rule every other
+      # sentence in this text follows. Anchored on `operator_messages` because that is the
+      # backstop an agent reads messages with; the reply clause is admitted separately.
+      private def operator_messages_note : String
+        return "" unless @tools.serves?("operator_messages")
+        OPERATOR_MESSAGES_NOTE + (@tools.serves?("reply_to_operator") ? OPERATOR_REPLY_NOTE : "")
       end
 
       # Which project this server is on, and the warning that the answer moves. Split out of
@@ -665,9 +673,9 @@ module Gori
         end
       end
 
-      # Only the tools in `names` this server actually advertises, joined for prose — or nil
-      # when the `--tools` filter removed every one of them, so the sentence naming them can
-      # be dropped whole.
+      # Only the tools in `names` this server's `tools/list` actually carries, joined for
+      # prose — or nil when every one of them is absent, so the sentence naming them can be
+      # dropped whole.
       #
       # `instructions` is the first thing the model reads and it is read as FACT. A sentence
       # naming a tool `tools/list` does not carry sends the agent to call something that
@@ -676,7 +684,22 @@ module Gori
       # very first instruction — while advertising neither ql_reference nor nine other names
       # it mentioned. The mechanism was already here; it reached one sentence (the
       # operator-messages note) and none of the rest.
+      #
+      # `serves?`, not `advertises?`: `--read-only` is the OTHER reason a name is missing
+      # from tools/list, and this text used to offer `delete_project` — gated, so neither
+      # listed nor runnable — to every read-only server. The one sentence that names an
+      # absent tool ON PURPOSE asks `restorable` below instead.
       private def advertised(*names : String) : String?
+        kept = names.to_a.select { |n| @tools.serves?(n) }
+        kept.empty? ? nil : kept.join(", ")
+      end
+
+      # The read-only sentence's counterpart: the tools the `--tools` filter kept, whether or
+      # not the gate is currently withholding them. It exists for exactly one clause — "action
+      # tools (…) are disabled — restart without --read-only to enable them" — whose whole
+      # point is naming what a restart would bring back. A tool the FILTER removed is not
+      # coming back either way, so it is still not promised.
+      private def restorable(*names : String) : String?
         kept = names.to_a.select { |n| @tools.advertises?(n) }
         kept.empty? ? nil : kept.join(", ")
       end
@@ -713,8 +736,8 @@ module Gori
         disabled << "fuzz_*" if @tools.advertises?("fuzz_start")
         disabled << "mine_*" if @tools.advertises?("mine_start")
         disabled << "authorize_*" if @tools.advertises?("authorize_start")
-        disabled << "create/update_issue" if advertised("create_issue", "update_issue")
-        disabled << "create/delete_rule" if advertised("create_rule", "delete_rule")
+        disabled << "create/update_issue" if restorable("create_issue", "update_issue")
+        disabled << "create/delete_rule" if restorable("create_rule", "delete_rule")
         head = if disabled.empty?
                  " Read-only mode: this server cannot write or send."
                else
@@ -736,7 +759,10 @@ module Gori
       private def filter_note : String?
         f = @tools.tool_filter
         return nil unless f
-        " This server was started with --tools=#{f.spec.inspect} and advertises #{f.size} of " \
+        # `served_count`, not `f.size`: under `--read-only` the filter's own count is the set
+        # it KEPT, and the gate then withholds some of it. One number here, and it is the one
+        # the very next `tools/list` will return.
+        " This server was started with --tools=#{f.spec.inspect} and advertises #{@tools.served_count} of " \
         "#{Tools::TOOL_NAMES.size} tools; tools/list is the authority on what it has."
       end
 
@@ -752,9 +778,15 @@ module Gori
                                "(a `[gori]` line in your own turn, or beside the result of a gori " \
                                "tool you called), and are always readable with " \
                                "operator_messages — call it at the start of a " \
-                               "turn, or whenever a note says gori has something for you, and act on it. " \
-                               "Answer them with reply_to_operator (a one-line summary, optional detail): " \
-                               "the operator is in gori, not in your terminal."
+                               "turn, or whenever a note says gori has something for you, and act on it."
+
+      # …and the half that names the ANSWER, which is a second tool and so a second condition.
+      # One sentence naming two tools is one sentence that is wrong whenever the filter keeps
+      # only one of them — `--tools='list_*,operator_messages'` sent the agent to a
+      # reply_to_operator that tools/list does not carry. A live route still carries
+      # `OperatorNote::REPLY_HINT`, which names the tool at the moment it is needed.
+      OPERATOR_REPLY_NOTE = " Answer them with reply_to_operator (a one-line summary, optional " \
+                            "detail): the operator is in gori, not in your terminal."
 
       # Start carrying operator messages once the client is initialized. `send` is this
       # server's frame writer (the lock, the UTF-8 guard); the store and client name are read

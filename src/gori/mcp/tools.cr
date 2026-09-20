@@ -364,8 +364,40 @@ module Gori
       getter tool_filter : ToolFilter?
 
       # Whether `tools/list` would show `name` under the active `--tools` filter.
+      #
+      # The FILTER ONLY, deliberately — this answers "would this tool be here if the
+      # --read-only gate were lifted", which is the question the read-only sentence in
+      # `instructions` asks (it names what restarting would restore). Every other reader
+      # wants `serves?` below.
       def advertises?(name : String) : Bool
         (f = @tool_filter).nil? || f.allows?(name)
+      end
+
+      # Whether `tools/list` actually carries `name` — the `--tools` filter AND the
+      # `--read-only` gate, which are two different reasons a tool is absent and only one of
+      # which a restart reverses. Anything that tells the agent what it can CALL has to ask
+      # this one: `instructions` used to offer `delete_project` on a read-only server, where
+      # it is neither listed nor runnable.
+      def serves?(name : String) : Bool
+        Tools.serves?(@tool_filter, @allow_actions, name)
+      end
+
+      # How many tools this server's `tools/list` carries.
+      def served_count : Int32
+        Tools.served_names(@tool_filter, @allow_actions).size
+      end
+
+      # The ONE home for "is it in tools/list", asked of the two flags rather than of a
+      # server: `serves?` above reads it per name, `gori mcp` counts it for the start-up
+      # banner and refuses a `--tools` spec that leaves it empty. A second spelling of this
+      # rule is how the banner came to promise all 179 tools on a server about to advertise 62.
+      def self.serves?(filter : ToolFilter?, allow_actions : Bool, name : String) : Bool
+        (filter.nil? || filter.allows?(name)) && (allow_actions || !GATED_TOOLS.includes?(name))
+      end
+
+      # …and the whole set of them, in declaration order.
+      def self.served_names(filter : ToolFilter?, allow_actions : Bool) : Array(String)
+        TOOL_NAMES.select { |name| serves?(filter, allow_actions, name) }
       end
 
       # Where `operator_messages` starts reading (see `initialize` / `bind_project`).
@@ -915,7 +947,7 @@ module Gori
         return nil unless f
         return nil if f.allows?(name) || !TOOL_NAMES.includes?(name)
         err("tool '#{name}' is not served by this gori MCP server: it was started with " \
-            "--tools=#{f.spec.inspect}, which advertises #{f.size} of #{TOOL_NAMES.size} tools. " \
+            "--tools=#{f.spec.inspect}, which advertises #{served_count} of #{TOOL_NAMES.size} tools. " \
             "Everything available is in tools/list.", "UNKNOWN_TOOL")
       end
 

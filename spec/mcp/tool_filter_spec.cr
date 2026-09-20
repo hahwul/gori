@@ -97,4 +97,53 @@ describe Gori::MCP::ToolFilter do
       end
     end
   end
+
+  # `--tools` names tools; `--read-only` withholds them. Folding the gate into the name table
+  # `parse` resolves against made every action tool read as a MISSPELLING — including both
+  # examples `gori mcp --tools` prints in its own help — so the two are kept apart and put
+  # together in exactly one place.
+  describe "composing with --read-only" do
+    it "resolves an action tool's name that the gate will then withhold" do
+      # What `gori mcp` passes, and the whole of the fix: the full catalogue. Against the
+      # read-only subset this answered `"send_request" matches no tool`, which is the
+      # sentence a typo gets.
+      spec = "list_*,get_*,send_request"
+      filter = Gori::MCP::ToolFilter.parse(spec, Gori::MCP::Tools::TOOL_NAMES)
+      filter.should be_a(Gori::MCP::ToolFilter)
+      filter = filter.as(Gori::MCP::ToolFilter)
+      filter.names.should contain("send_request")
+
+      served = Gori::MCP::Tools.served_names(filter, allow_actions: false)
+      served.should_not contain("send_request") # withheld, not unknown
+      served.should contain("list_history")
+    end
+
+    # The one combination that still leaves nothing to serve — and the reason `gori mcp`
+    # refuses it by name rather than starting a server with an empty catalogue.
+    it "serves nothing when every selected tool is gated" do
+      filter = Gori::MCP::ToolFilter.parse("fuzz_*", Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter)
+      Gori::MCP::Tools.served_names(filter, allow_actions: false).should be_empty
+      Gori::MCP::Tools.served_names(filter, allow_actions: true).should_not be_empty
+    end
+
+    # The invariant the start-up banner and the `instructions` count both now rest on: this
+    # is the same set `tools/list` emits, for every combination of the two flags. The banner
+    # promised "all 179 tools" on a server about to advertise 62 because it counted the
+    # registry instead.
+    it "counts exactly what tools/list carries, under either flag" do
+      with_store do |store|
+        {nil, "list_*,get_*,send_request", "-fuzz_*,-mine_*", "*"}.each do |spec|
+          filter = spec.try { |sp| Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter) }
+          {true, false}.each do |allow_actions|
+            tools = Gori::MCP::Tools.new(store, allow_actions, false, tool_filter: filter)
+            listed = JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s).sort!
+            expected = Gori::MCP::Tools.served_names(filter, allow_actions).sort
+            listed.should eq(expected), "--tools=#{spec.inspect} allow_actions=#{allow_actions}"
+            tools.served_count.should eq(listed.size)
+            listed.each { |n| tools.serves?(n).should be_true }
+          end
+        end
+      end
+    end
+  end
 end
