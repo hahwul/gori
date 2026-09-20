@@ -15,6 +15,11 @@ module Gori::CLI::Run
   def self.ambiguous_project_name_for_spec(registry : Gori::ProjectRegistry, name : String) : Bool
     ambiguous_name?(registry, name)
   end
+
+  def self.delete_preview_verdict_for_spec(project : Gori::Project, locked : Bool,
+                                           open_elsewhere : Bool) : String
+    delete_preview_verdict(project, locked, open_elsewhere)
+  end
 end
 
 private def with_project_root(&)
@@ -111,6 +116,41 @@ describe "gori run project delete (preview)" do
       project.disk_size.should be > 0
     ensure
       FileUtils.rm_rf(root)
+    end
+  end
+
+  # `ProjectRegistry#delete` refuses on EITHER lock, so a preview that ends in "re-run with
+  # --yes" while one of them is held is promising a delete its own next step declines.
+  it "predicts the refusal instead of inviting --yes when the project is held" do
+    with_project_root do |registry|
+      project = registry.create("held proj")
+      free = Gori::CLI::Run.delete_preview_verdict_for_spec(project, false, false)
+      free.should contain("re-run with --yes")
+
+      # The case the preview used to miss entirely: nobody is capturing, a peer merely has
+      # the database open (an MCP server takes no capture lock and writes issues and notes
+      # all the same).
+      open_only = Gori::CLI::Run.delete_preview_verdict_for_spec(project, false, true)
+      open_only.should contain("held by another gori instance")
+      open_only.should_not contain("--yes to remove")
+
+      capturing = Gori::CLI::Run.delete_preview_verdict_for_spec(project, true, false)
+      capturing.should contain("held by a live capture")
+    end
+  end
+
+  # The probe behind the second half of that verdict, against a REAL open handle — the
+  # counts above run through a read-only Store of their own, so the preview has to ask
+  # after closing it or it finds its own lock and calls every project held.
+  it "reads a live peer's handle as 'open in another instance', and its own as not" do
+    with_project_root do |registry|
+      project = registry.create("lock proj")
+      Gori::OpenLock.in_use?(project.db_path).should be_false
+      with_project_store(project) do |_store|
+        Gori::OpenLock.in_use?(project.db_path).should be_true
+      end
+      Gori::CLI::Run.project_object_counts_for_spec(project) # opens and closes its own handle
+      Gori::OpenLock.in_use?(project.db_path).should be_false
     end
   end
 end

@@ -401,9 +401,23 @@ module Gori
 
       # What --yes would destroy. Exits NON-ZERO: this path removed nothing, and a script
       # that forgot --yes must not read a 0 as "it's gone".
+      #
+      # BOTH guards `ProjectRegistry#delete` applies, not only the capture lock. Reporting
+      # just that one, the preview said "Capture: not running" and "re-run with --yes" for a
+      # project an MCP server merely had OPEN — and `--yes` then refused it with "project is
+      # open in another gori instance — close it there first". The preview exists to describe
+      # the delete about to happen, so it must not promise one the confirmed call declines.
+      # MCP's dry run already reports both (`open_in_another_instance`), and the TUI picker
+      # splits the blocked targets off before it offers the confirm at all; this is the same
+      # pairing at the surface that missed it.
+      #
+      # After `project_object_counts`, which opens and closes a read-only handle of its own:
+      # probing while that handle is alive would find OUR OWN lock and report every project
+      # as held by a peer.
       private def self.print_delete_preview(registry : ProjectRegistry, project : Project, format : Symbol) : NoReturn
         flows, issues = project_object_counts(project)
         locked = capture_running?(project)
+        open_elsewhere = OpenLock.in_use?(project.db_path)
         if format == :json
           puts(JSON.build do |j|
             j.object do
@@ -419,6 +433,10 @@ module Gori
               j.field "db_size", project.db_size
               j.field "disk_size", project.disk_size
               j.field "capture_lock_held", locked
+              j.field "open_in_another_instance", open_elsewhere
+              # One field for "would --yes actually remove this", so a script does not have to
+              # re-derive the refusal rule from the two locks beside it.
+              j.field "deletable", !locked && !open_elsewhere
             end
           end)
         else
@@ -428,8 +446,22 @@ module Gori
           puts "Issues:   #{issues || "—"}"
           puts "On disk:  #{CLI::Output.human_size(project.disk_size)}"
           puts "Capture:  #{locked ? "RUNNING in another gori instance" : "not running"}"
+          puts "Open:     #{open_elsewhere ? "HELD by another gori instance (an MCP server, a second TUI, …)" : "no other instance"}"
         end
-        abort "gori run project delete: nothing deleted — re-run with --yes to remove #{project.dir}"
+        abort "gori run project delete: #{delete_preview_verdict(project, locked, open_elsewhere)}"
+      end
+
+      # The preview's closing line: what `--yes` would do from here. Spelled from the same two
+      # facts the guards above report, so the sentence cannot predict a delete that
+      # `ProjectRegistry#delete` is going to refuse a moment later.
+      private def self.delete_preview_verdict(project : Project, locked : Bool,
+                                              open_elsewhere : Bool) : String
+        return "nothing deleted — re-run with --yes to remove #{project.dir}" unless locked || open_elsewhere
+        # Capture named first when both are true: it is the more specific state (a capturer
+        # also holds the database open), and it is the one with an obvious next step.
+        held = locked ? "a live capture" : "another gori instance"
+        "nothing deleted — #{project.dir} is held by #{held}; " \
+        "--yes would be refused until it lets go"
       end
 
       # Is another live instance capturing into this project? CaptureLock.held? probes by
