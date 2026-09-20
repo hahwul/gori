@@ -30,6 +30,24 @@ module Gori
     # Lives inside the project dir, so it is never itself listed as a project.
     ID_FILE = ".id"
 
+    # Why a name gori will not make a directory out of was refused, in the one sentence the
+    # three surfaces print verbatim ("gori run project create: …", MCP's INVALID_ARGUMENT,
+    # the TUI picker's flash row). Bare "invalid project name" named the verdict and not the
+    # rule, so `!!!` and `...` read as gori being broken rather than as a name it cannot
+    # slugify. ADVICE, not the predicate: `#slugify` also keeps `_` and any non-ASCII
+    # character, so a name gori refuses is one made entirely of `.`, `-`, spaces and other
+    # ASCII punctuation — "add a letter or a digit" always fixes it, which is what an
+    # operator needs, while spelling the full rule here would only invite a second copy of
+    # it. See `#slugify` for why a dot-run must never become a path.
+    UNSLUGGABLE_NAME = "invalid project name: it needs at least one letter or digit"
+
+    # …and why a RENAME was refused, which is a different rule: a rename never touches the
+    # directory slug (see #rename), so the only name it cannot take is an empty one. Its own
+    # constant rather than a third wording at the call site: the TUI picker checks this before
+    # calling, and a picker disagreeing with the registry about the same refusal is the drift
+    # `UNSLUGGABLE_NAME` was extracted to stop.
+    BLANK_NAME = "invalid project name: it cannot be blank"
+
     def initialize(@root : String)
     end
 
@@ -181,7 +199,7 @@ module Gori
     def create_or_reopen(name : String, description : String = "") : {Project, Bool}
       display = name.strip
       slug = slugify(display)
-      raise Gori::Error.new("invalid project name") if slug.empty?
+      raise Gori::Error.new(UNSLUGGABLE_NAME) if slug.empty?
       slug = unique_slug(slug, display) # don't merge into a DIFFERENT project that slugifies alike
       dir = File.join(@root, slug)
       db_path = File.join(dir, Project::DB_FILE)
@@ -205,7 +223,7 @@ module Gori
       s = Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED)
       begin
         desc = description.strip
-        s.set_setting("description", desc) unless desc.empty?
+        s.set_setting(Project::DESCRIPTION_KEY, desc) unless desc.empty?
         # A BRAND-NEW database is born speaking this install's token grammar, so it says so. The
         # marker's absence means bare (every project written before namespaces existed carries no
         # marker), and a fresh namespaced project that left it absent would hand its first opener a
@@ -232,7 +250,7 @@ module Gori
 
       display = name.strip
       base_slug = slugify(display)
-      raise Gori::Error.new("invalid project name") if base_slug.empty?
+      raise Gori::Error.new(UNSLUGGABLE_NAME) if base_slug.empty?
 
       # The projects ROOT, not the project dir: the leaf below is claimed with a bare
       # `Dir.mkdir` for its atomicity, and that fails outright (ENOENT) when the root does
@@ -415,7 +433,7 @@ module Gori
     # names are rejected the same way create() rejects an unslugifiable name.
     def rename(project : Project, new_name : String) : Project
       display = new_name.strip
-      raise Gori::Error.new("invalid project name") if display.empty?
+      raise Gori::Error.new(BLANK_NAME) if display.empty?
       raise Gori::Error.new("project directory missing") unless Dir.exists?(project.dir)
       # A rename replaces a name that is already there, so it gets the same durable
       # replace as `create`'s — and unlike that one it is NOT best-effort: a rename the

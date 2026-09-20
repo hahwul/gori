@@ -21,7 +21,8 @@ module Gori::CLI::Run
     registry = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
     entries = counted.map do |project, flows|
       {Gori::ProjectRegistry::Entry.new(project, registry.id_of(project),
-        File.basename(project.dir), registry.workspace_of(project)), flows}
+        File.basename(project.dir), registry.workspace_of(project)),
+       Gori::Store::ProjectCensus.new(flows, nil)}
     end
     project_list_rows(entries, default_db, active_db, all)
   end

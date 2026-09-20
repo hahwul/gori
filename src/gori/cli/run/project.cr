@@ -84,6 +84,7 @@ module Gori
       record ProjectListRow,
         entry : ProjectRegistry::Entry,
         flows : Int64?,
+        description : String?,
         current : Bool,
         tui_active : Bool do
         def project : Project
@@ -120,12 +121,12 @@ module Gori
       # answer to "which project am I on?", quietly pointing at the wrong project.
       #
       # Pure and separately testable: the census and `$GORI_HOME` are the caller's problem.
-      private def self.project_list_rows(counted : Array({ProjectRegistry::Entry, Int64?}),
+      private def self.project_list_rows(counted : Array({ProjectRegistry::Entry, Store::ProjectCensus}),
                                          default_db : String?, active_db : String?,
                                          all : Bool) : Array(ProjectListRow)
         wanted = active_db.try { |path| Paths.canonical_file(path) }
-        rows = counted.map do |entry, flows|
-          ProjectListRow.new(entry, flows,
+        rows = counted.map do |entry, census|
+          ProjectListRow.new(entry, census.flows, census.description,
             current: !default_db.nil? && entry.project.db_path == default_db,
             tui_active: !wanted.nil? && Paths.canonical_file(entry.project.db_path) == wanted)
         end
@@ -160,7 +161,10 @@ module Gori
         # database open instead of hundreds.
         needle = ProjectRegistry.needle(query)
         matched = needle ? entries.select(&.matches?(needle)) : entries
-        counted = matched.map { |entry| {entry, Store.captured_flows(entry.project.db_path)} }
+        # ONE pass per project, carrying both things the listing prints — see
+        # `Store.project_census`: the description used to need a second open, which is why
+        # nothing headless ever reported it.
+        counted = matched.map { |entry| {entry, Store.project_census(entry.project.db_path)} }
         # The default is the head of the WHOLE registry, read before `--query` narrowed
         # anything — see `project_list_rows`.
         default_db = ProjectRegistry.default_of(entries.map(&.project)).try(&.db_path)
@@ -183,6 +187,10 @@ module Gori
                   j.field "last_modified", pr.last_modified.try(&.to_unix)
                   j.field "time", pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%dT%H:%M:%S%:z") }
                   j.field "flows", row.flows
+                  # What the project is FOR, as `project create --description` and MCP
+                  # `create_project` store it. Written by this very command and readable
+                  # nowhere headless until now — MCP `project_info` is its other reader.
+                  j.field "description", row.description
                   j.field "current", row.current
                   j.field "tui_active", row.tui_active
                 end
@@ -401,9 +409,23 @@ module Gori
 
       # What --yes would destroy. Exits NON-ZERO: this path removed nothing, and a script
       # that forgot --yes must not read a 0 as "it's gone".
+      #
+      # BOTH guards `ProjectRegistry#delete` applies, not only the capture lock. Reporting
+      # just that one, the preview said "Capture: not running" and "re-run with --yes" for a
+      # project an MCP server merely had OPEN — and `--yes` then refused it with "project is
+      # open in another gori instance — close it there first". The preview exists to describe
+      # the delete about to happen, so it must not promise one the confirmed call declines.
+      # MCP's dry run already reports both (`open_in_another_instance`), and the TUI picker
+      # splits the blocked targets off before it offers the confirm at all; this is the same
+      # pairing at the surface that missed it.
+      #
+      # After `project_object_counts`, which opens and closes a read-only handle of its own:
+      # probing while that handle is alive would find OUR OWN lock and report every project
+      # as held by a peer.
       private def self.print_delete_preview(registry : ProjectRegistry, project : Project, format : Symbol) : NoReturn
         flows, issues = project_object_counts(project)
         locked = capture_running?(project)
+        open_elsewhere = OpenLock.in_use?(project.db_path)
         if format == :json
           puts(JSON.build do |j|
             j.object do
@@ -418,7 +440,14 @@ module Gori
               j.field "issues", issues
               j.field "db_size", project.db_size
               j.field "disk_size", project.disk_size
+              # NULL is a third answer, not a missing one: the probe itself can fail (see
+              # `capture_running?`), and reporting that as `false` is the same lie as
+              # reporting it as "not held" — `deletable` below folds it in.
               j.field "capture_lock_held", locked
+              j.field "open_in_another_instance", open_elsewhere
+              # One field for "would --yes actually remove this", so a script does not have to
+              # re-derive the refusal rule from the two locks beside it.
+              j.field "deletable", locked == false && !open_elsewhere
             end
           end)
         else
@@ -427,20 +456,59 @@ module Gori
           puts "Flows:    #{flows || "—"}"
           puts "Issues:   #{issues || "—"}"
           puts "On disk:  #{CLI::Output.human_size(project.disk_size)}"
-          puts "Capture:  #{locked ? "RUNNING in another gori instance" : "not running"}"
+          puts "Capture:  #{capture_line(locked)}"
+          puts "Open:     #{open_elsewhere ? "HELD by another gori instance (an MCP server, a second TUI, …)" : "no other instance"}"
         end
-        abort "gori run project delete: nothing deleted — re-run with --yes to remove #{project.dir}"
+        abort "gori run project delete: #{delete_preview_verdict(project, locked, open_elsewhere)}"
       end
 
-      # Is another live instance capturing into this project? CaptureLock.held? probes by
+      private def self.capture_line(locked : Bool?) : String
+        case locked
+        when true  then "RUNNING in another gori instance"
+        when false then "not running"
+        else            "UNKNOWN — the capture lock could not be probed"
+        end
+      end
+
+      # The preview's closing line: what `--yes` would do from here. Spelled from the same two
+      # facts the guards above report, so the sentence cannot predict a delete that
+      # `ProjectRegistry#delete` is going to refuse a moment later.
+      #
+      # `locked` is TRISTATE and the nil arm is not a rounding error: `ProjectRegistry#delete`
+      # refuses a project whose capture lock it cannot probe ("cannot check the capture lock
+      # for \u2026"), so folding "unknown" into "not running" would put this sentence right back
+      # to inviting a `--yes` that aborts — the defect the rest of this method exists to close,
+      # one state over.
+      private def self.delete_preview_verdict(project : Project, locked : Bool?,
+                                              open_elsewhere : Bool) : String
+        return "nothing deleted — re-run with --yes to remove #{project.dir}" if locked == false && !open_elsewhere
+        reason = case
+                 # Capture named first when several are true: it is the most specific answer
+                 # (a capturer also holds the database open), and the one with an obvious
+                 # next step.
+                 when locked      then "is held by a live capture"
+                 when locked.nil? then "has a capture lock this command cannot read — check the directory's permissions"
+                 else                  "is held by another gori instance"
+                 end
+        "nothing deleted — #{project.dir} #{reason}; " \
+        "--yes would be refused until that clears"
+      end
+
+      # Is another live instance capturing into this project? `CaptureLock.held?` probes by
       # ACQUIRING the lock (it creates the lock file and re-raises anything that is not
-      # contention), so a project directory this user can read but not write would blow up a
-      # command that promised to only look. Unknown reads as "not running" here; the delete
-      # itself re-probes through ProjectRegistry#delete, which is where being wrong matters.
-      private def self.capture_running?(project : Project) : Bool
+      # contention), so a project directory this user can read but not write raises here —
+      # and a command that promised to only look must not blow up on that.
+      #
+      # nil is UNKNOWN, not "no". It used to be `false`, on the reasoning that "the delete
+      # itself re-probes through ProjectRegistry#delete, which is where being wrong matters"
+      # — and that was exactly backwards: `delete` re-probes and REFUSES on the same failure,
+      # so a preview calling it "not running" ended in "re-run with --yes" for a delete that
+      # then aborted with "cannot check the capture lock for \u2026". Three states, reported as
+      # three (`capture_line`, `deletable`, `delete_preview_verdict`).
+      private def self.capture_running?(project : Project) : Bool?
         CaptureLock.held?(project.dir)
       rescue
-        false
+        nil
       end
 
       # Flow + issue counts for the delete preview, from a short-lived READ-ONLY handle of its

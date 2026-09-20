@@ -288,4 +288,27 @@ describe "MCP agent ergonomics" do
       end
     end
   end
+
+  # `create_project{description}` and `gori run project create --description` both STORE the
+  # operator's note about what this engagement is for, and until now nothing headless ever
+  # handed it back: an agent could write it and then never read it, its own included. The
+  # orienting call is where it belongs — this one already holds the store open, while
+  # `list_projects` deliberately opens no databases.
+  describe "project_info description" do
+    it "reads back the description a project was created with" do
+      with_store do |store|
+        store.set_setting(Gori::Project::DESCRIPTION_KEY, "staging sweep, prod is out of scope")
+        info = erg_json(tools_for(store), "project_info", "{}")
+        info["description"].as_s.should eq("staging sweep, prod is out of scope")
+      end
+    end
+
+    it "is null for a project that was never described" do
+      with_store do |store|
+        info = erg_json(tools_for(store), "project_info", "{}")
+        info.as_h.has_key?("description").should be_true # the field is always present
+        info["description"].raw.should be_nil
+      end
+    end
+  end
 end
