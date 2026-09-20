@@ -622,6 +622,24 @@ describe Gori::MCP::Server do
         resp["structuredContent"]["field"].as_s.should eq("kind")
         # The message enumerates the kinds; an agent that guessed wrong gets the real list.
         resp["content"][0]["text"].as_s.should contain("postman")
+        # …and it quotes back the value it refused, so the agent can see it was READ.
+        resp["content"][0]["text"].as_s.should contain(%("csv"))
+      end
+    end
+
+    # ABSENT and WRONG are two different mistakes, and only one of them has a value to look
+    # at again. "invalid 'kind'" for an argument that was never sent reads as a rejected
+    # value, which an agent answers by re-spelling the one it did send — `path` one line down
+    # in the same handler has always said this correctly.
+    it "says an omitted kind is MISSING, not invalid" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"path":"/tmp/x"}}})
+        resp = mcp_drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["field"].as_s.should eq("kind")
+        text = resp["content"][0]["text"].as_s
+        text.should contain("missing required 'kind'")
+        text.should contain("har")
       end
     end
 

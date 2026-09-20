@@ -1596,7 +1596,7 @@ module Gori
           s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length). A session that never came from a flow and still holds §…§ markers is REFUSED — the Repeater tab renders them and this path cannot")
           s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id/repeater_id is given)")
           s.field "method", strprop("HTTP method (default GET)")
-          s.field "headers", objprop("header name->value map")
+          s.field "headers", header_map_prop("request headers: a name->value map, or the [{\"name\":\"Cookie\",\"value\":\"a=1\"}] list the session-slot and authorize tools take")
           s.field "body", strprop("request body, sent as-is")
           s.field "body_base64", strprop("request body as base64 — the byte-exact form, and it works on BOTH the url/HTTP1.1 path and the h2_fields path. Use it whenever the body is not UTF-8 (binary, protobuf/gRPC, gzip, a multipart upload, an overlong-UTF-8 traversal payload) or carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8) — 'body' is sent as its UTF-8 encoding. Wins over 'body' and gets no project env expansion. A declared session binding or $GEN token still resolves at the send seam, in the body as well as the head (and Content-Length follows it) — pass verbatim:true if the bytes must reach the origin exactly as given")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")

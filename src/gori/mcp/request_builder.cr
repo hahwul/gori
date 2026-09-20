@@ -39,6 +39,24 @@ module Gori
         end
         if arr = node.as_a?
           return arr.map do |item|
+            # `[{"name": …, "value": …}, …]` is the OTHER spelling of a header set on this
+            # same server — it is what `create_session_slot{set_headers}` and
+            # `authorize_start{identities}` take — so an agent that has read one schema sends
+            # it here too. Refusing it made `send_request` the odd tool out for a shape gori
+            # itself taught the model; the two keys together are unambiguous.
+            if o = item.as_h?
+              # `presence`, not `o["name"]?`: a `JSON::Any` wrapping nil is TRUTHY (which is
+              # why this method's own entry guard is `raw.nil? || raw.raw.nil?`), so a null or
+              # empty name would reach the wire as `": value"` — and `discover_start` formats
+              # that pair into a line with nothing left to name what the caller wrote, which
+              # is the refusal the sibling fix in `session_slots.cr` exists to prevent.
+              n = o["name"]?.try(&.as_s?).try(&.strip).presence
+              v = o["value"]?
+              raise Gori::Error.new(
+                "invalid 'headers' (an object entry must be {\"name\": …, \"value\": …} with a " \
+                "non-empty name; a name->value map goes in 'headers' itself, not in a list)") unless n && v && !v.raw.nil?
+              next {n, v.as_s? || v.to_s}
+            end
             pair = item.as_a?
             raise Gori::Error.new("invalid 'headers' (array form must hold [name, value] pairs)") unless pair && pair.size == 2
             {pair[0].as_s? || pair[0].to_s, pair[1].as_s? || pair[1].to_s}

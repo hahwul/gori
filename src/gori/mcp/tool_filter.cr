@@ -2,14 +2,20 @@ require "levenshtein"
 
 module Gori
   module MCP
-    # `gori mcp --tools=SPEC` — which of the 160 tools this server advertises.
+    # `gori mcp --tools=SPEC` — which of `Tools::TOOL_NAMES` this server advertises.
     #
-    # The whole catalogue is ~172 KB of JSON, or roughly 43,000 tokens, and an MCP client
-    # loads it into the model's context before the first question is asked and keeps it there
-    # for the session. `--read-only` was the only lever, and it cuts one specific way (down to
-    # 53 tools / ~12k tokens) — there was no way to say "history and flows, plus send_request,
-    # and none of the fuzz/mine/discover/authorize workbench", which is most of what an agent
-    # attached to a capture actually needs.
+    # The whole catalogue is ~43,000 tokens, and an MCP client loads it into the model's
+    # context before the first question is asked and keeps it there for the session.
+    # `--read-only` was the only lever, and it cuts one specific way (to the tools that
+    # neither write nor dial) — there was no way to say "history and flows, plus
+    # send_request, and none of the fuzz/mine/discover/authorize workbench", which is most of
+    # what an agent attached to a capture actually needs.
+    #
+    # The two flags are INDEPENDENT and compose: a spec is resolved against the whole
+    # catalogue, whatever the gate is doing, so `--read-only --tools='…,send_request'` names
+    # a tool that exists and is then withheld — it is not a misspelling. `gori mcp` refuses
+    # the one combination that leaves nothing to serve, and `Tools.served_names` is the one
+    # place the two are put together.
     #
     # SPEC is a comma-separated list of tool names and `*` globs, evaluated left to right; a
     # term prefixed with `-` subtracts. Globs mean the prefix families the tools are already
@@ -32,8 +38,8 @@ module Gori
       private def initialize(@spec, @allowed)
       end
 
-      # Parses SPEC against `known` (the registry's full name list, already narrowed by
-      # --read-only where that applies). Returns the filter, or the message to abort with.
+      # Parses SPEC against `known` — the registry's full name list, and only ever that.
+      # Returns the filter, or the message to abort with.
       def self.parse(spec : String, known : Enumerable(String)) : ToolFilter | String
         terms = spec.split(',').map(&.strip).reject(&.empty?)
         return "--tools: no tool patterns given" if terms.empty?

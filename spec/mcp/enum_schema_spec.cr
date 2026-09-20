@@ -204,4 +204,29 @@ describe "MCP closed-set arguments" do
       offenders.should eq([] of String)
     end
   end
+
+  # The same rule applied to a UNION rather than a closed set. `RequestBuilder.header_pairs`
+  # takes a `headers` argument in two documented shapes — the name->value map, and the
+  # `[{name, value}]` list `create_session_slot`/`authorize_start` take — and a client that
+  # validates against `inputSchema` refuses the call before gori ever sees it, so a shape the
+  # reader takes and the schema does not is a shape the agent cannot actually send.
+  describe "the headers union" do
+    it "declares both shapes its reader accepts, on every tool that takes one" do
+      with_store do |store|
+        listing = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+        %w[send_request discover_start].each do |name|
+          prop = listing.find { |t| t["name"].as_s == name }.not_nil!["inputSchema"]["properties"]["headers"].as_h
+          branches = prop["oneOf"].as_a.map(&.["type"].as_s)
+          branches.should contain("object"), "#{name}.headers drops the map form"
+          branches.should contain("array"), "#{name}.headers drops the [{name, value}] form"
+        end
+        # …and the reader really does take one value of each branch, so the declaration is
+        # not a second answer that can drift from it.
+        [%({"Authorization":"Bearer T"}),
+         %([{"name":"Authorization","value":"Bearer T"}])].each do |shape|
+          Gori::MCP::RequestBuilder.header_pairs(JSON.parse(shape)).should eq([{"Authorization", "Bearer T"}])
+        end
+      end
+    end
+  end
 end

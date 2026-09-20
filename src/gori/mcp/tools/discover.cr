@@ -401,7 +401,7 @@ module Gori
           s.field "max_depth", intprop("spider depth from the seed (default 4, max #{DISCOVER_MAX_DEPTH})")
           s.field "wordlist", strprop("path to an extra path wordlist (merged with the built-in list)")
           s.field "extensions", strprop("comma list of extensions to also probe (e.g. php,json,bak)")
-          s.field "headers", objprop("custom request-header name->value map added to every probe (e.g. Authorization/Cookie); overrides Accept/User-Agent, Host/Connection are ignored")
+          s.field "headers", header_map_prop("custom request headers added to every probe (e.g. Authorization/Cookie): a name->value map, or a [{\"name\",\"value\"}] list; overrides Accept/User-Agent, Host/Connection are ignored")
           s.field "containment", enumprop("how far off the seed the crawl may wander (default scope-aware)", DISCOVER_CONTAINMENTS)
           s.field "concurrency", intprop("parallel requests (default 20, max #{DISCOVER_MAX_CONCURRENCY})")
           s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")

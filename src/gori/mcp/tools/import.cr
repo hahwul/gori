@@ -22,10 +22,18 @@ module Gori
 
       @[Tool("import_flows", gated: true, agent_action: true)]
       private def import_flows(h) : Result
-        kind_s = str(h, "kind").try(&.strip.downcase)
-        kind = kind_s.try { |k| KINDS[k]? }
-        unless kind_s && kind
-          return err("invalid 'kind' (expected #{KINDS.keys.join("|")})", "INVALID_ARGUMENT", field: "kind")
+        kind_s = str(h, "kind").try(&.strip.downcase).presence
+        # ABSENT and WRONG are two different mistakes, and only one of them is a value to
+        # look at again. "invalid 'kind'" for an argument that was never sent reads as a
+        # rejected value, which is the sentence an agent answers by re-spelling the one it
+        # did send — `path` one line below has always said this correctly.
+        unless kind_s
+          return err("missing required 'kind' (expected #{KINDS.keys.join("|")})",
+            "INVALID_ARGUMENT", field: "kind")
+        end
+        unless kind = KINDS[kind_s]?
+          return err("invalid 'kind' #{kind_s.inspect} (expected #{KINDS.keys.join("|")})",
+            "INVALID_ARGUMENT", field: "kind")
         end
         path = str(h, "path").try(&.strip)
         return err("missing required 'path'", "INVALID_ARGUMENT", field: "path") if path.nil? || path.empty?

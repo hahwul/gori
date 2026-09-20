@@ -50,4 +50,43 @@ describe "MCP handshake (#1090)" do
       end
     end
   end
+
+  # …and not declaring it must not UNdeclare it. The latch the courier reads used to be
+  # written inside the capabilities builder, which `server/discover` also calls — so a
+  # dual-era client that handshook and then probed discovery once had its channel route
+  # silently retired for the rest of the session. The push is the only way to see the latch
+  # from outside, so this drives a real courier: the operator's line has to come back out as
+  # a `claude/channel` frame AFTER the probe.
+  it "keeps a declared channel across a server/discover probe" do
+    reader, writer = IO.pipe
+    prev = Gori::Settings.mcp_channels?
+    begin
+      Gori::Settings.mcp_channels = true
+      with_store do |store|
+        output = IO::Memory.new
+        writer.puts(%({"jsonrpc":"2.0","id":1,"method":"initialize","params":) +
+                    %({"protocolVersion":"2025-06-18","clientInfo":{"name":"claude-code"}}}))
+        writer.puts(%({"jsonrpc":"2.0","id":2,"method":"server/discover"}))
+        writer.flush
+        spawn do
+          # The courier starts on the discovery answer and anchors its cursor at the feed's
+          # end, so the message is posted only once that answer is out — otherwise it is
+          # behind the cursor and no route would ever be asked for it.
+          100.times { break if output.to_s.includes?(%("id":2)); sleep 10.milliseconds }
+          store.post_agent_message("the operator is asking", "all", nil)
+          # `notifications/…`, not `claude/channel`: the handshake reply above already
+          # carries that name, as the capability it declares.
+          100.times { break if output.to_s.includes?("notifications/claude/channel"); sleep 20.milliseconds }
+          writer.close rescue nil
+        end
+        Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          input: reader, output: output).run
+        output.to_s.should contain("notifications/claude/channel")
+      end
+    ensure
+      Gori::Settings.mcp_channels = prev
+      reader.try(&.close) rescue nil
+      writer.try(&.close) rescue nil
+    end
+  end
 end

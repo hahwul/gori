@@ -43,7 +43,11 @@ end
 describe "MCP instructions truthfulness" do
   it "never names a tool the server does not advertise, under any filter" do
     with_store do |store|
-      {nil, "*", "list_*", "get_*,decode", "ql_*", "send_request", "-fuzz_*,-mine_*"}.each do |spec|
+      # `list_*,operator_messages` is in the set because the operator-messages paragraph names
+      # TWO tools and was admitted on one of them — a filter that keeps the poll tool and not
+      # the reply tool is the shape that catches it.
+      {nil, "*", "list_*", "get_*,decode", "ql_*", "send_request", "-fuzz_*,-mine_*",
+       "list_*,operator_messages", "reply_to_operator,get_*"}.each do |spec|
         text, names = instructions_under(store, spec)
         leaked = named_in(text) - names
         leaked.should be_empty, "--tools=#{spec.inspect} instructions name #{leaked.to_a.sort.join(", ")}, which tools/list does not carry"
@@ -64,6 +68,21 @@ describe "MCP instructions truthfulness" do
       narrowed, listed = instructions_under(store, "list_*", allow_actions: false)
       named_in(narrowed).should_not contain("send_request")
       (named_in(narrowed) - listed).should be_empty
+    end
+  end
+
+  # …and every OTHER sentence is held to the same rule as under `--tools`, which is where
+  # this leaked: "Projects can be managed via …, delete_project" went out to every read-only
+  # server, offering a gated tool that is neither listed nor runnable. The read-only sentence
+  # is the ONE allowed to name an absent tool, so it is subtracted by name rather than by
+  # trusting the whole paragraph.
+  it "names no gated tool outside the sentence that exists to name them" do
+    with_store do |store|
+      text, listed = instructions_under(store, nil, allow_actions: false)
+      restored = text.split("Read-only mode:")[1]?.try(&.split(". ").first) || ""
+      leaked = named_in(text) - listed - named_in(restored)
+      leaked.should be_empty, "read-only instructions name #{leaked.to_a.sort.join(", ")}, which tools/list does not carry"
+      listed.should_not contain("delete_project")
     end
   end
 

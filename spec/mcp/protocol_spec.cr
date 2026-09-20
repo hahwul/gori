@@ -20,6 +20,39 @@ private def modern(store, method : String, params : String = "") : JSON::Any
   mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!
 end
 
+# A one-shot loopback origin for the batch/ping example. It answers the request the batch's
+# `send_request` makes — and the moment that request arrives, it writes `line` onto the
+# server's OWN stdin. That is what puts a frame in front of the reader fiber while the worker
+# is parked inside `handle_batch`, with nothing here timed. The pipe is hung up straight
+# after, so the reader reaches EOF and `run` returns once the worker has drained.
+private def poking_origin(line : String, writer : IO) : Int32
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  spawn do
+    # `serve` as a call and not a block over the accept loop: a block captures the loop
+    # variable (spec/support and src/gori/proxy/server.cr both carry the scar).
+    conn = server.accept?
+    poke_and_answer(conn, line, writer) if conn
+    server.close rescue nil
+  rescue
+    server.close rescue nil
+  end
+  port
+end
+
+private def poke_and_answer(conn : TCPSocket, line : String, writer : IO) : Nil
+  while (l = conn.gets("\r\n", chomp: true)) && !l.empty?
+  end
+  writer.puts(line)
+  writer.flush
+  writer.close
+  conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+  conn.flush rescue nil
+  conn.close rescue nil
+rescue
+  conn.close rescue nil
+end
+
 private def legacy(store, method : String, params : String = "{}") : JSON::Any
   init = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}})
   line = %({"jsonrpc":"2.0","id":7,"method":"#{method}","params":#{params}})
@@ -106,6 +139,40 @@ describe "MCP protocol version negotiation" do
       mixed = "[" + %({"jsonrpc":"2.0","id":8,"method":"tools/list","params":{}}) + "]"
       mcp_drive(store, mixed)[0].as_a[0]["result"]["tools"].as_a.should_not be_empty
     end
+  end
+
+  # …and that refusal is the BATCH MEMBER's, not the connection's. `ping` is answered by the
+  # READER, ahead of a queue that may be minutes deep, which is the whole reason the server
+  # splits reader from worker — and `@batch` is the worker's, so a modern liveness probe
+  # arriving while the worker happened to be mid-batch was refused for being inside an array
+  # it was never part of. A client whose pings go unanswered decides the server is dead and
+  # kills it mid-call, which is exactly the call it was waiting on.
+  it "answers a modern ping that arrives while another fiber is running a batch" do
+    reader, writer = IO.pipe
+    with_store do |store|
+      ping = %({"jsonrpc":"2.0","id":8,"method":"ping","params":{#{META}}})
+      port = poking_origin(ping, writer)
+      batch = "[" + %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"send_request",) +
+              %("arguments":{"url":"http://127.0.0.1:#{port}/","allow_unscoped":true}}}) + "]"
+      writer.puts(batch)
+      writer.flush
+      output = IO::Memory.new
+      Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+        input: reader, output: output).run
+      lines = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
+
+      # The batch still left as one array, with its member's answer in it…
+      array = lines.find(&.as_a?).not_nil!.as_a
+      array.size.should eq(1)
+      array[0]["id"].as_i.should eq(7)
+      # …and the ping got a real result, on its own frame, beside it.
+      pong = lines.find { |l| l.as_h? && l["id"]? == 8 }.not_nil!
+      pong["error"]?.should be_nil
+      pong["result"]["resultType"].as_s.should eq("complete")
+    end
+  ensure
+    reader.try(&.close) rescue nil
+    writer.try(&.close) rescue nil
   end
 
   # Nothing here is paginated, so any cursor a client sends is one this server never minted.
