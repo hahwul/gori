@@ -571,10 +571,11 @@ describe "Gori::Probe::Active (manual run estimate)" do
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
       est = a.active_estimate(detail)
       # reflected_param, cors_reflection, backslash_powered all apply — plus crlf_injection, ssti,
-      # and sqli_error_based, which reuse the same reflectable-query-param gate.
-      est.map(&.info.id).sort!.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "reflected_param", "sqli_error_based", "ssti"])
-      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤8) + crlf_injection (1) + ssti (2) + sqli_error_based (≤5) = 18
-      est.sum(&.requests.end).should eq(18)
+      # and sqli_error_based, which reuse the same reflectable-query-param gate; insecure_http_methods
+      # applies to any flow (it sends its own OPTIONS/TRACE, deduped per host).
+      est.map(&.info.id).sort!.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "insecure_http_methods", "reflected_param", "sqli_error_based", "ssti"])
+      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤8) + crlf_injection (1) + ssti (2) + sqli_error_based (≤5) + insecure_http_methods (2) = 20
+      est.sum(&.requests.end).should eq(20)
     end
   end
 
@@ -587,25 +588,27 @@ describe "Gori::Probe::Active (manual run estimate)" do
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
       # RULES order (cors_reflection disabled): reflected_param, backslash_powered, sqli_error_based,
-      # then the other reflectable-query-param rules crlf_injection and ssti.
-      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered", "sqli_error_based", "crlf_injection", "ssti"])
+      # then the other reflectable-query-param rules crlf_injection and ssti, then the host-level
+      # insecure_http_methods (last in the registry, applies to any flow).
+      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered", "sqli_error_based", "crlf_injection", "ssti", "insecure_http_methods"])
     end
   end
 
-  it "estimates zero for an unsafe-method / paramless / non-CORS flow" do
+  it "estimates only the host-level check for an unsafe-method / paramless / non-CORS flow" do
     with_store do |store|
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
-      # POST is never probed under the default (safe-only) estimate…
+      # No param/CORS/denied signal ⇒ only insecure_http_methods (OPTIONS/TRACE, path/param- and
+      # method-independent) applies; the targeted param checks do not.
       post = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/x?q=1", method: "POST")
-      a.active_estimate(post).should be_empty
+      a.active_estimate(post).map(&.info.id).should eq(["insecure_http_methods"])
       # …but the allow_unsafe estimate (the run popup's opt-in) surfaces the reflectable-param check.
       unsafe_est = a.active_estimate(post, Gori::Probe::Active::Options.new(allow_unsafe: true))
       unsafe_est.map(&.info.id).should contain("reflected_param")
-      # GET with no params + no ACAO has nothing to test, opt-in or not.
+      # GET with no params + no ACAO has nothing param-shaped to test, opt-in or not.
       bare = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/nothing")
-      a.active_estimate(bare).should be_empty
-      a.active_estimate(bare, Gori::Probe::Active::Options.new(allow_unsafe: true)).should be_empty
+      a.active_estimate(bare).map(&.info.id).should eq(["insecure_http_methods"])
+      a.active_estimate(bare, Gori::Probe::Active::Options.new(allow_unsafe: true)).map(&.info.id).should eq(["insecure_http_methods"])
     end
   end
 

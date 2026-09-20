@@ -19,6 +19,9 @@ require "./active/request_smuggling"
 require "./active/ssrf_oast"
 require "./active/xxe_oast"
 require "./active/cmd_injection_oast"
+require "./active/ratelimit_bypass"
+require "./active/forbidden_method_bypass"
+require "./active/insecure_http_methods"
 require "../outbound"
 require "../scope"
 require "../fuzz/engine"
@@ -46,7 +49,9 @@ module Gori
                CrlfInjection.new, PathNormalizationBypass.new,
                UrlRewriteBypass.new, Ssti.new,
                NextjsActionNoAuth.new, RequestSmuggling.new,
-               SsrfOast.new, CmdInjectionOast.new, XxeOast.new] of Rule
+               SsrfOast.new, CmdInjectionOast.new, XxeOast.new,
+               RateLimitBypass.new, ForbiddenMethodBypass.new,
+               InsecureHttpMethods.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.
