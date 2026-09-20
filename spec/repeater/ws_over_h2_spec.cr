@@ -184,6 +184,11 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
         .should be_false
     end
 
+    it "does not turn an HTTP/1.x CONNECT carrying the marker name into an h2 send" do
+      WS.extended_connect_request?(
+        "CONNECT example.com:443 HTTP/1.1\r\nX-Gori-Protocol: websocket\r\n\r\n").should be_false
+    end
+
     it "keeps the h1 and h2 halves apart and unites them in replayable?" do
       h2 = String.new(connect_head(443))
       h1 = "GET /ws HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\n\r\n"

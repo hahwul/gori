@@ -492,8 +492,24 @@ describe Gori::Repeater::WsEngine do
       WsEngine.upgrade_request?("GET /ws HTTP/1.1\r\nUpgrade:websocket\r\n\r\n").should be_true
     end
 
+    it "reads Upgrade as a token list across repeated field lines" do
+      WsEngine.upgrade_request?(
+        "GET /ws HTTP/1.1\r\nUpgrade: h2c, websocket\r\n\r\n").should be_true
+      WsEngine.upgrade_request?(
+        "GET /ws HTTP/1.1\r\nUpgrade: websocket, h2c\r\n\r\n").should be_true
+      WsEngine.upgrade_request?(
+        "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nUpgrade: h2c\r\n\r\n").should be_true
+    end
+
     it "does not match a mid-line 'upgrade: websocket' inside another header value" do
       WsEngine.upgrade_request?("GET / HTTP/1.1\r\nX-Note: please upgrade: websocket\r\n\r\n").should be_false
+    end
+
+    it "requires an exact token in the header block" do
+      WsEngine.upgrade_request?(
+        "GET / HTTP/1.1\r\nUpgrade: websocket-v2\r\n\r\n").should be_false
+      WsEngine.upgrade_request?(
+        "POST / HTTP/1.1\r\nContent-Length: 20\r\n\r\nUpgrade: websocket\r\n").should be_false
     end
 
     it "is false for an ordinary request" do

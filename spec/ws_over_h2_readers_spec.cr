@@ -101,6 +101,13 @@ describe "Store::FlowDetail#websocket? — one predicate, both transports" do
     end
   end
 
+  it "recognises the websocket member inside an HTTP/1.1 Upgrade list" do
+    with_store do |store|
+      h1_ws_flow(store, upgrade: "h2c, websocket").websocket?.should be_true
+      h1_ws_flow(store, upgrade: "websocket-v2").websocket?.should be_false
+    end
+  end
+
   # The ANSWER is required on both sides. A handshake the origin rejected never opened a
   # socket, and HAR must keep exporting it as the ordinary failed request it is.
   it "is false for a handshake the origin refused, on either transport" do

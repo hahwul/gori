@@ -80,7 +80,10 @@ module Gori::Proxy::Codec
 
     # Is `token` one of `value`'s comma-separated members, with OWS trimmed? Byte-wise over the
     # value so a long `Connection`/`Upgrade` field costs no Array and no per-member String.
-    protected def self.list_member?(value : String, token : String) : Bool
+    # Public for classifiers that hold a raw head rather than a parsed `HeaderList` (notably
+    # the stored/replay WebSocket handshake predicate). Keeping the member grammar here makes
+    # a live parsed handshake and a raw stored one answer the same token question.
+    def self.list_member?(value : String, token : String) : Bool
       bytes = value.to_slice
       start = 0
       pos = 0

@@ -36,32 +36,45 @@ module Gori::Proxy::WS
     payload.size >= prefix.size && payload[0, prefix.size] == prefix
   end
 
-  # A request head declares an HTTP/1.1 WebSocket upgrade. Matches the `Upgrade: websocket`
-  # header case-insensitively (RFC 6455: the token is case-insensitive; browsers send
-  # lowercase, but `Upgrade: WebSocket` and no-space forms are equally valid), tolerating
-  # flexible whitespace after the colon.
+  # A request head declares an HTTP/1.1 WebSocket upgrade. `Upgrade` is a list-valued field,
+  # so the answer is the presence of the exact `websocket` MEMBER across every field line —
+  # not a string prefix. That is the same question `Handshake.upgrades_to_websocket?` asks on
+  # the live proxy path. The distinction is observable at both edges: `h2c, websocket` is a
+  # valid declaration, while `websocket-v2` and a body line beginning `Upgrade: websocket`
+  # are not.
   #
   # Here for the same reason `NOTICE_PREFIX` is: the READERS outnumber the writers and they
   # live outside the proxy. `Repeater::WsEngine` owned this regex, and `store/models.cr`
   # cannot require `ws_engine.cr` (→ `flow_request.cr` → `store.cr`, a cycle back into the
-  # file that would be asking). `WsEngine::UPGRADE_HEADER` and `Store::FlowDetail#websocket?`
-  # both defer here, so "is this an RFC 6455 handshake?" has exactly one spelling.
+  # file that would be asking). `WsEngine` and `Store::FlowDetail#websocket?` both defer here,
+  # so "is this an RFC 6455 handshake?" has exactly one spelling.
   #
   # This is the HTTP/1.1 half ONLY. RFC 8441 replaces the handshake with an extended CONNECT
   # carrying a `:protocol` pseudo-header and no `Upgrade:` field at all, so an h2 socket
   # answers false here and is recognised by `Store::FlowDetail#websocket?` instead.
-  UPGRADE_HEADER = /(?:^|\n)upgrade:[ \t]*websocket/i
-
   # `head` is a captured request head kept byte-exact (never scrubbed, P7); an obs-text byte
-  # in a header value would make PCRE `matches?` raise, so it is scrubbed for the match. This
-  # is a read-only classification — the request is never re-sent from the scrubbed copy — so
-  # the substitution is lossless here in a way it is not on any send path.
+  # can make String operations raise, so it is scrubbed for this read-only classification.
+  # The request is never re-sent from the scrubbed copy, so the substitution is lossless here
+  # in a way it is not on any send path.
   def self.upgrade_request?(head : String) : Bool
-    head.scrub.matches?(UPGRADE_HEADER)
+    first = true
+    head.scrub.each_line do |raw|
+      line = raw.chomp
+      if first
+        first = false
+        next
+      end
+      break if line.empty? # the body is not a header block
+      name, sep, value = line.partition(':')
+      next if sep.empty?
+      next unless name.compare("upgrade", case_insensitive: true) == 0
+      return true if Codec::HeaderList.list_member?(value, PROTOCOL_TOKEN)
+    end
+    false
   end
 
-  # The HTTP/2 counterpart of `UPGRADE_HEADER`: the `:protocol` token RFC 8441 registers for
-  # a WebSocket. An extended CONNECT can carry other tokens (`connect-udp`, RFC 9298;
+  # The HTTP/2 counterpart of `upgrade_request?`: the `:protocol` token RFC 8441 registers
+  # for a WebSocket. An extended CONNECT can carry other tokens (`connect-udp`, RFC 9298;
   # `connect-ip`, RFC 9484; a private one) and those are NOT RFC 6455 framing, so pointing a
   # frame codec at them would invent messages out of somebody else's protocol. Recognition is
   # by the token, and only by the token.
@@ -113,9 +126,8 @@ module Gori::Proxy::WS
   # verbatim, and an operator who edits it to `connect` has written a different method — which
   # this must report as such rather than quietly treat as the same request.
   private def self.connect_line?(head : String) : Bool
-    line = head.each_line.first? || return false
-    method, sep, _ = line.partition(' ')
-    !sep.empty? && method == "CONNECT"
+    method, _, version = Codec::Http1.authored_start_line(head.to_slice)
+    method == "CONNECT" && version == "HTTP/2"
   end
 
   # The RSV1..RSV3 nibble of the first header octet (RFC 6455 §5.2), shifted down so

@@ -384,15 +384,17 @@ module Gori
       loop do
         event = session.flow_events.receive
         next unless event.kind == :updated # one line per completed/errored flow
-        # A WebSocket flow (status 101) emits an :updated PER message on the SAME id;
-        # print + count it ONCE (its first update), else it prints duplicate rows and
-        # its own messages trip --max, tearing the live connection down mid-stream.
+        # A WebSocket flow emits an :updated PER message on the SAME id; print + count it ONCE
+        # (its first update), else it prints duplicate rows and its own messages trip --max,
+        # tearing the live connection down mid-stream. That is 101 over h1, but 2xx plus the
+        # `websocket` connect protocol over h2 — use the same lightweight predicate the PROTO
+        # column uses rather than spelling only the first transport here.
         next if seen.includes?(event.id)
         if row = session.store.flow_row(event.id)
-          # Only WS re-emits :updated, so only WS ids need de-dup tracking — keeping
-          # `seen` bounded by concurrent WS flows instead of growing per HTTP flow for
-          # the lifetime of a long `gori run capture` session.
-          seen << event.id if row.status == 101
+          # Only WS re-emits :updated, so only WS ids need de-dup tracking — keeping `seen`
+          # bounded by concurrent WS flows instead of growing per HTTP flow for the lifetime
+          # of a long `gori run capture` session.
+          seen << event.id if Proto.websocket?(row.status, row.connect_protocol)
           # Stream the SAME row rendering `gori run history` prints, so capture and
           # history output never drift (text = human-readable; json = stable contract).
           puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))

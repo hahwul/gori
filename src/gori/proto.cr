@@ -114,6 +114,15 @@ module Gori
       !!connect_protocol.try { |p| Gori::Proxy::WS.protocol_token?(p) }
     end
 
+    # Does this lightweight row projection identify a WebSocket on either transport? This is
+    # intentionally the list/PROTO-level predicate: an h1 101 has no request-head bytes here,
+    # while an h2 socket is the accepted extended CONNECT recorded in `connect_protocol`.
+    # Readers that hold a full `FlowDetail` and need proof from the h1 request use its stricter
+    # `websocket?` instead.
+    def self.websocket?(status : Int32?, connect_protocol : String?) : Bool
+      status == 101 || websocket_connect?(status, connect_protocol)
+    end
+
     # Classify a flow from its status, the content types of BOTH sides, and the extended
     # CONNECT protocol it declared. A WebSocket wins first over either transport — the h1
     # handshake's 101, or an h2 `:protocol: websocket` the origin accepted (a WebSocket
@@ -142,7 +151,7 @@ module Gori
     # V16 column existed), in which case the answer is exactly what it was before.
     def self.classify(status : Int32?, content_type : String?, request_content_type : String?,
                       connect_protocol : String?) : Kind
-      return Kind::Ws if status == 101 || websocket_connect?(status, connect_protocol)
+      return Kind::Ws if websocket?(status, connect_protocol)
       return Kind::Grpc if grpc?(content_type) || grpc?(request_content_type)
       return Kind::Sse if Sse.sse?(content_type)
       Kind::Http
