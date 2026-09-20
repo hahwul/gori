@@ -75,16 +75,51 @@ describe "MCP protocol version negotiation" do
     end
   end
 
-  # …except on the one request that exists to tell a client what to send. A bootstrap probe
-  # that has stamped its version but has nothing to declare yet would otherwise be refused
-  # by the RPC that would have unblocked it.
-  it "answers server/discover for a modern probe that declares no capabilities" do
+  # …including on `server/discover`. What that request is excused from is naming an era at
+  # all — the example above sends it bare and is answered. It is NOT excused from the
+  # required fields of an era it has just declared: `ClientCapabilities` has no required
+  # member, so `{}` is always available and a bootstrap probe is missing nothing.
+  it "refuses a server/discover that declares a version but no capabilities" do
     with_store do |store|
       line = %({"jsonrpc":"2.0","id":7,"method":"server/discover","params":) +
              %({"_meta":{"io.modelcontextprotocol/protocolVersion":"#{VERSION}"}}})
-      res = mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!
-      res["error"]?.should be_nil
-      res["result"]["supportedVersions"].as_a.map(&.as_s).should contain(VERSION)
+      err = mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!["error"]
+      err["code"].as_i.should eq(-32602)
+      err["message"].as_s.should contain("io.modelcontextprotocol/clientCapabilities")
+    end
+  end
+
+  # The array frame does not exist in the stateless revision (batching went in 2025-06-18),
+  # so a member that has declared it must not be answered inside one — even though the
+  # batch itself is still accepted, because 2025-03-26 made receiving them mandatory and we
+  # still advertise that revision.
+  it "refuses a modern request that arrives inside a JSON-RPC batch" do
+    with_store do |store|
+      line = "[" + %({"jsonrpc":"2.0","id":7,"method":"tools/list","params":) +
+             %({"_meta":{"io.modelcontextprotocol/protocolVersion":"#{VERSION}",) +
+             %("io.modelcontextprotocol/clientCapabilities":{}}}}) + "]"
+      batch = mcp_drive(store, line)[0].as_a
+      batch.size.should eq(1)
+      batch[0]["error"]["code"].as_i.should eq(-32600)
+      batch[0]["error"]["message"].as_s.should contain("batching")
+      # …and the legacy member beside it is still answered, in the same array.
+      mixed = "[" + %({"jsonrpc":"2.0","id":8,"method":"tools/list","params":{}}) + "]"
+      mcp_drive(store, mixed)[0].as_a[0]["result"]["tools"].as_a.should_not be_empty
+    end
+  end
+
+  # Nothing here is paginated, so any cursor a client sends is one this server never minted.
+  # Answering page one anyway is the shape of a silent loop.
+  it "refuses a tools/list cursor it never issued" do
+    with_store do |store|
+      line = %({"jsonrpc":"2.0","id":7,"method":"tools/list","params":{"cursor":"abc",) +
+             %("_meta":{"io.modelcontextprotocol/protocolVersion":"#{VERSION}",) +
+             %("io.modelcontextprotocol/clientCapabilities":{}}}})
+      err = mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!["error"]
+      err["code"].as_i.should eq(-32602)
+      err["message"].as_s.should contain("cursor")
+      mcp_drive(store, %({"jsonrpc":"2.0","id":7,"method":"tools/list","params":{"cursor":"abc"}}))
+        .find { |l| l["id"]? == 7 }.not_nil!["error"]["code"].as_i.should eq(-32602)
     end
   end
 
@@ -96,6 +131,36 @@ describe "MCP protocol version negotiation" do
              %({"_meta":{"io.modelcontextprotocol/protocolVersion":"1999-01-01"}}})
       err = mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!["error"]
       err["code"].as_i.should eq(-32022)
+    end
+  end
+
+  # The key is reserved by the spec and no handshake client writes it, so a slot that holds
+  # something other than a string is a MODERN client's serialisation bug — `20260728`
+  # unquoted, a `null` from an absent config. Reading it as legacy would serve that bug back
+  # with a straight face; the refusal names the field and the shape it actually held.
+  it "refuses a protocol version that is present but is not a string" do
+    with_store do |store|
+      {"20260728", "null", %(["#{VERSION}"])}.each do |bad|
+        line = %({"jsonrpc":"2.0","id":7,"method":"tools/list","params":) +
+               %({"_meta":{"io.modelcontextprotocol/protocolVersion":#{bad},) +
+               %("io.modelcontextprotocol/clientCapabilities":{}}}})
+        err = mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!["error"]
+        err["code"].as_i.should eq(-32602)
+        err["message"].as_s.should contain("io.modelcontextprotocol/protocolVersion")
+      end
+    end
+  end
+
+  # A field plainly present, refused as "required", reads as a server that cannot see it.
+  it "names the shape when the client capabilities are the wrong one" do
+    with_store do |store|
+      line = %({"jsonrpc":"2.0","id":7,"method":"tools/list","params":) +
+             %({"_meta":{"io.modelcontextprotocol/protocolVersion":"#{VERSION}",) +
+             %("io.modelcontextprotocol/clientCapabilities":[]}}})
+      err = mcp_drive(store, line).find { |l| l["id"]? == 7 }.not_nil!["error"]
+      err["code"].as_i.should eq(-32602)
+      err["message"].as_s.should contain("must be a JSON object")
+      err["message"].as_s.should contain("an array")
     end
   end
 
@@ -161,11 +226,29 @@ describe "MCP result envelope" do
     end
   end
 
-  # The TTL is a promise about the catalogue. A read-only server that is still unbound
-  # advertises `create_project` and loses it on the first bind, so while that is ahead of us
-  # the only honest answer is zero — a client holding a five-minute copy would go on offering
-  # the model a tool that now refuses, and no `listChanged` exists to invalidate it.
-  it "promises no freshness while the catalogue can still change under it" do
+  # What makes the catalogue cacheable at all, and what the spec spells as a MUST NOT: the
+  # set of tools "MUST NOT vary per-connection or as a side effect of other requests on the
+  # connection". It is a function of the start-up flags (`--read-only`, `--tools`) and of
+  # nothing a call can reach — `create_project` used to be listed on a live `unbound?` and
+  # is not any more; it is advertised always and refuses at call time instead.
+  #
+  # Pinned here rather than claimed in a comment, because the failure is invisible from one
+  # connection: a client caches the list for the five minutes `ttlMs` promises, and the
+  # tool it was told about is gone.
+  it "does not let the project binding change the catalogue at all" do
+    names = ->(store : Gori::Store?, actions : Bool) do
+      tools = Gori::MCP::Tools.new(store, allow_actions: actions, verify_upstream: false)
+      JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s).to_set
+    end
+    with_store do |store|
+      names.call(nil, false).should eq(names.call(store, false))
+      names.call(nil, true).should eq(names.call(store, true))
+    end
+  end
+
+  # The freshness the example above earns: the same number from an unbound read-only server
+  # as from a bound one, because there is nothing left for the binding to change.
+  it "promises the same freshness before a project is bound" do
     line = %({"jsonrpc":"2.0","id":7,"method":"tools/list","params":{#{META}}})
     input = IO::Memory.new("#{line}\n")
     output = IO::Memory.new
@@ -173,6 +256,84 @@ describe "MCP result envelope" do
       input: input, output: output).run
     result = JSON.parse(output.to_s.each_line.reject(&.strip.empty?).first)["result"]
     result["tools"].as_a.map(&.["name"].as_s).should contain("create_project")
-    result["ttlMs"].as_i.should eq(0)
+    result["ttlMs"].as_i.should eq(Gori::MCP::Protocol::TOOLS_LIST_TTL_MS)
+  end
+end
+
+describe "MCP subscriptions" do
+  # gori has nothing to push — no `listChanged`, no resources, and the one vendor
+  # notification is confined to the handshake era. The conformant answer to that is the
+  # EMPTY subscription, not `-32601`: acknowledge first (the spec's ordering rule), agree to
+  # nothing ("notification types the server does not support are omitted"), then close the
+  # way a server closes a stream it is ending itself.
+  #
+  # Closing at once is also the only safe shape: one worker fiber runs one request at a
+  # time, so a stream held open would starve every tool call behind it.
+  it "acknowledges a listen with an empty filter and closes it gracefully" do
+    with_store do |store|
+      line = %({"jsonrpc":"2.0","id":"sub-1","method":"subscriptions/listen","params":) +
+             %({"notifications":{"toolsListChanged":true},#{META}}})
+      out = mcp_drive(store, line)
+
+      ack = out.find { |l| l["method"]? == "notifications/subscriptions/acknowledged" }.not_nil!
+      ack["id"]?.should be_nil
+      # In `_meta`, not beside it — a client demultiplexing one stdio channel looks in
+      # exactly one place, and the id is the opening request's own.
+      ack["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"].as_s.should eq("sub-1")
+      ack["params"]["notifications"].as_h.should be_empty
+
+      done = out.find { |l| l["id"]? == "sub-1" }.not_nil!["result"]
+      done["resultType"].as_s.should eq("complete")
+      done["_meta"]["io.modelcontextprotocol/subscriptionId"].as_s.should eq("sub-1")
+      # The server's own identity rides in the same `_meta`; two `_meta` keys would be a
+      # duplicate that some clients reject outright.
+      done["_meta"]["io.modelcontextprotocol/serverInfo"]["name"].as_s.should eq("gori")
+
+      # And the acknowledgement is FIRST.
+      out.index(ack).not_nil!.should be < out.index { |l| l["id"]? == "sub-1" }.not_nil!
+    end
+  end
+end
+
+describe "MCP tools/call error reporting" do
+  # "Protocol Errors indicate issues with the request structure itself that models are less
+  # likely to be able to fix: Unknown tool …" — a name that is not in `tools/list` never
+  # reached a tool, so it is not a tool result. The sentence survives as `error.message`.
+  it "answers an unknown tool with a protocol error, not an isError result" do
+    with_store do |store|
+      res = modern(store, "tools/call", %("name":"no_such_tool","arguments":{}))
+      res["result"]?.should be_nil
+      res["error"]["code"].as_i.should eq(-32602)
+      res["error"]["message"].as_s.should contain("no_such_tool")
+    end
+  end
+
+  # A tool that RAN and failed stays on the other side of the line, because that is the
+  # bucket a client is told to hand back to the model for a retry.
+  it "keeps a tool's own failure as an isError result" do
+    with_store do |store|
+      res = modern(store, "tools/call", %("name":"get_flow","arguments":{"id":999999}))
+      res["error"]?.should be_nil
+      res["result"]["isError"].as_bool.should be_true
+      res["result"]["structuredContent"]["error_code"].as_s.should eq("NOT_FOUND")
+    end
+  end
+
+  # The `--tools` refusal is the same class: the tool is not advertised, so from the
+  # client's side it does not exist. Its sentence is written to be read by the model and it
+  # still is — as the error's message.
+  it "answers a tool hidden by --tools the same way, keeping the sentence" do
+    with_store do |store|
+      filter = Gori::MCP::ToolFilter.parse("list_history", Gori::MCP::Tools::TOOL_NAMES)
+      filter.should be_a(Gori::MCP::ToolFilter)
+      input = IO::Memory.new(%({"jsonrpc":"2.0","id":7,"method":"tools/call","params":) +
+                             %({"name":"get_flow","arguments":{},#{META}}}) + "\n")
+      output = IO::Memory.new
+      Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+        tool_filter: filter.as(Gori::MCP::ToolFilter), input: input, output: output).run
+      err = JSON.parse(output.to_s.each_line.reject(&.strip.empty?).first)["error"]
+      err["code"].as_i.should eq(-32602)
+      err["message"].as_s.should contain("tools/list")
+    end
   end
 end

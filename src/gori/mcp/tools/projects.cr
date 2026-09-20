@@ -397,14 +397,21 @@ module Gori
           s.field "project", strprop("target project display name or directory slug"), required: true
         end
 
-        if @allow_actions || unbound?
-          tool j, "create_project",
-            "Create a new gori project (or reopen an existing one with the same name). " \
-            "When the server is unbound, create auto-binds to the new project; when already " \
-            "bound, call switch_project to make it active." do |s|
-            s.field "name", strprop("project display name (slugified for its directory)"), required: true
-            s.field "description", strprop("optional description stored in the project settings")
-          end
+        # Declared unconditionally, including on a `--read-only` server that is already
+        # bound — where it refuses with TOOL_DISABLED. It used to be gated on
+        # `@allow_actions || unbound?`, which made the CATALOGUE move: a read-only client
+        # that bound a project lost a tool mid-connection, and `tools/list` "MUST NOT vary
+        # per-connection or as a side effect of other requests on the connection"
+        # (2026-07-28 server/tools). The gate that matters is the one in
+        # `create_project_entry`, which is unchanged; this is only what the client is told
+        # exists, and the description already says which call does what.
+        tool j, "create_project",
+          "Create a new gori project (or reopen an existing one with the same name). " \
+          "When the server is unbound, create auto-binds to the new project; when already " \
+          "bound, call switch_project to make it active. Under --read-only this works only " \
+          "while the server is still unbound." do |s|
+          s.field "name", strprop("project display name (slugified for its directory)"), required: true
+          s.field "description", strprop("optional description stored in the project settings")
         end
 
         return unless @allow_actions

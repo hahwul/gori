@@ -52,6 +52,7 @@ module Gori
       META_CLIENT_INFO      = "#{META_PREFIX}clientInfo"
       META_CLIENT_CAPS      = "#{META_PREFIX}clientCapabilities"
       META_SERVER_INFO      = "#{META_PREFIX}serverInfo"
+      META_SUBSCRIPTION_ID  = "#{META_PREFIX}subscriptionId"
 
       # `resultType` on a result that is the final answer. The other member of the set,
       # `input_required`, belongs to multi round-trip requests — a server asking the client

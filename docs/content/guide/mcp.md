@@ -280,6 +280,10 @@ gori speaks both eras of MCP from one process, and each request decides which on
 
 A version gori does not speak is refused with `-32022` and the list of versions it does, so a client retries instead of guessing. The tool surface is identical either way: the era decides the envelope, never what a tool does.
 
+Two things follow from the stateless revision that are worth knowing before you write a client. `subscriptions/listen` is answered, but with an empty filter and an immediate graceful close — gori pushes nothing, so the honest subscription is the empty one, and you should rely on the `ttlMs` you were given instead. And the `claude/channel` research preview is declared only to the handshake era: a stateless server may write responses, notifications belonging to a request in flight, and notifications on an acknowledged subscription, and a channel push is none of those. Operator messages still reach every client, by the socket, the Codex queue, and `operator_messages` — none of which touches the protocol stream.
+
+An unknown tool name comes back as a JSON-RPC `-32602`, not as a tool result with `isError`. That is where the spec puts it: the call never reached a tool, so there is nothing for the model to retry differently. A tool that *ran* and failed still answers `isError: true` with a structured error, which is the one your agent should be handed back.
+
 ## Tool Hints
 
 Every tool in `tools/list` carries `annotations.readOnlyHint`, so a client can tell the tools that only read this project's capture from the ones that write to it or send traffic at a target — the difference between a call worth running unattended and one worth asking about. It is derived from the same declaration [`--read-only`](#read-only-mode) enforces, so the hint and the gate cannot disagree, and a read-only tool also carries `openWorldHint: false`: it answers from the project store and never dials.
