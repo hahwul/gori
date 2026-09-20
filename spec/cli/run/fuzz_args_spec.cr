@@ -161,6 +161,14 @@ describe "gori run fuzz — processor flags" do
     Gori::CLI::Run.parse_rate_for_spec("0.0").should be_nil
   end
 
+  it "refuses non-finite --rate values instead of disabling the limiter" do
+    message = "gori run: invalid --rate 'Infinity' (a finite non-negative number)"
+    Gori::CLI::Run.fuzz_rate_error("Infinity").should eq(message)
+    Gori::CLI::Run.fuzz_rate_error("-Infinity").should_not be_nil
+    Gori::CLI::Run.fuzz_rate_error("NaN").should_not be_nil
+    Gori::CLI::Run.fuzz_rate_error("2.5").should be_nil
+  end
+
   # Unlike parse_count, zero is ALLOWED here — these flags spell "no delay", "no retries".
   it "accepts zero as a non-negative count" do
     Gori::CLI::Run.parse_nonneg_for_spec("0").should eq(0)
