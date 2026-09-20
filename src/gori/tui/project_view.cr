@@ -26,7 +26,7 @@ module Gori::Tui
   # the tab body has focus (cursor visible); Esc / ^P / ^C save + exit like NotesView.
   # Description can also be provided optionally when creating via the picker.
   class ProjectView
-    DESC_KEY = "description"
+    DESC_KEY = Gori::Project::DESCRIPTION_KEY
 
     @project : Project?
     @flow_count : Int64

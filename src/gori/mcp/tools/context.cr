@@ -64,6 +64,13 @@ module Gori
             j.field "workspace_bound", !@workspace_root.nil?
             j.field "read_only", !@allow_actions
             if s = @store
+              # The one place a project's DESCRIPTION is readable headlessly. `create_project`
+              # takes it, `gori run project create --description` writes it and the TUI's
+              # Project tab edits it — and nothing outside that tab ever handed it back, so an
+              # agent could write the engagement's scope note and then never see it again, its
+              # own included. Reported here rather than in `list_projects`, which is a roster
+              # that deliberately opens no databases; this call already holds one open.
+              j.field "description", s.setting(Project::DESCRIPTION_KEY)
               j.field "flows", s.count
               j.field "issues", s.count_issues
               j.field "total_bytes", s.total_size
@@ -685,6 +692,8 @@ module Gori
 
         tool j, "project_info",
           "Project totals: flow count, issue count, captured bytes, earliest capture time, " \
+          "the operator's project `description` (what this engagement is for — the one call " \
+          "that reads back what create_project stored), " \
           "plus which project/db is being served and how it was selected. When unbound " \
           "(bound:false), call list_projects / create_project / switch_project first. " \
           "This is the LIVE binding, and it overrides the server instructions — those " \

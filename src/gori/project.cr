@@ -9,6 +9,14 @@ module Gori
   struct Project
     DB_FILE = "gori.db"
 
+    # The settings key holding the operator-written description — what the project is FOR,
+    # typed on the Project tab or handed to `create`/`create_project` at birth. One home,
+    # beside the DB filename, because it already had two spellings (the registry's write and
+    # the Project tab's read) and each surface that learns to report it would otherwise add
+    # another: a reader keyed on a typo is an empty description, which reads as a project
+    # that was never described.
+    DESCRIPTION_KEY = "description"
+
     getter name : String
     getter db_path : String
     getter? ephemeral : Bool

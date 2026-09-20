@@ -214,7 +214,7 @@ module Gori
       s = Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED)
       begin
         desc = description.strip
-        s.set_setting("description", desc) unless desc.empty?
+        s.set_setting(Project::DESCRIPTION_KEY, desc) unless desc.empty?
         # A BRAND-NEW database is born speaking this install's token grammar, so it says so. The
         # marker's absence means bare (every project written before namespaces existed carries no
         # marker), and a fresh namespaced project that left it absent would hand its first opener a
