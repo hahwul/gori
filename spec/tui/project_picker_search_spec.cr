@@ -72,23 +72,78 @@ describe "ProjectPicker.narrow" do
   end
 end
 
-describe "ProjectPicker.row_labels" do
-  it "adds the directory slug only to the names another project shares" do
-    labels = ProjectPicker.row_labels(twin_registry)
-    labels["/p/api"].should eq("api  ·  api")
-    labels["/p/api-2"].should eq("api  ·  api-2")
-    # A unique name stays exactly as it was: a slug beside every row is noise, and for a
+describe "ProjectPicker.row_discriminators" do
+  it "marks only the names another project shares, and prefers the workspace" do
+    d = ProjectPicker.row_discriminators(twin_registry)
+    # `create_for_workspace` takes the NAME from the workspace basename, so for the pair this
+    # exists for the basename is the name and the parent is the whole of the difference —
+    # "billing" vs "payments" reads at a glance where "api" vs "api-2" does not.
+    d["/p/api"].should eq("billing")
+    d["/p/api-2"].should eq("payments")
+    # A unique name gets nothing beside it: a discriminator on every row is noise, and for a
     # hand-created project the slug is just the name again.
-    labels["/p/acme-api"].should eq("Acme API")
+    d.has_key?("/p/acme-api").should be_false
+  end
+
+  it "falls back to the directory slug when no workspace is bound" do
+    d = ProjectPicker.row_discriminators([entry("api", "api"), entry("api", "api-2")])
+    d["/p/api"].should eq("api")
+    d["/p/api-2"].should eq("api-2")
   end
 
   it "judges the collision case-insensitively, as #find resolves it" do
-    labels = ProjectPicker.row_labels([entry("API", "api"), entry("api", "api-2")])
-    labels.values.each(&.should(contain("·")))
+    d = ProjectPicker.row_discriminators([entry("API", "api"), entry("api", "api-2")])
+    d.size.should eq(2)
   end
 
-  it "labels every project in a registry with no collisions at all" do
-    labels = ProjectPicker.row_labels([entry("alpha", "alpha"), entry("beta", "beta")])
-    labels.should eq({"/p/alpha" => "alpha", "/p/beta" => "beta"})
+  it "uses the workspace basename when it is not simply the name again" do
+    # A renamed project keeps its binding, so the basename can be the useful half.
+    d = ProjectPicker.row_discriminators([
+      entry("staging", "staging", "aaaa1111", "/w/acme-web"),
+      entry("staging", "staging-2", "bbbb2222", "/w/acme-mobile"),
+    ])
+    d["/p/staging"].should eq("acme-web")
+    d["/p/staging-2"].should eq("acme-mobile")
+  end
+end
+
+describe "ProjectPicker.fit_label" do
+  it "leaves a unique name untouched at any width" do
+    ProjectPicker.fit_label("acme", nil, 4).should eq("acme")
+  end
+
+  it "shortens the NAME, never the part that disambiguates" do
+    # `Screen#text` ellipsizes from the right, so a joined label handed to it whole loses
+    # exactly the discriminator — two same-named rows rendering identically again, which is
+    # the failure this whole pair exists to prevent.
+    tight = ProjectPicker.fit_label("payments-api", "billing", 16)
+    tight.should end_with(" · billing")
+    Screen.display_width(tight).should be <= 16
+  end
+
+  it "keeps the discriminator alone when the name cannot be elided into" do
+    ProjectPicker.fit_label("payments-api", "billing", 10).should eq("billing")
+  end
+
+  it "joins without shortening when it already fits" do
+    ProjectPicker.fit_label("api", "billing", 40).should eq("api · billing")
+    ProjectPicker.labelled("api", "billing").should eq("api · billing")
+    ProjectPicker.labelled("api", nil).should eq("api")
+  end
+end
+
+describe "ProjectPicker.delete_confirm_body with disambiguated names" do
+  it "still names both halves of a same-named pair rather than falling back to a count" do
+    # The confirm drops to "Delete 2 projects?" once the names run past NAMED_DELETE_WIDTH,
+    # so a discriminator that is too long costs the irreversible confirm the very names it
+    # was added to disambiguate. `billing`/`payments` beat `payments-api`/`payments-api-2`
+    # precisely because they are short.
+    names = twin_registry.select { |e| e.project.name == "api" }.map do |e|
+      ProjectPicker.labelled(e.project.name, ProjectPicker.discriminator(e))
+    end
+    body = ProjectPicker.delete_confirm_body(names, 0, 0)
+    body.should contain("api · billing")
+    body.should contain("api · payments")
+    body.should_not contain("Delete 2 projects?")
   end
 end

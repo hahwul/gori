@@ -114,6 +114,11 @@ module Gori::Tui
       # listings do (see `ProjectPicker.narrow`), and those live in sidecars the registry
       # reads once per project here rather than per keystroke.
       @entries = @registry.entries
+      # Derived ONCE per registry read, both of them. `@projects` keeps the unfiltered array
+      # allocation-free for the idle path (see `filtered_projects`), and `@discriminators` is
+      # constant between mutations while `render_list` runs ~20×/s off the starfield clock.
+      @projects = @entries.map(&.project).as(Array(Project))
+      @discriminators = ProjectPicker.row_discriminators(@entries).as(Hash(String, String))
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
@@ -398,12 +403,14 @@ module Gori::Tui
 
     # Saved projects filtered by @query (see `ProjectPicker.narrow`).
     # List layout: 0=New, 1=Temp, 2=Search bar (typing only active here), 3+=projects.
+    # `@projects` itself while nothing is narrowing — the overwhelmingly common state, and
+    # this is called several times per frame plus more per keystroke (render, entry_count,
+    # activate, the three mark gestures, target_projects, entry_at). `narrow` already returns
+    # its argument unmapped for a blank needle; the `map` that turns entries back into
+    # projects is what would allocate an N-element array on every one of those calls.
     private def filtered_projects : Array(Project)
-      filtered_entries.map(&.project)
-    end
-
-    private def filtered_entries : Array(ProjectRegistry::Entry)
-      ProjectPicker.narrow(@entries, @query)
+      return @projects if ProjectRegistry.needle(@query).nil?
+      ProjectPicker.narrow(@entries, @query).map(&.project)
     end
 
     # Which projects the search keeps, and in what order.
@@ -445,28 +452,67 @@ module Gori::Tui
       named.map { |(e, _)| e } + addressed
     end
 
-    # The label each project row shows: its display name, plus the directory slug when
-    # another project on this host carries the SAME name.
+    # What tells a project apart from ANOTHER project on this host carrying the same display
+    # name, keyed on the project directory. Only the ambiguous ones are in the map; a unique
+    # name needs nothing beside it, and a discriminator on every row is noise.
     #
     # Display names are not unique by design — `ProjectRegistry#create_for_workspace` names a
     # project after its workspace basename, so two checkouts called `api` both display "api"
-    # while living in slugs `api` and `api-2` (the registry's own `#find` comment says so, and
-    # `gori run project delete` refuses such a name outright rather than guess). Two
-    # identical rows is the one ambiguity this list cannot let the operator resolve before
-    # pressing `↵` on an irreversible delete. ONLY when it is ambiguous: a slug beside every
-    # row is noise, and for a hand-created project the slug is just the name again.
+    # while living in slugs `api` and `api-2` (the registry's `#find` says so, and `gori run
+    # project delete` refuses such a name outright rather than guess). Two identical rows is
+    # the one ambiguity this list cannot let the operator resolve before pressing `↵` on an
+    # irreversible delete.
     #
     # Judged over the WHOLE registry rather than the filtered view, because the delete confirm
-    # reaches marks the current search is hiding — and keyed on the project DIRECTORY, which
-    # is unique, so the row render and that confirm read one map instead of each deriving the
-    # rule.
-    def self.row_labels(entries : Array(ProjectRegistry::Entry)) : Hash(String, String)
+    # reaches marks the current search is hiding.
+    def self.row_discriminators(entries : Array(ProjectRegistry::Entry)) : Hash(String, String)
       counts = Hash(String, Int32).new(0)
       entries.each { |e| counts[e.project.name.downcase] += 1 }
-      entries.to_h do |e|
-        name = e.project.name
-        {e.project.dir, counts[name.downcase] > 1 ? "#{name}  ·  #{e.slug}" : name}
+      out = {} of String => String
+      entries.each do |e|
+        out[e.project.dir] = discriminator(e) if counts[e.project.name.downcase] > 1
       end
+      out
+    end
+
+    # The shortest thing that actually distinguishes one of a same-named pair.
+    #
+    # The WORKSPACE where there is one, and specifically the component that is NOT the name:
+    # `create_for_workspace` takes the name from the workspace basename, so for the very pair
+    # this exists for the basename IS the name and the parent is the whole of the difference
+    # (`billing` vs `payments`, not `api` vs `api`). The slug otherwise — unique, always
+    # present, but for that pair a one-character tail on two identical strings, which is a
+    # poor thing to read just before an `rm_rf`.
+    def self.discriminator(entry : ProjectRegistry::Entry) : String
+      if ws = entry.workspace.presence
+        tail = File.basename(ws)
+        part = tail.compare(entry.project.name, case_insensitive: true) == 0 ? File.basename(File.dirname(ws)) : tail
+        return part unless part.empty? || part == "." || part == "/"
+      end
+      entry.slug
+    end
+
+    # Name and discriminator as ONE string, for a caller with nowhere to fit them separately
+    # (the delete confirm). A single-space separator, not a padded one: `delete_confirm_body`
+    # falls back to a bare count once the names run past `NAMED_DELETE_WIDTH`, so every column
+    # spent on decoration is one that can cost the confirm the names it exists to print.
+    def self.labelled(name : String, disambiguator : String?) : String
+      disambiguator ? "#{name} · #{disambiguator}" : name
+    end
+
+    # …and the same pair fitted to a row, shortening the NAME rather than the tail.
+    # `Screen#text` ellipsizes from the right, which on this label cuts off precisely the part
+    # that disambiguates it — so on a narrow card the two rows this method exists to separate
+    # went back to rendering identically.
+    def self.fit_label(name : String, disambiguator : String?, width : Int32) : String
+      return name unless disambiguator
+      full = labelled(name, disambiguator)
+      return full if Screen.display_width(full) <= width
+      tail = " · #{disambiguator}"
+      room = width - Screen.display_width(tail)
+      # Under two columns of name there is nothing left to elide into; the discriminator alone
+      # is still the more useful half, and the meta cell beside it keeps the row identifiable.
+      room < 2 ? disambiguator : "#{Screen.fit(name, room)}#{tail}"
     end
 
     private def handle_list(ev : Termisu::Event::Key) : Project | Symbol?
@@ -761,11 +807,10 @@ module Gori::Tui
         blocked << p if in_use
         in_use
       end
-      # The SAME labels the rows carry, so a confirm over two projects that share a display
-      # name names each one unambiguously — `Delete "api"?` for one of a pair is exactly the
-      # sentence an irreversible wipe must not print (see `ProjectPicker.row_labels`).
-      labels = ProjectPicker.row_labels(@entries)
-      name_of = ->(p : Project) { labels[p.dir]? || p.name }
+      # The SAME name the rows carry, so a confirm over two projects that share a display name
+      # names each one unambiguously — `Delete "api"?` for one of a pair is exactly the
+      # sentence an irreversible wipe must not print (see `row_discriminators`).
+      name_of = ->(p : Project) { label_for(p) }
       if deletable.empty?
         # Said out loud even for the capture-lock case the green "● on" dot already flags:
         # a ctrl-d that does nothing at all reads as delete being broken rather than refused
@@ -851,10 +896,10 @@ module Gori::Tui
         # stale confirm frame and reads as hung rather than as working.
         @mode = :deleting
         render
-        # Built BEFORE the loop: `row_labels` reads `@entries`, and `reload_projects` below
-        # replaces them with a registry the deleted projects are gone from — after which a
-        # refusal could not be named the way the confirm the operator just read named it.
-        labels = ProjectPicker.row_labels(@entries)
+        # Captured BEFORE the loop: `reload_projects` below replaces `@discriminators` with a
+        # registry the deleted projects are gone from — after which a refusal could not be
+        # named the way the confirm the operator just read named it.
+        labels = @discriminators
         targets.each do |project|
           @registry.delete(project) # refuses if it went live since request_delete
           deleted << project.dir
@@ -863,7 +908,7 @@ module Gori::Tui
           # message names WHICH, and it has to reach the screen: swallowed, the dialog just
           # closed with the project still listed and nothing said, so the operator saw delete
           # as broken rather than as refused.
-          refused << (labels[project.dir]? || project.name)
+          refused << ProjectPicker.labelled(project.name, labels[project.dir]?)
           first_error ||= ex.message
         rescue ex : IO::Error
           # rm_rf hit a real filesystem failure (permission, locked file) — keep the TUI
@@ -871,7 +916,7 @@ module Gori::Tui
           # Its message is captured too: reported as the generic refusal it is NOT, this
           # reads as "close the other gori" and sends the operator after an instance that
           # was never there.
-          label = labels[project.dir]? || project.name
+          label = ProjectPicker.labelled(project.name, labels[project.dir]?)
           refused << label
           first_error ||= %(can't delete "#{label}" — #{ex.message})
         end
@@ -975,11 +1020,19 @@ module Gori::Tui
     # Re-read the registry after a mutation, dropping marks whose project is gone with it.
     private def reload_projects : Nil
       @entries = @registry.entries
-      @marks.retain(@entries.map(&.project.dir))
+      @projects = @entries.map(&.project)
+      @discriminators = ProjectPicker.row_discriminators(@entries)
+      @marks.retain(@projects.map(&.dir))
       invalidate_running_cache
     end
 
     # --- space menu (project row actions) ------------------------------------
+
+    # This project as the list names it — the one seam the confirm and the refusal sentences
+    # read, so they cannot drift from the row the operator is looking at.
+    private def label_for(project : Project) : String
+      ProjectPicker.labelled(project.name, @discriminators[project.dir]?)
+    end
 
     private def selected_project : Project?
       return nil if @selected < 3
@@ -1059,10 +1112,11 @@ module Gori::Tui
       if name.empty?
         # ↵ on an emptied field used to fall straight through to `cancel_rename`: the prompt
         # CLOSED and the name was unchanged, which is indistinguishable from a rename that
-        # was accepted and then lost. Refuse it here the same way `ProjectRegistry#rename`
-        # would if it were reached, and stay, so `esc` remains the only way to back out.
+        # was accepted and then lost. Refuse it here with the registry's OWN sentence
+        # (`BLANK_NAME` — `#rename` raises exactly this), and stay, so `esc` remains the only
+        # way to back out and the pre-check cannot drift from the rule it stands in for.
         set_flash(ProjectPicker.failed_flash("rename", project.name,
-          Gori::Error.new("the new name cannot be blank")), ok: false)
+          Gori::Error.new(ProjectRegistry::BLANK_NAME)), ok: false)
         return
       end
       begin
@@ -1215,7 +1269,17 @@ module Gori::Tui
         @mode = :list
       elsif key.enter?
         if @new_field == :name
-          if !@name.strip.empty?
+          # An empty (or whitespace-only) name used to fall through to nothing at all: no
+          # field advance, no mode change, no message — and `start_new` opens this form with
+          # an empty field whenever the picker had no search text, so it is the FIRST key an
+          # operator presses here. The same dead-key reading this whole path exists to remove.
+          if @name.strip.empty?
+            # Through the same helper, with the registry's own sentence: `create` would raise
+            # exactly this for a name with nothing to slugify, and a refusal spelled locally
+            # is one more wording to keep in step with the rule.
+            set_flash(ProjectPicker.failed_flash("create", @name,
+              Gori::Error.new(ProjectRegistry::UNSLUGGABLE_NAME)), ok: false)
+          else
             @new_field = :desc
           end
         else
@@ -1601,7 +1665,6 @@ module Gori::Tui
 
     private def render_list(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
       fp = filtered_projects
-      labels = ProjectPicker.row_labels(@entries)
 
       # One rounded card holds the actions (New / Temp / Search), a tee divider,
       # then the scrollable project list — the same header + divider + list shape
@@ -1645,6 +1708,7 @@ module Gori::Tui
         msg = @query.empty? ? "no projects yet" : "no matches"
         screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
       else
+        discriminators = @discriminators
         (0...res_rows).each do |vi|
           ri = @results_scroll + vi
           break if ri >= fp.size
@@ -1663,7 +1727,7 @@ module Gori::Tui
           # Width of the whole meta cell: every segment plus a " · " separator between each.
           mdw = segments.sum { |(text, _)| Screen.display_width(text) } + 3 * (segments.size - 1)
           name_w = cw - 3 - (mdw + 2)
-          label = labels[proj.dir]? || proj.name
+          label = ProjectPicker.fit_label(proj.name, discriminators[proj.dir]?, [name_w, 1].max)
           screen.text(box.x + 3, py, label, is_selected || marked ? Theme.text_bright : Theme.text, bg, width: [name_w, 1].max)
           mx = box.right - mdw - 2
           segments.each_with_index do |(text, fg), si|
@@ -1936,7 +2000,7 @@ module Gori::Tui
       nbase = cx + 2 + Screen.display_width(prefix)
       nwidth = {cw - Screen.display_width(prefix) - 2, 1}.max
       screen.input_line(nbase, iy, @rename_name, @rename_name.size, @preedit, Theme.text_bright, Theme.panel, width: nwidth)
-      render_form_flash(screen, w, h)
+      render_form_flash(screen, w, h, iy)
       centered(screen, h - 2, "↵ save   esc cancel", Theme.muted, w)
     end
 
@@ -1945,9 +2009,18 @@ module Gori::Tui
     # create or rename sets would be written and never painted. Same row and same colour as
     # the list's notice, so one message row means one thing on every screen of this picker.
     # Capped: a filesystem error carries a path of unbounded length.
-    private def render_form_flash(screen : Screen, w : Int32, h : Int32) : Nil
+    #
+    # `panel_bottom` is the last row the form itself drew. On a short terminal the notice row
+    # (`h - 3`) lands INSIDE that panel — at h = 9 the new-project panel occupies rows 5–7 and
+    # `h - 3` is 6 — and painting there in the screen's background colour scribbles over the
+    # `name ›` / `description ›` fields the operator is still editing. Slide below the panel
+    # where there is room, and decline to draw at all where there is not: the same stance
+    # ConfirmDialog takes on a card it cannot fit.
+    private def render_form_flash(screen : Screen, w : Int32, h : Int32, panel_bottom : Int32) : Nil
       return unless flash = @flash
-      centered(screen, h - 3, flash, @flash_ok ? Theme.green : Theme.red, w, width: w - 2)
+      y = {h - 3, panel_bottom + 1}.max
+      return if y >= h - 2 # h - 2 is the hint row
+      centered(screen, y, flash, @flash_ok ? Theme.green : Theme.red, w, width: w - 2)
     end
 
     # One action/result row inside the picker card: selection band + ▎ bar, label
@@ -1981,7 +2054,10 @@ module Gori::Tui
         # Names the four spellings that ADDRESS a project rather than just "projects": the
         # slug and the short id are what tell apart two checkouts sharing a display name,
         # and nothing else on this screen says they are accepted here.
-        screen.text(qx, y, "search name, slug, id or path…", Theme.muted, bg)
+        # `width:` like both sibling branches: the old 18-column placeholder happened to fit
+        # every card, so the missing cap was invisible until this one grew to 30 and started
+        # overdrawing the card's right border on a narrow terminal.
+        screen.text(qx, y, "search name, slug, id or path…", Theme.muted, bg, width: box.w - 7)
       else
         screen.text(qx, y, @query, Theme.text, bg, width: box.w - 7)
       end
@@ -2022,7 +2098,7 @@ module Gori::Tui
         end
       end
 
-      render_form_flash(screen, w, h)
+      render_form_flash(screen, w, h, iy + 2) # the panel is three rows tall
       hint = "↵ next/create   ↑/↓ fields   esc cancel"
       centered(screen, h - 2, hint, Theme.muted, w)
     end

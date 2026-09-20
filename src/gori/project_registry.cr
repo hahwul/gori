@@ -34,10 +34,19 @@ module Gori
     # three surfaces print verbatim ("gori run project create: …", MCP's INVALID_ARGUMENT,
     # the TUI picker's flash row). Bare "invalid project name" named the verdict and not the
     # rule, so `!!!` and `...` read as gori being broken rather than as a name it cannot
-    # slugify; `#slugify` keeps any name carrying a non-ASCII character, so "a letter or a
-    # digit" is the whole of what is missing. See `#slugify` for why a dot-run must never
-    # become a path.
+    # slugify. ADVICE, not the predicate: `#slugify` also keeps `_` and any non-ASCII
+    # character, so a name gori refuses is one made entirely of `.`, `-`, spaces and other
+    # ASCII punctuation — "add a letter or a digit" always fixes it, which is what an
+    # operator needs, while spelling the full rule here would only invite a second copy of
+    # it. See `#slugify` for why a dot-run must never become a path.
     UNSLUGGABLE_NAME = "invalid project name: it needs at least one letter or digit"
+
+    # …and why a RENAME was refused, which is a different rule: a rename never touches the
+    # directory slug (see #rename), so the only name it cannot take is an empty one. Its own
+    # constant rather than a third wording at the call site: the TUI picker checks this before
+    # calling, and a picker disagreeing with the registry about the same refusal is the drift
+    # `UNSLUGGABLE_NAME` was extracted to stop.
+    BLANK_NAME = "invalid project name: it cannot be blank"
 
     def initialize(@root : String)
     end
@@ -424,7 +433,7 @@ module Gori
     # names are rejected the same way create() rejects an unslugifiable name.
     def rename(project : Project, new_name : String) : Project
       display = new_name.strip
-      raise Gori::Error.new("invalid project name: it cannot be blank") if display.empty?
+      raise Gori::Error.new(BLANK_NAME) if display.empty?
       raise Gori::Error.new("project directory missing") unless Dir.exists?(project.dir)
       # A rename replaces a name that is already there, so it gets the same durable
       # replace as `create`'s — and unlike that one it is NOT best-effort: a rename the
