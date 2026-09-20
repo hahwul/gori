@@ -65,9 +65,9 @@ module Gori
       # A request head declares a WebSocket upgrade — the single source of truth for "is this
       # repeater a WebSocket flow?" across the TUI restore paths, the CLI and MCP.
       #
-      # The regex itself moved to `Proxy::WS` (#742) so that `Store::FlowDetail#websocket?`
-      # can ask the same question without requiring this file (→ `flow_request.cr` →
-      # `store.cr`, a cycle). Same bytes, same answer; this is where the REPEATER asks it.
+      # The predicate lives in `Proxy::WS` (#742) so that `Store::FlowDetail#websocket?` can
+      # ask the same question without requiring this file (→ `flow_request.cr` → `store.cr`,
+      # a cycle). Same bytes, same answer; this is where the REPEATER asks it.
       #
       # And note what it therefore means: this predicate is the HTTP/1.1 half ONLY — a head
       # that opens a socket with an `Upgrade:` handshake answered by a 101. An RFC 8441
@@ -79,8 +79,6 @@ module Gori
       # engine choice asks. The distinction used to be moot (there was only one transport) and
       # keeping the two spellings apart is what stops an h1-only assumption from riding along
       # into a caller that now has two.
-      UPGRADE_HEADER = Proxy::WS::UPGRADE_HEADER
-
       def self.upgrade_request?(request : String) : Bool
         Proxy::WS.upgrade_request?(request)
       end
