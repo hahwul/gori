@@ -200,9 +200,14 @@ module Gori
           timeout: retest_timeout(h),
           record_history: bool_arg(h, "record_history", true),
           waiver: "allow_unscoped:true")
+        # `stop:` — the engine polls it before each step, so a cancelled call stops dialling
+        # (#1103). The sends that DID happen keep their History rows and the run row keeps its
+        # `Skipped` remainder: that is a truthful record of what reached the target (P7), and
+        # with no response owed to the caller it is the only trace the operator has. Nothing
+        # here is cleaned up after a cancel.
         report = Retest.execute(store, planned, backend,
           issue_id: issue_id, surface: Gori::FlowSource::Surface::Mcp,
-          allow_cleanup: bool_arg(h, "allow_cleanup", false))
+          allow_cleanup: bool_arg(h, "allow_cleanup", false), stop: cancel_signal)
         Result.new(JSON.build do |j|
           j.object do
             j.field "issue_id", issue_id

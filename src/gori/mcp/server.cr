@@ -433,11 +433,19 @@ module Gori
           @initialized = true
           start_courier
         when "notifications/cancelled"
-          # The client has stopped waiting for a request we are still holding. A fiber
-          # cannot be interrupted, so the work itself runs to completion — what this buys
-          # is the spec's half of the contract: no response is sent for a cancelled id,
-          # so a client that has already reused or retired it is not handed an answer it
-          # has nowhere to put.
+          # The client has stopped waiting for a request we are still holding. Two things
+          # follow, and they are the spec's MUST and its SHOULD:
+          #
+          #   - no response is ever sent for a cancelled id (`cancelled?` at the write
+          #     sites), so a client that has already reused or retired it is not handed an
+          #     answer it has nowhere to put; and
+          #   - the work STOPS, for the tools that can be stopped. A fiber cannot be
+          #     interrupted, so this is cooperative: `cancel_probe` hands the tools layer a
+          #     predicate, and a long tool polls it between sends. `probe_scan{active:true}`
+          #     was the case that made this a defect rather than a nicety — a cancelled scan
+          #     went on putting real attack traffic on a third party's server for up to
+          #     `PROBE_ACTIVE_MAX_FLOWS` flows, and the resource we were failing to free was
+          #     someone else's. Which tools honour it is listed on `Tools#call` (#1103).
           #
           # Only ids still in `@pending` are remembered. One already answered has nothing
           # to suppress, and recording it would let a client grow this set for the life of
@@ -794,7 +802,7 @@ module Gori
         args = tool_arguments(params)
         return write_error(id, -32602,
           "tools/call: 'arguments' must be an object (or a JSON-encoded one)") unless args
-        result = @tools.call(name, args)
+        result = @tools.call(name, args, cancelled: cancel_probe(id))
         # "Protocol Errors indicate issues with the request structure itself that models are
         # less likely to be able to fix: Unknown tool …" — the spec names this one and gives
         # the code. A name that is not in `tools/list` is not a tool that ran and failed, and
@@ -1007,6 +1015,23 @@ module Gori
             end
           end
         end)
+      end
+
+      # "Is the call you are serving cancelled?", as a predicate — the one seam between the
+      # JSON-RPC id (which only this class knows) and a tool that wants to stop (which must
+      # never learn the id, the set, or this server). A closure over the key rather than an
+      # argument threaded through 179 tools, and it costs a running tool one `Set#empty?` per
+      # poll in the case that is always the common one.
+      #
+      # NOT `cancelled?` below: that one DELETES the key, because it is the write site's
+      # one-shot suppression. A tool polling it would clear the flag on its first read and
+      # `write_result` would then answer a request the client had retired.
+      #
+      # A batch member always reads false, and correctly: `@pending` does not track member
+      # ids (their responses have to leave as one array), so `@cancelled` never holds one.
+      private def cancel_probe(id : JSON::Any) : Proc(Bool)
+        key = id.to_json
+        -> { !@cancelled.empty? && @cancelled.includes?(key) }
       end
 
       # Whether this response is owed to a request the client has since cancelled — checked

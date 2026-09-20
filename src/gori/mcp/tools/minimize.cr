@@ -114,14 +114,31 @@ module Gori
             keep_alive: true, idle_conns: 1),
           Repeater::Minimize::SEND_CAP)
 
+        # `Stop` polls the cancellation predicate immediately before every send, so a
+        # cancelled call stops at the next candidate instead of riding SEND_CAP out at the
+        # origin (#1103). This is the same token the TUI arms on pane close and `gori run
+        # repeater minimize` arms on SIGINT — MCP was the third surface and the only one that
+        # had no way to reach it.
         report = begin
-          Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) { }
+          Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend,
+            stop: Repeater::Minimize::Stop.new(cancel_signal)) { }
         ensure
           backend.close # release the parked socket even if the run raises
         end
 
         applied = false
-        if apply && !report.aborted && !report.removed.empty?
+        # `!cancelled?` is the extra condition, and it is NOT covered by `aborted`: a stop
+        # during CALIBRATION aborts (nothing was verified), but a stop mid-search returns
+        # `aborted: false` with the removals proven so far — and applying those would rewrite
+        # the stored request under a caller who is owed no response and will never learn the
+        # session changed. Every removal in `removed` is individually sound; a silent mutation
+        # behind a client that walked away is not. The report is thrown away either way.
+        #
+        # This is the CLI twin's decision, spelled the same way: `cli/run/repeater_minimize.cr`
+        # computes `apply && !interrupted_run && !report.aborted && …`, on the reasoning that a
+        # destructive write is where a cancelled sweep parts company with a capped one. There
+        # the operator is told `--apply` was skipped; here there is no one left to tell.
+        if apply && !report.aborted && !report.removed.empty? && !cancelled?
           # ws_keep_key/ws_http_only/tls_preset for the reason the CLI twin gives:
           # update_repeater's SQL sets every one of those columns unconditionally and its
           # signature defaults them, so omitting one CLEARS a session that carried it.

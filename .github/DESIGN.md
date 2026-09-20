@@ -2981,3 +2981,53 @@ actually restore.
 **And the catalogue's cost is now said out loud on every start.** 179 tools is ~197 KB, about
 50,000 tokens an MCP client loads before the first question and keeps for the session;
 `--tools` is the lever, and it was announced only to the operators who had already found it.
+
+### 2026-09-20: a cancelled request stops the work, and the tools layer is only ever asked
+
+Refines: [P4](#p4), [P1](#p1). MCP `notifications/cancelled` (#1103).
+
+The spec's MUST for a cancellation ("MUST NOT send any further messages for it") was met and
+its two SHOULDs ("stop processing the cancelled request", "free associated resources") were
+not. For every short tool that was invisible. For `probe_scan{active:true}` it was the
+opposite of P4: a client that had withdrawn its request still had real attack probes sent on
+its behalf, up to `PROBE_ACTIVE_MAX_FLOWS` flows of them, and the resource gori was failing to
+free was a third party's server. "Cancel and retry" did not work either — the retry queued
+behind the run the client had abandoned.
+
+**The seam is a predicate, and it lives on `Tools#call`.** `Server#handle_tools_call` knows
+the JSON-RPC id and the tools layer must not learn it, so the transport hands down a
+`Proc(Bool)` closed over the key — one optional argument on the one method every tool call
+already passes through, rather than a token threaded through 179 handlers that 176 of them
+would ignore. It is held for the life of that call and cleared in an `ensure`: the worker
+serves one request at a time, so a predicate that outlived its call would answer the next
+tool's poll with a previous caller's cancellation. The engines below it take `stop : Proc(Bool)`
+or a core-owned token (`Repeater::Minimize::Stop`, which grew a second way to be armed for
+callers that can only be asked) and know nothing about MCP — `Probe`, `Repeater` and `Retest`
+stay on the core side of §2.1.
+
+**The non-consuming read is a separate method from the consuming one.** `Server#cancelled?`
+DELETES the key, because at the write sites it is a one-shot suppression. A running tool
+polling that one would clear the flag on its first read and the answer would be written after
+all — so `cancel_probe` asks without consuming, and the end-to-end spec asserts the empty
+output that pins the difference.
+
+**Which tools stop is a listed decision, not an emergent one.** `probe_scan`,
+`minimize_repeater` and `run_retest` poll it; the list on `Tools#call` names them and says why
+each of the others does not. Two of those reasons are worth keeping: `cookie_crack` is pure
+CPU over a wordlist with no outbound and no yield point, so the reader fiber never runs during
+it and the notification is not even parsed until it finishes — a check there would be code
+that cannot fire, and what it would be protecting is the operator's own CPU. And the `*_start`
+tools are deliberately exempt: they return a `job_id` immediately, so cancelling the call that
+started one would suppress the id while the job ran on, which is the opposite of what the
+client asked for. `stop_job` is that surface.
+
+**What a stopped run leaves behind is what really happened.** A cancelled request gets no
+response at all, so nothing here shapes a partial report — the job is only to stop. A retest's
+sends keep their History rows and its run row keeps its `Skipped` remainder (P7: record the
+wire; with no answer owed to the caller that row is the operator's only trace). A scan writes
+nothing mid-run, and the one thing it does write — the out-of-band promotion — is skipped,
+because it exists to put those findings in a report the stopped run does not have. The one
+place a stop had to be given a new refusal is `minimize_repeater`'s `apply`: a stop during
+calibration aborts, but a stop mid-search returns `aborted: false` with the removals proven so
+far, and applying those would rewrite the stored request under a caller who will never learn
+the session changed.
