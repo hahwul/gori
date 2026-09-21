@@ -320,11 +320,15 @@ describe Gori::Settings do
       previous_proxy = Gori::Settings.upstream_proxy
       previous_insecure = Gori::Settings.upstream_proxy_insecure?
       previous_project_proxy = Gori::Settings.project_upstream_proxy
+      previous_rules = Gori::Settings.upstream_rules
       begin
         proxy_keys.each { |key| ENV.delete(key) }
         ENV["HTTPS_PROXY"] = "https://env-proxy.test:8443"
         Gori::Settings.upstream_proxy = ""
         Gori::Settings.project_upstream_proxy = nil
+        # `tls_proxy_configured?` answers from the rule table before it reaches the environment
+        # arm this example exercises — a leftover `http+tls` rule satisfied it vacuously.
+        Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
         Gori::Settings.upstream_proxy_insecure = true
 
         Gori::Settings.upstream_proxy_warnings.join("\n").should contain("upstream_proxy_insecure is on")
@@ -335,6 +339,7 @@ describe Gori::Settings do
         Gori::Settings.upstream_proxy = previous_proxy
         Gori::Settings.upstream_proxy_insecure = previous_insecure
         Gori::Settings.project_upstream_proxy = previous_project_proxy
+        Gori::Settings.upstream_rules = previous_rules
       end
     end
 
