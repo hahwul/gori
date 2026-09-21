@@ -12,6 +12,12 @@ GORI_TEST_HOME = File.tempname("gori-spec-home")
 Dir.mkdir_p(GORI_TEST_HOME)
 ENV["GORI_HOME"] = GORI_TEST_HOME
 
+# Keep the suite deterministic now that an empty gori upstream intentionally adopts the
+# conventional process proxy variables. Individual examples that exercise that fallback set
+# them explicitly and restore the caller's environment around the example.
+["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+ "http_proxy", "https_proxy", "all_proxy", "no_proxy"].each { |key| ENV.delete(key) }
+
 require "../src/gori"
 
 # Several examples feed Settings a deliberately unparseable file. The warning that earns

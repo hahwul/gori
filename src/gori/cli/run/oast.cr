@@ -792,8 +792,12 @@ module Gori
       # single decision point the dial itself asked (`Upstream.proxied_via`) rather than parsing
       # it back out of the error text.
       private def self.oast_proxy_label(host : String) : String?
-        name = URI.parse(host).host
-        name ? Gori::Proxy::Upstream.proxied_via(name) : nil
+        uri = URI.parse(host)
+        name = uri.host
+        return nil unless name
+        scheme = uri.scheme.try(&.downcase)
+        port = uri.port || (scheme == "https" ? 443 : 80)
+        Gori::Proxy::Upstream.proxied_via(name, scheme, port)
       rescue
         nil
       end

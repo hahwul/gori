@@ -3072,3 +3072,33 @@ layer for good. Advancing a cursor past rows that will never be sent is not mark
 delivered — nothing is emitted on that path, so there is nothing a failed emit could take back.
 The courier and `operator_messages` had the rule right; the third reader of the same feed did
 not, which is the argument for `each_event_of_kind` owning it.
+
+### 2026-09-21: an empty gori upstream adopts the process proxy convention
+
+Refines: [P4](#p4), [P5](#p5). Issue #1114.
+
+`network.upstream_proxy` being blank used to mean that every gori-owned dial was direct, even
+when the process had been launched with `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY`. That is a
+surprising split from the command-line tools gori is commonly run beside, and it made a
+container or a corporate workstation silently bypass its required egress proxy.
+
+**The environment is a last-resort route, not a second settings table.** The existing
+operator-owned decision remains the authority: project destination gates, project pins, the
+ordered `upstream_rules` table (including `direct`), and a non-empty global scalar all win
+before the environment is consulted. Only an empty global scalar reaches the environment
+fallback, and `NO_PROXY` / `no_proxy` is applied there. This keeps a deliberate gori exception
+from being overridden by ambient process state while still making an unconfigured install
+behave like its surrounding tools.
+
+**The original scheme is part of the route query.** HTTP origins choose `HTTP_PROXY` and then
+`ALL_PROXY`; HTTPS origins choose `HTTPS_PROXY`, `HTTP_PROXY`, and then `ALL_PROXY`, with
+uppercase names preferred over their lowercase compatibility spellings. The dialer carries
+the origin scheme to the one `Settings.upstream_route` seam so the capture path, engines,
+updater, and OAST traffic do not each invent a precedence rule. A malformed selected value is
+an invalid route and fails closed; it never silently falls through to a direct origin.
+
+**Environment URL schemes follow the established convention only at that boundary.** An
+environment `http://` value is a plaintext HTTP CONNECT hop and `https://` means TLS to that
+proxy; credentials in process URI userinfo are accepted because they are not persisted. The
+persisted `network.upstream_proxy` `https://` spelling remains the historical plaintext form,
+so adopting the convention cannot reinterpret an existing settings file.

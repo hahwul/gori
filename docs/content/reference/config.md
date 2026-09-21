@@ -43,7 +43,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 |-----|------|---------|-------------|
 | `bind_host` | string | `127.0.0.1` | Global default listen address (used when a project has no `net.bind_host`) |
 | `bind_port` | integer | `8070` | Global default listen port (used when a project has no `net.bind_port`) |
-| `upstream_proxy` | string | `""` | Global default upstream: legacy `host:port`/`http://…`, `http+tls://…` (TLS to the proxy), or `socks5://…`/`socks5h://…`; empty = direct. Project `net.upstream_proxy` wins when set. `https://…` is the **legacy spelling of the plaintext form**; see [upstream_rules](#upstream-rules) |
+| `upstream_proxy` | string | `""` | Global default upstream: legacy `host:port`/`http://…`, `http+tls://…` (TLS to the proxy), or `socks5://…`/`socks5h://…`; empty = environment fallback (`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, then direct). Project `net.upstream_proxy` wins when set. `https://…` is the **legacy spelling of the plaintext form**; see [upstream_rules](#upstream-rules) |
 | `upstream_proxy_ca` | string | `""` | PEM bundle trusted for the **upstream proxy's own** certificate on an `http+tls` hop, in addition to the system store. Blank = system trust only. A path, never a secret, so it is safe to share in a profile |
 | `upstream_proxy_insecure` | bool | `false` | Skip verification of the **upstream proxy's** certificate. Independent of `verify_upstream` and untouched by `--insecure-upstream`, which are about the **origin**. Off by default: that hop carries every `CONNECT` authority and every `Proxy-Authorization` credential |
 | `verify_upstream` | bool | `true` | Verify upstream TLS certificates against the system CA trust store, resolved automatically from standard locations (honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`); if none is found, HTTPS verification fails; set `SSL_CERT_FILE` or turn this off. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. `--insecure-upstream` seeds it off for one session |
@@ -232,6 +232,8 @@ Every refusal is recorded in the project as a flow carrying its reason, too. A c
 
 `network.upstream_proxy` is the catch-all route. Bare `host:port` and `http://…` use a plaintext HTTP CONNECT proxy (default port `8080`). `http+tls://…` uses the same CONNECT protocol with the hop to the proxy wrapped in TLS (default port `443`). `socks5://…` resolves destination names **locally** and sends an address literal; `socks5h://…` sends hostname targets as `ATYP DOMAIN` so the **proxy** resolves them. Both SOCKS forms default to port 1080. URI credentials are refused; configure direct credentials in the Project tab, or use an `upstream_rules` entry with `username` and `password_env`.
 
+When this scalar is blank, gori consults the process environment at dial time. HTTP origins select `HTTP_PROXY`, then `ALL_PROXY`; HTTPS origins select `HTTPS_PROXY`, then `HTTP_PROXY`, then `ALL_PROXY`. Uppercase names are preferred and lowercase spellings are accepted. `NO_PROXY` / `no_proxy` supports `*`, hosts and domains, bracketed IPv6 literals, and optional ports; a match goes direct. An explicit project upstream, matching rule (including `direct`), or non-empty scalar takes precedence over the environment. In this environment-variable convention, `http://` means a plaintext HTTP CONNECT proxy and `https://` means TLS to the proxy; the persisted `network.upstream_proxy` `https://` spelling retains its legacy plaintext meaning.
+
 #### `https://` means the plaintext proxy, not TLS
 
 `https://proxy:3128` has meant *a plaintext HTTP CONNECT proxy* since before gori could speak TLS to a proxy at all, and it still does. It was not reclaimed: every existing `settings.json` carrying one means the plaintext form, and redefining the scheme would have moved that egress onto a handshake the proxy may not offer, on upgrade, with no edit. So the spelling is **accepted unchanged and reported**, never reinterpreted:
@@ -292,7 +294,8 @@ Precedence, highest first:
 | 1 (highest) | Project `net.upstream_proxy`: an explicit per-project pin, which bypasses the table wholesale |
 | 2 | `upstream_rules`, first host match |
 | 3 | `network.upstream_proxy`: the implicit catch-all |
-| 4 (lowest) | Direct |
+| 4 | Process environment (`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`) when the scalar is blank, subject to `NO_PROXY` / `no_proxy` |
+| 5 (lowest) | Direct |
 
 For an open project, **Destination host** is evaluated before this table. `*` (the default)
 leaves the precedence above unchanged; a non-matching destination goes direct without falling

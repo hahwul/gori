@@ -101,7 +101,7 @@ module Gori::Settings
 
   class_property bind_host : String = DEFAULT_BIND_HOST
   class_property bind_port : Int32 = DEFAULT_BIND_PORT
-  class_getter upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # HTTP/SOCKS URI or legacy host:port; "" = direct
+  class_getter upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # HTTP/SOCKS URI or legacy host:port; "" = environment fallback, then direct
 
   # Assigning the scalar RETIRES the retained load error. A non-string `network.upstream_proxy`
   # makes every route fail closed (apply_upstream_proxy), and the settings editor corrects it by

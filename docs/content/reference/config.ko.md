@@ -43,7 +43,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 |-----|------|---------|-------------|
 | `bind_host` | string | `127.0.0.1` | 전역 기본 리스닝 주소 (프로젝트에 `net.bind_host`가 없을 때 사용) |
 | `bind_port` | integer | `8070` | 전역 기본 리스닝 포트 (프로젝트에 `net.bind_port`가 없을 때 사용) |
-| `upstream_proxy` | string | `""` | 전역 기본 업스트림: 기존 `host:port`/`http://…`, `http+tls://…`(프록시까지 TLS), 또는 `socks5://…`/`socks5h://…`; 비어 있으면 직접 연결. 설정 시 프로젝트 `net.upstream_proxy`가 우선. `https://…`는 **평문 형식의 기존 표기**입니다. [upstream_rules](#upstream-rules) 참고 |
+| `upstream_proxy` | string | `""` | 전역 기본 업스트림: 기존 `host:port`/`http://…`, `http+tls://…`(프록시까지 TLS), 또는 `socks5://…`/`socks5h://…`; 비어 있으면 환경변수(`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`)를 먼저 확인한 뒤 직접 연결합니다. 설정 시 프로젝트 `net.upstream_proxy`가 우선. `https://…`는 **평문 형식의 기존 표기**입니다. [upstream_rules](#upstream-rules) 참고 |
 | `upstream_proxy_ca` | string | `""` | `http+tls` 홉에서 **업스트림 프록시 자신의** 인증서를 검증할 PEM 번들. 시스템 스토어에 더해서 신뢰합니다. 비우면 시스템 스토어만 사용. 비밀이 아니라 경로이므로 프로필로 공유해도 안전합니다 |
 | `upstream_proxy_insecure` | bool | `false` | **업스트림 프록시** 인증서 검증을 건너뜁니다. **origin**을 다루는 `verify_upstream`이나 `--insecure-upstream`과는 무관하며 그 플래그에 영향받지 않습니다. 기본이 꺼짐인 이유: 이 홉은 모든 `CONNECT` authority와 모든 `Proxy-Authorization` 자격증명을 실어 나릅니다 |
 | `verify_upstream` | bool | `true` | 시스템 CA 트러스트 스토어로 업스트림 TLS 인증서 검증(표준 위치에서 자동 탐색하며 `SSL_CERT_FILE` / `SSL_CERT_DIR` 존중; 스토어를 못 찾으면 HTTPS 검증 실패. `SSL_CERT_FILE` 지정 또는 끄기). 토글하면 재시작 없이 실행 중인 프록시, 액티브 프로브, Repeater / Fuzzer / Miner 전송기에 즉시 반영됩니다. `--insecure-upstream`은 해당 세션에만 끈 상태로 시작 |
@@ -232,6 +232,8 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 `network.upstream_proxy`는 catch-all 경로입니다. `host:port`와 `http://…`는 평문 HTTP CONNECT 프록시를 사용합니다(기본 포트 `8080`). `http+tls://…`는 같은 CONNECT 프로토콜을 쓰지만 프록시까지의 홉을 TLS로 감쌉니다(기본 포트 `443`). `socks5://…`는 대상 이름을 **로컬에서** 해석해 주소 리터럴을 보내고, `socks5h://…`는 호스트 이름을 `ATYP DOMAIN`으로 보내 **프록시가** 해석합니다. 두 SOCKS 형식 모두 기본 포트는 1080입니다. URI 자격증명은 거부됩니다. Project 탭에서 직접 자격증명을 설정하거나 `username`과 `password_env`를 가진 `upstream_rules` 항목을 사용하세요.
 
+이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트를 지원하며 일치하면 직접 연결합니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시, `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
+
 #### `https://`는 TLS가 아니라 평문 프록시입니다
 
 `https://proxy:3128`은 gori가 프록시에 TLS로 말할 수 있게 되기 전부터 *평문 HTTP CONNECT 프록시*를 의미했고, 지금도 그렇습니다. 이 스킴을 되찾지 않았습니다. 이미 `https://`가 적힌 모든 `settings.json`은 평문 형식을 뜻하고, 스킴의 의미를 바꾸면 업그레이드만으로, 아무 편집 없이, 프록시가 제공하지도 않을 핸드셰이크로 그 egress를 옮기게 됩니다. 그래서 이 표기는 **그대로 받아들이고 알려주기만** 하며, 재해석하지 않습니다.
@@ -292,7 +294,8 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 | 1 (최상) | 프로젝트 `net.upstream_proxy`. 명시적 프로젝트 고정으로, 테이블을 통째로 건너뜁니다 |
 | 2 | `upstream_rules`의 첫 호스트 일치 |
 | 3 | `network.upstream_proxy`. 암묵적 catch-all |
-| 4 (최하) | 직접 연결 |
+| 4 | 스칼라가 비어 있을 때 프로세스 환경(`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`), `NO_PROXY` / `no_proxy` 적용 |
+| 5 (최하) | 직접 연결 |
 
 열려 있는 프로젝트에서는 **Destination host**가 이 테이블보다 먼저 평가됩니다. 기본값 `*`는 위 우선순위를 그대로 두고, 일치하지 않는 목적지는 전역 규칙이나 스칼라 프록시로 폴백하지 않고 직접 연결됩니다.
 

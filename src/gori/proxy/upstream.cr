@@ -42,9 +42,10 @@ module Gori::Proxy
                   io_timeout : Time::Span = Settings.io_timeout,
                   *, overrides : Gori::HostOverrides? = nil,
                   pin : String? = nil,
-                  apply_host_overrides : Bool = true) : IO?
+                  apply_host_overrides : Bool = true,
+                  origin_scheme : String = "http") : IO?
       dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin,
-        apply_host_overrides: apply_host_overrides)[0]
+        apply_host_overrides: apply_host_overrides, origin_scheme: origin_scheme)[0]
     end
 
     # Like `dial`, but also says WHY there is no socket. Every dial failure used to collapse
@@ -58,13 +59,14 @@ module Gori::Proxy
                          io_timeout : Time::Span = Settings.io_timeout,
                          *, overrides : Gori::HostOverrides? = nil,
                          pin : String? = nil,
-                         apply_host_overrides : Bool = true) : {IO?, DialError?}
+                         apply_host_overrides : Bool = true,
+                         origin_scheme : String = "http") : {IO?, DialError?}
       target, target_port = apply_host_overrides ? connect_target(host, port, overrides, pin) : {pin || host, port}
       # ONE decision point for "how do we reach this host": Settings.upstream_route folds the
-      # project pin, the rule table and the legacy scalar together. Resolved on the ORIGINAL
-      # host, not `target` — a rule is written against the name the operator sees, and a
-      # hostname override only changes where we dial (see connect_target).
-      route = Settings.upstream_route(host)
+      # project pin, the rule table, the legacy scalar, and its environment fallback together.
+      # Resolved on the ORIGINAL host, not `target` — a rule is written against the name the
+      # operator sees, and a hostname override only changes where we dial (see connect_target).
+      route = Settings.upstream_route(host, origin_scheme, port)
       if err = route.configuration_error
         {nil, DialError.new(DialErrorKind::Proxy, "#{err} — the origin was never contacted")}
       elsif route.direct?
@@ -518,8 +520,9 @@ module Gori::Proxy
     # read (a proxy that opens the tunnel and then goes silent is not a dial FAILURE — the dial
     # succeeded; the silence shows up later, on the first read) and needs to ask this question
     # directly.
-    def self.proxied_via(host : String) : String?
-      route = Settings.upstream_route(host)
+    def self.proxied_via(host : String, origin_scheme : String? = nil,
+                         origin_port : Int32? = nil) : String?
+      route = Settings.upstream_route(host, origin_scheme, origin_port)
       route.direct? ? nil : proxy_label(route)
     end
 
@@ -1113,7 +1116,8 @@ module Gori::Proxy
                              *, overrides : Gori::HostOverrides? = nil,
                              pin : String? = nil,
                              tls_preset : String? = nil) : {OpenSSL::SSL::Socket::Client?, DialError?}
-      tcp, dial_err = dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin)
+      tcp, dial_err = dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin,
+        origin_scheme: "https")
       return {nil, dial_err || DialError::ORIGIN_UNREACHABLE} unless tcp
       # `hostname:` below is unaffected by `pin` on purpose: SNI and the verified name stay the
       # NAME. A pinned dial reaches the address the client actually connected to and then asks
@@ -1142,7 +1146,7 @@ module Gori::Proxy
       # per failed origin → fd exhaustion). `tcp` is non-nil here: `dial` never raises
       # (it returns nil), so the only raising step runs after the nil-guard above.
       tcp.try(&.close) rescue nil
-      {nil, tls_dial_error(ex, io_timeout, host)}
+      {nil, tls_dial_error(ex, io_timeout, host, port)}
     end
 
     # What actually broke inside the TLS attempt. This used to be a bare `rescue` that threw
@@ -1167,7 +1171,8 @@ module Gori::Proxy
     # `dial_tls_result`) and must reach the SAME six verdicts — the alternative is a second
     # classifier that drifts, which is how OAST registration came to report every TLS failure
     # as one unexplained sentence (#1020).
-    def self.tls_dial_error(ex : Exception, io_timeout : Time::Span, host : String) : DialError
+    def self.tls_dial_error(ex : Exception, io_timeout : Time::Span, host : String,
+                            origin_port : Int32? = nil) : DialError
       # A read timeout is not a TLS verdict — nothing came back to judge. Naming the layer
       # TLS here is precisely what produced the certificate advice for a black hole, so it
       # gets its own kind and carries how long gori actually waited (the stall was otherwise
@@ -1175,7 +1180,7 @@ module Gori::Proxy
       if ex.is_a?(IO::TimeoutError)
         return DialError.new(DialErrorKind::Timeout,
           cause: "no TLS response within #{io_timeout.total_seconds.round(1)}s",
-          via_proxy: proxied_via(host))
+          via_proxy: proxied_via(host, "https", origin_port))
       end
       cause = exception_cause(ex)
       # OpenSSL says "certificate verify failed" for an untrusted chain, an expired leaf AND a
@@ -1183,7 +1188,7 @@ module Gori::Proxy
       # three. Everything else it raises is a protocol-level refusal, where offering a CA file
       # is the wrong advice.
       return DialError.new(DialErrorKind::TlsVerify, cause: cause) if cause.includes?("certificate verify failed")
-      DialError.new(DialErrorKind::Tls, cause: cause, via_proxy: proxied_via(host))
+      DialError.new(DialErrorKind::Tls, cause: cause, via_proxy: proxied_via(host, "https", origin_port))
     end
 
     # Longest library verdict worth carrying into a stored flow error. OpenSSL's are ~60 bytes.

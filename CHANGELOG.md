@@ -5,6 +5,7 @@
 ### Changes
 
 - CLI: `gori run notes delete <n>` now requires `--yes`, and the refusal quotes the note's first line so a wrong list position is visible before anything is removed (#1120)
+- Network: outbound requests honor `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, and `NO_PROXY` when no explicit gori upstream is configured (#1114)
 - Docs: an Apple container section in the install guide — Apple's `container` (macOS 26+) runs the published image with the same flags docker takes, and `just container-build` / `container-run` mirror the docker recipes (#1121)
 - CLI: `gori run` project writes now use a bounded SQLite lock wait and report the project with retry guidance when a live TUI owns the writer slot (#1118)
 
