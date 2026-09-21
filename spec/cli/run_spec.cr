@@ -601,6 +601,26 @@ module Gori::CLI::Run
                                             name : String?, tags : String?)
     apply_repeater_metadata(store, id, name, tags)
   end
+
+  def self.persist_repeater_response_for_spec(id : Int64, head : Bytes, body : Bytes?, error : String?,
+                                              duration_us : Int64, project : Gori::Project,
+                                              request_sha256 : String?) : Bool
+    persist_repeater_response(id, head, body, error, duration_us, project, request_sha256)
+  end
+end
+
+describe "gori run repeater post-send persistence" do
+  it "turns an unopenable project into a failed write result instead of raising" do
+    path = File.tempname("gori-post-send-invalid", ".db")
+    File.write(path, "not a sqlite database")
+    begin
+      Gori::CLI::Run.persist_repeater_response_for_spec(
+        1_i64, Bytes.empty, nil, nil, 0_i64, Gori::Project.new("broken", path), nil
+      ).should be_false
+    ensure
+      File.delete?(path)
+    end
+  end
 end
 
 # #210: both writes it makes are now `exec_task_ok`, and it threw the answer away — so

@@ -609,7 +609,8 @@ module Gori
       # list, a scope load for Outbound). A `body:` query is a write — it drains FTS —
       # so those callers pass false. Every CLI store skips idle FTS: the process is
       # short-lived, and an idle indexer next to a capturing TUI is the #752 condition.
-      private def self.open_store(project : Project, *, read_only : Bool = false) : Store
+      private def self.open_store(project : Project, *, read_only : Bool = false,
+                                  abort_on_failure : Bool = true) : Store
         store = Store.open(project.db_path,
           retention_flows: read_only ? Store::RETENTION_UNLIMITED : Settings.retention_flows,
           read_only: read_only,
@@ -652,9 +653,11 @@ module Gori
         reapply_active_slot
         store
       rescue ex : DB::Error | SQLite3::Exception
-        abort "gori run: cannot open database #{project.db_path}: " \
-              "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
-              "#{open_failure_hint(ex, project.db_path, read_only, project.name)}"
+        message = "gori run: cannot open database #{project.db_path}: " \
+                  "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
+                  "#{open_failure_hint(ex, project.db_path, read_only, project.name)}"
+        abort message if abort_on_failure
+        raise ex
       end
 
       # The open-time re-spelling, said out loud. STDERR, never STDOUT: `gori run … --format json`

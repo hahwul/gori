@@ -482,8 +482,18 @@ module Gori::Settings
   # no TLS proxy would be noise on every start.
   private def self.tls_proxy_configured? : Bool
     return true if upstream_rules.any?(&.tls?)
-    [effective_upstream_proxy, upstream_proxy].any? do |value|
-      parse_upstream_proxy(value).tls?
+    return true if [effective_upstream_proxy, upstream_proxy].any? do |value|
+                     parse_upstream_proxy(value).tls?
+                   end
+    return false unless project_upstream_proxy.nil? && upstream_proxy.strip.empty?
+
+    # The environment is the effective catch-all when the global scalar is blank and no project
+    # pin (including an explicit direct `""`) is present. Inspect both origin schemes because an
+    # HTTPS proxy may be selected only for TLS origins, while an `https://` value in HTTP_PROXY is
+    # also a TLS proxy when it is the route for an HTTP origin.
+    ["http", "https"].any? do |scheme|
+      value = environment_proxy_value(scheme)
+      value ? parse_environment_upstream_proxy(value).tls? : false
     end
   end
 
