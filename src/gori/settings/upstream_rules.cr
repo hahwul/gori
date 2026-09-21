@@ -525,10 +525,16 @@ module Gori::Settings
     uri.query.nil? && uri.fragment.nil? && (uri.path.empty? || uri.path == "/")
   end
 
+  # `.presence`, not a nil check: `URI.parse("http://").host` is `""`, which is truthy, and
+  # that one word was the difference between the environment grammar failing closed like the
+  # persisted one (`parse_upstream_proxy("http://")` is invalid) and it minting a route to
+  # host "" on the default port (#1114). Applied after the brackets come off too, so `[]` is
+  # not a host either.
   private def self.environment_proxy_host(uri : URI) : String?
-    host = uri.host
+    host = uri.host.presence
     return nil unless host
-    host.starts_with?('[') && host.ends_with?(']') ? host[1...-1] : host
+    host = host[1...-1] if host.starts_with?('[') && host.ends_with?(']')
+    host.presence
   end
 
   private def self.environment_proxy_credentials_unsafe?(username : String, password : String?) : Bool

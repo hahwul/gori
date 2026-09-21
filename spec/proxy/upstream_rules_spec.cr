@@ -394,6 +394,21 @@ describe "upstream rules" do
       reset_upstream
     end
 
+    # The environment grammar was MORE permissive than the persisted one: `http://` parsed to
+    # host "" on port 8080 while `parse_upstream_proxy("http://")` refused it (#1114).
+    it "fails an environment proxy URL with no host closed, as the scalar grammar does" do
+      ["http://", "http://:3128", "http://[]:3128", "https://", "socks5h://"].each do |value|
+        with_proxy_environment({"HTTP_PROXY" => value}) do
+          route = Gori::Settings.upstream_route("origin.test", "http", 80)
+          route.invalid?.should be_true, value
+          route.direct?.should be_false, value
+        end
+      end
+      Gori::Settings.parse_upstream_proxy("http://").invalid?.should be_true
+    ensure
+      reset_upstream
+    end
+
     it "does not echo environment proxy credentials when the value is invalid" do
       with_proxy_environment({"HTTP_PROXY" => "http://alice:super-secret@env-proxy.test:bad"}) do
         route = Gori::Settings.upstream_route("origin.test", "http", 80)
