@@ -2,83 +2,82 @@
 
 ## Unreleased
 
-### Changes
+## v0.7.1
 
-- TUI: captured text carrying a glyph the terminal draws two columns wide — `✅ ⭐ ⚡` and the rest of Unicode's `EastAsianWidth=W` set — no longer shifts every row below it out of place for the rest of the session (#1125)
-- CLI: `gori run notes delete <n>` now requires `--yes`, and the refusal quotes the note's first line so a wrong list position is visible before anything is removed (#1120)
-- Network: outbound requests honor `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, and `NO_PROXY` (including CIDR blocks) when no explicit gori upstream is configured, with localhost and loopback always direct; TLS passthrough and blind CONNECT tunnels take the HTTPS proxy, a portless `http://` value means port 80, an empty host fails closed, and the startup banner, `settings:network` and the statusline `upstream_env` field say which variable is routing (#1114)
-- TUI: clicking in the Notes body, an Issue's NOTES card or the Project DESCRIPTION places the caret without switching the editor into INSERT — `i`/↵ or the NOR/INS chip do that — and a double-click there takes the word in READ mode, where `y` copies it. A paste aimed at an editor pane that is in READ now opens the pane and inserts, instead of being refused (#1124)
-- Issues: an open writeup keeps the place you were reading — the detail's notes no longer jump back to the top on every capture, `i` opens INSERT at the caret instead of line 1, and saving no longer leaves the pane reporting a peer conflict against your own write (#1122, #1123)
-- TUI: a READ-mode selection no longer outlives its document — switching a Notes sub-tab, a peer rewriting the note, `^E` handing text back, or a project switch re-seeding the DESCRIPTION drops the band instead of painting it over the new text, where `y` copied characters never selected (#1123)
-- Docs: an Apple container section in the install guide — Apple's `container` (macOS 26+) runs the published image with the same flags docker takes, and `just container-build` / `container-run` mirror the docker recipes (#1121)
-- CLI: a short-lived `gori run` write keeps its bounded SQLite wait and, when another gori holds the project, says so with the read-only workaround instead of naming a `--db` target's parent directory as a project; `discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen` and `intercept` keep the standard wait for the run they hold the project open for (#1118)
-- CLI: a write that did not land is reported instead of assumed. `repeater send --format json` carries `response_saved` / `history_saved` with the reason, a session another gori deleted mid-send included, while a send that reached the origin still exits 0 so a retry does not duplicate it; a `discover` batch the writer refused is counted on STDERR with exit 1 rather than dropped, and MCP reports it as `unsaved_flows` (#1118)
+- Network: outbound requests honor `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY` (CIDR included) when no gori upstream is set, loopback stays direct, an empty proxy host fails closed, and the banner, `settings:network` and the statusline name the variable that is routing (#1114)
+- CLI: a write that did not land is reported, not assumed — `repeater send --format json` carries `response_saved`/`history_saved` with the reason, a refused `discover` batch exits 1, MCP reports it as `unsaved_flows`, and a short-lived write keeps its bounded SQLite wait and names the gori holding the project (#1118)
+- TUI: a double-width glyph (`✅ ⭐ ⚡` and the rest of `EastAsianWidth=W`) no longer shifts every row below it out of place for the rest of the session (#1125)
+- TUI: a click places the caret without entering INSERT, a double-click takes the word in READ, and a paste aimed at a READ pane inserts instead of being refused (#1124)
+- TUI: a READ selection no longer outlives its document — a sub-tab switch, a peer's rewrite, `^E` or a project switch drops the band (#1123)
+- Issues: an open writeup keeps its scroll position and caret, and saving no longer reports a peer conflict against your own write (#1122, #1123)
+- CLI: `gori run notes delete <n>` requires `--yes`, and the refusal quotes the note's first line (#1120)
+- Docs: an Apple `container` section in the install guide (macOS 26+), mirroring the docker recipes (#1121)
 
 ## v0.7.0
 
 ### New features
 
-- MCP: **Messages to the agent** — from the command palette or the Attached-agents card, send a one-line message with any marked flows into an attached agent's own session (the Claude Code inbox socket, a live Codex thread, the `claude/channel` preview, or riding back on the next tool result), and the agent answers with `reply_to_operator` (#1090)
-- MCP: `get_current_context` reports what the operator MARKED in the TUI — the rows, the sub-tab chips and the filter they were marked under — and `list_history{ids}` fetches a whole marked set in one call (#1091)
+- MCP: **Messages to the agent** — send a one-line message with any marked flows into an attached agent's own session (the Claude Code inbox socket, a live Codex thread, the `claude/channel` preview, or the next tool result), answered with `reply_to_operator` (#1090)
+- MCP: `get_current_context` reports what the operator marked in the TUI — the rows, the sub-tab chips and the filter they were marked under — and `list_history{ids}` fetches the whole set in one call (#1091)
 - MCP: the stateless **`2026-07-28`** revision — `server/discover`, per-request version negotiation, `resultType`, `tools/list` cache hints, `subscriptions/listen`, and `annotations.readOnlyHint` on every tool (#1100, #1101, #1105)
-- MCP: cancelling a request now STOPS the work — `probe_scan`, `minimize_repeater` and `run_retest` stop sending at the next flow, candidate or step (#1103)
+- MCP: cancelling a request stops the work — `probe_scan`, `minimize_repeater` and `run_retest` stop sending at the next flow, candidate or step (#1103)
 - Session: `gori run session from-request` and `create_session_slot{from_request_flow_id}` build a slot from selected captured headers, redacted, and a value copied off the wire stays byte-literal at send time (#1086)
-- Probe: new passive rules — exposed API documentation and schemas, a session identifier carried in the URL, a permissive Flash/Silverlight policy — and new active rules: 429 and HTTP-method access-control bypass, insecure methods (TRACE/XST), and CRLF injection through form and JSON bodies (#1109)
+- Probe: new passive rules — exposed API documentation and schemas, a session identifier in the URL, a permissive Flash/Silverlight policy — and new active rules: 429 and HTTP-method access-control bypass, TRACE/XST, and CRLF injection through form and JSON bodies (#1109)
 - Probe: a WebSocket carried by an HTTP/2 extended CONNECT (RFC 8441) is scanned like any other socket (#1083)
-- CLI/MCP: `gori run project list --query` and `list_projects{query, limit, offset}` narrow over display name, directory slug, short id and bound workspace path (#1085)
+- CLI/MCP: `project list --query` and `list_projects{query, limit, offset}` narrow over display name, directory slug, short id and bound workspace path (#1085)
 - TUI: Miss Ring ships on by default, and turning her off is written to `settings.json` (#1096)
 
 ### Changes
 
-- TUI: a misspelled filter field is named ("unknown field `hostt:` — did you mean `host:`?") instead of reading as an empty list, and a pasted URL or authority is no longer painted as a typo (#1106)
-- Project: the picker finds a project by slug, short id or workspace path, tells two same-named projects apart, and says why a create or rename was refused; `description` is readable from `gori run project list --format json` and `project_info`; the delete preview reports both locks it honours (#1108)
-- Project: the ACTIVITY feed reaches every row it holds, its retention cap runs on event inserts too, and a write that left the stored value where it was is no longer recorded as a change (#1084)
+- TUI: a misspelled filter field is named ("unknown field `hostt:` — did you mean `host:`?") instead of reading as an empty list, and a pasted URL is no longer painted as a typo (#1106)
+- Project: the picker finds a project by slug, short id or workspace path, tells two same-named projects apart, and says why a create or rename was refused; `description` is readable from JSON output and `project_info` (#1108)
+- Project: the ACTIVITY feed reaches every row it holds, its retention cap runs on event inserts too, and a write that changed nothing is no longer recorded as a change (#1084)
 - Probe: four rules stop guessing — PHP `Warning`/`Notice` output, CORS reflection on any `Vary: Origin` endpoint, a two-segment NGINX alias, and DOM clobbering on the `window.X = window.X || {}` preamble (#1098)
-- WebSocket: a stored or replayed HTTP/1.1 handshake reads the exact `websocket` member across repeated `Upgrade` fields, and `gori run capture` prints an RFC 8441 socket once instead of counting every frame toward `--max` (#1113)
-- MCP: `--read-only --tools=SPEC` starts, three argument refusals name what the caller actually sent, and the handshake stops promising tools the server does not have — every start reports the tool count it will advertise (#1102, #1105)
+- WebSocket: a stored or replayed h1 handshake reads the exact `websocket` member across repeated `Upgrade` fields, and `gori run capture` prints an RFC 8441 socket once instead of counting every frame toward `--max` (#1113)
+- MCP: `--read-only --tools=SPEC` starts, three argument refusals name what the caller sent, and every start reports the tool count it will advertise instead of promising tools it does not have (#1102, #1105)
 - CLI: `grpc reflect --timeout` and the Fuzzer/Discover/Miner/Sequencer `--rate` reject non-finite values as usage errors, named by the command that took them (#1104)
 - TUI: the setup wizard explains local and device access, the guided tour ends with a first-session checklist, and an Issues RELATED reload keeps the same row selected (#1038, #1081)
 - Discover: a `-H` header name that is not an RFC 7230 token is refused instead of written onto the wire (#1086)
 
 ## v0.6.1
 
-- Repeater: a `$BIND.`/`$GEN.` token an operator types into a tab opened from History resolves at send time again — only the names the capture itself arrived with stay literal, instead of the whole tab being switched off (#1080)
-- Repeater: a stored request whose head never terminates (`\r\n\r`, what shell `$(…)` leaves behind) is now SAID — `head_unterminated` on `repeater create`/`send`/`list`, the TUI send toast and four MCP tools. The bytes are still sent verbatim; h2 and WS are exempt (#1075)
-- Robustness: seven ways ordinary data ended the process — a non-UTF-8 byte in a HAR, a bad port or self-referential anchor in an OpenAPI spec, a drifted `match_rules` enum, a huge `"time"` overflowing `Float64#to_i`, and a far-future timestamp under a non-UTC `TZ` — now report what they met instead of raising (#1079)
+- Repeater: a `$BIND.`/`$GEN.` token typed into a tab opened from History resolves at send time again — only the names the capture itself arrived with stay literal, instead of the whole tab being switched off (#1080)
+- Repeater: a stored request whose head never terminates (`\r\n\r`, what shell `$(…)` leaves behind) is now said — `head_unterminated` on `repeater create`/`send`/`list`, the TUI send toast and four MCP tools. The bytes still go out verbatim; h2 and WS are exempt (#1075)
+- Robustness: seven ways ordinary data ended the process — a non-UTF-8 HAR byte, a bad port or self-referential anchor in an OpenAPI spec, a drifted `match_rules` enum, a huge `"time"`, a far-future timestamp under a non-UTC `TZ` — now report what they met instead of raising (#1079)
 - MCP: `create_issue` takes `notes`, so a finding is filed with its body in one call (#1076)
 
 ## v0.6.0
 
 ### New features
 
-- Evidence: freeze an exchange as an immutable copy, so what proved a finding survives the next send and History's retention sweep — an **Evidence** tab over the project-wide archive with compare, redacted copy and export, `Space` → **Link…** freezing as it links, a freeze refused when the request drifted from the response beside it, plus `gori run evidence` and six MCP tools (#1038, #1039)
+- Evidence: freeze an exchange as an immutable copy, so what proved a finding survives the next send and History's retention sweep — an **Evidence** tab with compare, redacted copy and export, `Space` → **Link…** freezing as it links, plus `gori run evidence` and six MCP tools (#1038, #1039)
 - Retest: an Issue carries the ordered Repeater sends that reproduce it — a role per step (`setup`/`baseline`/`variant`/`control`/`cleanup`) and one assertion (`status:`, `json:`, `body:same`) — runnable from the card, from `gori run retest run` (exit 0 only on `pass`) and from ten MCP tools (#1036)
-- Redaction: `--redact` replaces the values a *redaction profile* names inside bodies with a keyed `[REDACTED:…]` placeholder — profiles per project and global, every `--format` covered once, the stored bytes untouched — with the TUI copy menu and MCP `get_flow` following (#1035)
-- Env: tokens gain namespaces — `$ENV.KEY`, `$BIND.NAME`, and `$GEN.NAME` for a fresh send-time UUID, random value or timestamp — so a GraphQL `$id` in a body needs no escape; existing projects are re-spelled the first time they open, with a backup beside the database (#1069)
-- TUI: the tab bar is nine numbered slots — `1`-`9` jump from anywhere, `0` opens a type-to-filter **Go to tab…** over the whole catalog, `⇧1`-`⇧9` are the same two gestures on the sub-tab strip, and `settings:tabs` is one ordered list where the position carries the visibility
-- TUI: an **Editor keyset** (`helix-ish` / `vim-ish`) respells every text pane's READ grammar at once, on top of an editor scope that makes every pane key — `i`, `↵`, `x`, `y`, undo, append, top/bottom — an ordinary rebindable verb
-- JWT: RS/PS/ES 256-512 and EdDSA signing and verification with a PEM key you supply, `--verify` answering under the alg the token declares, the algorithm-confusion attack family, and a JWE shown by its header instead of as an opaque string (#1010, #1015)
-- Decoder: Java serialization, ASP.NET ViewState, PHP `serialize()` and Python pickle are read as labelled JSON trees, in the tab and in the detail pane; a pickle is disassembled, never executed (#1011)
+- Redaction: `--redact` replaces the values a *redaction profile* names with a keyed `[REDACTED:…]` placeholder — profiles per project and global, every `--format` covered, the stored bytes untouched — with the TUI copy menu and MCP `get_flow` following (#1035)
+- Env: tokens gain namespaces — `$ENV.KEY`, `$BIND.NAME`, and `$GEN.NAME` for a fresh send-time UUID, random value or timestamp — so a GraphQL `$id` in a body needs no escape; existing projects are re-spelled on first open, with a backup beside the database (#1069)
+- TUI: the tab bar is nine numbered slots — `1`-`9` jump from anywhere, `0` opens a type-to-filter **Go to tab…**, `⇧1`-`⇧9` are the same two gestures on the sub-tab strip, and `settings:tabs` is one ordered list where the position carries the visibility
+- TUI: an **Editor keyset** (`helix-ish`/`vim-ish`) respells every text pane's READ grammar at once, on top of an editor scope that makes every pane key an ordinary rebindable verb
+- JWT: RS/PS/ES 256-512 and EdDSA signing and verification with a PEM key you supply, `--verify` answering under the alg the token declares, the algorithm-confusion attack family, and a JWE shown by its header (#1010, #1015)
+- Decoder: Java serialization, ASP.NET ViewState, PHP `serialize()` and Python pickle read as labelled JSON trees, in the tab and the detail pane; a pickle is disassembled, never executed (#1011)
 - WebSocket: Socket.IO/Engine.IO, SignalR, STOMP, SockJS and Action Cable get a detail pane named after the framing and a `ws_proto` key in `show --format json` and `get_flow`, with raw frames still the truth (#1009)
 - Discover: a brute-force hit's body is read for endpoints, header-declared links are followed (`Link`, `Content-Location`, `Refresh`, `Set-Cookie Path=`), the API-description documents join the well-known set, a `405` is proof a path exists, and linked assets are no longer downloaded (`--assets` restores)
-- OAST: `oast listen --save` and `oast_start{persist:true}` keep a headless registration as a project session, so the blind SSRF/XXE/command-injection rules have something to plant against; `oast presets --check` and registration failures named by stage (#1020)
+- OAST: `oast listen --save` and `oast_start{persist:true}` keep a headless registration as a project session, so the blind SSRF/XXE/command-injection rules have something to plant against; plus `oast presets --check` and registration failures named by stage (#1020)
 - TUI: the statusline sees what gori is about to do — `scope`, `intercept`, `probe`, `issues` and `jobs` in the stdin context, each read from the source its chip renders from — and a timed-out command gets `SIGTERM` before `SIGKILL` (#1058)
 - History: `gori run history --format json` redacts sensitive header values and marks the row; `--include-sensitive` returns the exact bytes (#1002)
 - CLI: `colormarker update` edits a rule in place, `issues create -n/--notes-file/--notes-stdin` writes the body in one transaction, and `repeater create --request-stdin` takes a raw request off a pipe (#1001, #1018, #1019)
 - MCP: `gori mcp --install-pi` configures Pi in `~/.pi/agent/mcp.json` (#992)
-- Docs: Brand Kit and Miss Ring reference pages, and a statusline guide page whose every command is printed above a shot of the row it produced
+- Docs: Brand Kit and Miss Ring reference pages, and a statusline guide whose every command is printed above a shot of the row it produced
 
 ### Changes
 
-- Keys: one letter, one meaning — `d` only destroys, `y` always copies, `o` is only `↵`'s alias, `t` toggles a rule, `s` goes to the source, `r` sends and `^R` runs; the sub-tab verbs are one bucket drawn on all nine strip tabs; and a key the registry binds is the key that fires (#1053, #1055, #1056)
-- Issues: one concept for what backs a finding — the primary flow is RELATED's first row on every surface, `↵` shows a row's exchange in place and `s` goes to its source, **Link…** keeps the bytes instead of offering a second verb, and reloads keep the same related row selected while failed removals are reported honestly (#1038)
-- Issues, Probe: RELATED and AFFECTED URLS become bordered panes with focus of their own, a finding's remediation text is a scrollable pane instead of a truncated header row, and both `/` bars complete the way History's does
+- Keys: one letter, one meaning — `d` only destroys, `y` always copies, `o` is only `↵`'s alias, `t` toggles a rule, `s` goes to the source, `r` sends and `^R` runs; the sub-tab verbs are one bucket drawn on all nine strips, and a key the registry binds is the key that fires (#1053, #1055, #1056)
+- Issues: one concept for what backs a finding — the primary flow is RELATED's first row on every surface, `↵` shows a row's exchange in place, `s` goes to its source, **Link…** keeps the bytes, and failed removals are reported honestly (#1038)
+- Issues, Probe: RELATED and AFFECTED URLS become bordered panes with focus of their own, remediation text scrolls instead of truncating, and both `/` bars complete the way History's does
 - TUI: a pane stops shouting the name the chip above it already carries, drill-ins step with one `⇧N`/`⇧P` pair, and a measured walk through the core loop fixed a dozen hint strips naming a key that was not there (#1040, #1061)
 - Performance: literal History body/header search by byte scan (`body~` over 500k flows 4.1s → 0.25s), the proxy's head read and framing decision (~26µs → ~18µs a request), Sequencer analysis (153ms → 71ms), Miner's JSON spans (~117ms → ~1ms a probe), and the Discover, Fuzzer and Probe scan paths (#997, #999, #1064, #1065, #1067, #1070)
 - Colormarker: a reused `flows.id` no longer paints a new row in a deleted flow's colour, the `matches N of M` line answers for the scope being edited, a duplicate keeps the original's enabled state, and the editor prints the caveats the other two surfaces already did (#1032)
-- Sequencer: six numbers that looked right and answered something else — an empty `position` range refused before the run, a hex counter detected at concurrency > 1, a manual paste reporting its own goal, reconfigure keeping its settings, and MCP saying why a run found no tokens (#1030)
+- Sequencer: six numbers that looked right and answered something else — an empty `position` range, a hex counter at concurrency > 1, a manual paste reporting its own goal, reconfigure losing its settings, and MCP not saying why a run found no tokens (#1030)
 - Decoder: a hostile back-reference no longer raises out of a reader, `decoder list` measures its columns, and MCP `decode` names the converters that undo what ran, in the order that undoes it (#1011, #1031)
-- Cookie: `--verify` / `--crack` and the MCP tools read Django's HMAC algorithm off the signature length, as the TUI badge already did, instead of assuming `sha256` (#1027)
+- Cookie: `--verify`/`--crack` and the MCP tools read Django's HMAC algorithm off the signature length, as the TUI badge already did, instead of assuming `sha256` (#1027)
 - CLI: a wordlist that names a terminal is refused instead of hanging, an unreadable stdin reads as a sentence, and a refusal the arguments alone settle comes before the pipe is drained (#1034)
 - MCP: the handshake `instructions` stop calling the project a pin — they are sent once and cached, so after `switch_project` they went on naming the project the server started on (#1003)
 - Docs: an accuracy pass over the English and Korean guides — keys, rule host scope, colour-rule conditions, per-field `Alt-Svc` stripping, undocumented `gori run` flags and MCP tool gating
@@ -88,7 +87,7 @@
 
 ### New features
 
-- Cookie: a TUI workbench tab for framework signed session cookies (Flask/itsdangerous, Rack, Django) — decode, verify, crack and forge, the JWT tab's sibling (#565)
+- Cookie: a TUI workbench for framework signed session cookies (Flask/itsdangerous, Rack, Django) — decode, verify, crack and forge, the JWT tab's sibling (#565)
 - Retest: diff two projects at endpoint scale — a Diff sub-tab, `gori run diff`, MCP `diff_projects`, and `⇧F`/`n` to file a row as an Issue or Note (#824, #845)
 - Issues: CVSS v3.1/v4.0 scoring with `cvss:>=7` filtering, CVSS-aware exports and SARIF `security-severity` (#575)
 - gRPC: proto descriptor sets and server reflection as schema sources, schema-aware field fuzzing (`--field`), gRPC FIELDS editing, and grpc-web outcomes read from the body frame (#823, #841, #849, #984)
@@ -96,7 +95,7 @@
 - Proxy: outbound TLS fingerprints per destination and per send (`chrome`/`firefox`/`safari`/`curl`), plus `gori settings tls-fingerprint` (#822, #844)
 - Proxy: SOCKS5H, project-scoped proxy auth and destination filtering, and an upstream CONNECT proxy over TLS (`http+tls://`) (#858)
 - Rewriter: one-keystroke response-modification presets (unhide fields, drop CSP or security headers, disable SRI) installed as ordinary rules (#821)
-- Project: an ACTIVITY pane over the event feed, and config changes recorded with who changed what (#864)
+- Project: an ACTIVITY pane over the event feed, with config changes recording who changed what (#864)
 - Fuzzer: save a complete run — every request/wire/response byte — with run history, bounded restore, `gori run fuzz save/list/show/delete` and MCP `save_results` (#897)
 - Repeater/Fuzzer: replay a WebSocket captured over HTTP/2 (RFC 8441 extended CONNECT)
 - Probe: passive takeover, cleartext-credential, shared-cache and internal-host checks; blind OS command injection and XXE over OAST (#970, #974)
@@ -124,9 +123,9 @@
 
 ### New features
 
-- Authorize: replay a captured request under saved identities against a baseline, on all three surfaces. Passive replay of what the browser touches, `gori run authorize`, and the MCP tools share one plan (#707, #710)
+- Authorize: replay a captured request under saved identities against a baseline, on all three surfaces — passive replay of what the browser touches, `gori run authorize`, and the MCP tools share one plan (#707, #710)
 - History views: `v` picks a named filter that stays on — seven built-ins, project/global saved views, `gori run views` / `--view`, and MCP `*_view`. A project opens on `History + Repeater` (#776)
-- History provenance: a SRC column and `src:` name who sent each flow. TUI Repeater sends record by default; Authorize and Probe ignore gori-originated traffic on the unattended path (#770)
+- History provenance: a SRC column and `src:` name who sent each flow; TUI Repeater sends record by default, and Authorize and Probe ignore gori-originated traffic on the unattended path (#770)
 - Proxy: a `socks5` inbound listener, and `network.strip_alt_svc` so a browser cannot leave for HTTP/3 (#786)
 - Fuzzer: WebSocket session sweep, last-byte-sync race over HTTP/1.1, and URL-encoding of query/form payloads by default (#705, #795)
 - Import: WSDL 1.1 becomes one SOAP template per operation (#794)
@@ -152,16 +151,16 @@
 
 A hotfix release: the bug fixes written since v0.3.1, cherry-picked onto it. The features on the way to the next minor are not in it.
 
-- Open browser: a browser that never starts is reported as such, with its own error and how it died, instead of `opened` — gori only checked that the process spawned, not that it survived, and closed the browser's stderr, which was the one thing that could have explained the failure. The verdict comes from waiting on the child rather than a deadline, so it holds on a machine slow enough to lose that race. Brave is also launched without `--test-type`, which 1.92+ treats as a unit-test signal and aborts on — Chrome still gets it, to hide the SPKI-pin infobar (#700, #716, #721)
-- Scope: a regex EXCLUDE rule no longer fails **open** on a target that is not valid UTF-8 — it scrubbed nothing and `rescue false` read as "does not match", which is scope evasion. The History/Sitemap SQL lens also now agrees with the live gate on bracketed IPv6 hosts, brace globs and non-ASCII case (#688, #699)
-- Project settings: a host override reaches gori's own reserved name from either layer and folds case and a trailing root dot into one key, and the TUI refreshes the project env table before writing it back over a peer's edit (#687, #689)
+- Open browser: a browser that never starts is reported with its own error and how it died, instead of `opened` — the verdict comes from waiting on the child rather than a deadline. Brave is launched without `--test-type`, which 1.92+ aborts on; Chrome still gets it, to hide the SPKI-pin infobar (#700, #716, #721)
+- Scope: a regex EXCLUDE rule no longer fails **open** on a target that is not valid UTF-8 — `rescue false` read as "does not match", which is scope evasion. The History/Sitemap SQL lens also now agrees with the live gate on bracketed IPv6 hosts, brace globs and non-ASCII case (#688, #699)
+- Project settings: a host override reaches gori's own reserved name from either layer and folds case and a trailing root dot into one key, and the TUI refreshes the project env table before writing back over a peer's edit (#687, #689)
 - TUI: the statusline gets its own timeout and reports why it is blank, instead of killing the script that was about to answer (#690)
-- Stability: a crash audit across the CLI, TUI, store and MCP — a non-UTF-8 byte no longer aborts a command through PCRE2, a stale read cursor no longer takes the session down, and a poisoned release tag no longer crashes every later launch from cache. An MCP discover job also flushed its findings after going terminal, so a run finishing during a `switch_project` could write them into the project you had just moved to (#699)
-- MCP: `gori mcp --install-claude` now writes Claude Desktop's config where the running platform actually keeps it — `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, not a macOS `~/Library/Application Support/…` path built under a Linux `$HOME` (#718)
+- Stability: a crash audit across the CLI, TUI, store and MCP — a non-UTF-8 byte no longer aborts a command through PCRE2, a stale read cursor no longer takes the session down, a poisoned release tag no longer crashes every later launch from cache, and an MCP discover job no longer flushes its findings into the project you switched to mid-run (#699)
+- MCP: `--install-claude` writes Claude Desktop's config where the running platform actually keeps it — `$XDG_CONFIG_HOME/Claude/` on Linux, not a macOS path built under a Linux `$HOME` (#718)
 
 ## v0.3.1
 
-- Filters: one query grammar on every filter surface, content terms included; `header:`/`body:` now take a side, and the filter bar teaches its own syntax (#668, #674)
+- Filters: one query grammar on every filter surface, content terms included; `header:`/`body:` take a side, and the filter bar teaches its own syntax (#668, #674)
 - Decoder: recognize GraphQL/gRPC bodies by media-type essence, decode HTML entities, and cover WS subscriptions and both-side protobuf (#663)
 - Probe: scan binary WebSocket frames for credential shapes, stop DOM-XSS pairing on shapes that carry no taint, and fix two rule gates that failed silently (#671, #672, #676)
 - TUI: a copy key in INS mode (`y` there types a `y`), a wrap-lines toggle with horizontal scrolling back, sandbox togglable from the palette, and a deeper brand gold in the light theme (#652, #657, #670, #677, #680)
@@ -183,38 +182,38 @@ A hotfix release: the bug fixes written since v0.3.1, cherry-picked onto it. The
 - Fuzzer: built-in payload preset sets (SQLi and more), selectable across TUI/CLI/MCP (#568)
 - OAST: blind SSRF — plant a payload, promote the finding when the target calls home (#609)
 - Export: HAR export, with the import-side fields to round-trip it (#506)
-- Miss Ring: an opt-in companion in the body's corner, and on the project picker delivering the update notice; on `lively` she now also plays one of four idle gestures — a yawn, a smile, a squint or a deadpan — about once a minute, in the status-bar chip as well as the body sprite (#474, #548, #550)
+- Miss Ring: an opt-in companion in the body's corner, and on the project picker delivering the update notice; on `lively` she also plays one of four idle gestures about once a minute, in the status-bar chip as well as the body sprite (#474, #548, #550)
 
 ### Changes
 
-- Discover: read the target's well-known documents (OIDC/OAuth discovery, `security.txt`, sitemaps, …) and extract endpoints from JS bundles, JSON, source maps and inline `<script>`; keep each finding's request/response and open them from the findings table; hold and re-measure a drifting soft-404 baseline instead of reporting hundreds of limiter hits; report a real page on a wildcard-200 origin; bound per-response spend and stop a JS literal from buying a brute-force sweep (#605, #638)
-- Comparer: per-row change highlighting with `n`/`⇧N` navigation and `f` fold, per-column `status·size·time` headers with the A→B delta, and **Send to Comparer** from the Repeater, Sitemap and Fuzzer rows; `--context=N` fold parity in CLI/MCP
+- Discover: read the target's well-known documents (OIDC/OAuth discovery, `security.txt`, sitemaps, …) and extract endpoints from JS bundles, JSON, source maps and inline `<script>`; keep each finding's request/response and open them from the findings table; hold and re-measure a drifting soft-404 baseline; report a real page on a wildcard-200 origin; and bound per-response spend so a JS literal cannot buy a brute-force sweep (#605, #638)
+- Comparer: per-row change highlighting with `n`/`⇧N` navigation and `f` fold, per-column `status·size·time` headers with the A→B delta, **Send to Comparer** from the Repeater, Sitemap and Fuzzer rows, and `--context=N` fold parity in CLI/MCP
 - Rewriter: rules scoped global or project (replacing the s/o preset library), shown on the tab bar by default right of Comparer (#544, #611)
 - Probe: passive-rule improvements, the OAST SSRF rule classed CWE-918, and a navigable AFFECTED URLS list in a finding
 - Miner: latency-bound scheduling — one work queue for all locations, parallel calibration (~2.4x)
-- JWT: the lens switch (`^T`) now shows on the pane it acts on; new `dancheong` (dark) and `hanji` (light) themes
-- Project picker: multi-select over the project list — `Tab` / `⇧Tab` mark and step, `⇧↑` / `⇧↓` extend a range, `ctrl-a` marks everything the search shows, `esc` clears. The space menu's **Delete** then acts on the marks if any are set, else the cursor row; it names what it is about to wipe, says how much of the set the current search is hiding, and keeps (rather than silently skips) a project another gori still has open
-- `gori ca`: reject a flag written before the verb, repair a CA directory missing one of the key/cert pair, and reject an Ed25519/Ed448 or mismatched-key root with an operator-legible message instead of failing at the first CONNECT
+- JWT: the lens switch (`^T`) shows on the pane it acts on; new `dancheong` (dark) and `hanji` (light) themes
+- Project picker: multi-select over the project list — `Tab`/`⇧Tab` mark and step, `⇧↑`/`⇧↓` extend a range, `ctrl-a` marks what the search shows, `esc` clears. **Delete** then acts on the marks, names what it is about to wipe, says how much of the set the search is hiding, and keeps a project another gori has open
+- `gori ca`: reject a flag written before the verb, repair a CA directory missing one of the key/cert pair, and reject an Ed25519/Ed448 or mismatched-key root with a legible message instead of failing at the first CONNECT
 - Fixes: bracketed-paste freeze and poison in the Repeater; the `--` separator dropping subcommand args across ~60 `gori run` sites; colormarker custom-colour persistence and reorder writes; clipboard OSC 52 over tty; project-settings and host-override reload/rollback audit; OAST partial-poll evidence loss; and many dogfood-surfaced bugs
 
 ## v0.2.0
 
-- Proxy: upstream connection rules with per-host routing, SOCKS5 and proxy auth; a TLS pass-through list that is never MITM'd; per-destination outbound TLS (client certificates, protocol floor, ciphers); a setting to force HTTP/1.1; transparent listeners and additional listeners alongside the primary bind (#434, #435, #436, #437, #438)
-- Proxy: harden the HTTP/2 assembler against CONTINUATION spoofing and stream-slot exhaustion, re-sync framing after a head rewrite so Match&Replace can't smuggle, and reject bare-CR header obfuscation and ambiguous response framing (#341, #403, #409, #412, #417)
+- Proxy: upstream connection rules with per-host routing, SOCKS5 and proxy auth; a TLS pass-through list that is never MITM'd; per-destination outbound TLS (client certificates, protocol floor, ciphers); a setting to force HTTP/1.1; transparent listeners and additional listeners alongside the primary bind (#434–#438)
+- Proxy: harden the HTTP/2 assembler against CONTINUATION spoofing and stream-slot exhaustion, re-sync framing after a head rewrite so Match&Replace cannot smuggle, and reject bare-CR header obfuscation and ambiguous response framing (#341, #403, #409, #412, #417)
 - Proxy: serve the CA-download page at a reserved host, `gori.proxy` (#347)
-- TUI: multi-select in History, the Intercept queue, the Sitemap tree, and the Issues list, so the space menu acts on N items at once (#442, #459, #460, #461)
-- TUI: the Project tab becomes sub-tabs instead of five tiled panes, Network settings gain upstream-rules and outbound-TLS tables, a Keys section picks the command modifier (⌥ reaches the shortcuts Ctrl can't), plus `rosepine` and `tokyonight_day` themes (#440, #454, #458, #462, #463)
-- TUI: export the current note to Markdown from the Notes space menu, and ask where to write the Issues report instead of always overwriting `<project dir>/issues.{md,json}`. Export is `⇧E` on both tabs; the Issues list's old `x` is freed, so `x` now means "Select line" everywhere (#432)
+- TUI: multi-select in History, the Intercept queue, the Sitemap tree and the Issues list, so the space menu acts on N items at once (#442, #459, #460, #461)
+- TUI: the Project tab becomes sub-tabs instead of five tiled panes, Network settings gain upstream-rules and outbound-TLS tables, a Keys section picks the command modifier (⌥ reaches the shortcuts Ctrl cannot), plus `rosepine` and `tokyonight_day` themes (#440, #454, #458, #462, #463)
+- TUI: export the current note to Markdown from the Notes space menu, and ask where to write the Issues report instead of always overwriting `<project dir>/issues.{md,json}`. Export is `⇧E` on both tabs, which frees the Issues list's old `x`, so `x` now means "Select line" everywhere (#432)
 - Settings: `--config PATH` plus settings export/import profiles, per-project connect/idle timeouts and capture limit, and a unified retention policy (#439, #440, #441, #448, #450, #455)
 - Import: read Postman collections, Insomnia exports, and Burp XML (#453)
 - Probe: active-scan rules for open redirect, CRLF/response-header injection, host-header injection, access-control bypass, NGINX-style parameter traversal, GraphQL introspection, SSTI, and Next.js server-action missing authorization; passive rules for JWT weaknesses, source maps, SRI, and directory listing; a manual unsafe-method opt-in and AGGRESSIVE mode (#299, #342, #343, #346, #349, #350, #451)
 - CLI/MCP: bring `gori run` and `gori mcp` to TUI parity, and create/delete projects from `gori run project` (#351, #352)
 - Performance: move trigram FTS indexing off the capture commit path, and reuse one HTTP/1.1 connection across a fuzz sweep (up to 20x on HTTPS) (#428, #433)
-- Security: close request-splicing and scope-gate holes across Discover, Fuzzer, Repeater and Scope — crawled-link splicing, unvalidated redirect `Location`, per-URL probe authorization, fail-open scope, irregular request-line whitespace, and `wss://` targets dialing cleartext (#390-#397, #404-#407, #418-#422)
-- Security: keep gori's own files owner-only — the CA private key is now 0600 from creation (it used to land at the umask default and get chmod'd a syscall later, and a key that got loose any other way was never re-tightened) and is re-asserted on every load, and a settings export carrying a secret is written 0600. `--config` and `--ca-dir` no longer re-mode a directory the operator merely named (#466, #467)
-- Say what went wrong instead of swallowing it: a TUI session that can't open (a bad `--db`, an unreadable store) reports why on the project picker rather than dropping the operator on "no projects yet"; an unparseable `settings.json` says it is falling back to defaults rather than resetting the bind, upstream rules and TLS pass-through list in silence; and a path that should be a directory but isn't (`--ca-dir notes.txt`) is named as such instead of surfacing as `BIO_new_file(...) failed` or a raw backtrace
+- Security: close request-splicing and scope-gate holes across Discover, Fuzzer, Repeater and Scope — crawled-link splicing, unvalidated redirect `Location`, per-URL probe authorization, fail-open scope, irregular request-line whitespace, and `wss://` targets dialing cleartext (#390–#397, #404–#407, #418–#422)
+- Security: keep gori's own files owner-only — the CA private key is 0600 from creation and re-asserted on every load, and a settings export carrying a secret is written 0600. `--config` and `--ca-dir` no longer re-mode a directory the operator merely named (#466, #467)
+- Say what went wrong instead of swallowing it: a TUI session that cannot open (a bad `--db`, an unreadable store) says why on the project picker instead of "no projects yet"; an unparseable `settings.json` announces the fallback instead of silently resetting the bind, upstream rules and pass-through list; and `--ca-dir notes.txt` is named as a non-directory rather than surfacing as `BIO_new_file(...) failed`
 - Refactor: a single outbound chokepoint for the active-traffic scope gate, one Plan builder per engine (fuzz, discover, miner, repeater, sequencer) shared by TUI/CLI/MCP, and all 28 TUI modals on one Overlay seam (#354, #355, #356, #361)
-- Packaging and docs: Nix flake with an update channel, `AGENTS.md`, `DESIGN.md` with the P0-P8 principles, and an install script that survives GitHub API rate limits (#338, #345, #353, #360, #429)
+- Packaging and docs: a Nix flake with an update channel, `AGENTS.md`, `DESIGN.md` with the P0–P8 principles, and an install script that survives GitHub API rate limits (#338, #345, #353, #360, #429)
 
 ## v0.1.4
 
@@ -226,14 +225,14 @@ A hotfix release: the bug fixes written since v0.3.1, cherry-picked onto it. The
 - MCP: fix a credential leak in `get_repeater_context`, cap unbounded h1 capture reads, and surface `PROJECT_BUSY` on rolled-back writes (#335)
 - TUI: Repeater `^N` mirrors the target host into the Host header, Fuzzer wordlist field suggests recent and favorited paths, tutorial navigation fixes (#314, #315, #335)
 - OAST: support global-scope providers alongside project scope (#313)
-- Fix dogfooding-surfaced bugs across QL (`url:`, size and `dur:` units, uppercase schemes), Discover, Sequencer, Repeater, browser CA trust warning, `settings.json` formatting, and multipart form data (#312, #316, #317, #318, #319, #325, #337)
+- Fix dogfooding-surfaced bugs across QL (`url:`, size and `dur:` units, uppercase schemes), Discover, Sequencer, Repeater, browser CA trust warning, `settings.json` formatting, and multipart form data (#312, #316–#319, #325, #337)
 
 ## v0.1.3
 
 - Fix 30 confirmed bugs found across three build-and-dogfood passes: TUI (`--db`, Repeater NUL-truncated bodies, Rewriter hot-reload, Sequencer/Miner/OAST, Scope reload, log redirection), CLI (`oast listen --help` crash, Issues/Sitemap export encoding), proxy (WS close-handshake race, h2 preface on intercept), MCP, Import (HAR/OpenAPI/URL-list CRLF injection), Fuzzer auto-calibration, and more (#301, #307, #310)
 - CLI: accept `-V` as a version flag alias (#298)
 - TUI: match banner and wordmark gold to the real logo (#308)
-- Docs: dynamic landing page, nav/sidebar reorganization, logo download menu, homepage title (#300, #302, #303, #304, #305, #306, #309)
+- Docs: dynamic landing page, nav/sidebar reorganization, logo download menu, homepage title (#300, #302–#306, #309)
 
 ## v0.1.2
 
