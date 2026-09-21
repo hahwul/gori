@@ -1330,6 +1330,9 @@ module Gori::Tui
         # minutes old — the ordinary way to paste is to go copy something and come back, and a
         # clock left at that keypress declared the paste stalled on its own opening tick.
         @paste_stall.opened(Time.instant)
+        # An editor pane in READ is OPENED rather than refused — see `arm_editor_for_paste`,
+        # which runs first precisely so both questions below see the mode it just set.
+        arm_editor_for_paste
         if begin_bulk_paste?
           @paste_buf = String::Builder.new
         elsif paste_runs_as_commands?

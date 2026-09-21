@@ -6,7 +6,7 @@
 
 - CLI: `gori run notes delete <n>` now requires `--yes`, and the refusal quotes the note's first line so a wrong list position is visible before anything is removed (#1120)
 - Network: outbound requests honor `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, and `NO_PROXY` when no explicit gori upstream is configured (#1114)
-- TUI: clicking in the Notes body, an Issue's NOTES card or the Project DESCRIPTION places the caret without switching the editor into INSERT — `i`/↵ or the NOR/INS chip do that — and a double-click there takes the word in READ mode, where `y` copies it (#1124)
+- TUI: clicking in the Notes body, an Issue's NOTES card or the Project DESCRIPTION places the caret without switching the editor into INSERT — `i`/↵ or the NOR/INS chip do that — and a double-click there takes the word in READ mode, where `y` copies it. A paste aimed at an editor pane that is in READ now opens the pane and inserts, instead of being refused (#1124)
 - Docs: an Apple container section in the install guide — Apple's `container` (macOS 26+) runs the published image with the same flags docker takes, and `just container-build` / `container-run` mirror the docker recipes (#1121)
 - CLI: `gori run` project writes now use a bounded SQLite lock wait and report the project with retry guidance when a live TUI owns the writer slot (#1118)
 
