@@ -15,15 +15,52 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Only the BODY editor of a tab that says it can take one is eligible: everything else
   # (bottom prompts, pickers, overlays, single-line fields, hex edit) keeps the old
   # per-keystroke path, which is exactly what those surfaces already handle correctly.
-  private def begin_bulk_paste? : Bool
+  # The context in which a paste belongs to the tab BODY at all: no modal over it, no bottom
+  # prompt, no floating picker — each of those owns its own keymap, and a paste inside one is
+  # contained there. ONE home, because both decisions taken at a paste's start transition need
+  # exactly this set and the second one arrived as a copy of the first.
+  private def paste_body_context? : Bool
     return false unless @focus == :body && @overlay.none? && !modal_overlay?
     return false if @space_menu_open || copy_as_shown? || send_to_shown?
-    return false if @goto_open || @search_open || @rename_open || @tag_edit_open
+    !(@goto_open || @search_open || @rename_open || @tag_edit_open)
+  end
+
+  private def begin_bulk_paste? : Bool
+    return false unless paste_body_context?
     @tabs[@active_tab]?.try(&.accepts_bulk_paste?) || false
   end
 
+  # A bracketed paste arriving at an editor pane that is in READ opens it first (#1124).
+  #
+  # `i` then ⌘V was the documented recovery — `PASTE_REFUSED` says so in as many words — and
+  # it lands in exactly the state this does: INSERT, caret where READ left it, the clipboard
+  # spliced there. So this removes a keystroke from a two-step the operator was going to take
+  # anyway; it does not invent a destination for the text. A paste is an explicit "put this in
+  # the buffer", which is why it may arm an editor that a POINTER gesture deliberately may not.
+  #
+  # Called BEFORE the two questions below rather than folded into either, because it has to
+  # change the answer to both: with the pane now in INSERT, `begin_bulk_paste?` takes the three
+  # bulk-capable editors (Notes, the Repeater request, the Fuzzer template) and
+  # `paste_runs_as_commands?` stops refusing the rest (the Decoder / JWT / Cookie inputs, the
+  # Issue notes, the Project description, the single-line TARGET rows), which then get the
+  # per-keystroke path they already use in INSERT. Neither predicate needed a new clause.
+  #
+  # The guards are `paste_body_context?` — shared with `begin_bulk_paste?` — plus
+  # `subtab_filter_editing?`: a paste into the sub-tab `/` bar belongs to the bar, and arming
+  # the editor underneath it would put the clipboard in two places at once. `editor_read_mode?` is derived from `body_badge`, so a
+  # pane whose keys are already captured some other way — the Repeater's hex editor, its
+  # `^Q` chain modal, the gRPC FIELDS form — reports INSERT here and is left alone.
+  private def arm_editor_for_paste : Nil
+    return unless paste_body_context?
+    return unless tab = @tabs[@active_tab]?
+    return if tab.subtab_filter_editing?
+    tab.editor_enter_insert if tab.editor_read_mode?
+  end
+
   # Shown when a paste is refused. It names the recovery, because a paste that vanishes
-  # without a word is its own bug report.
+  # without a word is its own bug report. Since #1124 an editor pane in READ is opened rather
+  # than refused (`arm_editor_for_paste`), so what is left here is the focus that takes no
+  # text at all: the tab bar, the sub-tab strip, a list body.
   PASTE_REFUSED = "paste ignored — nothing focused takes text (i edits the pane, ↵ its fields)"
 
   # --- a paste whose END MARKER never came ---------------------------------

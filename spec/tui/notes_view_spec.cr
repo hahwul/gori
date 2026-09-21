@@ -466,3 +466,75 @@ describe Gori::Tui::NotesView do
     end
   end
 end
+
+# The pointer's mode contract (#1124). A click AIMS the caret; it does not arm the editor.
+# `click_to_cursor` / `select_word_at` used to call `enter_insert!` first, so the next bare
+# letter was TYPED rather than run: `y` meant as copy put a `y` in the note, over whatever was
+# selected. INS is entered the way the keyboard enters it — `i` / ↵ — or by clicking the
+# NOR/INS chip the border draws. Every other read/insert editor in the TUI (Repeater REQUEST,
+# Fuzzer TEMPLATE, Decoder / JWT / Cookie INPUT) already split the gesture this way.
+describe "NotesView pointer gestures" do
+  # The editor body sits one column inside `rect` (render's own inset), so screen column
+  # `rect.x + 1 + n` is buffer column n and screen row `rect.y + n` is line n.
+  seeded = ->(store : Gori::Store) do
+    view = NotesView.new
+    view.reload(store)
+    view.replace_current("alpha beta\ngamma delta")
+    rect = Rect.new(0, 0, 40, 6)
+    view.render(Screen.new(MemoryBackend.new(40, 6)), rect)
+    {view, rect}
+  end
+
+  it "places the caret without arming the editor" do
+    with_store do |store|
+      view, rect = seeded.call(store)
+      view.click_to_cursor(rect, rect.x + 3, rect.y + 1)
+      view.insert_mode?.should be_false
+      # READ's `y` with nothing selected copies the caret LINE — so this is where it landed.
+      view.copy_text.should eq("gamma delta")
+    end
+  end
+
+  it "takes the word under a double-click in READ, where `y` can reach it" do
+    with_store do |store|
+      view, rect = seeded.call(store)
+      view.select_word_at(rect, rect.x + 3, rect.y + 1).should be_true
+      view.insert_mode?.should be_false
+      view.selection?.should be_true
+      view.copy_text.should eq("gamma")
+    end
+  end
+
+  it "drags a READ band from the press, still without arming the editor" do
+    with_store do |store|
+      view, rect = seeded.call(store)
+      view.click_to_cursor(rect, rect.x + 1, rect.y)
+      view.drag_to_cursor(rect, rect.x + 6, rect.y)
+      view.insert_mode?.should be_false
+      view.copy_text.should eq("alpha")
+    end
+  end
+
+  it "collapses a standing READ selection on the next plain click" do
+    with_store do |store|
+      view, rect = seeded.call(store)
+      view.select_word_at(rect, rect.x + 1, rect.y).should be_true
+      view.selection?.should be_true
+      view.click_to_cursor(rect, rect.x + 8, rect.y)
+      view.selection?.should be_false
+      view.copy_text.should eq("alpha beta")
+    end
+  end
+
+  it "keeps placing the EDITOR caret once INS is on" do
+    with_store do |store|
+      view, rect = seeded.call(store)
+      view.enter_insert!
+      view.click_to_cursor(rect, rect.x + 3, rect.y + 1)
+      view.insert_mode?.should be_true
+      view.select_word_at(rect, rect.x + 3, rect.y + 1).should be_true
+      view.insert_mode?.should be_true
+      view.copy_text.should eq("gamma")
+    end
+  end
+end

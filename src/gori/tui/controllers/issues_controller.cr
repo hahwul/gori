@@ -450,10 +450,12 @@ module Gori::Tui
       return false unless @issues.detail_open?
       inner = detail_inner(rect)
       return double_click_related(inner, mx, my) if @issues.links_card_rect(inner).contains?(mx, my)
-      # The NOTES BODY, and only it. `notes_select_word` forces INSERT and hit-tests nothing,
-      # so a pair of presses on the meta block up top (title, chips, timestamps, evidence)
-      # used to drop the operator into the editor with a word selected at clamped
-      # coordinates — a gesture on a read-only row that starts an edit somewhere else.
+      # The NOTES BODY, and only it. `notes_select_word` hit-tests nothing — it clamps the
+      # pointer into the editor — so a pair of presses on the meta block up top (title,
+      # chips, timestamps, evidence) used to take a word out of the notes at coordinates
+      # nowhere near the rows the operator was pointing at. (It also forced INSERT, so the
+      # same gesture on a read-only row STARTED AN EDIT; that half is gone with #1124, and
+      # this guard still owns the other half.)
       return false unless @issues.notes_body_rect(inner).contains?(mx, my)
       @issues.notes_select_word(inner, mx, my)
     end

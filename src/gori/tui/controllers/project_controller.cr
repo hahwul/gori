@@ -204,6 +204,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      @press_on_desc = false
       # Chip strip FIRST: it sits inside this tab's body rect (under the OVERVIEW band), so a
       # chip click reads as a body click unless it's claimed here. It lands on the STRIP, not
       # in the card — clicking "Description" selects the sub-tab, it doesn't open the editor.
@@ -278,8 +279,16 @@ module Gori::Tui
             end
             return true
           end
+          # The card's TEXT takes the caret; its BORDER just took the focus above.
+          # `pane_at` answers `:desc` for the whole card, borders included, and
+          # `desc_click_to_cursor` clamps rather than refusing — so without this a press on
+          # the bottom hairline placed the caret on the last visible line and armed a drag
+          # there. `IssuesController#handle_detail_click` carries the same test.
+          if desc.inset(1, 1).contains?(mx, my)
+            @press_on_desc = true # the motion that continues this press belongs to the editor
+            @project_view.desc_click_to_cursor(rect, mx, my)
+          end
         end
-        @project_view.desc_click_to_cursor(rect, mx, my)
       when :settings
         handle_project_settings_click(rect, mx, my)
       end # :overview band → just take body focus
@@ -299,13 +308,36 @@ module Gori::Tui
       end
     end
 
+    # Whether the last press landed IN the DESCRIPTION card rather than on the chip strip
+    # above it or on the NOR/INS badge its own border carries. `supports_drag?` is asked with
+    # no coordinates — `drag_press_target?` runs it right after the click — so the click is
+    # what has to record where it began; `IssuesController#@detail_press` is the same guard.
+    #
+    # The bare `pane == :desc` it replaces was honest only while `desc_drag_to_cursor` refused
+    # every gesture the card was not already in INSERT for. That refusal is gone (#1124), and
+    # without this a press on the "Description" chip — or on the mode badge — followed by a
+    # twitch would drag a band open from a cell outside the text, and under `settings:mouse`
+    # drag-copy put it on the clipboard.
+    @press_on_desc = false
+
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
     # A drag extends a selection over TEXT: the DESCRIPTION, or the HOST OVERRIDES / ENV row
     # while one is open. The lists themselves have no text to extend over — a drag there is a
     # fast repeated select — so they answer false. No focus/save side effects — the press that
     # began the gesture already ran them.
     def supports_drag? : Bool
-      @project_view.pane == :desc || @project_view.ov_adding? || env_row_open?
+      # Answered the way `handle_drag` DISPATCHES — by the focused pane — because that is what
+      # the motion will actually run. As a flat disjunction the three disagreed: `focus_pane`
+      # only assigns `@pane` and never closes an open HOST OVERRIDES / ENV row, so with one of
+      # those still open a press on the DESCRIPTION card's mode badge armed a drag through
+      # `env_row_open?`, and `handle_drag`'s `:desc` arm then opened a band from the border
+      # cell the press landed on.
+      case @project_view.pane
+      when :desc      then @press_on_desc
+      when :overrides then @project_view.ov_adding?
+      when :env       then env_row_open?
+      else                 false
+      end
     end
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
@@ -325,13 +357,25 @@ module Gori::Tui
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       return false if @project_view.strip_chip_at(rect, mx, my) # a chip is a button, not text
       case @project_view.pane_at(rect, mx, my)
-      when :desc      then @project_view.desc_select_word(rect, mx, my)
+      when :desc      then desc_double_click(rect, mx, my)
       when :scope     then double_click_scope(rect, mx, my)
       when :overrides then double_click_override(rect, mx, my)
       when :env       then double_click_env(rect, mx, my)
       when :activity  then double_click_activity(rect, mx, my)
       else                 false
       end
+    end
+
+    # The DESCRIPTION card's TEXT, and only it. `pane_at` answers `:desc` for the whole card
+    # including its border rows, and `desc_select_word` hit-tests nothing — it clamps through
+    # `card.inset(1, 1)` — so a pair of presses on the bottom hairline took a word off the last
+    # visible line. That used to force INSERT; since #1124 it paints a READ band instead, which
+    # `y` copies and a toast reports — a selection the operator never pointed at, now
+    # observable. The press half carries the same test.
+    private def desc_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless card = @project_view.desc_card_rect(rect)
+      return false unless card.inset(1, 1).contains?(mx, my)
+      @project_view.desc_select_word(rect, mx, my)
     end
 
     private def double_click_scope(rect : Rect, mx : Int32, my : Int32) : Bool

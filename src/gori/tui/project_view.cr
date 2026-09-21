@@ -437,18 +437,18 @@ module Gori::Tui
       @desc_area.word_delete_key?(ev)
     end
 
-    # Mouse DRAG / DOUBLE-CLICK over the description — the click already forced INSERT, so
-    # both work on the editor's own selection.
+    # Mouse DRAG / DOUBLE-CLICK over the description. Each runs against the selection model
+    # the CURRENT mode owns — INS: the editor's own anchor, painted by `TextArea#render`;
+    # READ: `@desc_read`, painted by `paint_desc_read_chrome`. Both used to force INSERT
+    # first, which put a READ-mode word out of reach of `y` (#1124).
     def desc_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless desc_insert_mode?
-      return unless card = card_rect(rect, :desc)
-      @desc_area.click_to_cursor(card.inset(1, 1), mx, my, selecting: true)
+      desc_click_to_cursor(rect, mx, my, selecting: true)
     end
 
     def desc_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless card = card_rect(rect, :desc)
-      enter_desc_insert!
-      @desc_area.select_word_at(card.inset(1, 1), mx, my)
+      inner = card.inset(1, 1)
+      desc_insert_mode? ? @desc_area.select_word_at(inner, mx, my) : @desc_read.select_word(@desc_area, inner, mx, my)
     end
 
     # Sub-tab order, left to right. DESCRIPTION leads: it's the one card you WRITE rather
@@ -759,13 +759,25 @@ module Gori::Tui
       card_rect(rect, :desc)
     end
 
-    # Mouse: place the description-editor cursor at a click INSIDE the card, entering INS
-    # like NotesView#click_to_cursor. Selecting the sub-tab (a chip click, ↓ off the strip)
-    # deliberately does NOT come through here — that lands in READ mode, so arrows navigate.
-    def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+    # Mouse: place the description-editor cursor at a click INSIDE the card, IN THE MODE THE
+    # CARD IS ALREADY IN. Selecting the sub-tab (a chip click, ↓ off the strip) deliberately
+    # does not come through here at all.
+    #
+    # The `enter_desc_insert!` that used to lead this method is gone (#1124): a click is how
+    # you aim, not how you ask to type, and arming the editor here meant the next bare letter
+    # was typed rather than run — `y` putting a `y` in the description instead of copying,
+    # over whatever was selected. INS is entered by `i` / ↵ or by clicking the NOR/INS chip
+    # this card draws on its own border. `NotesView#click_to_cursor` is the twin of this.
+    def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       return unless card = card_rect(rect, :desc)
-      enter_desc_insert!
-      @desc_area.click_to_cursor(card.inset(1, 1), mx, my)
+      inner = card.inset(1, 1)
+      if desc_insert_mode?
+        @desc_area.click_to_cursor(inner, mx, my, selecting: selecting)
+      else
+        # Through the read state — it owns the band READ paints, and its `click` is what
+        # COLLAPSES a standing ⇧arrow selection (`sync_from` deliberately does not).
+        @desc_read.click(@desc_area, inner, mx, my, selecting: selecting)
+      end
     end
 
     # --- PROJECT SETTINGS pane (delegated from ProjectController#handle_project_settings_key) ---

@@ -139,28 +139,49 @@ describe "ProjectView DESCRIPTION scrolling" do
 end
 
 describe "ProjectView DESCRIPTION insert mode" do
-  # Arriving at the DESCRIPTION sub-tab must land in READ mode, where the arrows navigate;
-  # only a click INSIDE the card opens the editor. That is the regression the sub-tab
-  # promotion fixed — selecting the chip used to route through desc_click_to_cursor and drop
-  # straight into INS, where ←/→ became caret movement with no way back out to the strip.
-  it "only enters INS from a click inside its own card" do
+  # Arriving at the DESCRIPTION sub-tab must land in READ mode, where the arrows navigate.
+  # That is the regression the sub-tab promotion fixed — selecting the chip used to route
+  # through desc_click_to_cursor and drop straight into INS, where ←/→ became caret movement
+  # with no way back out to the strip.
+  #
+  # #1124 finished the job: NO pointer gesture enters INS any more. A click aims the caret in
+  # whichever mode the card is already in — arming the editor here meant the next bare letter
+  # was typed rather than run, so a `y` meant as copy put a `y` in the description, over
+  # whatever was selected. `i` / ↵ and the NOR/INS chip are the ways in.
+  it "aims the caret from a click inside its own card, and never enters INS" do
     with_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
-      view.replace_desc("one\ntwo")
+      view.replace_desc("one\ntwo\nthree")
       rect = Rect.new(0, 0, 120, 30)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: true)
       view.pane.should eq(:desc)
       view.desc_insert_mode?.should be_false # the tab opens on DESCRIPTION, in READ
+      inner = view.desc_card_rect(rect).not_nil!.inset(1, 1)
 
       view.focus_pane(:scope) # another sub-tab is showing…
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: true)
-      view.desc_click_to_cursor(rect, rect.x + 2, rect.y + 14)
-      view.desc_insert_mode?.should be_false # …so a click in the body can't reach the editor
+      view.desc_click_to_cursor(rect, inner.x, inner.y + 1)
+      # …so a click on those cells can't reach the editor at all: the caret has not moved.
+      view.desc_copy_text.should eq("one")
 
       view.focus_pane(:desc)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: true)
-      view.desc_click_to_cursor(rect, rect.x + 2, rect.y + 14)
+      view.desc_click_to_cursor(rect, inner.x, inner.y + 1)
+      view.desc_insert_mode?.should be_false
+      view.desc_copy_text.should eq("two") # READ's `y` with no band: the caret LINE
+
+      # A double-click takes the word IN READ, which is exactly what `y` then copies.
+      view.desc_select_word(rect, inner.x + 1, inner.y + 2).should be_true
+      view.desc_insert_mode?.should be_false
+      view.desc_selection?.should be_true
+      view.desc_copy_text.should eq("three")
+
+      # And once INS is on, the same gestures drive the editor's own caret and selection.
+      view.enter_desc_insert!
+      view.desc_click_to_cursor(rect, inner.x, inner.y + 1)
       view.desc_insert_mode?.should be_true
+      view.desc_select_word(rect, inner.x + 1, inner.y + 1).should be_true
+      view.desc_copy_text.should eq("two")
     end
   end
 end

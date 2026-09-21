@@ -288,3 +288,78 @@ describe "Gori::Tui::NotesController — a closed note's links" do
     end
   end
 end
+
+# What a PRESS arms (#1124). `drag_to_cursor` used to refuse every gesture the pane was not
+# already in INSERT for, and that refusal was doing double duty as a press-target guard:
+# `supports_drag?` answered a flat `true`, because the whole tab body is the editor. The
+# refusal is gone — a drag now extends whichever selection model the current mode owns — so
+# the flat `true` had to become a record of where the press landed. Without it, pressing the
+# NOR/INS chip on the editor's own border and twitching the mouse would toggle the mode AND
+# drag a band open from a cell of the border, which `settings:mouse` drag-copy then writes to
+# the clipboard. `IssuesController#@detail_press` is the same guard for the same reason.
+describe "Gori::Tui::NotesController — what a press arms" do
+  it "arms a drag from the editor, and not from the NOR/INS chip" do
+    with_notes_controller do |controller|
+      view = controller.view
+      view.exit_insert! # `notes_new` (the helper's setup) drops into INSERT; start from READ
+      rect = Rect.new(0, 0, 76, 20)
+      controller.render_body(Screen.new(MemoryBackend.new(76, 20)), rect, :body)
+
+      # The chip located by its EFFECT rather than by re-deriving the card geometry here: it
+      # is the ONLY cell where a press changes the mode, which is the property under test.
+      chip = nil.as({Int32, Int32}?)
+      (rect.y...rect.bottom).each do |y|
+        (rect.x...rect.right).each do |x|
+          controller.handle_click(rect, x, y)
+          next unless view.insert_mode?
+          chip = {x, y}
+          view.exit_insert!
+          break
+        end
+        break if chip
+      end
+      cx, cy = chip.not_nil!
+
+      controller.handle_click(rect, cx, cy)
+      view.insert_mode?.should be_true # it really is the chip: a press there toggles
+      controller.supports_drag?.should be_false
+      view.exit_insert!
+
+      # …and an ordinary press, which places the caret and leaves the mode alone, does arm one.
+      controller.handle_click(rect, rect.x + 4, cy + 2)
+      view.insert_mode?.should be_false
+      controller.supports_drag?.should be_true
+    end
+  end
+end
+
+# The rows `notes_body_rect` CARVES OFF — the `/ filter` bar above the editor and the
+# link-preview row taken from its last line. `TextArea#click_to_cursor` and `#select_word_at`
+# both CLAMP rather than refusing, so a press on the preview row used to place the caret on the
+# last visible line of the note, take a word from it, and arm a drag there. Harmless while the
+# drag was refused outside INSERT; since #1124 it is a band `y` copies (see
+# spec/tui/press_target_spec.cr for the same shape on the Project DESCRIPTION card).
+describe "Gori::Tui::NotesController — rows the editor was not drawn into" do
+  it "arms no drag and takes no word from the link-preview row" do
+    with_notes_controller do |controller|
+      view = controller.view
+      view.exit_insert! # `notes_new` (the helper's setup) drops into INSERT
+      view.replace_current("alpha beta\ngamma delta")
+      rect = Rect.new(0, 0, 76, 20)
+      backend = MemoryBackend.new(76, 20)
+      controller.render_body(Screen.new(backend), rect, :body)
+      # The row the preview is DRAWN on, read off a real render rather than re-derived, so the
+      # spec cannot disagree with `carve_links_row`.
+      links_y = (0...rect.h).find { |y| backend.row(y).includes?("[repeater] XSS PoC (+2)") }
+      links_y.should_not be_nil
+
+      controller.handle_click(rect, rect.x + 4, links_y.not_nil!).should be_true
+      controller.supports_drag?.should be_false
+      controller.handle_double_click(rect, rect.x + 4, links_y.not_nil!).should be_false
+      view.selection?.should be_false
+      view.insert_mode?.should be_false
+      # …and the caret never left line 0, where the note opened.
+      view.copy_text.should eq("alpha beta")
+    end
+  end
+end
