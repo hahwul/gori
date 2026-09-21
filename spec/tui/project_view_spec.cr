@@ -711,3 +711,74 @@ describe "ProjectView SCOPE pane" do
     end
   end
 end
+
+# The DESCRIPTION's READ selection is an anchor into the text it was made in. `replace_desc`
+# (`^E`) and `reload` on a project switch replace that text in place, and the band used to
+# survive both — painted over the new description, with `y` copying characters the operator
+# never selected. The drop is `TextReadState#bind`'s; the `@desc_dirty` guard on `reload`
+# is untouched, so an unsaved buffer keeps its text AND its band.
+private def with_desc_project(&)
+  dir = File.tempname("gori-desc-read")
+  Dir.mkdir_p(dir)
+  path = File.join(dir, "gori.db")
+  store = Gori::Store.open(path)
+  begin
+    yield store, Gori::Project.new("p", path)
+  ensure
+    store.close rescue nil
+    FileUtils.rm_rf(dir)
+  end
+end
+
+describe "ProjectView DESCRIPTION READ selection across a document hand-over" do
+  # A view on the DESCRIPTION card with "beta" selected in READ — a band that does not start
+  # at the origin, so a re-seeded caret landing on (0, 0) cannot collapse it by accident.
+  seeded = ->(store : Gori::Store, project : Gori::Project) do
+    store.set_setting(ProjectView::DESC_KEY, "alpha beta gamma")
+    view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+    view.reload(project, store)
+    view.focus_pane(:desc)
+    view.desc_read_move(0, 6)
+    view.desc_read_move(0, 4, selecting: true)
+    view.desc_selection?.should be_true
+    view.desc_copy_text.should eq("beta")
+    view
+  end
+
+  it "drops the band when ^E hands a different text back" do
+    with_desc_project do |store, project|
+      view = seeded.call(store, project)
+      view.replace_desc("zzzzzzzzzzzzzzzzzzzz")
+      view.desc_selection?.should be_false
+      view.desc_copy_text.should eq("zzzzzzzzzzzzzzzzzzzz")
+    end
+  end
+
+  it "drops the band when a reload seeds a different stored description" do
+    with_desc_project do |store, project|
+      view = seeded.call(store, project)
+      store.set_setting(ProjectView::DESC_KEY, "zzzzzzzzzzzzzzzzzzzz")
+      view.reload(project, store)
+      view.desc_text.should eq("zzzzzzzzzzzzzzzzzzzz")
+      view.desc_selection?.should be_false
+      view.desc_copy_text.should eq("zzzzzzzzzzzzzzzzzzzz")
+    end
+  end
+
+  it "keeps an unsaved buffer, and its band, across a reload" do
+    with_desc_project do |store, project|
+      view = seeded.call(store, project)
+      view.enter_desc_insert!
+      view.insert('!') # dirty; typed at the caret, which the band left at column 10
+      view.exit_desc_insert!
+      view.desc_read_to_edge(-1)
+      view.desc_read_move(0, 6)
+      view.desc_read_move(0, 4, selecting: true)
+      store.set_setting(ProjectView::DESC_KEY, "zzzzzzzzzzzzzzzzzzzz")
+      view.reload(project, store)
+      view.desc_text.should eq("alpha beta! gamma")
+      view.desc_selection?.should be_true
+      view.desc_copy_text.should eq("beta")
+    end
+  end
+end

@@ -538,3 +538,83 @@ describe "NotesView pointer gestures" do
     end
   end
 end
+
+# A READ selection is an anchor into ONE document. Notes keeps a single read state for the
+# whole sub-tab strip while every note owns its own TextArea, and a note's text is replaced
+# in place by a peer reload or by `^E`. In each case the band used to survive the hand-over:
+# painted at the old coordinates over text the operator never selected in, and `y` put that
+# text on the clipboard. `IssuesView#open_detail_issue` fixed the same leak for an Issue's
+# writeup (#1123); here the drop is `TextReadState#bind`'s, so no hand-over site has to
+# remember it — `switch_note`, `switch_note_by_id`, `reload`, `replace_current` all go the
+# same way.
+describe "NotesView READ selection across a document hand-over" do
+  # note 1 = "alpha beta / gamma delta", note 2 = "zzzzzzzzzzzzzz", pane in READ on note 1,
+  # rendered once so the double-click has a layout to hit-test against.
+  two_notes = ->(store : Gori::Store) do
+    view = NotesView.new
+    view.reload(store)
+    view.replace_current("alpha beta\ngamma delta")
+    view.new_note
+    view.replace_current("zzzzzzzzzzzzzz")
+    view.switch_note(0)
+    rect = Rect.new(0, 0, 40, 6)
+    view.render(Screen.new(MemoryBackend.new(40, 6)), rect)
+    {view, rect}
+  end
+
+  it "drops the band when the sub-tab switches" do
+    with_store do |store|
+      view, rect = two_notes.call(store)
+      view.select_word_at(rect, rect.x + 1 + 6, rect.y).should be_true
+      view.selection?.should be_true
+      view.copy_text.should eq("beta")
+
+      view.switch_note(1)
+      view.selection?.should be_false
+      view.copy_text.should eq("zzzzzzzzzzzzzz") # the caret LINE of note 2, not a 4-cell band
+      view.render(Screen.new(MemoryBackend.new(40, 6)), rect)
+      view.selection?.should be_false
+    end
+  end
+
+  it "drops the band when a peer rewrites the note under it" do
+    with_store do |store|
+      view, rect = two_notes.call(store)
+      view.save(store).should be_true # so a peer can find the note by id
+      view.select_word_at(rect, rect.x + 1 + 6, rect.y).should be_true
+      view.copy_text.should eq("beta")
+
+      peer = NotesView.new
+      peer.reload(store)
+      peer.switch_note(0)
+      peer.replace_current("zzzzzzzzzzzzzzzzzzzz")
+      peer.save(store).should be_true
+
+      view.reload(store) # the data_version tick
+      view.current_text.should eq("zzzzzzzzzzzzzzzzzzzz")
+      view.selection?.should be_false
+      view.copy_text.should eq("zzzzzzzzzzzzzzzzzzzz")
+    end
+  end
+
+  it "keeps the band across a peer reload that changed nothing" do
+    with_store do |store|
+      view, rect = two_notes.call(store)
+      view.save(store).should be_true
+      view.select_word_at(rect, rect.x + 1 + 6, rect.y).should be_true
+      view.reload(store)
+      view.selection?.should be_true
+      view.copy_text.should eq("beta")
+    end
+  end
+
+  it "drops the band when ^E hands a different text back" do
+    with_store do |store|
+      view, rect = two_notes.call(store)
+      view.select_word_at(rect, rect.x + 1 + 6, rect.y).should be_true
+      view.replace_current("zzzzzzzzzzzzzzzzzzzz")
+      view.selection?.should be_false
+      view.copy_text.should eq("zzzzzzzzzzzzzzzzzzzz")
+    end
+  end
+end

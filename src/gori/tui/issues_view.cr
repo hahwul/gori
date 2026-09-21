@@ -1130,7 +1130,7 @@ module Gori::Tui
 
     def notes_selection? : Bool
       return false unless notes_focused?
-      notes_insert_mode? ? @notes.selection? : @notes_read.selection?
+      notes_insert_mode? ? @notes.selection? : @notes_read.selection?(@notes)
     end
 
     def notes_select_line : Nil

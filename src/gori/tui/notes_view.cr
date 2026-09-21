@@ -162,7 +162,11 @@ module Gori::Tui
       @next_id = {@next_id, doc.next_id}.max
       doc.notes.each { |e| @unpersisted.delete(e.id) }
       @dirty = false
-      # Leave @mode / @read alone — soft merge must not force READ or drop selection.
+      # Leave @mode alone — soft merge must not force READ. `@read` is left alone too, and
+      # that is right for BOTH branches above only because of `TextReadState#bind`: the skip
+      # keeps the same buffer at the same revision, so the band survives; the `set_text`
+      # moves the editor's `edits`, so the band — whose anchor indexed the text that was just
+      # replaced — is dropped the next time the state is asked anything (#1123 in Issues).
     end
 
     def count : Int32
@@ -258,7 +262,7 @@ module Gori::Tui
     end
 
     def selection? : Bool
-      insert_mode? ? current.area.selection? : @read.selection?
+      insert_mode? ? current.area.selection? : @read.selection?(current.area)
     end
 
     def select_line : Nil

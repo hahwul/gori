@@ -389,7 +389,7 @@ module Gori::Tui
 
     def desc_selection? : Bool
       return false unless @pane == :desc
-      desc_insert_mode? ? @desc_area.selection? : @desc_read.selection?
+      desc_insert_mode? ? @desc_area.selection? : @desc_read.selection?(@desc_area)
     end
 
     def desc_select_line : Nil

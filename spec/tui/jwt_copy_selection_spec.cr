@@ -241,7 +241,7 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
         ctl.jwt_from_text(MULTILINE)
         s = ctl.@sessions[ctl.@idx]
         s.input_mode.should eq(InputMode::Read) # the pane opens in READ
-        s.input_read.selection?.should be_false
+        s.input_read.selection?(s.input).should be_false
         s.input_read.copy_text(s.input).should eq("one") # the old payload: line 0 alone
         ctl.jwt_copy_text.should eq(MULTILINE)
       end
@@ -253,7 +253,7 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
         s = ctl.@sessions[ctl.@idx]
         3.times { ctl.handle_body_key(key(Termisu::Input::Key::Right, :shift)) }
 
-        s.input_read.selection?.should be_true
+        s.input_read.selection?(s.input).should be_true
         ctl.jwt_copy_text.should eq("one")
       end
     end
