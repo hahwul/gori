@@ -20,6 +20,16 @@ module Gori
       with_termisu_logging_silenced { Termisu.new }
     rescue IO::Error
       abort "gori: requires an interactive terminal (no /dev/tty) — #{hint}"
+    rescue ex : Termisu::Error
+      # The OTHER two ways `Termisu.new` refuses, both added with the #1125 lock bump and
+      # neither an `IO::Error`: `TerminalInUseError` (a live Termisu already holds the
+      # process's controlling terminal, via the global `TerminalOwnership` lease) and
+      # `InputOwnershipError`. gori builds one Termisu per process today, so this is the
+      # latent half — but the whole point of this seam is that a refused construction reads
+      # as a sentence rather than a backtrace, and the tty is already raw with the alternate
+      # screen up by the time either could fire. Reported with the reason rather than folded
+      # into the no-tty message, which would name the wrong cause.
+      abort "gori: cannot take the terminal — #{ex.message}"
     end
 
     # The one fd every entrypoint's records go to, and the binding that keeps them OFF the

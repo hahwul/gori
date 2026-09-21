@@ -44,14 +44,18 @@ require "termisu"
 # on `IO::FileDescriptor` means a second IO over gori's live tty fd (and a finalizer that would
 # close it), which is a change that belongs in termisu, not in a patch carried by a consumer.
 #
-# ONE THING THIS WIDENS, disclosed because it is not zero. `Termisu#resume_input_processing`
-# calls `Source::Input#start`, which flips `@running` back to true and spawns a fresh fiber —
-# so if the PREVIOUS fiber is still parked in this sleep when that happens, it wakes to a true
-# flag, never exits, and two fibers read the same parser. That race is termisu's and predates
-# this, but its window was the sleep, so it grows from 4ms to at most 16ms. gori has exactly
-# one path through `stop`/`start`: `Runner#run_external_editor`, whose block is a `Process.run`
-# on the operator's `$EDITOR` — seconds, not milliseconds — so the old fiber has long since
-# seen the flag. Nothing else in gori suspends the terminal.
+# WHAT THIS WIDENS, disclosed because it is not zero. It used to be a double-fiber race:
+# `resume_input_processing` flipped `@running` back on and spawned a fresh fiber while the
+# previous one was still parked in the sleep. That race is gone at c3d69e6 (`fix:
+# coordinate raw input ownership`) — `Source::Input` serializes `start`/`stop` on a
+# lifecycle lock and `stop` blocks on `@done` until the old
+# fiber's `ensure` runs, so two can no longer coexist.
+#
+# What replaces it is the mirror image: `stop` now WAITS for that fiber, and the loop does not
+# select on the stop signal while sleeping. So every mode transition that pauses input —
+# `term.suspend` for the external editor, `term.close` on quit — blocks on the sleep finishing,
+# and this patch takes that from upstream's 4ms to at most 16ms. Both are far below the
+# `Process.run` either of them brackets, which is why it stays worth the idle CPU.
 #
 # TWO WAYS THIS GOES WRONG, and only one of them is benign. If upstream RENAMES or restructures
 # `run_loop`, the override becomes dead code and the poll returns to 4ms — nothing breaks, and
@@ -61,6 +65,12 @@ require "termisu"
 # compile error and no failing example. That is the same "keeps applying when it should not"
 # case `paste_end_marker_patch.cr` guards on purpose, and it is what the lock pin answers: move
 # the pin and the spec fails, which is exactly when someone should be re-reading this file.
+#
+# BOTH have now happened once, at the #1125 lock bump. `run_loop` took two parameters upstream,
+# so the old no-argument copy became a silent overload nobody called and the back-off was simply
+# gone; and the body it froze predated `@pending_event`, which keeps a parsed event across a
+# paused output channel instead of dropping it. The copy below is the CURRENT upstream body with
+# the sleep line changed and nothing else, which is the only shape that re-reading can check.
 class Termisu::Event::Source::Input
   # How long input must have been quiet before the poll backs off. Long enough that a pause
   # between two keystrokes — even a slow typist's — never leaves the fast path.
@@ -70,10 +80,7 @@ class Termisu::Event::Source::Input
   # event after a pause, and only for that one, since delivering it re-arms `IDLE_GRACE`.
   DEEP_IDLE_SLEEP = 16.milliseconds
 
-  private def run_loop : Nil
-    output = @output
-    return unless output
-
+  private def run_loop(output : Channel(Event::Any), stop_signal : Channel(Nil)) : Nil
     last_delivery = Time.instant
 
     while @running.get
@@ -81,10 +88,17 @@ class Termisu::Event::Source::Input
       drained = 0
 
       while @running.get && drained < MAX_DRAIN_PER_CYCLE
-        event = @parser.poll_event(0)
+        event = @pending_event || @parser.poll_event(0)
         break unless event
 
-        output.send(event)
+        unless send_event(output, stop_signal, event)
+          # The parser already consumed this complete event. Keep it for the
+          # next run instead of losing it when a full output channel is paused.
+          @pending_event = event
+          return
+        end
+
+        @pending_event = nil
         emitted = true
         drained += 1
       end

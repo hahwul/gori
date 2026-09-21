@@ -23,33 +23,24 @@ require "termisu"
 # gori pins `github.com/hahwul/termisu`, so the fix at the right depth is a termisu release and a
 # lock bump — this file only buys the time to do that deliberately.
 #
-# THE BUG, in `Termisu::Input::Parser#read_paste_end_tail`: the probe that matches `\e[201~`
-# skipped the fd entirely whenever its poll budget was 0 —
+# WHAT IS LEFT, after the #1125 lock bump. This file used to carry a third override,
+# `read_paste_end_tail`, because the probe that matches `\e[201~` skipped the fd entirely
+# whenever its poll budget was 0 — and 0 is what `Event::Source::Input#run_loop` drains with,
+# so `Key::PasteEnd` was never emitted at all. termisu d2d0de7 (`fix: enforce input parser
+# deadlines`) rewrote that method around `@reader.read_byte(paste_wait_ms)` and fixed it
+# upstream, so the override is gone and the
+# shard's own version runs. The remaining two are about what happens when the marker never
+# arrives, which upstream still does not handle.
 #
-#     wait = paste_wait_ms
-#     break if wait <= 0            # <- never consults the reader
-#     break unless @reader.wait_for_data(wait)
-#
-# and 0 is not an edge case: `Event::Source::Input#run_loop`, the fiber every termisu app
-# receives input through, drains with `poll_event(0)`, which stamps a poll deadline that is
-# already expired by the time the probe reads it. So the five bytes sitting on the fd right
-# behind the marker's own ESC were never compared. The probe handed the ESC back to `@pending`
-# and re-ran on that same byte until the 1000ms window closed, then delivered a bare `Escape`
-# and let `[201~` through as five text keys. `Key::PasteEnd` was never emitted at all.
-#
-# For gori that was a total freeze, not a cosmetic defect: `Runner#handle` keys every paste
-# decision off the two `PasteNewline#pasting?` transitions, so with no end transition the bulk
-# buffer swallowed every later keystroke into an insert that was never flushed. The text never
-# appeared and the keyboard was dead with the frame still repainting. `Runner::PASTE_STALL` now
-# bounds that state whatever the cause, but a backstop is not a working paste: it costs a
-# second and lands `[201~` in the request. This is what makes the paste correct.
-#
-# THE FIX is to delete the refusal. A zero budget is a non-blocking readiness CHECK, not a
-# reason to skip the read: `Reader#wait_for_data` answers from its own buffer first and
-# otherwise selects with a zero timeout, and the rest of the marker is normally already there
-# behind the ESC that opened the probe. The caller's budget is still honoured — at 0 it now
-# costs one non-blocking select instead of the marker. A partial tail is still pushed back and
-# re-probed on the next call, exactly as before.
+# THE GIVE-UP BRANCH, in `parse_paste_escape`: the pinned parser bounds the marker window, but
+# when it expires it returns a bare `Escape` and leaves `@in_paste` SET. That is not a
+# degradation, it is a session-long trap — every later ESC is probed as an end marker and
+# mis-delivered. For gori that is a freeze, not a cosmetic defect: `Runner#handle` keys every
+# paste decision off the two `PasteNewline#pasting?` transitions, so with no end transition the
+# bulk buffer swallows every later keystroke into an insert that is never flushed.
+# `Runner::PASTE_STALL` bounds that state whatever the cause, but a backstop is not a working
+# paste. `leave_paste!` is the same escape hatch from outside, for a paste cut with no trailing
+# ESC at all — nothing opens the probe then, so there is nothing to time out on.
 class Termisu::Input::Parser
   # The bytes following ESC in the START marker, matched literally and for the same reason
   # `PASTE_END_TAIL` is: inside a paste an ESC is compared as raw bytes, never parsed as a
@@ -74,22 +65,6 @@ class Termisu::Input::Parser
     @in_paste = false
     @paste_deadline = nil
     @pending.clear
-  end
-
-  private def read_paste_end_tail : Array(UInt8)
-    tail = [] of UInt8
-
-    while tail.size < PASTE_END_TAIL.size
-      byte = @pending.shift?
-      unless byte
-        break unless @reader.wait_for_data(paste_wait_ms)
-        byte = @reader.read_byte
-        break unless byte
-      end
-      tail << byte
-    end
-
-    tail
   end
 
   # SECOND HALF: leave paste mode when the marker is never coming, so ONE truncated paste
