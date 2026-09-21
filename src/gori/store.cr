@@ -201,6 +201,13 @@ module Gori
     # arrive from the caller. `Settings::DEFAULT_RETENTION_FLOWS` references this constant, so
     # the number itself lives only here.
     RETENTION_DEFAULT = 100_000
+    # SQLite's busy handler is a process-wide blocking wait from Crystal's point of view: while
+    # it sleeps in C, this cooperative scheduler cannot run another fiber. Long-lived surfaces
+    # therefore use the generous default below only for ordinary short-lived contention; the CLI
+    # passes its own smaller budget so a command sharing a project with a live TUI fails promptly
+    # and can name the retryable condition to the operator (#1118).
+    SQLITE_BUSY_TIMEOUT_MS      = 5_000
+    DB_CHECKOUT_TIMEOUT_SECONDS =   5.0
     # Pass this for a store that must never delete history: a read-oriented or
     # count-only open, and the MCP server's own store. Named rather than a bare 0 so the
     # intent is legible at the call site and greppable across surfaces.
@@ -298,7 +305,9 @@ module Gori
                   authorize_events : Channel(FlowEvent)? = nil,
                   read_only : Bool = false,
                   background_index : Bool = true,
-                  events_retention : Int32 = EVENTS_RETENTION) : Store
+                  events_retention : Int32 = EVENTS_RETENTION,
+                  busy_timeout_ms : Int32 = SQLITE_BUSY_TIMEOUT_MS,
+                  checkout_timeout_seconds : Float64 = DB_CHECKOUT_TIMEOUT_SECONDS) : Store
       # `cache_size` is negative because SQLite reads that as KiB rather than pages: -64000
       # is 64 MiB. The default is -2000 (2 MiB) PER CONNECTION, which on a long-lived project
       # means every unindexed History filter re-reads pages off disk with almost no reuse —
@@ -331,8 +340,8 @@ module Gori
       # the writer, the probe passive and catch-up fibers, a second `gori mcp` process) could
       # each claim one. Eight caps the worst case at ~512 MiB instead of unbounded, and is
       # well past the handful of readers gori actually runs at once.
-      url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000" \
-            "&cache_size=-64000&max_pool_size=8"
+      url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=#{busy_timeout_ms}" \
+            "&cache_size=-64000&max_pool_size=8&checkout_timeout=#{checkout_timeout_seconds}"
       refuse_non_database(path)
       # Announce that this process has the database open, for as long as it is (see OpenLock).
       # Taken BEFORE `DB.open` so the window in which a peer could delete the file out from

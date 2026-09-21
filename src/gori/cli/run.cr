@@ -200,6 +200,15 @@ module Gori
 
       # --- shared helpers ----------------------------------------------------
 
+      # A CLI invocation is a one-shot operation, unlike the TUI's long-lived capture writer.
+      # SQLite's busy handler sleeps inside C and therefore blocks this process's whole
+      # cooperative scheduler. Five seconds per Store.open/write is especially misleading in a
+      # create/send loop: every open, session write and response write can pay it again before
+      # the command prints anything. Keep the CLI bounded and let the error below say what to do
+      # when a live TUI owns the writer slot (#1118).
+      CLI_BUSY_TIMEOUT_MS          = 1_000
+      CLI_CHECKOUT_TIMEOUT_SECONDS =   1.0
+
       # Is a subcommand's first token a VERB, as opposed to a flag or nothing at all?
       #
       # A `case args.first?` that ends in `else <the read command>` treats an unrecognized verb
@@ -604,7 +613,9 @@ module Gori
         store = Store.open(project.db_path,
           retention_flows: read_only ? Store::RETENTION_UNLIMITED : Settings.retention_flows,
           read_only: read_only,
-          background_index: false)
+          background_index: false,
+          busy_timeout_ms: CLI_BUSY_TIMEOUT_MS,
+          checkout_timeout_seconds: CLI_CHECKOUT_TIMEOUT_SECONDS)
         # THE token-grammar reconcile, before anything reads a token out of this store (#env.syntax).
         # `read_only` does not exempt a command: the handle above may be read-only, but the
         # re-spelling writes through its own connection, and `gori run repeater list` is exactly as
@@ -612,7 +623,8 @@ module Gori
         # is — the alternative is a headless run that reads them under the wrong grammar forever.
         # Reported HERE (STDERR, one line per project) rather than carried: every `gori run`
         # subcommand funnels through this method, so a caller that forgot to report would be silent.
-        report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name))
+        report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name,
+          busy_timeout_ms: CLI_BUSY_TIMEOUT_MS))
         # The project's pinned upstream / dial timeouts / capture cap (#538). `bind: false`:
         # not one command routed through here LISTENS — `gori run capture` is the only
         # subcommand that binds and it opens its project through `Session.open` instead — so
@@ -642,7 +654,7 @@ module Gori
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run: cannot open database #{project.db_path}: " \
               "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
-              "#{open_failure_hint(ex, project.db_path, read_only)}"
+              "#{open_failure_hint(ex, project.db_path, read_only, project.name)}"
       end
 
       # The open-time re-spelling, said out loud. STDERR, never STDOUT: `gori run … --format json`
@@ -667,7 +679,7 @@ module Gori
       #
       # A LOCKED project. A write subcommand opens for write and `Store.open` migrates, so a
       # peer holding the write lock (a TUI, a `gori run capture`, an MCP server) fails the open
-      # after `busy_timeout=5000` with the bare words "database is locked" — printed under
+      # after the configured SQLite busy timeout with the bare words "database is locked" — printed under
       # "cannot open database <path>", which reads as a broken FILE. It is the opposite: the
       # file is fine and the condition clears by itself. Matched on the message, not
       # `SQLite3::Exception#code`, because this rescue also catches the `DB::Error` crystal-db
@@ -687,17 +699,14 @@ module Gori
       # `read_only` opens are excluded because for them a non-writable file is not a fault.
       # Public for the reason `two_targets_error` is: its only caller ends in `abort`.
       def self.open_failure_hint(ex : Exception, db_path : String? = nil,
-                                 read_only : Bool = false) : String
+                                 read_only : Bool = false, project_name : String? = nil) : String
         msg = ex.message.to_s
         # `read_only` gates BOTH message branches, not just the filesystem tail below. A
         # read-only open can still surface either string — `Store.open` runs its pragmas before
         # `apply_query_only` — and both sentences were wrong for it: "read it with a read-only
         # subcommand" is what the operator just did, and "this subcommand writes" is false.
-        if msg.includes?("is locked")
-          return " — another gori (a TUI, a capture, or an MCP server) is writing to this project." \
-                 " Nothing is wrong with the file; retry." if read_only
-          return " — another gori (a TUI, a capture, or an MCP server) is writing to this project." \
-                 " Nothing is wrong with the file: retry, or read it with a read-only subcommand."
+        if hint = lock_failure_hint(msg, read_only, project_name)
+          return hint
         end
         if !read_only && (msg.includes?("readonly") || msg.includes?("read-only"))
           return " — this subcommand writes, and the file (or its directory) is not writable."
@@ -717,6 +726,19 @@ module Gori
         end
         return "" if dir_writable && File::Info.writable?(path)
         " — this subcommand writes, and the file (or its directory) is not writable."
+      end
+
+      private def self.lock_failure_hint(msg : String, read_only : Bool, project_name : String?) : String?
+        subject = project_name ? "project #{project_name.inspect}" : "the project"
+        if msg.includes?("is locked")
+          return " — #{subject} is locked by another gori (a TUI, a capture, or an MCP server)." \
+                 " Nothing is wrong with the file; retry." if read_only
+          return " — #{subject} is locked by another gori (a TUI, a capture, or an MCP server)." \
+                 " Nothing is wrong with the file: retry, or close the other instance."
+        end
+        return " — #{subject} is busy in another gori instance; retry or close the TUI." \
+           if msg.includes?("Could not check out a connection")
+        nil
       end
 
       # Does this QL string read `flows_fts`? Shape-only: no store, so it is safe to call

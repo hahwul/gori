@@ -201,7 +201,8 @@ module Gori
     # module's own connection to `db_path`, so a `gori run history list` migrates exactly as a TUI
     # does. Never raises: a project whose tokens could not be re-spelled must still open, with the
     # failure said out loud (`StoreReport#error`) rather than an aborted command.
-    def self.reconcile(store : Store, db_path : String, project : String) : StoreReport?
+    def self.reconcile(store : Store, db_path : String, project : String,
+                       busy_timeout_ms : Int32 = Store::SQLITE_BUSY_TIMEOUT_MS) : StoreReport?
       # A grammar gori had to GUESS may not rewrite anything — an unreadable settings.json, a
       # half-applied one, a typo where the value should be. See `Settings.env_syntax_stated?`.
       return nil unless Settings.env_syntax_stated?
@@ -219,7 +220,7 @@ module Gori
         return StoreReport.new(project, from, to, 0, 0, 0, nil,
           error: ex.message.presence || ex.class.name)
       end
-      apply(plan, db_path)
+      apply(plan, db_path, busy_timeout_ms)
     end
 
     # The three name tables, which `Store` owns the queries for (`store/env_write_guard.cr`) — the
@@ -527,10 +528,11 @@ module Gori
     # either stale or torn. `VACUUM INTO` writes a single consistent database — and it cannot run
     # inside a transaction, which is why it happens first and is deleted again if the marker check
     # says a peer got there.
-    private def self.apply(plan : Plan, db_path : String) : StoreReport?
+    private def self.apply(plan : Plan, db_path : String,
+                           busy_timeout_ms : Int32 = Store::SQLITE_BUSY_TIMEOUT_MS) : StoreReport?
       backup =
         begin
-          plan.writes.empty? ? nil : vacuum_into(db_path, plan.to)
+          plan.writes.empty? ? nil : vacuum_into(db_path, plan.to, busy_timeout_ms)
         rescue ex : ::DB::Error | ::SQLite3::Exception | File::Error
           # The BACKUP could not be written — a read-only DIRECTORY, a full disk. Nothing to clean
           # up (the copy never landed) and nothing to migrate: re-spelling a project gori could not
@@ -545,7 +547,7 @@ module Gori
             error: ex.message.presence || ex.class.name)
         end
       begin
-        applied = apply_writes(plan, db_path, backup)
+        applied = apply_writes(plan, db_path, backup, busy_timeout_ms)
       rescue ex : ::DB::Error | ::SQLite3::Exception | File::Error
         # NOTHING was written — `BEGIN IMMEDIATE` failed, or the transaction rolled back — so the
         # backup is a copy of bytes nobody changed, and it must go with the rest of the attempt.
@@ -570,13 +572,14 @@ module Gori
     # Every planned `UPDATE`, the marker and the feed row in ONE transaction. Answers whether it
     # COMMITTED — false means a peer had already done this migration, which is not a failure; a
     # failure raises and the caller above cleans the backup up.
-    private def self.apply_writes(plan : Plan, db_path : String, backup : String?) : Bool
+    private def self.apply_writes(plan : Plan, db_path : String, backup : String?,
+                                  busy_timeout_ms : Int32) : Bool
       # The report the ACTIVITY row carries, which is why it is built here: the row goes out on THIS
       # connection and has to be the same sentence the surfaces print.
       report = StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows, plan.left,
         backup, bare_hints: plan.hints.uniq)
       applied = false
-      ::DB.open("sqlite3:#{db_path}?busy_timeout=5000") do |db|
+      ::DB.open("sqlite3:#{db_path}?busy_timeout=#{busy_timeout_ms}") do |db|
         db.using_connection do |conn|
           conn.exec("BEGIN IMMEDIATE")
           begin
@@ -659,9 +662,9 @@ module Gori
 
     # `gori.db.pre-namespaced-20260913-142530` beside the database. A name that says what it is a
     # copy of the state before, so an operator who finds two of them knows which way each went.
-    private def self.vacuum_into(db_path : String, to : Env::Syntax) : String
+    private def self.vacuum_into(db_path : String, to : Env::Syntax, busy_timeout_ms : Int32) : String
       dest = unique_path("#{db_path}.pre-#{to.to_s.downcase}-#{stamp}")
-      ::DB.open("sqlite3:#{db_path}?busy_timeout=5000") do |db|
+      ::DB.open("sqlite3:#{db_path}?busy_timeout=#{busy_timeout_ms}") do |db|
         db.using_connection(&.exec("VACUUM INTO ?", dest))
       end
       File.chmod(dest, 0o600) rescue nil

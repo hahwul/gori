@@ -452,6 +452,14 @@ module Gori
         ok
       end
 
+      # A repeater write can be refused after the store itself opened successfully: the TUI may
+      # have taken SQLite's single writer slot between the migration and this operation. Keep the
+      # retry advice in one sentence so create, metadata, WS frames and response persistence do
+      # not fall back to the old silent/generic wording (#1118).
+      private def self.project_write_failure(prefix : String, project : Project) : String
+        "#{prefix}: project #{project.name.inspect} is busy or unwritable — retry or close the TUI"
+      end
+
       # `request_sources` / `request_source_error` / `request_content` are PUBLIC for the same
       # reason `two_targets_error` is: they are split from the `abort` so a spec can pin both
       # the condition and the wording, and `cmd_repeater_create` ends in `abort`, which a spec
@@ -714,10 +722,11 @@ module Gori
             tls_preset: tls_preset
           )
 
-          abort "gori run repeater create: failed to create repeater session" if id == 0
+          abort project_write_failure("gori run repeater create: failed to create repeater session", project) if id == 0
 
           unless apply_repeater_metadata(store, id, name, tags)
-            abort "gori run repeater create: session ##{id} was created, but its name/tags were NOT saved (store busy or unwritable)"
+            abort project_write_failure(
+              "gori run repeater create: session ##{id} was created, but its name/tag metadata was NOT fully saved", project)
           end
 
           if is_ws && !ws_messages.empty?
@@ -725,7 +734,8 @@ module Gori
             # `DELETE FROM ws_messages`), so the success line below would name a WebSocket
             # session that cannot replay anything.
             unless store.update_repeater_ws_messages(id, ws_messages)
-              abort "gori run repeater create: session ##{id} was created, but its WebSocket messages were NOT saved (store busy or unwritable)"
+              abort project_write_failure(
+                "gori run repeater create: session ##{id} was created, but its WebSocket messages were NOT saved", project)
             end
           end
 
@@ -860,7 +870,7 @@ module Gori
       # Callers gate on `result.ok?`: a failed resend must not wipe a good stored response.
       private def self.persist_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
                                                  duration_us : Int64, project : Project,
-                                                 request_sha256 : String?) : Nil
+                                                 request_sha256 : String?) : Bool
         store = open_store(project)
         begin
           store.update_repeater_response(id, head, body, error, duration_us, request_sha256: request_sha256)
@@ -1059,8 +1069,11 @@ module Gori
         # the row's request at the moment of this write is still exactly these bytes. The
         # wire may differ (`--set`, `$NAME` expansion, the slot overlay) and deliberately does
         # not count: the drift check compares the ROW's request, not what went out.
-        persist_repeater_response(id, result.head, result.body, result.error, result.duration_us,
-          project, Evidence.request_digest(rec.request)) if result.ok?
+        if result.ok? && !persist_repeater_response(id, result.head, result.body, result.error, result.duration_us,
+             project, Evidence.request_digest(rec.request))
+          STDERR.puts project_write_failure("gori run repeater send: response was NOT saved", project)
+          exit 1
+        end
         exit 1 unless result.ok?
       end
 
@@ -1118,8 +1131,11 @@ module Gori
         if result.answered?
           store2 = open_store(project)
           begin
-            store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us,
-              request_sha256: request_sha256)
+            unless store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error,
+                     result.duration_us, request_sha256: request_sha256)
+              STDERR.puts project_write_failure("gori run repeater send: WebSocket response was NOT saved", project)
+              exit 1
+            end
           ensure
             store2.close
           end

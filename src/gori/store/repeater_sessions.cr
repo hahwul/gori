@@ -245,8 +245,9 @@ module Gori
     # Persist a repeater tab's LAST send result (V11) so it survives a reopen. Kept
     # separate from update_repeater (the request side) — called once each send
     # completes. `head` is the response head bytes (empty on error), `error` is set
-    # only when the send failed. Via exec_task (writer connection), so this DOES
-    # bump the TUI data_version poll; Repeater reconcile soft-syncs around it.
+    # only when the send failed. Via exec_task_ok (writer connection), so this DOES
+    # bump the TUI data_version poll and answers whether the commit happened; Repeater reconcile
+    # soft-syncs around it.
     #
     # `request_sha256` (V28) is `Evidence.request_digest` of the SAVED request bytes this
     # row held when the send went out — the request half of the pair this response completes.
@@ -261,8 +262,8 @@ module Gori
     # still passable — and is the honest value for a caller that genuinely does not know the
     # bytes — but it has to be written down.
     def update_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
-                                 duration_us : Int64, *, request_sha256 : String?) : Nil
-      exec_task ->(c : DB::Connection) {
+                                 duration_us : Int64, *, request_sha256 : String?) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET response_head = ?, response_body = ?, response_error = ?, response_duration_us = ?, response_request_sha256 = ?, updated_at = ? WHERE id = ?",
           head, body, error, duration_us, request_sha256, now_us, id)
         nil
