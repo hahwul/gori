@@ -114,7 +114,7 @@ module Gori
         return error(connect_error(scheme, host, port, verify_upstream, dial_error), started) unless upstream
 
         begin
-          exchange(upstream, request, host, port, started)
+          exchange(upstream, request, host, port, started, origin_scheme: scheme)
         ensure
           upstream.close rescue nil
         end
@@ -187,7 +187,7 @@ module Gori
               results << Result.new(Bytes.new(0), nil, nil, 0_i64, "skipped — the connection closed earlier in the group")
               next
             end
-            r = exchange(upstream, request, host, port, Time.instant)
+            r = exchange(upstream, request, host, port, Time.instant, origin_scheme: scheme)
             results << r
             # A failed OR incomplete exchange leaves the socket unusable for the rest: an
             # error is self-evident; an incomplete body (origin cut it short, or we hit the
@@ -214,8 +214,8 @@ module Gori
       # value through every dial's return tuple (which would touch `ClientConn`'s live-MITM
       # path and every other engine's signature for a clause only THIS message needs). A plain,
       # unproxied miss keeps today's exact wording: `proxied_via` is nil for a direct route.
-      def self.no_response_error(host : String, port : Int32) : String
-        "no response from #{host}:#{port}#{Proxy::Upstream.proxy_tunnel_note(Proxy::Upstream.proxied_via(host))}"
+      def self.no_response_error(host : String, port : Int32, origin_scheme : String = "http") : String
+        "no response from #{host}:#{port}#{Proxy::Upstream.proxy_tunnel_note(Proxy::Upstream.proxied_via(host, origin_scheme, port))}"
       end
 
       # Writes one request on an already-open connection and reads its single response
@@ -227,10 +227,10 @@ module Gori
       # any more: `Fuzz::ConnPool` reuses one socket across a sweep's requests. Both apply
       # the SAME retirement rule to the socket afterwards (error or incomplete ⇒ unusable).
       def self.exchange(upstream : IO, request : Bytes, host : String, port : Int32,
-                        started : Time::Instant) : Result
+                        started : Time::Instant, *, origin_scheme : String = "http") : Result
         upstream.write(request)
         upstream.flush
-        read_response(upstream, request, host, port, started)
+        read_response(upstream, request, host, port, started, origin_scheme: origin_scheme)
       rescue ex
         # A write/flush failure — no response byte was ever attempted, so this is always the
         # pre-delivery case (see `read_response`'s own rescue for the post-head-read one).
@@ -244,9 +244,9 @@ module Gori
       # releases them together, and only reads responses afterwards (reading is no longer
       # time-critical once every byte has been written).
       def self.read_response(upstream : IO, request : Bytes, host : String, port : Int32,
-                             started : Time::Instant) : Result
+                             started : Time::Instant, *, origin_scheme : String = "http") : Result
         head = read_response_head(upstream)
-        return error(no_response_error(host, port), started) unless head
+        return error(no_response_error(host, port, origin_scheme), started) unless head
 
         resp = Proxy::Codec::Http1.parse_response_head(head)
         # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured request

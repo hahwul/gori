@@ -61,10 +61,10 @@ module Gori
     private def self.routed_io(host : String, port : Int32, tls : Bool, verify_tls : Bool,
                                connect_timeout : Time::Span, read_timeout : Time::Span) : IO
       tcp, dial_error = Proxy::Upstream.dial_result(host, port, connect_timeout, read_timeout,
-        apply_host_overrides: false)
+        apply_host_overrides: false, origin_scheme: tls ? "https" : "http")
       raise dial_failure(host, port, dial_error) unless tcp
 
-      tls ? wrap_tls(tcp, host, verify_tls, read_timeout) : tcp
+      tls ? wrap_tls(tcp, host, port, verify_tls, read_timeout) : tcp
     end
 
     # The pre-TLS legs. `dial_result` already knows WHICH one failed; this used to print only
@@ -112,7 +112,7 @@ module Gori
     # otherwise stop gori's own updater and OAST traffic from trusting the public roots it also
     # needs. Target traffic keeps the replace-the-store semantics operators expect of the
     # variable; gori's service traffic trusts the system roots plus whatever you name.
-    private def self.wrap_tls(tcp : IO, host : String, verify : Bool,
+    private def self.wrap_tls(tcp : IO, host : String, port : Int32, verify : Bool,
                               io_timeout : Time::Span) : OpenSSL::SSL::Socket::Client
       context = OpenSSL::SSL::Context::Client.new
       if verify
@@ -123,15 +123,16 @@ module Gori
       OpenSSL::SSL::Socket::Client.new(tcp, context: context, sync_close: true, hostname: host)
     rescue ex
       tcp.close rescue nil
-      raise tls_failure(host, ex, io_timeout)
+      raise tls_failure(host, port, ex, io_timeout)
     end
 
     # The TLS leg, split the way `Proxy::Upstream` splits it for target traffic — and named
     # with the remedy that fits THAT verdict. Verification failing is the one case where a CA
     # bundle is the answer; a handshake that never got to a certificate, or a port that
     # accepted and then went silent, must not be offered the same advice.
-    private def self.tls_failure(host : String, ex : Exception, io_timeout : Time::Span) : Error
-      err = Proxy::Upstream.tls_dial_error(ex, io_timeout, host)
+    private def self.tls_failure(host : String, port : Int32, ex : Exception,
+                                 io_timeout : Time::Span) : Error
+      err = Proxy::Upstream.tls_dial_error(ex, io_timeout, host, port)
       message =
         case err.kind
         when .tls_verify?

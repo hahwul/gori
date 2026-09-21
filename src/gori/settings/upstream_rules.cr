@@ -92,8 +92,8 @@ module Gori::Settings
   end
 
   # The resolved decision for ONE destination host: collapses the project override, the rule
-  # table and the legacy scalar into a single value, so Upstream.dial has exactly one
-  # decision point instead of three branches that can disagree.
+  # table, legacy scalar, and process environment into a single value, so Upstream.dial has
+  # exactly one decision point instead of separate branches that can disagree.
   # `credential_error` is carried on the ROUTE, not re-derived at dial time, because the rule
   # that produced the route is the only thing that knows which environment variable was named.
   record UpstreamRoute,
@@ -160,7 +160,7 @@ module Gori::Settings
   end
 
   # The first rule matching `dest_host`, or nil when the table is empty / nothing matches
-  # (the caller then falls back to the legacy scalar). Order is significant.
+  # (the caller then falls back to the legacy scalar or process environment). Order is significant.
   def self.upstream_rule_for(dest_host : String) : UpstreamRule?
     return nil if @@upstream_rules_compiled.empty?
     bare = HostPattern.bare(dest_host.downcase)
@@ -174,12 +174,15 @@ module Gori::Settings
   #      unchanged from before rules existed, so an upgrade can't reroute a pinned project;
   #   2. the rule table (first host match);
   #   3. the global `network.upstream_proxy` scalar — the implicit catch-all;
-  #   4. direct.
+  #   4. the process environment (HTTPS_PROXY / HTTP_PROXY / ALL_PROXY) when the
+  #      scalar is blank, with NO_PROXY / no_proxy taking the direct exception;
+  #   5. direct.
   #
   # A project override deliberately bypasses the table wholesale. Its Destination host gate
   # is orthogonal: `*` keeps "this project goes through this proxy, period", while a narrower
   # pattern makes every non-match direct before the table/scalar can claim it.
-  def self.upstream_route(dest_host : String) : UpstreamRoute
+  def self.upstream_route(dest_host : String, origin_scheme : String? = nil,
+                          origin_port : Int32? = nil) : UpstreamRoute
     destination_match, destination_error = project_upstream_destination_match(dest_host)
     if destination_error
       return invalid_upstream_route("#{destination_error} — the destination proxy filter is invalid")
@@ -208,7 +211,167 @@ module Gori::Settings
     if err = @@upstream_proxy_load_error
       return invalid_upstream_route(err)
     end
+    return environment_upstream_route(dest_host, origin_scheme, origin_port) if upstream_proxy.strip.empty?
     parse_upstream_proxy(upstream_proxy)
+  end
+
+  # Environment proxy variables are the last catch-all, not a replacement for gori's own
+  # routing settings. An explicit project value, direct rule, or scalar therefore remains an
+  # operator decision and wins over the process environment. Reading the variables at route
+  # resolution time also matches the existing live-settings behaviour and keeps headless
+  # commands/tests that set them after startup predictable.
+  private def self.environment_upstream_route(dest_host : String, origin_scheme : String?,
+                                              origin_port : Int32?) : UpstreamRoute
+    return UpstreamRoute::DIRECT if environment_no_proxy?(dest_host, origin_port)
+    value = environment_proxy_value(origin_scheme)
+    return UpstreamRoute::DIRECT unless value
+    parse_environment_upstream_proxy(value)
+  end
+
+  # HTTP_PROXY and friends conventionally carry a proxy URL, but the bare host:port form
+  # remains useful for a gori install that already uses the scalar's legacy spelling. Uppercase
+  # is preferred when both spellings exist; lowercase is the compatibility fallback used by
+  # curl/Python and other CLI clients.
+  private def self.environment_proxy_value(origin_scheme : String?) : String?
+    case origin_scheme.try(&.downcase)
+    when "http"
+      environment_value("HTTP_PROXY") || environment_value("ALL_PROXY")
+    when "https"
+      environment_value("HTTPS_PROXY") || environment_value("HTTP_PROXY") || environment_value("ALL_PROXY")
+    else
+      environment_value("HTTPS_PROXY") || environment_value("HTTP_PROXY") || environment_value("ALL_PROXY")
+    end
+  end
+
+  private def self.environment_value(name : String) : String?
+    ENV[name]?.try(&.strip).try(&.presence) || ENV[name.downcase]?.try(&.strip).try(&.presence)
+  end
+
+  # NO_PROXY is deliberately applied only to the environment fallback. It must not silently
+  # override an explicit gori route, and a project/rule direct entry is already the more
+  # precise way to express a permanent exception. Entries support the forms used by the common
+  # CLI clients: *, bare hosts/domains (including a leading .domain), IPv6 in brackets, and
+  # an optional :port suffix.
+  private def self.environment_no_proxy?(host : String, port : Int32?) : Bool
+    raw = environment_value("NO_PROXY")
+    return false unless raw
+    raw.split(',').any? do |entry|
+      no_proxy_entry_matches?(entry.strip, host, port)
+    end
+  end
+
+  private def self.no_proxy_entry_matches?(entry : String, host : String, port : Int32?) : Bool
+    return false if entry.empty?
+    return true if entry == "*"
+    return false if entry.includes?("://") || entry.includes?('/')
+
+    entry_host, entry_port = no_proxy_entry_parts(entry)
+    return false unless entry_host
+    return false unless no_proxy_port_matches?(entry_port, port)
+    return true if local_no_proxy_entry?(entry_host, host)
+
+    no_proxy_host_matches?(entry_host, host)
+  rescue
+    # A malformed NO_PROXY token is ignored, matching the forgiving behaviour of the clients
+    # this environment contract is intended to align with. It must not turn into a direct route.
+    false
+  end
+
+  private def self.no_proxy_port_matches?(entry_port : Int32?, port : Int32?) : Bool
+    entry_port.nil? || entry_port == port
+  end
+
+  private def self.local_no_proxy_entry?(entry_host : String, host : String) : Bool
+    entry_host == "<local>" && !HostPattern.normalize(host).includes?('.')
+  end
+
+  private def self.no_proxy_host_matches?(entry_host : String, host : String) : Bool
+    pattern = entry_host.lchop('.').presence
+    return false unless pattern
+    HostPattern::Compiled.new(pattern).matches?(host)
+  end
+
+  private def self.no_proxy_entry_parts(entry : String) : {String?, Int32?}
+    if entry.starts_with?('[')
+      close = entry.index(']')
+      return {nil, nil} unless close
+      host = entry[1...close]
+      rest = entry[(close + 1)..]
+      return {host, nil} if rest.empty?
+      return {nil, nil} unless rest.starts_with?(':')
+      port = no_proxy_port(rest[1..])
+      return {nil, nil} unless port
+      return {host, port}
+    end
+
+    parts = entry.split(':')
+    return {entry, nil} unless parts.size == 2
+    port = no_proxy_port(parts[1])
+    return {nil, nil} unless port
+    {parts[0], port}
+  end
+
+  private def self.no_proxy_port(value : String) : Int32?
+    port = value.to_i?
+    port && port.in?(1..65_535) ? port : nil
+  end
+
+  # https:// means TLS to a proxy in the environment-variable convention. The persisted
+  # scalar keeps its historical plaintext meaning, so this translation is intentionally local
+  # to environment routes. URI userinfo is accepted here because it is process state rather
+  # than a value gori writes to settings.json.
+  private def self.parse_environment_upstream_proxy(value : String) : UpstreamRoute
+    raw = value.strip
+    return UpstreamRoute::DIRECT if raw.empty?
+    unless raw.includes?("://")
+      route = parse_upstream_proxy(raw)
+      return route unless route.invalid?
+      return invalid_upstream_route("settings: invalid environment proxy")
+    end
+
+    environment_uri_upstream_route(URI.parse(raw))
+  rescue URI::Error | ArgumentError | OverflowError
+    invalid_upstream_route("settings: invalid environment proxy")
+  end
+
+  private def self.environment_uri_upstream_route(uri : URI) : UpstreamRoute
+    route_kind = upstream_route_kind(environment_proxy_scheme(uri))
+    return route_kind if route_kind.is_a?(UpstreamRoute)
+    kind, default_port = route_kind
+    unless environment_proxy_authority?(uri)
+      return invalid_upstream_route("settings: environment proxy must be an authority without a path, query, or fragment")
+    end
+
+    host = environment_proxy_host(uri)
+    return invalid_upstream_route("settings: invalid environment proxy") unless host
+    port = uri.port || default_port
+    return invalid_upstream_route("settings: invalid environment proxy") unless port.in?(0..65_535)
+    username = uri.user || ""
+    password = uri.password
+    if environment_proxy_credentials_unsafe?(username, password)
+      return invalid_upstream_route("settings: environment proxy credentials cannot contain CR or LF")
+    end
+    UpstreamRoute.new(kind, host, port, username, password)
+  end
+
+  private def self.environment_proxy_scheme(uri : URI) : String
+    scheme = uri.scheme.try(&.downcase) || ""
+    scheme == "https" ? UPSTREAM_TLS_KIND : scheme
+  end
+
+  private def self.environment_proxy_authority?(uri : URI) : Bool
+    uri.query.nil? && uri.fragment.nil? && (uri.path.empty? || uri.path == "/")
+  end
+
+  private def self.environment_proxy_host(uri : URI) : String?
+    host = uri.host
+    return nil unless host
+    host.starts_with?('[') && host.ends_with?(']') ? host[1...-1] : host
+  end
+
+  private def self.environment_proxy_credentials_unsafe?(username : String, password : String?) : Bool
+    return true if username.includes?('\r') || username.includes?('\n')
+    password.try(&.includes?('\r')) == true || password.try(&.includes?('\n')) == true
   end
 
   # A rule turned into a route. Save-time validation catches these errors in the normal path;

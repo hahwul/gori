@@ -37,13 +37,13 @@ You rarely need to edit the file by hand. Everything in it is editable in-app fr
 
 ## Network
 
-By default the proxy listens on `127.0.0.1:8070` and connects directly to targets. You can change that in three places, highest priority first:
+With no upstream setting or process proxy environment, the proxy listens on `127.0.0.1:8070` and connects directly to targets. You can change the gori-side route in three places, highest priority first:
 
 1. **Per-project**: pin a bind address, port, and upstream for one project from the **Project** tab; these win for that project only.
 2. **CLI flags**: `--listen` / `--port` override the global default for the current process, without writing to disk.
 3. **`settings.json` `network`**: the shared default, edited by the first-run wizard and Preferences → **Network**.
 
-When nothing is set, the factory default is `127.0.0.1:8070`, direct. See [network](/reference/config/#network) for every key and [Per-Project Overrides](/reference/config/#per-project-overrides) for the exact precedence.
+When nothing is set, the factory default is `127.0.0.1:8070`, direct. If `network.upstream_proxy` is blank, gori also honors the conventional `HTTPS_PROXY`, `HTTP_PROXY`, and `ALL_PROXY` variables (including lowercase spellings), with `NO_PROXY` / `no_proxy` exceptions. An explicit project upstream, upstream rule, or non-empty gori scalar wins over those variables. See [network](/reference/config/#network) for every key and [Per-Project Overrides](/reference/config/#per-project-overrides) for the exact precedence.
 
 ## The Root CA
 

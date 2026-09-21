@@ -646,7 +646,8 @@ module Gori::Fuzz
           next
         end
         if w = warmup
-          wr = Repeater::Engine.exchange(upstream, w, @origin.host, @origin.port, Time.instant)
+          wr = Repeater::Engine.exchange(upstream, w, @origin.host, @origin.port, Time.instant,
+            origin_scheme: @origin.scheme)
           # The warmup request is now on the wire (whether or not the response says the socket
           # survives), so it counts toward the true wire total — reported via `extra_requests`,
           # below the caller's `jobs.size`, matching how ConnPool re-sends are counted.
