@@ -2267,6 +2267,21 @@ module Gori::Tui
       @coalesce = nil
     end
 
+    # Drop the undo history WITHOUT touching the text — for an owner that has decided this
+    # buffer now holds a DIFFERENT document whose bytes happen to match the one it was already
+    # holding (two issues with the same writeup, two empty ones most of all).
+    #
+    # `set_text` clears the stack as part of replacing the buffer, and for a long time that was
+    # the only way a buffer changed hands, so no owner needed this. A skip-if-unchanged guard
+    # in front of `set_text` (IssuesView#seed_notes) breaks that pairing on purpose — it keeps
+    # the caret and the scroll — and it keeps the STACK with them. A stack left over from the
+    # previous document then undoes edits that were never made to this one: undo on issue B
+    # hands back issue A's text, now dirty against B and one save away from overwriting it.
+    def clear_undo : Nil
+      @undo_stack.clear
+      break_run # whatever run was open belonged to the document being handed over
+    end
+
     def undo : Nil
       return if @undo_stack.empty?
       state = @undo_stack.pop

@@ -566,6 +566,20 @@ module Gori::Tui
       @detail_focus = :links
       @notes_mode = InputMode::Read
       seed_notes(issue.notes)
+      # THE hand-over. `seed_notes` decides on the BYTES, and bytes cannot tell two issues
+      # apart — two empty writeups is the ordinary case — so the one path that really does
+      # mean "different row, start over" says so itself, for each thing the skipped `set_text`
+      # would otherwise have reset:
+      #
+      # - the CARET, so a new detail opens at the top of its writeup (`ensure_visible` pulls
+      #   the scroll up behind it on the next render);
+      # - the UNDO STACK, or undo here replays the PREVIOUS issue's edits into this buffer and
+      #   leaves it dirty against a writeup that never had them — see `TextArea#clear_undo`;
+      # - the READ SELECTION, whose anchor indexes the document being handed over.
+      @notes.to_buffer_start
+      @notes.clear_undo
+      @notes_read.clear_selection
+      @notes_read.sync_from(@notes)
       true
     end
 
@@ -573,10 +587,43 @@ module Gori::Tui
     # row that was just read (open, re-read, discard, post-save), so the lost-update baseline
     # and the announce latch move with it — a seed that skipped either would leave the pane
     # either refusing a save that has nothing to lose or accepting one that clobbers a peer.
+    #
+    # `set_text` REPLACES the buffer, and it zeroes the caret and the scroll and clears the
+    # undo stack with it. That is right when the stored writeup has MOVED and pure loss every
+    # other time — and "every other time" is what both hot callers actually pass: the
+    # data_version tick re-reads an open detail ~1.3×/s while capturing (#1122), and `i`
+    # re-seeds on the way into INSERT (#1123). Each one dragged the operator's reading
+    # position back to line 0 — the first over and over, the second exactly when they had
+    # finished scrolling to the paragraph they meant to edit.
+    #
+    # So ask the BUFFER, not the baseline: `notes_key` is the same LF projection `#text` hands
+    # back, so `@notes.text == key` is exactly "replacing the document would change nothing".
+    # It is the guard FuzzerView#reconcile and NotesView#soft_merge_from already keep in front
+    # of their own `set_text`, for this same reason. Comparing against `@notes_base` instead
+    # would answer the same in the two cases above and the WRONG way on the third: `save_notes`
+    # re-seeds with the text it just committed, and the baseline it is measured against is
+    # still the PRE-EDIT value at that moment — so the compare would call the buffer stale and
+    # land the caret back on line 1 of the writeup the operator had just finished.
+    #
+    # A discard (`^W`) is the case that still replaces: the buffer holds typed text the stored
+    # row does not, the compare says so, and the caret resets with the text it belonged to.
+    #
+    # The bookkeeping below runs either way. `@notes_base` and the announce latch belong to
+    # the ISSUE this detail is holding, not to the bytes: `open_detail_issue` re-seeds when the
+    # operator opens a DIFFERENT row, whose notes may well be byte-identical (two empty
+    # writeups is the ordinary case), and skipping them there would leave the previous issue's
+    # peer latch armed against the new one.
     private def seed_notes(text : String) : Nil
-      @notes.set_text(text)
+      key = notes_key(text)
+      unless @notes.text == key
+        @notes.set_text(text)
+        # The read anchor indexes the buffer just replaced, exactly as `@sel_anchor` did —
+        # `set_text` drops the EDITOR's and cannot reach this one, so `y` after a peer's
+        # rewrite (or a `^W`) copied a span measured against a document that is gone.
+        @notes_read.clear_selection
+      end
       @notes_read.sync_from(@notes)
-      @notes_base = notes_key(text)
+      @notes_base = key
       @notes_peer_seen = nil
     end
 
@@ -587,10 +634,11 @@ module Gori::Tui
     # this" on the first tick and refuse a save that had nothing to lose. Mirrors `split_wire`'s
     # rule rather than a blanket `\r` strip: only a segment terminator is a line ending, so a
     # lone `\r` inside a payload pasted into the writeup is content and stays.
+    #
+    # Delegated rather than spelled out again: `TextArea.normalize_lf` IS this projection, and
+    # it lives beside the `set_text` that defines it, so the two cannot drift apart.
     private def notes_key(text : String) : String
-      parts = text.split('\n')
-      last = parts.size - 1
-      parts.each_with_index.map { |p, i| i == last ? p : p.rstrip('\r') }.join('\n')
+      TextArea.normalize_lf(text)
     end
 
     # Jump to a specific issue (create-and-link "open" path). Reloads, clears a
@@ -1191,6 +1239,18 @@ module Gori::Tui
       # `ProjectView#save` already carry.
       return false unless store.update_issue(issue.id, notes: @notes.text)
       exit_notes_insert!
+      # The BASELINE has to move with the committed write, and only this method knows the
+      # write landed. Without it the pane stayed `notes_dirty?` forever against a value only
+      # IT had written: `refresh_detail` below then took the peer-REPORT branch instead of the
+      # re-seed one, so the next data_version tick — ~1.3×/s while capturing — told the
+      # operator "notes changed by another session" about their own save. And it never
+      # recovered: `@notes_base` is refreshed nowhere else (the tick keeps taking the dirty
+      # branch, and `enter_notes_insert!` re-seeds only when clean), so the open detail stopped
+      # adopting real peer writes and `notes_conflict?` answered true for the rest of the
+      # session. Routed through `seed_notes` rather than assigning `@notes_base` by hand so the
+      # announce latch resets with it — and its guard makes the call free: the buffer already
+      # holds this document, so nothing is replaced and the caret stays where the typing left it.
+      seed_notes(@notes.text)
       # refresh_detail already re-syncs @notes from the re-fetched @detail (now that
       # notes-insert mode is off), and it nil-guards a peer-deleted issue — so no
       # separate (unsafe) set_text here.
