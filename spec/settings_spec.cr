@@ -270,6 +270,31 @@ describe Gori::Settings do
       end
     end
 
+    it "warns when an environment-selected TLS proxy is not verified" do
+      proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                    "http_proxy", "https_proxy", "all_proxy", "no_proxy"]
+      previous_env = proxy_keys.map { |key| {key, ENV[key]?} }
+      previous_proxy = Gori::Settings.upstream_proxy
+      previous_insecure = Gori::Settings.upstream_proxy_insecure?
+      previous_project_proxy = Gori::Settings.project_upstream_proxy
+      begin
+        proxy_keys.each { |key| ENV.delete(key) }
+        ENV["HTTPS_PROXY"] = "https://env-proxy.test:8443"
+        Gori::Settings.upstream_proxy = ""
+        Gori::Settings.project_upstream_proxy = nil
+        Gori::Settings.upstream_proxy_insecure = true
+
+        Gori::Settings.upstream_proxy_warnings.join("\n").should contain("upstream_proxy_insecure is on")
+      ensure
+        previous_env.each do |key, value|
+          value ? (ENV[key] = value) : ENV.delete(key)
+        end
+        Gori::Settings.upstream_proxy = previous_proxy
+        Gori::Settings.upstream_proxy_insecure = previous_insecure
+        Gori::Settings.project_upstream_proxy = previous_project_proxy
+      end
+    end
+
     it "round-trips both keys through settings.json" do
       dir = File.tempname("gori-settings-proxy-tls")
       Dir.mkdir_p(dir)

@@ -212,4 +212,28 @@ describe "Gori::Repeater::Engine.no_response_error" do
     Gori::Repeater::Engine.no_response_error("origin.test", 8080)
       .should eq("no response from origin.test:8080")
   end
+
+  it "uses the HTTPS environment proxy for a TLS no-response diagnostic" do
+    proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                  "http_proxy", "https_proxy", "all_proxy", "no_proxy"]
+    previous_env = proxy_keys.map { |key| {key, ENV[key]?} }
+    previous_proxy = Gori::Settings.upstream_proxy
+    previous_project_proxy = Gori::Settings.project_upstream_proxy
+    begin
+      proxy_keys.each { |key| ENV.delete(key) }
+      ENV["HTTPS_PROXY"] = "http://secure-proxy.test:8443"
+      Gori::Settings.upstream_proxy = ""
+      Gori::Settings.project_upstream_proxy = nil
+
+      Gori::Repeater::Engine.no_response_error("origin.test", 443, "https").should eq(
+        "no response from origin.test:443 (reached via upstream HTTP proxy secure-proxy.test:8443 — " \
+        "the tunnel produced no data; the proxy may be at fault, not the target)")
+    ensure
+      previous_env.each do |key, value|
+        value ? (ENV[key] = value) : ENV.delete(key)
+      end
+      Gori::Settings.upstream_proxy = previous_proxy
+      Gori::Settings.project_upstream_proxy = previous_project_proxy
+    end
+  end
 end

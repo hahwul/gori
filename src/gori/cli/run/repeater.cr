@@ -460,6 +460,14 @@ module Gori
         "#{prefix}: project #{project.name.inspect} is busy or unwritable — retry or close the TUI"
       end
 
+      # A response/history write happens after the send attempt. Once the network succeeds, its
+      # failure is a warning, not a failed send: a shell that retries every non-zero command would
+      # otherwise duplicate a request that already reached the origin.
+      private def self.project_write_warning(prefix : String, project : Project) : String
+        "#{project_write_failure(prefix, project)} — the send attempt is already complete; " \
+        "do not retry solely because of this write failure"
+      end
+
       # `request_sources` / `request_source_error` / `request_content` are PUBLIC for the same
       # reason `two_targets_error` is: they are split from the `abort` so a spec can pin both
       # the condition and the wording, and `cmd_repeater_create` ends in `abort`, which a spec
@@ -871,9 +879,15 @@ module Gori
       private def self.persist_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
                                                  duration_us : Int64, project : Project,
                                                  request_sha256 : String?) : Bool
-        store = open_store(project)
+        store = begin
+          open_store(project, abort_on_failure: false)
+        rescue Gori::Error | DB::Error | SQLite3::Exception
+          return false
+        end
         begin
           store.update_repeater_response(id, head, body, error, duration_us, request_sha256: request_sha256)
+        rescue Gori::Error | DB::Error | SQLite3::Exception
+          false
         ensure
           store.close
         end
@@ -1071,8 +1085,7 @@ module Gori
         # not count: the drift check compares the ROW's request, not what went out.
         if result.ok? && !persist_repeater_response(id, result.head, result.body, result.error, result.duration_us,
              project, Evidence.request_digest(rec.request))
-          STDERR.puts project_write_failure("gori run repeater send: response was NOT saved", project)
-          exit 1
+          STDERR.puts project_write_warning("gori run repeater send: response was NOT saved", project)
         end
         exit 1 unless result.ok?
       end
@@ -1087,12 +1100,17 @@ module Gori
                                                        result : Repeater::Result,
                                                        created_at : Int64, session_id : Int64,
                                                        project : Project) : Int64?
-        store = open_store(project)
+        store = begin
+          open_store(project, abort_on_failure: false)
+        rescue Gori::Error | DB::Error | SQLite3::Exception
+          STDERR.puts project_write_warning("gori run repeater send: History was NOT saved", project)
+          return nil
+        end
         begin
           Repeater::HistoryRecord.record(store, plan, result, created_at, wire,
             surface: Gori::FlowSource::Surface::Cli, source_ref: session_id.to_s)
-        rescue ex : Gori::Error
-          STDERR.puts "gori run repeater send: #{ex.message}"
+        rescue Gori::Error | DB::Error | SQLite3::Exception
+          STDERR.puts project_write_warning("gori run repeater send: History was NOT saved", project)
           nil
         ensure
           store.close
@@ -1129,15 +1147,9 @@ module Gori
         # (a 403/426 where the stored row holds a 101 IS the news, and it was being dropped).
         # See `WsEngine::Result#answered?`.
         if result.answered?
-          store2 = open_store(project)
-          begin
-            unless store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error,
-                     result.duration_us, request_sha256: request_sha256)
-              STDERR.puts project_write_failure("gori run repeater send: WebSocket response was NOT saved", project)
-              exit 1
-            end
-          ensure
-            store2.close
+          unless persist_repeater_response(id, result.handshake_head, Bytes.empty, result.error,
+                   result.duration_us, project, request_sha256)
+            STDERR.puts project_write_warning("gori run repeater send: WebSocket response was NOT saved", project)
           end
         end
 

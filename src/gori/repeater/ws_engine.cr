@@ -252,7 +252,11 @@ module Gori
           # behind a proxy that answers the CONNECT and then closes without relaying anything is
           # the same shape as the h1 repeater's clean-EOF case, and a hand-duplicated string here
           # would silently miss the proxy-tunnel clause that builder now carries.
-          return err(Engine.no_response_error(host, port), started) unless head
+          # `dial_tls_result` resolves its environment route as `https`, while the cleartext
+          # dialer resolves it as `http`. Keep the diagnostic on that same origin-scheme axis:
+          # a `wss://` no-response must mention HTTPS_PROXY when that is the proxy that carried
+          # the successful CONNECT tunnel.
+          return err(Engine.no_response_error(host, port, tls ? "https" : "http"), started) unless head
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
           unless resp.status == 101
