@@ -353,3 +353,48 @@ describe "sub-tab strip hit-tests" do
     split.should contain("BodyChrome.find_icon_split")
   end
 end
+
+# The tutorial's mock REQUEST card is the fourth pane on this axis, and it failed BOTH ways at
+# once: it painted a `Frame.mode_badge` that answered no clicks, while the card BODY — which
+# paints no control at all — was the one live region, and what it did there was enter INSERT.
+#
+# The app it teaches does neither (#1124): a press on the chip toggles the mode, a press on the
+# body places a caret and changes no mode. The mock has no caret, so its body is inert now and
+# the chip is the live cell, which is the honest lesson.
+describe "the tutorial's mock mode badge" do
+  # Comments stripped for the reason the two source-grep rules above give: the prose explaining
+  # a rule contains the tokens the rule looks for.
+  tutorial_body = ->(signature : String) do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "tutorial.cr"))
+      .lines.reject(&.lstrip.starts_with?('#')).join('\n')
+    body = src[/^\s*#{Regex.escape(signature)}.*?^    end$/m]?
+    body.should_not be_nil
+    body.not_nil!
+  end
+
+  it "is what the Edit lesson's pointer acts on, instead of the card body" do
+    body = tutorial_body.call("private def handle_shell_click(mx : Int32, my : Int32) : Nil")
+    arm = body[/if @step\.edit\?\n.*?\n\s*end/m]?
+    arm.should_not be_nil
+    arm.not_nil!.should contain("edit_badge_hit?")
+    arm.not_nil!.should contain("toggle_edit_insert")
+    # The two shapes it replaced: a one-way door into INS, opened by the whole card.
+    arm.not_nil!.should_not contain("@request_rect.contains?")
+    arm.not_nil!.should_not match(/\benter_insert\b/)
+  end
+
+  it "is hit-tested at the numbers the card draws it with" do
+    draw = tutorial_body.call("private def render_request_pane(screen : Screen, rect : Rect, focused : Bool, *,")
+    hit = tutorial_body.call("private def edit_badge_hit?(mx : Int32, my : Int32) : Bool")
+    # `min_x`: the badge is refused below it by BOTH `Frame.mode_badge` and `mode_badge_hit`,
+    # so a disagreement here is a live cell over an unpainted one (or the reverse).
+    draw[/badge_min = rect\.x \+ (\d+)/, 1].should eq(hit[/r\.x \+ (\d+)/, 1])
+    # …and the card-too-small bail, which is what stops the hit-test answering for a badge the
+    # draw returned before painting.
+    draw[/rect\.w < (\d+)/, 1].should eq(hit[/r\.w < (\d+)/, 1])
+    draw[/rect\.h < (\d+)/, 1].should eq(hit[/r\.h < (\d+)/, 1])
+    # The right edge and the row are spelled once each, and both are the card's own.
+    hit.should contain("r.right - 1")
+    draw.should contain("rect.right - 1")
+  end
+end

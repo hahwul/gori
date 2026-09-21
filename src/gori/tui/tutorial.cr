@@ -698,26 +698,45 @@ module Gori::Tui
     end
 
     # The three doors into the mock's INS mode — the Edit lesson's `i`/↵, the shared shell's
-    # `i`/↵ on the REQUEST pane, and a click on the Edit lesson's pane — spelled the same
-    # three lines each. One home, so they cannot disagree about the try-it flag the way they
-    # already did about the field.
+    # `i`/↵ on the REQUEST pane, and a click on the Edit lesson's NOR/INS chip — spelled the
+    # same three lines each. One home, so they cannot disagree about the try-it flag the way
+    # they already did about the field.
     private def enter_insert : Nil
       @edit_insert = true
       @edit_typed = ""
       mark_edit_tried
     end
 
+    # …and one home for the way out, which `esc`, `↵` and the chip all take.
+    private def exit_insert : Nil
+      @edit_insert = false
+      mark_edit_tried
+    end
+
+    # The mock REQUEST card's NOR/INS chip, inverted at `render_request_pane`'s own three
+    # numbers — and behind its own `w < 8 || h < 3` bail — so the live cells are exactly the
+    # painted ones, and a card too small to draw a badge cannot answer for one.
+    private def edit_badge_hit?(mx : Int32, my : Int32) : Bool
+      r = @request_rect
+      return false if r.w < 8 || r.h < 3
+      Frame.mode_badge_hit(mx, my, r.y, r.right - 1, r.x + 10, @edit_insert)
+    end
+
+    # The chip is a TOGGLE, the way every real editor's is (`NotesController#handle_click`
+    # and its four siblings), rather than a one-way door into INS.
+    private def toggle_edit_insert : Nil
+      @edit_insert ? exit_insert : enter_insert
+    end
+
     private def handle_edit_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.escape?
-        @edit_insert = false
-        mark_edit_tried
+        exit_insert
         return
       end
       if key.enter?
         # ↵ leaves INS (like leaving insert in many editors); Next advances the tour.
-        @edit_insert = false
-        mark_edit_tried
+        exit_insert
         return
       end
       if key.backspace?
@@ -989,10 +1008,15 @@ module Gori::Tui
       # on it used to fall through to the body-focus branch below — which `render_edit`
       # ignores entirely, since it always draws that pane focused and reads @edit_insert for
       # the mode — so the pointer did nothing at all, while still ticking the NAVIGATE
-      # lesson's try-it on the way past. Clicking into a field to type in it is what the
-      # pointer means here.
+      # lesson's try-it on the way past.
+      #
+      # What the pointer means here is what it means in the app it is teaching (#1124): a
+      # press on the card's NOR/INS chip toggles the mode, and a press anywhere else places a
+      # caret and changes no mode. This card has no caret to place, so the body is inert —
+      # which is the honest mock of "a click does not open the editor". The chip that used to
+      # be painted and dead is the live cell instead, and the lesson's ask is still `i`.
       if @step.edit?
-        enter_insert if @request_rect.contains?(mx, my) && !@edit_insert
+        toggle_edit_insert if edit_badge_hit?(mx, my)
         return
       end
 
