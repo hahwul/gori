@@ -43,7 +43,8 @@ TUI` guidance. A subcommand that keeps the project open for a whole run —
 `discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept` — keeps
 the standard five-second wait, the same one the TUI's capture writer uses. A
 repeater send that already reached the network keeps its completed-send result even when its
-response or History write cannot be persisted: it prints a warning to STDERR and does not ask a
+response or History write cannot be persisted: it prints a warning to STDERR, and `--format json`
+carries `response_saved` / `history_saved` with the reason, so a script can tell without asking a
 generic shell retry to send the request again solely because of that write failure.
 
 ```bash
