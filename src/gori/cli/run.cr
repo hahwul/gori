@@ -674,7 +674,7 @@ module Gori
       rescue ex : DB::Error | SQLite3::Exception
         message = "gori run: cannot open database #{project.db_path}: " \
                   "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
-                  "#{open_failure_hint(ex, project.db_path, read_only, project.name)}"
+                  "#{open_failure_hint(ex, project.db_path, read_only)}"
         abort message if abort_on_failure
         raise ex
       end
@@ -721,13 +721,13 @@ module Gori
       # `read_only` opens are excluded because for them a non-writable file is not a fault.
       # Public for the reason `two_targets_error` is: its only caller ends in `abort`.
       def self.open_failure_hint(ex : Exception, db_path : String? = nil,
-                                 read_only : Bool = false, project_name : String? = nil) : String
+                                 read_only : Bool = false) : String
         msg = ex.message.to_s
         # `read_only` gates BOTH message branches, not just the filesystem tail below. A
         # read-only open can still surface either string — `Store.open` runs its pragmas before
         # `apply_query_only` — and both sentences were wrong for it: "read it with a read-only
         # subcommand" is what the operator just did, and "this subcommand writes" is false.
-        if hint = lock_failure_hint(msg, read_only, project_name)
+        if hint = lock_failure_hint(msg, read_only)
           return hint
         end
         if !read_only && (msg.includes?("readonly") || msg.includes?("read-only"))
@@ -750,16 +750,26 @@ module Gori
         " — this subcommand writes, and the file (or its directory) is not writable."
       end
 
-      private def self.lock_failure_hint(msg : String, read_only : Bool, project_name : String?) : String?
-        subject = project_name ? "project #{project_name.inspect}" : "the project"
+      # "This project", never a name. The sentence hangs off "cannot open database <path>", so
+      # the target is already on the line — and the only name available here is
+      # `Project#name`, which for a `--db PATH` target `resolve_read_project` synthesises from
+      # the path's PARENT DIRECTORY. `gori run notes create --db /tmp/claude-501/mycap.db` was
+      # told `project "claude-501" is locked`, and there is no such project.
+      #
+      # The advice names the workaround the operator can actually take: a read-only
+      # subcommand does not need the writer slot, so `history`, `notes` (list), `repeater
+      # list` and friends work against the very project a TUI is capturing into. "Close the
+      # other instance" is what they already knew.
+      private def self.lock_failure_hint(msg : String, read_only : Bool) : String?
         if msg.includes?("is locked")
-          return " — #{subject} is locked by another gori (a TUI, a capture, or an MCP server)." \
+          return " — this project is locked by another gori (a TUI, a capture, or an MCP server)." \
                  " Nothing is wrong with the file; retry." if read_only
-          return " — #{subject} is locked by another gori (a TUI, a capture, or an MCP server)." \
-                 " Nothing is wrong with the file: retry, or close the other instance."
+          return " — this project is locked by another gori (a TUI, a capture, or an MCP server)." \
+                 " Nothing is wrong with the file: retry, read it with a read-only subcommand, or close the other instance."
         end
-        return " — #{subject} is busy in another gori instance; retry or close the TUI." \
-           if msg.includes?("Could not check out a connection")
+        return " — this project's connections are all busy in another gori instance (a TUI, a capture, or an MCP server):" \
+               " retry, read it with a read-only subcommand, or close the other instance." \
+                if msg.includes?("Could not check out a connection")
         nil
       end
 

@@ -456,8 +456,13 @@ module Gori
       # have taken SQLite's single writer slot between the migration and this operation. Keep the
       # retry advice in one sentence so create, metadata, WS frames and response persistence do
       # not fall back to the old silent/generic wording (#1118).
+      #
+      # The PATH, not `project.name`: for a `--db PATH` target that name is the path's parent
+      # directory (`resolve_read_project`), and naming it as a project invented one. The path
+      # is true for both target forms and is what the operator typed or the registry resolved.
       private def self.project_write_failure(prefix : String, project : Project) : String
-        "#{prefix}: project #{project.name.inspect} is busy or unwritable — retry or close the TUI"
+        "#{prefix}: the project at #{project.db_path} is busy or unwritable — another gori " \
+        "(a TUI, a capture, or an MCP server) may hold its writer slot; retry, or close it"
       end
 
       # A response/history write happens after the send attempt. Once the network succeeds, its
