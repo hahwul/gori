@@ -464,8 +464,13 @@ module Gori
       # failure is a warning, not a failed send: a shell that retries every non-zero command would
       # otherwise duplicate a request that already reached the origin.
       private def self.project_write_warning(prefix : String, project : Project) : String
-        "#{project_write_failure(prefix, project)} — the send attempt is already complete; " \
-        "do not retry solely because of this write failure"
+        "#{project_write_failure(prefix, project)}#{project_write_warning_tail}"
+      end
+
+      # The half of `project_write_warning` that is about the SEND, for a failure sentence that
+      # already says what happened to the write (`persist_repeater_response`).
+      private def self.project_write_warning_tail : String
+        " — the send attempt is already complete; do not retry solely because of this write failure"
       end
 
       # `request_sources` / `request_source_error` / `request_content` are PUBLIC for the same
@@ -876,18 +881,27 @@ module Gori
       # `repeater list` / `--diff` see it — parity with the TUI (repeater_controller.cr
       # #drain_results). Reopens the store because `send` closed it before the (slow) dial.
       # Callers gate on `result.ok?`: a failed resend must not wipe a good stored response.
+      #
+      # Answers nil when the row now holds the response, else the sentence that says why not.
+      # Two things can go wrong in the window the dial opened, and they want different advice:
+      # the project refused the write (busy, locked, unwritable — retry the WRITE, not the send),
+      # or the session was deleted meanwhile (`gori run repeater delete`, the TUI closing the
+      # tab, MCP `delete_repeater`) and there is nothing to write to. `update_repeater_response`
+      # answers false for both, so this asks `repeater_exists?` to say which.
       private def self.persist_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
                                                  duration_us : Int64, project : Project,
-                                                 request_sha256 : String?) : Bool
+                                                 request_sha256 : String?) : String?
         store = begin
           open_store(project, abort_on_failure: false)
         rescue Gori::Error | DB::Error | SQLite3::Exception
-          return false
+          return project_write_failure("response was NOT saved", project)
         end
         begin
-          store.update_repeater_response(id, head, body, error, duration_us, request_sha256: request_sha256)
+          return nil if store.update_repeater_response(id, head, body, error, duration_us, request_sha256: request_sha256)
+          return "response was NOT saved: session ##{id} no longer exists (deleted by another gori while the send was in flight)" unless store.repeater_exists?(id)
+          project_write_failure("response was NOT saved", project)
         rescue Gori::Error | DB::Error | SQLite3::Exception
-          false
+          project_write_failure("response was NOT saved", project)
         ensure
           store.close
         end
@@ -1083,9 +1097,9 @@ module Gori
         # the row's request at the moment of this write is still exactly these bytes. The
         # wire may differ (`--set`, `$NAME` expansion, the slot overlay) and deliberately does
         # not count: the drift check compares the ROW's request, not what went out.
-        if result.ok? && !persist_repeater_response(id, result.head, result.body, result.error, result.duration_us,
-             project, Evidence.request_digest(rec.request))
-          STDERR.puts project_write_warning("gori run repeater send: response was NOT saved", project)
+        if result.ok? && (why = persist_repeater_response(id, result.head, result.body, result.error, result.duration_us,
+             project, Evidence.request_digest(rec.request)))
+          STDERR.puts "gori run repeater send: #{why}#{project_write_warning_tail}"
         end
         exit 1 unless result.ok?
       end
@@ -1147,9 +1161,9 @@ module Gori
         # (a 403/426 where the stored row holds a 101 IS the news, and it was being dropped).
         # See `WsEngine::Result#answered?`.
         if result.answered?
-          unless persist_repeater_response(id, result.handshake_head, Bytes.empty, result.error,
-                   result.duration_us, project, request_sha256)
-            STDERR.puts project_write_warning("gori run repeater send: WebSocket response was NOT saved", project)
+          if why = persist_repeater_response(id, result.handshake_head, Bytes.empty, result.error,
+               result.duration_us, project, request_sha256)
+            STDERR.puts "gori run repeater send: WebSocket #{why}#{project_write_warning_tail}"
           end
         end
 

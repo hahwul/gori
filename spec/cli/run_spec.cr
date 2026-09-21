@@ -604,8 +604,34 @@ module Gori::CLI::Run
 
   def self.persist_repeater_response_for_spec(id : Int64, head : Bytes, body : Bytes?, error : String?,
                                               duration_us : Int64, project : Gori::Project,
-                                              request_sha256 : String?) : Bool
+                                              request_sha256 : String?) : String?
     persist_repeater_response(id, head, body, error, duration_us, project, request_sha256)
+  end
+end
+
+# `persist_repeater_response` goes through `open_store`, which installs the project's env layer
+# and settings into process globals exactly as a real `gori run` would. Put them back.
+private def with_cli_env_restored(&)
+  prev_env = Gori::Settings.project_env_vars
+  prev_layer = Gori::Env.layer
+  begin
+    yield
+  ensure
+    Gori::Env.layer = prev_layer
+    Gori::Settings.project_env_vars = prev_env
+    Gori::Env.bump_highlight_rev
+  end
+end
+
+private def with_project_db(&)
+  path = File.tempname("gori-post-send", ".db")
+  begin
+    yield path
+  ensure
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+    File.delete?("#{path}.open.lock")
   end
 end
 
@@ -616,9 +642,46 @@ describe "gori run repeater post-send persistence" do
     begin
       Gori::CLI::Run.persist_repeater_response_for_spec(
         1_i64, Bytes.empty, nil, nil, 0_i64, Gori::Project.new("broken", path), nil
-      ).should be_false
+      ).should_not be_nil
     ensure
       File.delete?(path)
+    end
+  end
+
+  it "answers nil once the row holds the response" do
+    with_cli_env_restored do
+      with_project_db do |path|
+        store = Gori::Store.open(path)
+        id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+        store.close
+        Gori::CLI::Run.persist_repeater_response_for_spec(
+          id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 5_i64, Gori::Project.new("p", path), nil).should be_nil
+        reopened = Gori::Store.open(path)
+        begin
+          String.new(reopened.repeaters.find!(&.id.==(id)).response_head.not_nil!).should start_with("HTTP/1.1 200")
+        ensure
+          reopened.close
+        end
+      end
+    end
+  end
+
+  # The window: `send` read the row and closed the store, dialled for seconds, and reopens to
+  # write. A peer removed the row meanwhile. The UPDATE matches nothing and used to commit,
+  # answer true, print nothing and exit 0 — the operator believed the response was on a tab
+  # that no longer existed. The sentence has to name THAT, not the project's busy-ness.
+  it "names the session as gone when it was deleted during the send, not the project as busy" do
+    with_cli_env_restored do
+      with_project_db do |path|
+        store = Gori::Store.open(path)
+        id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+        store.delete_repeater(id).should be_true
+        store.close
+        why = Gori::CLI::Run.persist_repeater_response_for_spec(
+          id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 5_i64, Gori::Project.new("p", path), nil).not_nil!
+        why.should contain("session ##{id} no longer exists")
+        why.should_not contain("busy")
+      end
     end
   end
 end

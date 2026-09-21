@@ -171,11 +171,23 @@ module Gori
           sni = w.call(sni, EnvMigration::Kind::Dial)
         end
       end
-      exec_task_ok ->(c : DB::Connection) {
+      # `exec_task_row`, not `exec_task_ok`: a minimize `--apply` (CLI and MCP) reads this row,
+      # spends seconds sending, and writes back — a peer that closed the tab in between must not
+      # be answered "applied". See `update_repeater_response` for the same window on a send.
+      exec_task_row ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, ws_keep_key = ?, ws_http_only = ?, tls_preset = ?, updated_at = ? WHERE id = ?",
           target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, ws_keep_key ? 1 : 0, ws_http_only ? 1 : 0, tls_preset, now_us, id)
         nil
       }
+    end
+
+    # Does a session row with this id exist right now? A narrow read for a caller that was just
+    # answered false by one of the row-checked writes above and has to say WHICH of the two
+    # things happened — the store refused the write, or the row is gone.
+    def repeater_exists?(id : Int64) : Bool
+      !@db.query_one?("SELECT 1 FROM repeaters WHERE id = ?", id, as: Int64).nil?
+    rescue
+      false
     end
 
     # The `flow_id` of one tab, or nil for a draft (and for an id that is gone). A narrow read for
@@ -245,9 +257,16 @@ module Gori
     # Persist a repeater tab's LAST send result (V11) so it survives a reopen. Kept
     # separate from update_repeater (the request side) — called once each send
     # completes. `head` is the response head bytes (empty on error), `error` is set
-    # only when the send failed. Via exec_task_ok (writer connection), so this DOES
-    # bump the TUI data_version poll and answers whether the commit happened; Repeater reconcile
-    # soft-syncs around it.
+    # only when the send failed. Via the writer connection, so this DOES bump the TUI
+    # data_version poll; Repeater reconcile soft-syncs around it.
+    #
+    # Answers whether THIS ROW now holds the response: false for a rolled-back batch (store
+    # busy/locked/closing) AND for an id no row has. The second half matters because every
+    # headless send closes the store, dials for as long as the origin takes, and reopens to
+    # write — `gori run repeater delete`, a TUI closing the tab or MCP `delete_repeater` can
+    # remove the row inside that window, and an `UPDATE … WHERE id = ?` that matched nothing
+    # used to commit and answer true, so the operator was told the response was on a tab that
+    # no longer existed. `repeater_exists?` tells the two apart when the caller has to say which.
     #
     # `request_sha256` (V28) is `Evidence.request_digest` of the SAVED request bytes this
     # row held when the send went out — the request half of the pair this response completes.
@@ -263,7 +282,7 @@ module Gori
     # bytes — but it has to be written down.
     def update_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
                                  duration_us : Int64, *, request_sha256 : String?) : Bool
-      exec_task_ok ->(c : DB::Connection) {
+      exec_task_row ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET response_head = ?, response_body = ?, response_error = ?, response_duration_us = ?, response_request_sha256 = ?, updated_at = ? WHERE id = ?",
           head, body, error, duration_us, request_sha256, now_us, id)
         nil
