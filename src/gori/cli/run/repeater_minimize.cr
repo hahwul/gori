@@ -178,8 +178,10 @@ module Gori
             w.close
           end
           unless applied
-            STDERR.puts "gori run repeater minimize: --apply did NOT commit (project busy) — " \
-                        "session ##{id} still holds the original request"
+            # `update_repeater` answers false for a rolled-back write AND for a row that is
+            # gone: the search took seconds, and a peer may have closed the tab meanwhile.
+            STDERR.puts "gori run repeater minimize: --apply did NOT commit (project busy, or session " \
+                        "##{id} was deleted during the search) — the session, if it still exists, holds the original request"
           end
         end
         # The report is rendered through the SAME resolver the search used, so the request

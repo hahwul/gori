@@ -36,7 +36,7 @@ gori run <subcommand> [verb] [options]
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. SQLite WAL이 읽는 쪽과 쓰는 쪽을 함께 감당합니다. `body:` 질의는 예외입니다. 검색 인덱스를 비우므로 쓰기입니다.
 
-쓰기 서브커맨드는 TUI·MCP와 같은 WAL 데이터베이스를 사용하며 Store의 writer를 통해 직렬화됩니다. TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite writer 슬롯을 잠시 점유할 수 있습니다. CLI의 SQLite 열기·쓰기 대기는 최대 1초입니다. 슬롯이 계속 사용 중이면 필요한 쓰기를 프로젝트 이름과 함께 `retry or close the TUI` 안내를 출력하고 0이 아닌 종료 코드로 끝납니다. repeater send도 네트워크 응답을 저장하지 못하면 성공으로 처리하지 않고 오류를 출력하므로, 저장되지 않은 응답을 조용히 잃지 않습니다.
+쓰기 서브커맨드는 TUI·MCP와 같은 WAL 데이터베이스를 사용하며 Store의 writer를 통해 직렬화됩니다. TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite writer 슬롯을 잠시 점유할 수 있습니다. 짧게 끝나는 서브커맨드의 SQLite 열기·쓰기 대기는 최대 1초입니다. 슬롯이 계속 사용 중이면 다른 gori가 프로젝트를 잠그고 있다는 안내(재시도하거나 읽기 전용 서브커맨드로 읽기)를 출력하고 0이 아닌 종료 코드로 끝납니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`)는 TUI 캡처 writer와 같은 기본 5초 대기를 유지합니다. repeater send는 응답이 이미 origin에 도달했다면 저장에 실패해도 종료 코드 0을 유지하되, STDERR 경고와 함께 `--format json`의 `response_saved` / `history_saved` 필드로 어느 쓰기가 실패했는지 알립니다.
 
 ```bash
 gori run history --project my-engagement -q 'status:5xx'

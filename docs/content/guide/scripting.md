@@ -37,10 +37,15 @@ Read subcommands open the store read-only and never take the capture lock, so th
 
 Write subcommands use the same WAL database as the TUI and MCP and serialize through the Store
 writer. They may run while the TUI is open, but a capture commit can briefly own SQLite's writer
-slot. Each CLI SQLite open/writer wait has a one-second budget; when the slot stays busy, the
-required write exits non-zero with the project name and `retry or close the TUI` guidance. A
+slot. A short-lived subcommand gives its SQLite open/writer waits a one-second budget; when the
+slot stays busy, the required write exits non-zero and says the project is locked by another gori,
+with the workaround (retry, or read it with a read-only subcommand). A subcommand that keeps the
+project open for a whole run —
+`discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept` — keeps
+the standard five-second wait, the same one the TUI's capture writer uses. A
 repeater send that already reached the network keeps its completed-send result even when its
-response or History write cannot be persisted: it prints a warning to STDERR and does not ask a
+response or History write cannot be persisted: it prints a warning to STDERR, and `--format json`
+carries `response_saved` / `history_saved` with the reason, so a script can tell without asking a
 generic shell retry to send the request again solely because of that write failure.
 
 ```bash

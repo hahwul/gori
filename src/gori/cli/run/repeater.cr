@@ -456,16 +456,48 @@ module Gori
       # have taken SQLite's single writer slot between the migration and this operation. Keep the
       # retry advice in one sentence so create, metadata, WS frames and response persistence do
       # not fall back to the old silent/generic wording (#1118).
+      #
+      # The PATH, not `project.name`: for a `--db PATH` target that name is the path's parent
+      # directory (`resolve_read_project`), and naming it as a project invented one. The path
+      # is true for both target forms and is what the operator typed or the registry resolved.
       private def self.project_write_failure(prefix : String, project : Project) : String
-        "#{prefix}: project #{project.name.inspect} is busy or unwritable — retry or close the TUI"
+        "#{prefix}: the project at #{project.db_path} is busy or unwritable — another gori " \
+        "(a TUI, a capture, or an MCP server) may hold its writer slot; retry, or close it"
       end
 
       # A response/history write happens after the send attempt. Once the network succeeds, its
       # failure is a warning, not a failed send: a shell that retries every non-zero command would
       # otherwise duplicate a request that already reached the origin.
       private def self.project_write_warning(prefix : String, project : Project) : String
-        "#{project_write_failure(prefix, project)} — the send attempt is already complete; " \
-        "do not retry solely because of this write failure"
+        "#{project_write_failure(prefix, project)}#{project_write_warning_tail}"
+      end
+
+      # The half of `project_write_warning` that is about the SEND, for a failure sentence that
+      # already says what happened to the write (`persist_repeater_response`).
+      private def self.project_write_warning_tail : String
+        " — the send attempt is already complete; do not retry solely because of this write failure"
+      end
+
+      # What became of one write `repeater send` makes AFTER the origin answered — the stored
+      # response, or the `--record-history` flow. `error` nil means it landed.
+      #
+      # These ride the ONE result object `--format json` prints, so a script can tell. They
+      # used to be STDERR prose under exit 0: `gori run repeater send 7 --format json | jq`
+      # under a busy project was byte-identical to a successful run while the row still held
+      # the PREVIOUS response — so the next `send 7 --diff` diffed against a stale baseline and
+      # reported "no differences". Exit 0 stays (the request reached the origin; a shell must
+      # not resend it), which is exactly why the machine-readable half has to carry the answer:
+      # a report emitted before the side effect cannot, so both writes now happen before the
+      # emit (#1118).
+      struct WriteOutcome
+        getter error : String?
+
+        def initialize(@error : String?)
+        end
+
+        def ok? : Bool
+          @error.nil?
+        end
       end
 
       # `request_sources` / `request_source_error` / `request_content` are PUBLIC for the same
@@ -876,18 +908,30 @@ module Gori
       # `repeater list` / `--diff` see it — parity with the TUI (repeater_controller.cr
       # #drain_results). Reopens the store because `send` closed it before the (slow) dial.
       # Callers gate on `result.ok?`: a failed resend must not wipe a good stored response.
+      #
+      # Answers nil when the row now holds the response, else the sentence that says why not.
+      # Two things can go wrong in the window the dial opened, and they want different advice:
+      # the project refused the write (busy, locked, unwritable — retry the WRITE, not the send),
+      # or the session was deleted meanwhile (`gori run repeater delete`, the TUI closing the
+      # tab, MCP `delete_repeater`) and there is nothing to write to. `update_repeater_response`
+      # answers false for both, so this asks `repeater_exists?` to say which.
       private def self.persist_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
                                                  duration_us : Int64, project : Project,
-                                                 request_sha256 : String?) : Bool
+                                                 request_sha256 : String?) : String?
         store = begin
           open_store(project, abort_on_failure: false)
-        rescue Gori::Error | DB::Error | SQLite3::Exception
-          return false
+        rescue ex : Gori::Error | DB::Error | SQLite3::Exception
+          # The accurate reason (`open_failure_message`), not the generic busy sentence: a
+          # read-only file and a non-writable WAL directory reach here too, and "retry" is the
+          # wrong advice for both.
+          return "response was NOT saved: #{open_failure_message(ex, project)}"
         end
         begin
-          store.update_repeater_response(id, head, body, error, duration_us, request_sha256: request_sha256)
+          return nil if store.update_repeater_response(id, head, body, error, duration_us, request_sha256: request_sha256)
+          return "response was NOT saved: session ##{id} no longer exists (deleted by another gori while the send was in flight)" unless store.repeater_exists?(id)
+          project_write_failure("response was NOT saved", project)
         rescue Gori::Error | DB::Error | SQLite3::Exception
-          false
+          project_write_failure("response was NOT saved", project)
         ensure
           store.close
         end
@@ -1062,56 +1106,72 @@ module Gori
           diff_capped = Repeater::Diff.truncated?(orig, fresh)
           diff = Repeater::Diff.lines(orig, fresh)
         end
-        # BEFORE the emit, so the flow id can go INSIDE the one result object `--format json`
-        # has always printed. Printing a second top-level object after it broke every consumer
-        # doing `… --format json | jq .status` (trailing content), and in text mode appended a
-        # bare integer line to the response dump.
+        # BOTH writes BEFORE the emit, so their outcome can go INSIDE the one result object
+        # `--format json` has always printed (`WriteOutcome`). Printing a second top-level
+        # object after it broke every consumer doing `… --format json | jq .status` (trailing
+        # content), and in text mode appended a bare integer line to the response dump.
         #
-        # Recorded regardless of ok?: an error flow is evidence too (and matches MCP
+        # History is recorded regardless of ok?: an error flow is evidence too (and matches MCP
         # send_request, which records the attempt).
-        recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, id, project) : nil
+        recorded_flow_id = nil.as(Int64?)
+        history_write = nil.as(WriteOutcome?)
+        if record_history
+          case recorded = record_repeater_send_to_history(plan, wire, result, sent_at, id, project)
+          in Int64  then recorded_flow_id = recorded; history_write = WriteOutcome.new(nil)
+          in String then history_write = WriteOutcome.new(recorded)
+          end
+        end
+        # The digest of the request that produced this response (Schema V28). `rec.request` is
+        # the SAVED row — this command sends what the row holds and never writes it back, so
+        # the row's request at the moment of this write is still exactly these bytes. The
+        # wire may differ (`--set`, `$NAME` expansion, the slot overlay) and deliberately does
+        # not count: the drift check compares the ROW's request, not what went out.
+        # Only on ok?: a failed resend must not wipe a good stored response.
+        response_write = nil.as(WriteOutcome?)
+        if result.ok?
+          response_write = WriteOutcome.new(persist_repeater_response(id, result.head, result.body, result.error,
+            result.duration_us, project, Evidence.request_digest(rec.request)))
+        end
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id,
-          tls_preset: sent_tls_preset(plan))
+          tls_preset: sent_tls_preset(plan), response_write: response_write, history_write: history_write)
+        # The STDERR half of the same two answers, in both formats: a human at a terminal reads
+        # this line, and a script's pipe still carries the JSON field.
+        if (hw = history_write) && (why = hw.error)
+          STDERR.puts "gori run repeater send: #{why}#{project_write_warning_tail}"
+        end
+        if (rw = response_write) && (why = rw.error)
+          STDERR.puts "gori run repeater send: #{why}#{project_write_warning_tail}"
+        end
         # The session slot's `$NAME` that went out LITERALLY, after the response and before the
         # exit code. A Repeater send under a slot is how an operator MINTS a binding, so this is
         # also the surface that has to say when the mint never happened: the origin answers 401
         # to a header carrying the reference itself, and that reads as a session that was sent
         # and rejected. See `Run.unbound_overlay_note`.
         report_unbound_slot_overlay("gori run repeater send")
-        # The digest of the request that produced this response (Schema V28). `rec.request` is
-        # the SAVED row — this command sends what the row holds and never writes it back, so
-        # the row's request at the moment of this write is still exactly these bytes. The
-        # wire may differ (`--set`, `$NAME` expansion, the slot overlay) and deliberately does
-        # not count: the drift check compares the ROW's request, not what went out.
-        if result.ok? && !persist_repeater_response(id, result.head, result.body, result.error, result.duration_us,
-             project, Evidence.request_digest(rec.request))
-          STDERR.puts project_write_warning("gori run repeater send: response was NOT saved", project)
-        end
         exit 1 unless result.ok?
       end
 
       # Write one repeater HTTP send to History and return the new flow id — the CLI half of
       # #749's opt-in punch-through. Re-opens the store (closed before the send, like
-      # `persist_repeater_response`). A write failure is a WARNING and nil, not an abort: the
-      # send already happened, so aborting here would misreport a completed send as a failure.
-      # The caller puts the id on the OUTPUT (a `recorded_flow_id` field in JSON, a STDERR note
-      # in text) rather than this method printing — see the call site.
+      # `persist_repeater_response`). A write failure is the sentence that says so, not an
+      # abort: the send already happened, so aborting here would misreport a completed send as
+      # a failure. The caller puts the id AND the failure on the OUTPUT (`recorded_flow_id` /
+      # `history_saved` in JSON, a STDERR note in text) rather than this method printing — a
+      # `recorded_flow_id: null` alone was indistinguishable from `--record-history` not passed.
       private def self.record_repeater_send_to_history(plan : Repeater::Plan, wire : Bytes,
                                                        result : Repeater::Result,
                                                        created_at : Int64, session_id : Int64,
-                                                       project : Project) : Int64?
+                                                       project : Project) : Int64 | String
         store = begin
           open_store(project, abort_on_failure: false)
-        rescue Gori::Error | DB::Error | SQLite3::Exception
-          STDERR.puts project_write_warning("gori run repeater send: History was NOT saved", project)
-          return nil
+        rescue ex : Gori::Error | DB::Error | SQLite3::Exception
+          return "History was NOT saved: #{open_failure_message(ex, project)}"
         end
         begin
           Repeater::HistoryRecord.record(store, plan, result, created_at, wire,
             surface: Gori::FlowSource::Surface::Cli, source_ref: session_id.to_s)
         rescue Gori::Error | DB::Error | SQLite3::Exception
-          STDERR.puts project_write_warning("gori run repeater send: History was NOT saved", project)
-          nil
+          project_write_failure("History was NOT saved", project)
         ensure
           store.close
         end
@@ -1146,14 +1206,16 @@ module Gori
         # not wipe a good stored handshake, and `ok?` alone was the other half of that mistake
         # (a 403/426 where the stored row holds a 101 IS the news, and it was being dropped).
         # See `WsEngine::Result#answered?`.
+        response_write = nil.as(WriteOutcome?)
         if result.answered?
-          unless persist_repeater_response(id, result.handshake_head, Bytes.empty, result.error,
-                   result.duration_us, project, request_sha256)
-            STDERR.puts project_write_warning("gori run repeater send: WebSocket response was NOT saved", project)
-          end
+          response_write = WriteOutcome.new(persist_repeater_response(id, result.handshake_head, Bytes.empty,
+            result.error, result.duration_us, project, request_sha256))
         end
 
-        emit_ws_result(id, result, format)
+        emit_ws_result(id, result, format, response_write)
+        if (rw = response_write) && (why = rw.error)
+          STDERR.puts "gori run repeater send: WebSocket #{why}#{project_write_warning_tail}"
+        end
         # `--slot NAME` on the handshake head, resolved to nothing — same reason as the HTTP
         # path below. Before the exit so a failed exchange says it too.
         report_unbound_slot_overlay("gori run repeater send")
@@ -1380,57 +1442,10 @@ module Gori
         s.valid_encoding? ? CLI::Output.term_safe(s) : "0x#{payload.hexstring}"
       end
 
-      private def self.emit_ws_result(id : Int64, result : Repeater::WsEngine::Result, format : Symbol) : Nil
+      private def self.emit_ws_result(id : Int64, result : Repeater::WsEngine::Result, format : Symbol,
+                                      response_write : WriteOutcome? = nil) : Nil
         if format == :json
-          puts(JSON.build do |j|
-            j.object do
-              j.field "repeater_id", id
-              j.field "upgraded", result.upgraded?
-              j.field "duration_us", result.duration_us
-              j.field "close_code", result.close_code
-              CLI::Output.json_captured(j, "error", result.error)
-              j.field "note", result.note
-              # The inbound transcript stopped SHORT of the server at a cap. A synthetic row
-              # already sits in `messages` below; this is the summary half so a script reading
-              # the envelope (not walking the array) still sees the transcript is incomplete.
-              j.field "truncated", result.truncated
-              j.field "messages" do
-                j.array do
-                  result.messages.each do |m|
-                    j.object do
-                      j.field "direction", m.direction
-                      j.field "opcode", m.opcode
-                      j.field "frame", Store::WsOutMessage.new(m.opcode, m.payload, m.shape).shape_label(m.direction == "out")
-                      # A CLOSE's §5.5.1 code and reason as FIELDS, not only inside the base64
-                      # below. The text transcript beside this has printed them all along
-                      # (`ws_control_payload_text`), `gori run show --format json` emits them on
-                      # a captured row (`WsMessage#emit_shape_json`) and MCP `send_websocket`
-                      # emits them on this very transcript — so a script driving the CLI was the
-                      # one reader left decoding base64 to learn WHY the socket closed, which is
-                      # the single most diagnostic thing a failed WebSocket test produces.
-                      if m.opcode == 8 && m.payload.size >= 2
-                        j.field "close_code", (m.payload[0].to_i << 8) | m.payload[1].to_i
-                        reason = m.payload[2, m.payload.size - 2]
-                        j.field "close_reason", String.new(reason).scrub unless reason.empty?
-                      end
-                      if m.opcode == 1
-                        j.field "text", scrub(m.payload)
-                        # JSON has no way to carry a byte that is not valid UTF-8, so `text`
-                        # above is U+FFFD-substituted for exactly the payload an §8.1/§5.6
-                        # test is about. Emit the real bytes beside it rather than leaving a
-                        # script no way to read them back.
-                        j.field "payload_base64", Base64.strict_encode(m.payload) unless String.new(m.payload).valid_encoding?
-                      else
-                        j.field "binary", true
-                        j.field "size", m.payload.size
-                        j.field "payload_base64", Base64.strict_encode(m.payload)
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end)
+          puts ws_result_json(id, result, response_write)
         elsif result.ok?
           STDERR.puts "→ WebSocket upgraded=#{result.upgraded?} in #{CLI::Output.human_us(result.duration_us)}#{result.close_code ? " (close #{result.close_code})" : ""}"
           STDERR.puts "note: #{result.note}" if result.note
@@ -1438,6 +1453,69 @@ module Gori
           result.messages.each { |m| puts ws_transcript_line(m) }
         else
           STDERR.puts "repeater failed: #{result.error}"
+        end
+      end
+
+      # Whether the stored handshake was written, beside the exchange it came from. Present only
+      # when a write was attempted (`answered?`), like `response_saved` on the HTTP object.
+      private def self.emit_write_outcome_json(j : JSON::Builder, saved_field : String,
+                                               error_field : String, outcome : WriteOutcome?) : Nil
+        return unless o = outcome
+        j.field saved_field, o.ok?
+        j.field error_field, o.error unless o.ok?
+      end
+
+      private def self.ws_result_json(id : Int64, result : Repeater::WsEngine::Result,
+                                      response_write : WriteOutcome? = nil) : String
+        JSON.build do |j|
+          j.object do
+            j.field "repeater_id", id
+            j.field "upgraded", result.upgraded?
+            j.field "duration_us", result.duration_us
+            j.field "close_code", result.close_code
+            CLI::Output.json_captured(j, "error", result.error)
+            j.field "note", result.note
+            emit_write_outcome_json(j, "response_saved", "response_save_error", response_write)
+            # The inbound transcript stopped SHORT of the server at a cap. A synthetic row
+            # already sits in `messages` below; this is the summary half so a script reading
+            # the envelope (not walking the array) still sees the transcript is incomplete.
+            j.field "truncated", result.truncated
+            j.field "messages" do
+              j.array do
+                result.messages.each do |m|
+                  j.object do
+                    j.field "direction", m.direction
+                    j.field "opcode", m.opcode
+                    j.field "frame", Store::WsOutMessage.new(m.opcode, m.payload, m.shape).shape_label(m.direction == "out")
+                    # A CLOSE's §5.5.1 code and reason as FIELDS, not only inside the base64
+                    # below. The text transcript beside this has printed them all along
+                    # (`ws_control_payload_text`), `gori run show --format json` emits them on
+                    # a captured row (`WsMessage#emit_shape_json`) and MCP `send_websocket`
+                    # emits them on this very transcript — so a script driving the CLI was the
+                    # one reader left decoding base64 to learn WHY the socket closed, which is
+                    # the single most diagnostic thing a failed WebSocket test produces.
+                    if m.opcode == 8 && m.payload.size >= 2
+                      j.field "close_code", (m.payload[0].to_i << 8) | m.payload[1].to_i
+                      reason = m.payload[2, m.payload.size - 2]
+                      j.field "close_reason", String.new(reason).scrub unless reason.empty?
+                    end
+                    if m.opcode == 1
+                      j.field "text", scrub(m.payload)
+                      # JSON has no way to carry a byte that is not valid UTF-8, so `text`
+                      # above is U+FFFD-substituted for exactly the payload an §8.1/§5.6
+                      # test is about. Emit the real bytes beside it rather than leaving a
+                      # script no way to read them back.
+                      j.field "payload_base64", Base64.strict_encode(m.payload) unless String.new(m.payload).valid_encoding?
+                    else
+                      j.field "binary", true
+                      j.field "size", m.payload.size
+                      j.field "payload_base64", Base64.strict_encode(m.payload)
+                    end
+                  end
+                end
+              end
+            end
+          end
         end
       end
 
@@ -1462,12 +1540,15 @@ module Gori
                                             diff : Array(Repeater::DiffLine)?, format : Symbol,
                                             diff_capped : Bool = false,
                                             recorded_flow_id : Int64? = nil,
-                                            tls_preset : String? = nil) : Nil
+                                            tls_preset : String? = nil,
+                                            response_write : WriteOutcome? = nil,
+                                            history_write : WriteOutcome? = nil) : Nil
         # Text mode: the id goes to STDERR beside the other status lines, so a `> resp.txt`
         # redirect still captures exactly the response and nothing else.
         STDERR.puts "recorded to History as flow ##{recorded_flow_id}" if recorded_flow_id && format != :json
         if format == :json
-          puts repeater_json(result, diff, diff_capped, recorded_flow_id, tls_preset)
+          puts repeater_json(result, diff, diff_capped, recorded_flow_id, tls_preset,
+            response_write: response_write, history_write: history_write)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
           if d = diff
@@ -2014,7 +2095,9 @@ module Gori
 
       private def self.repeater_json(result : Repeater::Result, diff : Array(Repeater::DiffLine)?,
                                      diff_capped : Bool = false, recorded_flow_id : Int64? = nil,
-                                     tls_preset : String? = nil) : String
+                                     tls_preset : String? = nil, *,
+                                     response_write : WriteOutcome? = nil,
+                                     history_write : WriteOutcome? = nil) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
@@ -2026,6 +2109,13 @@ module Gori
             # ⇒ it was not recorded. Inside THIS object, never a second one: `--format json` has
             # always emitted exactly one, and a trailing object breaks every `jq` consumer.
             j.field("recorded_flow_id", recorded_flow_id) if recorded_flow_id
+            # …and WHY it is absent when `--record-history` WAS passed: `history_saved: false`
+            # plus the sentence. Without it a null id read the same as the flag not given.
+            emit_write_outcome_json(j, "history_saved", "history_error", history_write)
+            # Whether the SESSION ROW now holds this response (present only when a write was
+            # attempted, i.e. `ok`). `false` means the next `send --diff` would diff against
+            # the PREVIOUS response — see `WriteOutcome`.
+            emit_write_outcome_json(j, "response_saved", "response_save_error", response_write)
             j.field "status", result.response.try(&.status)
             j.field "duration_us", result.duration_us
             # A send failure quotes origin bytes — see `Output.json_captured`. The WS sibling

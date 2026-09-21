@@ -196,6 +196,40 @@ describe "Gori::Store repeater tabs (v9)" do
     end
   end
 
+  # `exec_task_ok` answers "did the batch COMMIT", and an UPDATE aimed at an id nobody has
+  # commits having matched nothing. Every headless send closes the store, dials, and reopens
+  # to write — so a `gori run repeater delete`, a TUI closing the tab or MCP `delete_repeater`
+  # inside that window used to be answered "response saved" about a row that no longer existed.
+  it "answers false for a response written to an id no row has" do
+    with_store do |store|
+      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.delete_repeater(id).should be_true
+      store.update_repeater_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 1_i64,
+        request_sha256: nil).should be_false
+      store.repeater_exists?(id).should be_false
+    end
+  end
+
+  it "answers true for a response written to a live row, and says the row exists" do
+    with_store do |store|
+      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.repeater_exists?(id).should be_true
+      store.update_repeater_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 1_i64,
+        request_sha256: nil).should be_true
+    end
+  end
+
+  # Same window on a minimize `--apply` (CLI and MCP): the search takes seconds, then the row is
+  # rewritten. A tab closed meanwhile must not be reported as applied.
+  it "answers false for a request update aimed at an id no row has" do
+    with_store do |store|
+      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.update_repeater(id, "https://a.test", "GET /min HTTP/1.1\r\n\r\n".to_slice, false, true).should be_true
+      store.delete_repeater(id).should be_true
+      store.update_repeater(id, "https://a.test", "GET /min HTTP/1.1\r\n\r\n".to_slice, false, true).should be_false
+    end
+  end
+
   it "answers false when a peer holds the writer slot" do
     path = File.tempname("gori-repeaters-contended", ".db")
     store = Gori::Store.open(path, busy_timeout_ms: 1)

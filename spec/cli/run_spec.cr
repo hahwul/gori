@@ -604,21 +604,122 @@ module Gori::CLI::Run
 
   def self.persist_repeater_response_for_spec(id : Int64, head : Bytes, body : Bytes?, error : String?,
                                               duration_us : Int64, project : Gori::Project,
-                                              request_sha256 : String?) : Bool
+                                              request_sha256 : String?) : String?
     persist_repeater_response(id, head, body, error, duration_us, project, request_sha256)
   end
 end
 
+# `persist_repeater_response` goes through `open_store`, which installs the project's env layer
+# and settings into process globals exactly as a real `gori run` would. Put them back.
+private def with_cli_env_restored(&)
+  prev_env = Gori::Settings.project_env_vars
+  prev_layer = Gori::Env.layer
+  begin
+    yield
+  ensure
+    Gori::Env.layer = prev_layer
+    Gori::Settings.project_env_vars = prev_env
+    Gori::Env.bump_highlight_rev
+  end
+end
+
+private def with_project_db(&)
+  path = File.tempname("gori-post-send", ".db")
+  begin
+    yield path
+  ensure
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+    File.delete?("#{path}.open.lock")
+  end
+end
+
 describe "gori run repeater post-send persistence" do
-  it "turns an unopenable project into a failed write result instead of raising" do
+  # …and the sentence carries the reason `open_store`'s own abort would have given, not the
+  # generic "busy or unwritable" every open failure used to collapse into: a non-database file
+  # is not busy, and "retry" is the wrong advice for it (and for a read-only file or directory,
+  # which reach here the same way).
+  it "turns an unopenable project into a failed write result that says what was wrong" do
     path = File.tempname("gori-post-send-invalid", ".db")
     File.write(path, "not a sqlite database")
     begin
-      Gori::CLI::Run.persist_repeater_response_for_spec(
-        1_i64, Bytes.empty, nil, nil, 0_i64, Gori::Project.new("broken", path), nil
-      ).should be_false
+      why = Gori::CLI::Run.persist_repeater_response_for_spec(
+        1_i64, Bytes.empty, nil, nil, 0_i64, Gori::Project.new("broken", path), nil).not_nil!
+      why.should start_with("response was NOT saved: gori run: cannot open database #{path}")
+      why.should_not contain("busy")
     ensure
       File.delete?(path)
+    end
+  end
+
+  it "composes the open-failure sentence from SQLite's words plus the hint" do
+    project = Gori::Project.new("p", "/tmp/p/gori.db")
+    locked = Gori::CLI::Run.open_failure_message(Exception.new("database is locked"), project)
+    locked.should start_with("gori run: cannot open database /tmp/p/gori.db: database is locked")
+    locked.should contain("read it with a read-only subcommand")
+    Gori::CLI::Run.open_failure_message(Exception.new(nil), project)
+      .should eq("gori run: cannot open database /tmp/p/gori.db: not a valid SQLite database (or unreadable)")
+  end
+end
+
+# `open_store` hydrates the process (env layer, settings, schemas, slots) AFTER `Store.open`
+# returned. A raise in that stretch used to propagate with the Store still alive — open-lock
+# flock held, writer fiber parked — which only looked harmless because every caller then
+# exited; the post-send writes call it with `abort_on_failure: false` and carry on. Every
+# hydration step rescues its own malformed input today, so there is no input that makes this
+# stretch raise on demand; the shape is pinned instead: the hydration is one call, and the
+# rescue around it closes the store before re-raising.
+describe "gori run — a store that could not finish opening is closed" do
+  it "closes the Store when hydration raises, before the open-failure rescue sees it" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "cli", "run.cr"))
+    open_store = src[/private def self\.open_store\(.*?\n      end\n/m].not_nil!
+    hydrate = open_store.index("hydrate_cli_store(store, project, busy_ms)").not_nil!
+    close = open_store.index("store.close").not_nil!
+    outer = open_store.index("rescue ex : DB::Error | SQLite3::Exception").not_nil!
+    hydrate.should be < close
+    close.should be < outer
+    # Nothing between `Store.open` and the hydration call: a step that lands there is a step
+    # the close does not cover.
+    open_store[/Store\.open\(.*?\n        begin\n          hydrate_cli_store/m].should_not be_nil
+  end
+end
+
+it "answers nil once the row holds the response" do
+  with_cli_env_restored do
+    with_project_db do |path|
+      store = Gori::Store.open(path)
+      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.close
+      Gori::CLI::Run.persist_repeater_response_for_spec(
+        id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 5_i64, Gori::Project.new("p", path), nil).should be_nil
+      reopened = Gori::Store.open(path)
+      begin
+        String.new(reopened.repeaters.find!(&.id.==(id)).response_head.not_nil!).should start_with("HTTP/1.1 200")
+      ensure
+        reopened.close
+      end
+    end
+  end
+end
+
+describe "gori run repeater post-send persistence — the window between send and write" do
+  # The window: `send` read the row and closed the store, dialled for seconds, and reopens to
+  # write. A peer removed the row meanwhile. The UPDATE matches nothing and used to commit,
+  # answer true, print nothing and exit 0 — the operator believed the response was on a tab
+  # that no longer existed. The sentence has to name THAT, not the project's busy-ness.
+  it "names the session as gone when it was deleted during the send, not the project as busy" do
+    with_cli_env_restored do
+      with_project_db do |path|
+        store = Gori::Store.open(path)
+        id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+        store.delete_repeater(id).should be_true
+        store.close
+        why = Gori::CLI::Run.persist_repeater_response_for_spec(
+          id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 5_i64, Gori::Project.new("p", path), nil).not_nil!
+        why.should contain("session ##{id} no longer exists")
+        why.should_not contain("busy")
+      end
     end
   end
 end

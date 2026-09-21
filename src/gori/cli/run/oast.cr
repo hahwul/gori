@@ -848,7 +848,9 @@ module Gori
         # Resolve --save's project BEFORE registering. A bad project name must fail while the
         # only cost is an error message; past the register there is third-party state minted
         # that this process would then have to tear down again to stay honest.
-        store = save ? open_store(resolve_read_project(project_name, db_path)) : nil
+        # `long_running`: `--save` keeps this handle through the whole poll loop and touches
+        # the session row on every tick.
+        store = save ? open_store(resolve_read_project(project_name, db_path), long_running: true) : nil
         prov = Oast::Provider.build(kind, host, token)
         http = Oast::HttpClient.new
         session = begin

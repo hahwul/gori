@@ -419,7 +419,9 @@ module Gori
         # by mtime, and a retest is several seconds long — re-resolving at persist time could
         # write the run summary into a DIFFERENT project.
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        # `long_running`: the live backend sends through this handle and the run summary is
+        # written at the end of a retest several seconds long.
+        store = open_store(project, long_running: true)
         begin
           abort "gori run retest run: no issue with id #{iid}" unless store.get_issue(iid)
           planned = Retest.plan(store, iid)

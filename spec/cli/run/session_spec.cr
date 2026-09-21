@@ -155,7 +155,10 @@ describe "gori run — --slot ordering" do
   # `--slot admin` announced itself on stderr and then put no overlay on the wire at all.
   it "re-applies the selection every time open_store installs a fresh layer" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run.cr"))
-    body = src[/private def self\.open_store.*?\n      end/m]
+    # The layer install lives in `hydrate_cli_store`, the hydration half of `open_store`
+    # (split so a raise in it closes the store); `open_store` must still call it.
+    src[/private def self\.open_store.*?\n      end/m].should contain("hydrate_cli_store(store, project, busy_ms)")
+    body = src[/private def self\.hydrate_cli_store.*?\n      end/m]
     lines = body.lines.reject(&.lstrip.starts_with?('#'))
     install = lines.index(&.includes?("Env.layer = Bindings.load"))
     reapply = lines.index(&.includes?("reapply_active_slot"))

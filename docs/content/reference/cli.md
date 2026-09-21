@@ -105,8 +105,10 @@ Read subcommands open the store read-only and never take the capture lock, so th
 
 Write subcommands share that project's WAL database with the TUI and MCP. They serialize through
 the Store writer and can run while the TUI is open, but a capture commit can temporarily own the
-SQLite writer slot. A CLI invocation gives its SQLite open/writer waits a one-second budget; if the
-slot is still busy, the required write exits non-zero and names the project with `retry or close the TUI` guidance. A
+SQLite writer slot. A short-lived subcommand gives its SQLite open/writer waits a one-second budget; if the
+slot is still busy, the required write exits non-zero and says the project is locked by another gori, with the workaround (retry, or read it with a read-only subcommand).
+A subcommand that keeps the project open for a whole run (`discover`, `fuzz`, `import`, `probe`, `retest run`,
+`oast listen`/`resume`, `intercept`) keeps the standard five-second wait instead. A
 repeater send also fails instead of claiming success when its network response could not be saved,
 so a script can distinguish a completed write from a response that needs attention.
 
@@ -400,6 +402,8 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--http` | WebSocket: send the handshake as an ordinary HTTP request for this send only. Selects the engine, not a rewrite |
 | `--record-history` | Also write the outbound request + response to History as a captured flow, and print its flow id on stdout (HTTP only; a Repeater send leaves no flow by default) |
 | `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--format` | As above |
+
+A send that reached the origin exits `0` even when the writes after it fail, so a shell does not resend it. `--format json` says which: `response_saved` (present once a response was written to the session, `false` with `response_save_error` when the project refused the write or the session was deleted mid-send, in which case a later `--diff` would compare against the previous response) and, under `--record-history`, `history_saved` with `history_error` beside a `recorded_flow_id` that is then absent. Text mode prints the same sentence on STDERR.
 
 **`repeater move <repeater-id>`**: reorder the workbench strip. `--to N` names the 1-based tab number `repeater list` prints; `--up` / `--down` step one place. Pass one of the three. Passing both `--to` and a direction is refused rather than resolved, and a `--to` outside `1-<count>` is refused rather than clamped, so a session never lands somewhere the command did not name. `--format json` reports `from_index` / `to_index` / `moved`.
 

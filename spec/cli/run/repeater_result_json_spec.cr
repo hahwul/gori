@@ -8,8 +8,17 @@ require "json"
 # unrecoverable from the CLI entirely. MCP had already been fixed with a
 # `<field>_lossy` + `<field>_base64` pair; this is the same shape.
 module Gori::CLI::Run
-  def self.repeater_json_for_spec(result : Repeater::Result) : String
-    repeater_json(result, nil)
+  def self.repeater_json_for_spec(result : Repeater::Result,
+                                  response_write : WriteOutcome? = nil,
+                                  history_write : WriteOutcome? = nil,
+                                  recorded_flow_id : Int64? = nil) : String
+    repeater_json(result, nil, false, recorded_flow_id, nil,
+      response_write: response_write, history_write: history_write)
+  end
+
+  def self.ws_result_json_for_spec(id : Int64, result : Repeater::WsEngine::Result,
+                                   response_write : WriteOutcome? = nil) : String
+    ws_result_json(id, result, response_write)
   end
 
   def self.incomplete_reason_for_spec(result : Repeater::Result) : String
@@ -93,5 +102,80 @@ describe "gori run repeater — why a response is incomplete" do
     j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(
       result_of(head, "short".to_slice, incomplete: true)))
     j["incomplete_reason"].as_s.should contain("origin closed")
+  end
+end
+
+# What happened to the two writes a `repeater send` makes AFTER the origin answered — the
+# stored response and the `--record-history` flow — as fields on the one object `--format
+# json` prints. Both used to be STDERR prose under exit 0, emitted AFTER the JSON: `send 7
+# --format json | jq` under a busy project was byte-identical to a success while the row still
+# held the previous response, so the next `send 7 --diff` reported "no differences" against a
+# stale baseline. Exit 0 is deliberate (the request reached the origin; a shell must not
+# resend it), which is why the machine-readable half has to carry the answer.
+describe "gori run repeater send --format json — did the post-send writes land?" do
+  ok = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice
+
+  it "says nothing about a write that was not attempted, so the common object is unchanged" do
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(ok, "ok".to_slice)))
+    j["response_saved"]?.should be_nil
+    j["response_save_error"]?.should be_nil
+    j["history_saved"]?.should be_nil
+    j["history_error"]?.should be_nil
+  end
+
+  it "carries response_saved:true when the row took the response" do
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(ok, "ok".to_slice),
+      response_write: Gori::CLI::Run::WriteOutcome.new(nil)))
+    j["response_saved"].as_bool.should be_true
+    j["response_save_error"]?.should be_nil
+  end
+
+  it "carries response_saved:false AND the reason, over an otherwise successful send" do
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(ok, "ok".to_slice),
+      response_write: Gori::CLI::Run::WriteOutcome.new("response was NOT saved: session #7 no longer exists")))
+    j["ok"].as_bool.should be_true
+    j["response_saved"].as_bool.should be_false
+    j["response_save_error"].as_s.should contain("session #7 no longer exists")
+  end
+
+  # `recorded_flow_id: null` alone read the same as `--record-history` not passed.
+  it "tells a failed History record from --record-history not passed" do
+    failed = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(ok, "ok".to_slice),
+      history_write: Gori::CLI::Run::WriteOutcome.new("History was NOT saved: the project is busy")))
+    failed["recorded_flow_id"]?.should be_nil
+    failed["history_saved"].as_bool.should be_false
+    failed["history_error"].as_s.should contain("History was NOT saved")
+
+    recorded = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(ok, "ok".to_slice),
+      history_write: Gori::CLI::Run::WriteOutcome.new(nil), recorded_flow_id: 42_i64))
+    recorded["recorded_flow_id"].as_i64.should eq(42)
+    recorded["history_saved"].as_bool.should be_true
+    recorded["history_error"]?.should be_nil
+  end
+
+  it "carries the same pair on the WebSocket object" do
+    result = Gori::Repeater::WsEngine::Result.new(
+      "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice, [] of Gori::Repeater::WsEngine::Message,
+      10_i64, nil, nil, nil, true)
+    plain = JSON.parse(Gori::CLI::Run.ws_result_json_for_spec(3_i64, result))
+    plain["response_saved"]?.should be_nil
+    failed = JSON.parse(Gori::CLI::Run.ws_result_json_for_spec(3_i64, result,
+      Gori::CLI::Run::WriteOutcome.new("response was NOT saved: project is busy")))
+    failed["upgraded"].as_bool.should be_true
+    failed["response_saved"].as_bool.should be_false
+    failed["response_save_error"].as_s.should contain("NOT saved")
+  end
+
+  # The principle, pinned on the source: a report emitted before the side effect cannot carry
+  # it. Both writes have to happen before the one emit.
+  it "makes both writes before it emits the result" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "repeater.cr"))
+    send_body = src[/private def self\.cmd_repeater_send\(.*?\n      end\n/m].not_nil!
+    emit_at = send_body.index("emit_repeater_result(result, new_body").not_nil!
+    send_body.index("record_repeater_send_to_history(plan, wire, result").not_nil!.should be < emit_at
+    send_body.index("persist_repeater_response(id, result.head").not_nil!.should be < emit_at
+    ws_body = src[/private def self\.cmd_repeater_send_ws\(.*?\n      end\n/m].not_nil!
+    ws_body.index("persist_repeater_response(id, result.handshake_head").not_nil!
+      .should be < ws_body.index("emit_ws_result(id, result, format").not_nil!
   end
 end

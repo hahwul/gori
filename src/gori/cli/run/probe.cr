@@ -127,7 +127,9 @@ module Gori
           filter = parsed
         end
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        # `long_running`: a scan walks every selected flow (and `--active` sends probes) before
+        # its findings are written through this same handle.
+        store = open_store(resolve_read_project(project_name, db_path), long_running: true)
         scope = Scope.load(store)
         # The one term that could not be compiled before the store opened. Off `scope`, which is
         # loaded here anyway, so a `scope:` query costs no extra read — and only when the query

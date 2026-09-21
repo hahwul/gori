@@ -2039,6 +2039,26 @@ module Gori
       false # store closing — treat as a failed write
     end
 
+    # `exec_task_ok` for ONE statement aimed at ONE row by id: true only when the batch
+    # committed AND the statement matched a row.
+    #
+    # `exec_task_ok` answers "did the batch COMMIT", and an `UPDATE … WHERE id = ?` against an
+    # id a peer deleted commits fine having matched nothing — so a caller that reads its true as
+    # "the row now holds these bytes" is wrong exactly when a second gori is closing tabs. The
+    # window is real on any surface that dials between reading the row and writing to it (a
+    # headless send, a minimize) and it is the class #1118 set out to close. `changes()` is read
+    # inside the same transaction, right after the statement, which is the only place it is
+    # unambiguous (`update_scope_rule`, `finish_fuzz_run` do the same by hand).
+    private def exec_task_row(run : DB::Connection -> Nil) : Bool
+      changed = 0_i64
+      ok = exec_task_ok ->(c : DB::Connection) {
+        run.call(c)
+        changed = c.scalar("SELECT changes()").as(Int64)
+        nil
+      }
+      ok && changed > 0
+    end
+
     private def read_issue(rs : DB::ResultSet) : Issue
       Issue.new(
         rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String),

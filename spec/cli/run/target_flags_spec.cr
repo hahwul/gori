@@ -44,6 +44,17 @@ describe "gori run — --db and --project are one question, not two" do
   end
 end
 
+# Private resolvers, reopened for a bare-call wrapper (the whitebox trick every CLI spec uses).
+module Gori::CLI::Run
+  def self.resolve_read_project_for_spec(project_name : String?, db_path : String?) : Gori::Project
+    resolve_read_project(project_name, db_path)
+  end
+
+  def self.project_write_failure_for_spec(prefix : String, project : Gori::Project) : String
+    project_write_failure(prefix, project)
+  end
+end
+
 # What a failed `open_store` says, when the failure is not what the wrapper implies.
 #
 # A write subcommand opens for write and `Store.open` migrates, so a peer holding the write
@@ -53,18 +64,61 @@ end
 # That reads as a corrupt or unreadable FILE, and it is the opposite: the file is fine and the
 # condition clears on its own. Reproduced against a peer holding `BEGIN IMMEDIATE`.
 describe "gori run — what a refused open blames" do
-  it "names a peer's write lock as transient, not the file as bad" do
+  # The ADVICE is pinned word for word, not `contain("retry")`: any wording satisfies that,
+  # which is how "read it with a read-only subcommand" — the one workaround an operator can
+  # act on against a live TUI — drifted out and "close the other instance" (what they already
+  # knew) drifted in without a spec noticing.
+  it "names a peer's write lock as transient, and the read-only workaround" do
     hint = Gori::CLI::Run.open_failure_hint(Exception.new("database is locked"))
-    hint.should contain("another gori")
-    hint.should contain("retry")
+    hint.should contain("locked by another gori")
+    hint.should contain("Nothing is wrong with the file")
+    hint.should contain("read it with a read-only subcommand")
+    hint.should contain("close the other instance")
   end
 
-  it "names the project when the connection pool is busy" do
+  it "does not tell a read-only open to use a read-only subcommand" do
+    hint = Gori::CLI::Run.open_failure_hint(Exception.new("database is locked"), nil, true)
+    hint.should contain("locked by another gori")
+    hint.should_not contain("read-only subcommand")
+  end
+
+  # The pool-exhausted spelling carries the same advice as the lock spelling: both are "a peer
+  # has it", and an operator should not have to read them differently.
+  it "gives the busy-pool spelling the same advice" do
     hint = Gori::CLI::Run.open_failure_hint(
-      DB::PoolTimeout.new("Could not check out a connection in 1.0 seconds"),
-      nil, false, "acme")
-    hint.should contain(%(project "acme"))
-    hint.should contain("retry")
+      Exception.new("Could not check out a connection in 1.0 seconds"))
+    hint.should contain("another gori")
+    hint.should contain("read it with a read-only subcommand")
+    hint.should contain("close the other instance")
+  end
+
+  # `--db PATH` never names a project, so `resolve_read_project` synthesises `Project#name`
+  # from the path's PARENT DIRECTORY. The lock hint used to print that as `project
+  # "claude-501" is locked` — a project that does not exist. Driven through the real resolver
+  # rather than a hand-fed name, so the derivation is what is under test.
+  it "does not present a --db target's directory as a project" do
+    with_tempdir do |dir|
+      scratch = File.join(dir, "claude-501")
+      Dir.mkdir_p(scratch)
+      db = File.join(scratch, "mycap.db")
+      File.write(db, "x")
+      project = Gori::CLI::Run.resolve_read_project_for_spec(nil, db)
+      project.name.should eq("claude-501") # the derivation that made the old sentence a lie
+      # Through `open_failure_message`, the seam `open_store`'s abort uses, which is handed the
+      # whole Project — not the hint helper with a hand-picked argument list.
+      %w[database\ is\ locked Could\ not\ check\ out\ a\ connection].each do |msg|
+        message = Gori::CLI::Run.open_failure_message(Exception.new(msg), project)
+        message.should start_with("gori run: cannot open database #{db}: #{msg}")
+        # The PATH carries the directory, and that is right; the quoted NAME is what must not.
+        message.should_not contain(%("claude-501"))
+        message.should_not contain("project \"")
+        message.should contain("this project")
+      end
+      # The repeater write refusals name the PATH, which is true for both target forms.
+      sentence = Gori::CLI::Run.project_write_failure_for_spec("gori run repeater send: response was NOT saved", project)
+      sentence.should contain(db)
+      sentence.should_not contain(%("claude-501"))
+    end
   end
 
   it "covers the table-lock spelling SQLite also uses" do

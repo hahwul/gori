@@ -108,7 +108,10 @@ module Gori
           containment: containment, headers: parsed_headers)
 
         project = resolve_discover_project(project_name, db_path)
-        store = open_store(project)
+        # `long_running`: the store stays open for the whole crawl and every finding batch is
+        # written through it, so it takes the Store's standard wait budget, not the one-shot
+        # CLI one — a one-second refusal here is a dropped batch of findings, not a fast exit.
+        store = open_store(project, long_running: true)
         begin
           # The store stays open for the whole run (findings are written through it), so the
           # Outbound does NOT take ownership of it — the ensure below is what closes it.
@@ -238,6 +241,7 @@ module Gori
         pending = [] of {Store::CapturedRequest, Store::CapturedResponse?}
         base_ts = Time.utc.to_unix * 1_000_000
         had_error = false
+        unsaved = 0
         # This was discover's own private helper until fuzz, mine and sequence turned out to
         # need the identical thing; it now lives in `run/interrupt.cr` (which carries the
         # reasoning) so there is one implementation rather than four copies.
@@ -253,7 +257,7 @@ module Gori
               pair = Discover::Persist.flow_pair(f, base_ts + findings.size, ev.exchange,
                 surface: Gori::FlowSource::Surface::Cli)
               pending << {pair.request, pair.response}
-              flush_discover(store, pending) if pending.size >= 200
+              unsaved += flush_discover(store, pending) if pending.size >= 200
             end
           when Discover::ProgressEvent then discover_progress(ev)
           when Discover::DoneEvent     then discover_done(ev, engine, pool_stats)
@@ -264,7 +268,13 @@ module Gori
         # and no DoneEvent, but findings discovered before it should still reach the Sitemap. A
         # SIGINT/SIGTERM lands here too (see the trap above) since Engine#stop makes the run end
         # like any other — so this one flush covers the normal, error, AND interrupted paths.
-        flush_discover(store, pending) unless no_store
+        unsaved += flush_discover(store, pending) unless no_store
+        # A rolled-back batch is capture that never happened: the findings above were printed,
+        # but the rows they name do not exist and never will (the pairs keep no bytes past the
+        # flush). The TUI says so on its toast and in the notification centre; a script has only
+        # STDERR and the exit code, so it gets both — this is the one condition under which a
+        # printed finding cannot be opened, and "exit 0, row missing" is the silent kind (#1118).
+        had_error = report_discover_unsaved(unsaved, had_error)
         puts CLI::Output.discover_array_json(findings) if format == :json
         # LAST, after the summary: `--slot NAME` whose overlay resolved to nothing means every
         # probe in the sweep carried `$SESSION` itself instead of a session, so the whole crawl
@@ -282,11 +292,37 @@ module Gori
         exit 1 if had_error
       end
 
+      # Write the buffered pairs as one batch and answer how many of them did NOT land.
+      #
+      # `insert_import_batch` returns the COMMITTED count — 0 for a batch the writer rolled back
+      # (a peer holding the writer slot past the busy budget) or a closing store — and this used
+      # to discard it and clear the buffer regardless, so up to 200 crawled exchanges vanished
+      # per collision with no line, no count and exit 0. The buffer is still cleared either way:
+      # keeping a refused batch for a later retry is exactly the unbounded growth the 200-cap
+      # exists to prevent, and `Import.insert_all` makes the same call (it stops and reports).
       private def self.flush_discover(store : Store,
-                                      pending : Array({Store::CapturedRequest, Store::CapturedResponse?})) : Nil
-        return if pending.empty?
-        store.insert_import_batch(pending)
+                                      pending : Array({Store::CapturedRequest, Store::CapturedResponse?})) : Int32
+        return 0 if pending.empty?
+        landed = store.insert_import_batch(pending)
+        lost = pending.size - landed
         pending.clear
+        lost
+      end
+
+      # Says the loss on STDERR and answers the run's error flag with it folded in. Split from
+      # `run_discover_stream`, which is at the complexity bar.
+      private def self.report_discover_unsaved(unsaved : Int32, had_error : Bool) : Bool
+        return had_error unless unsaved > 0
+        STDERR.puts discover_unsaved_note(unsaved)
+        true
+      end
+
+      # Public for the reason every other refusal sentence in this tree is: the caller ends in
+      # an exit, so the wording is pinned here.
+      def self.discover_unsaved_note(unsaved : Int32) : String
+        "gori run discover: #{unsaved} captured exchange#{unsaved == 1 ? "" : "s"} NOT saved " \
+        "(project busy or unwritable) — the findings were printed, but their History/Sitemap " \
+        "rows do not exist and cannot be opened; re-run the crawl once the project is free"
       end
 
       private def self.emit_discover_finding(f : Discover::Finding, format : Symbol) : Nil

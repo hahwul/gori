@@ -200,14 +200,29 @@ module Gori
 
       # --- shared helpers ----------------------------------------------------
 
-      # A CLI invocation is a one-shot operation, unlike the TUI's long-lived capture writer.
+      # The SQLite wait budget for a SHORT-LIVED subcommand: open, one or two writes, exit.
       # SQLite's busy handler sleeps inside C and therefore blocks this process's whole
       # cooperative scheduler. Five seconds per Store.open/write is especially misleading in a
       # create/send loop: every open, session write and response write can pay it again before
-      # the command prints anything. Keep the CLI bounded and let the error below say what to do
+      # the command prints anything. Keep those bounded and let the error below say what to do
       # when a live TUI owns the writer slot (#1118).
+      #
+      # NOT every `gori run` is one-shot, and `open_store` is the single door all of them use.
+      # `discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume` and the
+      # `intercept` verbs keep the project open for the length of a crawl, a sweep, a 200 MB HAR
+      # stream or a bounded poll, and write through it as they go — exactly the shape the TUI's
+      # capture writer has, and exactly where a one-second refusal turns one busy commit on the
+      # peer's side into a dropped batch of findings. Those callers pass `long_running: true`
+      # and keep the Store's own defaults (`store_budget`).
       CLI_BUSY_TIMEOUT_MS          = 1_000
       CLI_CHECKOUT_TIMEOUT_SECONDS =   1.0
+
+      # `{busy_timeout_ms, checkout_timeout_seconds}` for a CLI store open. Public and pure so
+      # the choice is pinned by a spec rather than by timing a contended open.
+      def self.store_budget(long_running : Bool) : {Int32, Float64}
+        return {Store::SQLITE_BUSY_TIMEOUT_MS, Store::DB_CHECKOUT_TIMEOUT_SECONDS} if long_running
+        {CLI_BUSY_TIMEOUT_MS, CLI_CHECKOUT_TIMEOUT_SECONDS}
+      end
 
       # Is a subcommand's first token a VERB, as opposed to a flag or nothing at all?
       #
@@ -609,14 +624,38 @@ module Gori
       # list, a scope load for Outbound). A `body:` query is a write — it drains FTS —
       # so those callers pass false. Every CLI store skips idle FTS: the process is
       # short-lived, and an idle indexer next to a capturing TUI is the #752 condition.
+      # `long_running` for a subcommand that keeps this handle open across a crawl, a sweep or
+      # a stream and writes through it as it goes — see `CLI_BUSY_TIMEOUT_MS` for which.
       private def self.open_store(project : Project, *, read_only : Bool = false,
-                                  abort_on_failure : Bool = true) : Store
+                                  abort_on_failure : Bool = true,
+                                  long_running : Bool = false) : Store
+        busy_ms, checkout_s = store_budget(long_running)
         store = Store.open(project.db_path,
           retention_flows: read_only ? Store::RETENTION_UNLIMITED : Settings.retention_flows,
           read_only: read_only,
           background_index: false,
-          busy_timeout_ms: CLI_BUSY_TIMEOUT_MS,
-          checkout_timeout_seconds: CLI_CHECKOUT_TIMEOUT_SECONDS)
+          busy_timeout_ms: busy_ms,
+          checkout_timeout_seconds: checkout_s)
+        begin
+          hydrate_cli_store(store, project, busy_ms)
+        rescue ex
+          # A failure AFTER the open used to leave this Store alive — its open-lock flock held
+          # and its writer fiber parked — while the rescue below decided what to say. Harmless
+          # only while every caller exits moments later; `abort_on_failure: false` callers
+          # (the post-send writes) carry on, so the handle they never received is closed here.
+          store.close
+          raise ex
+        end
+        store
+      rescue ex : DB::Error | SQLite3::Exception
+        abort open_failure_message(ex, project, read_only) if abort_on_failure
+        raise ex
+      end
+
+      # Everything a `gori run` store needs loaded into this process before a command reads a
+      # token, a rule or a slot out of it. Split from `open_store` so a raise in here closes the
+      # store it was hydrating (see the caller).
+      private def self.hydrate_cli_store(store : Store, project : Project, busy_ms : Int32) : Nil
         # THE token-grammar reconcile, before anything reads a token out of this store (#env.syntax).
         # `read_only` does not exempt a command: the handle above may be read-only, but the
         # re-spelling writes through its own connection, and `gori run repeater list` is exactly as
@@ -625,7 +664,7 @@ module Gori
         # Reported HERE (STDERR, one line per project) rather than carried: every `gori run`
         # subcommand funnels through this method, so a caller that forgot to report would be silent.
         report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name,
-          busy_timeout_ms: CLI_BUSY_TIMEOUT_MS))
+          busy_timeout_ms: busy_ms))
         # The project's pinned upstream / dial timeouts / capture cap (#538). `bind: false`:
         # not one command routed through here LISTENS — `gori run capture` is the only
         # subcommand that binds and it opens its project through `Session.open` instead — so
@@ -651,13 +690,18 @@ module Gori
         # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
         # holding the pointer. See `reapply_active_slot`.
         reapply_active_slot
-        store
-      rescue ex : DB::Error | SQLite3::Exception
-        message = "gori run: cannot open database #{project.db_path}: " \
-                  "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
-                  "#{open_failure_hint(ex, project.db_path, read_only, project.name)}"
-        abort message if abort_on_failure
-        raise ex
+      end
+
+      # The one sentence for a project that could not be opened: SQLite's own words (or the
+      # non-database fallback) plus `open_failure_hint`'s reason. Public so a caller that
+      # survives the failure (`persist_repeater_response`, which must not abort a completed
+      # send) reports the SAME accurate reason `open_store`'s abort would have — a read-only
+      # file, a non-writable WAL directory, a peer's lock — instead of collapsing every one of
+      # them into "busy or unwritable".
+      def self.open_failure_message(ex : Exception, project : Project, read_only : Bool = false) : String
+        "gori run: cannot open database #{project.db_path}: " \
+        "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
+        "#{open_failure_hint(ex, project.db_path, read_only)}"
       end
 
       # The open-time re-spelling, said out loud. STDERR, never STDOUT: `gori run … --format json`
@@ -702,13 +746,13 @@ module Gori
       # `read_only` opens are excluded because for them a non-writable file is not a fault.
       # Public for the reason `two_targets_error` is: its only caller ends in `abort`.
       def self.open_failure_hint(ex : Exception, db_path : String? = nil,
-                                 read_only : Bool = false, project_name : String? = nil) : String
+                                 read_only : Bool = false) : String
         msg = ex.message.to_s
         # `read_only` gates BOTH message branches, not just the filesystem tail below. A
         # read-only open can still surface either string — `Store.open` runs its pragmas before
         # `apply_query_only` — and both sentences were wrong for it: "read it with a read-only
         # subcommand" is what the operator just did, and "this subcommand writes" is false.
-        if hint = lock_failure_hint(msg, read_only, project_name)
+        if hint = lock_failure_hint(msg, read_only)
           return hint
         end
         if !read_only && (msg.includes?("readonly") || msg.includes?("read-only"))
@@ -731,16 +775,26 @@ module Gori
         " — this subcommand writes, and the file (or its directory) is not writable."
       end
 
-      private def self.lock_failure_hint(msg : String, read_only : Bool, project_name : String?) : String?
-        subject = project_name ? "project #{project_name.inspect}" : "the project"
+      # "This project", never a name. The sentence hangs off "cannot open database <path>", so
+      # the target is already on the line — and the only name available here is
+      # `Project#name`, which for a `--db PATH` target `resolve_read_project` synthesises from
+      # the path's PARENT DIRECTORY. `gori run notes create --db /tmp/claude-501/mycap.db` was
+      # told `project "claude-501" is locked`, and there is no such project.
+      #
+      # The advice names the workaround the operator can actually take: a read-only
+      # subcommand does not need the writer slot, so `history`, `notes` (list), `repeater
+      # list` and friends work against the very project a TUI is capturing into. "Close the
+      # other instance" is what they already knew.
+      private def self.lock_failure_hint(msg : String, read_only : Bool) : String?
         if msg.includes?("is locked")
-          return " — #{subject} is locked by another gori (a TUI, a capture, or an MCP server)." \
+          return " — this project is locked by another gori (a TUI, a capture, or an MCP server)." \
                  " Nothing is wrong with the file; retry." if read_only
-          return " — #{subject} is locked by another gori (a TUI, a capture, or an MCP server)." \
-                 " Nothing is wrong with the file: retry, or close the other instance."
+          return " — this project is locked by another gori (a TUI, a capture, or an MCP server)." \
+                 " Nothing is wrong with the file: retry, read it with a read-only subcommand, or close the other instance."
         end
-        return " — #{subject} is busy in another gori instance; retry or close the TUI." \
-           if msg.includes?("Could not check out a connection")
+        return " — this project's connections are all busy in another gori instance (a TUI, a capture, or an MCP server):" \
+               " retry, read it with a read-only subcommand, or close the other instance." \
+                if msg.includes?("Could not check out a connection")
         nil
       end
 

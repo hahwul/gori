@@ -10,7 +10,8 @@
 - Issues: an open writeup keeps the place you were reading — the detail's notes no longer jump back to the top on every capture, `i` opens INSERT at the caret instead of line 1, and saving no longer leaves the pane reporting a peer conflict against your own write (#1122, #1123)
 - TUI: a READ-mode selection no longer outlives its document — switching a Notes sub-tab, a peer rewriting the note, `^E` handing text back, or a project switch re-seeding the DESCRIPTION drops the band instead of painting it over the new text, where `y` copied characters never selected (#1123)
 - Docs: an Apple container section in the install guide — Apple's `container` (macOS 26+) runs the published image with the same flags docker takes, and `just container-build` / `container-run` mirror the docker recipes (#1121)
-- CLI: `gori run` project writes now use a bounded SQLite lock wait and report the project with retry guidance when a live TUI owns the writer slot; a successful repeater send stays successful when its response or History cannot be saved, so automatic retries do not duplicate it (#1118)
+- CLI: a short-lived `gori run` write keeps its bounded SQLite wait and, when another gori holds the project, says so with the read-only workaround instead of naming a `--db` target's parent directory as a project; `discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen` and `intercept` keep the standard wait for the run they hold the project open for (#1118)
+- CLI: a write that did not land is reported instead of assumed. `repeater send --format json` carries `response_saved` / `history_saved` with the reason, a session another gori deleted mid-send included, while a send that reached the origin still exits 0 so a retry does not duplicate it; a `discover` batch the writer refused is counted on STDERR with exit 1 rather than dropped, and MCP reports it as `unsaved_flows` (#1118)
 
 ## v0.7.0
 

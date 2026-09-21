@@ -93,6 +93,13 @@ module Gori
 
       # A capturing instance is "live" only if its bridge says capturing AND the
       # heartbeat is recent — otherwise a queued command would never be applied.
+      #
+      # Every open below is `long_running: true`, and not because any one verb is slow: this
+      # subcommand only has a job when a TUI is capturing into the same project, so that peer
+      # owning the writer slot is the NORMAL condition here, not a stuck one. The one-second
+      # one-shot budget was measured against exactly that peer and refused; a refused `forward`
+      # leaves the held request (and the client behind it) hanging, and `enqueue_intercept`
+      # holds its handle across the acknowledgement poll besides.
       INTERCEPT_LIVE_MS   = 10_000_i64
       INTERCEPT_ACK_POLLS =         30
       INTERCEPT_ACK_SLEEP = 100.milliseconds
@@ -129,7 +136,7 @@ module Gori
           "get, forward, drop, edit, enable, disable, filter, direction, list")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, long_running: true)
         begin
           bridge = intercept_bridge_state(store)
           unless bridge
@@ -309,7 +316,7 @@ module Gori
         item_id = positional[0].to_i64? || abort("gori run intercept get: invalid item id '#{positional[0]}'")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, long_running: true)
         begin
           bridge = intercept_bridge_state(store)
           abort "gori run intercept get: no capturing gori instance is publishing intercept state" unless bridge
@@ -353,7 +360,7 @@ module Gori
       private def self.enqueue_intercept(project_name : String?, db_path : String?, verb : String, *,
                                          item_id : Int64? = nil, bytes : Bytes? = nil, arg : String? = nil) : {String, String?}
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, long_running: true)
         begin
           bridge = intercept_bridge_state(store)
           unless bridge && intercept_live?(bridge)
@@ -506,7 +513,7 @@ module Gori
       # here for the identical reason (`kind`/`binary?` before choosing a normalization rule).
       private def self.held_row_for_edit(project_name : String?, db_path : String?, item_id : Int64) : Store::HeldRow?
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, long_running: true)
         begin
           bridge = intercept_bridge_state(store)
           return nil unless bridge
