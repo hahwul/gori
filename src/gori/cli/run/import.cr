@@ -59,7 +59,9 @@ module Gori
 
         kind, path = import_source(sources)
 
-        store = open_store(resolve_import_project(project_name, db_path))
+        # `long_running`: a HAR stream is written chunk by chunk through this one handle for as
+        # long as the file takes, so it keeps the Store's standard wait budget.
+        store = open_store(resolve_import_project(project_name, db_path), long_running: true)
         result = begin
           Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli)
         rescue ex : Gori::Error

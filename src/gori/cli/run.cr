@@ -200,14 +200,29 @@ module Gori
 
       # --- shared helpers ----------------------------------------------------
 
-      # A CLI invocation is a one-shot operation, unlike the TUI's long-lived capture writer.
+      # The SQLite wait budget for a SHORT-LIVED subcommand: open, one or two writes, exit.
       # SQLite's busy handler sleeps inside C and therefore blocks this process's whole
       # cooperative scheduler. Five seconds per Store.open/write is especially misleading in a
       # create/send loop: every open, session write and response write can pay it again before
-      # the command prints anything. Keep the CLI bounded and let the error below say what to do
+      # the command prints anything. Keep those bounded and let the error below say what to do
       # when a live TUI owns the writer slot (#1118).
+      #
+      # NOT every `gori run` is one-shot, and `open_store` is the single door all of them use.
+      # `discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume` and the
+      # `intercept` verbs keep the project open for the length of a crawl, a sweep, a 200 MB HAR
+      # stream or a bounded poll, and write through it as they go — exactly the shape the TUI's
+      # capture writer has, and exactly where a one-second refusal turns one busy commit on the
+      # peer's side into a dropped batch of findings. Those callers pass `long_running: true`
+      # and keep the Store's own defaults (`store_budget`).
       CLI_BUSY_TIMEOUT_MS          = 1_000
       CLI_CHECKOUT_TIMEOUT_SECONDS =   1.0
+
+      # `{busy_timeout_ms, checkout_timeout_seconds}` for a CLI store open. Public and pure so
+      # the choice is pinned by a spec rather than by timing a contended open.
+      def self.store_budget(long_running : Bool) : {Int32, Float64}
+        return {Store::SQLITE_BUSY_TIMEOUT_MS, Store::DB_CHECKOUT_TIMEOUT_SECONDS} if long_running
+        {CLI_BUSY_TIMEOUT_MS, CLI_CHECKOUT_TIMEOUT_SECONDS}
+      end
 
       # Is a subcommand's first token a VERB, as opposed to a flag or nothing at all?
       #
@@ -609,14 +624,18 @@ module Gori
       # list, a scope load for Outbound). A `body:` query is a write — it drains FTS —
       # so those callers pass false. Every CLI store skips idle FTS: the process is
       # short-lived, and an idle indexer next to a capturing TUI is the #752 condition.
+      # `long_running` for a subcommand that keeps this handle open across a crawl, a sweep or
+      # a stream and writes through it as it goes — see `CLI_BUSY_TIMEOUT_MS` for which.
       private def self.open_store(project : Project, *, read_only : Bool = false,
-                                  abort_on_failure : Bool = true) : Store
+                                  abort_on_failure : Bool = true,
+                                  long_running : Bool = false) : Store
+        busy_ms, checkout_s = store_budget(long_running)
         store = Store.open(project.db_path,
           retention_flows: read_only ? Store::RETENTION_UNLIMITED : Settings.retention_flows,
           read_only: read_only,
           background_index: false,
-          busy_timeout_ms: CLI_BUSY_TIMEOUT_MS,
-          checkout_timeout_seconds: CLI_CHECKOUT_TIMEOUT_SECONDS)
+          busy_timeout_ms: busy_ms,
+          checkout_timeout_seconds: checkout_s)
         # THE token-grammar reconcile, before anything reads a token out of this store (#env.syntax).
         # `read_only` does not exempt a command: the handle above may be read-only, but the
         # re-spelling writes through its own connection, and `gori run repeater list` is exactly as
@@ -625,7 +644,7 @@ module Gori
         # Reported HERE (STDERR, one line per project) rather than carried: every `gori run`
         # subcommand funnels through this method, so a caller that forgot to report would be silent.
         report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name,
-          busy_timeout_ms: CLI_BUSY_TIMEOUT_MS))
+          busy_timeout_ms: busy_ms))
         # The project's pinned upstream / dial timeouts / capture cap (#538). `bind: false`:
         # not one command routed through here LISTENS — `gori run capture` is the only
         # subcommand that binds and it opens its project through `Session.open` instead — so

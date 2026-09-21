@@ -108,7 +108,10 @@ module Gori
           containment: containment, headers: parsed_headers)
 
         project = resolve_discover_project(project_name, db_path)
-        store = open_store(project)
+        # `long_running`: the store stays open for the whole crawl and every finding batch is
+        # written through it, so it takes the Store's standard wait budget, not the one-shot
+        # CLI one — a one-second refusal here is a dropped batch of findings, not a fast exit.
+        store = open_store(project, long_running: true)
         begin
           # The store stays open for the whole run (findings are written through it), so the
           # Outbound does NOT take ownership of it — the ensure below is what closes it.

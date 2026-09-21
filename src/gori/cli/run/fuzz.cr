@@ -402,7 +402,8 @@ module Gori
         # One writable project handle serves optional History recording and permanent result
         # storage. Opened only after every preflight/refusal, so a run that never sends does not
         # create an empty saved-run row.
-        write_store = (record_policy == :none && !save_results) ? nil : open_store(resolve_read_project(project_name, db_path))
+        # `long_running`: held for the whole sweep, with a result or History batch per round trip.
+        write_store = (record_policy == :none && !save_results) ? nil : open_store(resolve_read_project(project_name, db_path), long_running: true)
         saved = nil.as(Fuzz::Persistence?)
         # Calibration SENDS, so it belongs inside the block that releases the read
         # connection — a raise in there would otherwise leak it. The permanent row is created

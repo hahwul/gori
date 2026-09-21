@@ -90,8 +90,13 @@ describe "env.syntax migration notice" do
     # The headless CLI: every `gori run` subcommand funnels through `open_store`, read-only ones
     # included — the re-spelling writes through its own connection.
     run = notice_src("gori", "cli", "run.cr")
-    run.should contain("report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name,")
-    run.should contain("busy_timeout_ms: CLI_BUSY_TIMEOUT_MS")
+    # Scoped to `open_store`'s own body: the file has a second `Store.open` and a bare
+    # `busy_timeout_ms:` anywhere in it satisfied the old whole-file `contain`. The reconcile
+    # must ride the SAME budget the open beside it was given — a one-shot open with a
+    # five-second re-spelling would wait longer on the migration than on the project.
+    open_store = run[/private def self\.open_store\(.*?\n      rescue ex/m].not_nil!
+    open_store.should contain("report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name,")
+    open_store.scan(/busy_timeout_ms: busy_ms\b/).size.should eq(2)
 
     # MCP binds a project at TWO sites — the constructor and `bind_project` (switch_project, an
     # auto-binding create_project) — so both ask, through one helper.
