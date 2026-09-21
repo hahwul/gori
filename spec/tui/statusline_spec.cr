@@ -330,6 +330,7 @@ describe Gori::Tui::StatuslineController do
         ctx["proxy"]["port"].as_i.should eq(session.proxy.port)
         ctx["proxy"]["addr"].as_s.should eq(
           Gori::BindAddress.authority(session.proxy.host, session.proxy.port))
+        ctx["upstream_env"].as_s.should eq("") # spec_helper unsets the proxy variables
 
         # The MODES. Each is the question a top-bar chip exists to answer, and before these
         # fields no statusline could ask it — which made the row strictly poorer than the

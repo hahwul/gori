@@ -659,6 +659,40 @@ describe SettingsView do
     end
   end
 
+  # The Proxy protocol row reads "None" for a blank scalar whether the install is direct or
+  # sending everything through `$HTTPS_PROXY` — this row is where the difference shows (#1114).
+  it "shows the environment proxy in effect on its own NETWORK row, never its credentials" do
+    prev = {ENV["HTTPS_PROXY"]?, Gori::Settings.upstream_proxy, Gori::Settings.project_upstream_proxy}
+    begin
+      Gori::Settings.upstream_proxy = ""
+      Gori::Settings.project_upstream_proxy = nil
+      ENV["HTTPS_PROXY"] = "http://alice:s3cret@corp.example:3128"
+      backend = MemoryBackend.new(140, 30)
+      v = SettingsView.new
+      v.reload(:network)
+      v.render(Screen.new(backend), Rect.new(0, 0, 140, 30))
+      backend.contains?("HTTPS_PROXY → http proxy corp.e").should be_true # the modal truncates
+      backend.contains?("s3cret").should be_false
+      backend.contains?("alice").should be_false
+
+      Gori::Settings.upstream_proxy = "http://gori-proxy.test:8080"
+      backend = MemoryBackend.new(140, 30)
+      v.reload(:network)
+      v.render(Screen.new(backend), Rect.new(0, 0, 140, 30))
+      backend.contains?("shadowed · HTTPS_PROXY").should be_true
+
+      ENV.delete("HTTPS_PROXY")
+      backend = MemoryBackend.new(140, 30)
+      v.reload(:network)
+      v.render(Screen.new(backend), Rect.new(0, 0, 140, 30))
+      backend.contains?("Environment proxy").should be_true
+    ensure
+      prev[0] ? (ENV["HTTPS_PROXY"] = prev[0].not_nil!) : ENV.delete("HTTPS_PROXY")
+      Gori::Settings.upstream_proxy = prev[1]
+      Gori::Settings.project_upstream_proxy = prev[2]
+    end
+  end
+
   it "renders the Update check toggle in the GENERAL section" do
     backend = MemoryBackend.new(100, 30)
     v = SettingsView.new

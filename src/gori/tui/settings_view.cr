@@ -84,6 +84,9 @@ module Gori::Tui
       Field.new("Upstream rules",
         "per-host routing / proxy auth — edit with `gori settings --edit` (network.upstream_rules)",
         readonly: true),
+      Field.new("Environment proxy",
+        "HTTPS_PROXY / HTTP_PROXY / ALL_PROXY as this process sees them — the route while Proxy protocol is None and no project pin or rule claims the host (a `*` rule shadows them entirely); localhost stays direct, NO_PROXY exceptions apply; set a proxy above or unset the variable to change it",
+        readonly: true),
       Field.new("Outbound TLS",
         "per-host client certificates, protocol range and TLS fingerprint (groups/sigalgs/ALPN, or a chrome/firefox/safari/curl preset) — edit with `gori settings --edit` (outbound_tls); check what actually goes on the wire with `gori settings tls-fingerprint`",
         readonly: true),
@@ -398,6 +401,7 @@ module Gori::Tui
                       Settings::DEFAULT_STRIP_ALT_SVC ? "on" : "off",
                       passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH),
                       rule_count_label(Settings.upstream_rules.size, "rule"),
+                      environment_proxy_summary,
                       outbound_tls_summary,
                       hostnames_summary]
                 end
@@ -434,6 +438,7 @@ module Gori::Tui
         Settings.strip_alt_svc? ? "on" : "off",
         passthrough_label(Settings.tls_passthrough),
         rule_count_label(Settings.upstream_rules.size, "rule"),
+        environment_proxy_summary,
         outbound_tls_summary,
         hostnames_summary,
       ]
@@ -505,6 +510,21 @@ module Gori::Tui
       base = rule_count_label(Settings.outbound_tls.size, "entry", "entries")
       presets = Settings.outbound_tls.map(&.preset).reject(&.empty?).uniq!
       presets.empty? ? base : "#{base} · #{presets.join(", ")}"
+    end
+
+    # The environment-proxy row's value. The Proxy protocol row above it reads "None" for a
+    # blank scalar, which is also what an install routing everything through `$HTTPS_PROXY`
+    # shows — so this row is where that fact lives (#1114). "none" when nothing is exported;
+    # `Settings.environment_upstream_status` (the variables, the proxies, and how far they
+    # reach once rules narrow them) when the environment is a route in effect; and named as
+    # SHADOWED when the variables are exported but nothing can reach them — a project pin, a
+    # scalar, or a catch-all rule. Never the credentials (`Settings::EnvironmentUpstream#label`).
+    private def environment_proxy_summary : String
+      summary = Settings.environment_upstream_summary
+      return "none" if summary.empty?
+      # Status FIRST, and short: the modal is narrow and the tail is what gets truncated. The
+      # help line under the row says what "shadowed" means.
+      Settings.environment_upstream_in_effect? ? Settings.environment_upstream_status : "shadowed · #{summary}"
     end
 
     private def passthrough_label(patterns : Array(String)) : String

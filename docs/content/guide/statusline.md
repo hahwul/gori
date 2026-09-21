@@ -137,6 +137,7 @@ Each run receives a JSON context on stdin describing the live session, so script
   "proxy": { "host": "127.0.0.1", "port": 8070, "addr": "127.0.0.1:8070" },
   "upstream": "",
   "upstream_rules": 0,
+  "upstream_env": "",
   "scope": { "active": true, "rules": 2, "sandbox": false },
   "intercept": { "enabled": false, "queued": 0, "direction": "both" },
   "probe": "passive",
@@ -154,6 +155,7 @@ Each run receives a JSON context on stdin describing the live session, so script
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | The address the proxy is actually listening on |
 | `upstream` | string | The **catch-all** upstream proxy address/URI, or empty when connecting directly. A destination matched by an [upstream rule](/reference/config/#upstream-rules) routes elsewhere; this field does not reflect that |
 | `upstream_rules` | integer | Number of [upstream rules](/reference/config/#upstream-rules) in effect. Non-zero means routing is per-destination and `upstream` alone does not describe where traffic goes |
+| `upstream_env` | string | The process proxy variable routing traffic when `upstream` is empty and no rule claims the host, e.g. `HTTPS_PROXY → http proxy corp.example:3128`, qualified with `· destinations no upstream rule claims` once a rule table narrows it; empty when nothing can reach the environment (a project pin, a non-empty `upstream`, or a `*` rule). Never carries credentials |
 | `scope.active` / `scope.rules` | bool / integer | Whether [scope](/guide/proxy/#scope) filtering is actually in force — the lens is on **and** at least one rule exists — and how many rules there are |
 | `scope.sandbox` | bool | Whether the [Sandbox](/guide/proxy/#sandbox) is blocking out-of-scope destinations outright, rather than merely not recording them |
 | `intercept.enabled` | bool | Whether catch is on. Real clients are held while it is |

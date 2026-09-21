@@ -271,6 +271,98 @@ describe "upstream rules" do
       reset_upstream
     end
 
+    it "summarises the exported variables per origin scheme, without credentials" do
+      with_proxy_environment({"HTTP_PROXY" => "http://bob:hunter2@env-proxy.test:3128"}) do
+        proxies = Gori::Settings.environment_upstream_proxies
+        proxies.size.should eq(1)
+        proxies[0].name.should eq("HTTP_PROXY")
+        proxies[0].schemes.should eq(["http", "https"]) # one variable, both origins
+        Gori::Settings.environment_upstream_summary.should eq("HTTP_PROXY → http proxy env-proxy.test:3128")
+        Gori::Settings.environment_upstream_in_effect?.should be_true
+
+        ENV["https_proxy"] = "socks5h://[::1]:1080"
+        Gori::Settings.environment_upstream_summary.should eq(
+          "HTTP_PROXY → http proxy env-proxy.test:3128; https_proxy → socks5h proxy [::1]:1080")
+
+        Gori::Settings.upstream_proxy = "global.test:8080"
+        Gori::Settings.environment_upstream_in_effect?.should be_false
+      end
+      Gori::Settings.environment_upstream_summary.should eq("")
+    ensure
+      reset_upstream
+    end
+
+    # "In effect" is not a global yes/no once rules exist. A `*` rule claims every host, so the
+    # environment is shadowed exactly as a non-blank scalar shadows it — and the banner used to
+    # say "no gori upstream proxy is set, so $HTTPS_PROXY routes https origins" over a table
+    # that sent everything to a jump host (#1114).
+    it "treats a catch-all rule as shadowing the environment entirely" do
+      with_proxy_environment({"HTTPS_PROXY" => "http://corp.example:3128"}) do
+        Gori::Settings.upstream_rules = [rule("*", "socks5", "jump.example:1080")]
+        Gori::Settings.upstream_route("a.test", "https", 443).kind.should eq("socks5")
+        Gori::Settings.environment_upstream_scope.none?.should be_true
+        Gori::Settings.environment_upstream_in_effect?.should be_false
+        Gori::Settings.environment_upstream_status.should eq("")
+        Gori::Settings.upstream_proxy_warnings.join("\n").should_not contain("_PROXY")
+        # …while the variables are still exported and reportable as such.
+        Gori::Settings.environment_upstream_summary.should eq("HTTPS_PROXY → http proxy corp.example:3128")
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "says the environment reaches only the destinations a narrow rule table leaves unclaimed" do
+      with_proxy_environment({"HTTPS_PROXY" => "http://corp.example:3128"}) do
+        Gori::Settings.upstream_rules = [rule("*.corp.test", "direct")]
+        Gori::Settings.upstream_route("a.test", "https", 443).host.should eq("corp.example")
+        Gori::Settings.upstream_route("x.corp.test", "https", 443).direct?.should be_true
+        Gori::Settings.environment_upstream_scope.partial?.should be_true
+        Gori::Settings.environment_upstream_in_effect?.should be_true
+        Gori::Settings.environment_upstream_reach.should eq("destinations no upstream rule claims")
+        Gori::Settings.environment_upstream_status.should eq(
+          "HTTPS_PROXY → http proxy corp.example:3128 · destinations no upstream rule claims")
+        joined = Gori::Settings.upstream_proxy_warnings.join("\n")
+        joined.should contain("$HTTPS_PROXY routes https origins via http proxy corp.example:3128 " \
+                              "for destinations no upstream rule claims")
+        joined.should_not contain("no gori upstream proxy is set")
+
+        # The invalid-value warning carries the same qualifier.
+        ENV["HTTPS_PROXY"] = "http://"
+        Gori::Settings.upstream_proxy_warnings.join("\n")
+          .should contain("origin dial to destinations no upstream rule claims fails closed")
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "words a narrowed project destination filter the same way, and a broken one as shadowing" do
+      with_proxy_environment({"HTTPS_PROXY" => "http://corp.example:3128"}) do
+        Gori::Settings.project_upstream_destination = "*.lab.test"
+        Gori::Settings.upstream_route("a.lab.test", "https", 443).host.should eq("corp.example")
+        Gori::Settings.upstream_route("a.test", "https", 443).direct?.should be_true
+        Gori::Settings.environment_upstream_reach.should eq("destinations the project destination filter admits")
+
+        Gori::Settings.upstream_rules = [rule("*.corp.test", "direct")]
+        Gori::Settings.environment_upstream_reach.should eq(
+          "destinations no upstream rule claims and the project destination filter admits")
+
+        # A filter that cannot compile refuses every dial before the environment is asked.
+        Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
+        Gori::Settings.project_upstream_destination = "["
+        Gori::Settings.upstream_route("a.lab.test", "https", 443).invalid?.should be_true
+        Gori::Settings.environment_upstream_scope.none?.should be_true
+        Gori::Settings.environment_upstream_status.should eq("")
+
+        # No filter and no rules: the environment answers for everything, unqualified.
+        Gori::Settings.project_upstream_destination = nil
+        Gori::Settings.environment_upstream_scope.all?.should be_true
+        Gori::Settings.environment_upstream_reach.should be_nil
+        Gori::Settings.upstream_proxy_warnings.join("\n").should contain("no gori upstream proxy is set")
+      end
+    ensure
+      reset_upstream
+    end
+
     it "keeps explicit gori routes ahead of the environment fallback" do
       with_proxy_environment({"HTTP_PROXY" => "http://env-proxy.test:3128"}) do
         Gori::Settings.upstream_proxy = "global.test:8080"

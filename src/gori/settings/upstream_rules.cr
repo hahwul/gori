@@ -253,18 +253,160 @@ module Gori::Settings
   # is preferred when both spellings exist; lowercase is the compatibility fallback used by
   # curl/Python and other CLI clients.
   private def self.environment_proxy_value(origin_scheme : String?) : String?
-    case origin_scheme.try(&.downcase)
-    when "http"
-      environment_value("HTTP_PROXY") || environment_value("ALL_PROXY")
-    when "https"
-      environment_value("HTTPS_PROXY") || environment_value("HTTP_PROXY") || environment_value("ALL_PROXY")
-    else
-      environment_value("HTTPS_PROXY") || environment_value("HTTP_PROXY") || environment_value("ALL_PROXY")
+    environment_proxy_selection(origin_scheme).try(&.[1])
+  end
+
+  ENVIRONMENT_HTTP_PROXY_NAMES  = ["HTTP_PROXY", "ALL_PROXY"]
+  ENVIRONMENT_HTTPS_PROXY_NAMES = ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"]
+
+  # The variable that answers for `origin_scheme`, as `{name as exported, value}` — the name
+  # is kept because a startup notice that says "a proxy is in effect" without naming the
+  # variable that put it there sends the operator to settings.json, where it is not.
+  private def self.environment_proxy_selection(origin_scheme : String?) : {String, String}?
+    names = origin_scheme.try(&.downcase) == "http" ? ENVIRONMENT_HTTP_PROXY_NAMES : ENVIRONMENT_HTTPS_PROXY_NAMES
+    names.each do |name|
+      if found = environment_lookup(name)
+        return found
+      end
     end
+    nil
   end
 
   private def self.environment_value(name : String) : String?
-    ENV[name]?.try(&.strip).try(&.presence) || ENV[name.downcase]?.try(&.strip).try(&.presence)
+    environment_lookup(name).try(&.[1])
+  end
+
+  private def self.environment_lookup(name : String) : {String, String}?
+    [name, name.downcase].each do |spelling|
+      if value = ENV[spelling]?.try(&.strip).try(&.presence)
+        return {spelling, value}
+      end
+    end
+    nil
+  end
+
+  # One environment variable that `upstream_route` would select, with the route it parses to
+  # and the origin schemes it answers for. `route` is the SAME parse a dial gets, so an invalid
+  # value is reported here as the same failure that will refuse the dial.
+  record EnvironmentUpstream, name : String, route : UpstreamRoute, schemes : Array(String) do
+    # The proxy without its credentials — the only spelling that may reach a screen, a log or
+    # a statusline script. `route.username`/`password` never leave the route.
+    def label : String
+      return "invalid" if route.invalid?
+      host = route.host.includes?(':') ? "[#{route.host}]" : route.host
+      "#{route.kind} proxy #{host}:#{route.port}"
+    end
+  end
+
+  # The environment variables that would route a dial right now, whether or not the environment
+  # is the arm in effect (see `environment_upstream_in_effect?`) — one entry per distinct
+  # variable, in origin-scheme order, so `HTTP_PROXY` covering both http and https origins is
+  # one entry saying so rather than two. Empty when nothing is exported.
+  def self.environment_upstream_proxies : Array(EnvironmentUpstream)
+    selected = {} of String => {String, Array(String)}
+    ["http", "https"].each do |scheme|
+      next unless found = environment_proxy_selection(scheme)
+      name, value = found
+      entry = selected[name] ||= {value, [] of String}
+      entry[1] << scheme
+    end
+    selected.map do |name, (value, schemes)|
+      EnvironmentUpstream.new(name, parse_environment_upstream_proxy(value), schemes)
+    end
+  end
+
+  # How much of the destination space reaches the environment arm. Not a yes/no: once rules
+  # exist, routing is per-destination (the argument `StatuslineController#build_context_json`
+  # already makes for its `upstream` field), and a surface that said "in effect" for an install
+  # whose `*` rule sends everything to a jump host put a brand-new FALSE sentence on the banner.
+  enum EnvironmentUpstreamScope
+    # The arm never runs: a project pin, a non-blank scalar, a load error that fails every dial
+    # closed before the environment is asked, or a catch-all (`*`) rule that claims every host.
+    None
+    # Every destination reaches it (still subject to the loopback carve-out and NO_PROXY).
+    All
+    # Only the destinations no rule claims — and, under a narrowed project destination
+    # filter, only the ones that filter admits; the rest never ask the environment.
+    Partial
+  end
+
+  def self.environment_upstream_scope : EnvironmentUpstreamScope
+    return EnvironmentUpstreamScope::None unless project_upstream_proxy.nil? && upstream_proxy.strip.empty?
+    return EnvironmentUpstreamScope::None unless @@upstream_rules_load_error.nil? && @@upstream_proxy_load_error.nil?
+    # `upstream_route`'s own order: project auth without a pin, or a broken auth value, is an
+    # invalid route for every host; a broken destination filter likewise.
+    return EnvironmentUpstreamScope::None if project_upstream_auth_error || project_upstream_auth
+    return EnvironmentUpstreamScope::None if @@project_upstream_destination_error
+    return EnvironmentUpstreamScope::None if upstream_rules.any? { |rule| rule.host.strip == "*" }
+    narrowed = !upstream_rules.empty? || environment_upstream_destination_narrowed?
+    narrowed ? EnvironmentUpstreamScope::Partial : EnvironmentUpstreamScope::All
+  end
+
+  # Whether ANY dial can reach the environment arm — the gate the surfaces share. `Partial`
+  # counts: the environment really is the route for the destinations nothing else claims.
+  def self.environment_upstream_in_effect? : Bool
+    !environment_upstream_scope.none?
+  end
+
+  private def self.environment_upstream_destination_narrowed? : Bool
+    effective_project_upstream_destination != DEFAULT_PROJECT_UPSTREAM_DESTINATION
+  end
+
+  # The ONE wording of which destinations the environment answers for, or nil when it answers
+  # for all of them. Every surface splices this rather than paraphrasing it, so the banner, the
+  # settings row and the statusline cannot disagree about how far the variable reaches.
+  def self.environment_upstream_reach : String?
+    return nil unless environment_upstream_scope.partial?
+    parts = [] of String
+    parts << "no upstream rule claims" unless upstream_rules.empty?
+    parts << "the project destination filter admits" if environment_upstream_destination_narrowed?
+    "destinations #{parts.join(" and ")}"
+  end
+
+  # The one-line, credential-free rendering both the settings:network row and the statusline
+  # context carry: `HTTPS_PROXY → http proxy corp.example:3128; HTTP_PROXY → invalid`. Empty
+  # when no variable is exported. Says nothing about whether the environment is in effect —
+  # that is `environment_upstream_scope`, and `environment_upstream_status` is the rendering
+  # that folds the two together.
+  def self.environment_upstream_summary : String
+    environment_upstream_proxies.join("; ") { |e| "#{e.name} → #{e.label}" }
+  end
+
+  # `environment_upstream_summary` qualified by `environment_upstream_reach`, and "" whenever
+  # the environment is not a route in effect — so a non-empty value always means LIVE routing
+  # for at least the destinations it names, never a variable an explicit upstream shadows.
+  # The statusline `upstream_env` field is exactly this string.
+  def self.environment_upstream_status : String
+    return "" unless environment_upstream_in_effect?
+    summary = environment_upstream_summary
+    return "" if summary.empty?
+    reach = environment_upstream_reach
+    reach ? "#{summary} · #{reach}" : summary
+  end
+
+  # What the startup banner says about the environment arm, when it is a route in effect. A
+  # proxy that gori did not configure — and that `settings:network` used to render as "None" —
+  # is exactly the "config that is only wrong at dial time, far from the file that caused it"
+  # this warning path exists for; a value that fails to parse is worse, because every dial it
+  # selects fails closed with nothing on screen but a per-flow error.
+  private def self.environment_upstream_warnings : Array(String)
+    notes = [] of String
+    return notes unless environment_upstream_in_effect?
+    reach = environment_upstream_reach
+    environment_upstream_proxies.each do |env|
+      origins = env.schemes.join(" and ")
+      if err = env.route.configuration_error
+        notes << "#{err} — $#{env.name} is exported but not a usable proxy, so every #{origins} " \
+                 "origin dial#{reach ? " to #{reach}" : ""} fails closed until it is fixed or unset"
+      elsif reach
+        notes << "network: $#{env.name} routes #{origins} origins via #{env.label} for #{reach} " \
+                 "(localhost stays direct; NO_PROXY exceptions apply)"
+      else
+        notes << "network: no gori upstream proxy is set, so $#{env.name} routes #{origins} " \
+                 "origins via #{env.label} (localhost stays direct; NO_PROXY exceptions apply)"
+      end
+    end
+    notes
   end
 
   # NO_PROXY is deliberately applied only to the environment fallback. It must not silently
@@ -492,7 +634,7 @@ module Gori::Settings
              "is NOT verified, so the hop carrying every CONNECT authority and Proxy-Authorization " \
              "header is unauthenticated"
     end
-    out
+    out.concat(environment_upstream_warnings)
   rescue
     [] of String
   end

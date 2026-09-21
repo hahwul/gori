@@ -270,6 +270,49 @@ describe Gori::Settings do
       end
     end
 
+    # The environment used to be the one route no surface named: `settings:network` rendered
+    # "None", the banner said nothing, and a malformed value refused every dial with the same
+    # silence (#1114). Named at startup, never with its credentials.
+    it "names an environment proxy that is in effect, and one that fails every dial closed" do
+      proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                    "http_proxy", "https_proxy", "all_proxy", "no_proxy"]
+      previous_env = proxy_keys.map { |key| {key, ENV[key]?} }
+      previous_proxy = Gori::Settings.upstream_proxy
+      previous_project_proxy = Gori::Settings.project_upstream_proxy
+      previous_rules = Gori::Settings.upstream_rules
+      begin
+        proxy_keys.each { |key| ENV.delete(key) }
+        Gori::Settings.upstream_proxy = ""
+        Gori::Settings.project_upstream_proxy = nil
+        Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
+
+        ENV["HTTPS_PROXY"] = "http://alice:super-secret@corp.example:3128"
+        joined = Gori::Settings.upstream_proxy_warnings.join("\n")
+        joined.should contain("$HTTPS_PROXY")
+        joined.should contain("http proxy corp.example:3128")
+        joined.should contain("https origins")
+        joined.should_not contain("super-secret")
+        joined.should_not contain("alice")
+
+        ENV["HTTP_PROXY"] = "http://not a proxy:::"
+        joined = Gori::Settings.upstream_proxy_warnings.join("\n")
+        joined.should contain("$HTTP_PROXY")
+        joined.should contain("fails closed")
+        joined.should contain("http origin") # HTTPS_PROXY still covers https
+
+        # An explicit gori upstream shadows the variables, so there is nothing to announce.
+        Gori::Settings.upstream_proxy = "http://gori-proxy.test:8080"
+        Gori::Settings.upstream_proxy_warnings.join("\n").should_not contain("_PROXY")
+      ensure
+        previous_env.each do |key, value|
+          value ? (ENV[key] = value) : ENV.delete(key)
+        end
+        Gori::Settings.upstream_proxy = previous_proxy
+        Gori::Settings.project_upstream_proxy = previous_project_proxy
+        Gori::Settings.upstream_rules = previous_rules
+      end
+    end
+
     it "warns when an environment-selected TLS proxy is not verified" do
       proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
                     "http_proxy", "https_proxy", "all_proxy", "no_proxy"]
