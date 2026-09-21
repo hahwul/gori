@@ -412,8 +412,9 @@ module Gori::Settings
   # NO_PROXY is deliberately applied only to the environment fallback. It must not silently
   # override an explicit gori route, and a project/rule direct entry is already the more
   # precise way to express a permanent exception. Entries support the forms used by the common
-  # CLI clients: *, bare hosts/domains (including a leading .domain), IPv6 in brackets, and
-  # an optional :port suffix.
+  # CLI clients: *, bare hosts/domains (including a leading .domain), IPv6 in brackets, an
+  # optional :port suffix, and IPv4/IPv6 CIDR blocks (`10.0.0.0/8`, `fd00::/8`) matched
+  # against an address-literal destination.
   private def self.environment_no_proxy?(host : String, port : Int32?) : Bool
     raw = environment_value("NO_PROXY")
     return false unless raw
@@ -425,7 +426,8 @@ module Gori::Settings
   private def self.no_proxy_entry_matches?(entry : String, host : String, port : Int32?) : Bool
     return false if entry.empty?
     return true if entry == "*"
-    return false if entry.includes?("://") || entry.includes?('/')
+    return false if entry.includes?("://")
+    return no_proxy_cidr_matches?(entry, host) if entry.includes?('/')
 
     entry_host, entry_port = no_proxy_entry_parts(entry)
     return false unless entry_host
@@ -437,6 +439,47 @@ module Gori::Settings
     # A malformed NO_PROXY token is ignored, matching the forgiving behaviour of the clients
     # this environment contract is intended to align with. It must not turn into a direct route.
     false
+  end
+
+  # `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local` is the single commonest
+  # NO_PROXY in a container or corporate profile, and every `/` entry used to be skipped in
+  # silence — so an RFC 1918 target the operator had excluded was dialled through the proxy,
+  # and disclosed to it (#1114). Matched only against an address LITERAL, as Go does: a name
+  # is not resolved here (this runs per dial, and a resolver answer is not what the entry
+  # says). A port on the destination does not narrow a CIDR entry — it carries none.
+  private def self.no_proxy_cidr_matches?(entry : String, host : String) : Bool
+    prefix, _, bits = entry.partition('/')
+    prefix = prefix[1...-1] if prefix.starts_with?('[') && prefix.ends_with?(']')
+    length = bits.to_i?
+    return false unless length
+    dest = HostPattern.bare(host)
+    if (net4 = Socket::IPAddress.parse_v4_fields?(prefix)) && (addr4 = Socket::IPAddress.parse_v4_fields?(dest))
+      return false unless length.in?(0..32)
+      cidr_prefix_equal?(net4.to_slice, addr4.to_slice, length)
+    elsif (net6 = Socket::IPAddress.parse_v6_fields?(prefix)) && (addr6 = Socket::IPAddress.parse_v6_fields?(dest))
+      return false unless length.in?(0..128)
+      cidr_prefix_equal?(no_proxy_v6_bytes(net6), no_proxy_v6_bytes(addr6), length)
+    else
+      false
+    end
+  end
+
+  private def self.no_proxy_v6_bytes(fields : StaticArray(UInt16, 8)) : Bytes
+    bytes = Bytes.new(16)
+    fields.each_with_index do |field, i|
+      bytes[i * 2] = (field >> 8).to_u8
+      bytes[i * 2 + 1] = (field & 0xFF).to_u8
+    end
+    bytes
+  end
+
+  # The first `length` bits of two equal-length byte strings agree.
+  private def self.cidr_prefix_equal?(a : Bytes, b : Bytes, length : Int32) : Bool
+    full, rest = length.divmod(8)
+    return false unless a[0, full] == b[0, full]
+    return true if rest == 0
+    mask = (0xFF << (8 - rest)) & 0xFF
+    (a[full] & mask) == (b[full] & mask)
   end
 
   private def self.no_proxy_port_matches?(entry_port : Int32?, port : Int32?) : Bool

@@ -232,7 +232,7 @@ Every refusal is recorded in the project as a flow carrying its reason, too. A c
 
 `network.upstream_proxy` is the catch-all route. Bare `host:port` and `http://…` use a plaintext HTTP CONNECT proxy (default port `8080`). `http+tls://…` uses the same CONNECT protocol with the hop to the proxy wrapped in TLS (default port `443`). `socks5://…` resolves destination names **locally** and sends an address literal; `socks5h://…` sends hostname targets as `ATYP DOMAIN` so the **proxy** resolves them. Both SOCKS forms default to port 1080. URI credentials are refused; configure direct credentials in the Project tab, or use an `upstream_rules` entry with `username` and `password_env`.
 
-When this scalar is blank, gori consults the process environment at dial time. HTTP origins select `HTTP_PROXY`, then `ALL_PROXY`; HTTPS origins select `HTTPS_PROXY`, then `HTTP_PROXY`, then `ALL_PROXY`. Uppercase names are preferred and lowercase spellings are accepted. `NO_PROXY` / `no_proxy` supports `*`, hosts and domains, bracketed IPv6 literals, and optional ports; a match goes direct. An explicit project upstream, matching rule (including `direct`), or non-empty scalar takes precedence over the environment. In this environment-variable convention, `http://` means a plaintext HTTP CONNECT proxy (port 80 when none is given, not the scalar's 8080) and `https://` means TLS to the proxy; the persisted `network.upstream_proxy` `https://` spelling retains its legacy plaintext meaning.
+When this scalar is blank, gori consults the process environment at dial time. HTTP origins select `HTTP_PROXY`, then `ALL_PROXY`; HTTPS origins select `HTTPS_PROXY`, then `HTTP_PROXY`, then `ALL_PROXY`. Uppercase names are preferred and lowercase spellings are accepted. `NO_PROXY` / `no_proxy` supports `*`, hosts and domains, bracketed IPv6 literals, optional ports, and IPv4/IPv6 CIDR blocks (`10.0.0.0/8,fd00::/8`, matched against an address-literal destination); a match goes direct. `localhost` and loopback addresses are always direct, whatever `NO_PROXY` says — on every dial, TLS passthrough and CONNECT tunnels included; the exemption is about the destination, so a proxy that itself listens on `127.0.0.1` is still used for remote targets. An explicit project upstream, matching rule (including `direct`), or non-empty scalar takes precedence over the environment. In this environment-variable convention, `http://` means a plaintext HTTP CONNECT proxy (port 80 when none is given, not the scalar's 8080) and `https://` means TLS to the proxy; the persisted `network.upstream_proxy` `https://` spelling retains its legacy plaintext meaning.
 
 #### `https://` means the plaintext proxy, not TLS
 
@@ -294,7 +294,7 @@ Precedence, highest first:
 | 1 (highest) | Project `net.upstream_proxy`: an explicit per-project pin, which bypasses the table wholesale |
 | 2 | `upstream_rules`, first host match |
 | 3 | `network.upstream_proxy`: the implicit catch-all |
-| 4 | Process environment (`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`) when the scalar is blank, subject to `NO_PROXY` / `no_proxy` |
+| 4 | Process environment (`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`) when the scalar is blank, subject to `NO_PROXY` / `no_proxy` (hosts, domains, ports, CIDR blocks); localhost and loopback are always direct here |
 | 5 (lowest) | Direct |
 
 For an open project, **Destination host** is evaluated before this table. `*` (the default)

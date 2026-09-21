@@ -292,6 +292,29 @@ describe "upstream rules" do
       reset_upstream
     end
 
+    # The container/k8s profile shape. Every `/` entry used to be skipped in silence, so the
+    # excluded RFC 1918 target went through the proxy — and was disclosed to it (#1114).
+    it "applies NO_PROXY CIDR entries to IPv4 and IPv6 address literals" do
+      with_proxy_environment({
+        "HTTP_PROXY" => "http://env-proxy.test:3128",
+        "NO_PROXY"   => "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8,[2001:db8::]/32,.svc",
+      }) do
+        ["10.1.2.3", "172.31.255.255", "192.168.0.1", "fd12::1", "[fd12::1]", "2001:db8:1::9",
+         "kube.svc"].each do |host|
+          Gori::Settings.upstream_route(host, "http", 8080).direct?.should be_true, host
+        end
+        ["11.0.0.1", "172.32.0.1", "192.169.0.1", "fe80::1", "2001:db9::1", "10.example.test"].each do |host|
+          Gori::Settings.upstream_route(host, "http", 8080).host.should eq("env-proxy.test"), host
+        end
+        # A malformed block is ignored, never a direct route (the forgiving convention).
+        ENV["NO_PROXY"] = "10.0.0.0/33,10.0.0.0/x,10.0.0/8,fd00::/129"
+        Gori::Settings.upstream_route("10.1.2.3", "http", 8080).host.should eq("env-proxy.test")
+        Gori::Settings.upstream_route("fd12::1", "http", 8080).host.should eq("env-proxy.test")
+      end
+    ensure
+      reset_upstream
+    end
+
     # "In effect" is not a global yes/no once rules exist. A `*` rule claims every host, so the
     # environment is shadowed exactly as a non-blank scalar shadows it — and the banner used to
     # say "no gori upstream proxy is set, so $HTTPS_PROXY routes https origins" over a table

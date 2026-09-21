@@ -232,7 +232,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 `network.upstream_proxy`는 catch-all 경로입니다. `host:port`와 `http://…`는 평문 HTTP CONNECT 프록시를 사용합니다(기본 포트 `8080`). `http+tls://…`는 같은 CONNECT 프로토콜을 쓰지만 프록시까지의 홉을 TLS로 감쌉니다(기본 포트 `443`). `socks5://…`는 대상 이름을 **로컬에서** 해석해 주소 리터럴을 보내고, `socks5h://…`는 호스트 이름을 `ATYP DOMAIN`으로 보내 **프록시가** 해석합니다. 두 SOCKS 형식 모두 기본 포트는 1080입니다. URI 자격증명은 거부됩니다. Project 탭에서 직접 자격증명을 설정하거나 `username`과 `password_env`를 가진 `upstream_rules` 항목을 사용하세요.
 
-이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트를 지원하며 일치하면 직접 연결합니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시(포트를 생략하면 스칼라의 8080이 아니라 80), `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
+이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트, IPv4/IPv6 CIDR 블록(`10.0.0.0/8,fd00::/8`, 주소 리터럴 목적지에 대해 판정)을 지원하며 일치하면 직접 연결합니다. `localhost`와 루프백 주소는 `NO_PROXY`와 무관하게 항상 직접 연결합니다 — TLS passthrough와 CONNECT 터널을 포함한 모든 dial에서 그렇고, 이 예외는 목적지 기준이므로 프록시 자체가 `127.0.0.1`에 있어도 원격 목적지에는 그 프록시를 씁니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시(포트를 생략하면 스칼라의 8080이 아니라 80), `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
 
 #### `https://`는 TLS가 아니라 평문 프록시입니다
 
@@ -294,7 +294,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 | 1 (최상) | 프로젝트 `net.upstream_proxy`. 명시적 프로젝트 고정으로, 테이블을 통째로 건너뜁니다 |
 | 2 | `upstream_rules`의 첫 호스트 일치 |
 | 3 | `network.upstream_proxy`. 암묵적 catch-all |
-| 4 | 스칼라가 비어 있을 때 프로세스 환경(`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`), `NO_PROXY` / `no_proxy` 적용 |
+| 4 | 스칼라가 비어 있을 때 프로세스 환경(`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`), `NO_PROXY` / `no_proxy`(호스트·도메인·포트·CIDR 블록) 적용; localhost와 루프백은 여기서 항상 직접 연결 |
 | 5 (최하) | 직접 연결 |
 
 열려 있는 프로젝트에서는 **Destination host**가 이 테이블보다 먼저 평가됩니다. 기본값 `*`는 위 우선순위를 그대로 두고, 일치하지 않는 목적지는 전역 규칙이나 스칼라 프록시로 폴백하지 않고 직접 연결됩니다.
