@@ -380,24 +380,48 @@ module Gori::Tui
       true
     end
 
-    # Mouse: place the cursor at a click. `rect` is the framed interior the runner
-    # passes to render; re-apply render's 1-col side inset so the editor geometry matches.
-    def click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      enter_insert!
-      current.area.click_to_cursor(editor_rect(rect), mx, my)
+    # Mouse: place the cursor at a click, IN THE MODE THE PANE IS ALREADY IN. `rect` is the
+    # framed interior the runner passes to render; re-apply render's 1-col side inset so the
+    # editor geometry matches.
+    #
+    # The `enter_insert!` that used to lead this method is gone (#1124). A click is how you
+    # aim, not how you ask to type — and forcing INSERT here meant the next bare letter was
+    # typed instead of run, so `y` put a `y` in the note rather than copying, over whatever
+    # was selected. Every other read/insert editor in the TUI (the Repeater request pane, the
+    # Fuzzer template, the Decoder / JWT / Cookie inputs) already splits the click this way;
+    # this pane, the Issue notes card and the Project description were the three that did not.
+    # INSERT is now entered the way the keyboard enters it — `i` / ↵ — or by clicking the
+    # NOR/INS chip the card's own border draws.
+    def click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
+      inner = editor_rect(rect)
+      if insert_mode?
+        current.area.click_to_cursor(inner, mx, my, selecting: selecting)
+      else
+        # Through the read state, not the editor: `@read` owns the band this mode PAINTS, and
+        # its `click` is also what COLLAPSES a standing ⇧arrow selection (`sync_from` leaves
+        # the anchor alone on purpose — see `ReadCursor#sync`).
+        @read.click(current.area, inner, mx, my, selecting: selecting)
+      end
     end
 
-    # Mouse DRAG — extend the selection to the pointer. The click already put this pane in
-    # INSERT, so the selection is the editor's own (the band `TextArea#render` paints).
+    # Mouse DRAG — extend the selection to the pointer, through whichever selection model the
+    # current mode owns (INS: the editor's own anchor, painted by `TextArea#render`; READ:
+    # `@read`, painted by `paint_chrome`). One call, so the drag can never land on a different
+    # rect — or a different model — than the press it continues.
     def drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless insert_mode?
-      current.area.click_to_cursor(editor_rect(rect), mx, my, selecting: true)
+      click_to_cursor(rect, mx, my, selecting: true)
     end
 
-    # Mouse DOUBLE-CLICK — select the word under the pointer.
+    # Mouse DOUBLE-CLICK — select the word under the pointer, in the current mode. In READ
+    # that is a band `y` copies; it used to be unreachable here, because the gesture forced
+    # INSERT first and a bare `y` then typed over the word it had just selected.
     def select_word_at(rect : Rect, mx : Int32, my : Int32) : Bool
-      enter_insert!
-      current.area.select_word_at(editor_rect(rect), mx, my)
+      inner = editor_rect(rect)
+      if insert_mode?
+        current.area.select_word_at(inner, mx, my)
+      else
+        @read.select_word(current.area, inner, mx, my)
+      end
     end
 
     # render's 1-col side inset, applied once so click, drag and double-click share it.

@@ -112,13 +112,30 @@ describe "clicking the Issues detail" do
     end
   end
 
-  it "leaves the NOTES body to the notes editor" do
+  it "leaves the NOTES body to the notes editor, aiming the caret without arming it" do
     with_session do |host, session|
       detail_controller(host, session.store) do |ctl|
         notes = ctl.view.notes_body_rect(AREA.inset(1, 1))
-        ctl.handle_click(AREA, notes.x + 1, notes.y).should be_true
+        ctl.handle_click(AREA, notes.x + 1, notes.y + 1).should be_true
         ctl.view.notes_focused?.should be_true
-        ctl.view.notes_insert_mode?.should be_true
+        # #1124: the click used to `enter_notes_insert!` before placing the caret, so the
+        # next bare letter was TYPED rather than run — a `y` meant as copy put a `y` in the
+        # notes, over whatever was selected. INS is `i` / ↵ / the NOR-INS chip now.
+        ctl.view.notes_insert_mode?.should be_false
+        ctl.view.notes_copy_text.should eq("bravo") # READ's `y` with no band: the caret LINE
+      end
+    end
+  end
+
+  it "drags a READ band in the NOTES body, still without arming the editor" do
+    with_session do |host, session|
+      detail_controller(host, session.store) do |ctl|
+        notes = ctl.view.notes_body_rect(AREA.inset(1, 1))
+        ctl.handle_click(AREA, notes.x, notes.y).should be_true
+        ctl.supports_drag?.should be_true # the press claimed the motion for the editor
+        ctl.handle_drag(AREA, notes.x + 3, notes.y)
+        ctl.view.notes_insert_mode?.should be_false
+        ctl.view.notes_copy_text.should eq("alp")
       end
     end
   end
@@ -177,12 +194,15 @@ describe "clicking the Issues detail" do
     end
   end
 
-  it "still selects a word on a double-click in the NOTES body" do
+  it "still selects a word on a double-click in the NOTES body — in READ, where `y` reaches it" do
     with_session do |host, session|
       detail_controller(host, session.store) do |ctl|
         notes = ctl.view.notes_body_rect(AREA.inset(1, 1))
         ctl.handle_double_click(AREA, notes.x + 1, notes.y).should be_true
         host.issue_link_opens.should eq(0)
+        ctl.view.notes_insert_mode?.should be_false
+        ctl.view.notes_selection?.should be_true
+        ctl.view.notes_copy_text.should eq("alpha")
       end
     end
   end
@@ -190,9 +210,10 @@ describe "clicking the Issues detail" do
   it "does not start an edit from a double-click on the read-only meta block" do
     with_session do |host, session|
       detail_controller(host, session.store) do |ctl|
-        # `notes_select_word` forces INSERT and hit-tests nothing, so the title/chips/evidence
-        # rows used to drop the operator into the editor with a word selected at clamped
-        # coordinates — an edit begun by a gesture on a row that cannot be edited.
+        # `notes_select_word` hit-tests nothing — it clamps — so the title/chips/evidence rows
+        # used to take a word out of the notes at coordinates nowhere near the row pointed at.
+        # It forced INSERT on the way, so the same gesture on a read-only row began an edit;
+        # that half went with #1124, and this guard still owns the other half.
         inner = AREA.inset(1, 1)
         ctl.handle_double_click(AREA, inner.x + 5, inner.y).should be_false
         ctl.view.notes_insert_mode?.should be_false

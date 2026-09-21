@@ -288,3 +288,47 @@ describe "Gori::Tui::NotesController — a closed note's links" do
     end
   end
 end
+
+# What a PRESS arms (#1124). `drag_to_cursor` used to refuse every gesture the pane was not
+# already in INSERT for, and that refusal was doing double duty as a press-target guard:
+# `supports_drag?` answered a flat `true`, because the whole tab body is the editor. The
+# refusal is gone — a drag now extends whichever selection model the current mode owns — so
+# the flat `true` had to become a record of where the press landed. Without it, pressing the
+# NOR/INS chip on the editor's own border and twitching the mouse would toggle the mode AND
+# drag a band open from a cell of the border, which `settings:mouse` drag-copy then writes to
+# the clipboard. `IssuesController#@detail_press` is the same guard for the same reason.
+describe "Gori::Tui::NotesController — what a press arms" do
+  it "arms a drag from the editor, and not from the NOR/INS chip" do
+    with_notes_controller do |controller|
+      view = controller.view
+      view.exit_insert! # `notes_new` (the helper's setup) drops into INSERT; start from READ
+      rect = Rect.new(0, 0, 76, 20)
+      controller.render_body(Screen.new(MemoryBackend.new(76, 20)), rect, :body)
+
+      # The chip located by its EFFECT rather than by re-deriving the card geometry here: it
+      # is the ONLY cell where a press changes the mode, which is the property under test.
+      chip = nil.as({Int32, Int32}?)
+      (rect.y...rect.bottom).each do |y|
+        (rect.x...rect.right).each do |x|
+          controller.handle_click(rect, x, y)
+          next unless view.insert_mode?
+          chip = {x, y}
+          view.exit_insert!
+          break
+        end
+        break if chip
+      end
+      cx, cy = chip.not_nil!
+
+      controller.handle_click(rect, cx, cy)
+      view.insert_mode?.should be_true # it really is the chip: a press there toggles
+      controller.supports_drag?.should be_false
+      view.exit_insert!
+
+      # …and an ordinary press, which places the caret and leaves the mode alone, does arm one.
+      controller.handle_click(rect, rect.x + 4, cy + 2)
+      view.insert_mode?.should be_false
+      controller.supports_drag?.should be_true
+    end
+  end
+end

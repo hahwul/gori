@@ -206,6 +206,7 @@ module Gori::Tui
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
       body = notes_body_rect(rect)
+      @press_on_editor = false
       # NOR/INS chip on the editor top border toggles insert (same as ↵ / esc).
       if Frame.mode_badge_hit(mx, my, body.y, body.right - 1, body.x + 1, @notes.insert_mode?)
         if @notes.insert_mode?
@@ -215,15 +216,27 @@ module Gori::Tui
         end
         return true
       end
+      @press_on_editor = true # the motion that continues this press belongs to the editor
       @notes.click_to_cursor(body, mx, my)
       true
     end
+
+    # Whether the last press landed on the EDITOR rather than on the chip its border carries.
+    # `supports_drag?` is asked with no coordinates — `drag_press_target?` runs it right after
+    # the click — and the whole tab body is the editor, so "true" was the honest answer while
+    # `drag_to_cursor` refused every gesture the pane was not already in INSERT for.
+    #
+    # That refusal is gone (#1124), so the flag has to say it instead: pressing the NOR/INS
+    # chip and twitching the mouse would otherwise toggle the mode and then drag a band open
+    # from a cell of the border — and, under `settings:mouse` drag-copy, put it on the
+    # clipboard. `IssuesController#@detail_press` is the same guard for the same reason.
+    @press_on_editor = false
 
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
     # No focus/save side effects here: the press that started the gesture already did those,
     # and re-running them per motion event would churn while the pointer moves.
     def supports_drag? : Bool
-      true
+      @press_on_editor
     end
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil

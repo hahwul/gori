@@ -204,6 +204,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      @press_on_desc = false
       # Chip strip FIRST: it sits inside this tab's body rect (under the OVERVIEW band), so a
       # chip click reads as a body click unless it's claimed here. It lands on the STRIP, not
       # in the card — clicking "Description" selects the sub-tab, it doesn't open the editor.
@@ -279,6 +280,7 @@ module Gori::Tui
             return true
           end
         end
+        @press_on_desc = true # the motion that continues this press belongs to the editor
         @project_view.desc_click_to_cursor(rect, mx, my)
       when :settings
         handle_project_settings_click(rect, mx, my)
@@ -299,13 +301,25 @@ module Gori::Tui
       end
     end
 
+    # Whether the last press landed IN the DESCRIPTION card rather than on the chip strip
+    # above it or on the NOR/INS badge its own border carries. `supports_drag?` is asked with
+    # no coordinates — `drag_press_target?` runs it right after the click — so the click is
+    # what has to record where it began; `IssuesController#@detail_press` is the same guard.
+    #
+    # The bare `pane == :desc` it replaces was honest only while `desc_drag_to_cursor` refused
+    # every gesture the card was not already in INSERT for. That refusal is gone (#1124), and
+    # without this a press on the "Description" chip — or on the mode badge — followed by a
+    # twitch would drag a band open from a cell outside the text, and under `settings:mouse`
+    # drag-copy put it on the clipboard.
+    @press_on_desc = false
+
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
     # A drag extends a selection over TEXT: the DESCRIPTION, or the HOST OVERRIDES / ENV row
     # while one is open. The lists themselves have no text to extend over — a drag there is a
     # fast repeated select — so they answer false. No focus/save side effects — the press that
     # began the gesture already ran them.
     def supports_drag? : Bool
-      @project_view.pane == :desc || @project_view.ov_adding? || env_row_open?
+      @press_on_desc || @project_view.ov_adding? || env_row_open?
     end
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil

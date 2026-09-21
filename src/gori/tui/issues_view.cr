@@ -198,12 +198,26 @@ module Gori::Tui
     # Mouse: place the inline NOTES-editor cursor at a click. `rect` is the framed
     # detail interior render() receives; the NOTES editor sits at rect.y + 6 (after
     # the badge/hint/meta/flow rows + divider + "NOTES" label), mirroring render_detail.
-    def notes_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+    #
+    # The click FOCUSES the card and places the caret; it does not change the mode (#1124).
+    # `enter_notes_insert!` used to lead this method, so aiming the caret also armed the
+    # editor — and the next bare letter was typed rather than run, which is how a `y` meant
+    # as copy became a `y` typed over the selection. The mode is entered the way the keyboard
+    # enters it (`i` / ↵) or by clicking the NOR/INS chip this card draws on its own border.
+    # See `NotesView#click_to_cursor`, which this mirrors, and `RepeaterView#place_request_caret`.
+    def notes_click_to_cursor(rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       notes_rect = notes_body_rect(rect)
       return if notes_rect.empty?
-      @detail_focus = :notes
-      enter_notes_insert!
-      @notes.click_to_cursor(notes_rect, mx, my)
+      # Never on a DRAG: re-aiming focus mid-gesture would hand the motion a card the press
+      # did not start in. The press has already set it.
+      @detail_focus = :notes unless selecting
+      if notes_insert_mode?
+        @notes.click_to_cursor(notes_rect, mx, my, selecting: selecting)
+      else
+        # Through the read state — it owns the band READ paints, and its `click` is what
+        # COLLAPSES a standing ⇧arrow selection (`sync_from` deliberately does not).
+        @notes_read.click(@notes, notes_rect, mx, my, selecting: selecting)
+      end
     end
 
     def select_index(idx : Int32) : Nil
@@ -1134,21 +1148,23 @@ module Gori::Tui
       @notes.word_delete_key?(ev)
     end
 
-    # Mouse DRAG / DOUBLE-CLICK over the notes pane. The click already forced INSERT (see
-    # `notes_click_to_cursor`), so both work on the editor's own selection.
+    # Mouse DRAG / DOUBLE-CLICK over the notes pane. Each runs against the selection model
+    # the CURRENT mode owns — INS: the editor's own anchor, painted by `TextArea#render`;
+    # READ: `@notes_read`, painted by `paint_notes_read_chrome`. Both used to force INSERT first,
+    # which is what put a READ-mode word out of reach of `y` (#1124).
     def notes_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless notes_insert_mode?
-      notes_rect = notes_body_rect(rect)
-      return if notes_rect.empty?
-      @notes.click_to_cursor(notes_rect, mx, my, selecting: true)
+      notes_click_to_cursor(rect, mx, my, selecting: true)
     end
 
     def notes_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
       notes_rect = notes_body_rect(rect)
       return false if notes_rect.empty?
       @detail_focus = :notes
-      enter_notes_insert!
-      @notes.select_word_at(notes_rect, mx, my)
+      if notes_insert_mode?
+        @notes.select_word_at(notes_rect, mx, my)
+      else
+        @notes_read.select_word(@notes, notes_rect, mx, my)
+      end
     end
 
     # Live IME composing text for the notes editor (delegates to the TextArea).
