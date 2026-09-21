@@ -26,7 +26,7 @@
   };
   "termisu" = {
     url = "https://github.com/hahwul/termisu.git";
-    rev = "df6e907e6fe27f2cc70b9f855dff996d08398ad1";
-    sha256 = "1agymskfgnja2pppsbfyc9qnaqi1l5g2y6qz6ghh0a5iksazva3y";
+    rev = "b790d9147d6b08edfcc60854406a8a78b4a97ded";
+    sha256 = "1k71syllkvhjsawknsvdbwb83v55ns1kwpn68s010ssp733r08xd";
   };
 }

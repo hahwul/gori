@@ -4,6 +4,7 @@
 
 ### Changes
 
+- TUI: captured text carrying a glyph the terminal draws two columns wide — `✅ ⭐ ⚡` and the rest of Unicode's `EastAsianWidth=W` set — no longer shifts every row below it out of place for the rest of the session (#1125)
 - CLI: `gori run notes delete <n>` now requires `--yes`, and the refusal quotes the note's first line so a wrong list position is visible before anything is removed (#1120)
 - Network: outbound requests honor `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, and `NO_PROXY` (including CIDR blocks) when no explicit gori upstream is configured, with localhost and loopback always direct; TLS passthrough and blind CONNECT tunnels take the HTTPS proxy, a portless `http://` value means port 80, an empty host fails closed, and the startup banner, `settings:network` and the statusline `upstream_env` field say which variable is routing (#1114)
 - TUI: clicking in the Notes body, an Issue's NOTES card or the Project DESCRIPTION places the caret without switching the editor into INSERT — `i`/↵ or the NOR/INS chip do that — and a double-click there takes the word in READ mode, where `y` copies it. A paste aimed at an editor pane that is in READ now opens the pane and inserts, instead of being refused (#1124)
