@@ -156,7 +156,12 @@ container run --rm -it \
 
 Every container also gets its own IP on the host's `vmnet` network, so publishing a port is optional: `container ls` prints the address, and pointing your client's proxy straight at `<ip>:8070` works just as well.
 
-`container build -f docker/Dockerfile -t gori:dev .` builds the image from source and honours `docker/Dockerfile.dockerignore` the way BuildKit does. The builder runs in its own VM, which does not inherit the host's `HTTP_PROXY`.
+`container build -f docker/Dockerfile -t gori:dev .` builds the image from source, and reads `docker/Dockerfile.dockerignore` — a Dockerfile-adjacent ignore list is the only one it looks for, so unlike BuildKit it never falls back to a `.dockerignore` at the context root. The builder runs in its own VM, which does not inherit the host's `HTTP_PROXY` and defaults to 2 CPUs and 2 GB (`container builder status`). A `--release` build of gori runs well over an hour at that size, so give it more first:
+
+```bash
+container builder stop
+container builder start --cpus 8 --memory 8g
+```
 
 ## Pre-built Binary
 

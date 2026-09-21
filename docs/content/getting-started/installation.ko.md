@@ -155,7 +155,12 @@ container run --rm -it \
 
 컨테이너마다 호스트의 `vmnet` 네트워크에서 자기 IP를 받으므로 포트 게시는 선택입니다. `container ls`가 출력하는 주소를 클라이언트 프록시에 `<ip>:8070`으로 바로 지정해도 똑같이 동작합니다.
 
-`container build -f docker/Dockerfile -t gori:dev .`로 소스에서 이미지를 빌드할 수 있으며, BuildKit과 마찬가지로 `docker/Dockerfile.dockerignore`를 읽습니다. 빌더는 자체 VM에서 동작하므로 호스트의 `HTTP_PROXY`를 상속하지 않습니다.
+`container build -f docker/Dockerfile -t gori:dev .`로 소스에서 이미지를 빌드할 수 있으며, `docker/Dockerfile.dockerignore`를 읽습니다. Dockerfile 옆의 무시 목록만 찾으므로, BuildKit과 달리 컨텍스트 루트의 `.dockerignore`로 되돌아가지 않습니다. 빌더는 자체 VM에서 동작하므로 호스트의 `HTTP_PROXY`를 상속하지 않으며, 기본값이 CPU 2개에 2 GB입니다(`container builder status`). 그 크기에서는 gori의 `--release` 빌드가 한 시간을 훌쩍 넘기므로, 먼저 늘려 두는 편이 좋습니다:
+
+```bash
+container builder stop
+container builder start --cpus 8 --memory 8g
+```
 
 ## 사전 빌드 바이너리 {#pre-built-binary}
 
