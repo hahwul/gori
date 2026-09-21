@@ -409,6 +409,27 @@ describe "upstream rules" do
       reset_upstream
     end
 
+    it "defaults a portless environment URL to the scheme's port: 80, 443, 1080 — never 8080" do
+      {
+        "http://noport.test"    => {"http", 80},
+        "https://noport.test"   => {"http+tls", 443},
+        "socks5://noport.test"  => {"socks5", 1080},
+        "socks5h://noport.test" => {"socks5h", 1080},
+      }.each do |value, expected|
+        with_proxy_environment({"HTTP_PROXY" => value}) do
+          route = Gori::Settings.upstream_route("origin.test", "http", 80)
+          {route.kind, route.port}.should eq(expected), value
+        end
+      end
+      # The bare host:port spelling and the persisted scalar keep their legacy 8080.
+      with_proxy_environment({"HTTP_PROXY" => "noport.test"}) do
+        Gori::Settings.upstream_route("origin.test", "http", 80).port.should eq(8080)
+      end
+      Gori::Settings.parse_upstream_proxy("http://noport.test").port.should eq(8080)
+    ensure
+      reset_upstream
+    end
+
     it "does not echo environment proxy credentials when the value is invalid" do
       with_proxy_environment({"HTTP_PROXY" => "http://alice:super-secret@env-proxy.test:bad"}) do
         route = Gori::Settings.upstream_route("origin.test", "http", 80)

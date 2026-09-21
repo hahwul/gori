@@ -496,10 +496,19 @@ module Gori::Settings
     invalid_upstream_route("settings: invalid environment proxy")
   end
 
+  # A portless `http://` here defaults to 80, the scheme's port, NOT the scalar's 8080. The
+  # 8080 is legitimate history for the persisted `host:port` form, but for `HTTP_PROXY` every
+  # neighbouring tool (curl, Go, Python) reads `http://proxy` as `proxy:80`, and gori handing
+  # `HTTP_PROXY=http://localhost` a CONNECT on whatever listens on :8080 was the one reading no
+  # operator had written. The scalar keeps 8080; only the environment grammar changes (#1114).
+  ENVIRONMENT_HTTP_PROXY_PORT = 80
+
   private def self.environment_uri_upstream_route(uri : URI) : UpstreamRoute
-    route_kind = upstream_route_kind(environment_proxy_scheme(uri))
+    scheme = environment_proxy_scheme(uri)
+    route_kind = upstream_route_kind(scheme)
     return route_kind if route_kind.is_a?(UpstreamRoute)
     kind, default_port = route_kind
+    default_port = ENVIRONMENT_HTTP_PROXY_PORT if scheme == "http"
     unless environment_proxy_authority?(uri)
       return invalid_upstream_route("settings: environment proxy must be an authority without a path, query, or fragment")
     end

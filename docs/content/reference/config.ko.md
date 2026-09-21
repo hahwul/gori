@@ -232,7 +232,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 `network.upstream_proxy`는 catch-all 경로입니다. `host:port`와 `http://…`는 평문 HTTP CONNECT 프록시를 사용합니다(기본 포트 `8080`). `http+tls://…`는 같은 CONNECT 프로토콜을 쓰지만 프록시까지의 홉을 TLS로 감쌉니다(기본 포트 `443`). `socks5://…`는 대상 이름을 **로컬에서** 해석해 주소 리터럴을 보내고, `socks5h://…`는 호스트 이름을 `ATYP DOMAIN`으로 보내 **프록시가** 해석합니다. 두 SOCKS 형식 모두 기본 포트는 1080입니다. URI 자격증명은 거부됩니다. Project 탭에서 직접 자격증명을 설정하거나 `username`과 `password_env`를 가진 `upstream_rules` 항목을 사용하세요.
 
-이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트를 지원하며 일치하면 직접 연결합니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시, `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
+이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트를 지원하며 일치하면 직접 연결합니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시(포트를 생략하면 스칼라의 8080이 아니라 80), `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
 
 #### `https://`는 TLS가 아니라 평문 프록시입니다
 
