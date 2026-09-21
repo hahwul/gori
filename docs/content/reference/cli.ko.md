@@ -81,7 +81,7 @@ gori run <subcommand> [verb] [options]
 | `jwt [<token>]` | JWT 디코드, 재서명, 또는 공격 페이로드 생성 |
 | `cookie [<cookie>]` | Flask / Rack / Django 세션 쿠키 디코드, 검증, 브루트포스, 위조 |
 | `decoder <chain> [input]` | Decoder 인코드 / 디코드 / 해시 체인 실행 |
-| `notes [<n>]` · `create` · `delete` | 프로젝트 노트 읽기, 작성, 삭제 |
+| `notes [<n>]` · `create` · `delete` | 프로젝트 노트 읽기, 작성, 삭제 (`delete`는 `--yes` 필요) |
 | `issues` · `create` · `update` · `delete` | 이슈 목록 / 내보내기, 또는 이슈 작성과 삭제 |
 | `links` · `add` · `delete` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
@@ -886,14 +886,16 @@ gori run notes                                  # 목록
 gori run notes 2                                # 2번 노트 출력
 gori run notes create --text "SSRF candidate on /fetch"
 echo "pasted from a scratchpad" | gori run notes create
-gori run notes delete 2
+gori run notes delete 2 --yes
 ```
 
 | Option | Description |
 |--------|-------------|
 | `list` | `--all`은 요약 한 줄 대신 모든 노트를 전문으로 출력 |
 | `create` | `--text=TEXT`, 위치 인자, 또는 STDIN |
-| `delete <n>` (`rm`) | 인덱스 `n`의 노트 삭제 |
+| `delete <n>` (`rm`) | 인덱스 `n`의 노트 삭제. `-y`/`--yes` 필요 |
+
+노트는 어디에도 다시 없는 글입니다 — 캡처를 다시 하거나 실행을 반복해서 복원할 수 있는 대상이 아닙니다. 게다가 인덱스는 **목록 위치**라서, 앞의 노트가 하나 사라지면 `notes delete 2`가 가리키는 노트도 달라집니다. 그래서 `delete`는 `-y`/`--yes` 없이는 거부하고(대화형 확인 절차는 없습니다), 거부 메시지에 노트의 첫 줄(빈 노트라면 생략)을 인용해 번호를 잘못 짚었는지 삭제 전에 확인할 수 있게 합니다.
 
 ### run links {#run-links}
 

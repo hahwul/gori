@@ -107,3 +107,107 @@ describe "gori run notes --format json (whole set)" do
     parsed[0]["text"].as_s.should eq("a\e[31m\tb")
   end
 end
+
+# --- `notes delete --yes` (issue #1120) ------------------------------------------------
+#
+# The gate the rest of the delete family has had all along. The refusal helper is reached the
+# same whitebox way `history delete`'s pins are: a bare call from inside the module, which
+# Crystal permits where an explicit-receiver call from outside would not.
+
+private def note(text : String) : Gori::Notes::NoteEntry
+  Gori::Notes::NoteEntry.new(1_i64, text)
+end
+
+# `cmd_notes_delete`'s own lines — from its `def` to the NEXT one, the way
+# `unknown_args_sweep_spec`'s `method_body` windows a method. Anchored on the following
+# `def self.` rather than on a comment, so reordering the file cannot silently widen the
+# window until a neighbour's code satisfies the assertions below.
+private def notes_delete_body : String
+  lines = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "notes.cr")).split("\n")
+  starts = [] of Int32
+  lines.each_with_index { |l, i| starts << i if l.matches?(/^      (private )?def self\./) }
+  at = starts.index { |i| lines[i].matches?(/^      (private )?def self\.cmd_notes_delete\b/) }
+  raise "cmd_notes_delete not found" unless at
+  lines[starts[at]...(starts[at + 1]? || lines.size)].join("\n")
+end
+
+describe "gori run notes delete" do
+  it "refuses without --yes and names the note that would go" do
+    err = Gori::CLI::Run.note_delete_confirmation_error_for_spec(2, note("SSRF candidate on /fetch"), false).not_nil!
+    err.should contain("note #2")
+    err.should contain(%("SSRF candidate on /fetch")) # the first line, so a wrong index is visible
+    err.should contain("--yes")
+  end
+
+  it "passes once --yes is given" do
+    Gori::CLI::Run.note_delete_confirmation_error_for_spec(2, note("SSRF candidate"), true).should be_nil
+  end
+
+  it "says nothing extra for a blank note rather than echoing the index back as a name" do
+    # `CLI::Output.note_label` would hand back "note 3" here; repeating the number the
+    # operator just typed, in quotes, reads like a title they can check it against.
+    err = Gori::CLI::Run.note_delete_confirmation_error_for_spec(3, note("   \n\t"), false).not_nil!
+    err.should contain("note #3")
+    err.should_not contain("\"")
+  end
+
+  it "still refuses a blank note, unlike the TUI's close-confirm" do
+    # `notes.close` skips its modal for a blank note because the TUI judges the BUFFER on
+    # screen. Headless reads the last committed text, so "blank" here can just mean a peer
+    # has not saved yet — and the sentence must stay true of that note.
+    err = Gori::CLI::Run.note_delete_confirmation_error_for_spec(3, note(""), false).not_nil!
+    err.should contain("cannot be recovered")
+    err.should_not contain("exists nowhere else")
+  end
+
+  it "neutralizes the control bytes a terminal would act on, INCLUDING the Cf class" do
+    # A note is free text taken from $EDITOR, a paste or a pipe, so its "title" can carry
+    # ANSI — this sentence goes straight to a terminal. `should_not contain('\e')` alone
+    # would be vacuous (inspect escapes ESC by itself), so the escape TEXT is refused too.
+    err = Gori::CLI::Run.note_delete_confirmation_error_for_spec(1, note("a\e[31mred"), false).not_nil!
+    err.should_not contain('\e')
+    err.should_not contain("\\u001B") # what inspect alone, without term_safe, would leave
+    err.should contain("a·[31mred")
+
+    # U+202E (RIGHT-TO-LEFT OVERRIDE) reverses everything after it without changing a byte —
+    # the one input class that can defeat "is this the note I meant". Crystal's `Char#control?`
+    # is Cc AND Cf, so `term_safe` catches it where `Issues::Export.one_line`'s `[[:cntrl:]]`
+    # (Cc only) would not; this is why the helper does not reuse that one.
+    bidi = Gori::CLI::Run.note_delete_confirmation_error_for_spec(1, note("a\u{202E}gnitset"), false).not_nil!
+    bidi.should_not contain('\u{202E}')
+    bidi.should contain("a·gnitset")
+  end
+
+  it "clamps a long first line, and clamps before scrubbing so the work fits the message" do
+    long = Gori::CLI::Run.note_delete_confirmation_error_for_spec(1, note("x" * 200), false).not_nil!
+    long.should contain("…")
+    long.should_not contain("x" * 41)
+  end
+end
+
+# The wiring itself, asserted over the SOURCE for the two reasons `unknown_args_sweep_spec`
+# gives: `abort` calls `exit`, so the refusal is not catchable in-process, and the defect is an
+# ABSENCE — the pre-#1120 bug was exactly a missing flag and a missing gate, and every example
+# above stays green if the flag is dropped or the gate is moved below the write.
+describe "gori run notes delete — the gate is actually wired" do
+  body = notes_delete_body
+
+  it "registers -y/--yes on the delete parser and lets it reach the gate" do
+    body.should match(/p\.on\("-y", "--yes"/)
+    body.should match(/\{ yes = true \}/)
+    body.should contain("note_delete_confirmation_error(n, target, yes)")
+  end
+
+  it "runs the gate BEFORE the write, not after it" do
+    gate = body.index("note_delete_confirmation_error").not_nil!
+    save = body.index("Notes.save").not_nil!
+    gate.should be < save
+  end
+end
+
+module Gori::CLI::Run
+  def self.note_delete_confirmation_error_for_spec(n : Int32, entry : Notes::NoteEntry,
+                                                   yes : Bool) : String?
+    note_delete_confirmation_error(n, entry, yes)
+  end
+end
