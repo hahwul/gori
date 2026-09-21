@@ -441,6 +441,15 @@ module Gori::Tui
           # Additive on purpose — `upstream` keeps its exact v1 meaning for existing scripts.
           j.field "upstream", Settings.effective_upstream_proxy
           j.field "upstream_rules", Settings.upstream_rules.size
+          # The ENVIRONMENT arm, the same way: `upstream` is "" both for a direct install and
+          # for one sending everything through `$HTTPS_PROXY`, and a script reading only that
+          # field would call the second one direct. Credential-free by construction
+          # (`Settings.environment_upstream_status`), "" when the environment is not a route
+          # in effect — so a non-empty value always means live routing, never a variable that
+          # a pin, a scalar or a catch-all rule shadows — and, once a rule table narrows it,
+          # carrying the same "for destinations no upstream rule claims" qualifier the banner
+          # and the settings row show. Additive; `upstream` keeps v1.
+          j.field "upstream_env", Settings.environment_upstream_status
           # Everything below is the session's MODES — what gori is set to do to the next
           # request, as opposed to what it has already captured. The context shipped with
           # `project`/`flows`/`proxy` alone, which made the row strictly poorer than the

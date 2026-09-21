@@ -219,11 +219,13 @@ describe "Gori::Repeater::Engine.no_response_error" do
     previous_env = proxy_keys.map { |key| {key, ENV[key]?} }
     previous_proxy = Gori::Settings.upstream_proxy
     previous_project_proxy = Gori::Settings.project_upstream_proxy
+    previous_rules = Gori::Settings.upstream_rules
     begin
       proxy_keys.each { |key| ENV.delete(key) }
       ENV["HTTPS_PROXY"] = "http://secure-proxy.test:8443"
       Gori::Settings.upstream_proxy = ""
       Gori::Settings.project_upstream_proxy = nil
+      Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule # a leftover rule would answer first
 
       Gori::Repeater::Engine.no_response_error("origin.test", 443, "https").should eq(
         "no response from origin.test:443 (reached via upstream HTTP proxy secure-proxy.test:8443 — " \
@@ -234,6 +236,7 @@ describe "Gori::Repeater::Engine.no_response_error" do
       end
       Gori::Settings.upstream_proxy = previous_proxy
       Gori::Settings.project_upstream_proxy = previous_project_proxy
+      Gori::Settings.upstream_rules = previous_rules
     end
   end
 end

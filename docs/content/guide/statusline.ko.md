@@ -137,6 +137,7 @@ printf '\n'
   "proxy": { "host": "127.0.0.1", "port": 8070, "addr": "127.0.0.1:8070" },
   "upstream": "",
   "upstream_rules": 0,
+  "upstream_env": "",
   "scope": { "active": true, "rules": 2, "sandbox": false },
   "intercept": { "enabled": false, "queued": 0, "direction": "both" },
   "probe": "passive",
@@ -154,6 +155,7 @@ printf '\n'
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | 프록시가 실제로 리스닝 중인 주소 |
 | `upstream` | string | **캐치올** 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. [업스트림 규칙](/ko/reference/config/#upstream-rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
 | `upstream_rules` | integer | 적용 중인 [업스트림 규칙](/ko/reference/config/#upstream-rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
+| `upstream_env` | string | `upstream`이 비어 있고 규칙에도 걸리지 않을 때 트래픽을 보내는 프로세스 프록시 환경변수, 예: `HTTPS_PROXY → http proxy corp.example:3128`. 규칙 테이블이 범위를 좁히면 `· destinations no upstream rule claims`가 덧붙음; 환경변수에 닿는 경로가 없으면(프로젝트 고정, 비어 있지 않은 `upstream`, `*` 규칙) 비어 있음. 자격증명은 절대 담지 않음 |
 | `scope.active` / `scope.rules` | bool / integer | [스코프](/ko/guide/proxy/#scope) 필터가 실제로 작동 중인지 — 렌즈가 켜져 있고 **동시에** 규칙이 하나 이상 — 그리고 규칙이 몇 개인지 |
 | `scope.sandbox` | bool | [Sandbox](/ko/guide/proxy/#sandbox)가 스코프 밖 목적지를 기록만 안 하는 게 아니라 아예 차단하고 있는지 |
 | `intercept.enabled` | bool | catch가 켜져 있는지. 켜져 있는 동안 실제 클라이언트가 붙잡혀 있음 |

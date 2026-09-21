@@ -109,6 +109,67 @@ private def with_passthrough_proxy(passthrough : Array(String), &)
   end
 end
 
+private PROXY_ENV_KEYS = [
+  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+  "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+]
+
+# The process proxy variables set for one example, with gori's own upstream knobs blank so the
+# environment is the route that answers, and everything put back afterwards.
+private def with_proxy_environment(values : Hash(String, String), &)
+  previous = PROXY_ENV_KEYS.map { |key| {key, ENV[key]?} }
+  saved_proxy = Gori::Settings.upstream_proxy
+  saved_project = Gori::Settings.project_upstream_proxy
+  saved_rules = Gori::Settings.upstream_rules
+  begin
+    PROXY_ENV_KEYS.each { |key| ENV.delete(key) }
+    values.each { |key, value| ENV[key] = value }
+    Gori::Settings.upstream_proxy = ""
+    Gori::Settings.project_upstream_proxy = nil
+    Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
+    yield
+  ensure
+    previous.each { |key, value| value ? (ENV[key] = value) : ENV.delete(key) }
+    Gori::Settings.upstream_proxy = saved_proxy
+    Gori::Settings.project_upstream_proxy = saved_project
+    Gori::Settings.upstream_rules = saved_rules
+  end
+end
+
+# A one-shot upstream HTTP proxy that records the CONNECT request line it was handed and answers
+# 200. Whether it hears anything at all is the measurement: the environment below names it under
+# `HTTPS_PROXY` only, so a dial that asked the route for an `http` origin never arrives here.
+private def with_recording_upstream_proxy(&)
+  server = TCPServer.new("127.0.0.1", 0)
+  seen = Channel(String).new(1)
+  spawn do
+    conn = server.accept
+    request_line = conn.gets("\r\n", chomp: true) || ""
+    while (line = conn.gets("\r\n", chomp: true)) && !line.empty?
+    end
+    conn << "HTTP/1.1 200 Connection established\r\n\r\n"
+    conn.flush
+    seen.send(request_line)
+    sleep 50.milliseconds
+    conn.close rescue nil
+  rescue
+  end
+  begin
+    yield server.local_address.port, seen
+  ensure
+    server.close rescue nil
+  end
+end
+
+private def receive_within(ch : Channel(String), seconds : Int32, what : String) : String
+  select
+  when got = ch.receive
+    got
+  when timeout(seconds.seconds)
+    fail "#{what} did not arrive within #{seconds}s"
+  end
+end
+
 describe "TLS passthrough" do
   # The feature: a pinning client must reach the origin's OWN certificate. Asserted by
   # certificate identity, not by inference — CN=origin.test can only have come from the origin.
@@ -185,6 +246,56 @@ describe "TLS passthrough" do
     Gori::Settings.tls_passthrough?("anything.test").should be_false
   ensure
     Gori::Settings.tls_passthrough = [] of String
+  end
+  # The passthrough dial is a TLS origin's dial, so it must ask the environment for the proxy
+  # `HTTPS_PROXY` names — the decrypting branch already does (`dial_tls_result`). It used to
+  # ask for an `http` origin, which selects `HTTP_PROXY`, so an environment exporting only
+  # `HTTPS_PROXY` saw the one shape it exists to carry go DIRECT — and this proxy heard nothing.
+  #
+  # A NON-loopback authority on purpose, and one that need not resolve: the recording proxy
+  # receiving `CONNECT passthrough.test:<port>` IS the assertion, and a loopback target takes
+  # the direct carve-out below before the environment is even asked.
+  it "dials a passthrough CONNECT through HTTPS_PROXY, the TLS origin's variable (#1114)" do
+    with_passthrough_proxy(["passthrough.test"]) do |proxy, origin_port, sink, _seen, _done|
+      with_recording_upstream_proxy do |pport, connect_seen|
+        with_proxy_environment({"HTTPS_PROXY" => "http://127.0.0.1:#{pport}"}) do
+          raw = TCPSocket.new("127.0.0.1", proxy.port)
+          raw << "CONNECT passthrough.test:#{origin_port} HTTP/1.1\r\nHost: passthrough.test:#{origin_port}\r\n\r\n"
+          raw.flush
+          String.new(Codec::Http1.read_head(raw).not_nil!).should contain("200")
+          receive_within(connect_seen, 5, "the CONNECT at the environment proxy")
+            .should eq("CONNECT passthrough.test:#{origin_port} HTTP/1.1")
+          raw.close
+          sink.requests.should be_empty
+        end
+      end
+    end
+  end
+
+  # The other half of the same contract: a LOOPBACK target is direct before `NO_PROXY` or the
+  # variables are consulted (DESIGN.md §7, 2026-09-21), and that holds on the passthrough path
+  # too — the same `HTTPS_PROXY` that carried the CONNECT above hears nothing here. `127.0.0.1`
+  # rather than `localhost`, so nothing depends on how a host resolves that name.
+  it "sends a loopback passthrough CONNECT direct under the same HTTPS_PROXY (#1114)" do
+    with_passthrough_proxy(["127.0.0.1"]) do |proxy, origin_port, sink, _seen, _done|
+      with_recording_upstream_proxy do |pport, connect_seen|
+        with_proxy_environment({"HTTPS_PROXY" => "http://127.0.0.1:#{pport}"}) do
+          raw = TCPSocket.new("127.0.0.1", proxy.port)
+          raw << "CONNECT 127.0.0.1:#{origin_port} HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+          raw.flush
+          # 200 means the dial reached the pinned origin; a proxy that heard nothing means it
+          # got there directly (a failed direct dial would have answered 502).
+          String.new(Codec::Http1.read_head(raw).not_nil!).should contain("200")
+          select
+          when line = connect_seen.receive
+            fail "the loopback CONNECT reached the environment proxy: #{line}"
+          when timeout(300.milliseconds)
+          end
+          raw.close
+          sink.requests.should be_empty
+        end
+      end
+    end
   end
 end
 

@@ -2117,7 +2117,12 @@ module Gori::Proxy
       if (tls = @tls) && !Settings.tls_passthrough?(host)
         intercept_tunnel(req, host, port, tls)
       else
-        upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin)
+        # `origin_scheme: "https"`: a CONNECT is the client asking for the tunnel an `https://`
+        # URL needs, and the MITM branch's own dial (`dial_tls_result`) already says so. The
+        # default `"http"` picked `HTTP_PROXY`, so an environment exporting only `HTTPS_PROXY`
+        # sent this — the one shape that proxy exists to carry — direct instead (#1114).
+        upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin,
+          origin_scheme: "https")
         unless upstream
           write_gateway_error
           return false

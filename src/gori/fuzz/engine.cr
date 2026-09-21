@@ -709,7 +709,12 @@ module Gori::Fuzz
       released.each do |i|
         spawn do
           socket = sockets[i].not_nil!
-          results[i] = Repeater::Engine.read_response(socket, expanded, @origin.host, @origin.port, started)
+          # `origin_scheme:` for the same reason the warm-up exchange above carries it: the
+          # no-response diagnostic re-asks the route, and an https race target behind an
+          # HTTPS_PROXY-only environment otherwise loses its "(reached via …)" clause — or,
+          # with two proxies exported, names the wrong one (#1114).
+          results[i] = Repeater::Engine.read_response(socket, expanded, @origin.host, @origin.port, started,
+            origin_scheme: @origin.scheme)
           socket.close rescue nil
           done.send(nil)
         end
