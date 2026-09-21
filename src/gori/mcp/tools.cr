@@ -936,6 +936,13 @@ module Gori
         # back-pressures the engine's 256-slot event channel and stalls every crawl worker.
         getter persist_buf = [] of {Store::CapturedRequest, Store::CapturedResponse?}
         property persist_at : Time::Instant = Time.instant # last flush; see DISCOVER_PERSIST_INTERVAL
+        # Findings whose flow rows were NOT written — a flush the writer rolled back (a peer
+        # holding the writer slot), a closing store, or a project switched under the job. The
+        # finding is still in `results`; the row it names does not exist. Reported on
+        # `discover_status` / `discover_results` as `unsaved_flows`, because a caller that
+        # reads a finding here and then `get_flow`s it has no other way to tell "not yet
+        # flushed" from "never will be".
+        property unsaved = 0
         property? truncated = false
         property ended_at_ms : Int64? = nil
         property stop_requested_at_ms : Int64? = nil

@@ -275,13 +275,30 @@ module Gori
         # `job_project_mismatch` makes on the read side.
         if djob.db_path != @db_path
           Log.warn { "discover job #{djob.id}: dropping #{djob.persist_buf.size} unflushed finding(s) — project changed since the run started" }
-          djob.persist_buf.clear
+          drop_unsaved(djob)
           return
         end
-        store.insert_import_batch(djob.persist_buf)
+        # The COMMITTED count, not a fire-and-forget: 0 is a batch the writer rolled back (a peer
+        # holding the writer slot past the busy budget) or a closing store, and clearing the
+        # buffer over it silently lost up to 64 findings' rows per collision. The CLI twin
+        # (`flush_discover`) reports the same number on STDERR and exits 1 (#1118).
+        landed = store.insert_import_batch(djob.persist_buf)
+        lost = djob.persist_buf.size - landed
+        if lost > 0
+          djob.unsaved += lost
+          Log.warn { "discover job #{djob.id}: #{lost} finding(s) not saved as flows (store busy or closing) — their rows cannot be opened" }
+        end
         djob.persist_buf.clear
-      rescue
-        djob.persist_buf.clear # a store failure must not wedge the crawl or grow forever
+      rescue ex
+        # A store failure must not wedge the crawl or grow the buffer forever — but it is a
+        # loss, and it is counted as one.
+        Log.warn { "discover job #{djob.id}: #{djob.persist_buf.size} finding(s) not saved as flows (#{ex.message})" }
+        drop_unsaved(djob)
+      end
+
+      private def drop_unsaved(djob : DiscoverJob) : Nil
+        djob.unsaved += djob.persist_buf.size
+        djob.persist_buf.clear
       end
 
       @[Tool("discover_status", gated: true, read_only: true)]
@@ -302,6 +319,9 @@ module Gori
             # says whether it ended having covered everything it queued.
             j.field "incomplete_reason", incomplete_reason(djob.status)
             j.field "results_truncated", djob.truncated?
+            # Findings whose flow rows were not written (see `DiscoverJob#unsaved`). Non-zero
+            # means that many of `found` cannot be opened with get_flow / seen in list_sitemap.
+            j.field "unsaved_flows", djob.unsaved
             j.field "error", djob.error_msg
             if s
               j.field "calibrated_out", s.calibrated_out
@@ -347,6 +367,7 @@ module Gori
             j.field "incomplete_reason", incomplete_reason(djob.status)
             j.field "queued", djob.queued
             j.field "results_truncated", djob.truncated?
+            j.field "unsaved_flows", djob.unsaved
           end
         end)
       end
@@ -420,7 +441,9 @@ module Gori
         tool j, "discover_status", "Counts + state of a discover job (running|done|budget_exhausted|stopped|error), " \
                                    "including the FP/FN figures (calibrated_out / *_suppressed). " \
                                    "budget_exhausted means max_requests halted the run with tasks still queued — a " \
-                                   "partial sweep, NOT an exhaustive one; see incomplete_reason and queued." do |s|
+                                   "partial sweep, NOT an exhaustive one; see incomplete_reason and queued. " \
+                                   "unsaved_flows counts findings whose History/Sitemap rows could not be written " \
+                                   "(project busy); those findings are listed but cannot be opened with get_flow." do |s|
           s.field "job_id", strprop("id from discover_start"), required: true
         end
 
