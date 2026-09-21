@@ -3102,3 +3102,15 @@ environment `http://` value is a plaintext HTTP CONNECT hop and `https://` means
 proxy; credentials in process URI userinfo are accepted because they are not persisted. The
 persisted `network.upstream_proxy` `https://` spelling remains the historical plaintext form,
 so adopting the convention cannot reinterpret an existing settings file.
+
+**Loopback is direct before `NO_PROXY` is read.** `localhost` and any loopback or unspecified
+address literal (`127.0.0.0/8`, `::1`, `0.0.0.0`, `::`) never take the environment route, whether
+or not `NO_PROXY` names them — the same answer Go's `httpproxy` and curl give. A profile that
+exports `HTTP_PROXY` for the corporate egress does not mean "send my own machine's traffic
+there", and doing so both failed every local test and disclosed the local request-target to a
+third party. It keys on the DESTINATION only — a proxy that itself sits on `127.0.0.1` is still
+used for a remote target — and it holds on every dial, the TLS passthrough relay and the blind
+CONNECT tunnel included: those now ask for the TLS origin's variable, and a loopback target
+still answers "direct" before that variable is read. The carve-out belongs to the environment
+arm only: a rule, scalar, or project pin that routes loopback through a proxy is an operator
+decision and still wins.

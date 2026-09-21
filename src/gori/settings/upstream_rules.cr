@@ -222,10 +222,30 @@ module Gori::Settings
   # commands/tests that set them after startup predictable.
   private def self.environment_upstream_route(dest_host : String, origin_scheme : String?,
                                               origin_port : Int32?) : UpstreamRoute
+    return UpstreamRoute::DIRECT if environment_loopback_host?(dest_host)
     return UpstreamRoute::DIRECT if environment_no_proxy?(dest_host, origin_port)
     value = environment_proxy_value(origin_scheme)
     return UpstreamRoute::DIRECT unless value
     parse_environment_upstream_proxy(value)
+  end
+
+  # `localhost` and any loopback or unspecified address literal are direct BEFORE `NO_PROXY` is
+  # read — the convention this fallback adopts (Go's `httpproxy`, curl) answers "no proxy" for
+  # them without consulting the exception list, because no operator exports `HTTP_PROXY` meaning
+  # "send my own machine's traffic to the corporate proxy". Without this, a profile that exports
+  # the variable turned every local test into `CONNECT localhost:3000` at a third party: the dial
+  # failed there AND the local request-target was disclosed. `0.0.0.0`/`::` join the loopback
+  # set because a proxy asked to reach them dials ITSELF, never the operator's host.
+  #
+  # ONLY the environment arm. An explicit rule, scalar, or project pin naming a proxy for
+  # loopback is an operator decision (a local jump host under test is a real shape) and keeps
+  # winning; this never runs for those.
+  private def self.environment_loopback_host?(host : String) : Bool
+    bare = HostPattern.normalize(host)
+    return true if bare == "localhost"
+    ip = Socket::IPAddress.new(bare, 0) rescue nil
+    return false unless ip
+    ip.loopback? || ip.unspecified?
   end
 
   # HTTP_PROXY and friends conventionally carry a proxy URL, but the bare host:port form

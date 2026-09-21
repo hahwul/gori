@@ -255,6 +255,22 @@ describe "upstream rules" do
       reset_upstream
     end
 
+    it "never sends localhost or a loopback literal to an environment proxy, NO_PROXY or not" do
+      with_proxy_environment({"HTTP_PROXY" => "http://env-proxy.test:3128"}) do
+        ["localhost", "LocalHost.", "127.0.0.1", "127.9.9.9", "::1", "[::1]", "::ffff:127.0.0.1",
+         "0.0.0.0", "::"].each do |host|
+          Gori::Settings.upstream_route(host, "http", 3000).direct?.should be_true, host
+        end
+        # The carve-out is the environment's, not the operator's: an explicit route to a local
+        # proxy is a decision and keeps winning.
+        Gori::Settings.upstream_route("10.0.0.1", "http", 80).host.should eq("env-proxy.test")
+        Gori::Settings.upstream_proxy = "127.0.0.1:1080"
+        Gori::Settings.upstream_route("localhost", "http", 3000).host.should eq("127.0.0.1")
+      end
+    ensure
+      reset_upstream
+    end
+
     it "keeps explicit gori routes ahead of the environment fallback" do
       with_proxy_environment({"HTTP_PROXY" => "http://env-proxy.test:3128"}) do
         Gori::Settings.upstream_proxy = "global.test:8080"
