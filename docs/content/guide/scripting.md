@@ -35,6 +35,13 @@ clear`, `project delete`), and there an invisible winner decides which project g
 
 Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into; SQLite WAL keeps both readers and the writer happy. A `body:` query is the exception: answering it drains the search index, which is a write.
 
+Write subcommands use the same WAL database as the TUI and MCP and serialize through the Store
+writer. They may run while the TUI is open, but a capture commit can briefly own SQLite's writer
+slot. Each CLI SQLite open/writer wait has a one-second budget; when the slot stays busy, the
+required write exits non-zero with the project name and `retry or close the TUI` guidance. A repeater send
+also reports an error if its network response could not be persisted, rather than silently losing
+the saved response.
+
 ```bash
 gori run history --project my-engagement -q 'status:5xx'
 gori run issues --db /path/to/project.db --format json

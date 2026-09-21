@@ -47,7 +47,8 @@ end
 # What a failed `open_store` says, when the failure is not what the wrapper implies.
 #
 # A write subcommand opens for write and `Store.open` migrates, so a peer holding the write
-# lock (a TUI, a `gori run capture`, an MCP server) fails the open after `busy_timeout=5000`
+# lock (a TUI, a `gori run capture`, an MCP server) fails the open after the CLI's bounded
+# SQLite busy timeout
 # with SQLite's bare "database is locked" — printed under "cannot open database <path>".
 # That reads as a corrupt or unreadable FILE, and it is the opposite: the file is fine and the
 # condition clears on its own. Reproduced against a peer holding `BEGIN IMMEDIATE`.
@@ -55,6 +56,14 @@ describe "gori run — what a refused open blames" do
   it "names a peer's write lock as transient, not the file as bad" do
     hint = Gori::CLI::Run.open_failure_hint(Exception.new("database is locked"))
     hint.should contain("another gori")
+    hint.should contain("retry")
+  end
+
+  it "names the project when the connection pool is busy" do
+    hint = Gori::CLI::Run.open_failure_hint(
+      DB::PoolTimeout.new("Could not check out a connection in 1.0 seconds"),
+      nil, false, "acme")
+    hint.should contain(%(project "acme"))
     hint.should contain("retry")
   end
 

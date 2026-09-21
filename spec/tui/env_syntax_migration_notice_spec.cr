@@ -90,7 +90,8 @@ describe "env.syntax migration notice" do
     # The headless CLI: every `gori run` subcommand funnels through `open_store`, read-only ones
     # included — the re-spelling writes through its own connection.
     run = notice_src("gori", "cli", "run.cr")
-    run.should contain("report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name))")
+    run.should contain("report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name,")
+    run.should contain("busy_timeout_ms: CLI_BUSY_TIMEOUT_MS")
 
     # MCP binds a project at TWO sites — the constructor and `bind_project` (switch_project, an
     # auto-binding create_project) — so both ask, through one helper.

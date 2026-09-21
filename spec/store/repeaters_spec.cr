@@ -196,6 +196,31 @@ describe "Gori::Store repeater tabs (v9)" do
     end
   end
 
+  it "answers false when a peer holds the writer slot" do
+    path = File.tempname("gori-repeaters-contended", ".db")
+    store = Gori::Store.open(path, busy_timeout_ms: 1)
+    peer = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=1")
+    begin
+      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      lock = peer.checkout
+      begin
+        lock.exec("BEGIN IMMEDIATE")
+        store.update_repeater_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, nil, 1_i64,
+          request_sha256: nil).should be_false
+      ensure
+        lock.exec("ROLLBACK") rescue nil
+        lock.release rescue nil
+      end
+    ensure
+      peer.close rescue nil
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+      File.delete?("#{path}.open.lock")
+    end
+  end
+
   it "reads a legacy row whose `request` was bound as a Crystal String (TEXT storage " \
      "class), the way an out-of-date gori writer bound it before the V2 fix" do
     with_store do |store, path|
