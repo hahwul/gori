@@ -1003,7 +1003,7 @@ module Gori::Tui
     end
 
     private def read_or_all(read : TextReadState, ed : TextArea) : String
-      read.selection? ? read.copy_text(ed) : read.copy_all(ed)
+      read.selection?(ed) ? read.copy_text(ed) : read.copy_all(ed)
     end
 
     private def do_copy(text : String, label : String? = nil) : Nil
@@ -1028,7 +1028,7 @@ module Gori::Tui
     def cookie_selection_active? : Bool
       s = cur
       case s.pane
-      when :input   then s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
+      when :input   then s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?(s.input)
       when :payload then s.payload.selection?
       else               false
       end

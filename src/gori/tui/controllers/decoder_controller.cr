@@ -826,7 +826,7 @@ module Gori::Tui
       s = cur
       case s.pane
       when :input
-        s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
+        s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?(s.input)
       when :output then s.view.output_selection?
       else              false
       end

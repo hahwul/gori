@@ -85,22 +85,22 @@ describe "READ-mode chrome + border badge parity" do
       # JwtView#paint_read_chrome draws from `input_read` alone, so this is the number that
       # decides where the block caret lands.
       s.input_read.cursor.cx.should eq(s.input.lines_snapshot[0].size)
-      s.input_read.selection?.should be_false
+      s.input_read.selection?(s.input).should be_false
 
       s.input_home(true) # ⇧Home extends back to column 0
-      s.input_read.selection?.should be_true
+      s.input_read.selection?(s.input).should be_true
       s.input_read.cursor.cx.should eq(0)
 
       s.input_home(false) # …and a plain Home collapses it
-      s.input_read.selection?.should be_false
+      s.input_read.selection?(s.input).should be_false
     end
 
     it "leaves INSERT mode's own anchor alone (jwt input)" do
       s = JwtSession.new("abcdef", nil)
       s.input_mode = InputMode::Insert
       s.input_end(true)
-      s.input.selection?.should be_true       # the editor owns it in INS …
-      s.input_read.selection?.should be_false # … and the read cursor stays out of it
+      s.input.selection?.should be_true                # the editor owns it in INS …
+      s.input_read.selection?(s.input).should be_false # … and the read cursor stays out of it
     end
   end
 

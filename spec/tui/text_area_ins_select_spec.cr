@@ -201,7 +201,7 @@ describe "Gori::Tui::TextArea INSERT-mode selection" do
       5.times { ed.move(0, 1, selecting: true) }
 
       read.adopt_editor_selection(ed).should be_true
-      read.selection?.should be_true
+      read.selection?(ed).should be_true
       read.copy_text(ed).should eq("hello")
       # The span now lives in exactly ONE place: the editor-side anchor is retired, so
       # pressing `i` again cannot bring a stale INS band back.
@@ -224,11 +224,11 @@ describe "Gori::Tui::TextArea INSERT-mode selection" do
       ed = TextArea.new("hello world")
       read = TextReadState.new
       read.select_line(ed)
-      read.selection?.should be_true
+      read.selection?(ed).should be_true
 
       ed.insert('X') # the edit that made the old span meaningless
       read.adopt_editor_selection(ed).should be_false
-      read.selection?.should be_false
+      read.selection?(ed).should be_false
       ed.selection?.should be_false
     end
 

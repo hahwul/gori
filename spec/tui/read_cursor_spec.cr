@@ -130,13 +130,13 @@ describe Gori::Tui::TextReadState do
 
     read = TextReadState.new
     read.select_line(ed)
-    read.selection?.should be_true
+    read.selection?(ed).should be_true
 
     read.sync_from(ed)
-    read.selection?.should be_true # a caret adopt is not a selection gesture
+    read.selection?(ed).should be_true # a caret adopt is not a selection gesture
 
     read.click(ed, rect, 3, 1) # a plain press on line 1
-    read.selection?.should be_false
+    read.selection?(ed).should be_false
     read.cursor.cy.should eq(1)
   end
 
@@ -148,7 +148,7 @@ describe Gori::Tui::TextReadState do
     read = TextReadState.new
     read.click(ed, rect, 0, 0)                  # press at line 0 col 0
     read.click(ed, rect, 7, 1, selecting: true) # drag into line 1
-    read.selection?.should be_true
+    read.selection?(ed).should be_true
     text = read.copy_text(ed)
     text.should start_with("alpha bravo")
     text.should_not contain("foxtrot") # the drag stopped on line 1

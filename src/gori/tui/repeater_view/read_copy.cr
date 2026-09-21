@@ -152,7 +152,7 @@ class Gori::Tui::RepeaterView
     # drives `Runner#read_selection_active?`, which gates BOTH the space-menu entry's title
     # and `read_copy`, so claiming a selection here while copy still read `@req_read` would
     # offer "Copy selection" and then copy the caret line.
-    when :request  then pane_insert?(:request) ? req_editor.selection? : @req_read.selection?
+    when :request  then pane_insert?(:request) ? req_editor.selection? : @req_read.selection?(req_editor)
     when :response then @resp_cursor.selection?
     when :target   then !pane_insert?(:target) && @target_read.selection?(target_active_cx)
     else                false

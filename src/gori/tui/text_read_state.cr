@@ -7,8 +7,48 @@ module Gori::Tui
   class TextReadState
     getter cursor : ReadCursor
 
+    # The document this state last spoke to: the editor and the `edits` revision it was at.
+    # `bind` compares against it on every call that takes an editor — see there.
+    @doc : TextArea?
+    @doc_rev : Int32
+
     def initialize
       @cursor = ReadCursor.new
+      @doc = nil
+      @doc_rev = -1
+    end
+
+    # THE hand-over seam: a read state whose selection anchor indexes a document that is no
+    # longer the one on screen drops that selection, here, before it answers anything.
+    #
+    # The anchor is a (line, column) pair with no notion of which buffer it was made in. Two
+    # owners hand this state a DIFFERENT document without going through it: Notes keeps one
+    # read state for a strip of sub-tabs, each with its own `TextArea` (a `^2` swaps the
+    # editor under the state), and every owner's peer reload / `^E` hand-back / project
+    # switch replaces the bytes inside the same editor (`set_text`, `replace_from_outside`).
+    # Either way the band was painted at the old coordinates over the new text, and `y` put
+    # the wrong document's characters on the clipboard — the operator never selected in it.
+    #
+    # `IssuesView#open_detail_issue` states the rule ("the READ SELECTION, whose anchor
+    # indexes the document being handed over") and fixed it at one caller with an explicit
+    # `clear_selection`. That caller is still needed — a skip-if-unchanged seed hands over a
+    # new row whose bytes match the old, which no counter can see — but a rule that each new
+    # hand-over site has to remember is how this bug reached five of them. So the state keeps
+    # the identity of the editor it last synced against and that editor's `edits` revision,
+    # and treats a change in either as the hand-over. `edits` is the editor's own monotonic
+    # content counter (every splice, `set_text`, `undo`); the read state moves the caret only
+    # through `place_cursor` and the buffer-edge jumps, none of which bump it, so an unchanged
+    # revision means exactly "the text the anchor was made in is still the text".
+    #
+    # Rebinding also re-syncs the caret from the editor: the old position may index past the
+    # end of the new document, and every caller reads `@cursor` right after this.
+    private def bind(editor : TextArea) : Nil
+      doc = @doc
+      return if doc && doc.same?(editor) && @doc_rev == editor.edits
+      @cursor.clear_selection
+      @cursor.sync(editor.cy, editor.cx)
+      @doc = editor
+      @doc_rev = editor.edits
     end
 
     # --- the READ-mode over-paint ----------------------------------------------
@@ -70,7 +110,11 @@ module Gori::Tui
       @cursor.clear_selection
     end
 
-    def selection? : Bool
+    # Whether a READ band is live IN `editor`. Takes the editor on purpose: a selection made in
+    # another document is not a selection here, and the owners that branch on this to offer
+    # "Copy selection" then hand the same editor to `copy_text` — the two must agree.
+    def selection?(editor : TextArea) : Bool
+      bind(editor)
       @cursor.selection?
     end
 
@@ -95,6 +139,7 @@ module Gori::Tui
     def move(editor : TextArea, dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       lines = editor.lines_snapshot
       return if lines.empty?
+      bind(editor)
       @cursor.sync(editor.cy, editor.cx)
       if dr != 0 && (target = editor.visual_row_target(dr))
         @cursor.move_to(target[0], target[1], selecting: selecting)
@@ -105,6 +150,7 @@ module Gori::Tui
     end
 
     def sync_from(editor : TextArea) : Nil
+      bind(editor)
       @cursor.sync(editor.cy, editor.cx)
     end
 
@@ -147,6 +193,7 @@ module Gori::Tui
     # calls `place_cursor`, which retires the editor-side anchor, so the span lives in exactly
     # one place afterwards and cannot come back the next time `i` is pressed.
     def adopt_editor_selection(editor : TextArea) : Bool
+      bind(editor) # INS typing moved `edits` — bind BEFORE adopting, or the next paint drops it
       span = editor.selection_span
       lines = editor.lines_snapshot
       if span.nil? || lines.empty?
@@ -165,6 +212,7 @@ module Gori::Tui
     # `selecting` (⇧Home/⇧End, which move the editor caret directly) and collapsing it
     # otherwise. `sync_from`'s counterpart for a key that went through the editor first.
     def sync_to(editor : TextArea, selecting : Bool = false) : Nil
+      bind(editor)
       @cursor.move_to(editor.cy, editor.cx, selecting: selecting)
     end
 
@@ -175,6 +223,7 @@ module Gori::Tui
     def click(editor : TextArea, rect : Rect, mx : Int32, my : Int32, selecting : Bool = false) : Nil
       lines = editor.lines_snapshot
       return if lines.empty?
+      bind(editor)
       @cursor.sync(editor.cy, editor.cx) # the press position — the anchor a drag extends from
       editor.click_to_cursor(rect, mx, my)
       @cursor.move_to(editor.cy, editor.cx, selecting: selecting)
@@ -187,6 +236,7 @@ module Gori::Tui
     def select_word(editor : TextArea, rect : Rect, mx : Int32, my : Int32) : Bool
       lines = editor.lines_snapshot
       return false if lines.empty?
+      bind(editor)
       editor.click_to_cursor(rect, mx, my)
       select_word_at_cursor(editor, lines)
     end
@@ -199,6 +249,7 @@ module Gori::Tui
     def select_word_at_cursor(editor : TextArea, lines : Array(String)? = nil) : Bool
       lines ||= editor.lines_snapshot
       return false if lines.empty?
+      bind(editor)
       @cursor.sync(editor.cy, editor.cx)
       return false unless @cursor.select_word_at_cursor(lines)
       apply(editor, lines)
@@ -208,6 +259,7 @@ module Gori::Tui
     def apply(editor : TextArea, lines : Array(String)? = nil) : Nil
       lines ||= editor.lines_snapshot
       return if lines.empty?
+      bind(editor)
       cx = @cursor.cx.clamp(0, lines[@cursor.cy].size)
       editor.place_cursor(@cursor.cy, cx)
     end
