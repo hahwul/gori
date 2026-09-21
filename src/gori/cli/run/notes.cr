@@ -6,7 +6,8 @@ module Gori
   module CLI
     module Run
       @[Subcommand("notes", help: [
-        {"notes [<n>]", "Read or write the project's notes (list, <n>, --all, create, delete)"},
+        {"notes [<n>]", "Read or write the project's notes (list, <n>, --all, create)"},
+        {"notes delete <n>", "Delete the note at 1-based list position <n> (needs --yes)"},
       ])]
       private def self.cmd_notes(args : Array(String)) : Nil
         case sub = args.first?
@@ -40,7 +41,7 @@ module Gori
                      "or --all to print them all.\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run notes create [--text TEXT] [options]\n" \
-                     "  gori run notes delete <n> [options]"
+                     "  gori run notes delete <n> --yes [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--all", "Print every note in full instead of the one-line list") { all = true }
@@ -129,14 +130,28 @@ module Gori
         end
       end
 
+      # `gori run notes delete <n> --yes` — remove one note by its 1-based list position.
+      #
+      # `--yes` is required for the reason the rest of the delete family requires it, only more
+      # so: a note is prose the operator typed, and unlike a flow or a fuzz run there is no
+      # capture or re-run that reproduces it. The TUI already confirms here — `notes.close` puts
+      # up a "Its text will be discarded" modal and `notes.clear` another — and headless was the
+      # one surface that took the number and ran.
+      #
+      # MCP is NOT covered by that and this comment does not claim it is: `delete_note` is
+      # `gated:`, but the gate is a per-SERVER enable, which is why `clear_history` and
+      # `delete_repeaters` each ask for `confirm:true` on top of it. `delete_note` asks for
+      # nothing, and closing that is a change to the MCP contract rather than to this file.
       private def self.cmd_notes_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
+        yes = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run notes delete <n> [options]\n\n" \
+          p.banner = "Usage: gori run notes delete <n> --yes [options]\n\n" \
                      "Delete the note at 1-based list position <n> (as shown by `notes`)."
+          p.on("-y", "--yes", "Confirm the deletion (required — there is no interactive prompt here)") { yes = true }
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -157,9 +172,23 @@ module Gori
             store.close
             abort "gori run notes delete: no note ##{n} (this project has #{persisted.size} note#{persisted.size == 1 ? "" : "s"})"
           end
+          target = persisted.notes[n - 1]
+          # Gated AFTER the note is resolved, so the refusal can name the text that would go —
+          # and after the "no note #n" abort, so a typo'd number still gets the specific answer.
+          #
+          # NOT free: `open_store` above already migrated the schema and re-spelled the stored
+          # env tokens, so a refused invocation is not a no-op on disk. It stays here anyway,
+          # because resolving the position on a separate read-only handle and reopening for
+          # write would let a peer's insert or delete land between the two — and `n` is a
+          # POSITION, so the note this refusal names would no longer be the note the second
+          # handle deletes. One handle is what keeps the name honest.
+          if err = note_delete_confirmation_error(n, target, yes)
+            store.close
+            abort "gori run notes delete: #{err}"
+          end
           # Delete by the note's STABLE id (not its list position) and merge, so a concurrent
           # writer's other notes aren't clobbered by a blind overwrite. See Notes.merge.
-          target_id = persisted.notes[n - 1].id
+          target_id = target.id
           # Keep the ACTIVE note active across the delete, by id. `persisted.cur` is a
           # position, and removing a note ahead of it slides every later one up — so deleting
           # note 1 while note 3 was active left `cur` on 3, which is now the note that used to
@@ -181,6 +210,56 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # The refusal `notes delete` owes an operator who did not pass --yes, or nil when they
+      # did. Split from the delete itself so a spec can pin the wording — `cmd_notes_delete`
+      # ends in `abort`, which a spec cannot drive (the same reason `delete_confirmation_error`
+      # is its own method in `history.cr`).
+      #
+      # The target is NAMED, where `repeater delete`'s gate only counts: a note is addressed by
+      # its 1-based LIST POSITION, so `notes delete 2` means a different note once an earlier
+      # one is gone, and the first line is the only thing that tells the operator whether the
+      # number they typed is the note they meant. A blank note has no first line, and echoing
+      # the listing's "note N" fallback here would repeat the number back as if it were a name,
+      # so that case says nothing extra.
+      #
+      # It still REFUSES a blank note, where the TUI's `notes.close` skips its modal for one.
+      # That is not drift: the TUI calls a note blank on the buffer the operator is looking at,
+      # while this reads the last COMMITTED text, and a peer typing into that note in a TUI or
+      # through `update_note` has not committed yet. So the sentence stays true of a blank note
+      # too — "cannot be recovered", not "its text exists nowhere else", which would be a claim
+      # about text this surface cannot see.
+      #
+      # Takes the ENTRY, not a title: `Notes.title` splits the whole note body, and the happy
+      # `--yes` path must not pay for a string the first line here throws away.
+      private def self.note_delete_confirmation_error(n : Int32, entry : Notes::NoteEntry, yes : Bool) : String?
+        return nil if yes
+        named = Notes.title(entry.text).try { |t| " (#{note_title_for_message(t)})" } || ""
+        "refusing to delete note ##{n}#{named} without --yes; positions shift when a note is " \
+        "removed, and a deleted note cannot be recovered"
+      end
+
+      # A note's first line, fit to print inside a one-line terminal message.
+      #
+      # Clamped BEFORE it is scrubbed, so the work is proportional to the message rather than
+      # to the note: a note body is unbounded (`notes create` reads STDIN) and can be one very
+      # long line, and scrubbing all of it to keep 39 characters is a copy of the whole thing.
+      #
+      # `CLI::Output.term_safe`, NOT `Issues::Export.one_line` — which is what MCP wraps this
+      # same title in. The two are not interchangeable here: `one_line` collapses `[[:cntrl:]]`,
+      # which is Cc ONLY, while `term_safe` tests Crystal's `Char#control?`, which is Cc AND Cf.
+      # Cf is the class that matters for a line a terminal renders — U+202E and the bidi
+      # isolates reverse the display without changing a byte, so an operator checking "is this
+      # the note I meant" could be shown a name that is not the one that would go. See the same
+      # reasoning spelled out at `CLI::Settings.unsafe_char?`.
+      #
+      # `inspect` last, for the quotes: a first line containing one cannot forge the end of the
+      # name. It escapes, so the rendered name can exceed the clamp — the clamp bounds the
+      # note's characters, not the printed width.
+      private def self.note_title_for_message(title : String) : String
+        clamped = title.size > 40 ? "#{title[0, 39]}…" : title
+        CLI::Output.term_safe(clamped).inspect
       end
 
       private def self.parse_note_index(arg : String?) : Int32?

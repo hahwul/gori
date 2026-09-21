@@ -81,7 +81,7 @@ gori run <subcommand> [verb] [options]
 | `jwt [<token>]` | Decode, re-sign, or generate attack payloads for a JWT |
 | `cookie [<cookie>]` | Decode, verify, brute-force, or forge a Flask / Rack / Django session cookie |
 | `decoder <chain> [input]` | Run a Decoder encode / decode / hash chain |
-| `notes [<n>]` · `create` · `delete` | Read, write, or delete project notes |
+| `notes [<n>]` · `create` · `delete` | Read, write, or delete project notes (`delete` needs `--yes`) |
 | `issues` · `create` · `update` · `delete` | List / export issues, or write and remove issues |
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
@@ -887,14 +887,16 @@ gori run notes                                  # list
 gori run notes 2                                # print note 2
 gori run notes create --text "SSRF candidate on /fetch"
 echo "pasted from a scratchpad" | gori run notes create
-gori run notes delete 2
+gori run notes delete 2 --yes
 ```
 
 | Option | Description |
 | -------- | ------------- |
 | `list` | `--all` prints every note in full instead of a summary line |
 | `create` | `--text=TEXT`, or a positional argument, or STDIN |
-| `delete <n>` (`rm`) | Delete the note at index `n` |
+| `delete <n>` (`rm`) | Delete the note at index `n`; `-y`/`--yes` is required |
+
+A note is prose that exists nowhere else — no capture or re-run reproduces one — and the index is a **list position**, so `notes delete 2` names a different note once an earlier one is gone. `delete` therefore refuses without `-y`/`--yes` (there is no interactive prompt), and the refusal quotes the note's first line, when it has one, so a wrong number is visible before it costs anything.
 
 ### run links
 
