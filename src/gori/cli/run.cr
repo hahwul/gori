@@ -636,6 +636,26 @@ module Gori
           background_index: false,
           busy_timeout_ms: busy_ms,
           checkout_timeout_seconds: checkout_s)
+        begin
+          hydrate_cli_store(store, project, busy_ms)
+        rescue ex
+          # A failure AFTER the open used to leave this Store alive — its open-lock flock held
+          # and its writer fiber parked — while the rescue below decided what to say. Harmless
+          # only while every caller exits moments later; `abort_on_failure: false` callers
+          # (the post-send writes) carry on, so the handle they never received is closed here.
+          store.close
+          raise ex
+        end
+        store
+      rescue ex : DB::Error | SQLite3::Exception
+        abort open_failure_message(ex, project, read_only) if abort_on_failure
+        raise ex
+      end
+
+      # Everything a `gori run` store needs loaded into this process before a command reads a
+      # token, a rule or a slot out of it. Split from `open_store` so a raise in here closes the
+      # store it was hydrating (see the caller).
+      private def self.hydrate_cli_store(store : Store, project : Project, busy_ms : Int32) : Nil
         # THE token-grammar reconcile, before anything reads a token out of this store (#env.syntax).
         # `read_only` does not exempt a command: the handle above may be read-only, but the
         # re-spelling writes through its own connection, and `gori run repeater list` is exactly as
@@ -670,13 +690,18 @@ module Gori
         # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
         # holding the pointer. See `reapply_active_slot`.
         reapply_active_slot
-        store
-      rescue ex : DB::Error | SQLite3::Exception
-        message = "gori run: cannot open database #{project.db_path}: " \
-                  "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
-                  "#{open_failure_hint(ex, project.db_path, read_only)}"
-        abort message if abort_on_failure
-        raise ex
+      end
+
+      # The one sentence for a project that could not be opened: SQLite's own words (or the
+      # non-database fallback) plus `open_failure_hint`'s reason. Public so a caller that
+      # survives the failure (`persist_repeater_response`, which must not abort a completed
+      # send) reports the SAME accurate reason `open_store`'s abort would have — a read-only
+      # file, a non-writable WAL directory, a peer's lock — instead of collapsing every one of
+      # them into "busy or unwritable".
+      def self.open_failure_message(ex : Exception, project : Project, read_only : Bool = false) : String
+        "gori run: cannot open database #{project.db_path}: " \
+        "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
+        "#{open_failure_hint(ex, project.db_path, read_only)}"
       end
 
       # The open-time re-spelling, said out loud. STDERR, never STDOUT: `gori run … --format json`

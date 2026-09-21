@@ -920,8 +920,11 @@ module Gori
                                                  request_sha256 : String?) : String?
         store = begin
           open_store(project, abort_on_failure: false)
-        rescue Gori::Error | DB::Error | SQLite3::Exception
-          return project_write_failure("response was NOT saved", project)
+        rescue ex : Gori::Error | DB::Error | SQLite3::Exception
+          # The accurate reason (`open_failure_message`), not the generic busy sentence: a
+          # read-only file and a non-writable WAL directory reach here too, and "retry" is the
+          # wrong advice for both.
+          return "response was NOT saved: #{open_failure_message(ex, project)}"
         end
         begin
           return nil if store.update_repeater_response(id, head, body, error, duration_us, request_sha256: request_sha256)
@@ -1161,8 +1164,8 @@ module Gori
                                                        project : Project) : Int64 | String
         store = begin
           open_store(project, abort_on_failure: false)
-        rescue Gori::Error | DB::Error | SQLite3::Exception
-          return project_write_failure("History was NOT saved", project)
+        rescue ex : Gori::Error | DB::Error | SQLite3::Exception
+          return "History was NOT saved: #{open_failure_message(ex, project)}"
         end
         begin
           Repeater::HistoryRecord.record(store, plan, result, created_at, wire,

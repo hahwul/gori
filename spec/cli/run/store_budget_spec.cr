@@ -55,10 +55,14 @@ describe "gori run — the SQLite wait budget a subcommand opens with" do
   end
 
   it "hands the re-spelling the same budget as the open beside it" do
-    open_store = cli_src("run.cr")[/private def self\.open_store\(.*?\n      rescue ex/m].not_nil!
+    run = cli_src("run.cr")
+    open_store = run[/private def self\.open_store\(.*?\n      end\n/m].not_nil!
     open_store.should contain("busy_ms, checkout_s = store_budget(long_running)")
     open_store.should contain("busy_timeout_ms: busy_ms,")
     open_store.should contain("checkout_timeout_seconds: checkout_s)")
-    open_store.should contain("busy_timeout_ms: busy_ms))")
+    open_store.should contain("hydrate_cli_store(store, project, busy_ms)")
+    hydrate = run[/private def self\.hydrate_cli_store\(.*?\n      end\n/m].not_nil!
+    hydrate.should contain("EnvMigration.reconcile(store, project.db_path, project.name,")
+    hydrate.should contain("busy_timeout_ms: busy_ms))")
   end
 end

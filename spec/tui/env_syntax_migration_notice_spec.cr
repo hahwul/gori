@@ -90,13 +90,19 @@ describe "env.syntax migration notice" do
     # The headless CLI: every `gori run` subcommand funnels through `open_store`, read-only ones
     # included — the re-spelling writes through its own connection.
     run = notice_src("gori", "cli", "run.cr")
-    # Scoped to `open_store`'s own body: the file has a second `Store.open` and a bare
-    # `busy_timeout_ms:` anywhere in it satisfied the old whole-file `contain`. The reconcile
-    # must ride the SAME budget the open beside it was given — a one-shot open with a
-    # five-second re-spelling would wait longer on the migration than on the project.
-    open_store = run[/private def self\.open_store\(.*?\n      rescue ex/m].not_nil!
-    open_store.should contain("report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name,")
-    open_store.scan(/busy_timeout_ms: busy_ms\b/).size.should eq(2)
+    # Scoped to the two methods that make up a CLI open: the file has a second `Store.open`
+    # and a bare `busy_timeout_ms:` anywhere in it satisfied the old whole-file `contain`. The
+    # reconcile must ride the SAME budget the open beside it was given — a one-shot open with
+    # a five-second re-spelling would wait longer on the migration than on the project — so
+    # `open_store` chooses `busy_ms` once and hands it to both `Store.open` and the hydration.
+    open_store = run[/private def self\.open_store\(.*?\n      end\n/m].not_nil!
+    open_store.should contain("busy_timeout_ms: busy_ms,")
+    open_store.should contain("hydrate_cli_store(store, project, busy_ms)")
+    hydrate = run[/private def self\.hydrate_cli_store\(.*?\n      end\n/m].not_nil!
+    hydrate.should contain("report_env_syntax_migration(EnvMigration.reconcile(store, project.db_path, project.name,")
+    hydrate.should contain("busy_timeout_ms: busy_ms))")
+    hydrate.index("EnvMigration.reconcile").not_nil!
+      .should be < hydrate.index("Env.load_project(store)").not_nil!
 
     # MCP binds a project at TWO sites — the constructor and `bind_project` (switch_project, an
     # auto-binding create_project) — so both ask, through one helper.
