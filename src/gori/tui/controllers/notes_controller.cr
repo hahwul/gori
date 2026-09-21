@@ -216,6 +216,11 @@ module Gori::Tui
         end
         return true
       end
+      # `notes_body_rect` is what the EDITOR was drawn into: the filter bar above it and the
+      # link-preview row carved off its last line are not it. `TextArea#click_to_cursor` clamps
+      # rather than refusing, so a press on the preview row used to jump the caret to the last
+      # visible line and arm a drag from a row that carries no text at all.
+      return true unless body.contains?(mx, my)
       @press_on_editor = true # the motion that continues this press belongs to the editor
       @notes.click_to_cursor(body, mx, my)
       true
@@ -247,6 +252,10 @@ module Gori::Tui
       body = notes_body_rect(rect)
       # The NOR/INS chip is a button, not text — a double-click there is two toggles.
       return false if Frame.mode_badge_hit(mx, my, body.y, body.right - 1, body.x + 1, @notes.insert_mode?)
+      # …and `select_word_at` clamps like the press does, so the rows the editor was NOT drawn
+      # into would otherwise take a word from the last visible line — a band `y` then copies,
+      # off a row the pointer was never on. Same test as the press above.
+      return false unless body.contains?(mx, my)
       @notes.select_word_at(body, mx, my)
     end
 

@@ -332,3 +332,34 @@ describe "Gori::Tui::NotesController — what a press arms" do
     end
   end
 end
+
+# The rows `notes_body_rect` CARVES OFF — the `/ filter` bar above the editor and the
+# link-preview row taken from its last line. `TextArea#click_to_cursor` and `#select_word_at`
+# both CLAMP rather than refusing, so a press on the preview row used to place the caret on the
+# last visible line of the note, take a word from it, and arm a drag there. Harmless while the
+# drag was refused outside INSERT; since #1124 it is a band `y` copies (see
+# spec/tui/press_target_spec.cr for the same shape on the Project DESCRIPTION card).
+describe "Gori::Tui::NotesController — rows the editor was not drawn into" do
+  it "arms no drag and takes no word from the link-preview row" do
+    with_notes_controller do |controller|
+      view = controller.view
+      view.exit_insert! # `notes_new` (the helper's setup) drops into INSERT
+      view.replace_current("alpha beta\ngamma delta")
+      rect = Rect.new(0, 0, 76, 20)
+      backend = MemoryBackend.new(76, 20)
+      controller.render_body(Screen.new(backend), rect, :body)
+      # The row the preview is DRAWN on, read off a real render rather than re-derived, so the
+      # spec cannot disagree with `carve_links_row`.
+      links_y = (0...rect.h).find { |y| backend.row(y).includes?("[repeater] XSS PoC (+2)") }
+      links_y.should_not be_nil
+
+      controller.handle_click(rect, rect.x + 4, links_y.not_nil!).should be_true
+      controller.supports_drag?.should be_false
+      controller.handle_double_click(rect, rect.x + 4, links_y.not_nil!).should be_false
+      view.selection?.should be_false
+      view.insert_mode?.should be_false
+      # …and the caret never left line 0, where the note opened.
+      view.copy_text.should eq("alpha beta")
+    end
+  end
+end
