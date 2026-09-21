@@ -66,6 +66,25 @@ docker-build tag="gori:dev":
 docker-run tag="gori:dev" *args:
     docker run --rm -it -v gori:/data {{tag}} {{args}}
 
+# Apple's `container` (macOS 26+, Apple Silicon) reads the same Dockerfile and takes
+# the same flags as the two recipes above, so these mirror them rather than reshaping
+# anything: `-v gori:/data` auto-creates the named volume, `-it` gives the TUI its
+# terminal, and `container build` honours `docker/Dockerfile.dockerignore` the way
+# BuildKit does. Two differences worth knowing: the builder runs in its own VM, which
+# does not inherit the host's HTTP_PROXY, and every container gets its own vmnet IP,
+# so publishing a port is optional — `container ls` prints the address to point a
+# client at instead.
+
+# Build the container image with Apple's `container` (macOS 26+).
+[group('docker')]
+container-build tag="gori:dev":
+    container build -f docker/Dockerfile -t {{tag}} .
+
+# Run the image `container-build` produced.
+[group('docker')]
+container-run tag="gori:dev" *args:
+    container run --rm -it -v gori:/data {{tag}} {{args}}
+
 # Run all tests. `--no-debug` because the suite is one 7,000-unit binary whose compile the
 # object cache barely helps (~35 s warm), and skipping DWARF takes ~17% off that. What it
 # costs: an UNEXPECTED exception's backtrace shows mangled names without file:line —

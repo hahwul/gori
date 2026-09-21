@@ -143,6 +143,21 @@ docker run --rm -it -v gori:/data -p 8070:8070 -e TZ=Asia/Seoul \
   ghcr.io/hahwul/gori --listen 0.0.0.0
 ```
 
+### Apple container
+
+Apple's [`container`](https://github.com/apple/container) (macOS 26+, Apple Silicon) runs the same image with the same flags. `-v gori:/data` creates the named volume for you, `-it` gives the TUI its terminal, and `-i` is all `gori mcp` needs:
+
+```bash
+container run --rm -it \
+  -v gori:/data \
+  -p 8070:8070 \
+  ghcr.io/hahwul/gori --listen 0.0.0.0
+```
+
+Every container also gets its own IP on the host's `vmnet` network, so publishing a port is optional: `container ls` prints the address, and pointing your client's proxy straight at `<ip>:8070` works just as well.
+
+`container build -f docker/Dockerfile -t gori:dev .` builds the image from source and honours `docker/Dockerfile.dockerignore` the way BuildKit does. The builder runs in its own VM, which does not inherit the host's `HTTP_PROXY`.
+
 ## Pre-built Binary
 
 Standalone binaries for macOS and Linux are attached to every [GitHub Release](https://github.com/hahwul/gori/releases/latest).

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- Docs: an Apple container section in the install guide — Apple's `container` (macOS 26+) runs the published image with the same flags docker takes, and `just container-build` / `container-run` mirror the docker recipes
+
 ## v0.7.0
 
 ### New features
