@@ -74,19 +74,19 @@ gori mcp --read-only
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
 | `gori mcp` | 179 | ~203 KB | ~52k | 전부 (기본값) |
-| `--read-only` | 62 | ~66 KB | ~17k | 읽기와 순수 연산; 쓰기·전송 없음 |
-| `--tools=@recon` | 27 | ~41 KB | ~11k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
-| `--tools=@recon --read-only` | 22 | ~29 KB | ~7k | 전송과 쓰기를 뺀 `@recon` |
-| `--tools=@minimal` | 10 | ~16 KB | ~4k | History와 개별 flow 읽기, 오퍼레이터와 대화 |
+| `--read-only` | 62 | ~66 KB | ~17k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `--tools=@recon` | 32 | ~46 KB | ~12k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon --read-only` | 25 | ~33 KB | ~9k | `--read-only`가 끄는 도구를 뺀 `@recon` |
+| `--tools=@minimal` | 13 | ~20 KB | ~5k | History와 개별 flow 읽기, 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
 
 | 프로필 | 도구 |
 | --- | --- |
-| `@minimal` | `project_info`, `list_projects`, `switch_project`, `ql_reference`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `operator_messages`, `reply_to_operator` |
-| `@recon` | `@minimal`에 더해 `ql_explain`, `list_sitemap`, `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `probe_issues`, `list_issues`, `get_issue`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `operator_messages`, `reply_to_operator` |
+| `@recon` | `@minimal`에 더해 `list_sitemap`, `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `get_issue`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
-프로필은 글롭이 아니라 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`이 조용히 커지지 않습니다. 둘 다 `switch_project`를 포함하므로 바인딩 없이 시작해도 동작합니다.
+프로필은 글롭이 아니라 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`이 조용히 커지지 않습니다. 둘 다 `switch_project`와 `create_project`를 포함하므로, 프로젝트가 하나도 없는 머신에서 바인딩 없이 시작해도 동작합니다.
 
 `--tools`는 도구 이름, `*` 글롭, `@프로필`을 쉼표로 나열한 것이고 왼쪽부터 적용됩니다. `-`를 앞에 붙인 항목은 빼냅니다:
 

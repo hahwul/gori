@@ -418,6 +418,21 @@ module Gori
         JSON.build { |j| tools.list(j) }
       end
 
+      # The ONE rounding of a catalogue's size into the KB the banner prints and the guide's
+      # table states — the spec checks the table with this, so the two cannot round apart.
+      def self.catalogue_kb(bytes : Int32) : Int32
+        (bytes / 1024.0).round.to_i
+      end
+
+      # `tools/list ~203 KB`, or the bytes when there is less than half a KB of it: a
+      # one-tool `--tools` spec used to be reported as "~0 KB", the one line whose job is the
+      # cost saying there is none.
+      def self.catalogue_weight(filter : ToolFilter?, allow_actions : Bool) : String
+        bytes = catalogue_json(filter, allow_actions).bytesize
+        kb = catalogue_kb(bytes)
+        kb.zero? ? "tools/list #{bytes} bytes" : "tools/list ~#{kb} KB"
+      end
+
       # Where `operator_messages` starts reading (see `initialize` / `bind_project`).
       def messages_floor : Int64
         @messages_floor

@@ -100,12 +100,14 @@ describe Gori::MCP::ToolFilter do
       (Gori::MCP::ToolFilter::MINIMAL - recon.tools).should be_empty
     end
 
-    # A profile has to survive every start it can be handed: unbound (a picker, or no call can
-    # ever bind a project — #1136) and `--read-only` (a profile of gated tools would abort).
+    # A profile has to survive every start it can be handed: unbound (#1136 — and BOTH
+    # pickers, because `switch_project` has nothing to switch to on a host with no project yet,
+    # where only `create_project` gets the agent out) and `--read-only` (a profile of gated
+    # tools would abort).
     it "works unbound and under --read-only" do
       profiles.each do |profile|
-        profile.tools.any? { |n| Gori::MCP::Tools::PROJECT_PICKERS.includes?(n) }.should be_true,
-          "@#{profile.name} keeps no project picker"
+        (Gori::MCP::Tools::PROJECT_PICKERS - profile.tools).should be_empty,
+          "@#{profile.name} leaves out a project picker"
         filter = Gori::MCP::ToolFilter.parse("@#{profile.name}", Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter)
         served = Gori::MCP::Tools.served_names(filter, allow_actions: false)
         served.should contain("project_info")

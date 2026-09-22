@@ -35,13 +35,7 @@ module Gori::CLI
       p.on("--no-project", "Start unbound even inside a Git workspace (agent picks via list/create/switch)") { no_project = true }
       p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
       p.on("--read-only", "Disable action tools (send_request, create/update_issue); serve the project without a writer") { read_only = true }
-      # No size in this text: it is compiled in, and every number written here has drifted
-      # (#1137). The startup log weighs the catalogue it is about to serve instead.
-      p.on("--tools=SPEC", "Advertise only these tools — comma-separated names, globs or @profiles, " \
-                           "'-' subtracts (e.g. '@recon', '@minimal,send_request', '-fuzz_*,-mine_*').\n" \
-                           "The client loads every advertised tool into the model's context; the\n" \
-                           "startup log says how much. Profiles:\n" +
-                           MCP::ToolFilter::PROFILES.join("\n") { |pr| "  @#{pr.name.ljust(9)}#{pr.summary}" }) { |v| tools_spec = v }
+      p.on("--tools=SPEC", mcp_tools_help) { |v| tools_spec = v }
       p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_targets << "agy" }
       p.on("--install-codex", "Install gori as an MCP server in Codex (~/.codex/config.toml)") { install_targets << "codex" }
       p.on("--install-claude", "Install gori as an MCP server in Claude Desktop config") { install_targets << "claude" }
@@ -107,24 +101,8 @@ module Gori::CLI
     # model's context and keeps it there for the session. Said on EVERY start — which is why
     # it is HERE and not beside the bound server below: an unbound start (outside a git
     # workspace, `--no-project`, or a database that would not open) spends exactly the same
-    # context and used to say nothing at all. The count is what this process will actually
-    # advertise, gate included; "all 179 tools (--read-only)" overstated a 62-tool catalogue
-    # by threefold, on the one line whose whole job is that number.
-    #
-    # And the WEIGHT is measured here, from the very listing the client will be handed,
-    # rather than written into help or docs: every size gori ever wrote down had drifted by
-    # the time #1137 measured it. One JSON build of a few hundred KB, once per start.
-    weight = "tools/list ~#{(MCP::Tools.catalogue_json(tool_filter, !read_only).bytesize / 1024.0).round.to_i} KB"
-    if f = tool_filter
-      Log.info { "mcp: --tools=#{f.spec} advertises #{advertised.size} of #{MCP::Tools::TOOL_NAMES.size} tools (#{weight}): #{advertised.sort.join(", ")}" }
-    else
-      Log.info do
-        served = advertised.size == MCP::Tools::TOOL_NAMES.size ? "all #{advertised.size}" : "#{advertised.size} of #{MCP::Tools::TOOL_NAMES.size}"
-        "mcp: advertising #{served} tools#{" (--read-only)" if read_only} (#{weight}); " \
-        "narrow it with a --tools profile (#{MCP::ToolFilter.profile_names}) or a --tools=SPEC " \
-        "of names and globs to spend less of the model's context on it"
-      end
-    end
+    # context and used to say nothing at all.
+    Log.info { mcp_catalogue_banner(tool_filter, read_only) }
 
     selection, bind_error = if no_project
                               {MCP::ProjectResolver::Selection.new(nil, nil, nil, "unbound"), nil}
@@ -201,6 +179,46 @@ module Gori::CLI
       server.run # blocks until STDIN EOF (client closed)
     ensure
       store.close
+    end
+  end
+
+  # The `--tools` help. No size in it: this text is compiled in, and every number ever
+  # written here had drifted by the time #1137 measured it — the startup log weighs the
+  # catalogue it is about to serve instead. The profile column is as wide as the longest
+  # name, not a fixed `ljust`, which pads only when the value is SHORTER and would run a
+  # longer profile's name straight into its summary.
+  def self.mcp_tools_help : String
+    width = MCP::ToolFilter::PROFILES.max_of(&.name.size) + 3
+    String.build do |io|
+      io << "Advertise only these tools: comma-separated names, globs or @profiles,\n"
+      io << "'-' subtracts (e.g. '@recon', '@minimal,send_request', '-fuzz_*,-mine_*').\n"
+      io << "The client loads every advertised tool into the model's context; the\n"
+      io << "startup log says how much. Profiles:"
+      MCP::ToolFilter::PROFILES.each do |pr|
+        io << "\n  " << "@#{pr.name}".ljust(width) << pr.summary
+      end
+    end
+  end
+
+  # The start-up line that says what this server's catalogue costs.
+  #
+  # Said on EVERY start, bound or not (see the call site), and the count is what this process
+  # will actually advertise, gate included; "all 179 tools (--read-only)" overstated a
+  # 62-tool catalogue by threefold, on the one line whose whole job is that number. The
+  # WEIGHT is measured from the very listing the client will be handed, rather than written
+  # into help or docs, for the reason `mcp_tools_help` gives. One JSON build per start — the
+  # same work the server's first `declared_args` does again, off any hot path.
+  def self.mcp_catalogue_banner(tool_filter : MCP::ToolFilter?, read_only : Bool) : String
+    advertised = MCP::Tools.served_names(tool_filter, !read_only)
+    total = MCP::Tools::TOOL_NAMES.size
+    weight = MCP::Tools.catalogue_weight(tool_filter, !read_only)
+    if f = tool_filter
+      "mcp: --tools=#{f.spec} advertises #{advertised.size} of #{total} tools (#{weight}): #{advertised.sort.join(", ")}"
+    else
+      served = advertised.size == total ? "all #{advertised.size}" : "#{advertised.size} of #{total}"
+      "mcp: advertising #{served} tools#{" (--read-only)" if read_only} (#{weight}); " \
+      "narrow it with a --tools profile (#{MCP::ToolFilter.profile_names}) or a --tools=SPEC " \
+      "of names and globs to spend less of the model's context on it"
     end
   end
 

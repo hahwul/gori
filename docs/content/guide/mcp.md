@@ -74,19 +74,19 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
 | `gori mcp` | 179 | ~203 KB | ~52k | Everything (the default) |
-| `--read-only` | 62 | ~66 KB | ~17k | Reading and pure compute; nothing writes or sends |
-| `--tools=@recon` | 27 | ~41 KB | ~11k | Read and map the capture, replay a request, record issues and notes |
-| `--tools=@recon --read-only` | 22 | ~29 KB | ~7k | `@recon` without the send and the writes |
-| `--tools=@minimal` | 10 | ~16 KB | ~4k | Read History and single flows, talk to the operator |
+| `--read-only` | 62 | ~66 KB | ~17k | Read tools and pure compute; no live requests |
+| `--tools=@recon` | 32 | ~46 KB | ~12k | Read and map the capture, replay a request, record issues and notes |
+| `--tools=@recon --read-only` | 25 | ~33 KB | ~9k | `@recon` minus what `--read-only` disables |
+| `--tools=@minimal` | 13 | ~20 KB | ~5k | Read History and single flows, talk to the operator |
 
 Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
 
 | Profile | Tools |
 | --- | --- |
-| `@minimal` | `project_info`, `list_projects`, `switch_project`, `ql_reference`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `operator_messages`, `reply_to_operator` |
-| `@recon` | `@minimal`, plus `ql_explain`, `list_sitemap`, `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `probe_issues`, `list_issues`, `get_issue`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `operator_messages`, `reply_to_operator` |
+| `@recon` | `@minimal`, plus `list_sitemap`, `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `get_issue`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
-A profile is a fixed list of names, not a glob, so a later gori that adds a `list_*` tool does not quietly grow `@recon`. Both keep `switch_project`, so they work on an unbound start too.
+A profile is a fixed list of names, not a glob, so a later gori that adds a `list_*` tool does not quietly grow `@recon`. Both keep `switch_project` and `create_project`, so they work on an unbound start, even on a machine with no project yet.
 
 `--tools` takes a comma-separated list of tool names, `*` globs and `@profiles`, applied left to right; a term prefixed with `-` subtracts:
 

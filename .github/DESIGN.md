@@ -3195,5 +3195,8 @@ failure `--tools` already refuses to produce by accident.
 the same spec grammar, so they compose (`@minimal,send_request`, `-@recon`). A glob would let a
 profile grow with the registry — `list_*` gains every new lister — which is the silent growth
 #1137 was filed about, moved inside the lever meant to contain it. A tool joins a profile by
-being written into `ToolFilter::PROFILES`, and every profile keeps a project picker so it
-survives an unbound start (#1136).
+being written into `ToolFilter::PROFILES`. Every profile keeps both project pickers, since
+`switch_project` has nothing to switch to on a host with no project yet (#1136), and a
+member's description may not send the agent to a tool the profile leaves out: the model reads
+it as fact, and each such pointer is a call spent on `UNKNOWN_TOOL`. The spec holds the
+exceptions — mentions that are not instructions — in a list with a reason each.

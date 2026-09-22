@@ -22,10 +22,11 @@ module Gori
     # the one combination that leaves nothing to serve, and `Tools.served_names` is the one
     # place the two are put together.
     #
-    # SPEC is a comma-separated list of tool names and `*` globs, evaluated left to right; a
-    # term prefixed with `-` subtracts. Globs mean the prefix families the tools are already
-    # named for (`list_*`, `intercept_*`, `fuzz_*`) are groups for free, with no catalogue to
-    # drift out of step with the registry:
+    # SPEC is a comma-separated list of tool names, `*` globs and `@profile`s, evaluated left
+    # to right; a term prefixed with `-` subtracts. Globs mean the prefix families the tools
+    # are already named for (`list_*`, `intercept_*`, `fuzz_*`) are groups for free, with no
+    # catalogue to drift out of step with the registry. A profile IS such a catalogue — a
+    # hand-kept list (`PROFILES`) — and pays for it with the specs that pin it (see there):
     #
     #     --tools='list_*,get_*,ql_*,send_request'      only those
     #     --tools='-fuzz_*,-mine_*,-discover_*'         everything except the async workbench
@@ -44,20 +45,31 @@ module Gori
       record Profile, name : String, summary : String, tools : Array(String)
 
       # What an agent attached to a capture reads with, and the channel back to the operator.
-      # `list_projects` + `switch_project` are here on purpose: a profile has to work on an
-      # UNBOUND start too (outside a git workspace, `--no-project`, a database that would not
-      # open), and a server with no picker cannot be repaired from the agent's side (#1136).
-      MINIMAL = %w[project_info list_projects switch_project
-        ql_reference list_history get_flow get_response_body_chunk
-        get_current_context operator_messages reply_to_operator]
+      #
+      # All three project binders are here on purpose: a profile has to work on an UNBOUND
+      # start too (outside a git workspace, `--no-project`, a database that would not open).
+      # `switch_project` alone is not enough — on a host with no project registered yet there
+      # is nothing to switch TO, and only `create_project` gets the agent out (#1136).
+      #
+      # `ql_explain` and `get_repeater_context` are here because members' own descriptions send
+      # the agent to them (`list_history{strict}` → ql_explain; `get_current_context`'s tab
+      # numbers → get_repeater_context "before acting"). A profile whose tools point at tools
+      # it does not serve spends a call on every such pointer and gets UNKNOWN_TOOL back;
+      # spec/mcp/catalogue_size_spec.cr holds every profile to that.
+      MINIMAL = %w[project_info list_projects switch_project create_project
+        ql_reference ql_explain list_history get_flow get_response_body_chunk
+        get_current_context get_repeater_context operator_messages reply_to_operator]
 
       # …plus the rest of the capture an agent maps a target from, the pure decoders it reads
       # tokens with, ONE request replayed, and the issues and notes it records findings in.
       # Not the workbench (fuzz/mine/discover/sequence/authorize, repeater tabs, rules): an
       # agent that needs those is the one the full catalogue is for.
-      RECON = MINIMAL + %w[ql_explain list_sitemap list_scope compare_flows list_env
-        decode jwt_decode
-        probe_issues list_issues get_issue list_notes get_note
+      #
+      # Finding triage is recording, so `probe_promote` / `probe_dismiss` ride with the issue
+      # writes; `probe_delete` does not — it erases the scanner's record rather than judging it.
+      RECON = MINIMAL + %w[list_sitemap list_scope compare_flows list_env
+        decode jwt_decode jwt_verify
+        probe_issues probe_promote probe_dismiss list_issues get_issue list_notes get_note
         send_request create_issue update_issue create_note update_note]
 
       # Explicit NAMES, never globs, and that is the design: a profile is a promise about
