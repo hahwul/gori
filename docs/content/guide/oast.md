@@ -1,6 +1,6 @@
 +++
 title = "OAST"
-description = "Catch out-of-band callbacks (interactsh & friends) to confirm blind SSRF, XXE, and injection."
+description = "Catch out-of-band callbacks (interactsh & friends) to confirm blind SSRF, XXE, injection, and remote file inclusion."
 weight = 70
 
 [extra]
@@ -135,7 +135,7 @@ gori run oast release 7                        # deregister it; its callbacks st
 
 `resume` keeps the registration on exit (Ctrl-C stops polling, nothing more) and persists every callback it catches into the project, so the OAST tab shows the same hits. `listen --save` behaves the same way from its first poll. `release` is the deliberate teardown for either.
 
-A saved session is also what arms the **blind** active checks. `ssrf_oast`, `xxe_oast` and `cmd_injection_oast` plant a payload and wait for the target to call home, so they mint against a stored session; with none they plan nothing and send nothing, and `gori run probe --active` (and MCP `probe_scan`, under `out_of_band`) says so rather than letting an empty result read as "no blind vulnerability".
+A saved session is also what arms the **blind** active checks. `ssrf_oast`, `xxe_oast`, `cmd_injection_oast` and `rfi_oast` plant a payload and wait for the target to call home, so they mint against a stored session; with none they plan nothing and send nothing, and `gori run probe --active` (and MCP `probe_scan`, under `out_of_band`) says so rather than letting an empty result read as "no blind vulnerability".
 
 The saved providers (the **Providers** sub-tab's rows) are manageable headless too, with `gori run oast providers add|update|enable|disable|delete|list`, and both `listen` and `resume` take `--interval SEC` (default 5) for the poll cadence; the flags are in the [CLI Reference](/reference/cli/#run-oast).
 

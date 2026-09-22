@@ -51,7 +51,7 @@ module Gori
     # them "needs OAST" and to keep their (currently-unpayable) request cost out of the enabled
     # total. One list so the catalog, the estimate, and the badge cannot drift on which rules
     # these are.
-    OOB_RULE_IDS = Set{"ssrf_oast", "cmd_injection_oast", "xxe_oast"}
+    OOB_RULE_IDS = Set{"ssrf_oast", "cmd_injection_oast", "xxe_oast", "rfi_oast"}
 
     # Whether the analyzer/scan must SKIP rule `id`, given the project's stored disabled-id set.
     def self.rule_disabled?(id : String, stored : Set(String)) : Bool
@@ -163,6 +163,7 @@ module Gori
       "xxe_oast"                       => "An XML probe caused an OAST callback after declaring and referencing an external parameter entity. Disable DTD processing and external entity resolution in the XML parser, including external parameter entities and external DTD loading. Use a parser configuration that forbids network and file access.",
       "ssrf_oast"                      => "An out-of-band probe pointed this URL parameter at a gori-controlled OAST payload and the server called back to it — confirming the endpoint fetches an attacker-supplied URL (server-side request forgery). Validate the target against a strict allowlist of hosts/schemes, resolve and pin the destination IP (rejecting private/link-local/metadata ranges and DNS-rebinding), and never let a request parameter choose an arbitrary host to connect to. Blind SSRF reaches internal services, cloud metadata (169.254.169.254), and localhost admin panels.",
       "cmd_injection_oast"             => "An out-of-band probe appended a shell-breakout payload to this command/diagnostic parameter and the server's shell called the OAST listener back — confirming the value is concatenated into an OS command (command injection, typically remote code execution). Do not exec user input: pass arguments to a parameterized/safe API (no shell), or map the parameter to an allowlisted operation. Reject shell metacharacters and never build a command string from a request value.",
+      "rfi_oast"                       => "An out-of-band probe pointed an include-shaped parameter at a gori-controlled remote resource and the server called back — confirming remote file inclusion / execution. Do not pass request values to include/require or template loaders; use an allowlist of internal resource identifiers, disable remote URL includes, and keep uploaded or remote content non-executable.",
       "nextjs_action_no_auth"          => "A probe re-sent this Next.js server action (Next-Action) with the session Cookie / Authorization removed and still received a comparable 2xx response. Next.js does not authenticate or authorize server actions for you — enforce authentication and per-user authorization INSIDE every 'use server' function (and treat each action as a public, unauthenticated endpoint until it does). Single-shot; confirm the unauthenticated response actually contains privileged data.",
       "request_smuggling_clte"         => "A timing probe hung on a CL.TE framing conflict: the front-end framed this request by Content-Length while the back-end honoured Transfer-Encoding, so one tier blocked on a body the other had already ended — a request-smuggling / desync primitive. The front-end and back-end MUST agree on framing: reject any request carrying BOTH Content-Length and Transfer-Encoding (RFC 7230 §3.3.3), normalize/strip conflicting framing at the edge, and prefer HTTP/2 end-to-end (its length-prefixed framing removes the ambiguity). Confirm manually with the Repeater 'send group' (a complete smuggled prefix + a benign follow-up on one connection).",
       "request_smuggling_tecl"         => "A timing probe hung on a TE.CL framing conflict: the front-end honoured Transfer-Encoding (the request ended at the terminating chunk) while the back-end waited for Content-Length bytes that never arrived — a request-smuggling / desync primitive. The front-end and back-end MUST agree on framing: reject requests carrying BOTH Content-Length and Transfer-Encoding, have the edge re-chunk or strip conflicting framing, and prefer HTTP/2 end-to-end. Confirm manually with the Repeater 'send group'.",
@@ -317,6 +318,7 @@ module Gori
       "xxe_oast"                  => {611, "Improper Restriction of XML External Entity Reference"},
       "ssrf_oast"                 => {918, "Server-Side Request Forgery (SSRF)"},
       "cmd_injection_oast"        => {78, "Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"},
+      "rfi_oast"                  => {98, "Improper Control of Filename for Include/Require Statement in PHP Program"},
       "jwt_alg_none"              => {347, "Improper Verification of Cryptographic Signature"},
       "jwt_key_injection_header"  => {347, "Improper Verification of Cryptographic Signature"},
       "jwt_weak_alg"              => {327, "Use of a Broken or Risky Cryptographic Algorithm"},

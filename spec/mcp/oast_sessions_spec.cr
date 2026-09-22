@@ -270,9 +270,9 @@ describe "MCP OAST transport failures" do
 end
 
 # `oast_start` mints an ad-hoc registration that dies with the process — which meant an agent
-# could START a listener and still have NO way to reach the three things that need an
+# could START a listener and still have NO way to reach the blind rules that need an
 # `oast_sessions` row: `Probe::OutOfBand::StoreMinter` mints every blind SSRF/XXE/command-
-# injection payload against one (so `probe_scan{active:true}` ran those rules inert and its
+# injection/RFI payload against one (so `probe_scan{active:true}` ran those rules inert and its
 # empty result said nothing about blind vulnerabilities), `list_oast_sessions` could not show
 # the agent its own listener, and `oast_resume` had nothing to re-open in a later process.
 # `persist:true` is that row.

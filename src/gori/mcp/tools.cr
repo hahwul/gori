@@ -1347,7 +1347,7 @@ module Gori
       # that is not there, so it stays ad-hoc and the caller reads `store_session_id: null`).
       #
       # This is the row three things need and none of them could have from MCP before:
-      # `Probe::OutOfBand::StoreMinter` mints every blind SSRF/XXE/command-injection payload
+      # `Probe::OutOfBand::StoreMinter` mints every blind SSRF/XXE/command-injection/RFI payload
       # against one, so an agent that started a listener still got NO out-of-band probe
       # coverage; `list_oast_sessions` could not show the agent its own listener; and
       # `oast_resume` had nothing to re-open after the server process ended, which for the one
