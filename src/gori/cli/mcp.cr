@@ -35,9 +35,13 @@ module Gori::CLI
       p.on("--no-project", "Start unbound even inside a Git workspace (agent picks via list/create/switch)") { no_project = true }
       p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
       p.on("--read-only", "Disable action tools (send_request, create/update_issue); serve the project without a writer") { read_only = true }
-      p.on("--tools=SPEC", "Advertise only these tools — comma-separated names/globs, '-' subtracts " \
-                           "(e.g. 'list_*,get_*,send_request' or '-fuzz_*,-mine_*'). The full catalogue is " \
-                           "~43k tokens of client context; this trims it") { |v| tools_spec = v }
+      # No size in this text: it is compiled in, and every number written here has drifted
+      # (#1137). The startup log weighs the catalogue it is about to serve instead.
+      p.on("--tools=SPEC", "Advertise only these tools — comma-separated names, globs or @profiles, " \
+                           "'-' subtracts (e.g. '@recon', '@minimal,send_request', '-fuzz_*,-mine_*').\n" \
+                           "The client loads every advertised tool into the model's context; the\n" \
+                           "startup log says how much. Profiles:\n" +
+                           MCP::ToolFilter::PROFILES.join("\n") { |pr| "  @#{pr.name.ljust(9)}#{pr.summary}" }) { |v| tools_spec = v }
       p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_targets << "agy" }
       p.on("--install-codex", "Install gori as an MCP server in Codex (~/.codex/config.toml)") { install_targets << "codex" }
       p.on("--install-claude", "Install gori as an MCP server in Claude Desktop config") { install_targets << "claude" }
@@ -106,14 +110,19 @@ module Gori::CLI
     # context and used to say nothing at all. The count is what this process will actually
     # advertise, gate included; "all 179 tools (--read-only)" overstated a 62-tool catalogue
     # by threefold, on the one line whose whole job is that number.
+    #
+    # And the WEIGHT is measured here, from the very listing the client will be handed,
+    # rather than written into help or docs: every size gori ever wrote down had drifted by
+    # the time #1137 measured it. One JSON build of a few hundred KB, once per start.
+    weight = "tools/list ~#{(MCP::Tools.catalogue_json(tool_filter, !read_only).bytesize / 1024.0).round.to_i} KB"
     if f = tool_filter
-      Log.info { "mcp: --tools=#{f.spec} advertises #{advertised.size} of #{MCP::Tools::TOOL_NAMES.size} tools: #{advertised.sort.join(", ")}" }
+      Log.info { "mcp: --tools=#{f.spec} advertises #{advertised.size} of #{MCP::Tools::TOOL_NAMES.size} tools (#{weight}): #{advertised.sort.join(", ")}" }
     else
       Log.info do
         served = advertised.size == MCP::Tools::TOOL_NAMES.size ? "all #{advertised.size}" : "#{advertised.size} of #{MCP::Tools::TOOL_NAMES.size}"
-        "mcp: advertising #{served} tools#{" (--read-only)" if read_only}; " \
-        "narrow the catalogue with --tools=SPEC (e.g. --tools='list_*,get_*,send_request') " \
-        "to spend less of the model's context on it"
+        "mcp: advertising #{served} tools#{" (--read-only)" if read_only} (#{weight}); " \
+        "narrow it with a --tools profile (#{MCP::ToolFilter.profile_names}) or a --tools=SPEC " \
+        "of names and globs to spend less of the model's context on it"
       end
     end
 

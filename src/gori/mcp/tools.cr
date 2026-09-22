@@ -407,6 +407,17 @@ module Gori
         TOOL_NAMES.select { |name| serves?(filter, allow_actions, name) }
       end
 
+      # The `tools` array of `tools/list`, byte for byte, under these two flags — what the
+      # start-up banner weighs and what the guide's catalogue table is checked against
+      # (#1137). Built on a detached, storeless instance, which is exact rather than an
+      # approximation: the listing may not vary with anything on the connection (the
+      # 2026-07-28 MUST that `Tools#list` already keeps), so which project is bound cannot
+      # change a byte of it. A storeless `Tools` opens nothing and announces nothing.
+      def self.catalogue_json(filter : ToolFilter?, allow_actions : Bool) : String
+        tools = new(nil, allow_actions, true, tool_filter: filter)
+        JSON.build { |j| tools.list(j) }
+      end
+
       # Where `operator_messages` starts reading (see `initialize` / `bind_project`).
       def messages_floor : Int64
         @messages_floor

@@ -4,8 +4,13 @@ module Gori
   module MCP
     # `gori mcp --tools=SPEC` — which of `Tools::TOOL_NAMES` this server advertises.
     #
-    # The whole catalogue is ~43,000 tokens, and an MCP client loads it into the model's
-    # context before the first question is asked and keeps it there for the session.
+    # An MCP client loads the whole catalogue into the model's context before the first
+    # question is asked and keeps it there for the session; what that costs is measured, not
+    # written down here — `gori mcp` weighs the catalogue it is about to serve on every start
+    # (`Tools.catalogue_json`), and the guide's table is checked against the same number
+    # (spec/mcp/catalogue_size_spec.cr). A count in this comment would be the drift #1137
+    # found in four other places.
+    #
     # `--read-only` was the only lever, and it cuts one specific way (to the tools that
     # neither write nor dial) — there was no way to say "history and flows, plus
     # send_request, and none of the fuzz/mine/discover/authorize workbench", which is most of
@@ -25,6 +30,8 @@ module Gori
     #     --tools='list_*,get_*,ql_*,send_request'      only those
     #     --tools='-fuzz_*,-mine_*,-discover_*'         everything except the async workbench
     #     --tools='*,-intercept_*'                      same idea, spelled explicitly
+    #     --tools=@recon                                a named profile (`PROFILES`)
+    #     --tools='@minimal,send_request'               a profile, plus one tool
     #
     # A spec whose first term subtracts starts from EVERYTHING; otherwise it starts from
     # nothing and adds. A term matching no known tool is a startup ABORT rather than a silent
@@ -32,10 +39,48 @@ module Gori
     # three tools because a name was misspelled, which reads to the agent exactly like a
     # feature that does not exist.
     struct ToolFilter
+      # A named, curated catalogue: `--tools=@name` selects `tools`, and `-@name` takes them
+      # away, so a profile composes with globs and names like any other term.
+      record Profile, name : String, summary : String, tools : Array(String)
+
+      # What an agent attached to a capture reads with, and the channel back to the operator.
+      # `list_projects` + `switch_project` are here on purpose: a profile has to work on an
+      # UNBOUND start too (outside a git workspace, `--no-project`, a database that would not
+      # open), and a server with no picker cannot be repaired from the agent's side (#1136).
+      MINIMAL = %w[project_info list_projects switch_project
+        ql_reference list_history get_flow get_response_body_chunk
+        get_current_context operator_messages reply_to_operator]
+
+      # …plus the rest of the capture an agent maps a target from, the pure decoders it reads
+      # tokens with, ONE request replayed, and the issues and notes it records findings in.
+      # Not the workbench (fuzz/mine/discover/sequence/authorize, repeater tabs, rules): an
+      # agent that needs those is the one the full catalogue is for.
+      RECON = MINIMAL + %w[ql_explain list_sitemap list_scope compare_flows list_env
+        decode jwt_decode
+        probe_issues list_issues get_issue list_notes get_note
+        send_request create_issue update_issue create_note update_note]
+
+      # Explicit NAMES, never globs, and that is the design: a profile is a promise about
+      # SIZE, and `list_*` would grow it with every lister the registry gains — the same
+      # silent growth #1137 was filed about, moved inside the one lever meant to contain it.
+      # A tool joins a profile by being written here. Every name is a real tool
+      # (spec/mcp/tool_filter_spec.cr), and the guide's table reports each profile's count
+      # and weight (spec/mcp/catalogue_size_spec.cr).
+      PROFILES = [
+        Profile.new("minimal", "read History and single flows; talk to the operator", MINIMAL),
+        Profile.new("recon", "@minimal + sitemap, scope, findings, decoders, send_request, " \
+                             "issue and note writes", RECON),
+      ]
+
       getter spec : String
       @allowed : Set(String)
 
       private def initialize(@spec, @allowed)
+      end
+
+      # `@minimal, @recon` — for `--help` and every refusal that has to list them.
+      def self.profile_names : String
+        PROFILES.join(", ") { |p| "@#{p.name}" }
       end
 
       # Parses SPEC against `known` — the registry's full name list, and only ever that.
@@ -52,9 +97,14 @@ module Gori
           subtract = term.starts_with?('-')
           pattern = subtract ? term[1..] : term
           return "--tools: empty pattern in #{spec.inspect}" if pattern.empty?
-          hits = all.select { |name| matches?(pattern, name) }
-          if hits.empty?
-            return "--tools: #{pattern.inspect} matches no tool#{suggestion(pattern, all)}"
+          if pattern.starts_with?('@')
+            hits = profile(pattern[1..], all)
+            return hits if hits.is_a?(String)
+          else
+            hits = all.select { |name| matches?(pattern, name) }
+            if hits.empty?
+              return "--tools: #{pattern.inspect} matches no tool#{suggestion(pattern, all)}"
+            end
           end
           subtract ? selected.subtract(hits) : selected.concat(hits)
         end
@@ -64,11 +114,32 @@ module Gori
         new(spec, selected)
       end
 
+      # A profile's tools, or the refusal. An unknown name is refused like an unmatched glob
+      # and for the same reason, and the refusal lists every profile: there are few enough to
+      # name, and "did you mean" alone cannot help someone guessing at `@read`.
+      #
+      # A member `known` lacks is a gori bug, not the operator's — the spec pins every member
+      # to the registry — but it is still refused loudly rather than dropped: a profile that
+      # quietly lost a tool is the silent narrowing this whole parser exists to prevent.
+      private def self.profile(name : String, all : Array(String)) : Array(String) | String
+        unless p = PROFILES.find { |pr| pr.name == name }
+          near = Levenshtein.find(name, PROFILES.map(&.name), 2)
+          hint = near ? " — did you mean @#{near}?" : ""
+          return "--tools: unknown profile #{"@#{name}".inspect}#{hint} (profiles: #{profile_names})"
+        end
+        if missing = p.tools.find { |t| !all.includes?(t) }
+          return "--tools: profile @#{p.name} names #{missing.inspect}, which this gori does not serve"
+        end
+        p.tools
+      end
+
       # The "did you mean" tail, spelled the way `QL.suggest_field` spells its own: a
       # SUBSTRING sweep first (a caller who typed `history` means the family), then edit
       # distance for a genuine typo, which is what `list_hisotry` needs and a substring
       # search can never find.
       private def self.suggestion(pattern : String, all : Array(String)) : String
+        # A profile's name without its sigil: `--tools=recon` is not a typo for any tool.
+        return " — did you mean @#{pattern}?" if PROFILES.any? { |p| p.name == pattern }
         stem = pattern.delete('*')
         unless stem.empty?
           near = all.select(&.includes?(stem)).first(5)
@@ -77,7 +148,7 @@ module Gori
         if close = Levenshtein.find(stem, all, stem.size < 6 ? 2 : 3)
           return " — did you mean #{close}?"
         end
-        " (see `gori mcp` tools/list, or try a glob like 'list_*')"
+        " (see `gori mcp` tools/list, try a glob like 'list_*', or a profile: #{profile_names})"
       end
 
       # Shell-style `*` only — the one metacharacter the prefix families need. Anchored at
