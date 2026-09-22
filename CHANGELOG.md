@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- MCP: a malformed JSON-RPC envelope is refused instead of answered — `"jsonrpc"` must be the string `2.0`, and a request id must be a string, a number or null (#1138)
+- MCP: every tool schema now advertises the contract the server enforces (`additionalProperties: false`), so a validating client rejects a typo before the call leaves it (#1140)
+- MCP: an unbound server tells a typo from a tool `--tools` hid (both stay JSON-RPC `-32602`, not `NO_PROJECT`), and every "pick a project" hint — errors, instructions, `project_info`, the startup log — names only the tools that server actually serves, or says plainly that a restart is the only way out (#1136, #1142)
+
 ## v0.7.1
 
 - Network: outbound requests honor `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY` (CIDR included) when no gori upstream is set, loopback stays direct, an empty proxy host fails closed, and the banner, `settings:network` and the statusline name the variable that is routing (#1114)

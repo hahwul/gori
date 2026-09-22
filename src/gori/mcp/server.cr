@@ -691,7 +691,15 @@ module Gori
         pure = advertised("decode", "jwt_decode", "ql_reference")
         String.build do |b|
           b << " No project is bound yet."
-          b << " Call " << hints.join(", or ") << " before using traffic tools." unless hints.empty?
+          # Saying nothing here was the wrong silence: a server whose filter kept no PICKER
+          # told the model "no project is bound" and left it to discover, one refusal at a
+          # time, that nothing it can call will change that — while the `NO_PROJECT` error it
+          # was about to hit said so outright. Same words, from `Tools` (#1136).
+          if @tools.unbindable?
+            b << " And " << Tools::NO_BINDER_RECOVERY << "."
+          elsif !hints.empty?
+            b << " Call " << hints.join(", or ") << " before using traffic tools."
+          end
           b << " Pure tools (" << pure << ") work immediately." if pure
         end
       end

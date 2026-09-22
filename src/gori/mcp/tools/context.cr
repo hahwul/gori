@@ -92,10 +92,13 @@ module Gori
               # distinction (and the reason) belongs in its answer as a field, not only in
               # the prose note.
               j.field "bind_error", reason
-              j.field "note", "The configured project could not be opened (#{reason}). " \
-                              "Call list_projects, then switch_project or create_project."
+              j.field "note", "The configured project could not be opened (#{reason}); " \
+                              "#{project_recovery}."
             else
-              j.field "note", "No project bound. Call list_projects, create_project, or switch_project before traffic tools."
+              # The recovery names only the binders THIS server advertises (#1136) — the
+              # same sentence `no_project` writes, so the tool an agent calls to orient
+              # itself and the error it is orienting itself out of cannot disagree.
+              j.field "note", "No project bound; #{project_recovery}."
             end
           end
         end)
@@ -695,7 +698,7 @@ module Gori
           "the operator's project `description` (what this engagement is for — the one call " \
           "that reads back what create_project stored), " \
           "plus which project/db is being served and how it was selected. When unbound " \
-          "(bound:false), call list_projects / create_project / switch_project first. " \
+          "(bound:false), #{project_recovery}. " \
           "This is the LIVE binding, and it overrides the server instructions — those " \
           "describe the binding as of the call that produced them and no switch_project " \
           "updates them. " \
