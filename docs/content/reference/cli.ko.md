@@ -125,6 +125,13 @@ STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시�
 
 `--fail-if-no-matches` 없이 실행하면, 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz는 `1`로 끝납니다. "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다. 플래그를 주면 `3`이 우선합니다.
 
+**생성 명령은 `--format json`을 받고, 새로 만든 행으로 답합니다.** `repeater create`, `issues create`, `notes create`, `views add`, `colormarker add`, `rewriter add`, `rewriter extract add`, `probe rules add`, `oast providers add`, `links add`, `project scope add`, `project host-override add`는 쓰기가 커밋된 뒤 다시 읽어 온 객체 하나를 STDOUT에 출력하며, 그 모양은 같은 계열의 목록이 같은 행에 대해 출력하는 것과 정확히 같습니다. 그래서 스크립트는 문장에서 id를 긁어내는 대신 `jq .id`로 가져가면 됩니다. id는 그 계열의 다른 명령이 받는 값 그대로입니다. 대부분은 숫자이고, probe 규칙은 규칙 이름(`custom_p_7`), OAST 프로바이더는 프로바이더 키(`p_3`)입니다. 뷰는 이름으로 다루므로 id 대신 `name`과 `key`를 담습니다. `notes create`는 텍스트 줄이 가리키는 위치인 `index`를, `links add`는 `created`를 더합니다. `created`는 이미 링크돼 있던 쌍이면 `false`이고, 그때는 기존 링크의 id가 담깁니다. 텍스트 출력은 바뀌지 않습니다.
+
+```bash
+issue=$(gori run issues create --title "IDOR on /v1/users/{id}" --severity high --format json | jq .id)
+gori run links add --owner=issue --id="$issue" --ref=flow --ref-id=42 --format json
+```
+
 ### run capture {#run-capture}
 
 ```bash

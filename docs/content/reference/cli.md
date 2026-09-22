@@ -134,6 +134,13 @@ Where a run streams, `json` and `jsonl` are not always the same shape:
 
 Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins.
 
+**A create takes `--format json` and answers with the new row.** `repeater create`, `issues create`, `notes create`, `views add`, `colormarker add`, `rewriter add`, `rewriter extract add`, `probe rules add`, `oast providers add`, `links add`, `project scope add` and `project host-override add` print one object on STDOUT, read back after the write committed, in exactly the shape that family's listing prints for the same row. A script therefore takes the id with `jq .id` instead of scraping it out of a sentence. The id is whatever the rest of that family takes: a number for most, the rule name (`custom_p_7`) for a probe rule and the provider key (`p_3`) for an OAST provider. A view is addressed by name, so its object carries `name` and `key` rather than an id. `notes create` adds `index`, the position the text line names, and `links add` adds `created`, which is `false` for a pair that was already linked (with that link's id). Text output is unchanged.
+
+```bash
+issue=$(gori run issues create --title "IDOR on /v1/users/{id}" --severity high --format json | jq .id)
+gori run links add --owner=issue --id="$issue" --ref=flow --ref-id=42 --format json
+```
+
 ### run capture
 
 ```bash
