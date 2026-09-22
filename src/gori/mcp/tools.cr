@@ -969,7 +969,9 @@ module Gori
       # the caller cannot see the wire, a typo has to be an error.
       #
       # Keys starting with `_` are exempt: `_meta` is JSON-RPC's own envelope extension and
-      # some clients attach it to every call.
+      # some clients attach it to every call. The exemption is not in the advertised schema
+      # (see `tool`, #1140) — being more permissive than what was promised is the direction
+      # that cannot surprise a caller, and it keeps those clients working.
       private def unknown_args(name : String, h) : Array(String)?
         allowed = declared_args[name]?
         return nil unless allowed
@@ -2137,6 +2139,21 @@ module Gori
               j.field "properties" do
                 j.object { sb.properties.each { |pname, schema| j.field(pname) { schema.to_json(j) } } }
               end
+              # The advertised contract, spelled the way `unknown_args` enforces it (#1140).
+              # Omitting `additionalProperties` means "extras are fine" in JSON Schema, and
+              # `call` refuses them — so a validating client was handed one contract and the
+              # model was scored against another: a typo it could have caught client-side
+              # travelled to the server and came back INVALID_ARGUMENT instead.
+              #
+              # The `_`-prefixed exemption `unknown_args` keeps is deliberately NOT advertised
+              # here. Spelling it needs `patternProperties`, which is outside the JSON Schema
+              # subset several clients accept when they convert an MCP `inputSchema` into
+              # their provider's tool schema — one unparseable keyword on all 179 tools costs
+              # every such client the whole catalogue, to promise an extension MCP puts in
+              # `params._meta` rather than in `params.arguments` anyway. So the validator
+              # stays the more PERMISSIVE of the two, which is the safe direction: a caller
+              # that followed the schema can never be surprised by it.
+              j.field "additionalProperties", false
               j.field "required" do
                 j.array { sb.required.each { |r| j.string r } }
               end
