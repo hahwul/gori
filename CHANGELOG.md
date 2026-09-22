@@ -15,6 +15,7 @@
 - CLI: `gori run project network` lists, reads, pins and unsets a project's own network settings (`net.*`: upstream proxy and credentials, destination host, timeouts, capture cap, bind), so a per-project proxy no longer means editing the database by hand (#1115)
 - CLI: `gori run send` sends one request from a URL (curl-shaped) or a raw request without creating a Repeater session, and `--path` sends a session or a captured flow to another path for one send (#1116)
 - CLI: `--headers-only` and `--max-body=BYTES` keep a large response out of the terminal on `repeater send`, `repeater <flow-id>`, `repeater h2`, `send` and `show`, with a marker naming the full size (#1119)
+- CLI: `repeater create`, `project scope add` and `project host-override add` take `--format json` and print the new row as its listing does, id included, and `scope add` now names the new rule's id in text too (#1117)
 
 ## v0.7.1
 

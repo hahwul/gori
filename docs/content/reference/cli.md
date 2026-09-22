@@ -392,6 +392,12 @@ backtrace, as the flag doors already did.
 | `--keep-request-line` | With `--flow`: store the request line as captured, absolute-form included |
 | `--ws-keep-key` | WebSocket: send the request's own `Sec-WebSocket-Key` so an absent, short, duplicate, or non-base64 key can be tested |
 | `--ws-http-only` | WebSocket: store this session as plain HTTP: the upgrade is sent as an ordinary request and the `101` read as a response |
+| `--format=FMT` | `text` (default: `Repeater session #7 created successfully.`) or `json`: the new session as `repeater list --format json` prints it (`id`, `tui_index`, `position`, `name`, `target`, `http2`, …) plus `websocket`, the stored `ws_messages` count, and `request_line_rewritten` when a `--flow` seed's line was rewritten |
+
+```bash
+id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
+gori run repeater send "$id"
+```
 
 **`repeater send <repeater-id>`**: execute a saved session, HTTP or WebSocket.
 
@@ -1319,7 +1325,7 @@ gori run project scope disable
 | Option / subcommand | Description |
 | --------------------- | ------------- |
 | (default) | List rules; `--format` is `text` or `json` |
-| `add` | `--kind=include\|exclude` (default `include`), `--type=host\|string\|regex` (default `host`), `--pattern=…` (required) |
+| `add` | `--kind=include\|exclude` (default `include`), `--type=host\|string\|regex` (default `host`), `--pattern=…` (required). Prints the new rule's id; `--format json` prints the rule as the listing does (`id`, `kind`, `type`, `pattern`) |
 | `update <rule-id>` (`edit`) | Change a rule's `--kind` / `--type` / `--pattern`; a field you omit keeps its value |
 | `delete <rule-id>` | Remove a rule by id |
 | `enable` / `disable` | Toggle whether scope filtering is applied |
@@ -1378,7 +1384,7 @@ gori run project host-override delete 1
 | Option / subcommand | Description |
 | --------------------- | ------------- |
 | (default) | List overrides; `--format` is `text` or `json` |
-| `add` | `--host=…` + `--ip=…`, or positional `IP HOST` |
+| `add` | `--host=…` + `--ip=…`, or positional `IP HOST`. `--format json` prints the new override as the listing does (`id`, `host`, `ip`) |
 | `update <id>` | `--host=…` + `--ip=…` (both required) |
 | `delete <id>` | Remove an override by id |
 

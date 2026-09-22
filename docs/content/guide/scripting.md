@@ -90,6 +90,10 @@ gori run capture --project ci-run --for 5m --format jsonl > flows.jsonl
 # Fail a CI job when the fuzzer finds a reflected marker
 gori run fuzz 42 --wordlist payloads.txt --mr 'gori-canary' --fail-if-no-matches
 
+# A create command's --format json is the new row, id included — no scraping prose
+id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
+rule=$(gori run project scope add --pattern=api.example.com --format json | jq .id)
+
 # One request per path, no session per path, status and headers only
 for p in /api/v1/items/{1..38}; do gori run send "https://api.example.com$p" --headers-only; done
 ```

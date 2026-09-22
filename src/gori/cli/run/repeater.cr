@@ -249,38 +249,7 @@ module Gori
           repeaters = store.repeaters_mcp
           if format == :json
             puts(JSON.build do |j|
-              j.array do
-                repeaters.each_with_index do |r, i|
-                  j.object do
-                    j.field "id", r.id
-                    # Both numbers, named. `position` is the ordering COLUMN; `tui_index` is
-                    # what the TUI paints on the sub-tab chip, which is the number the
-                    # operator reads and the one MCP's repeater replies carry.
-                    j.field "tui_index", i + 1
-                    j.field "position", r.position
-                    j.field "name", r.name || "Untitled"
-                    j.field "tags", r.tags
-                    j.field "target", r.target
-                    j.field "http2", r.http2?
-                    j.field "auto_content_length", r.auto_content_length?
-                    j.field "flow_id", r.flow_id
-                    j.field "sni", r.sni
-                    # The session's TLS fingerprint (#844) — null for a session with no
-                    # override, which is what every session meant before it existed.
-                    j.field "tls_preset", r.tls_preset
-                    # Only when it is TRUE, so a workbench of well-formed sessions prints the
-                    # listing it always did. It is here because the stored bytes of an
-                    # unterminated request render identically to a terminated one in every
-                    # view gori has — the whole reason #1075 cost a debugging session — and a
-                    # listing is where an operator goes to find the odd tab out.
-                    if unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
-                      j.field "head_unterminated", true
-                    end
-                    j.field "last_error", r.response_error
-                    j.field "last_duration_us", r.response_duration_us
-                  end
-                end
-              end
+              j.array { repeaters.each_with_index { |r, i| j.object { repeater_row_fields(j, r, i + 1) } } }
             end)
           else
             if repeaters.empty?
@@ -312,6 +281,37 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # One session's fields as `repeater list --format json` prints them — shared with
+      # `repeater create --format json` (#1117), so a script sees the same object whether it
+      # lists the session or has just created it.
+      private def self.repeater_row_fields(j : JSON::Builder, r : Store::RepeaterRecord, tui_index : Int32) : Nil
+        j.field "id", r.id
+        # Both numbers, named. `position` is the ordering COLUMN; `tui_index` is what the TUI
+        # paints on the sub-tab chip, which is the number the operator reads and the one MCP's
+        # repeater replies carry.
+        j.field "tui_index", tui_index
+        j.field "position", r.position
+        j.field "name", r.name || "Untitled"
+        j.field "tags", r.tags
+        j.field "target", r.target
+        j.field "http2", r.http2?
+        j.field "auto_content_length", r.auto_content_length?
+        j.field "flow_id", r.flow_id
+        j.field "sni", r.sni
+        # The session's TLS fingerprint (#844) — null for a session with no override, which is
+        # what every session meant before it existed.
+        j.field "tls_preset", r.tls_preset
+        # Only when it is TRUE, so a workbench of well-formed sessions prints the listing it
+        # always did. It is here because the stored bytes of an unterminated request render
+        # identically to a terminated one in every view gori has — the whole reason #1075 cost a
+        # debugging session — and a listing is where an operator goes to find the odd tab out.
+        if unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
+          j.field "head_unterminated", true
+        end
+        j.field "last_error", r.response_error
+        j.field "last_duration_us", r.response_duration_us
       end
 
       # `gori run repeater move <id> --to N | --up | --down` — rearrange the sub-tab strip.
@@ -650,6 +650,7 @@ module Gori
         ws_http_only = false
         keep_request_line = false
         tls_preset : String? = nil
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater create [options]\n\n#{EVIDENCE_LINK_HELP}\n"
@@ -674,6 +675,7 @@ module Gori
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}. Stored on the session, so `repeater send` and a reopened TUI tab present it too") { |v| tls_preset = v }
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (lets an absent/short/duplicate/non-base64 key be tested)") { ws_keep_key = true }
           p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) read as the response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
+          p.on("--format=FMT", "Output: text (default) | json — the new session as `repeater list --format json` prints it, plus websocket / ws_messages / request_line_rewritten") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
@@ -722,6 +724,7 @@ module Gori
           tgt_str : String = tgt_val ? tgt_val : ""
           ws_messages = [] of Store::WsOutMessage
           is_ws = false
+          rewrote_request_line = false
 
           if fid = flow_id
             detail = store.get_flow(fid)
@@ -733,6 +736,7 @@ module Gori
             # workbench door, and the rewrite is reported either way (see `Built`).
             built = Repeater::FlowRequest.build(detail, rewrite_absolute_form: !keep_request_line)
             warn_request_line_rewrite(built, "gori run repeater create")
+            rewrote_request_line = built.rewrote_request_line
             # Only seed the request from the flow when the user didn't hand one in: --flow
             # doubles as provenance (the flow_id column) for a custom --request-raw/-file/-stdin,
             # so an explicit request must NOT be silently overwritten by the flow's bytes.
@@ -841,9 +845,41 @@ module Gori
           if unterminated_head?(req_content.to_slice, ws_http_only: ws_http_only, http2: http2)
             STDERR.puts "gori run repeater create: #{unterminated_head_note}"
           end
-          puts "Repeater session ##{id} created successfully."
+          if format == :json
+            puts repeater_created_json(store, id, is_ws, ws_messages.size, rewrote_request_line)
+          else
+            puts "Repeater session ##{id} created successfully."
+          end
         ensure
           store.close
+        end
+      end
+
+      # `repeater create --format json` (#1117): the row as `repeater list --format json` prints
+      # it — READ BACK, because the list shape carries what the store made of the arguments (the
+      # masked name, the tab number, the position the strip gave it) — plus the three facts only
+      # the create knows. A script used to scrape the id out of "Repeater session #7 created
+      # successfully.", which breaks on any rewording. `abort`s (the row committed a moment ago)
+      # only if a peer deleted it before it could be read, which the object could not describe.
+      private def self.repeater_created_json(store : Store, id : Int64, websocket : Bool,
+                                             ws_messages : Int32, rewrote_request_line : Bool) : String
+        rows = store.repeaters_mcp
+        i = rows.index { |r| r.id == id }
+        unless i
+          store.close
+          abort "gori run repeater create: session ##{id} was created, but another gori deleted it before it could be read back"
+        end
+        JSON.build do |j|
+          j.object do
+            repeater_row_fields(j, rows[i], i + 1)
+            j.field "websocket", websocket
+            # How many frames were stored with it — the count MCP's `create_repeater` reports,
+            # so a seeded WebSocket session's frames can be asserted rather than trusted.
+            j.field "ws_messages", ws_messages if websocket
+            # Only when it FIRED: a `--flow` seed's absolute-form line rewritten to origin-form
+            # is persisted into the row, so this is the one record that it was ever there.
+            j.field "request_line_rewritten", true if rewrote_request_line
+          end
         end
       end
 

@@ -2,13 +2,24 @@ require "../../spec_helper"
 require "json"
 require "compress/gzip"
 
-# `--headers-only` / `--max-body` (#1119) and `--path` (#1116) on `gori run repeater`. The
-# command bodies end in `exit`, so what is pinned is the pieces they are assembled from: the
-# refusals, the prefix cut, and the JSON body object.
+# `--headers-only` / `--max-body` (#1119), `--path` (#1116) and `repeater create --format json`
+# (#1117) on `gori run repeater`. The command bodies end in `exit`, so what is pinned is the
+# pieces they are assembled from: the refusals, the prefix cut, and the JSON objects.
 module Gori::CLI::Run
   def self.capped_repeater_json_for_spec(result : Repeater::Result, cap : BodyCap,
                                          request_target : String? = nil) : JSON::Any
     JSON.parse(repeater_json(result, nil, cap: cap, request_target: request_target))
+  end
+
+  def self.repeater_created_json_for_spec(store : Store, id : Int64, websocket : Bool = false,
+                                          ws_messages : Int32 = 0, rewrote : Bool = false) : JSON::Any
+    JSON.parse(repeater_created_json(store, id, websocket, ws_messages, rewrote))
+  end
+
+  def self.repeater_list_row_for_spec(store : Store, id : Int64) : JSON::Any
+    rows = store.repeaters_mcp
+    i = rows.index { |r| r.id == id }.not_nil!
+    JSON.parse(JSON.build { |j| j.object { repeater_row_fields(j, rows[i], i + 1) } })
   end
 end
 
@@ -98,6 +109,35 @@ describe "gori run repeater — output caps and --path" do
       j = Gori::CLI::Run.capped_repeater_json_for_spec(ok_result(head, BIG), Gori::CLI::Run::BodyCap.new, "/api/v1/items/42")
       j["path"].as_s.should eq("/api/v1/items/42")
       Gori::CLI::Run.capped_repeater_json_for_spec(ok_result(head, BIG), Gori::CLI::Run::BodyCap.new)["path"]?.should be_nil
+    end
+  end
+
+  describe "repeater create --format json (#1117)" do
+    it "is the row `repeater list --format json` prints, plus what only create knows" do
+      with_store do |store|
+        id = store.insert_repeater(target: "https://api.example.test", request: "GET / HTTP/1.1\r\nHost: api.example.test\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0)
+        created = Gori::CLI::Run.repeater_created_json_for_spec(store, id, rewrote: true)
+        listed = Gori::CLI::Run.repeater_list_row_for_spec(store, id)
+        created["id"].as_i64.should eq(id)
+        created["target"].as_s.should eq("https://api.example.test")
+        created["http2"].as_bool.should be_false
+        listed.as_h.each { |k, v| created[k].should eq(v) }
+        (created.as_h.keys - listed.as_h.keys).should eq(["websocket", "request_line_rewritten"])
+        created["websocket"].as_bool.should be_false
+        created["request_line_rewritten"].as_bool.should be_true
+      end
+    end
+
+    it "counts the frames a WebSocket session was created with" do
+      with_store do |store|
+        id = store.insert_repeater(target: "wss://ws.example.test", request: "GET /ws HTTP/1.1\r\nHost: ws.example.test\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0)
+        created = Gori::CLI::Run.repeater_created_json_for_spec(store, id, websocket: true, ws_messages: 3)
+        created["websocket"].as_bool.should be_true
+        created["ws_messages"].as_i.should eq(3)
+        created["request_line_rewritten"]?.should be_nil
+      end
     end
   end
 
