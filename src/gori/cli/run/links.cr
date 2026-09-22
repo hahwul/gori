@@ -204,22 +204,25 @@ module Gori
       # is at the complexity bar the lint gate holds.
       #
       # Store#add_link returns nil when the pair already exists — that is the desired end
-      # state, so the sentence says so rather than reporting a link that was not created.
+      # state, so the sentence says so rather than reporting a link that was not created. But a
+      # write that did not COMMIT (a busy or read-only project) answers nil too, and the text
+      # used to call that "already linked" — a link that did not exist. So the row is looked up
+      # rather than trusted from the nil, and no row at all refuses, in both formats.
       # `--format json` (#1117) is the link's `links list --format json` row plus `created`,
-      # false for a pair that was already linked, with THAT link's id: the row the next
-      # listing shows. The row is looked up rather than trusted from the nil, because a write
-      # that did not commit answers nil too, and `created: false` would then describe a link
-      # that does not exist — so no row at all refuses instead.
+      # false for a pair that was already linked, with THAT link's id: the row the next listing
+      # shows.
       private def self.link_add(store : Store, owner_kind : Store::LinkOwnerKind, oid : Int64,
                                 ref_kind : Store::LinkRefKind, rid : Int64, format : Symbol) : String
         created = store.add_link(owner_kind, oid, ref_kind, rid)
-        unless format == :json
-          return "Linked #{owner_kind.label} ##{oid} → #{ref_kind.label} ##{rid}." if created
-          return "#{owner_kind.label.capitalize} ##{oid} was already linked to #{ref_kind.label} ##{rid}."
+        link = store.list_links(owner_kind, oid).find { |l| l.ref_kind == ref_kind && l.ref_id == rid }
+        if format != :json && (sentence = link_add_sentence(created, !link.nil?, owner_kind, oid, ref_kind, rid))
+          return sentence
         end
-        link = store.list_links(owner_kind, oid).find { |l| l.ref_kind == ref_kind && l.ref_id == rid } ||
-               abort("gori run links add: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid} " \
-                     "after the write (store busy or unwritable, or removed by a peer) — try again")
+        unless link
+          store.close
+          abort "gori run links add: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid} " \
+                "after the write (project busy or unwritable, or removed by a peer) — try again"
+        end
         resolved = Links.resolve(store, link)
         JSON.build do |j|
           j.object do
@@ -227,6 +230,17 @@ module Gori
             j.field "created", !created.nil?
           end
         end
+      end
+
+      # `links add`'s text answer, or nil when there is nothing true to say: no row was written
+      # and none exists (`created` nil is "already there" AND "did not commit" — only `linked`,
+      # the row read back, tells them apart). Public and pure so a spec can drive it; the
+      # command refuses on nil.
+      def self.link_add_sentence(created : Int64?, linked : Bool, owner_kind : Store::LinkOwnerKind, oid : Int64,
+                                 ref_kind : Store::LinkRefKind, rid : Int64) : String?
+        return "Linked #{owner_kind.label} ##{oid} → #{ref_kind.label} ##{rid}." if created
+        return "#{owner_kind.label.capitalize} ##{oid} was already linked to #{ref_kind.label} ##{rid}." if linked
+        nil
       end
 
       # The required {owner id, ref kind, ref id} triple. Split out of cmd_links_mutate to keep

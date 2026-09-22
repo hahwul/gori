@@ -178,3 +178,46 @@ end
 # duplicated here. What is CLI-specific is the validation above: `links list` refuses an
 # unknown owner instead of printing "no links on issue #99999", which would read as "this
 # issue has no evidence" rather than "there is no such issue".
+
+# `Store#add_link` answers nil both for "already linked" and for a write that did not commit,
+# and the text used to call the second one "already linked" — a link that did not exist. The
+# command now reads the row back and refuses when there is none.
+private def with_contended_links_store(&)
+  path = File.tempname("gori-links-contended", ".db")
+  store = Gori::Store.open(path, busy_timeout_ms: 1)
+  peer = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=1")
+  begin
+    yield store, peer
+  ensure
+    peer.close rescue nil
+    store.close
+    {path, "#{path}-wal", "#{path}-shm", "#{path}.open.lock"}.each { |f| File.delete?(f) }
+  end
+end
+
+describe "gori run links add — a write that did not commit" do
+  it "has no row to report, so there is no sentence to print" do
+    with_contended_links_store do |store, peer|
+      iid = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      lock = peer.checkout
+      created = begin
+        lock.exec("BEGIN IMMEDIATE")
+        store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, 5_i64)
+      ensure
+        lock.exec("ROLLBACK") rescue nil
+        lock.release rescue nil
+      end
+      created.should be_nil
+      linked = store.list_links(Gori::Store::LinkOwnerKind::Issue, iid).any? { |l| l.ref_id == 5_i64 }
+      linked.should be_false
+      Gori::CLI::Run.link_add_sentence(created, linked, Gori::Store::LinkOwnerKind::Issue, iid,
+        Gori::Store::LinkRefKind::Flow, 5_i64).should be_nil
+    end
+  end
+
+  it "still tells a new link from an existing one" do
+    owner, ref = Gori::Store::LinkOwnerKind::Issue, Gori::Store::LinkRefKind::Flow
+    Gori::CLI::Run.link_add_sentence(9_i64, true, owner, 1_i64, ref, 2_i64).not_nil!.should start_with("Linked")
+    Gori::CLI::Run.link_add_sentence(nil, true, owner, 1_i64, ref, 2_i64).not_nil!.should contain("already linked")
+  end
+end
