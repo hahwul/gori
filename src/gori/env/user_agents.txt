@@ -1,0 +1,21 @@
+# The corpus `$GEN.USER_AGENT` picks from (#1112): one real browser User-Agent per line, as the
+# browser itself sends it by default — never a synthesised string, since a made-up UA is worse
+# than none. Embedded at compile time; nothing is fetched at send time. Blank lines and `#` lines
+# are ignored; an empty corpus fails the build.
+#
+# DESKTOP ONLY, on purpose: one run picks per send, and a mobile UA pulls a different site
+# (links, lengths, baselines) than a desktop one. The pick is uniform, so the MIX is the weight —
+# Chromium dominant, then Firefox and Safari, roughly as real desktop traffic splits.
+#
+# Refreshing: bump the majors to current stable. Chromium's reduced UA freezes everything after
+# the major (`153.0.0.0`) and Safari freezes the OS token at `10_15_7` — change only `Version/`.
+# Last refreshed: 2026-09 (Chrome 153, Edge 153, Firefox 156, Safari 27.0).
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0
+Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:156.0) Gecko/20100101 Firefox/156.0
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15
