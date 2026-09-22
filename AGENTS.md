@@ -30,7 +30,8 @@ canonical; parsed columns and pretty views are derived projections.
 - **The axis is provenance, not byte values.** The same octet gets three different answers:
   - **operator bytes** (imported HAR, an MCP `raw` request, a replay) go out verbatim, never
     sanitized. See the comment at `src/gori/import/builder.cr:31-38` and
-    `src/gori/mcp/request_builder.cr` (`normalize_raw`).
+    `src/gori/repeater/url_request.cr` (`raw` / `normalize_raw`, shared by MCP `send_request`
+    and `gori run send`).
   - **page-authored bytes** (a crawled `<a href>`) get percent-encoded where they merely
     break, and refused where they *frame*. See `src/gori/discover/url.cr` (`encode_unsafe`).
   - **remote-chosen bytes** (a redirect `Location`) are refused outright, not repaired. See
