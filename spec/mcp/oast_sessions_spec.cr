@@ -228,16 +228,18 @@ describe "MCP OAST sessions" do
     end
   end
 
-  it "exposes the read tool but gates resume/release behind --read-only" do
+  it "hides unusable session controls behind --read-only" do
     with_store do |store|
       tools = tools_for(store, allow_actions: false)
       names = JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s)
       names.should contain("list_oast_sessions")
-      names.should_not contain("oast_resume")
-      names.should_not contain("oast_release")
-      r = tools.call("oast_resume", JSON.parse(%({"id":1})))
-      r.is_error.should be_true
-      r.error_code.should eq("TOOL_DISABLED")
+      {"oast_poll", "oast_payload", "oast_resume", "oast_release"}.each do |name|
+        names.should_not contain(name)
+        args = name == "oast_resume" || name == "oast_release" ? %({"id":1}) : %({"session_id":"oast_missing"})
+        r = tools.call(name, JSON.parse(args))
+        r.is_error.should be_true
+        r.error_code.should eq("TOOL_DISABLED")
+      end
     end
   end
 

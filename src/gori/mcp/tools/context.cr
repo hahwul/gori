@@ -113,7 +113,9 @@ module Gori
       # says when the view last MOVED (the TUI writes only on change — there is still no
       # heartbeat, deliberately), and the `tui` block says whether a window is attached RIGHT
       # NOW, off the flock marker directory beside the database. Neither corrects the other.
-      @[Tool("get_current_context")]
+      @[Tool("get_current_context", requires: [
+        "list_history", "get_issue", "list_sitemap", "intercept_get", "intercept_list", "get_repeater_context",
+      ])]
       private def get_current_context : Result
         raw = store.setting(Store::UI_STATE_KEY)
         parsed = raw.try do |r|
@@ -212,7 +214,7 @@ module Gori
           "QUERY_SYNTAX", field: "filter")
       end
 
-      @[Tool("get_repeater_context")]
+      @[Tool("get_repeater_context", requires: ["get_response_body_chunk"])]
       private def get_repeater_context(h) : Result
         ui = parse_ui_state
         repeater_id = int(h, "id")

@@ -17,7 +17,8 @@ private def unbound_tools(spec : String?, allow_actions = true, &)
   prev = ENV["GORI_HOME"]?
   ENV["GORI_HOME"] = root
   filter = spec.try do |s|
-    f = Gori::MCP::ToolFilter.parse(s, Gori::MCP::Tools::TOOL_NAMES)
+    f = Gori::MCP::ToolFilter.parse(s, Gori::MCP::Tools::TOOL_NAMES,
+      Gori::MCP::Tools::TOOL_DEPENDENCIES)
     fail "expected a filter, got: #{f}" unless f.is_a?(Gori::MCP::ToolFilter)
     f
   end
@@ -33,7 +34,8 @@ end
 # `instructions` is assembled by the Server, which builds its own Tools — so this reaches it
 # the way a client does: one `server/discover`, answered in both eras and needing no handshake.
 private def unbound_instructions(spec : String) : String
-  filter = Gori::MCP::ToolFilter.parse(spec, Gori::MCP::Tools::TOOL_NAMES)
+  filter = Gori::MCP::ToolFilter.parse(spec, Gori::MCP::Tools::TOOL_NAMES,
+    Gori::MCP::Tools::TOOL_DEPENDENCIES)
   fail "expected a filter, got: #{filter}" unless filter.is_a?(Gori::MCP::ToolFilter)
   input = IO::Memory.new(%({"jsonrpc":"2.0","id":1,"method":"server/discover"}\n))
   output = IO::Memory.new

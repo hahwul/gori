@@ -391,7 +391,8 @@ describe "MCP tools/call error reporting" do
   # still is — as the error's message.
   it "answers a tool hidden by --tools the same way, keeping the sentence" do
     with_store do |store|
-      filter = Gori::MCP::ToolFilter.parse("list_history", Gori::MCP::Tools::TOOL_NAMES)
+      filter = Gori::MCP::ToolFilter.parse("list_events", Gori::MCP::Tools::TOOL_NAMES,
+        Gori::MCP::Tools::TOOL_DEPENDENCIES)
       filter.should be_a(Gori::MCP::ToolFilter)
       input = IO::Memory.new(%({"jsonrpc":"2.0","id":7,"method":"tools/call","params":) +
                              %({"name":"get_flow","arguments":{},#{META}}}) + "\n")

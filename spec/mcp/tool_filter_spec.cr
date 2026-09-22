@@ -5,21 +5,24 @@ require "../spec_helper"
 # here (spec/mcp/catalogue_size_spec.cr) — and `--read-only` was the only lever, cutting along
 # one axis only.
 
-private def names_for(spec : String, known = Gori::MCP::Tools::TOOL_NAMES) : Array(String)
-  f = Gori::MCP::ToolFilter.parse(spec, known)
+private def names_for(spec : String, known = Gori::MCP::Tools::TOOL_NAMES,
+                      dependencies = Gori::MCP::Tools::TOOL_DEPENDENCIES) : Array(String)
+  f = Gori::MCP::ToolFilter.parse(spec, known, dependencies)
   fail "expected a filter, got: #{f}" unless f.is_a?(Gori::MCP::ToolFilter)
   f.names
 end
 
 private def refusal_for(spec : String, known = Gori::MCP::Tools::TOOL_NAMES) : String
-  f = Gori::MCP::ToolFilter.parse(spec, known)
+  f = Gori::MCP::ToolFilter.parse(spec, known, Gori::MCP::Tools::TOOL_DEPENDENCIES)
   fail "expected a refusal, got a filter of #{f.size}" if f.is_a?(Gori::MCP::ToolFilter)
   f
 end
 
 describe Gori::MCP::ToolFilter do
   it "selects by exact name and by prefix glob" do
-    names_for("list_history,get_flow").should eq(["get_flow", "list_history"])
+    names_for("list_history,get_flow").should eq([
+      "get_flow", "get_response_body_chunk", "list_history", "ql_reference",
+    ])
     kept = names_for("intercept_*")
     kept.should contain("intercept_list")
     kept.should contain("intercept_forward")
@@ -43,9 +46,10 @@ describe Gori::MCP::ToolFilter do
 
   it "anchors a glob at both ends" do
     known = ["list_history", "x_list_history", "list_history_x"]
-    names_for("list_*", known).should eq(["list_history", "list_history_x"])
-    names_for("*_history", known).should eq(["list_history", "x_list_history"])
-    names_for("*", known).size.should eq(3)
+    no_dependencies = {} of String => Array(String)
+    names_for("list_*", known, no_dependencies).should eq(["list_history", "list_history_x"])
+    names_for("*_history", known, no_dependencies).should eq(["list_history", "x_list_history"])
+    names_for("*", known, no_dependencies).size.should eq(3)
   end
 
   # The failure this exists to prevent: a server quietly advertising a handful of tools
@@ -66,14 +70,16 @@ describe Gori::MCP::ToolFilter do
   describe "profiles" do
     profiles = Gori::MCP::ToolFilter::PROFILES
 
-    it "selects exactly a profile's tools, and composes with other terms" do
+    it "selects each profile's tools, and composes with other terms" do
       recon = profiles.find! { |pr| pr.name == "recon" }
       names_for("@recon").should eq(recon.tools.sort)
       names_for("@minimal,send_request").should contain("send_request")
       names_for("@recon,-send_request").should_not contain("send_request")
       # A leading subtraction starts from everything, as it does for a glob.
       rest = names_for("-@minimal")
-      rest.size.should eq(Gori::MCP::Tools::TOOL_NAMES.size - Gori::MCP::ToolFilter::MINIMAL.size)
+      # Shared companions are restored when selected workflows still need them.
+      rest.should contain("get_flow")
+      rest.should contain("get_response_body_chunk")
       rest.should_not contain("list_history")
     end
 
@@ -108,7 +114,8 @@ describe Gori::MCP::ToolFilter do
       profiles.each do |profile|
         (Gori::MCP::Tools::PROJECT_PICKERS - profile.tools).should be_empty,
           "@#{profile.name} leaves out a project picker"
-        filter = Gori::MCP::ToolFilter.parse("@#{profile.name}", Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter)
+        filter = Gori::MCP::ToolFilter.parse("@#{profile.name}", Gori::MCP::Tools::TOOL_NAMES,
+          Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
         served = Gori::MCP::Tools.served_names(filter, allow_actions: false)
         served.should contain("project_info")
         served.should contain("list_history")
@@ -130,10 +137,101 @@ describe Gori::MCP::ToolFilter do
     end
   end
 
+  describe "required companion tools" do
+    it "adds async job controls and documented result readers transitively" do
+      companions = {
+        "fuzz_start"      => %w[fuzz_status fuzz_results fuzz_stop],
+        "mine_start"      => %w[mine_status mine_results mine_stop],
+        "discover_start"  => %w[discover_status discover_results discover_stop],
+        "sequence_start"  => %w[sequence_status sequence_results sequence_stop],
+        "authorize_start" => %w[authorize_status authorize_results authorize_stop],
+      }
+
+      companions.each do |starter, required|
+        selected = names_for(starter)
+        required.each { |name| selected.should contain(name), "--tools=#{starter} omitted #{name}" }
+      end
+
+      # Results that hand back flow ids keep their reader, and a flow's paging tool follows
+      # it recursively. These are names the advertised descriptions tell the agent to call.
+      names_for("fuzz_start").should contain("get_flow")
+      names_for("fuzz_start").should contain("get_response_body_chunk")
+      names_for("get_flow").should eq(["get_flow", "get_response_body_chunk"])
+      names_for("list_history").should contain("ql_reference")
+
+      # OAST start/resume/stop/release are two persisted-session workflows whose descriptions
+      # point at one another; the closure handles those cycles and keeps both teardown paths.
+      names_for("oast_start").should contain("oast_resume")
+      names_for("oast_start").should contain("oast_release")
+      names_for("oast_stop").should contain("oast_release")
+      names_for("oast_start,-oast_resume").should contain("oast_resume")
+      names_for("get_repeater_context").should contain("get_response_body_chunk")
+      {"list_history", "get_issue", "list_sitemap", "intercept_get", "intercept_list",
+       "get_repeater_context", "get_response_body_chunk"}.each do |name|
+        names_for("get_current_context").should contain(name)
+      end
+
+      # A required companion cannot be subtracted while its parent remains selected.
+      names_for("fuzz_start,-fuzz_stop").should contain("fuzz_stop")
+    end
+
+    it "advertises each selected async workflow with every described companion" do
+      with_store do |store|
+        ["fuzz_start", "mine_start", "discover_start", "sequence_start", "authorize_start"].each do |starter|
+          filter = Gori::MCP::ToolFilter.parse(starter, Gori::MCP::Tools::TOOL_NAMES,
+            Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+          tools = Gori::MCP::Tools.new(store, true, false, tool_filter: filter)
+          listed = JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s)
+          listed.sort.should eq(Gori::MCP::Tools.served_names(filter, true).sort)
+
+          {"#{starter.split('_').first}_status", "#{starter.split('_').first}_results",
+           "#{starter.split('_').first}_stop"}.each do |name|
+            listed.should contain(name), "tools/list for #{starter} omitted #{name}"
+          end
+        end
+      end
+    end
+
+    it "advertises the OAST resume and release companions selected transitively" do
+      with_store do |store|
+        companions = {
+          "oast_start"          => ["oast_resume", "oast_release"],
+          "oast_stop"           => ["oast_release"],
+          "get_current_context" => [
+            "list_history", "get_issue", "list_sitemap", "intercept_get", "intercept_list",
+            "get_repeater_context", "get_response_body_chunk",
+          ],
+        }
+
+        companions.each do |root, required|
+          filter = Gori::MCP::ToolFilter.parse(root, Gori::MCP::Tools::TOOL_NAMES,
+            Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+          tools = Gori::MCP::Tools.new(store, true, false, tool_filter: filter)
+          listed = JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s)
+          required.each do |name|
+            listed.should contain(name), "tools/list for #{root} omitted #{name}"
+          end
+          listed.sort.should eq(Gori::MCP::Tools.served_names(filter, true).sort)
+        end
+      end
+    end
+
+    it "keeps every declared dependency in the tool registry" do
+      dependencies = Gori::MCP::Tools::TOOL_DEPENDENCIES
+      dependencies.keys.each { |name| Gori::MCP::Tools::TOOL_NAMES.should contain(name) }
+      required_names = dependencies.values.flatten
+      required_names.uniq!
+      required_names.each do |name|
+        Gori::MCP::Tools::TOOL_NAMES.should contain(name)
+      end
+    end
+  end
+
   describe "served through Tools" do
     it "hides the unselected from tools/list but still refuses them by name" do
       with_store do |store|
-        filter = Gori::MCP::ToolFilter.parse("list_*,get_*", Gori::MCP::Tools::TOOL_NAMES)
+        filter = Gori::MCP::ToolFilter.parse("list_*,get_*", Gori::MCP::Tools::TOOL_NAMES,
+          Gori::MCP::Tools::TOOL_DEPENDENCIES)
         filter = filter.as(Gori::MCP::ToolFilter)
         tools = Gori::MCP::Tools.new(store, true, false, tool_filter: filter)
 
@@ -178,7 +276,8 @@ describe Gori::MCP::ToolFilter do
       # read-only subset this answered `"send_request" matches no tool`, which is the
       # sentence a typo gets.
       spec = "list_*,get_*,send_request"
-      filter = Gori::MCP::ToolFilter.parse(spec, Gori::MCP::Tools::TOOL_NAMES)
+      filter = Gori::MCP::ToolFilter.parse(spec, Gori::MCP::Tools::TOOL_NAMES,
+        Gori::MCP::Tools::TOOL_DEPENDENCIES)
       filter.should be_a(Gori::MCP::ToolFilter)
       filter = filter.as(Gori::MCP::ToolFilter)
       filter.names.should contain("send_request")
@@ -188,11 +287,14 @@ describe Gori::MCP::ToolFilter do
       served.should contain("list_history")
     end
 
-    # The one combination that still leaves nothing to serve — and the reason `gori mcp`
-    # refuses it by name rather than starting a server with an empty catalogue.
-    it "serves nothing when every selected tool is gated" do
-      filter = Gori::MCP::ToolFilter.parse("fuzz_*", Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter)
-      Gori::MCP::Tools.served_names(filter, allow_actions: false).should be_empty
+    # The gate applies after dependency resolution: an action-only profile may retain a
+    # read-only companion that remains useful, but never serves the gated job tools.
+    it "withholds gated job tools while retaining their safe flow readers" do
+      filter = Gori::MCP::ToolFilter.parse("fuzz_*", Gori::MCP::Tools::TOOL_NAMES,
+        Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+      served = Gori::MCP::Tools.served_names(filter, allow_actions: false)
+      served.should eq(["get_flow", "get_response_body_chunk"])
+      served.any?(&.starts_with?("fuzz_")).should be_false
       Gori::MCP::Tools.served_names(filter, allow_actions: true).should_not be_empty
     end
 
@@ -203,7 +305,10 @@ describe Gori::MCP::ToolFilter do
     it "counts exactly what tools/list carries, under either flag" do
       with_store do |store|
         {nil, "list_*,get_*,send_request", "-fuzz_*,-mine_*", "*"}.each do |spec|
-          filter = spec.try { |sp| Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter) }
+          filter = spec.try do |sp|
+            Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES,
+              Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+          end
           {true, false}.each do |allow_actions|
             tools = Gori::MCP::Tools.new(store, allow_actions, false, tool_filter: filter)
             listed = JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s).sort!

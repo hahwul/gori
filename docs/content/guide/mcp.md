@@ -74,17 +74,17 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
 | `gori mcp` | 179 | ~203 KB | ~52k | Everything (the default) |
-| `--read-only` | 62 | ~66 KB | ~17k | Read tools and pure compute; no live requests |
-| `--tools=@recon` | 32 | ~46 KB | ~12k | Read and map the capture, replay a request, record issues and notes |
-| `--tools=@recon --read-only` | 25 | ~33 KB | ~9k | `@recon` minus what `--read-only` disables |
-| `--tools=@minimal` | 13 | ~20 KB | ~5k | Read History and single flows, talk to the operator |
+| `--read-only` | 59 | ~64 KB | ~16k | Read tools and pure compute; no live requests |
+| `--tools=@recon` | 34 | ~46 KB | ~12k | Read and map the capture, replay a request, record issues and notes |
+| `--tools=@recon --read-only` | 26 | ~33 KB | ~9k | `@recon` minus what `--read-only` disables |
+| `--tools=@minimal` | 17 | ~25 KB | ~6k | Read History, flows and the current TUI context; talk to the operator |
 
 Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
 
 | Profile | Tools |
 | --- | --- |
-| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `operator_messages`, `reply_to_operator` |
-| `@recon` | `@minimal`, plus `list_sitemap`, `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `get_issue`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator` |
+| `@recon` | `@minimal`, plus `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 A profile is a fixed list of names, not a glob, so a later gori that adds a `list_*` tool does not quietly grow `@recon`. Both keep `switch_project` and `create_project`, so they work on an unbound start, even on a machine with no project yet.
 
@@ -98,6 +98,8 @@ gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # everything bu
 ```
 
 Because the tools are named in prefix families (`list_*`, `intercept_*`, `fuzz_*`, `oast_*`), a glob selects a group. A spec that starts with a subtraction begins from every tool, so it keeps working when a later gori adds one.
+
+Tools that document a required follow-up—such as async job status/results/stop, flow paging, or the next step from the current TUI context—bring those companions into the catalogue automatically, transitively. Subtracting a required companion does not break a workflow whose parent tool remains selected.
 
 A narrow spec can also leave the server with no way to *pick* a project. If it starts unbound — outside a Git workspace, with `--no-project`, or because the configured database would not open — and the spec keeps neither `switch_project` nor `create_project`, nothing the agent calls can bind one. `list_projects` does not count: it lists projects and binds none of them. gori warns at startup, and the `NO_PROJECT` errors say the same thing instead of naming tools that are not there. Keep `switch_project` in the spec, or pass `--project`/`--db`.
 

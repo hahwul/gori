@@ -14,7 +14,8 @@ module Gori
     class Tools
       # --- fuzz tools (gated, async job model) --------------------------------
 
-      @[Tool("fuzz_start", gated: true, agent_action: true, env_refresh: true)]
+      @[Tool("fuzz_start", gated: true, agent_action: true, env_refresh: true,
+        requires: ["fuzz_status", "fuzz_results", "fuzz_stop"])]
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         save_results = bool_arg(h, "save_results", false)
@@ -428,7 +429,7 @@ module Gori
         end)
       end
 
-      @[Tool("fuzz_results", gated: true, read_only: true)]
+      @[Tool("fuzz_results", gated: true, read_only: true, requires: ["get_flow"])]
       private def fuzz_results(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)

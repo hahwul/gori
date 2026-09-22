@@ -27,7 +27,8 @@ module Gori
         str_list(h, "tokens").map(&.strip).reject(&.empty?)
       end
 
-      @[Tool("sequence_start", gated: true, agent_action: true, env_refresh: true)]
+      @[Tool("sequence_start", gated: true, agent_action: true, env_refresh: true,
+        requires: ["sequence_status", "sequence_results", "sequence_stop"])]
       private def sequence_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         plan = build_sequence_plan(h, ob)

@@ -124,8 +124,21 @@ module Gori
             {% raise "#{m.name}: @[Tool] takes the tool name as its one positional argument" %}
           {% end %}
           {% for key in ann.named_args.keys %}
-            {% unless %w[gated agent_action env_refresh unbound read_only].includes?(key.stringify) %}
-              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound, read_only" %}
+            {% unless %w[gated agent_action env_refresh unbound read_only requires].includes?(key.stringify) %}
+              {% raise "#{m.name}: unknown @[Tool] flag '#{key}' — allowed: gated, agent_action, env_refresh, unbound, read_only, requires" %}
+            {% end %}
+          {% end %}
+          {% if ann.named_args.keys.map(&.stringify).includes?("requires") %}
+            {% unless ann[:requires].is_a?(ArrayLiteral) && !ann[:requires].empty? %}
+              {% raise "#{m.name}: @[Tool] requires: must be a non-empty array of tool names" %}
+            {% end %}
+            {% for required in ann[:requires] %}
+              {% unless required.is_a?(StringLiteral) %}
+                {% raise "#{m.name}: every @[Tool] requires: entry must be a string literal" %}
+              {% end %}
+              {% unless tools.any? { |candidate| candidate.annotation(Tool)[0] == required } %}
+                {% raise "#{m.name}: required MCP tool #{required} is not registered" %}
+              {% end %}
             {% end %}
           {% end %}
           {% if ann.named_args.keys.map(&.stringify).includes?("read_only") %}
@@ -156,6 +169,18 @@ module Gori
 
         # Every tool name the dispatcher answers to, in declaration (require) order.
         TOOL_NAMES = {{ tools.map { |m| m.annotation(Tool)[0] } }}
+
+        # Required companion tools, declared next to the handlers and used by `--tools` to
+        # keep a selected workflow's documented calls available. `ToolFilter` closes this
+        # graph transitively after applying the operator's include/exclude patterns.
+        TOOL_DEPENDENCIES = {
+          {% for m in tools %}
+            {% ann = m.annotation(Tool) %}
+            {% if ann.named_args.keys.map(&.stringify).includes?("requires") %}
+              {{ ann[0] }} => {{ ann[:requires] }},
+            {% end %}
+          {% end %}
+        }
 
         # Tools refused under `gori mcp --read-only` (`gated: true`).
         GATED_TOOLS = Set(String){ {{ tools.select { |m| m.annotation(Tool)[:gated] }.map { |m| m.annotation(Tool)[0] }.splat }} }
@@ -1291,7 +1316,8 @@ module Gori
         found
       end
 
-      @[Tool("oast_start", gated: true, agent_action: true, unbound: true)]
+      @[Tool("oast_start", gated: true, agent_action: true, unbound: true,
+        requires: ["oast_poll", "oast_payload", "oast_stop", "oast_resume", "list_oast_providers", "list_oast_sessions"])]
       private def oast_start(h) : Result
         # A SAVED provider, by the id list_oast_providers prints. The provider CRUD tools next
         # door exist so an operator can configure a private collaborator once — and until this
@@ -1418,14 +1444,14 @@ module Gori
           "NOT_FOUND", field: "session_id")
       end
 
-      @[Tool("oast_payload", unbound: true)]
+      @[Tool("oast_payload", gated: true, unbound: true)]
       private def oast_payload(h) : Result
         s = oast_session(h)
         return s if s.is_a?(Result)
         Result.new({session_id: str(h, "session_id"), payload_url: s.provider.generate_payload(s.session)}.to_json)
       end
 
-      @[Tool("oast_poll", read_only: false, unbound: true)]
+      @[Tool("oast_poll", gated: true, unbound: true)]
       private def oast_poll(h) : Result
         s = oast_session(h)
         return s if s.is_a?(Result)
@@ -1447,7 +1473,7 @@ module Gori
         err("OAST poll failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
       end
 
-      @[Tool("oast_stop", gated: true, agent_action: true, unbound: true)]
+      @[Tool("oast_stop", gated: true, agent_action: true, unbound: true, requires: ["oast_release"])]
       private def oast_stop(h) : Result
         s = oast_session(h, delete: true)
         return s if s.is_a?(Result)

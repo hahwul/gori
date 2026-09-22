@@ -35,10 +35,12 @@ module Gori
     #     --tools='@minimal,send_request'               a profile, plus one tool
     #
     # A spec whose first term subtracts starts from EVERYTHING; otherwise it starts from
-    # nothing and adds. A term matching no known tool is a startup ABORT rather than a silent
-    # narrowing: the failure mode this is meant to prevent is a server that quietly serves
-    # three tools because a name was misspelled, which reads to the agent exactly like a
-    # feature that does not exist.
+    # nothing and adds. After the ordered terms resolve, required companion tools are added
+    # transitively. A subtraction cannot leave a selected tool's advertised workflow broken;
+    # for example, `fuzz_start,-fuzz_stop` still serves `fuzz_stop`. A term matching no known
+    # tool is a startup ABORT rather than a silent narrowing: the failure mode this is meant
+    # to prevent is a server that quietly serves three tools because a name was misspelled,
+    # which reads to the agent exactly like a feature that does not exist.
     struct ToolFilter
       # A named, curated catalogue: `--tools=@name` selects `tools`, and `-@name` takes them
       # away, so a profile composes with globs and names like any other term.
@@ -58,7 +60,8 @@ module Gori
       # spec/mcp/catalogue_size_spec.cr holds every profile to that.
       MINIMAL = %w[project_info list_projects switch_project create_project
         ql_reference ql_explain list_history get_flow get_response_body_chunk
-        get_current_context get_repeater_context operator_messages reply_to_operator]
+        get_current_context get_repeater_context get_issue list_sitemap intercept_get intercept_list
+        operator_messages reply_to_operator]
 
       # …plus the rest of the capture an agent maps a target from, the pure decoders it reads
       # tokens with, ONE request replayed, and the issues and notes it records findings in.
@@ -67,9 +70,9 @@ module Gori
       #
       # Finding triage is recording, so `probe_promote` / `probe_dismiss` ride with the issue
       # writes; `probe_delete` does not — it erases the scanner's record rather than judging it.
-      RECON = MINIMAL + %w[list_sitemap list_scope compare_flows list_env
+      RECON = MINIMAL + %w[list_scope compare_flows list_env
         decode jwt_decode jwt_verify
-        probe_issues probe_promote probe_dismiss list_issues get_issue list_notes get_note
+        probe_issues probe_promote probe_dismiss list_issues list_notes get_note
         send_request create_issue update_issue create_note update_note]
 
       # Explicit NAMES, never globs, and that is the design: a profile is a promise about
@@ -80,7 +83,7 @@ module Gori
       # and weight (spec/mcp/catalogue_size_spec.cr).
       PROFILES = [
         Profile.new("minimal", "read History and single flows; talk to the operator", MINIMAL),
-        Profile.new("recon", "@minimal + sitemap, scope, findings, decoders, send_request, " \
+        Profile.new("recon", "@minimal + scope, findings, decoders, send_request, " \
                              "issue and note writes", RECON),
       ]
 
@@ -97,7 +100,8 @@ module Gori
 
       # Parses SPEC against `known` — the registry's full name list, and only ever that.
       # Returns the filter, or the message to abort with.
-      def self.parse(spec : String, known : Enumerable(String)) : ToolFilter | String
+      def self.parse(spec : String, known : Enumerable(String),
+                     dependencies : Hash(String, Array(String))) : ToolFilter | String
         terms = spec.split(',').map(&.strip).reject(&.empty?)
         return "--tools: no tool patterns given" if terms.empty?
 
@@ -119,6 +123,9 @@ module Gori
             end
           end
           subtract ? selected.subtract(hits) : selected.concat(hits)
+        end
+        if dependency_error = include_dependencies(selected, all, dependencies)
+          return dependency_error
         end
         if selected.empty?
           return "--tools: #{spec.inspect} selects no tools; the server would advertise nothing"
@@ -190,6 +197,27 @@ module Gori
 
       def allows?(name : String) : Bool
         @allowed.includes?(name)
+      end
+
+      # Walk the handler-declared dependency graph from the user's final selection. Adding a
+      # dependency to the same set before pushing it bounds the traversal even if a future
+      # workflow has a cycle; the registry macro separately refuses references to missing
+      # tools.
+      private def self.include_dependencies(selected : Set(String), known : Array(String),
+                                            dependencies : Hash(String, Array(String))) : String?
+        pending = selected.to_a
+        while name = pending.pop?
+          next unless required = dependencies[name]?
+          required.each do |dependency|
+            unless known.includes?(dependency)
+              return "--tools: required tool #{dependency.inspect} for #{name.inspect} is missing from the registry"
+            end
+            next if selected.includes?(dependency)
+            selected << dependency
+            pending << dependency
+          end
+        end
+        nil
       end
 
       def size : Int32

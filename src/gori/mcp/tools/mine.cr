@@ -10,7 +10,8 @@ module Gori
     class Tools
       # --- mine tools (gated, async job model) --------------------------------
 
-      @[Tool("mine_start", gated: true, agent_action: true, env_refresh: true)]
+      @[Tool("mine_start", gated: true, agent_action: true, env_refresh: true,
+        requires: ["mine_status", "mine_results", "mine_stop"])]
       private def mine_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         engine, origin, total = build_mine_job(h, ob)

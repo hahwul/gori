@@ -54,6 +54,12 @@ describe "MCP tool registry" do
       self_gated = ["create_project"]
       runnable = Gori::MCP::Tools::TOOL_NAMES.reject { |n| Gori::MCP::Tools::GATED_TOOLS.includes?(n) }
       advertised(tools).sort.should eq(runnable.sort)
+      {"reply_to_operator", "oast_poll", "oast_payload"}.each do |name|
+        Gori::MCP::Tools::GATED_TOOLS.should contain(name)
+        advertised(tools).should_not contain(name)
+      end
+      # The unbound bootstrap exception is separate from action gating and stays listed.
+      advertised(tools).should contain("create_project")
 
       Gori::MCP::Tools::TOOL_NAMES.each do |name|
         r = tools.call(name, EMPTY_ARGS)
@@ -95,10 +101,12 @@ describe "MCP tool registry" do
     # exist, a session that was never started, a project with no name.
     tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false)
     both = Gori::MCP::Tools::UNBOUND_SAFE & Gori::MCP::Tools::GATED_TOOLS
-    both.should eq(Set{"oast_start", "oast_stop", "delete_project"})
+    both.should eq(Set{"oast_start", "oast_stop", "oast_poll", "oast_payload", "delete_project"})
     safe_args = {
       "oast_start"     => %({"provider":"no-such-provider"}),
       "oast_stop"      => %({}),
+      "oast_poll"      => %({}),
+      "oast_payload"   => %({}),
       "delete_project" => %({}),
     }
     both.each do |name|
@@ -139,9 +147,9 @@ describe "MCP tool annotations" do
         by_name[name]["annotations"]["openWorldHint"].as_bool.should be_false
       end
 
-      # The ungated writers. They gate themselves rather than being gated, so the hint
-      # cannot be read off `gated:` alone — which is the whole reason the flag exists.
-      {"send_request", "create_issue", "probe_scan", "oast_poll",
+      # Tools that mutate, may send, or require the action-enabled surface all need the
+      # conservative false hint even though some are gated at dispatch.
+      {"send_request", "create_issue", "probe_scan", "oast_poll", "oast_payload",
        "switch_project", "reply_to_operator"}.each do |name|
         by_name[name]["annotations"]["readOnlyHint"].as_bool.should be_false
         # Left unstated, so the spec's conservative default (true) stands: an action tool
