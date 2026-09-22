@@ -2,7 +2,7 @@ module Gori
   # OAST (out-of-band application security testing): register a payload URL with an
   # interaction server (interactsh and friends), then observe the DNS/HTTP/SMTP callbacks
   # a target makes to it — the ground truth for blind SSRF, blind XXE, blind command
-  # injection, JNDI, etc.
+  # injection, remote file inclusion, JNDI, etc.
   #
   # This engine is Store- and TUI-free (mirrors Gori::Miner / Gori::Discover) so the one
   # implementation drives the TUI OAST tab, `gori run oast`, and the MCP oast_* tools. A

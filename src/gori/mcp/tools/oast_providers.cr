@@ -177,7 +177,7 @@ module Gori
           "pass an ad-hoc `provider`/`server`/`token`. With NEITHER it defaults to interactsh " \
           "on a PUBLIC server, which means the callbacks — and the hostnames you are testing — " \
           "land on third-party infrastructure. Pass persist:true to make it a PROJECT listener " \
-          "— required if you want probe_scan's blind SSRF/XXE/command-injection rules to plant " \
+          "— required if you want probe_scan's blind SSRF/XXE/command-injection/RFI rules to plant " \
           "anything, since they mint against a stored session." do |s|
           s.field "provider_id", strprop("id of a saved provider from list_oast_providers (p_<n> project, g_<hex> global); supplies host + token, and cannot be combined with server/token")
           s.field "provider", enumprop("ad-hoc provider kind to register with (default interactsh)", OAST_KINDS)

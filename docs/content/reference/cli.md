@@ -746,7 +746,7 @@ A failed `listen` names the same stage. On `tls-verify` the remedy is this machi
 | `--save` | Save the registration as a project OAST session (see `oast list`) |
 | `--json` | Emit each callback as a JSON line (same shape as MCP) |
 
-`--save` is what turns an ad-hoc listener into a project one, and it changes three things: every callback is written into the project (so the TUI OAST tab shows the same hits), the registration is **kept** on exit so `oast resume ID` can pick it up later, and the out-of-band probe rules (`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`) have a session to mint payloads against — without one they plan nothing and `gori run probe --active` says so. It takes `--project` / `--db` like the session verbs; `oast release ID` is the teardown.
+`--save` is what turns an ad-hoc listener into a project one, and it changes three things: every callback is written into the project (so the TUI OAST tab shows the same hits), the registration is **kept** on exit so `oast resume ID` can pick it up later, and the out-of-band probe rules (`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`) have a session to mint payloads against — without one they plan nothing and `gori run probe --active` says so. It takes `--project` / `--db` like the session verbs; `oast release ID` is the teardown.
 
 **`oast list` / `resume` / `release`**: the project's saved listening SESSIONS, as opposed to the providers below (a provider is where you listen; a session is one live registration on it). A registration outlives the process that minted it, which is what makes a payload planted yesterday still worth watching.
 

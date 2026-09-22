@@ -734,7 +734,7 @@ gori run oast presets --check --format json
 | `--save` | 등록을 프로젝트 OAST 세션으로 저장(`oast list` 참고) |
 | `--json` | 각 콜백을 JSON 라인으로 출력(MCP와 동일한 형태) |
 
-`--save`는 즉석 리스너를 프로젝트 리스너로 바꾸고, 세 가지가 달라집니다. 모든 콜백이 프로젝트에 기록되고(그래서 TUI OAST 탭에 같은 히트가 보이고), 종료해도 등록이 **유지**되어 나중에 `oast resume ID`로 이어받을 수 있으며, 아웃오브밴드 프로브 룰(`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`)이 페이로드를 만들어낼 세션을 갖게 됩니다 — 세션이 없으면 이 룰들은 아무것도 계획하지 않고, `gori run probe --active`가 그 사실을 알려줍니다. 세션 명령들과 마찬가지로 `--project` / `--db`를 받으며, 정리는 `oast release ID`입니다.
+`--save`는 즉석 리스너를 프로젝트 리스너로 바꾸고, 세 가지가 달라집니다. 모든 콜백이 프로젝트에 기록되고(그래서 TUI OAST 탭에 같은 히트가 보이고), 종료해도 등록이 **유지**되어 나중에 `oast resume ID`로 이어받을 수 있으며, 아웃오브밴드 프로브 룰(`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`)이 페이로드를 만들어낼 세션을 갖게 됩니다 — 세션이 없으면 이 룰들은 아무것도 계획하지 않고, `gori run probe --active`가 그 사실을 알려줍니다. 세션 명령들과 마찬가지로 `--project` / `--db`를 받으며, 정리는 `oast release ID`입니다.
 
 **`oast list` / `resume` / `release`**: 프로젝트에 저장된 리스닝 **세션**입니다(아래의 프로바이더는 어디서 듣는지를, 세션은 그 위의 살아 있는 등록 하나를 뜻합니다). 등록은 그것을 만든 프로세스보다 오래 남고, 그래서 어제 심어둔 페이로드를 오늘도 지켜볼 수 있습니다.
 

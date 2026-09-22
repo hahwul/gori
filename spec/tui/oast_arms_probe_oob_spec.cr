@@ -5,7 +5,7 @@ include Gori::Tui
 
 # Starting an OAST listener has to ARM the live probe analyzer's out-of-band minter.
 #
-# `Probe::Analyzer#@oob` — the minter the blind SSRF/XXE/command-injection rules plant against —
+# `Probe::Analyzer#@oob` — the minter the blind SSRF/XXE/command-injection/RFI rules plant against —
 # is resolved once at construction and otherwise ONLY by `reload_rule_config` (a Rules-tab edit
 # / factory reset). The OAST tab was the surface that creates the session those rules mint
 # against, and it never touched the analyzer: a project opened with no session left `@oob` nil,
