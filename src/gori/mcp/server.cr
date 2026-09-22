@@ -192,6 +192,10 @@ module Gori
       # (a notification writes nothing at all).
       private def fast_path(root : JSON::Any) : Bool
         return false unless obj = root.as_h?
+        # A malformed envelope is never answered here. `handle_message` owns the -32600, and
+        # the reader declining sends the line down the ordinary path to get it — the reader
+        # must not be a second place that decides what a valid request looks like.
+        return false if envelope_error(obj)
         return false unless method = obj["method"]?.try(&.as_s?)
         id = obj["id"]?
         if id.nil?
@@ -383,10 +387,56 @@ module Gori
         send("[#{collected.join(',')}]")
       end
 
+      # What is wrong with this message's JSON-RPC envelope, or nil when nothing is.
+      #
+      # Two members and no more: the version, which the spec pins to the exact string
+      # `"2.0"`, and the id, which may be a string, a number or null when it is present at
+      # all. Everything else about the message (method, params, batching) is somebody else's
+      # check — this is the frame, and it is read by both the reader's fast path and the
+      # worker, from here, so the two can never disagree about what a request is.
+      private def envelope_error(obj : Hash(String, JSON::Any)) : String?
+        version = obj["jsonrpc"]?
+        if version.nil?
+          return "Invalid Request: missing 'jsonrpc' — every JSON-RPC message must carry \"jsonrpc\":\"2.0\""
+        end
+        unless version.as_s? == "2.0"
+          return "Invalid Request: 'jsonrpc' must be the string \"2.0\" (got #{version.to_json})"
+        end
+        id = obj["id"]?
+        return nil if id.nil? || valid_id?(id)
+        "Invalid Request: 'id' must be a string, a number or null (got #{json_type_of(id)})"
+      end
+
+      # A request id a client can correlate on: string, number, or null. An object, an array
+      # or a boolean is none of those, and echoing one back makes the response unmatchable.
+      private def valid_id?(id : JSON::Any?) : Bool
+        return false if id.nil?
+        case id.raw
+        when String, Int64, Float64, Nil then true
+        else                                  false
+        end
+      end
+
       private def handle_message(root : JSON::Any) : Nil
         id = nil.as(JSON::Any?)
         obj = root.as_h?
         return write_error(nil, -32600, "Invalid Request") unless obj
+
+        # The ENVELOPE, before the message is read as one. A server that answers
+        # `{"jsonrpc":"1.0"}` — or a message carrying no version member at all — with a
+        # `"jsonrpc":"2.0"` result is rewriting the client's frame into one it never sent,
+        # and the client that shipped the bug goes on believing it speaks 2.0. Same for an
+        # id the spec does not allow: `{"id":{}}` came back `{"id":{}}`, which no client
+        # correlating by id can match against anything, so the request simply hung.
+        #
+        # An unusable id is answered at `null` — the spec's own rule for a request whose id
+        # cannot be determined — while a legal id is echoed, so a client with a promise
+        # still resolves it. Notifications are held to the same envelope: the error goes out
+        # at `null`, for the reason the missing-`method` branch below already does it.
+        if problem = envelope_error(obj)
+          id = obj["id"]?
+          return write_error(valid_id?(id) ? id : nil, -32600, problem)
+        end
 
         id = obj["id"]?
         method = obj["method"]?.try(&.as_s?)
