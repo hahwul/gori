@@ -297,7 +297,7 @@ module Gori
           return "Extract rule ##{id} added — #{Env.spell(name, Env::Namespace::Bind)} binds from #{kind.label}."
         end
         rule = store.extract_rules.find(&.id.==(id)) ||
-               abort("gori run rewriter extract add: rule ##{id} was created, but it was gone before it could be read back")
+               abort_closing(store, "gori run rewriter extract add: rule ##{id} was created, but it was gone before it could be read back")
         JSON.build { |j| extract_rule_json(j, rule) }
       end
 
@@ -660,7 +660,7 @@ module Gori
           return scope.global? ? "Global rule ##{id} added — it applies in every project." : "Rule ##{id} added."
         end
         rule = Gori::Rules.merged(store).find { |r| r.scope == scope && r.id == id } ||
-               abort("gori run rewriter add: rule ##{id} was created, but it was gone before it could be read back")
+               abort_closing(store, "gori run rewriter add: rule ##{id} was created, but it was gone before it could be read back")
         JSON.build { |j| rewriter_rule_json(j, rule) }
       end
 

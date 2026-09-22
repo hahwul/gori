@@ -752,13 +752,14 @@ module Gori
           # meant to remove later had no handle for it (#1117).
           added = scope.rules.find { |r| r.kind == kind && r.match_type == match_type && r.pattern == pat.strip }
           if format == :json
-            if rule = added
-              puts(JSON.build { |j| scope_rule_json(j, rule) })
-            else
-              # Committed, then gone before the read — a peer deleted it in between.
-              STDERR.puts "gori run project scope add: the rule was added, but another gori removed it before it could be read back"
-              puts(JSON.build { |j| j.object { j.field "id", nil; j.field "kind", kind; j.field "type", match_type; j.field "pattern", pat.strip } })
+            unless rule = added
+              # Committed, then gone before the read — a peer deleted it in between. Refused like
+              # every other create's read-back: an `"id": null` a script feeds to `scope delete`
+              # fails there, far from the cause.
+              store.close
+              abort "gori run project scope add: the rule was added, but another gori removed it before it could be read back"
             end
+            puts(JSON.build { |j| scope_rule_json(j, rule) })
           else
             puts added ? "Scope rule ##{added.id} added successfully (#{kind} #{match_type} #{pat.strip})." : "Scope rule added successfully."
           end
@@ -1201,9 +1202,8 @@ module Gori
       end
 
       # One host override as JSON — the element of `host-override --format json`, and the whole
-      # of `host-override add --format json` (#1117). `id` is nil only when the row could not be
-      # read back after it was written (see the add below).
-      private def self.host_override_json(j : JSON::Builder, id : Int64?, host : String, ip : String) : Nil
+      # of `host-override add --format json` (#1117).
+      private def self.host_override_json(j : JSON::Builder, id : Int64, host : String, ip : String) : Nil
         j.object do
           j.field "id", id
           j.field "host", host
@@ -1268,7 +1268,11 @@ module Gori
           key = OverrideHost.key(h)
           e = ov.entries.find { |x| x.host == key }
           if format == :json
-            puts(JSON.build { |j| e ? host_override_json(j, e.id, e.host, e.ip) : host_override_json(j, nil, key, i) })
+            unless e
+              store.close
+              abort "gori run project host-override add: the override was added, but it was gone before it could be read back"
+            end
+            puts(JSON.build { |j| host_override_json(j, e.id, e.host, e.ip) })
           elsif e
             puts "Host override ##{e.id} added: #{e.ip} → #{e.host}"
           else

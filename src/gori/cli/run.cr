@@ -694,6 +694,14 @@ module Gori
         reapply_active_slot
       end
 
+      # `abort` for a refusal raised while `store` is open. `abort` calls `exit`, which skips the
+      # caller's `ensure store.close`, so the store is closed HERE — its writer fiber stopped and
+      # its open-lock released — before the process goes. nil for a path that opened no project.
+      private def self.abort_closing(store : Store?, message : String) : NoReturn
+        store.try &.close
+        abort message
+      end
+
       # The one sentence for a project that could not be opened: SQLite's own words (or the
       # non-database fallback) plus `open_failure_hint`'s reason. Public so a caller that
       # survives the failure (`persist_repeater_response`, which must not abort a completed

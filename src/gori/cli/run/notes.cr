@@ -121,7 +121,7 @@ module Gori
           # The position is a DISPLAY figure read back after the commit, so it names the note
           # where it actually landed among a peer's; a peer that deletes it in that instant
           # leaves nothing to number, and the id is then the only honest thing to print.
-          puts note_created_output(Notes.load(store), new_id, format)
+          puts note_created_output(Notes.load(store), new_id, format, store)
         ensure
           store.close
         end
@@ -133,10 +133,11 @@ module Gori
       # position the text sentence names. A note a peer deleted in that instant has no row,
       # and where text degrades to the id, JSON refuses rather than print an object whose
       # `index` the listing could never show.
-      private def self.note_created_output(doc : Notes::Doc, new_id : Int64, format : Symbol) : String
+      private def self.note_created_output(doc : Notes::Doc, new_id : Int64, format : Symbol,
+                                           store : Store? = nil) : String
         idx = doc.notes.index { |n| n.id == new_id }
         if format == :json
-          i = idx || abort("gori run notes create: note (id #{new_id}) was created, but it was gone before it could be read back")
+          i = idx || abort_closing(store, "gori run notes create: note (id #{new_id}) was created, but it was gone before it could be read back")
           CLI::Output.note_object_json(i, doc.notes[i], current: doc.cur == i, with_text: false)
         elsif idx
           "Note ##{idx + 1} created."

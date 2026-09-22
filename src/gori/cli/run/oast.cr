@@ -361,7 +361,7 @@ module Gori
         key = "p_#{id}"
         return "OAST provider '#{key}' created." unless format == :json
         config = Oast.provider_configs(store).find { |c| c.key == key } ||
-                 abort("gori run oast providers add: provider '#{key}' was created, but it was gone before it could be read back")
+                 abort_closing(store, "gori run oast providers add: provider '#{key}' was created, but it was gone before it could be read back")
         JSON.build { |j| oast_provider_json(j, config, show_tokens: false) }
       end
 

@@ -611,7 +611,7 @@ module Gori
         code = "custom_p_#{id}"
         return "Custom rule '#{code}' created." unless format == :json
         entry = Probe::RuleCatalog.load(store).find { |e| e.id == code } ||
-                abort("gori run probe rules add: rule '#{code}' was created, but it was gone before it could be read back")
+                abort_closing(store, "gori run probe rules add: rule '#{code}' was created, but it was gone before it could be read back")
         JSON.build { |j| Probe::RuleCatalog.entry_json(j, entry) }
       end
 

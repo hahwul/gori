@@ -280,7 +280,7 @@ module Gori
       private def self.issue_created_output(store : Store, id : Int64, format : Symbol) : String
         return "Issue ##{id} created successfully." unless format == :json
         issue = store.get_issue(id) ||
-                abort("gori run issues create: issue ##{id} was created, but it was gone before it could be read back")
+                abort_closing(store, "gori run issues create: issue ##{id} was created, but it was gone before it could be read back")
         Issues::Export.issue_json(issue, store)
       end
 

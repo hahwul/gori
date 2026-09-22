@@ -384,7 +384,7 @@ module Gori
       # never shows.
       private def self.colormarker_added_json(id : Int64, store : Store?) : String
         found = store ? store.color_rules.find(&.id.==(id)) : Settings.colormarker_rules.find(&.id.==(id)).try(&.to_rule)
-        rule = found || abort("gori run colormarker add: rule ##{id} was created, but it was gone before it could be read back")
+        rule = found || abort_closing(store, "gori run colormarker add: rule ##{id} was created, but it was gone before it could be read back")
         JSON.build { |j| colormarker_rule_json(j, rule) }
       end
 

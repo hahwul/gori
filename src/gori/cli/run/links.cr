@@ -214,14 +214,16 @@ module Gori
       private def self.link_add(store : Store, owner_kind : Store::LinkOwnerKind, oid : Int64,
                                 ref_kind : Store::LinkRefKind, rid : Int64, format : Symbol) : String
         created = store.add_link(owner_kind, oid, ref_kind, rid)
+        # A new row in text mode needs no read-back — the write just named it. Every other case
+        # does: nil is ambiguous, and JSON prints the row itself.
+        return link_add_sentence(created, true, owner_kind, oid, ref_kind, rid).to_s if created && format != :json
         link = store.list_links(owner_kind, oid).find { |l| l.ref_kind == ref_kind && l.ref_id == rid }
         if format != :json && (sentence = link_add_sentence(created, !link.nil?, owner_kind, oid, ref_kind, rid))
           return sentence
         end
         unless link
-          store.close
-          abort "gori run links add: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid} " \
-                "after the write (project busy or unwritable, or removed by a peer) — try again"
+          abort_closing(store, "gori run links add: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid} " \
+                               "after the write (project busy or unwritable, or removed by a peer) — try again")
         end
         resolved = Links.resolve(store, link)
         JSON.build do |j|
