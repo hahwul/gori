@@ -69,6 +69,7 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 | `$GEN.TIMESTAMP` | Unix 초 |
 | `$GEN.TIMESTAMP_MS` | Unix 밀리초 |
 | `$GEN.ISO8601` | 밀리초를 포함한 현재 UTC 시각의 RFC 3339 표현 |
+| `$GEN.USER_AGENT` | gori에 내장된 코퍼스에서 무작위로 고른 실제 브라우저 User-Agent 문자열(데스크톱·모바일의 Chrome, Firefox, Safari, Edge) |
 
 한 요청 안에서 같은 생성기 이름을 여러 번 쓰면 같은 값이 들어갑니다. 다음 요청에서는 새 값을 만듭니다. 생성기는 최종 전송 지점에서 운영자가 작성한 요청 텍스트에만 적용되며, 캡처 증거와 Fuzzer 페이로드 바이트는 리터럴로 유지됩니다.
 

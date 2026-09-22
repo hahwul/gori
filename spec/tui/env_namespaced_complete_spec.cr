@@ -87,7 +87,7 @@ describe "TextArea env completion (namespaced)" do
         rows[1].should start_with("$BIND.")
         rows[1].should contain("session bindings · 1")
         rows[2].should start_with("$GEN.")
-        rows[2].should contain("per-request generators · 6")
+        rows[2].should contain("per-request generators · #{Gori::Env::GENERATORS.size}")
         # Then the token rows, sorted {name, namespace} — so the SAME NAME in two namespaces
         # lands adjacent, which is the pair an operator most needs to tell apart. Namespace is
         # the tie-break, not the primary key: grouping by namespace would scatter `id` and

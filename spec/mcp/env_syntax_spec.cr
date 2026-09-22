@@ -50,7 +50,7 @@ describe "MCP list_env grammar report" do
         got["vars"].as_a.map(&.["key"].as_s).should eq(["TOKEN"])
         generators = got["generators"].as_a
         generators.map(&.["name"].as_s).should eq(
-          ["UUID", "RANDOM", "RANDOM_HEX", "TIMESTAMP", "TIMESTAMP_MS", "ISO8601"])
+          ["UUID", "RANDOM", "RANDOM_HEX", "TIMESTAMP", "TIMESTAMP_MS", "ISO8601", "USER_AGENT"])
         generators.map(&.["token"].as_s).should contain("$GEN.UUID")
         generators.find! { |row| row["name"].as_s == "RANDOM_HEX" }["description"].as_s
           .should contain("128-bit hex")

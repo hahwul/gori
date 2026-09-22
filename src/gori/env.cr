@@ -179,6 +179,12 @@ module Gori
     # token that then raises at the send seam, inside the fiber that was sending.
     record Generator, hint : String, mint : Proc(Generation, String)
 
+    # `$GEN.USER_AGENT`'s corpus (#1112): real browser values, one per line, embedded at compile
+    # time so a send stays a pure mint with no fetch. Parsed once at load; the file's own header
+    # says how to refresh it. `read_file` resolves relative to THIS source file.
+    USER_AGENTS = {{ read_file("#{__DIR__}/env/user_agents.txt") }}
+      .lines.map(&.strip).reject { |line| line.empty? || line.starts_with?('#') }
+
     # Built-ins that mint a fresh value at the final send seam. Names encode every format
     # choice the no-argument `$NS.NAME` grammar needs to make explicit.
     GENERATORS = {
@@ -188,6 +194,7 @@ module Gori
       "TIMESTAMP"    => Generator.new("Unix seconds · per send", ->(g : Generation) { g.now.to_unix.to_s }),
       "TIMESTAMP_MS" => Generator.new("Unix milliseconds · per send", ->(g : Generation) { g.now.to_unix_ms.to_s }),
       "ISO8601"      => Generator.new("UTC RFC 3339 · per send", ->(g : Generation) { g.now.to_rfc3339(fraction_digits: 3) }),
+      "USER_AGENT"   => Generator.new("real browser User-Agent · fresh per send", ->(_g : Generation) { USER_AGENTS.sample(Random::Secure) }),
     }
 
     # The catalog as the NAME → FORMAT table the surfaces print, derived from the one above so

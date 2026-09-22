@@ -101,9 +101,11 @@ describe "AuthorizeIdentityOverlay env completion" do
         ov = identity_form("Cookie: $U")
         screen = painted(ov)
         screen.should contain("$GEN.UUID")
+        screen.should contain("$GEN.USER_AGENT")
         screen.should_not contain("$ENV.UA")
         ov.handle_key(okey(Termisu::Input::Key::Tab))
-        ov.set_headers.should eq([{"Cookie", "$GEN.UUID"}])
+        # Rows sort by name, so the first `U` generator is USER_AGENT, not UUID.
+        ov.set_headers.should eq([{"Cookie", "$GEN.USER_AGENT"}])
       end
     end
   end

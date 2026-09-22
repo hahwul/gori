@@ -72,6 +72,30 @@ describe "Gori::Env generators" do
       generated("$GEN.TIMESTAMP").should match(/\A\d{10,}\z/)
       generated("$GEN.TIMESTAMP_MS").should match(/\A\d{13,}\z/)
       Time.parse_rfc3339(generated("$GEN.ISO8601"))
+      Gori::Env::USER_AGENTS.should contain(generated("$GEN.USER_AGENT"))
+    end
+  end
+
+  # The corpus is data a person edits by hand, and every entry lands in a header verbatim: one
+  # stray control byte or a blank line that survived the parse is a malformed request on the
+  # wire, not a realistic browser.
+  it "keeps the User-Agent corpus to real, header-safe browser values" do
+    corpus = Gori::Env::USER_AGENTS
+    corpus.size.should be >= 10
+    corpus.uniq.size.should eq(corpus.size)
+    corpus.each do |ua|
+      ua.should start_with("Mozilla/5.0 (")
+      ua.each_byte { |byte| (0x20..0x7e).includes?(byte).should be_true }
+      ua.should eq(ua.strip)
+    end
+  end
+
+  it "picks one User-Agent per request, the same wherever the request names it" do
+    with_generators do
+      a, b = generated("$GEN.USER_AGENT|$GEN.USER_AGENT").split('|')
+      a.should eq(b)
+      # A pick from ~20 values can repeat, so freshness is "more than one value across sends".
+      Array.new(64) { generated("$GEN.USER_AGENT") }.uniq.size.should be > 1
     end
   end
 
