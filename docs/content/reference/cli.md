@@ -59,6 +59,7 @@ gori run <subcommand> [verb] [options]
 | `compare <id-a> <id-b>` | Diff two flows' request or response |
 | `diff --from A --to B` | Retest report: diff two projects at endpoint scale (added / gone / changed / unchanged / removed) |
 | `intercept` | Inspect and drive a capturing TUI's live intercept queue |
+| `send [URL]` | Send one request built from a URL (curl-shaped) or a raw request, without creating a Repeater session |
 | `repeater <flow-id>` · `list` · `create` · `send` | Re-send a captured flow, or list / create / execute Repeater sessions (incl. WebSocket) |
 | `repeater minimize <id>` | Strip a saved request to the smallest form that keeps the response |
 | `repeater h2` | Send a field-native HTTP/2 request from an ordered HPACK field list |
@@ -192,6 +193,8 @@ Every row also carries `source`, where the flow came from (`proxy`, `repeater`, 
 gori run show <flow-id> --format raw
 ```
 
+`--headers-only` and `--max-body=BYTES` make the `text` and `json` views compact: `--headers-only` replaces each body with a line naming its size (`[body omitted by --headers-only: 149504 bytes]`; in JSON the body object keeps `encoding` and `size` and gains `omitted: true`), and `--max-body` prints the first BYTES of each decoded body followed by `[… truncated by --max-body: showing 2048 of 149504 bytes]` (in JSON `text`/`base64` hold the prefix, `size` the total, `shown_size` the prefix, and `truncated` is true). Either one also leaves out the sections derived from the bodies: decoded views, gRPC messages, WebSocket frames and SSE events. A transcript is still named with its count (`=== SSE EVENTS (40) — not printed under --max-body ===`, or `{"count": 40, "omitted": true}`). They are refused with the other formats, each of which writes the whole message, and with each other.
+
 `--format` is `text`, `json`, `raw` (exact bytes), `har` (a one-entry HAR log), or one of the **request-as-code** serializers: `curl`, `python` (requests), `fetch` (JavaScript), `go` (net/http), `httpie`, and `csrf` (a self-submitting HTML CSRF PoC). Each emits byte-identical text to the TUI's `Space → Y` **Copy as…** row of the same name. `--request-only` / `--response-only` limit the output and do not apply to `har`; every request-as-code format *is* the request, so `--response-only` is refused for all of them. Two caveats go to STDERR rather than into the snippet on STDOUT: a request body cut at the capture cap is carried **short**, and a WebSocket flow serializes as the upgrade handshake with none of its frames. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
 
 #### Safe evidence export
@@ -324,6 +327,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | Option | Description |
 | -------- | ------------- |
 | `--target=URL` | Send to a different origin; path and query are kept |
+| `--path=TARGET` | Send to a different request-target (path and query, e.g. `/api/v1/items/42?lang=en`) on the same origin. Everything else on the request line, every header and the body are kept byte-exact; the value goes on the line as written |
 | `--http2` / `--http1` (`--no-http2`) | Force a protocol; the default follows how the flow was captured |
 | `--sni=HOST` | TLS SNI override |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
@@ -334,7 +338,11 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--keep-request-line` | Send the stored request line as-is; do not rewrite an absolute-form line (`GET http://h/p`) to origin-form |
 | `--diff` | Diff against the original response |
 | `--allow-unscoped` | Send outside the project scope. Sandbox mode and explicit excludes still refuse each send |
+| `--headers-only` | Print the status line and headers only; the body is replaced by one line naming its size |
+| `--max-body=BYTES` | Print at most BYTES of the decoded response body, then a marker naming the full size |
 | `--format=FMT` | `text` (default) or `json` |
+
+`--headers-only` and `--max-body` shape what is **printed**, never what is sent or stored: the body is replaced by `[body omitted by --headers-only: 149504 bytes]`, or cut and followed by `[… truncated by --max-body: showing 2048 of 149504 bytes]`, so a cut body never reads as a short one. The size is the decoded body's (de-chunked, decompressed), the one an uncut dump prints. In `--format json` the `body` object keeps `size` as the whole decoded size; `--max-body` holds the prefix in `text`/`base64` and adds `shown_size`, with `truncated: true`, and `--headers-only` drops the bytes and adds `omitted: true`. The two flags are refused together. `--headers-only --diff` compares the two heads alone; `--max-body` is refused with `--diff`, whose comparison is of the whole messages. They take the same shape on `repeater send`, `repeater h2`, [`send`](#run-send) and [`show`](#run-show).
 
 **`repeater list`**: list saved Repeater sessions (`--format text|json`).
 
@@ -402,7 +410,18 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--idle-ms=N` | WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000) |
 | `--http` | WebSocket: send the handshake as an ordinary HTTP request for this send only. Selects the engine, not a rewrite |
 | `--record-history` | Also write the outbound request + response to History as a captured flow, and print its flow id on stdout (HTTP only; a Repeater send leaves no flow by default) |
-| `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--format` | As above |
+| `--path=TARGET` | Send this request-target (path and query) instead of the stored one, for this send only |
+| `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--headers-only`, `--max-body`, `--format` | As above (`--headers-only` / `--max-body` are HTTP-only: a WebSocket exchange prints a transcript) |
+
+`--path` sweeps one session's request across endpoints that differ only in path, without a session per path:
+
+```bash
+for n in $(seq 1 38); do
+  gori run repeater send 1 --path "/api/v1/items/$n" --headers-only
+done
+```
+
+It edits a copy of the stored request for this send: the session keeps its own request **and its last response**, because storing another target's answer beside it would show the TUI tab a response to a request it does not hold, and make the next `--diff` compare against the wrong endpoint. So `response_saved` is absent from `--format json`, a `path` field names the target that was sent, and the text status line ends with it (`→ 200 in 218.4ms · /api/v1/items/42`). `--record-history` still records the request as it went out, new path included, and `--diff` compares against the session's stored response.
 
 A send that reached the origin exits `0` even when the writes after it fail, so a shell does not resend it. `--format json` says which: `response_saved` (present once a response was written to the session, `false` with `response_save_error` when the project refused the write or the session was deleted mid-send, in which case a later `--diff` would compare against the previous response) and, under `--record-history`, `history_saved` with `history_error` beside a `recorded_flow_id` that is then absent. Text mode prints the same sentence on STDERR.
 
@@ -423,7 +442,32 @@ gori run repeater move 5 --down
 gori run repeater h2 --target https://api.example.com --fields fields.json
 ```
 
-`--fields=FILE` is a JSON file holding either a bare `[[name, value], …]` array or `{"fields": [[name, value], …], "body": "…"}` (`body_base64` for binary). Nothing in the list is normalized: a leading colon, a leading-space value, an uppercase name are the payload. `--target` sets the dial origin, so the `:authority` and `:scheme` fields may deliberately disagree with it. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--allow-unscoped`, `--tls-preset=NAME` and `--format text|json` behave as on `repeater send`.
+`--fields=FILE` is a JSON file holding either a bare `[[name, value], …]` array or `{"fields": [[name, value], …], "body": "…"}` (`body_base64` for binary). Nothing in the list is normalized: a leading colon, a leading-space value, an uppercase name are the payload. `--target` sets the dial origin, so the `:authority` and `:scheme` fields may deliberately disagree with it. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--allow-unscoped`, `--tls-preset=NAME`, `--headers-only`, `--max-body` and `--format text|json` behave as on `repeater send`.
+
+### run send
+
+Send one request and print the response, without creating a Repeater session: the headless form of MCP `send_request{url}`, built by the same code. It goes out through the project's upstream proxy, host overrides, scope and Sandbox like every other gori send, and leaves nothing behind unless you pass `--record-history`.
+
+```bash
+gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json'
+gori run send --url https://api.example.com/v1/items -X POST -b '{"name":"x"}' --record-history
+gori run send --url https://api.example.com --request-file req.http --headers-only
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--url=URL` (or the URL as the only argument) | Absolute `http://` / `https://` URL. Its path and query become the request-target; with a raw request it only names where to dial |
+| `-X`, `--method=METHOD` | HTTP method (default `GET`) |
+| `-H`, `--header=HEADER` | `Name: value`, repeatable, sent in order. `Host` and `Content-Length` are added only when you leave them out. A header that would split into two lines, or a name that is not a token, is refused: a raw request is the form for malformed bytes |
+| `-b`, `--body=BODY` | Request body; `$ENV.KEY` tokens expand |
+| `--body-file=FILE` | Request body read byte-for-byte, never expanded |
+| `-f`, `--request-file=FILE` · `-r`, `--request-raw=RAW` · `--request-stdin` | Send this raw HTTP request instead of building one. Refused beside `-X`/`-H`/`-b`/`--body-file`, which it would otherwise silently drop. The head's bare LFs are promoted to CRLF unless `--verbatim` |
+| `--verbatim` | No token expansion in `-H`, `-b` or a raw request, no bare-LF promotion, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial |
+| `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--slot=NAME`, `--allow-unscoped` | As on `repeater send` |
+| `--record-history` | Also write the request and response to History as a flow (`source: repeater`, `source_surface: cli`) and print its id. Off by default, as on `repeater send` |
+| `--headers-only`, `--max-body=BYTES`, `--format=FMT` | As on `repeater send` |
+
+A request that is a WebSocket handshake goes out as an ordinary request and its `101` is the answer, which the command says on STDERR. A framed exchange needs a session: `repeater create`, then `repeater send`.
 
 ### run fuzz
 

@@ -822,6 +822,8 @@ module Gori
         resp_only = false
         positional = [] of String
         redaction = RedactFlags.new
+        headers_only = false
+        max_body : Int32? = nil
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run show <flow-id> [options]"
@@ -830,6 +832,8 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |v| format = parse_format(v, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf]) }
           p.on("--request-only", "Only the request side") { req_only = true }
           p.on("--response-only", "Only the response side") { resp_only = true }
+          p.on("--headers-only", "text/json: print the request line/status line and headers only — each body is replaced by a line naming its size, and the sections derived from bodies (decoded views, gRPC messages, WebSocket frames, SSE events) are left out, named with their counts where they have one") { headers_only = true }
+          p.on("--max-body=BYTES", "text/json: print at most BYTES of each decoded body, then a marker naming its full size; the sections derived from bodies are left out as with --headers-only") { |v| max_body = parse_count(v, "--max-body") }
           redact_options(p, redaction)
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -838,6 +842,10 @@ module Gori
         end
         parser.parse(args)
         if err = show_side_error(format, req_only, resp_only)
+          abort "gori run show: #{err}"
+        end
+        cap = body_cap(headers_only, max_body, "gori run show")
+        if err = show_cap_error(format, cap)
           abort "gori run show: #{err}"
         end
         id = take_flow_id(positional, "show")
@@ -862,7 +870,7 @@ module Gori
 
         show_request = !resp_only
         show_response = !req_only
-        show_format(format, detail, show_request, show_response, ws_msgs)
+        show_format(format, detail, show_request, show_response, ws_msgs, cap)
         # After the document, like every other caveat this command reports, and on STDERR so
         # `--format har > evidence.har` still writes a pure HAR.
         redact_notes(redact_one(redact_report), choice, "show")
@@ -873,7 +881,8 @@ module Gori
       # is what makes sanitizing the detail ONCE, before this call, cover all ten of them.
       private def self.show_format(format : Symbol, detail : Store::FlowDetail,
                                    show_request : Bool, show_response : Bool,
-                                   ws_msgs : Array(Store::WsMessage)) : Nil
+                                   ws_msgs : Array(Store::WsMessage),
+                                   cap : BodyCap = BodyCap.new) : Nil
         case format
         when :raw    then show_raw(detail, show_request, show_response)
         when :har    then show_har(detail, ws_msgs)
@@ -883,8 +892,8 @@ module Gori
         when :go     then show_code(detail, ws_msgs, :go)
         when :httpie then show_code(detail, ws_msgs, :httpie)
         when :csrf   then show_code(detail, ws_msgs, :csrf)
-        when :json   then puts show_json(detail, show_request, show_response, ws_msgs)
-        else              show_text(detail, show_request, show_response, ws_msgs)
+        when :json   then puts show_json(detail, show_request, show_response, ws_msgs, cap)
+        else              show_text(detail, show_request, show_response, ws_msgs, cap)
         end
       end
 
@@ -1034,6 +1043,14 @@ module Gori
       # Both formats below write a shape that is not per-side, so a silently ignored flag would
       # hand back a document the operator did not ask for and has no way to tell apart from the
       # one they did.
+      # `--headers-only` / `--max-body` shape the two READING views. Every other format is a
+      # document with a contract of its own — `raw` is the exact bytes, `har` a whole entry, the
+      # code formats a request that has to run — and a cut body would break each of them quietly.
+      def self.show_cap_error(format : Symbol, cap : BodyCap) : String?
+        return nil if cap.whole? || format.in?(:text, :json)
+        "#{cap.flag} applies to --format text and json — --format #{format} writes the whole message"
+      end
+
       private def self.show_side_error(format : Symbol, req_only : Bool, resp_only : Bool) : String?
         return "--request-only and --response-only are mutually exclusive" if req_only && resp_only
         # A HAR entry is a request AND its response; there is no half-entry shape to emit.
@@ -1142,8 +1159,12 @@ module Gori
         notes
       end
 
+      # `cap` (`--headers-only` / `--max-body`) is a COMPACT view: the heads and the capped bodies,
+      # and nothing derived from the bodies — the point of the flag is a flow that prints in a
+      # screen, and an SSE stream's events or a socket's frames are the same bulk again. A derived
+      # section with a count is still NAMED, so its absence is never read as "there was none".
       private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool,
-                                 ws_msgs : Array(Store::WsMessage)) : Nil
+                                 ws_msgs : Array(Store::WsMessage), cap : BodyCap = BodyCap.new) : Nil
         # FIRST, above the bytes it is about: what gori DID to this exchange that the bytes
         # cannot show — a Match&Replace rule it could not run, a request the origin invented.
         # The WebSocket half of this has been readable here since #518 (`[gori] …` rows in the
@@ -1156,7 +1177,7 @@ module Gori
         end
         if req
           puts "=== REQUEST (#{detail.http_version}) ==="
-          print_message_text(detail.request_head, display_body(detail.request_head, detail.request_body), detail.request_body)
+          print_message_text(detail.request_head, display_body(detail.request_head, detail.request_body), detail.request_body, cap)
           puts "  [request body truncated]" if detail.request_body_truncated?
         end
         if resp
@@ -1166,23 +1187,31 @@ module Gori
             puts "error: #{err}"
           end
           if h = detail.response_head
-            print_message_text(h, display_body(h, detail.response_body), detail.response_body)
+            print_message_text(h, display_body(h, detail.response_body), detail.response_body, cap)
             puts "  [response body truncated]" if detail.response_body_truncated?
           elsif detail.error.nil?
             puts "(no response captured)"
           end
           unless ws_msgs.empty?
             puts ""
-            puts "=== WEBSOCKET MESSAGES (#{ws_msgs.size}) ==="
-            ws_msgs.each { |m| puts ws_message_text(m) }
+            if cap.whole?
+              puts "=== WEBSOCKET MESSAGES (#{ws_msgs.size}) ==="
+              ws_msgs.each { |m| puts ws_message_text(m) }
+            else
+              puts "=== WEBSOCKET MESSAGES (#{ws_msgs.size}) — not printed under #{cap.flag} ==="
+            end
           end
           if (events = sse_events_of(detail)) && !events.empty?
             puts ""
-            puts "=== SSE EVENTS (#{events.size}) ==="
-            events.each_with_index { |e, i| puts sse_event_text(e, i) }
+            if cap.whole?
+              puts "=== SSE EVENTS (#{events.size}) ==="
+              events.each_with_index { |e, i| puts sse_event_text(e, i) }
+            else
+              puts "=== SSE EVENTS (#{events.size}) — not printed under #{cap.flag} ==="
+            end
           end
         end
-        print_decoded_text(detail, req, resp, ws_msgs)
+        print_decoded_text(detail, req, resp, ws_msgs) if cap.whole?
       end
 
       # Parsed SSE events when the response is a text/event-stream, else nil. Like
@@ -1390,8 +1419,11 @@ module Gori
         end
       end
 
+      # `cap` makes the same compact view as `show_text`: capped body objects, and the sections
+      # derived from bodies left out — except that a transcript's COUNT stays, as an object with
+      # `omitted: true`, so a script can still tell "had frames" from "had none".
       private def self.show_json(detail : Store::FlowDetail, req : Bool, resp : Bool,
-                                 ws_msgs : Array(Store::WsMessage)) : String
+                                 ws_msgs : Array(Store::WsMessage), cap : BodyCap = BodyCap.new) : String
         JSON.build do |j|
           j.object do
             j.field "flow" do
@@ -1402,14 +1434,16 @@ module Gori
             # capture failure's text quotes bytes the origin sent (a malformed status line, a
             # header the codec refused), so it is captured data — see `Output.json_captured`.
             CLI::Output.json_captured(j, "error", detail.error)
-            emit_decoded_json(j, detail, req, resp, ws_msgs)
+            emit_decoded_json(j, detail, req, resp, ws_msgs) if cap.whole?
             if req
               j.field "request" do
                 j.object do
                   j.field "head", scrub(detail.request_head)
-                  emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?)
-                  emit_grpc_messages_json(j, detail.request_head, detail.request_body,
-                    detail.row.target, request: true)
+                  emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?, cap)
+                  if cap.whole?
+                    emit_grpc_messages_json(j, detail.request_head, detail.request_body,
+                      detail.row.target, request: true)
+                  end
                 end
               end
             end
@@ -1417,61 +1451,83 @@ module Gori
               j.field "response" do
                 j.object do
                   j.field "head", scrub(detail.response_head)
-                  emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?)
-                  emit_grpc_messages_json(j, detail.response_head, detail.response_body,
-                    detail.row.target, request: false)
+                  emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?, cap)
+                  if cap.whole?
+                    emit_grpc_messages_json(j, detail.response_head, detail.response_body,
+                      detail.row.target, request: false)
+                  end
                 end
               end
-              unless ws_msgs.empty?
-                j.field "ws_messages" do
+              emit_show_ws_json(j, ws_msgs, cap)
+              emit_show_sse_json(j, detail, cap)
+            end
+          end
+        end
+      end
+
+      # A WebSocket flow's transcript for `show --format json`. Under `--headers-only` /
+      # `--max-body` only its count, with `omitted: true` — the frames are the same bulk the flag
+      # exists to keep out, and a missing key would read as "no frames".
+      private def self.emit_show_ws_json(j : JSON::Builder, ws_msgs : Array(Store::WsMessage), cap : BodyCap) : Nil
+        return if ws_msgs.empty?
+        unless cap.whole?
+          j.field("ws_messages") { j.object { j.field "count", ws_msgs.size; j.field "omitted", true } }
+          return
+        end
+        j.field "ws_messages" do
+          j.object do
+            j.field "count", ws_msgs.size
+            j.field "truncated", false
+            j.field "messages" do
+              j.array do
+                ws_msgs.each do |m|
                   j.object do
-                    j.field "count", ws_msgs.size
-                    j.field "truncated", false
-                    j.field "messages" do
-                      j.array do
-                        ws_msgs.each do |m|
-                          j.object do
-                            j.field "direction", m.direction
-                            j.field "opcode", m.opcode
-                            m.emit_shape_json(j)
-                            if m.text?
-                              j.field "text", String.new(m.payload).scrub
-                              # See emit_ws_result: JSON cannot carry a byte that is not valid
-                              # UTF-8, and those bytes are the §8.1/§5.6 test case.
-                              j.field "base64", Base64.strict_encode(m.payload) unless String.new(m.payload).valid_encoding?
-                            else
-                              j.field "binary", true
-                              j.field "size", m.payload.size
-                              j.field "base64", Base64.strict_encode(m.payload)
-                            end
-                          end
-                        end
-                      end
+                    j.field "direction", m.direction
+                    j.field "opcode", m.opcode
+                    m.emit_shape_json(j)
+                    if m.text?
+                      j.field "text", String.new(m.payload).scrub
+                      # See emit_ws_result: JSON cannot carry a byte that is not valid
+                      # UTF-8, and those bytes are the §8.1/§5.6 test case.
+                      j.field "base64", Base64.strict_encode(m.payload) unless String.new(m.payload).valid_encoding?
+                    else
+                      j.field "binary", true
+                      j.field "size", m.payload.size
+                      j.field "base64", Base64.strict_encode(m.payload)
                     end
                   end
                 end
               end
-              if (events = sse_events_of(detail)) && !events.empty?
-                j.field "sse_events" do
+            end
+          end
+        end
+      end
+
+      # An event-stream response's parsed events for `show --format json`; count-only under a
+      # cap, like the WebSocket transcript above.
+      private def self.emit_show_sse_json(j : JSON::Builder, detail : Store::FlowDetail, cap : BodyCap) : Nil
+        events = sse_events_of(detail)
+        return if events.empty?
+        unless cap.whole?
+          j.field("sse_events") { j.object { j.field "count", events.size; j.field "omitted", true } }
+          return
+        end
+        j.field "sse_events" do
+          j.object do
+            j.field "count", events.size
+            # Same cap/expression as the MCP serializer (mcp/serialize.cr
+            # `emit_sse_events`) — was hardcoded `false` here, so a caller
+            # reading only `sse_events` (the point of --format json) had no
+            # signal the array was clipped.
+            j.field "truncated", events.size > MCP::Serialize::SSE_EVENTS_MAX
+            j.field "events" do
+              j.array do
+                events.each do |e|
                   j.object do
-                    j.field "count", events.size
-                    # Same cap/expression as the MCP serializer (mcp/serialize.cr
-                    # `emit_sse_events`) — was hardcoded `false` here, so a caller
-                    # reading only `sse_events` (the point of --format json) had no
-                    # signal the array was clipped.
-                    j.field "truncated", events.size > MCP::Serialize::SSE_EVENTS_MAX
-                    j.field "events" do
-                      j.array do
-                        events.each do |e|
-                          j.object do
-                            j.field "type", e.type
-                            j.field "id", e.id
-                            j.field "retry", e.retry
-                            j.field "data", e.data.scrub
-                          end
-                        end
-                      end
-                    end
+                    j.field "type", e.type
+                    j.field "id", e.id
+                    j.field "retry", e.retry
+                    j.field "data", e.data.scrub
                   end
                 end
               end

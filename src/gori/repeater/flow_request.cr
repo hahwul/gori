@@ -351,6 +351,67 @@ module Gori
         {combine(head, body), false}
       end
 
+      # `wire` with its request-target replaced by `target` — the per-send path/query override
+      # (`gori run repeater send --path`, `gori run repeater <flow-id> --path`, #1116) — or nil
+      # when the request line has no target to replace (no whitespace after the method).
+      #
+      # Everything else is kept byte-exact: the method, the version, the whitespace between the
+      # three (`GET  /x  HTTP/1.1` keeps its double spaces), the line's own terminator, every
+      # header and the body. The line is the FIRST NON-BLANK one, which is where
+      # `Codec::Http1.request_target_line` — the scope gate's reader — finds the target, so a
+      # request opening with a stray CRLF is edited on the line the gate will judge, not on the
+      # blank line in front of it. The target runs from the whitespace after the method to the
+      # whitespace before a trailing `HTTP/…` token; a target carrying a raw space
+      # (`GET /a b HTTP/1.1`, a fuzzer or smuggling shape) is therefore replaced WHOLE. With no
+      # version token (an HTTP/0.9-shaped line) it runs to the end of the line.
+      #
+      # `target` goes in verbatim — it is the operator's bytes (P7) — and it is not expanded
+      # here: a session send expands the whole draft afterwards (`Plan`), and a flow replay
+      # expands the operator's overrides at its own merge seam.
+      def self.replace_request_target(wire : Bytes, target : String) : Bytes?
+        pos = 0
+        while pos < wire.size
+          nl = wire.index(0x0A_u8, pos)
+          stop = nl || wire.size
+          line_end = stop > pos && wire[stop - 1] == 0x0D_u8 ? stop - 1 : stop
+          unless (pos...line_end).all? { |i| line_space?(wire[i]) }
+            return splice_request_target(wire, pos, line_end, target)
+          end
+          return nil unless nl
+          pos = nl + 1
+        end
+        nil
+      end
+
+      private def self.splice_request_target(wire : Bytes, from : Int32, to : Int32, target : String) : Bytes?
+        method_end = (from...to).find { |i| line_space?(wire[i]) }
+        return nil unless method_end
+        t_start = method_end
+        while t_start < to && line_space?(wire[t_start])
+          t_start += 1
+        end
+        return nil if t_start >= to
+        t_end = to
+        if last = (t_start...to).reverse_each.find { |i| line_space?(wire[i]) }
+          if String.new(wire[(last + 1)...to]).starts_with?("HTTP/")
+            t_end = last
+            while t_end > t_start && line_space?(wire[t_end - 1])
+              t_end -= 1
+            end
+          end
+        end
+        io = IO::Memory.new(wire.size + target.bytesize)
+        io.write(wire[0, t_start])
+        io << target
+        io.write(wire[t_end, wire.size - t_end])
+        io.to_slice
+      end
+
+      # SP or HTAB — the separators a request line is tokenized on here.
+      private def self.line_space?(b : UInt8) : Bool
+        b == 0x20_u8 || b == 0x09_u8
+      end
+
       # Rewrite a request line's HTTP-version token to match the transport when the user
       # flips the h1↔h2 toggle. The h1 `Engine` sends the request line VERBATIM, so a flow
       # captured over h2 (stored with a "…​ HTTP/2" line, see H2 Assembler#synth_request_head)

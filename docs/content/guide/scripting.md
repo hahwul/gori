@@ -89,6 +89,9 @@ gori run capture --project ci-run --for 5m --format jsonl > flows.jsonl
 
 # Fail a CI job when the fuzzer finds a reflected marker
 gori run fuzz 42 --wordlist payloads.txt --mr 'gori-canary' --fail-if-no-matches
+
+# One request per path, no session per path, status and headers only
+for p in /api/v1/items/{1..38}; do gori run send "https://api.example.com$p" --headers-only; done
 ```
 
 ## Staying In Scope
@@ -214,13 +217,14 @@ answerable in a script because there is no prompt.
 |------|------------|
 | Capture traffic in CI, headless | `capture` |
 | Query or export History (incl. HAR) | `history`, `show` |
+| Send one request, no session | `send` |
 | Replay and diff a request | `repeater`, `compare` |
 | Sweep payloads or hunt hidden params | `fuzz`, `mine` |
 | Crawl and brute-force endpoints | `discover`, `sitemap` |
 | Test access control across identities | `authorize` |
 | Scan and triage | `probe`, `issues`, `notes` |
 | Pure compute, no project needed | `decoder`, `jwt`, `cookie` |
-| Manage projects, scope, env, rules | `project`, `rewriter`, `colormarker` |
+| Manage projects, scope, env, network, rules | `project`, `rewriter`, `colormarker` |
 
 ## Next Steps
 

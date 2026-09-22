@@ -267,6 +267,53 @@ describe Gori::Repeater::FlowRequest do
     end
   end
 
+  # `--path` (#1116): a per-send request-target override. Everything around the target is the
+  # operator's (or the capture's) bytes and must come through untouched.
+  describe ".replace_request_target" do
+    it "swaps the target and keeps the method, version, headers and body byte-exact" do
+      wire = "POST /api/v1/items/1 HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\n".to_slice + Bytes[0xff, 0x00]
+      sent = Gori::Repeater::FlowRequest.replace_request_target(wire, "/api/v1/items/42?lang=en").not_nil!
+      sent.should eq("POST /api/v1/items/42?lang=en HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\n".to_slice + Bytes[0xff, 0x00])
+    end
+
+    # A raw space in a target is a fuzzer/smuggling shape: the WHOLE old target goes, not its
+    # first word with the rest left dangling in front of the version.
+    it "replaces a target carrying a raw space whole" do
+      sent = Gori::Repeater::FlowRequest.replace_request_target("GET /a b HTTP/1.1\r\n\r\n".to_slice, "/x")
+      String.new(sent.not_nil!).should eq("GET /x HTTP/1.1\r\n\r\n")
+    end
+
+    it "keeps odd spacing and a bare-LF terminator as they were" do
+      sent = Gori::Repeater::FlowRequest.replace_request_target("GET  /old\tHTTP/1.0\nX: 1\n\n".to_slice, "/new")
+      String.new(sent.not_nil!).should eq("GET  /new\tHTTP/1.0\nX: 1\n\n")
+    end
+
+    it "runs the target to the end of a line with no version token" do
+      String.new(Gori::Repeater::FlowRequest.replace_request_target("GET /old\r\n".to_slice, "/new").not_nil!)
+        .should eq("GET /new\r\n")
+    end
+
+    # Where the scope gate reads the target is where it gets replaced, or the gate would judge
+    # a URL this send does not go to.
+    it "edits the first NON-blank line, where the scope gate reads the target" do
+      sent = Gori::Repeater::FlowRequest.replace_request_target("\r\nGET /old HTTP/1.1\r\n\r\n".to_slice, "/new").not_nil!
+      String.new(sent).should eq("\r\nGET /new HTTP/1.1\r\n\r\n")
+      Gori::Outbound.request_target(sent).should eq("/new")
+    end
+
+    it "replaces an absolute-form target like any other" do
+      sent = Gori::Repeater::FlowRequest.replace_request_target("GET http://h/p HTTP/1.1\r\n\r\n".to_slice, "/q")
+      String.new(sent.not_nil!).should eq("GET /q HTTP/1.1\r\n\r\n")
+    end
+
+    it "answers nil when there is no target to replace" do
+      Gori::Repeater::FlowRequest.replace_request_target("GARBAGE\r\n\r\n".to_slice, "/x").should be_nil
+      Gori::Repeater::FlowRequest.replace_request_target("GET \r\n".to_slice, "/x").should be_nil
+      Gori::Repeater::FlowRequest.replace_request_target("\r\n\r\n".to_slice, "/x").should be_nil
+      Gori::Repeater::FlowRequest.replace_request_target(Bytes.empty, "/x").should be_nil
+    end
+  end
+
   describe ".retarget_version_line" do
     it "downgrades an h2-captured request line to HTTP/1.1 for the verbatim h1 send" do
       Gori::Repeater::FlowRequest.retarget_version_line("GET /a HTTP/2", false).should eq("GET /a HTTP/1.1")
