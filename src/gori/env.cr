@@ -182,8 +182,9 @@ module Gori
     # `$GEN.USER_AGENT`'s corpus (#1112): real browser values, one per line, embedded at compile
     # time so a send stays a pure mint with no fetch; the file's own header says how to refresh
     # it. Parsed in the MACRO so an empty corpus fails the build — at runtime it would be an
-    # `IndexError` in the sending fiber for a name every surface still advertises. `read_file`
-    # resolves relative to THIS source file.
+    # `IndexError` in the sending fiber for a name every surface still advertises. The rule is
+    # `EmbeddedList.parse`'s, restated at compile time. `read_file` resolves relative to THIS
+    # source file.
     USER_AGENTS = {% begin %}
       {% agents = read_file("#{__DIR__}/env/user_agents.txt").lines.map(&.strip).reject { |line| line.empty? || line.starts_with?("#") } %}
       {% if agents.empty? %}{% raise "src/gori/env/user_agents.txt holds no User-Agent line" %}{% end %}

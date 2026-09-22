@@ -1,3 +1,4 @@
+require "../embedded_list"
 require "../tty_path"
 
 module Gori::Discover
@@ -13,7 +14,7 @@ module Gori::Discover
     @@builtin : Array(String)?
 
     def self.builtin : Array(String)
-      @@builtin ||= parse(BUILTIN_RAW)
+      @@builtin ||= EmbeddedList.parse(BUILTIN_RAW)
     end
 
     # Built-in paths, then the optional user file (read at runtime). De-duped, order
@@ -25,7 +26,7 @@ module Gori::Discover
           merge_user_file(path) { |line| names << line }
         end
       end
-      dedup(names)
+      EmbeddedList.dedup(names)
     end
 
     # The user merge file is operator MATERIAL, not a curated gori asset: a leading or
@@ -53,20 +54,6 @@ module Gori::Discover
         next if trimmed.empty? || trimmed.starts_with?('#')
         yield line
       end
-    end
-
-    private def self.parse(raw : String) : Array(String)
-      out = [] of String
-      raw.each_line do |line|
-        stripped = line.strip
-        out << stripped unless stripped.empty? || stripped.starts_with?('#')
-      end
-      out
-    end
-
-    private def self.dedup(list : Array(String)) : Array(String)
-      seen = Set(String).new
-      list.select { |n| seen.add?(n) }
     end
   end
 end
