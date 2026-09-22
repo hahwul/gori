@@ -12,6 +12,7 @@ module Gori
         {"project sandbox", "Get/set the hard-containment sandbox gate (status, on, off)"},
         {"project env", "Manage project env vars ($ENV.KEY substitution; bare syntax: $KEY)"},
         {"project host-override", "Manage host overrides (list, add, update, delete)"},
+        {"project network", "Get/set the project's own network settings (net.*: upstream proxy, timeouts, capture cap, bind)"},
       ])]
       private def self.cmd_project(args : Array(String)) : Nil
         sub = args.first?
@@ -34,15 +35,21 @@ module Gori
           cmd_project_env(args[1..])
         when "host-override", "host-overrides"
           cmd_project_host_override(args[1..])
+        when "network", "net"
+          cmd_project_network(args[1..])
         else
-          # Flags only (e.g. --format json) → list projects
-          if (s = sub) && s.starts_with?('-')
-            cmd_project_list(args)
-          else
-            STDERR.puts "gori run project: unknown subcommand '#{sub}'"
-            print_project_help
-            exit 1
-          end
+          cmd_project_other(sub, args)
+        end
+      end
+
+      # Flags only (e.g. `--format json`) → list projects; any other word is refused.
+      private def self.cmd_project_other(sub : String, args : Array(String)) : Nil
+        if sub.starts_with?('-')
+          cmd_project_list(args)
+        else
+          STDERR.puts "gori run project: unknown subcommand '#{sub}'"
+          print_project_help
+          exit 1
         end
       end
 
@@ -62,6 +69,8 @@ module Gori
             sandbox            Get/set the hard-containment sandbox gate (status, on, off)
             env                Manage project env vars ($ENV.KEY substitution; bare syntax: $KEY)
             host-override      Manage host overrides (list, add, update, delete)
+            network            Get/set the project's own network settings (net.*): upstream proxy
+                               and credentials, destination host, timeouts, capture cap, bind
 
           Examples:
             gori run project --format json
@@ -73,6 +82,8 @@ module Gori
             gori run project sandbox on
             gori run project env set TOKEN=secret
             gori run project host-override add --host=api.example.com --ip=10.0.0.1
+            gori run project network set upstream_proxy=http://proxy.corp.example:3128
+            gori run project network
 
           See 'gori run project <subcommand> --help' for more.
           HELP

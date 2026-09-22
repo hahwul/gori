@@ -98,6 +98,7 @@ gori run <subcommand> [verb] [options]
 | `project sandbox` | Get / set the hard-containment sandbox gate (`status`, `on`, `off`) |
 | `project env` | List / set / delete project env vars (`$ENV.KEY` substitution) |
 | `project host-override` | List / add / update / delete project host to IP dial overrides |
+| `project network` | List / get / set / unset the project's own network settings (`net.*`: upstream proxy and credentials, destination host, timeouts, capture cap, bind) |
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`). Global flags go **after** the verb: `gori run rewriter rm 1 --project=x`, not `gori run rewriter --project=x rm 1`, which is rejected as a usage error rather than silently listing.
 
@@ -1336,6 +1337,40 @@ gori run project host-override delete 1
 | `add` | `--host=…` + `--ip=…`, or positional `IP HOST` |
 | `update <id>` | `--host=…` + `--ip=…` (both required) |
 | `delete <id>` | Remove an override by id |
+
+#### project network
+
+Read and edit the project's **own** network settings, the `net.*` rows the TUI's **Project settings** card writes. A value set here wins over the global `network.*` in `settings.json` for this project only; `unset` returns the key to the global value. See [Per-Project Overrides](/reference/config/#per-project-overrides) for what each key does and where it applies. Alias: `net`.
+
+```bash
+gori run project network                                   # every key: its value here, and where it comes from
+gori run project network --format json
+gori run project network set upstream_proxy=http://proxy.corp.example:3128
+gori run project network get upstream_proxy
+printf %s "$PROXY_PASS" | gori run project network set upstream_auth alice --password-stdin
+gori run project network set capture_max_mib 16
+gori run project network unset capture_max_mib
+```
+
+| Key (`net.` prefix optional) | Value |
+| ------ | ------- |
+| `bind_host` · `bind_port` | Proxy listen address and port. Applied only where gori listens: the TUI and `gori run capture` |
+| `upstream_proxy` | `http://`, `http+tls://`, `socks5://` or `socks5h://` URI. **Empty pins a direct route**: no global proxy, `upstream_rules` entry or `HTTP(S)_PROXY` applies to the project any more. Credentials in the URI are refused |
+| `upstream_destination_host` | Host pattern the project's proxy routing applies to; anything else goes direct. `*` (the default) clears the row |
+| `upstream_auth` | Proxy credentials: the value is the username, the password is read from stdin with `--password-stdin` (never the argument vector, which would put it in the process listing). HTTP Basic for an HTTP proxy, RFC 1929 for SOCKS5 |
+| `connect_timeout_secs` · `io_timeout_secs` | Outbound connect and idle timeouts, seconds (min 1) |
+| `capture_max_mib` | Body bytes captured and stored per message, MiB (1-2047) |
+
+| Subcommand | Description |
+| --------------------- | ------------- |
+| (default) / `list` | Every key with the value in effect and its source (`· project`, `· global`); `--format json` carries `value` (the project's own row, `null` when unset), `inherited` and `effective` |
+| `get KEY` | The value in effect: the project's own, else the inherited one (named on STDERR, so `$(…)` captures the value alone). Credentials print the method and username; the password is never printed |
+| `set KEY=VALUE` · `set KEY VALUE` | Pin a value, **even one equal to the global**, which is what keeps a later global edit from reaching the project. (The Project settings card folds a value equal to the global back to inherit when it saves; `set` does not, because it names one key.) |
+| `unset KEY` (`rm`) | Drop the project's value so it inherits again. A key that is not set is not an error |
+
+Credentials pin the upstream they were entered for, as they do in the Project settings card: `set upstream_auth` also pins an inherited global upstream to the project, in the same write, so the password can never follow a later global edit or an upstream rule to a different proxy; `set upstream_proxy` moves stored credentials to the new address (re-deriving Basic vs SOCKS5 for it); and `unset upstream_proxy` is refused until `unset upstream_auth`. The multi-row edits are one transaction, so a busy project cannot store a password beside an address it was not validated against. Every edit is recorded in the project's event feed, without the credential.
+
+A gori that already has the project open (a TUI, a capture, an MCP server) read these rows when it opened the project and keeps them until the project is reopened there; the command says so on STDERR when that is the case.
 
 ### run redact
 

@@ -12,6 +12,7 @@
 - CLI: OAST subcommands no longer mistake option values for verbs, and missing `--project`/`--db` values are rejected (#1144)
 - TUI: `esc` leaves every tab body and the footer names where it lands — it did nothing at all on the Diff sub-tab (where `↑` was dead too) or on an empty Fuzzer, several tabs never advertised it, the Repeater, Fuzzer, Miner and Colormarker lines named the wrong destination, and the Fuzzer's results footer printed a raw `{fuzz.sort}` for a key that was never bound (#1147)
 - Notes: a Markdown heading marker no longer rides into the note's title — the sub-tab chip, `gori run notes`, the MCP listing and the exported filename all drop the leading `#` (#1147)
+- CLI: `gori run project network` lists, reads, pins and unsets a project's own network settings (`net.*`: upstream proxy and credentials, destination host, timeouts, capture cap, bind), so a per-project proxy no longer means editing the database by hand (#1115)
 
 ## v0.7.1
 

@@ -82,6 +82,7 @@ require "./run/rewriter"
 require "./run/colormarker"
 require "./run/views"
 require "./run/project"
+require "./run/project_network"
 
 module Gori
   module CLI
