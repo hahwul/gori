@@ -92,6 +92,29 @@ describe "Gori::Env generators" do
     end
   end
 
+  # Each family is the slice of the corpus a TLS preset of that name would agree with; a
+  # Chromium line in the Safari family is the mismatch the names exist to prevent (every
+  # Chromium UA also claims `Safari/`).
+  it "narrows the User-Agent to the browser family its TLS preset name says" do
+    families = Gori::Env::USER_AGENT_FAMILIES
+    families.keys.map(&.downcase).each { |name| Gori::Settings::TLS_PRESETS.has_key?(name).should be_true }
+    families.each_value(&.should_not(be_empty))
+    families["CHROME"].all?(&.includes?("Chrome/")).should be_true
+    families["FIREFOX"].all? { |ua| ua.includes?("Firefox/") && !ua.includes?("Chrome/") }.should be_true
+    families["SAFARI"].none? { |ua| ua.includes?("Chrome/") || ua.includes?("Firefox/") }.should be_true
+    families.values.flatten.sort!.should eq(Gori::Env::USER_AGENTS.sort)
+    with_generators do
+      families.each do |family, list|
+        list.should contain(generated("$GEN.USER_AGENT_#{family}"))
+      end
+      # A family name is its own generator: in one request it does not share the plain pick.
+      out = generated("$GEN.USER_AGENT_FIREFOX|$GEN.USER_AGENT_SAFARI")
+      firefox, safari = out.split('|')
+      firefox.should contain("Firefox/")
+      safari.should_not contain("Firefox/")
+    end
+  end
+
   it "picks one User-Agent per request, the same wherever the request names it" do
     with_generators do
       a, b = generated("$GEN.USER_AGENT|$GEN.USER_AGENT").split('|')

@@ -70,6 +70,9 @@ Tokens stay as literal text in the editor and expand only on the way out: in Rep
 | `$GEN.TIMESTAMP_MS` | Unix time in milliseconds |
 | `$GEN.ISO8601` | current UTC time in RFC 3339 form, with milliseconds |
 | `$GEN.USER_AGENT` | a real desktop browser User-Agent (Chrome, Edge, Firefox, Safari), drawn at random from a list built into gori, so two sends can get the same one; it contains spaces, so use it in a header, not the request line |
+| `$GEN.USER_AGENT_CHROME` | the same, narrowed to Chrome and Edge, to pair with the `chrome` TLS preset |
+| `$GEN.USER_AGENT_FIREFOX` | the same, narrowed to Firefox, to pair with the `firefox` TLS preset |
+| `$GEN.USER_AGENT_SAFARI` | the same, narrowed to Safari, to pair with the `safari` TLS preset |
 
 The same generator name used more than once in one request has the same value. The next request mints again. Generators run only for operator-authored request text at the final send seam; captured evidence and Fuzzer payload bytes remain literal.
 

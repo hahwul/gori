@@ -181,14 +181,33 @@ module Gori
 
     # `$GEN.USER_AGENT`'s corpus (#1112): real browser values, one per line, embedded at compile
     # time so a send stays a pure mint with no fetch; the file's own header says how to refresh
-    # it. Parsed in the MACRO so an empty corpus fails the build — at runtime it would be an
-    # `IndexError` in the sending fiber for a name every surface still advertises. The rule is
-    # `EmbeddedList.parse`'s, restated at compile time. `read_file` resolves relative to THIS
-    # source file.
-    USER_AGENTS = {% begin %}
+    # it. Parsed in the MACRO so an empty corpus — or an empty family — fails the build: at
+    # runtime it would be an `IndexError` in the sending fiber for a name every surface still
+    # advertises. The rule is `EmbeddedList.parse`'s, restated at compile time. `read_file`
+    # resolves relative to THIS source file.
+    #
+    # USER_AGENT_FAMILIES (#1152) splits the same lines by the browser each one claims, keyed by
+    # the TLS preset it pairs with (`Settings::TLS_PRESETS`). Derived from the one file, so a
+    # refresh cannot leave a second list behind. Chromium is `Chrome/` (Edge included, as the
+    # `chrome` preset's own summary says); Safari is `Safari/` claimed WITHOUT `Chrome/`, which
+    # every Chromium UA also carries.
+    {% begin %}
       {% agents = read_file("#{__DIR__}/env/user_agents.txt").lines.map(&.strip).reject { |line| line.empty? || line.starts_with?("#") } %}
       {% if agents.empty? %}{% raise "src/gori/env/user_agents.txt holds no User-Agent line" %}{% end %}
-      {{ agents }}
+      {% families = {
+           "CHROME"  => agents.select(&.includes?("Chrome/")),
+           "FIREFOX" => agents.select(&.includes?("Firefox/")),
+           "SAFARI"  => agents.select { |ua| ua.includes?("Safari/") && !ua.includes?("Chrome/") && !ua.includes?("Firefox/") },
+         } %}
+      {% for family, list in families %}
+        {% if list.empty? %}{% raise "src/gori/env/user_agents.txt holds no #{family.id} User-Agent line" %}{% end %}
+      {% end %}
+      USER_AGENTS = {{ agents }}
+      USER_AGENT_FAMILIES = {
+        {% for family, list in families %}
+          {{ family }} => {{ list }},
+        {% end %}
+      }
     {% end %}
 
     # Built-ins that mint a fresh value at the final send seam. Names encode every format
@@ -201,6 +220,11 @@ module Gori
       "TIMESTAMP_MS" => Generator.new("Unix milliseconds · per send", ->(g : Generation) { g.now.to_unix_ms.to_s }),
       "ISO8601"      => Generator.new("UTC RFC 3339 · per send", ->(g : Generation) { g.now.to_rfc3339(fraction_digits: 3) }),
       "USER_AGENT"   => Generator.new("desktop browser User-Agent · random pick per send", ->(_g : Generation) { USER_AGENTS.sample }),
+      # One per `chrome` / `firefox` / `safari` TLS preset, so a UA can agree with the handshake
+      # it rides on (#1152). Named, not parameterised: `$GEN` takes no arguments.
+      "USER_AGENT_CHROME"  => Generator.new("Chrome/Edge User-Agent · pairs with TLS preset chrome", ->(_g : Generation) { USER_AGENT_FAMILIES["CHROME"].sample }),
+      "USER_AGENT_FIREFOX" => Generator.new("Firefox User-Agent · pairs with TLS preset firefox", ->(_g : Generation) { USER_AGENT_FAMILIES["FIREFOX"].sample }),
+      "USER_AGENT_SAFARI"  => Generator.new("Safari User-Agent · pairs with TLS preset safari", ->(_g : Generation) { USER_AGENT_FAMILIES["SAFARI"].sample }),
     }
 
     # The catalog as the NAME → FORMAT table the surfaces print, derived from the one above so

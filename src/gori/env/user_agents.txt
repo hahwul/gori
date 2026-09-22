@@ -9,7 +9,11 @@
 #
 # Refreshing: bump the majors to current stable. Chromium's reduced UA freezes everything after
 # the major (`153.0.0.0`) and Safari freezes the OS token at `10_15_7` — change only `Version/`.
-# Last refreshed: 2026-09 (Chrome 153, Edge 153, Firefox 156, Safari 27.0).
+# Last refreshed: 2026-09 (Chrome 153, Edge 153, Firefox 156, Safari 27.0 / 26.6).
+#
+# FAMILIES (`$GEN.USER_AGENT_CHROME` / `_FIREFOX` / `_SAFARI`, #1152) are read off the lines:
+# `Chrome/` is Chromium (Edge included, as the `chrome` TLS preset is), `Firefox/` is Firefox, and
+# `Safari/` with neither is Safari. Every family needs at least one line or the build fails.
 Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36
 Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36
 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36
@@ -19,3 +23,4 @@ Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)
 Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0
 Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:156.0) Gecko/20100101 Firefox/156.0
 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15
