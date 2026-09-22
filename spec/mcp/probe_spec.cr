@@ -282,9 +282,10 @@ describe "MCP probe rules + mode tools" do
       tools = tools_for(store)
       res = call_json(tools, "list_probe_rules", "{}")
       res["mode"].as_s.should eq("passive") # the fresh-project default
-      # One built-in ships OFF by default (the opt-in request-smuggling detector), so a fresh
-      # project already reports it disabled — see Probe::DEFAULT_DISABLED_RULES.
-      res["disabled_count"].as_i.should eq(1)
+      # Two built-ins ship OFF by default (the opt-in request-smuggling detector and time-based
+      # blind SQLi), so a fresh project already reports them disabled — see
+      # Probe::DEFAULT_DISABLED_RULES.
+      res["disabled_count"].as_i.should eq(2)
       rules = res["rules"].as_a
       rules.size.should be > 0
       kinds = rules.map { |r| r["kind"].as_s }.uniq
@@ -315,8 +316,8 @@ describe "MCP probe rules + mode tools" do
       before.should contain("secret_in_url")
 
       call_json(tools, "set_probe_rule_enabled", %({"id":"secret_in_url","enabled":false}))["enabled"].as_bool.should be_false
-      # 2 = secret_in_url (just disabled) + request_smuggling (off by default).
-      call_json(tools, "list_probe_rules", "{}")["disabled_count"].as_i.should eq(2)
+      # 3 = secret_in_url (just disabled) + request_smuggling + sqli_time_based (off by default).
+      call_json(tools, "list_probe_rules", "{}")["disabled_count"].as_i.should eq(3)
 
       after = call_json(tools, "probe_scan", "{}")["issues"].as_a.map { |g| g["code"].as_s }
       after.should_not contain("secret_in_url")

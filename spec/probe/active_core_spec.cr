@@ -535,16 +535,22 @@ describe "Gori::Probe::Active (manual run estimate)" do
       r = rule.requests_per_flow
       r.begin.should be >= 1
       r.end.should be >= r.begin
-      # Nothing floods a single flow with probes. The ONE exception is the OFF-BY-DEFAULT,
-      # opt-in request-smuggling detector: it legitimately spends more (2 baselines + 3 variants
-      # × 2 timing probes + a 2-member differential group) because it runs only when the operator
-      # explicitly enables it AND opts into unsafe/aggressive — see Probe::DEFAULT_DISABLED_RULES.
-      r.end.should be <= (rule.info.id == "request_smuggling" ? 10 : 8)
+      # Nothing floods a single flow with probes. The exceptions are the OFF-BY-DEFAULT, opt-in
+      # rules, which run only when the operator explicitly enables them: request_smuggling (2
+      # baselines + 3 variants × 2 timing probes + a 2-member differential group) and
+      # sqli_time_based (2 baselines + 2 families × 2 delays × 2 params) — see
+      # Probe::DEFAULT_DISABLED_RULES.
+      r.end.should be <= (rule.info.id.in?("request_smuggling", "sqli_time_based") ? 10 : 8)
     end
     by_id = Gori::Probe::Active::RULES.to_h { |rule| {rule.info.id, rule.requests_per_flow} }
     # BackslashPowered: TWO baselines (the second proves the endpoint is stable enough to diff
     # against) plus a `\`/`\\` pair per param, capped at 3 params → 4..8.
     by_id["backslash_powered"].should eq(4..8)
+    # BooleanBlindSqli: TWO baselines + a true/false pair per param (one default breakout), capped
+    # at 3 params → 4..8. TimeBlindSqli (off-by-default): TWO baselines + 2 delays × 2 families × 2
+    # params → 6..10.
+    by_id["sqli_boolean_based"].should eq(4..8)
+    by_id["sqli_time_based"].should eq(6..10)
     # The bypass family each carry a control leg, so none of them is a single request:
     # forbidden_bypass probe+control, url_rewrite_bypass probe+control+control2,
     # path_normalization_bypass 5-6 variants + the canonical-path control.
@@ -571,11 +577,12 @@ describe "Gori::Probe::Active (manual run estimate)" do
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
       est = a.active_estimate(detail)
       # reflected_param, cors_reflection, backslash_powered all apply — plus crlf_injection, ssti,
-      # and sqli_error_based, which reuse the same reflectable-query-param gate; insecure_http_methods
-      # applies to any flow (it sends its own OPTIONS/TRACE, deduped per host).
-      est.map(&.info.id).sort!.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "insecure_http_methods", "reflected_param", "sqli_error_based", "ssti"])
-      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤8) + crlf_injection (1) + ssti (2) + sqli_error_based (≤5) + insecure_http_methods (2) = 20
-      est.sum(&.requests.end).should eq(20)
+      # sqli_error_based and sqli_boolean_based, which reuse the same reflectable-query-param gate;
+      # insecure_http_methods applies to any flow (it sends its own OPTIONS/TRACE, deduped per host).
+      # sqli_time_based also gates on the query param but is off-by-default, so the estimate omits it.
+      est.map(&.info.id).sort!.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "insecure_http_methods", "reflected_param", "sqli_boolean_based", "sqli_error_based", "ssti"])
+      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤8) + crlf_injection (1) + ssti (2) + sqli_error_based (≤5) + sqli_boolean_based (≤8) + insecure_http_methods (2) = 28
+      est.sum(&.requests.end).should eq(28)
     end
   end
 
@@ -588,9 +595,10 @@ describe "Gori::Probe::Active (manual run estimate)" do
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
       # RULES order (cors_reflection disabled): reflected_param, backslash_powered, sqli_error_based,
-      # then the other reflectable-query-param rules crlf_injection and ssti, then the host-level
-      # insecure_http_methods (last in the registry, applies to any flow).
-      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered", "sqli_error_based", "crlf_injection", "ssti", "insecure_http_methods"])
+      # sqli_boolean_based, then the other reflectable-query-param rules crlf_injection and ssti,
+      # then the host-level insecure_http_methods (last in the registry, applies to any flow).
+      # sqli_time_based sits in the registry between them but is off-by-default, so it is omitted.
+      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered", "sqli_error_based", "sqli_boolean_based", "crlf_injection", "ssti", "insecure_http_methods"])
     end
   end
 
@@ -728,7 +736,10 @@ describe "Gori::Probe::Scan rules config parity" do
       baseline.sent.should be > 0
 
       # Disabling every active rule must stop the sends at the source, not just drop findings.
-      all_ids = Gori::Probe::Active::RULES.map(&.info.id).to_set
+      # The stored set records the DEVIATION from default, so "everything off" is every default-ON
+      # id present MINUS the default-OFF ids (whose absence already means off — including their id
+      # would FLIP them on). See Probe::DEFAULT_DISABLED_RULES.
+      all_ids = Gori::Probe::Active::RULES.map(&.info.id).to_set - Gori::Probe::DEFAULT_DISABLED_RULES
       muted = CountingBackend.new(origin)
       Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, overrides: nil, backend: muted, disabled: all_ids)
       muted.sent.should eq(0)

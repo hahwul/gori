@@ -2,6 +2,8 @@ require "./active/types"
 require "./active/insertion_points"
 require "./active/reflected_param"
 require "./active/error_based_sqli"
+require "./active/boolean_sqli"
+require "./active/time_based_sqli"
 require "./active/cors_reflection"
 require "./active/forbidden_bypass"
 require "./active/nginx_alias_traversal"
@@ -43,7 +45,7 @@ module Gori
 
       RULES = [PRIMARY, CorsReflection.new, ForbiddenBypass.new,
                NginxAliasTraversal.new, BackslashPowered.new,
-               ErrorBasedSqli.new,
+               ErrorBasedSqli.new, BooleanBlindSqli.new, TimeBlindSqli.new,
                GraphqlIntrospection.new, LfiParamTraversal.new,
                OpenRedirect.new, HostHeaderInjection.new,
                CrlfInjection.new, PathNormalizationBypass.new,
