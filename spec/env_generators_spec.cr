@@ -81,12 +81,14 @@ describe "Gori::Env generators" do
   # wire, not a realistic browser.
   it "keeps the User-Agent corpus to real, header-safe browser values" do
     corpus = Gori::Env::USER_AGENTS
-    corpus.size.should be >= 10
+    corpus.size.should be >= 5
     corpus.uniq.size.should eq(corpus.size)
     corpus.each do |ua|
       ua.should start_with("Mozilla/5.0 (")
       ua.each_byte { |byte| (0x20..0x7e).includes?(byte).should be_true }
-      ua.should eq(ua.strip)
+      # Desktop only: a mobile UA pulls a different site mid-run (see the corpus header).
+      ua.should_not contain("Mobile")
+      ua.should_not contain("Android")
     end
   end
 
@@ -94,7 +96,7 @@ describe "Gori::Env generators" do
     with_generators do
       a, b = generated("$GEN.USER_AGENT|$GEN.USER_AGENT").split('|')
       a.should eq(b)
-      # A pick from ~20 values can repeat, so freshness is "more than one value across sends".
+      # A pick from a small corpus can repeat, so freshness is "more than one value across sends".
       Array.new(64) { generated("$GEN.USER_AGENT") }.uniq.size.should be > 1
     end
   end

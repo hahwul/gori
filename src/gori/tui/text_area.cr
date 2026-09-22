@@ -2686,7 +2686,7 @@ module Gori::Tui
         rows_out << EnvComplete::Match.new(:ns, spelled, spelled,
           "#{ns.description} · #{table.size}", tok.run_end + (tok.dot_follows ? 1 : 0))
       end
-      # Six fixed generators would otherwise fill the eight-row viewport on a bare `$` and
+      # The fixed generators would otherwise fill the eight-row viewport on a bare `$` and
       # push the operator's own ENV/BIND names below the fold. Their `$GEN.` opener is enough
       # at that stage; typing any name prefix (`$U`) still searches them directly.
       append_env_token_rows(rows_out, tables, pl, tok.token_end, prefix, syntax,

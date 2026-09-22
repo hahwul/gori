@@ -69,9 +69,9 @@ Tokens stay as literal text in the editor and expand only on the way out: in Rep
 | `$GEN.TIMESTAMP` | Unix time in seconds |
 | `$GEN.TIMESTAMP_MS` | Unix time in milliseconds |
 | `$GEN.ISO8601` | current UTC time in RFC 3339 form, with milliseconds |
-| `$GEN.USER_AGENT` | a real browser User-Agent string (Chrome, Firefox, Safari, Edge on desktop and mobile), picked at random from a corpus built into gori |
+| `$GEN.USER_AGENT` | a real desktop browser User-Agent (Chrome, Edge, Firefox, Safari), drawn at random from a list built into gori, so two sends can get the same one; it contains spaces, so use it in a header, not the request line |
 
-The same generator name used more than once in one request has the same value. The next request gets a fresh value. Generators run only for operator-authored request text at the final send seam; captured evidence and Fuzzer payload bytes remain literal.
+The same generator name used more than once in one request has the same value. The next request mints again. Generators run only for operator-authored request text at the final send seam; captured evidence and Fuzzer payload bytes remain literal.
 
 Define env vars in two places (project wins on a key collision):
 
