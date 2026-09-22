@@ -6,6 +6,7 @@ module Gori::CLI
   # an AI client (Claude Desktop / Claude Code) spawns it and queries gori's
   # captured data + drives repeaters. STDOUT is the protocol channel, so EVERYTHING
   # else (logs, the resolved-db banner, errors) goes to STDERR.
+
   private def self.run_mcp(args : Array(String)) : Nil
     db_path = nil.as(String?)
     project = nil.as(String?)
@@ -128,7 +129,7 @@ module Gori::CLI
     project_id = selection.project_id
 
     unless selection.bound?
-      Log.info { "mcp: unbound (no project); use list_projects / create_project / switch_project (actions=#{!read_only})" }
+      log_unbound_binders(advertised, tools_spec, read_only)
       server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: nil, project_slug: nil, db_path: nil,
         selection_source: selection.source, workspace_root: nil, project_id: nil,
@@ -169,6 +170,12 @@ module Gori::CLI
       rescue ex : DB::Error | SQLite3::Exception | Error
         reason = "cannot open database #{resolved}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
         Log.error { "mcp: #{reason}; starting unbound" }
+        # The DEGRADED start is unbound too, and is the one the operator is most likely to be
+        # watching — so it gets the same binder check the deliberate `--no-project` start
+        # gets. Without it, a filtered server whose database would not open told the agent
+        # "the operator must restart" while the operator's own stderr said only that the file
+        # was bad (#1136).
+        log_unbound_binders(advertised, tools_spec, read_only)
         server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
           project_name: nil, project_slug: nil, db_path: nil,
           selection_source: "unbound", workspace_root: nil, project_id: nil,
@@ -191,6 +198,28 @@ module Gori::CLI
   # Writes the MCP entry into every named client config. Returns false if ANY target
   # failed — reported per target, and never as an abort partway through, which would have
   # made "which clients did gori configure?" depend on the order the flags were typed in.
+  # What the operator is told about an unbound start, named from what this process will
+  # ACTUALLY advertise rather than from the three tools that exist. `--tools` can remove every
+  # one of them, and a server left without a PICKER (`switch_project` / `create_project`)
+  # cannot be repaired from the agent's side at all — `list_projects` lists and binds nothing,
+  # so serving it alone buys the agent a listing and a refusal per entry. That is an operator
+  # mistake, made at start-up, and stderr is the only surface the operator is looking at when
+  # it is made — the agent never sees it (#1136).
+  private def self.log_unbound_binders(advertised : Array(String), tools_spec : String?,
+                                       read_only : Bool) : Nil
+    if MCP::Tools::PROJECT_PICKERS.none? { |n| advertised.includes?(n) }
+      Log.warn do
+        spec = tools_spec ? "--tools=#{tools_spec} advertises" : "this server advertises"
+        "mcp: unbound (no project) and #{spec} neither of " \
+        "#{MCP::Tools::PROJECT_PICKERS.join(", ")} — no call can bind a project. " \
+        "Restart with --project/--db, or add switch_project to --tools"
+      end
+    else
+      usable = MCP::Tools::PROJECT_BINDERS.select { |n| advertised.includes?(n) }
+      Log.info { "mcp: unbound (no project); use #{usable.join(" / ")} (actions=#{!read_only})" }
+    end
+  end
+
   private def self.install_mcp_config(targets : Array(String), db_path : String?, project : String?,
                                       read_only : Bool, insecure_upstream : Bool,
                                       use_active_project : Bool, no_project : Bool,

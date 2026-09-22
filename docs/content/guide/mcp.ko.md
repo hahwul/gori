@@ -72,12 +72,14 @@ gori mcp --read-only
 gori는 MCP 도구를 약 160개 제공합니다. 클라이언트는 첫 질문을 던지기 전에 이 목록 전체를 모델 컨텍스트에 싣고 세션 내내 유지합니다 — 대략 43,000 토큰입니다. `--read-only`는 53개(~12,000 토큰)로 줄여주지만 축이 하나뿐입니다. `--tools`는 직접 고르게 해줍니다:
 
 ```bash
-gori mcp --tools='list_*,get_*,ql_*,project_info,send_request'   # 정찰 + 재전송, ~11k 토큰
+gori mcp --tools='list_*,get_*,ql_*,project_info,switch_project,send_request'   # 정찰 + 재전송, ~11k 토큰
 gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워크벤치만 제외
 gori mcp --tools='*,-intercept_*'                                # 같은 뜻을 명시적으로
 ```
 
 스펙은 도구 이름과 `*` 글롭을 쉼표로 나열한 것이고 왼쪽부터 적용됩니다. `-`를 앞에 붙인 항목은 빼냅니다. 도구 이름이 이미 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로, 글롭만으로 별도 카탈로그 없이 그룹이 생깁니다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 그대로 동작합니다.
+
+스펙을 너무 좁히면 서버가 프로젝트를 *고를* 방법조차 잃을 수 있습니다. Git 워크스페이스 밖이거나 `--no-project`로 시작했거나 지정한 데이터베이스가 열리지 않아 바인딩이 없는데 스펙이 `switch_project`와 `create_project`를 둘 다 남기지 않으면, 에이전트가 무엇을 호출해도 프로젝트를 붙일 수 없습니다. `list_projects`는 여기 포함되지 않습니다 — 목록만 보여줄 뿐 아무것도 바인딩하지 않습니다. gori는 이를 시작 시점에 경고하고, `NO_PROJECT` 오류도 없는 도구를 가리키는 대신 같은 사실을 말합니다. 스펙에 `switch_project`를 남기거나 `--project`/`--db`를 넘기세요.
 
 아무것도 매치하지 않는 패턴은 조용히 좁히는 대신 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 도구가 빠진 서버는 그 기능이 아예 없는 gori와 구분되지 않기 때문입니다. 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다.
 

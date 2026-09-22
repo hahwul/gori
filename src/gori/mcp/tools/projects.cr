@@ -400,8 +400,8 @@ module Gori
           "the page carries it). A host accumulates a project per worktree, so this is a paged " \
           "listing: pass 'query' to locate the one you mean before switch_project, and read " \
           "'total' / 'has_more' rather than assuming the page is everything. Use switch_project " \
-          "to change the active project. When the server started unbound (no project), call " \
-          "list_projects then create_project or switch_project before traffic tools." do |s|
+          "to change the active project. When the server started unbound (no project), " \
+          "#{project_recovery}." do |s|
           s.field "query", strprop("keep only projects whose display name, directory slug, short id, " \
                                    "or bound workspace path CONTAINS this text (case-insensitive)")
           s.field "limit", intprop("max projects returned (default #{MCP_PROJECTS_DEFAULT}, max #{MCP_PROJECTS_MAX})")

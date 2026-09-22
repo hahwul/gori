@@ -621,13 +621,49 @@ module Gori
       # and the recovery is the same one sentence either way.
       private def no_project : Result
         if reason = @bind_error
-          return err("no project bound — the configured project could not be opened: #{reason}. " \
-                     "Call list_projects, then switch_project (or create_project) to continue.",
-            "NO_PROJECT")
+          return err("no project bound — the configured project could not be opened: #{reason}; " \
+                     "#{project_recovery}.", "NO_PROJECT")
         end
-        err("no project bound; call list_projects, create_project, or switch_project first",
-          "NO_PROJECT")
+        err("no project bound; #{project_recovery}", "NO_PROJECT")
       end
+
+      # How to get OUT of the unbound state, named from what `tools/list` actually carries.
+      #
+      # This sentence used to read "call list_projects, create_project, or switch_project
+      # first" whatever the server was serving, and under `--tools='list_*,get_*,send_request'`
+      # two of those three names came back `-32602 unknown tool`: an agent following the only
+      # recovery it was given, to tools this process had been started without. Same rule as
+      # `Server#advertised` (#1136).
+      private def project_recovery : String
+        return NO_BINDER_RECOVERY if unbindable?
+        "call #{PROJECT_BINDERS.select { |n| serves?(n) }.join(", ")} before traffic tools"
+      end
+
+      # The whole recovery path, in the order an agent walks it: find the project, then bind
+      # it. One list, read by the sentence above and by the two tool descriptions that point
+      # at it.
+      PROJECT_BINDERS = %w[list_projects create_project switch_project]
+
+      # …of which only these two BIND. `list_projects` reads a listing and changes nothing,
+      # so a server that serves it alone can tell the agent which projects exist and then
+      # refuse every one of them — the retry loop #1142 exists to stop, arrived at from the
+      # other side. `Server#unbound_note` has always drawn this line ("list_projects to see
+      # available projects" vs. the two that "pick"); the recovery sentence now draws it too.
+      PROJECT_PICKERS = %w[switch_project create_project]
+
+      # True when nothing this server advertises can move it onto a project. That is an
+      # operator decision made at start-up (`--tools`), not something a call can undo, and
+      # both the tool-facing sentence below and `gori mcp`'s start-up log read it from here.
+      def unbindable? : Bool
+        PROJECT_PICKERS.none? { |n| serves?(n) }
+      end
+
+      # …and what to say when it is. Lower-case and lead-in-less so each caller supplies its
+      # own punctuation; `Server#unbound_note` appends the same words to `instructions`, so
+      # the first text the model reads and the error it hits ten calls later agree.
+      NO_BINDER_RECOVERY = "this server advertises no project-selection tool, so no call can " \
+                           "bind one — the operator must restart gori mcp with a project " \
+                           "(--project/--db), or include switch_project in --tools"
 
       # Ceiling (seconds) a delete_project dry-run confirmation token stays valid.
       DELETE_TOKEN_TTL = 300
@@ -969,7 +1005,9 @@ module Gori
       # the caller cannot see the wire, a typo has to be an error.
       #
       # Keys starting with `_` are exempt: `_meta` is JSON-RPC's own envelope extension and
-      # some clients attach it to every call.
+      # some clients attach it to every call. The exemption is not in the advertised schema
+      # (see `tool`, #1140) — being more permissive than what was promised is the direction
+      # that cannot surprise a caller, and it keeps those clients working.
       private def unknown_args(name : String, h) : Array(String)?
         allowed = declared_args[name]?
         return nil unless allowed
@@ -1082,6 +1120,24 @@ module Gori
       def call(name : String, args : JSON::Any, cancelled : Proc(Bool)? = nil) : Result
         @cancelled = cancelled
         h = args.as_h? || EMPTY_HASH
+        # WHAT the name is, before WHETHER a project is bound. These two answers belong to
+        # different layers — `UNKNOWN_TOOL` is a protocol error the transport turns into
+        # -32602, `NO_PROJECT` is a tool result the model is meant to act on — and running
+        # the project gate first collapsed them: on an unbound server a typo and a tool the
+        # `--tools` filter had removed both came back "no project bound; call list_projects
+        # …", sending the agent to bind a project so it could retry a call that was never
+        # going to exist. A bound server had always classified them correctly (#1142).
+        #
+        # A tool the filter hid must be REFUSED rather than quietly answered for a second
+        # reason: `declared_args` is harvested from `list`, so a hidden tool has no declared
+        # arg set, `unknown_args` returns nil, and dispatch would run it with every argument
+        # unchecked — a tool absent from tools/list but fully live underneath.
+        if hidden = filtered_out(name)
+          return hidden
+        end
+        unless TOOL_NAMES.includes?(name)
+          return err("unknown tool: #{name}", "UNKNOWN_TOOL")
+        end
         if unbound? && !UNBOUND_SAFE.includes?(name)
           return no_project
         end
@@ -1090,13 +1146,6 @@ module Gori
         # dispatch; runs inside this method's rescue, so a store read error becomes an
         # INTERNAL result rather than crashing the loop.
         refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
-        # A tool the filter hid must be REFUSED, not quietly answered: `declared_args` is
-        # harvested from `list`, so a hidden tool has no declared arg set, `unknown_args`
-        # returns nil, and dispatch would run it with every argument unchecked — a tool
-        # absent from tools/list but fully live underneath.
-        if hidden = filtered_out(name)
-          return hidden
-        end
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
                      "Accepted: #{declared_args[name].to_a.sort.join(", ")}",
@@ -2137,6 +2186,21 @@ module Gori
               j.field "properties" do
                 j.object { sb.properties.each { |pname, schema| j.field(pname) { schema.to_json(j) } } }
               end
+              # The advertised contract, spelled the way `unknown_args` enforces it (#1140).
+              # Omitting `additionalProperties` means "extras are fine" in JSON Schema, and
+              # `call` refuses them — so a validating client was handed one contract and the
+              # model was scored against another: a typo it could have caught client-side
+              # travelled to the server and came back INVALID_ARGUMENT instead.
+              #
+              # The `_`-prefixed exemption `unknown_args` keeps is deliberately NOT advertised
+              # here. Spelling it needs `patternProperties`, which is outside the JSON Schema
+              # subset several clients accept when they convert an MCP `inputSchema` into
+              # their provider's tool schema — one unparseable keyword on all 179 tools costs
+              # every such client the whole catalogue, to promise an extension MCP puts in
+              # `params._meta` rather than in `params.arguments` anyway. So the validator
+              # stays the more PERMISSIVE of the two, which is the safe direction: a caller
+              # that followed the schema can never be surprised by it.
+              j.field "additionalProperties", false
               j.field "required" do
                 j.array { sb.required.each { |r| j.string r } }
               end

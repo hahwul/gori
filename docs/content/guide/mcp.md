@@ -72,12 +72,14 @@ One consequence is worth knowing: free-text search (`body:`) reads an index that
 gori exposes about 160 MCP tools. A client loads that whole catalogue into the model's context before you ask the first question and keeps it there for the session — roughly 43,000 tokens. `--read-only` cuts it to 53 tools (~12,000 tokens), but only along one axis. `--tools` lets you pick directly:
 
 ```bash
-gori mcp --tools='list_*,get_*,ql_*,project_info,send_request'   # recon + replay, ~11k tokens
+gori mcp --tools='list_*,get_*,ql_*,project_info,switch_project,send_request'   # recon + replay, ~11k tokens
 gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # everything but the async workbench
 gori mcp --tools='*,-intercept_*'                                # same idea, spelled out
 ```
 
 The spec is a comma-separated list of tool names and `*` globs, applied left to right; a term prefixed with `-` subtracts. Because the tools are already named in prefix families (`list_*`, `intercept_*`, `fuzz_*`, `oast_*`), globbing gives you groups without a separate catalogue to keep in step. A spec that starts with a subtraction begins from every tool, so it keeps working when a later gori adds one.
+
+A narrow spec can also leave the server with no way to *pick* a project. If it starts unbound — outside a Git workspace, with `--no-project`, or because the configured database would not open — and the spec keeps neither `switch_project` nor `create_project`, nothing the agent calls can bind one. `list_projects` does not count: it lists projects and binds none of them. gori warns at startup, and the `NO_PROJECT` errors say the same thing instead of naming tools that are not there. Keep `switch_project` in the spec, or pass `--project`/`--db`.
 
 A pattern that matches nothing aborts at startup with a suggestion (`--tools: "list_hisotry" matches no tool — did you mean list_history?`) rather than quietly serving a smaller set — a server missing a tool looks exactly like a gori that never had the feature. Tools left out are absent from `tools/list` **and** refused if called anyway, naming the flag that hid them. `--tools` composes with `--read-only`, and like every other flag it is written into the command when you pass it alongside `--install-*`.
 
