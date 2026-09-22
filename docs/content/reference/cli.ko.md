@@ -59,6 +59,7 @@ gori run <subcommand> [verb] [options]
 | `compare <id-a> <id-b>` | 두 플로우의 요청 또는 응답 diff |
 | `diff --from A --to B` | 리테스트 리포트: 프로젝트 두 개를 엔드포인트 단위로 비교 (added / gone / changed / unchanged / removed) |
 | `intercept` | 캡처 중인 TUI의 라이브 인터셉트 큐 조회 및 조작 |
+| `send [URL]` | Repeater 세션을 만들지 않고, URL(curl 형태) 또는 원시 요청으로 조립한 요청 하나를 전송 |
 | `repeater <flow-id>` · `list` · `create` · `send` | 캡처한 플로우 재전송, 또는 Repeater 세션 목록 / 생성 / 실행 (WebSocket 포함) |
 | `repeater minimize <id>` | 저장된 요청을 응답이 유지되는 최소 형태로 축약 |
 | `repeater h2` | 순서가 있는 HPACK 필드 목록으로 필드 단위 HTTP/2 요청 전송 |
@@ -98,6 +99,7 @@ gori run <subcommand> [verb] [options]
 | `project sandbox` | 하드 컨테인먼트 샌드박스 게이트 조회 / 설정 (`status`, `on`, `off`) |
 | `project env` | 프로젝트 env 변수 목록 / 설정 / 삭제 (`$ENV.KEY` 치환) |
 | `project host-override` | 프로젝트 호스트 → IP 다이얼 오버라이드 목록 / 추가 / 수정 / 삭제 |
+| `project network` | 프로젝트 자체 네트워크 설정(`net.*`: 업스트림 프록시와 자격증명, 목적지 호스트, 타임아웃, 캡처 상한, bind) 목록 / 조회 / 설정 / 해제 |
 
 읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`). 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
 
@@ -183,6 +185,8 @@ gori run show <flow-id> --format raw
 ```
 
 `--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space → Y` **Copy as…**에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. 요청을 코드로 내는 형식은 모두 요청 그 자체이므로 `--response-only`는 거부됩니다. 두 가지 주의사항은 STDOUT의 스니펫이 아니라 STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 **짧은 채로** 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않습니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+
+`--headers-only`와 `--max-body=BYTES`는 `text`와 `json` 뷰를 간추립니다. `--headers-only`는 각 본문을 크기를 알려주는 한 줄로 바꾸고(`[body omitted by --headers-only: 149504 bytes]`; JSON에서는 body 객체가 `encoding`과 `size`를 유지한 채 `omitted: true`를 얻습니다), `--max-body`는 디코드된 각 본문의 앞쪽 BYTES바이트를 찍은 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`를 붙입니다(JSON에서는 `text`/`base64`가 그 앞부분을 담고, `size`는 전체 크기, `shown_size`는 보여준 부분, `truncated`는 true입니다). 둘 중 하나만 있어도 본문에서 파생되는 섹션 — 디코드 뷰, gRPC 메시지, WebSocket 프레임, SSE 이벤트 — 은 빠집니다. 트랜스크립트는 그래도 개수와 함께 이름이 남습니다(`=== SSE EVENTS (40) — not printed under --max-body ===`, 또는 `{"count": 40, "omitted": true}`). 이 둘은 전체 메시지를 그대로 쓰는 다른 형식들과 함께 쓸 수 없고, 서로도 함께 쓸 수 없습니다.
 
 #### 안전한 증거 내보내기 {#safe-evidence-export}
 
@@ -314,6 +318,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | Option | Description |
 |--------|-------------|
 | `--target=URL` | 다른 오리진으로 전송. 경로와 쿼리는 유지 |
+| `--path=TARGET` | 같은 오리진에서 다른 request-target(경로와 쿼리, 예: `/api/v1/items/42?lang=en`)으로 전송. 요청 라인의 나머지 전부, 모든 헤더와 본문은 바이트 그대로 유지되며, 값은 쓴 그대로 라인에 실립니다 |
 | `--http2` / `--http1` (`--no-http2`) | 프로토콜 강제. 기본값은 플로우가 캡처된 방식을 따름 |
 | `--sni=HOST` | TLS SNI 오버라이드 |
 | `-k`, `--insecure-upstream` | 업스트림 TLS 검증 생략 |
@@ -324,7 +329,11 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--keep-request-line` | 저장된 요청 라인을 그대로 전송. 절대 형식(`GET http://h/p`)을 origin 형식으로 고치지 않습니다 |
 | `--diff` | 원본 응답과 비교 |
 | `--allow-unscoped` | 프로젝트 스코프 밖으로도 전송. 샌드박스와 명시적 제외 규칙은 매 전송을 여전히 거부합니다 |
+| `--headers-only` | 상태 라인과 헤더만 출력. 본문은 크기를 알려주는 한 줄로 대체 |
+| `--max-body=BYTES` | 디코드된 응답 본문을 최대 BYTES바이트까지 출력한 뒤, 전체 크기를 알려주는 마커를 붙임 |
 | `--format=FMT` | `text` (기본값) 또는 `json` |
+
+`--headers-only`와 `--max-body`는 **출력되는 것**만 바꿀 뿐, 무엇이 전송되거나 저장되는지는 절대 바꾸지 않습니다. 본문은 `[body omitted by --headers-only: 149504 bytes]`로 대체되거나, 잘린 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`가 뒤따르므로, 잘린 본문이 짧은 본문처럼 읽히는 일은 없습니다. 크기는 디코드된 본문의 크기(청크 해제, 압축 해제 후)이며, 자르지 않은 덤프가 찍는 것과 같은 값입니다. `--format json`에서는 `body` 객체가 `size`로 전체 디코드 크기를 유지합니다. `--max-body`는 `text`/`base64`에 그 앞부분을 담고 `shown_size`를 더하며 `truncated: true`를, `--headers-only`는 바이트를 빼고 `omitted: true`를 더합니다. 두 플래그는 함께 쓸 수 없습니다. `--headers-only --diff`는 두 헤드만 비교하고, `--max-body`는 `--diff`와 함께 쓸 수 없습니다. `--diff`의 비교 대상은 메시지 전체이기 때문입니다. 이 둘은 `repeater send`, `repeater h2`, [`send`](#run-send), [`show`](#run-show)에서 같은 형태로 동작합니다.
 
 **`repeater list`**: 저장된 Repeater 세션 목록 (`--format text|json`).
 
@@ -373,6 +382,12 @@ generate-request | gori run repeater create --target https://api.example.com --r
 | `--keep-request-line` | `--flow`와 함께: 요청 라인을 캡처된 그대로(절대 형식 포함) 저장 |
 | `--ws-keep-key` | WebSocket: 요청 자신의 `Sec-WebSocket-Key`를 전송. 키가 없거나 짧거나 중복이거나 base64가 아닌 경우를 테스트할 수 있습니다 |
 | `--ws-http-only` | WebSocket: 이 세션을 평범한 HTTP로 저장. 업그레이드를 일반 요청으로 보내고 `101`을 응답으로 읽습니다 |
+| `--format=FMT` | `text`(기본값: `Repeater session #7 created successfully.`) 또는 `json`: `repeater list --format json`이 찍는 것과 같은 새 세션(`id`, `tui_index`, `position`, `name`, `target`, `http2`, …)에 `websocket`, 저장된 `ws_messages` 개수, 그리고 `--flow` 시드의 라인이 다시 쓰였을 때의 `request_line_rewritten`을 더한 형태 |
+
+```bash
+id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
+gori run repeater send "$id"
+```
 
 **`repeater send <repeater-id>`**: 저장된 세션을 실행합니다. HTTP와 WebSocket 모두 해당됩니다.
 
@@ -391,7 +406,18 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--idle-ms=N` | WebSocket: 첫 수신 프레임 이후 서버 침묵 타임아웃 (100-60000, 기본값 3000) |
 | `--http` | WebSocket: 이번 전송에 한해 핸드셰이크를 일반 HTTP 요청으로 전송. 바이트를 고치는 게 아니라 엔진을 고르는 것입니다 |
 | `--record-history` | 나가는 요청 + 응답을 History에 캡처 플로우로 기록하고 flow id를 stdout에 출력(HTTP 전용; Repeater 전송은 기본적으로 플로우를 남기지 않음) |
-| `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--format` | 위와 동일 |
+| `--path=TARGET` | 이번 전송 한 번만, 저장된 것 대신 이 request-target(경로와 쿼리)을 전송 |
+| `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--headers-only`, `--max-body`, `--format` | 위와 동일 (`--headers-only` / `--max-body`는 HTTP 전용입니다: WebSocket 교환은 트랜스크립트를 출력합니다) |
+
+`--path`는 경로만 다른 엔드포인트들에 걸쳐 세션 하나의 요청을 스윕합니다. 경로마다 세션을 만들 필요가 없습니다.
+
+```bash
+for n in $(seq 1 38); do
+  gori run repeater send 1 --path "/api/v1/items/$n" --headers-only
+done
+```
+
+이 옵션은 이번 전송을 위해 저장된 요청의 사본을 고칩니다. 세션은 자신의 요청과 **마지막 응답**을 그대로 유지합니다. 다른 대상의 응답을 그 옆에 저장하면 TUI 탭이 자신이 가지고 있지 않은 요청에 대한 응답을 보여주게 되고, 다음 `--diff`가 엉뚱한 엔드포인트와 비교하게 되기 때문입니다. 그래서 `--format json`에는 `response_saved`가 빠지고, `path` 필드가 전송된 대상을 이름 붙이며, text 상태 줄은 그 값으로 끝납니다(`→ 200 in 218.4ms · /api/v1/items/42`). `--record-history`는 실제로 나간 대로(새 경로 포함) 요청을 여전히 기록하며, `--diff`는 세션에 저장된 응답과 계속 비교합니다.
 
 **`repeater move <repeater-id>`**: 워크벤치 스트립의 순서를 바꿉니다. `--to N`은 `repeater list`가 출력하는 1부터 시작하는 탭 번호이고, `--up` / `--down`은 한 칸씩 옮깁니다. 셋 중 하나만 주세요. `--to`와 방향을 함께 주면 임의로 해석하지 않고 거절하며, `1-<개수>` 범위를 벗어난 `--to`도 잘라 맞추지 않고 거절합니다. 명령이 지목하지 않은 자리에 세션이 놓이는 일이 없도록 하기 위해서입니다. `--format json`은 `from_index` / `to_index` / `moved`를 보고합니다.
 
@@ -410,7 +436,32 @@ gori run repeater move 5 --down
 gori run repeater h2 --target https://api.example.com --fields fields.json
 ```
 
-`--fields=FILE`은 `[[name, value], …]` 배열이거나 `{"fields": [[name, value], …], "body": "…"}` 형태의 JSON 파일입니다(바이너리는 `body_base64`). 목록의 어떤 것도 정규화하지 않습니다. 앞의 콜론, 앞 공백이 붙은 값, 대문자 이름이 곧 페이로드입니다. `--target`은 다이얼할 오리진을 정하므로, `:authority`와 `:scheme` 필드는 의도적으로 그와 어긋나게 둘 수 있습니다. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--allow-unscoped`, `--tls-preset=NAME`, `--format text|json`은 `repeater send`와 같습니다.
+`--fields=FILE`은 `[[name, value], …]` 배열이거나 `{"fields": [[name, value], …], "body": "…"}` 형태의 JSON 파일입니다(바이너리는 `body_base64`). 목록의 어떤 것도 정규화하지 않습니다. 앞의 콜론, 앞 공백이 붙은 값, 대문자 이름이 곧 페이로드입니다. `--target`은 다이얼할 오리진을 정하므로, `:authority`와 `:scheme` 필드는 의도적으로 그와 어긋나게 둘 수 있습니다. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--allow-unscoped`, `--tls-preset=NAME`, `--headers-only`, `--max-body`, `--format text|json`은 `repeater send`와 같습니다.
+
+### run send {#run-send}
+
+Repeater 세션을 만들지 않고 요청 하나를 보내고 응답을 출력합니다. 같은 코드로 만들어진 MCP `send_request{url}`의 헤드리스 형태입니다. 다른 모든 gori 전송과 마찬가지로 프로젝트의 업스트림 프록시, 호스트 오버라이드, 스코프, 샌드박스를 거쳐 나가며, `--record-history`를 주지 않는 한 아무것도 남기지 않습니다.
+
+```bash
+gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json'
+gori run send --url https://api.example.com/v1/items -X POST -b '{"name":"x"}' --record-history
+gori run send --url https://api.example.com --request-file req.http --headers-only
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--url=URL` (또는 URL을 유일한 인자로) | 절대 `http://` / `https://` URL. 경로와 쿼리가 request-target이 됩니다. 원시 요청과 함께 쓰면 다이얼할 곳만 이름 붙입니다 |
+| `-X`, `--method=METHOD` | HTTP 메서드 (기본값 `GET`) |
+| `-H`, `--header=HEADER` | `Name: value`, 반복 가능, 쓴 순서대로 전송. `Host`와 `Content-Length`는 빠뜨렸을 때만 추가됩니다. 두 줄로 쪼개질 헤더나 토큰이 아닌 이름은 거부됩니다: 잘못된 바이트를 위한 형식은 원시 요청입니다 |
+| `-b`, `--body=BODY` | 요청 본문. `$ENV.KEY` 토큰이 확장됩니다 |
+| `--body-file=FILE` | 요청 본문을 바이트 그대로 읽음, 절대 확장하지 않음 |
+| `-f`, `--request-file=FILE` · `-r`, `--request-raw=RAW` · `--request-stdin` | 요청을 조립하는 대신 이 원시 HTTP 요청을 전송. `-X`/`-H`/`-b`/`--body-file`과 함께 쓰면 거부됩니다. 그렇지 않으면 그 값들이 조용히 버려지기 때문입니다. 헤드의 단독 LF는 `--verbatim`이 아닌 한 CRLF로 승격됩니다 |
+| `--verbatim` | `-H`, `-b` 또는 원시 요청에서 토큰을 확장하지 않고, 단독 LF도 승격하지 않으며, HTTP/2에서 필드 이름을 소문자화하지 않습니다. URL은 여전히 확장됩니다: 다이얼할 곳을 이름 붙이는 값이기 때문입니다 |
+| `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--slot=NAME`, `--allow-unscoped` | `repeater send`와 같음 |
+| `--record-history` | 요청과 응답을 History에 플로우로도 기록(`source: repeater`, `source_surface: cli`)하고 id를 출력. `repeater send`와 마찬가지로 기본값은 꺼짐 |
+| `--headers-only`, `--max-body=BYTES`, `--format=FMT` | `repeater send`와 같음 |
+
+WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101`이 응답이 되며, 명령은 이를 STDERR에 알립니다. 프레임을 주고받는 교환에는 세션이 필요합니다: `repeater create` 다음 `repeater send`를 쓰세요.
 
 ### run fuzz {#run-fuzz}
 
@@ -1262,7 +1313,7 @@ gori run project scope disable
 | Option / subcommand | Description |
 |---------------------|-------------|
 | (default) | 규칙 목록; `--format`은 `text` 또는 `json` |
-| `add` | `--kind=include\|exclude` (기본 `include`), `--type=host\|string\|regex` (기본 `host`), `--pattern=…` (필수) |
+| `add` | `--kind=include\|exclude` (기본 `include`), `--type=host\|string\|regex` (기본 `host`), `--pattern=…` (필수). 새 규칙의 id를 출력합니다; `--format json`은 목록과 같은 형태(`id`, `kind`, `type`, `pattern`)로 규칙을 출력합니다 |
 | `update <rule-id>` (`edit`) | 규칙의 `--kind` / `--type` / `--pattern` 변경. 생략한 필드는 그대로 유지 |
 | `delete <rule-id>` | id로 규칙 제거 |
 | `enable` / `disable` | 스코프 필터링 적용 여부 토글 |
@@ -1321,9 +1372,43 @@ gori run project host-override delete 1
 | Option / subcommand | Description |
 |---------------------|-------------|
 | (default) | 오버라이드 목록; `--format`은 `text` 또는 `json` |
-| `add` | `--host=…` + `--ip=…`, 또는 positional `IP HOST` |
+| `add` | `--host=…` + `--ip=…`, 또는 positional `IP HOST`. `--format json`은 목록과 같은 형태(`id`, `host`, `ip`)로 새 오버라이드를 출력합니다 |
 | `update <id>` | `--host=…` + `--ip=…` (둘 다 필수) |
 | `delete <id>` | id로 오버라이드 제거 |
+
+#### project network {#project-network}
+
+프로젝트 **자체** 네트워크 설정, 즉 TUI의 **Project settings** 카드가 쓰는 `net.*` 행을 읽고 고칩니다. 여기서 값을 설정하면 이 프로젝트에 한해 `settings.json`의 전역 `network.*`를 이깁니다. `unset`은 그 키를 다시 전역 값으로 되돌립니다. 각 키가 무엇을 하고 어디에 적용되는지는 [프로젝트별 오버라이드](/ko/reference/config/#per-project-overrides)를 참고하세요. 별칭: `net`.
+
+```bash
+gori run project network                                   # 모든 키: 여기서의 값과 출처
+gori run project network --format json
+gori run project network set upstream_proxy=http://proxy.corp.example:3128
+gori run project network get upstream_proxy
+printf %s "$PROXY_PASS" | gori run project network set upstream_auth alice --password-stdin
+gori run project network set capture_max_mib 16
+gori run project network unset capture_max_mib
+```
+
+| Key (`net.` 접두사는 생략 가능) | Value |
+| ------ | ------- |
+| `bind_host` · `bind_port` | 프록시 리슨 주소와 포트. gori가 실제로 리슨하는 곳, 즉 TUI와 `gori run capture`에만 적용 |
+| `upstream_proxy` | `http://`, `http+tls://`, `socks5://` 또는 `socks5h://` URI. **비워 두면 직접 연결을 고정합니다**: 전역 프록시도, `upstream_rules` 항목도, `HTTP(S)_PROXY`도 더 이상 이 프로젝트에 적용되지 않습니다. URI에 담긴 자격증명은 거부됩니다 |
+| `upstream_destination_host` | 프로젝트의 프록시 라우팅이 적용될 호스트 패턴. 그 외에는 직접 연결됩니다. `*`(기본값)는 이 행을 지웁니다 |
+| `upstream_auth` | 프록시 자격증명: 값은 사용자명이고, 비밀번호는 `--password-stdin`으로 stdin에서 읽습니다(프로세스 목록에 남는 인자 벡터에는 절대 두지 않습니다). HTTP 프록시에는 HTTP Basic, SOCKS5에는 RFC 1929 |
+| `connect_timeout_secs` · `io_timeout_secs` | 아웃바운드 연결 및 유휴 타임아웃, 초 단위 (최소 1) |
+| `capture_max_mib` | 메시지마다 캡처해 저장하는 본문 바이트, MiB 단위 (1-2047) |
+
+| Subcommand | Description |
+| --------------------- | ------------- |
+| (default) / `list` | 모든 키를 적용 중인 값과 출처(`· project`, `· global`)와 함께 표시; `--format json`은 `value`(프로젝트 자신의 행, 설정 안 됐으면 `null`), `inherited`, `effective`를 싣습니다 |
+| `get KEY` | 적용 중인 값: 프로젝트 자신의 값, 없으면 상속된 값(STDERR에 이름이 나오므로 `$(…)`는 값만 담습니다). 자격증명은 방식과 사용자명만 출력하며 비밀번호는 절대 출력하지 않습니다 |
+| `set KEY=VALUE` · `set KEY VALUE` | 값을 고정합니다. **전역 값과 같은 값이라도** 고정되며, 이렇게 해야 이후의 전역 편집이 프로젝트에 닿지 않습니다. (Project settings 카드는 저장할 때 전역과 같은 값을 다시 inherit으로 접지만, `set`은 키 하나만 지목하므로 그렇게 하지 않습니다.) |
+| `unset KEY` (`rm`) | 프로젝트 값을 지워 다시 상속되게 합니다. 설정돼 있지 않은 키를 지워도 오류가 아닙니다 |
+
+자격증명은 Project settings 카드에서와 마찬가지로 입력받은 업스트림에 고정됩니다. `set upstream_auth`는 상속된 전역 업스트림도 같은 쓰기 한 번으로 프로젝트에 고정하므로, 이후의 전역 편집이나 업스트림 규칙이 비밀번호를 다른 프록시로 데려가는 일이 없습니다. `set upstream_proxy`는 저장된 자격증명을 새 주소로 옮깁니다(그에 맞춰 Basic인지 SOCKS5인지 다시 판정합니다). 그리고 `unset upstream_proxy`는 `unset upstream_auth`를 먼저 하기 전까지 거부됩니다. 여러 행에 걸친 편집은 하나의 트랜잭션이므로, 바쁜 프로젝트가 검증되지 않은 주소 옆에 비밀번호를 저장하는 일은 없습니다. 모든 편집은 자격증명 없이 프로젝트 이벤트 피드에 기록됩니다.
+
+이미 프로젝트를 연 gori(TUI, capture, MCP 서버)는 프로젝트를 열 때 이 행들을 읽어 프로젝트를 다시 열기 전까지 유지합니다. 그런 경우 명령이 STDERR에 이를 알립니다.
 
 ### run redact {#run-redact}
 
