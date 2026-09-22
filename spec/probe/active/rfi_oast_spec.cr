@@ -138,8 +138,10 @@ describe Gori::Probe::Active::RfiOast do
     with_store do |store|
       detail = rfi_flow(store)
       backend = RfiBackend.new
-      disabled = Gori::Probe::Active::RULES.map(&.info.id).reject { |id| id == "rfi_oast" }.to_set
-      disabled.delete("request_smuggling")
+      # Everything off except rfi_oast. Subtract DEFAULT_DISABLED_RULES: a default-OFF id PRESENT in
+      # the stored set means ENABLED (the flip), so it must be ABSENT to stay off.
+      disabled = Gori::Probe::Active::RULES.map(&.info.id).to_set - Gori::Probe::DEFAULT_DISABLED_RULES
+      disabled.delete("rfi_oast")
       Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, overrides: nil,
         backend: backend, disabled: disabled, opts: Gori::Probe::Active::Options.new(oob: RfiMinter.new),
         on_oob: ->(rule_id : String, candidate : Gori::Probe::OutOfBand::Candidate) {
