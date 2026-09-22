@@ -180,6 +180,10 @@ module Gori::Tui
       v.pane_insert?(v.focus) ? :editor : :body
     end
 
+    # `esc sub-tabs` on every branch past the empty one: `handle_escape` ends in
+    # `request_focus(:subtabs)`, and `subtab_strip_shown?` is `!@fuzzers.empty?`, so with a
+    # session the strip is drawn and escape stops there. The EMPTY line keeps `esc tabs` —
+    # no strip, and `focus_pane` downgrades it to the bar.
     def body_hint(focus : Symbol) : String
       v = current_view
       return "↹/esc tabs · ^N new" unless v
@@ -203,7 +207,7 @@ module Gori::Tui
         elsif v.target_insert?
           "type URL · #{sni} SNI · ↵/↓ template · #{run} run · ↹ pane · esc read"
         else
-          keys("{editor.insert}/↵ edit · #{read_common} · #{sni} SNI · #{run} run · ↹ pane · esc tabs")
+          keys("{editor.insert}/↵ edit · #{read_common} · #{sni} SNI · #{run} run · ↹ pane · esc sub-tabs")
         end
       when :template
         if v.template_insert?
@@ -217,7 +221,7 @@ module Gori::Tui
           # REPLACES it, which is the whole reason `fuzzer.copy` carries a ctrl chord.
           "type · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^O config · #{run} run · esc read · ↹ text"
         else
-          keys("{editor.insert}/↵ edit · #{read_common} · #{marks} · {editor.undo} undo · {editor.find} find · ^O config · #{run} run · ↹ pane · esc tabs")
+          keys("{editor.insert}/↵ edit · #{read_common} · #{marks} · {editor.undo} undo · {editor.find} find · ^O config · #{run} run · ↹ pane · esc sub-tabs")
         end
       when :config then config_hint(v, run)
       when :results
@@ -229,19 +233,29 @@ module Gori::Tui
         # "fuzz results already saved as run #N" refusal unreachable through the binding.
         # Named off the same predicate the gate reads, not a second copy of its conditions.
         save = v.results_saveable? ? " · #{save_key} save" : ""
-        "↑/↓ select · ↵ detail · #{keys("{fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
-        "#{run} run · #{stop} stop · space cmds · ↹ pane"
+        # `space → o sort`, not `{fuzz.sort} sort`. `fuzz.sort` is MENU-ONLY by decision
+        # (verbs/history.cr, key audit F2: a sort order is set once and read for the rest of
+        # the run, which is not worth a bare letter), so it carries a `mnemonic:` and no
+        # chord — and `Hotkeys.expand` leaves a token it cannot resolve ALONE. This line
+        # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
+        # key it named answered "nothing bound here". `space → …` is the spelling the
+        # Rewriter already uses for its own menu-only action.
+        "↑/↓ select · ↵ detail · space → o sort · #{keys("{fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
+        "#{run} run · #{stop} stop · space cmds · esc sub-tabs"
       when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
-      else              "↹/esc tabs"
+      else              "↹/esc sub-tabs"
       end
     end
 
+    # `esc sub-tabs` on all four, for the same reason the pane strips above carry it:
+    # `handle_escape`'s final arm answers escape here too, and the CONFIG column was the one
+    # part of the tab that never said where it goes.
     private def config_hint(v : FuzzerView, run : String) : String
       case v.config_row
-      when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane"
-      when :add  then keys("↵ add a payload set · {fuzz.list-paste} quick List · ↑/↓ row · #{run} run · ↹ pane")
-      when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · #{run} run · ↹ pane"
-      else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane"
+      when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane · esc sub-tabs"
+      when :add  then keys("↵ add a payload set · {fuzz.list-paste} quick List · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs")
+      when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs"
+      else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs"
       end
     end
 
@@ -276,11 +290,17 @@ module Gori::Tui
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
       if v.nil?
-        if nav_up?(ev) # `k` only BARE — see TabController#nav_up?
+        # ↑ AND esc, both to the tab bar. `handle_escape` below answers escape once a session
+        # exists, so the empty tab was the one state where it did not — and deferring it (as
+        # this arm used to, on the strength of a comment naming esc) reaches nothing:
+        # `Runner#resolve_verb_id` walks Editor → Fuzzer → Global, and the escape that would
+        # have caught it is `body.to-menu` in `Verb::Scope::Body`, which is on no tab's chain.
+        # The empty pane's own footer says `↹/esc tabs`, so the key was advertised and dead.
+        if nav_up?(ev) || ev.key.escape? # `k` only BARE — see TabController#nav_up?
           @host.request_focus(:menu)
           return true
         end
-        # No session yet: defer other keys to the central handler (^P palette, esc, …).
+        # No session yet: defer other keys to the central handler (^P palette, …).
         return false
       end
       c = ev.char || ev.key.to_char
@@ -724,7 +744,9 @@ module Gori::Tui
       when key.enter?              then v.open_detail
       when key.up?, key.lower_k?   then v.results_at_top? ? v.pane_advance(-1) : v.results_move(-1)
       when key.down?, key.lower_j? then v.results_move(1)
-        # `o` sort / `m` matched / `v` dist are verbs (`fuzz.sort` …) — they fall through.
+        # `m` matched / `v` dist are verbs — they fall through to the keymap. `o` is NOT one:
+        # `fuzz.sort` is menu-only, so `o` falls through to "nothing bound here" and the
+        # footer sends the hand to `space` instead.
       when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
         return false # Global breath
       end

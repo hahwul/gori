@@ -338,9 +338,11 @@ describe "the core-loop hints" do
           v.focus_pane(pane)
           ctl.body_hint(:body).should contain("⇧↹ back"), "the #{pane} strip does not name ⇧↹"
         end
-        # esc is still the way UP, and still says so.
+        # esc is still the way UP, and still says so — `sub-tabs`, because that is where
+        # `handle_body_key` sends it once a session exists (the strip is drawn from the
+        # first one). This read `esc tabs` and pinned a destination the key never had.
         v.focus_pane(:response)
-        ctl.body_hint(:body).should contain("esc tabs")
+        ctl.body_hint(:body).should contain("esc sub-tabs")
       end
     end
   end

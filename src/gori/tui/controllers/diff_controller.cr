@@ -116,12 +116,16 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "" unless focus == :body
-      return keys("{diff.pick-a} pick the baseline project") unless @diff.ready?
+      # `esc sub-tabs` on BOTH branches. The empty-state line names one key, and for as long
+      # as it named only that one the tab read as a dead end — `diff.to-menu` did not exist,
+      # and the hint that would have shown it missing said nothing either.
+      return keys("{diff.pick-a} pick the baseline project · ↑/esc sub-tabs") unless @diff.ready?
       base = keys("{diff.pick-a}/{diff.pick-b} pick · {diff.swap} swap · {diff.run} run · {diff.lens} lens · {diff.copy} copy")
       # The three ROW verbs are gated on a row under the cursor (`diff_rows_shown?`), and a
       # lens can empty the list. Naming a key that would do nothing is the hint lying about
       # what the tab can do — which it already did for `↵` before these two joined it.
-      @diff.selected_row ? keys("#{base} · ↵ Comparer · {diff.issue} issue · {diff.note} note") : base
+      row = @diff.selected_row ? keys("#{base} · ↵ Comparer · {diff.issue} issue · {diff.note} note") : base
+      "#{row} · ↑/esc sub-tabs"
     end
 
     # --- verbs ---------------------------------------------------------------

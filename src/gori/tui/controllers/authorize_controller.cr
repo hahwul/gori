@@ -988,18 +988,22 @@ module Gori::Tui
       true
     end
 
+    # Every branch ends in `esc tabs` (the empty one names it BEFORE its sentence, which is
+    # prose and would bury it). `pane_advance`'s comment above already states that escape is
+    # the way out to the tab bar; until now this line — the only place the operator would
+    # read it — was the one that did not.
     def body_hint(focus : Symbol) : String
       passive = @passive ? " · PASSIVE on" : ""
       unless @view.any_requests?
-        return keys("{authorize.identities} identities · {authorize.passive} passive · Send to Authorize from History to begin#{passive}")
+        return keys("{authorize.identities} identities · {authorize.passive} passive · esc tabs · Send to Authorize from History to begin#{passive}")
       end
       return @view.filter_hint if querying?
-      return keys("↑/↓ request · ⇥ identity · {authorize.stop} stop#{passive} · space cmds") if running?
+      return keys("↑/↓ request · ⇥ identity · {authorize.stop} stop#{passive} · space cmds · esc tabs") if running?
       # `⇧X clear` is named here and NOT in the running branch above: that one is deliberately
       # the two keys a run leaves meaningful, and "empty the queue" is not the thing to put in
       # front of an operator watching one go out. Resolved through the keymap so a rebind
       # reaches the hint; the rest of this line is still literal, as its siblings are.
-      keys("↑/↓ request · ⇥ identity · {authorize.run} run · {authorize.run-all} all · {authorize.identities} identities · {authorize.passive} passive#{passive} · {authorize.filter} filter · {authorize.copy} copy · {authorize.clear} clear · space cmds")
+      keys("↑/↓ request · ⇥ identity · {authorize.run} run · {authorize.run-all} all · {authorize.identities} identities · {authorize.passive} passive#{passive} · {authorize.filter} filter · {authorize.copy} copy · {authorize.clear} clear · space cmds · esc tabs")
     end
   end
 end

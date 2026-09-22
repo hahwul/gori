@@ -176,9 +176,13 @@ module Gori::Tui
       elsif @probe.preview_enabled? && @probe.preview_focus == :preview
         "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs"
       elsif @probe.preview_enabled?
-        "↑/↓ move · ↵ open · ↹ preview · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
+        "↑/↓ move · ↵ open · ↹ preview · #{clear} clear · #{mode} mode · #{filt} filter · space cmds · esc tabs"
       else
-        keys("↑/↓ move · ↵ open · {probe.open-evidence} source · {probe.repeater-evidence} repeater · {probe.promote-selected} promote · {probe.dismiss-selected} dismiss · {probe.delete-selected} delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds")
+        # `esc tabs` — `probe.leave` is `focus_pane(:menu)`, the same destination the two
+        # shorter branches above already name. These two were the FINDINGS lines that did
+        # not, so the only two states an operator sits in for any length of time were the two
+        # with no exit on them. It rides the end, after the keys that clip first.
+        keys("↑/↓ move · ↵ open · {probe.open-evidence} source · {probe.repeater-evidence} repeater · {probe.promote-selected} promote · {probe.dismiss-selected} dismiss · {probe.delete-selected} delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds · esc tabs")
       end
     end
 

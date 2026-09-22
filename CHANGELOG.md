@@ -8,6 +8,8 @@
 - MCP: every tool schema now advertises the contract the server enforces (`additionalProperties: false`), so a validating client rejects a typo before the call leaves it (#1140)
 - MCP: an unbound server tells a typo from a tool `--tools` hid (both stay JSON-RPC `-32602`, not `NO_PROJECT`), and every "pick a project" hint — errors, instructions, `project_info`, the startup log — names only the tools that server actually serves, or says plainly that a restart is the only way out (#1136, #1142)
 - CLI: OAST subcommands no longer mistake option values for verbs, and missing `--project`/`--db` values are rejected (#1144)
+- TUI: `esc` leaves every tab body and the footer names where it lands — it did nothing at all on the Diff sub-tab (where `↑` was dead too) or on an empty Fuzzer, several tabs never advertised it, the Repeater, Fuzzer, Miner and Colormarker lines named the wrong destination, and the Fuzzer's results footer printed a raw `{fuzz.sort}` for a key that was never bound (#1147)
+- Notes: a Markdown heading marker no longer rides into the note's title — the sub-tab chip, `gori run notes`, the MCP listing and the exported filename all drop the leading `#` (#1147)
 
 ## v0.7.1
 
