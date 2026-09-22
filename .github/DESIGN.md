@@ -3114,3 +3114,62 @@ CONNECT tunnel included: those now ask for the TLS origin's variable, and a loop
 still answers "direct" before that variable is read. The carve-out belongs to the environment
 arm only: a rule, scalar, or project pin that routes loopback through a proxy is an operator
 decision and still wins.
+
+### 2026-09-22: the MCP surface answers about itself before it answers about the project
+
+Refines: [P1](#p1), [P4](#p4). Issues #1136, #1138, #1140, #1142.
+
+Four defects found by driving the stdio server directly, and one shape under all of them: a
+question about the *call* was answered as though it were a question about the *data*.
+
+**The envelope is checked before the message is read as one.** `handle_message` looked at
+`method` and nothing else, so `{"jsonrpc":"1.0"}`, a message carrying no version member at
+all, and ids of every JSON shape were executed — and answered in a `"jsonrpc":"2.0"` frame,
+which rewrites the client's message into one it never sent and teaches a client that ships a
+serialisation bug that it speaks 2.0. `envelope_error` is the one predicate, read by the
+reader's `ping` fast path and by the worker, so the two fibers cannot disagree about what a
+request is. An id the spec does not allow is answered at `null` (the spec's own rule for a
+request whose id cannot be determined); a legal id is echoed, because a client is holding a
+promise for it.
+
+**A schema that omits `additionalProperties` is a promise the validator breaks.** gori refuses
+any undeclared argument — a mistyped `verbatm:true` left `verbatim` off and the caller measured
+a request it never sent — while all 179 root schemas said, in JSON Schema, that extras were
+fine. The client was handed one contract and scored against another, so a typo it could have
+caught locally travelled to the server instead. `additionalProperties: false` now closes them.
+
+**The `_`-prefixed exemption is honoured and not advertised, and that asymmetry is the
+point.** Spelling it in the schema needs `patternProperties`, which is outside the JSON Schema
+subset several clients accept when they convert an MCP `inputSchema` into their provider's
+tool schema — one unparseable keyword on all 179 tools costs such a client the whole
+catalogue, to promise an extension MCP puts in `params._meta` rather than in
+`params.arguments`. So the validator stays the more PERMISSIVE of the two. Only one direction
+of disagreement can hurt a caller: a schema that promises more than the validator accepts
+sends a legal-looking call to its refusal, while a validator that accepts more than the
+schema promised can never surprise a caller who followed the schema.
+
+**What the name IS comes before whether a project is bound.** `Tools#call` ran the unbound
+gate first, so on an unbound server a typo and a tool `--tools` had hidden both came back
+"no project bound" — masking a protocol error, and sending the agent to bind a project so it
+could retry a call that was never going to exist. `UNKNOWN_TOOL` is a protocol error (the
+transport turns it into -32602, per the 2026-09-20 entry above); `NO_PROJECT` is a tool result
+the model is meant to act on. Classify the name, then gate the project.
+
+**And the recovery out of the unbound state follows the filter, like every other sentence.**
+The 2026-09-20 entry made `instructions` name only the tools `tools/list` carries; the
+`NO_PROJECT` error, `project_info`'s note, the two tool descriptions that point at a binder,
+and the startup log were all still naming three fixed tools. `Tools#project_recovery` is the
+one home, and `instructions` appends the same words rather than dropping the sentence, so the
+first text the model reads and the error it hits ten calls later do not disagree.
+
+**A lister is not a binder.** The recovery set is `list_projects, create_project,
+switch_project`, but only the last two BIND: `list_projects` reads a page and changes nothing.
+A server that serves it alone can therefore hand the agent every project's name and then
+refuse every one of them — the same retry loop, entered from the other side — so
+`unbindable?` asks for a PICKER (`Tools::PROJECT_PICKERS`), not for any of the three.
+`Server#unbound_note` had always drawn that line in prose ("list_projects to see available
+projects" against the two that "pick"); it is now the predicate as well. When no picker is
+served the honest answer is that the recovery is not in the agent's hands at all — the
+operator has to restart — and that is said once at start-up on stderr, from both unbound
+entry points (`--no-project` and the degrade-to-unbound path a bad database takes), because
+stderr is the only surface the operator who made the mistake is looking at.
