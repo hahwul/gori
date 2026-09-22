@@ -1674,7 +1674,7 @@ module Gori::Tui
         @host.session.store.touch_oast_session(id)
         # Arm the live probe analyzer's OAST minter against this session. It is resolved once at
         # construction and otherwise only on a Rules-tab edit, so a project opened with no
-        # session left the out-of-band probe rules (blind SSRF/XXE/command-injection) INERT with
+        # session left the out-of-band probe rules (blind SSRF/XXE/command-injection/RFI) INERT with
         # a listener running here until a restart — the callbacks arrived nowhere and the active
         # scan read clean. Both a fresh register and a resume land here, and this is past the
         # discard early-return above, so a listener whose provider vanished mid-flight never arms.

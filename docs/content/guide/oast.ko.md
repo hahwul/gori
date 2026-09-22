@@ -1,6 +1,6 @@
 +++
 title = "OAST"
-description = "out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection을 확인하세요."
+description = "out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection, 원격 파일 포함을 확인하세요."
 weight = 70
 
 [extra]
@@ -135,7 +135,7 @@ gori run oast release 7                        # deregister it; its callbacks st
 
 `resume`은 종료해도 등록을 유지하고(Ctrl-C는 폴링만 멈춥니다) 받은 콜백을 프로젝트에 저장하므로 OAST 탭에서 같은 hit를 봅니다. `listen --save`도 첫 폴링부터 똑같이 동작합니다. 정리는 둘 다 `release`로 명시적으로 합니다.
 
-저장된 세션은 **블라인드** 액티브 체크를 켜는 스위치이기도 합니다. `ssrf_oast`, `xxe_oast`, `cmd_injection_oast`는 페이로드를 심어두고 대상이 연락해오기를 기다리므로 저장된 세션을 대상으로 페이로드를 만듭니다. 세션이 없으면 아무것도 계획하지 않고 아무것도 보내지 않으며, `gori run probe --active`(그리고 MCP `probe_scan`의 `out_of_band` 필드)가 그 사실을 알려줍니다 — 빈 결과가 "블라인드 취약점 없음"으로 읽히지 않도록.
+저장된 세션은 **블라인드** 액티브 체크를 켜는 스위치이기도 합니다. `ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`는 페이로드를 심어두고 대상이 연락해오기를 기다리므로 저장된 세션을 대상으로 페이로드를 만듭니다. 세션이 없으면 아무것도 계획하지 않고 아무것도 보내지 않으며, `gori run probe --active`(그리고 MCP `probe_scan`의 `out_of_band` 필드)가 그 사실을 알려줍니다 — 빈 결과가 "블라인드 취약점 없음"으로 읽히지 않도록.
 
 저장된 provider(**Providers** 서브탭의 행들)도 `gori run oast providers add|update|enable|disable|delete|list`로 헤드리스에서 관리할 수 있고, `listen`과 `resume`은 폴링 주기를 정하는 `--interval SEC`(기본 5)를 받습니다. 플래그는 [CLI Reference](/ko/reference/cli/#run-oast)를 참고하세요.
 

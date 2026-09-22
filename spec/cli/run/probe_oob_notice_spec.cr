@@ -32,6 +32,7 @@ describe "gori run probe — out-of-band reachability notice" do
       note.should contain("ssrf_oast")
       note.should contain("cmd_injection_oast")
       note.should contain("xxe_oast")
+      note.should contain("rfi_oast")
       note.should contain("no OAST session")
       note.should contain("not evidence that no blind (out-of-band) vulnerability exists")
     end

@@ -7,9 +7,9 @@ weight = 100
 group = "Workbenches"
 +++
 
-A blind SSRF, a blind XXE, an out-of-band injection: none of them answer you in the response. They reach out to some *other* server instead. **OAST** gives you that server: gori mints a payload URL tied to a listener, you plant it in a request, and any DNS or HTTP callback the target makes to it lands as a hit you can point to. This playbook runs one confirmation end to end in about ten minutes.
+A blind SSRF, a blind XXE, remote file inclusion, or an out-of-band injection: none of them answer you in the response. They reach out to some *other* server instead. **OAST** gives you that server: gori mints a payload URL tied to a listener, you plant it in a request, and any DNS or HTTP callback the target makes to it lands as a hit you can point to. This playbook runs one confirmation end to end in about ten minutes.
 
-> **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) first, and have a candidate injection point in hand: a parameter, header, or field that might make the server fetch a URL or resolve a hostname. A callback reaches a public interaction server that sees its metadata, so only run OAST against systems you're authorized to test, and prefer a self-hosted provider for sensitive work.
+> **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) first, and have a candidate injection point in hand: a parameter, header, or field that might make the server fetch a URL, include a remote file, or resolve a hostname. A callback reaches a public interaction server that sees its metadata, so only run OAST against systems you're authorized to test, and prefer a self-hosted provider for sensitive work.
 
 ## 1. Start a listener and grab a payload
 
@@ -28,7 +28,7 @@ A bare `listen` is store-free and its registration dies with the process, which 
 
 ## 2. Plant the payload
 
-Take that payload URL and put it where the target might dereference it. Send the candidate request to **Repeater** (`Ctrl-R` from History) or the **Fuzzer** (`Shift-I`), then `Space` → **Insert OAST payload** to drop the URL at the cursor. Plant it in whatever might trigger a server-side fetch: a URL parameter, a `Host` or `X-Forwarded-For` header, an XML entity for XXE, a webhook field. Send the request.
+Take that payload URL and put it where the target might dereference it. Send the candidate request to **Repeater** (`Ctrl-R` from History) or the **Fuzzer** (`Shift-I`), then `Space` → **Insert OAST payload** to drop the URL at the cursor. Plant it in whatever might trigger a server-side fetch or include: a URL parameter, a file/page/template field, a `Host` or `X-Forwarded-For` header, an XML entity for XXE, or a webhook field. Send the request.
 
 **Checkpoint.** The request carrying your payload reached the target. A normal response is fine here; the point is what the *server* does next, out of band.
 

@@ -19,6 +19,7 @@ require "./active/request_smuggling"
 require "./active/ssrf_oast"
 require "./active/xxe_oast"
 require "./active/cmd_injection_oast"
+require "./active/rfi_oast"
 require "./active/ratelimit_bypass"
 require "./active/forbidden_method_bypass"
 require "./active/insecure_http_methods"
@@ -49,7 +50,7 @@ module Gori
                CrlfInjection.new, PathNormalizationBypass.new,
                UrlRewriteBypass.new, Ssti.new,
                NextjsActionNoAuth.new, RequestSmuggling.new,
-               SsrfOast.new, CmdInjectionOast.new, XxeOast.new,
+               SsrfOast.new, CmdInjectionOast.new, XxeOast.new, RfiOast.new,
                RateLimitBypass.new, ForbiddenMethodBypass.new,
                InsecureHttpMethods.new] of Rule
 

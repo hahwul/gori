@@ -907,7 +907,7 @@ module Gori
         end
         # The `oast_sessions` row is what makes this a PROJECT listener rather than an ad-hoc
         # one: `gori run oast list` shows it, `resume` re-opens it in a later process, and
-        # `Probe::OutOfBand::StoreMinter` mints every blind SSRF/XXE/command-injection payload
+        # `Probe::OutOfBand::StoreMinter` mints every blind SSRF/XXE/command-injection/RFI payload
         # against it — so without one, `gori run probe --active` runs those rules inert and its
         # empty result says nothing about blind vulnerabilities (which is why the probe run
         # prints a notice saying exactly that).

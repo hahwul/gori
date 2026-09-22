@@ -127,7 +127,7 @@ module Gori
       # rules can plant against it WITHOUT a restart or a Rules-tab edit. `@oob` is otherwise
       # built once at construction and refreshed only by `reload_rule_config` (a Rules-tab edit /
       # factory reset) — neither of which fires when the OAST tab starts a listener, so a project
-      # opened with no session left the blind SSRF/XXE/command-injection rules INERT with a live
+      # opened with no session left the blind SSRF/XXE/command-injection/RFI rules INERT with a live
       # listener until gori restarted, and an active scan's empty result read as "no blind vuln"
       # when it meant "never planted".
       #
