@@ -233,19 +233,29 @@ module Gori::Tui
         # "fuzz results already saved as run #N" refusal unreachable through the binding.
         # Named off the same predicate the gate reads, not a second copy of its conditions.
         save = v.results_saveable? ? " · #{save_key} save" : ""
-        "↑/↓ select · ↵ detail · #{keys("{fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
-        "#{run} run · #{stop} stop · space cmds · ↹ pane"
+        # `space → o sort`, not `{fuzz.sort} sort`. `fuzz.sort` is MENU-ONLY by decision
+        # (verbs/history.cr, key audit F2: a sort order is set once and read for the rest of
+        # the run, which is not worth a bare letter), so it carries a `mnemonic:` and no
+        # chord — and `Hotkeys.expand` leaves a token it cannot resolve ALONE. This line
+        # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
+        # key it named answered "nothing bound here". `space → …` is the spelling the
+        # Rewriter already uses for its own menu-only action.
+        "↑/↓ select · ↵ detail · space → o sort · #{keys("{fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
+        "#{run} run · #{stop} stop · space cmds · esc sub-tabs"
       when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
       else              "↹/esc sub-tabs"
       end
     end
 
+    # `esc sub-tabs` on all four, for the same reason the pane strips above carry it:
+    # `handle_escape`'s final arm answers escape here too, and the CONFIG column was the one
+    # part of the tab that never said where it goes.
     private def config_hint(v : FuzzerView, run : String) : String
       case v.config_row
-      when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane"
-      when :add  then keys("↵ add a payload set · {fuzz.list-paste} quick List · ↑/↓ row · #{run} run · ↹ pane")
-      when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · #{run} run · ↹ pane"
-      else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane"
+      when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane · esc sub-tabs"
+      when :add  then keys("↵ add a payload set · {fuzz.list-paste} quick List · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs")
+      when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs"
+      else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane · esc sub-tabs"
       end
     end
 
@@ -734,7 +744,9 @@ module Gori::Tui
       when key.enter?              then v.open_detail
       when key.up?, key.lower_k?   then v.results_at_top? ? v.pane_advance(-1) : v.results_move(-1)
       when key.down?, key.lower_j? then v.results_move(1)
-        # `o` sort / `m` matched / `v` dist are verbs (`fuzz.sort` …) — they fall through.
+        # `m` matched / `v` dist are verbs — they fall through to the keymap. `o` is NOT one:
+        # `fuzz.sort` is menu-only, so `o` falls through to "nothing bound here" and the
+        # footer sends the hand to `space` instead.
       when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
         return false # Global breath
       end
