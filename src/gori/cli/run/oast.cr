@@ -12,20 +12,16 @@ module Gori
         {"oast providers", "Manage saved OAST providers (list, add, update, enable/disable, delete)"},
       ])]
       private def self.cmd_oast(args : Array(String)) : Nil
-        # `providers` is the one OAST subcommand that touches the project store, so it must be
-        # dispatched BEFORE strip_project_flags eats the --project/--db it actually needs.
-        # Match it ANYWHERE in the argv, not just at args[0] — `gori run oast --project=X
-        # providers` is the natural invocation and is exactly the one that carries the flag.
-        if i = args.index("providers")
-          return cmd_oast_providers(args[...i] + args[(i + 1)..])
-        end
-        # Same reason for the session verbs: `list` / `resume` / `release` are the OAST
-        # subcommands that read and write the PROJECT's persisted sessions, so they must be
-        # dispatched before strip_project_flags eats the --project/--db they need. Unlike the
-        # `providers` scan above this one walks positionally and skips a flag's VALUE, so
-        # `gori run oast --project list resume 7` resumes in the project NAMED "list".
+        # `providers` and the session verbs touch the project store, so they must be dispatched
+        # BEFORE strip_project_flags eats the --project/--db they actually need. Find the first
+        # positional token rather than searching for a word anywhere in argv: `providers` is a
+        # valid value for --provider/--server/--token, and a saved session id can be any malformed
+        # word. Treating either as a subcommand sends a valid listen invocation down the wrong
+        # branch and turns a useful argument error into an unrelated provider error.
         if pos = oast_subcommand_index(args)
           case sub = args[pos]
+          when "providers"
+            return cmd_oast_providers(args[...pos] + args[(pos + 1)..])
           when "list", "resume", "release"
             return cmd_oast_session_verb(sub, args[...pos] + args[(pos + 1)..])
           end
@@ -62,13 +58,24 @@ module Gori
           a = args[i]
           if a == "--project" || a == "--db"
             v = args[i + 1]?
+            if err = oast_project_flag_error(a, v)
+              abort err
+            end
             a == "--project" ? (project_name = v) : (db_path = v)
             i += 2 # skip the flag AND its value
           elsif a.starts_with?("--project=")
-            project_name = a[10..]
+            v = a[10..]
+            if err = oast_project_flag_error("--project", v)
+              abort err
+            end
+            project_name = v
             i += 1 # attached form is a single token
           elsif a.starts_with?("--db=")
-            db_path = a[5..]
+            v = a[5..]
+            if err = oast_project_flag_error("--db", v)
+              abort err
+            end
+            db_path = v
             i += 1
           else
             out << a
@@ -78,14 +85,51 @@ module Gori
         {out, project_name, db_path}
       end
 
+      # The OAST dispatcher has to inspect argv before each nested parser can claim its own
+      # options. Keep the list of value-taking flags here so a value equal to a subcommand (for
+      # example `--provider providers`) is never mistaken for the first positional token.
+      private def self.oast_value_flag?(arg : String) : Bool
+        case arg
+        when "--project", "--db", "--provider", "--server", "--token", "--interval",
+             "--format", "--name", "--kind", "--host"
+          true
+        else
+          false
+        end
+      end
+
+      # `strip_project_flags` runs before an OptionParser, so a missing value would otherwise
+      # be consumed as another flag (or disappear at argv's end) and the command could print
+      # help with exit 0 or start a listener against the default project. Return the sentence
+      # separately so the boundary is unit-testable without invoking `abort`.
+      def self.oast_project_flag_error(flag : String, value : String?) : String?
+        return nil if value && !value.empty? && !value.starts_with?("-")
+        "gori run oast: #{flag} needs a value"
+      end
+
       # Index of the first POSITIONAL token — the subcommand — skipping options and the
-      # separate value of the two that take one. nil when the argv is all flags.
+      # separate value of every OAST flag that takes one. nil when the argv is all flags.
       private def self.oast_subcommand_index(args : Array(String)) : Int32?
         i = 0
         while i < args.size
           a = args[i]
-          if a == "--project" || a == "--db"
+          if oast_value_flag?(a)
+            if a == "--project" || a == "--db"
+              if err = oast_project_flag_error(a, args[i + 1]?)
+                abort err
+              end
+            end
             i += 2
+          elsif a.starts_with?("--project=")
+            if err = oast_project_flag_error("--project", a[10..])
+              abort err
+            end
+            i += 1
+          elsif a.starts_with?("--db=")
+            if err = oast_project_flag_error("--db", a[5..])
+              abort err
+            end
+            i += 1
           elsif a.starts_with?('-')
             i += 1
           else
