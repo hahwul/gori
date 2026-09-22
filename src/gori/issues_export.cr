@@ -93,37 +93,46 @@ module Gori
       def self.json(issues : Array(Store::Issue), store : Store? = nil) : String
         JSON.build do |j|
           j.array do
-            issues.each do |f|
-              j.object do
-                j.field "id", f.id
-                # title/host: normalise with one_line (scrub + collapse control chars) — they're
-                # semantically single-line fields, so a raw newline is worth collapsing even though
-                # JSON itself would tolerate it verbatim (an MCP tool response IS this same JSON
-                # shape, and a client rendering "title" inline shouldn't see it split mid-string).
-                j.field "title", one_line(f.title)
-                j.field "severity", f.severity.label
-                j.field "status", f.status.label
-                j.field "cvss", f.cvss.try { |c| one_line(c) }
-                j.field "cvss_score", f.cvss_score
-                j.field "host", f.host.try { |h| one_line(h) }
-                # KEPT for compatibility, and it is the same fact as `links[0]`: the flow the
-                # issue was filed from is the first entry of `links` below. Readers that only
-                # know this field keep working; readers that want everything backing the issue
-                # read one array instead of a field plus an array.
-                j.field "flow_id", f.flow_id
-                j.field "created_at", f.created_at
-                j.field "updated_at", f.updated_at
-                # notes is multi-line BY DESIGN (free-text) — only the encoding-safety half of
-                # one_line applies; collapsing its newlines would mangle a legitimate multi-line note.
-                j.field "notes", scrub_only(f.notes)
-                j.field "links" do
-                  j.array { append_links_json(j, f, store) }
-                end
-                j.field "evidence" do
-                  j.array { append_evidence_json(j, f, store) }
-                end
-              end
-            end
+            issues.each { |f| issue_object(j, f, store) }
+          end
+        end
+      end
+
+      # ONE issue as a standalone object: the element `json` puts in its array, for
+      # `gori run issues create --format json` (#1117). Both go through `issue_object`, so a
+      # script that files an issue and later lists it reads one shape, not two that drift.
+      def self.issue_json(f : Store::Issue, store : Store? = nil) : String
+        JSON.build { |j| issue_object(j, f, store) }
+      end
+
+      def self.issue_object(j : JSON::Builder, f : Store::Issue, store : Store?) : Nil
+        j.object do
+          j.field "id", f.id
+          # title/host: normalise with one_line (scrub + collapse control chars) — they're
+          # semantically single-line fields, so a raw newline is worth collapsing even though
+          # JSON itself would tolerate it verbatim (an MCP tool response IS this same JSON
+          # shape, and a client rendering "title" inline shouldn't see it split mid-string).
+          j.field "title", one_line(f.title)
+          j.field "severity", f.severity.label
+          j.field "status", f.status.label
+          j.field "cvss", f.cvss.try { |c| one_line(c) }
+          j.field "cvss_score", f.cvss_score
+          j.field "host", f.host.try { |h| one_line(h) }
+          # KEPT for compatibility, and it is the same fact as `links[0]`: the flow the
+          # issue was filed from is the first entry of `links` below. Readers that only
+          # know this field keep working; readers that want everything backing the issue
+          # read one array instead of a field plus an array.
+          j.field "flow_id", f.flow_id
+          j.field "created_at", f.created_at
+          j.field "updated_at", f.updated_at
+          # notes is multi-line BY DESIGN (free-text) — only the encoding-safety half of
+          # one_line applies; collapsing its newlines would mangle a legitimate multi-line note.
+          j.field "notes", scrub_only(f.notes)
+          j.field "links" do
+            j.array { append_links_json(j, f, store) }
+          end
+          j.field "evidence" do
+            j.array { append_evidence_json(j, f, store) }
           end
         end
       end

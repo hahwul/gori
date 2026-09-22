@@ -59,6 +59,15 @@ module Gori::CLI::Run
   def self.parse_link_id_for_spec(v : String, flag : String) : Int64
     parse_link_id(v, flag)
   end
+
+  def self.link_add_for_spec(store : Gori::Store, owner_kind : Gori::Store::LinkOwnerKind, oid : Int64,
+                             ref_kind : Gori::Store::LinkRefKind, rid : Int64, format : Symbol) : String
+    link_add(store, owner_kind, oid, ref_kind, rid, format)
+  end
+
+  def self.link_row_json_for_spec(r : Links::Resolved) : String
+    JSON.build { |j| j.object { link_row_fields(j, r) } }
+  end
 end
 
 describe "gori run links — flag parsing" do
@@ -118,6 +127,48 @@ describe "gori run links — end validation" do
       Gori::CLI::Run.link_ref_exists_for_spec(store, Gori::Store::LinkRefKind::Fuzz, fid).should be_false
       Gori::CLI::Run.link_ref_exists_for_spec(store, Gori::Store::LinkRefKind::Miner, rid).should be_false
       Gori::CLI::Run.link_ref_exists_for_spec(store, Gori::Store::LinkRefKind::Flow, 99_999_i64).should be_false
+    end
+  end
+end
+
+# `links add --format json` (#1117): the link's `links list --format json` row plus `created`.
+# A pair that was already linked is the desired end state, not a failure — it answers
+# `created: false` with THAT link's id, the row the next listing shows.
+describe "gori run links add --format json" do
+  it "prints the new link's listing row with created: true, then false for the same pair" do
+    with_store do |store|
+      fid = seed_flow(store)
+      iid = store.insert_issue("finding", Gori::Store::Severity::Low, "api.test", nil)
+      owner, ref = Gori::Store::LinkOwnerKind::Issue, Gori::Store::LinkRefKind::Flow
+
+      first = JSON.parse(Gori::CLI::Run.link_add_for_spec(store, owner, iid, ref, fid, :json))
+      first["created"].as_bool.should be_true
+      first["ref_kind"].as_s.should eq("flow")
+      first["ref_id"].as_i64.should eq(fid)
+      link_id = first["id"].as_i64
+      link_id.should eq(store.link_id(owner, iid, ref, fid))
+
+      listed = JSON.parse(Gori::CLI::Run.link_row_json_for_spec(
+        Gori::Links.resolve_all(store, store.list_links(owner, iid)).find! { |r| r.link.id == link_id }))
+      first.as_h.keys.should eq(listed.as_h.keys + ["created"])
+      first.as_h.reject("created").should eq(listed.as_h)
+
+      again = JSON.parse(Gori::CLI::Run.link_add_for_spec(store, owner, iid, ref, fid, :json))
+      again["created"].as_bool.should be_false
+      again["id"].as_i64.should eq(link_id)
+      store.list_links(owner, iid).size.should eq(1)
+    end
+  end
+
+  it "keeps both text sentences unchanged" do
+    with_store do |store|
+      fid = seed_flow(store)
+      iid = store.insert_issue("finding", Gori::Store::Severity::Low, "api.test", nil)
+      owner, ref = Gori::Store::LinkOwnerKind::Issue, Gori::Store::LinkRefKind::Flow
+      Gori::CLI::Run.link_add_for_spec(store, owner, iid, ref, fid, :text)
+        .should eq("Linked issue ##{iid} → flow ##{fid}.")
+      Gori::CLI::Run.link_add_for_spec(store, owner, iid, ref, fid, :text)
+        .should eq("Issue ##{iid} was already linked to flow ##{fid}.")
     end
   end
 end

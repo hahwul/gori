@@ -215,21 +215,7 @@ module Gori
         end
 
         if format == :json
-          puts(JSON.build do |j|
-            j.array do
-              configs.each do |c|
-                j.object do
-                  j.field "id", c.key
-                  j.field "name", c.name
-                  j.field "kind", c.kind
-                  j.field "host", c.host
-                  j.field "scope", c.scope
-                  j.field "enabled", c.enabled
-                  j.field "token", c.token.nil? ? nil : (show_tokens ? c.token : "[REDACTED]")
-                end
-              end
-            end
-          end)
+          puts(JSON.build { |j| j.array { configs.each { |c| oast_provider_json(j, c, show_tokens) } } })
           return
         end
         if configs.empty?
@@ -239,6 +225,21 @@ module Gori
         configs.each do |c|
           tok = c.token.nil? ? "" : "  token=#{show_tokens ? c.token : "[REDACTED]"}"
           puts "#{c.enabled ? "[on ]" : "[off]"} #{CLI::Output.pad(c.key, 12)} #{c.kind.ljust(13)} #{CLI::Output.pad(c.name, 24)} #{c.host}#{tok}"
+        end
+      end
+
+      # One provider's object: the element of `providers list --format json`, and the whole of
+      # `providers add --format json` (#1117). One method so the two cannot drift. `id` is the
+      # scope-qualified key (`p_3`), the spelling every other providers verb takes.
+      private def self.oast_provider_json(j : JSON::Builder, c : Oast::ProviderConfig, show_tokens : Bool) : Nil
+        j.object do
+          j.field "id", c.key
+          j.field "name", c.name
+          j.field "kind", c.kind
+          j.field "host", c.host
+          j.field "scope", c.scope
+          j.field "enabled", c.enabled
+          j.field "token", c.token.nil? ? nil : (show_tokens ? c.token : "[REDACTED]")
         end
       end
 
@@ -256,6 +257,7 @@ module Gori
         host : String? = nil
         token : String? = nil
         enabled : Bool? = nil
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = update ? "Usage: gori run oast providers update <id> [options]\n\nFields you do not pass keep their current value." \
@@ -268,6 +270,10 @@ module Gori
           p.on("--token=TOK", "Provider auth token") { |v| token = v }
           p.on("--enabled", "Turn the provider on") { enabled = true }
           p.on("--disabled", "Turn the provider off") { enabled = false }
+          # `add` only (#1117): it is the verb that mints an id a script needs back. Not
+          # registered on `update`, whose answer is the id the caller already typed — a flag
+          # it parsed and ignored would be the silently-dropped argument this parser refuses.
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) } unless update
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run oast providers #{verb}: unknown option: #{f}\n#{p}" }
@@ -304,7 +310,7 @@ module Gori
             oast_provider_apply_update(store, oast_provider_row_id(store, id, verb),
               name, kind, host, token, enabled)
           else
-            oast_provider_apply_add(store, name, kind, host, token, enabled)
+            oast_provider_apply_add(store, name, kind, host, token, enabled, format)
           end
         ensure
           store.close
@@ -334,7 +340,7 @@ module Gori
 
       private def self.oast_provider_apply_add(store : Store, name : String?,
                                                kind : Oast::ProviderKind?, host : String?,
-                                               token : String?, enabled : Bool?) : Nil
+                                               token : String?, enabled : Bool?, format : Symbol) : Nil
         abort "gori run oast providers add: --name is required" if name.nil? || name.empty?
         k = kind || Oast::ProviderKind::Interactsh
         h = host.try(&.strip).presence || Oast::Presets.all.find { |p| p.kind == k }.try(&.host)
@@ -342,7 +348,21 @@ module Gori
         id = store.insert_oast_provider(name, k.label, h, token.try(&.strip).presence,
           enabled.nil? ? true : enabled, store.oast_providers.size)
         abort "gori run oast providers add: failed to persist the provider (store busy or unwritable)" if id == 0
-        puts "OAST provider 'p_#{id}' created."
+        puts oast_provider_added_output(store, id, format)
+      end
+
+      # What `providers add` prints once the insert committed. `--format json` (#1117) is the
+      # provider's `providers list --format json` object, read back through the listing's own
+      # `Oast.provider_configs`. The token stays `[REDACTED]`, the listing's default: `add` has
+      # no `--show-tokens`, and a create's answer is the kind of line that ends up in a CI log.
+      # A provider a peer removed in that instant has no row, and the command refuses rather
+      # than print one the listing never shows.
+      private def self.oast_provider_added_output(store : Store, id : Int64, format : Symbol) : String
+        key = "p_#{id}"
+        return "OAST provider '#{key}' created." unless format == :json
+        config = Oast.provider_configs(store).find { |c| c.key == key } ||
+                 abort("gori run oast providers add: provider '#{key}' was created, but it was gone before it could be read back")
+        JSON.build { |j| oast_provider_json(j, config, show_tokens: false) }
       end
 
       private def self.cmd_oast_provider_enabled(args : Array(String), enabled : Bool) : Nil

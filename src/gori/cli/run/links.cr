@@ -91,23 +91,7 @@ module Gori
         end
 
         if format == :json
-          puts(JSON.build do |j|
-            j.array do
-              resolved.each do |r|
-                j.object do
-                  j.field "id", r.link.id
-                  j.field "ref_kind", r.link.ref_kind.label
-                  j.field "ref_id", r.link.ref_id
-                  # Captured bytes (see Links.resolve_flow) — `one_line` so a raw 0x80 in an
-                  # h2 `:path` can't make this document invalid UTF-8, the same guard
-                  # `Issues::Export.append_links_json` and MCP `list_links` carry.
-                  j.field "label", Issues::Export.one_line(r.label)
-                  j.field "url", Issues::Export.one_line(r.url)
-                  j.field "stale", r.stale?
-                end
-              end
-            end
-          end)
+          puts(JSON.build { |j| j.array { resolved.each { |r| j.object { link_row_fields(j, r) } } } })
           return
         end
         if resolved.empty?
@@ -123,6 +107,21 @@ module Gori
         end
       end
 
+      # One link's fields: a row of `links list --format json`, and the body of `links add
+      # --format json` (#1117), which adds `created` beside them. One method so the two
+      # cannot drift.
+      private def self.link_row_fields(j : JSON::Builder, r : Links::Resolved) : Nil
+        j.field "id", r.link.id
+        j.field "ref_kind", r.link.ref_kind.label
+        j.field "ref_id", r.link.ref_id
+        # Captured bytes (see Links.resolve_flow) — `one_line` so a raw 0x80 in an
+        # h2 `:path` can't make this document invalid UTF-8, the same guard
+        # `Issues::Export.append_links_json` and MCP `list_links` carry.
+        j.field "label", Issues::Export.one_line(r.label)
+        j.field "url", Issues::Export.one_line(r.url)
+        j.field "stale", r.stale?
+      end
+
       private def self.cmd_links_mutate(args : Array(String), *, add : Bool) : Nil
         # One branch for all three words this flag changes, rather than a ternary per use:
         # the parser body is already at the cyclomatic ceiling the lint gate holds.
@@ -133,6 +132,7 @@ module Gori
         owner_id : Int64? = nil
         ref_s : String? = nil
         ref_id : Int64? = nil
+        format = :text
         leftover = [] of String
 
         parser = OptionParser.new do |p|
@@ -144,6 +144,9 @@ module Gori
           p.on("--id=N", "Owner issue/note id (required)") { |v| owner_id = parse_link_id(v, "--id") }
           p.on("--ref=KIND", "Target kind: flow|repeater|fuzz|miner (required)") { |v| ref_s = v.strip.downcase }
           p.on("--ref-id=M", "Target id (required)") { |v| ref_id = parse_link_id(v, "--ref-id") }
+          # `add` only (#1117): it creates the row whose id a script needs back. `delete` has no
+          # row left to describe, and a flag it parsed and ignored would be a silent drop.
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) } if add
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run links #{verb}: unknown option: #{f}\n#{p}" }
@@ -184,13 +187,7 @@ module Gori
           end
 
           if add
-            # Store#add_link returns nil when the pair already exists — that is the desired
-            # end state, so say so rather than reporting a link that was not created.
-            if store.add_link(owner_kind, oid, ref_kind, rid)
-              puts "Linked #{owner_kind.label} ##{oid} → #{ref_kind.label} ##{rid}."
-            else
-              puts "#{owner_kind.label.capitalize} ##{oid} was already linked to #{ref_kind.label} ##{rid}."
-            end
+            puts link_add(store, owner_kind, oid, ref_kind, rid, format)
           else
             unless store.link_id(owner_kind, oid, ref_kind, rid)
               abort "gori run links delete: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid}"
@@ -200,6 +197,35 @@ module Gori
           end
         ensure
           store.close
+        end
+      end
+
+      # `links add`'s write and the line it answers with. Split out of `cmd_links_mutate`, which
+      # is at the complexity bar the lint gate holds.
+      #
+      # Store#add_link returns nil when the pair already exists — that is the desired end
+      # state, so the sentence says so rather than reporting a link that was not created.
+      # `--format json` (#1117) is the link's `links list --format json` row plus `created`,
+      # false for a pair that was already linked, with THAT link's id: the row the next
+      # listing shows. The row is looked up rather than trusted from the nil, because a write
+      # that did not commit answers nil too, and `created: false` would then describe a link
+      # that does not exist — so no row at all refuses instead.
+      private def self.link_add(store : Store, owner_kind : Store::LinkOwnerKind, oid : Int64,
+                                ref_kind : Store::LinkRefKind, rid : Int64, format : Symbol) : String
+        created = store.add_link(owner_kind, oid, ref_kind, rid)
+        unless format == :json
+          return "Linked #{owner_kind.label} ##{oid} → #{ref_kind.label} ##{rid}." if created
+          return "#{owner_kind.label.capitalize} ##{oid} was already linked to #{ref_kind.label} ##{rid}."
+        end
+        link = store.list_links(owner_kind, oid).find { |l| l.ref_kind == ref_kind && l.ref_id == rid } ||
+               abort("gori run links add: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid} " \
+                     "after the write (store busy or unwritable, or removed by a peer) — try again")
+        resolved = Links.resolve(store, link)
+        JSON.build do |j|
+          j.object do
+            link_row_fields(j, resolved)
+            j.field "created", !created.nil?
+          end
         end
       end
 

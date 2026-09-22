@@ -192,6 +192,7 @@ module Gori
         notes : String? = nil
         notes_file : String? = nil
         notes_stdin = false
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run issues create [options]\n\n" \
@@ -208,6 +209,7 @@ module Gori
           p.on("-nNOTES", "--notes=NOTES", "Free-form notes (the issue's body)") { |v| notes = v }
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
           p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues create -t … --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run issues create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run issues create: missing value for #{f}" }
@@ -261,10 +263,25 @@ module Gori
           id = store.insert_issue(masked_title, severity, masked_host, flow_id, cvss: cvss,
             notes: body.try { |n| Env.mask_secrets(n) } || "")
           abort "gori run issues create: failed to persist issue (store busy or unwritable)" if id == 0
-          puts "Issue ##{id} created successfully."
+          puts issue_created_output(store, id, format)
         ensure
           store.close
         end
+      end
+
+      # What `issues create` prints once the insert has committed: the sentence, or under
+      # `--format json` the issue exactly as `gori run issues --format json` prints it (#1117).
+      # Read back from the store rather than assembled from the flags, so the object carries
+      # what the listing will — the masked title, the derived severity, the timestamps. An
+      # issue a peer deleted in that instant has no row to describe, and the object would be
+      # one the listing never shows, so that case refuses instead of printing a partial one.
+      # Its own method, rather than a branch in `cmd_issues_create`, because that command is
+      # at the complexity bar the lint gate holds.
+      private def self.issue_created_output(store : Store, id : Int64, format : Symbol) : String
+        return "Issue ##{id} created successfully." unless format == :json
+        issue = store.get_issue(id) ||
+                abort("gori run issues create: issue ##{id} was created, but it was gone before it could be read back")
+        Issues::Export.issue_json(issue, store)
       end
 
       # The refusal for a `--flow` that names no captured flow, or nil when it names one (or

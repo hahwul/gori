@@ -24,6 +24,10 @@ module Gori::CLI::Run
   def self.issue_flow_range_error_for_spec(flow_id : Int64?) : String?
     issue_flow_range_error(flow_id)
   end
+
+  def self.issue_created_output_for_spec(store : Gori::Store, id : Int64, format : Symbol) : String
+    issue_created_output(store, id, format)
+  end
 end
 
 private def captured_flow(store : Gori::Store) : Int64
@@ -167,6 +171,36 @@ describe "gori run issues --format json" do
       links[1]["kind"].as_s.should eq("repeater")
       links[1]["ref_id"].as_i.should eq(9)
       links[1]["label"].as_s.should_not be_empty
+    end
+  end
+end
+
+# `issues create --format json` (#1117): a script filing a finding had to scrape the id out of
+# "Issue #7 created successfully.". The object is the one the listing prints for that row, so
+# reading it back later gives the same shape the create answered with.
+describe "gori run issues create --format json" do
+  it "prints the new issue's listing object, id included" do
+    with_store do |store|
+      fid = captured_flow(store)
+      id = store.insert_issue("SQLi in /admin", Gori::Store::Severity::High, "acme.test", fid,
+        cvss: "9.8", notes: "reproduced twice")
+      created = JSON.parse(Gori::CLI::Run.issue_created_output_for_spec(store, id, :json))
+      created["id"].as_i64.should eq(id)
+      created["title"].as_s.should eq("SQLi in /admin")
+      created["severity"].as_s.should eq("high")
+      created["notes"].as_s.should eq("reproduced twice")
+
+      listed = JSON.parse(Gori::Issues::Export.json(store.issues, store)).as_a.find! { |o| o["id"].as_i64 == id }
+      created.as_h.keys.should eq(listed.as_h.keys)
+      created.should eq(listed)
+    end
+  end
+
+  it "keeps the text sentence unchanged" do
+    with_store do |store|
+      id = store.insert_issue("t", Gori::Store::Severity::Info, nil, nil)
+      Gori::CLI::Run.issue_created_output_for_spec(store, id, :text)
+        .should eq("Issue ##{id} created successfully.")
     end
   end
 end

@@ -105,3 +105,50 @@ describe "gori run colormarker — JSON" do
     end
   end
 end
+
+module Gori::CLI::Run
+  def self.colormarker_added_json_for_spec(id : Int64, store : Store?) : String
+    colormarker_added_json(id, store)
+  end
+end
+
+# `colormarker add --format json` (#1117): the listing's object for the rule just written,
+# read back from the store it went to.
+describe "gori run colormarker add --format json" do
+  it "prints a project rule's listing object, id included" do
+    with_store do |store|
+      id = store.insert_color_rule("status:>=500", "red", Gori::Store::MarkerStyle::Strip, "errs", false)
+      o = JSON.parse(Gori::CLI::Run.colormarker_added_json_for_spec(id, store))
+      o["id"].as_i64.should eq(id)
+      o["scope"].as_s.should eq("project")
+      o["enabled"].as_bool.should be_false
+
+      listed = json_for(Gori::Colormarker.merged(store).find! { |r| !r.global? && r.id == id })
+      o.as_h.keys.should eq(listed.as_h.keys)
+      o.should eq(listed)
+    end
+  end
+
+  # No store on this path: `add --scope global` writes settings.json and opens no project.
+  it "prints a global rule's listing object, override pair included" do
+    before = Gori::Settings.colormarker_rules
+    begin
+      Gori::Settings.colormarker_rules = [
+        Gori::Settings::ColormarkerRule.new(7_i64, true, "", "host:cdn", "blue", "strip"),
+      ]
+      o = JSON.parse(Gori::CLI::Run.colormarker_added_json_for_spec(7_i64, nil))
+      o["id"].as_i64.should eq(7)
+      o["scope"].as_s.should eq("global")
+      o["overridden"].as_bool.should be_false
+      o["default_enabled"].as_bool.should be_true
+
+      with_store do |store|
+        listed = json_for(Gori::Colormarker.merged(store).find! { |r| r.global? && r.id == 7_i64 })
+        o.as_h.keys.should eq(listed.as_h.keys)
+        o.should eq(listed)
+      end
+    ensure
+      Gori::Settings.colormarker_rules = before
+    end
+  end
+end

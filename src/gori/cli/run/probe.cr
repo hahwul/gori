@@ -550,6 +550,7 @@ module Gori
         region = "body"
         match_kind = "string"
         sev_s = "info"
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run probe rules add --title=T --pattern=P [options]\n\n" \
@@ -566,6 +567,7 @@ module Gori
           p.on("--exec", "Treat --pattern as a COMMAND: the region goes to it on stdin, exit 0 = " \
                          "match, stdout = evidence. Run with no shell and with your own privileges") { match_kind = "exec" }
           p.on("-sSEVERITY", "--severity=SEVERITY", "info|low|medium|high|critical (default info)") { |v| sev_s = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run probe rules add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run probe rules add: missing value for #{f}" }
@@ -592,10 +594,25 @@ module Gori
         begin
           id = store.insert_probe_custom_rule(t, description, side, region, match_kind, pat, severity)
           abort "gori run probe rules add: failed to persist the rule (store busy or unwritable)" if id == 0
-          puts "Custom rule 'custom_p_#{id}' created."
+          puts probe_rule_added_output(store, id, format)
         ensure
           store.close
         end
+      end
+
+      # What `probe rules add` prints once the insert committed. `--format json` (#1117) is the
+      # rule's `probe rules --format json` entry, through the same `RuleCatalog.entry_json` and
+      # read back through the listing's own `RuleCatalog.load`. So `id` is the rule's CODE
+      # (`custom_p_7`), not the bare row number: that is the id the listing prints and every
+      # sibling verb takes (`probe rules disable custom_p_7`), and the bare number is refused
+      # there. A rule a peer removed in that instant has no entry, and the command refuses
+      # rather than print one the listing never shows.
+      private def self.probe_rule_added_output(store : Store, id : Int64, format : Symbol) : String
+        code = "custom_p_#{id}"
+        return "Custom rule '#{code}' created." unless format == :json
+        entry = Probe::RuleCatalog.load(store).find { |e| e.id == code } ||
+                abort("gori run probe rules add: rule '#{code}' was created, but it was gone before it could be read back")
+        JSON.build { |j| Probe::RuleCatalog.entry_json(j, entry) }
       end
 
       private def self.cmd_probe_rule_delete(args : Array(String)) : Nil
