@@ -207,10 +207,15 @@ describe "Gori::Settings project network keys (#1115)" do
       rows_of(edit).should eq([{Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY, "*.corp.test"}])
     end
 
-    # An absent row IS `*`, so `*` clears the row rather than storing a second spelling of it.
-    it "clears the row for *" do
-      edit, _ = plan_set({} of String => String, "upstream_destination_host", "*")
-      rows_of(edit).should eq([{Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY, nil}])
+    # An absent row IS `*`, so `*` clears the row rather than storing a second spelling of it —
+    # and with no row there is nothing to clear, write, or audit.
+    it "clears the row for *, and changes nothing when there is none" do
+      key = Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY
+      edit, _ = plan_set({key => "*.corp.test"}, "upstream_destination_host", "*")
+      rows_of(edit).should eq([{key, nil}])
+      untouched, _ = plan_set({} of String => String, "upstream_destination_host", "*")
+      rows_of(untouched).should be_empty
+      untouched.not_nil!.audit.should be_empty
     end
 
     it "refuses a URL" do

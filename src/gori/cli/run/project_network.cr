@@ -137,7 +137,7 @@ module Gori
           end
           return
         end
-        puts CLI::Output.term_safe(stored || Settings.project_network_inherited(k) || "")
+        puts CLI::Output.term_safe(network_value_shown(k, stored || Settings.project_network_inherited(k) || ""))
         if stored.nil?
           STDERR.puts network_inherited_note(k)
         elsif k.key == Settings::PROJECT_UPSTREAM_KEY && stored.strip.empty?
@@ -201,7 +201,7 @@ module Gori
         ensure
           store.close
         end
-        puts network_set_line(k, value)
+        puts network_set_line(k, value, edit)
         report_network_edit(edit, k, project)
       end
 
@@ -295,13 +295,25 @@ module Gori
         text.chomp
       end
 
-      private def self.network_set_line(k : Settings::ProjectNetworkKey, value : String) : String
-        shown = case k.key
-                when Settings::PROJECT_UPSTREAM_KEY      then Settings.upstream_display(value)
-                when Settings::PROJECT_UPSTREAM_AUTH_KEY then "credentials for #{value.strip} (password not shown)"
-                else                                          value.strip
-                end
+      # The value as STORED (`007` is stored as `7`, `*` clears the destination row), read off
+      # the edit that just committed rather than echoed from what was typed.
+      private def self.network_set_line(k : Settings::ProjectNetworkKey, value : String,
+                                        edit : Settings::ProjectNetworkEdit) : String
+        return "#{k.key} unchanged" if edit.rows.empty?
+        return "#{k.key} set: credentials for #{CLI::Output.term_safe(value.strip)} (password not shown)" if k.auth?
+        row = edit.rows.find { |(key, _)| key == k.key }
+        stored = row.try(&.[1])
+        return "#{k.key} cleared — the default applies" if row && stored.nil?
+        shown = k.key == Settings::PROJECT_UPSTREAM_KEY ? Settings.upstream_display(stored || "") : (stored || "")
         "#{k.key} set: #{CLI::Output.term_safe(shown)}"
+      end
+
+      # A value on its way to STDOUT. An upstream URI with userinfo cannot be SET here (it is
+      # refused), but a hand-edited settings.json or a row written before that refusal can still
+      # hold one, and `get` / `--format json` are exactly what a CI log captures — so the
+      # password half is scrubbed the way the listing and the audit line already scrub it.
+      private def self.network_value_shown(k : Settings::ProjectNetworkKey, value : String) : String
+        k.key == Settings::PROJECT_UPSTREAM_KEY ? ConfigLog.scrub_url(value) : value
       end
 
       # What the write means, on STDERR beside the one-line result, plus the fact every edit here
@@ -386,10 +398,11 @@ module Gori
             j.field "username", auth.try(&.username)
             j.field "malformed", true if stored && auth.nil?
           else
-            inherited = Settings.project_network_inherited(k)
-            j.field "value", stored
+            inherited = Settings.project_network_inherited(k).try { |v| network_value_shown(k, v) }
+            shown = stored.try { |v| network_value_shown(k, v) }
+            j.field "value", shown
             j.field "inherited", inherited
-            j.field "effective", stored || inherited
+            j.field "effective", shown || inherited
           end
           j.field "summary", k.summary
         end

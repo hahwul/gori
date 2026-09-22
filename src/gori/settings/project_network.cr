@@ -121,7 +121,7 @@ module Gori::Settings
     when PROJECT_BIND_HOST_KEY            then plan_bind_host(k, value)
     when PROJECT_BIND_PORT_KEY            then plan_whole_number(k, value, 0, 65_535)
     when PROJECT_UPSTREAM_KEY             then plan_upstream(current, k, value)
-    when PROJECT_UPSTREAM_DESTINATION_KEY then plan_destination(k, value)
+    when PROJECT_UPSTREAM_DESTINATION_KEY then plan_destination(current, k, value)
     when PROJECT_UPSTREAM_AUTH_KEY        then plan_auth(current, value, password)
     when PROJECT_CAPTURE_MAX_KEY          then plan_whole_number(k, value, 1, MAX_CAPTURE_MAX_MIB)
     else                                       plan_whole_number(k, value, 1, Int32::MAX)
@@ -205,13 +205,18 @@ module Gori::Settings
     ProjectNetworkEdit.new([{k.key, v.as(String?)}], notes, "project #{k.key} set to #{v}")
   end
 
-  private def self.plan_destination(k : ProjectNetworkKey, value : String) : {ProjectNetworkEdit?, String?}
+  private def self.plan_destination(current : Hash(String, String), k : ProjectNetworkKey,
+                                    value : String) : {ProjectNetworkEdit?, String?}
     v = value.strip
     if err = upstream_destination_error(v)
       return {nil, err}
     end
     # An absent row IS `*` (`effective_project_upstream_destination`), so storing the default
-    # would only be a second spelling of the state every pre-feature project is in.
+    # would only be a second spelling of the state every pre-feature project is in — and with
+    # no row there is nothing to clear, so nothing is written or audited.
+    if v == DEFAULT_PROJECT_UPSTREAM_DESTINATION && !current.has_key?(k.key)
+      return {ProjectNetworkEdit.new([] of {String, String?}, ["* is already the default — nothing to change"], ""), nil}
+    end
     if v == DEFAULT_PROJECT_UPSTREAM_DESTINATION
       return {ProjectNetworkEdit.new([{k.key, nil.as(String?)}],
         ["* is the default — the row was cleared, so every destination is eligible"],

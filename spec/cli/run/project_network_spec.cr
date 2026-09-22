@@ -14,6 +14,11 @@ module Gori::CLI::Run
     network_entry_cells(Settings.project_network_key(name).not_nil!, stored).join("  ")
   end
 
+  def self.network_set_line_for_spec(name : String, value : String, rows : Array({String, String?})) : String
+    network_set_line(Settings.project_network_key(name).not_nil!, value,
+      Settings::ProjectNetworkEdit.new(rows, [] of String, ""))
+  end
+
   def self.network_refusal_text_for_spec(name : String, err : String) : String
     network_refusal_text(Settings.project_network_key(name).not_nil!, err)
   end
@@ -116,5 +121,24 @@ describe "gori run project network (#1115)" do
     it "leaves an unrelated refusal as the engine wrote it" do
       Gori::CLI::Run.network_refusal_text_for_spec("io_timeout_secs", "invalid io_timeout_secs").should eq("invalid io_timeout_secs")
     end
+  end
+end
+
+describe "gori run project network — what reaches STDOUT" do
+  # `set` cannot store a URI with userinfo, but a hand-edited settings.json or an older row can
+  # hold one, and `--format json` is what a CI log captures.
+  it "scrubs the password half of an upstream URI in JSON" do
+    j = Gori::CLI::Run.network_entry_json_for_spec("upstream_proxy", "http://bob:hunter2@proxy.test:3128")
+    j.to_json.should_not contain("hunter2")
+    j["value"].as_s.should contain("proxy.test:3128")
+  end
+
+  it "reports the value as stored, not as typed" do
+    Gori::CLI::Run.network_set_line_for_spec("connect_timeout_secs", "007",
+      [{"net.connect_timeout_secs", "7".as(String?)}]).should eq("net.connect_timeout_secs set: 7")
+    Gori::CLI::Run.network_set_line_for_spec("upstream_destination_host", "*",
+      [{"net.upstream_destination_host", nil.as(String?)}]).should contain("cleared")
+    Gori::CLI::Run.network_set_line_for_spec("upstream_destination_host", "*",
+      [] of {String, String?}).should contain("unchanged")
   end
 end
