@@ -350,12 +350,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     doc.notes.each_with_index do |entry, i|
       # "untitled", not "note N": `name` is what the toast says after the kind word, and
       # that fallback rendered as "linked to note note 1".
-      name = Notes.title(entry.text) || "untitled"
-      # The BODY's first line, not the note's — line one is the title, and echoing it in
-      # the detail column just prints every note's name twice.
-      body = entry.text.lines.map(&.strip).reject(&.empty?)
+      # The line AFTER the title's, not "line two" — `Notes.title` may take a LATER line
+      # (a first line that is a bare "#" heads nothing), and re-deriving "line one is the
+      # title" here printed every such note's name twice, in both columns. `title_and_detail`
+      # answers both from the one scan that knows which line it used.
+      raw_title, detail = Notes.title_and_detail(entry.text)
+      name = raw_title || "untitled" # not "note N": the toast reads "linked to note <name>"
       rows << LinkPicker::Row.new(Store::LinkOwnerKind::Note, entry.id, "#{i + 1}:#{name}",
-        name, body.size > 1 ? body[1] : "")
+        name, detail)
     end
     rows
   end

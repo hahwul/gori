@@ -27,7 +27,8 @@ module Gori::Tui
   class NotesView
     DOCS_KEY = Notes::DOCS_KEY # JSON {"cur":Int32, "notes":[String, ...]}
 
-    # One note document: a title is derived from its first non-blank line, so
+    # One note document: a title is derived from its first line with text, Markdown
+    # heading marker removed (`Notes.title`), so
     # there's no separate rename mode — the tab label tracks what you type.
     class Note
       include SubtabRef # a sub-tab strip may hold a mark on this note (#683)
@@ -44,7 +45,8 @@ module Gori::Tui
         @area.wrap = true
       end
 
-      # Sub-tab label: the note's title (first non-blank line, trimmed) truncated
+      # Sub-tab label: the note's title (`Notes.title` — first line with text, trimmed,
+      # with any Markdown heading marker dropped) truncated
       # to the chip width, else a positional fallback so empty notes are still
       # addressable. The title rule itself lives in `Notes.title` — the single
       # source of truth the CLI listing reads too, so labels can't drift.
@@ -186,7 +188,7 @@ module Gori::Tui
       (0 <= idx < @notes.size) ? @notes[idx] : nil
     end
 
-    # The current note's sub-tab label (first non-blank line, or "note N") — used
+    # The current note's sub-tab label (`Notes.title`, or "note N") — used
     # by the Runner's close-confirmation message.
     def current_label : String
       current.label(@current.clamp(0, @notes.size - 1))
@@ -600,7 +602,7 @@ module Gori::Tui
     end
 
     # Sub-tab chip labels (one per note), sourced by the Runner's shared strip: each
-    # note's first non-blank line, with a positional fallback for empty notes.
+    # note's title (`Notes.title`), with a positional fallback for empty notes.
     def subtab_labels : Array(String)
       @notes.map_with_index { |note, i| "#{i + 1}:#{note.label(i)}" }
     end

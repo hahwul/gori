@@ -128,9 +128,10 @@ module Gori
       end
 
       # The note's display title, scrubbed for the JSON-RPC wire. `one_line` rather than
-      # `scrub_only`: `Notes.title` returns the first non-blank LINE, so it is a single-line
-      # field here exactly as an issue's `title` is — and a lone CR or a stray C0 inside that
-      # line would otherwise ride out into a field a client renders inline.
+      # `scrub_only`: `Notes.title` returns ONE line (the first with text, Markdown heading
+      # marker dropped), so it is a single-line field here exactly as an issue's `title` is —
+      # and a lone CR or a stray C0 inside that line would otherwise ride out into a field a
+      # client renders inline.
       private def note_title(entry : Notes::NoteEntry) : String
         Issues::Export.one_line(Notes.title(entry.text) || "").presence || "Untitled"
       end

@@ -1008,7 +1008,8 @@ module Gori
 
       # --- notes --------------------------------------------------------------
 
-      # Title shown in listings: the note's first non-blank line, or a positional
+      # Title shown in listings: the note's title (`Notes.title` — first line with text,
+      # Markdown heading marker dropped), or a positional
       # fallback for a blank note (mirrors the TUI sub-tab's "note N").
       def self.note_label(idx : Int32, text : String) : String
         Notes.title(text) || "note #{idx + 1}"

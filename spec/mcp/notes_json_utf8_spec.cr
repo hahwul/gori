@@ -47,8 +47,10 @@ describe "MCP note tools — JSON-RPC UTF-8" do
   it "leaves a valid note untouched" do
     with_notes_store("# Findings\nbody") do |tools|
       note = JSON.parse(tools.call("get_note", JSON.parse(%({"id":7}))).text)
-      note["text"].as_s.should eq("# Findings\nbody")
-      note["title"].as_s.should eq("# Findings")
+      note["text"].as_s.should eq("# Findings\nbody") # the BODY is what "untouched" is about
+      # The title is derived, not stored, and `Notes.title` drops the ATX marker — see
+      # notes_spec. The body above is the assertion that nothing rewrote the note itself.
+      note["title"].as_s.should eq("Findings")
     end
   end
 

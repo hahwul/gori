@@ -303,14 +303,67 @@ module Gori
         {next_id, persisted.next_id, max_id + 1}.max)
     end
 
-    # The note's title: its first non-blank line, trimmed; nil when the note is
-    # empty/all-whitespace. Mirrors how the TUI derives each sub-tab's label.
+    # The note's title: its first non-blank line, trimmed, with a Markdown ATX heading marker
+    # removed; nil when the note is empty/all-whitespace. Mirrors how the TUI derives each
+    # sub-tab's label.
+    #
+    # A note IS Markdown — `export_basename` writes ".md", and the demo project's own notes
+    # open with "# …" — so almost every titled note starts its first line with hashes. They
+    # were carried through verbatim, which cost two columns of a sub-tab chip that is already
+    # truncating ("1:# Demo engagem…"), opened every `gori run notes` row with punctuation,
+    # and put a leading '#' on the exported filename. Stripped HERE, in the one home the
+    # comment above already claims, so the four surfaces cannot disagree about it.
+    #
+    # CommonMark's ATX rule, not a bare lstrip: one to six '#' after at most three spaces of
+    # indent, and then a space/tab or the end of the line. "#hashtag" and "#1042" are NOT
+    # headings and keep their '#' — a note whose first line is an issue reference should not
+    # lose it. The optional closing run ("## Title ##") goes too, and a heading with no text
+    # after the marker falls through to the next non-blank line rather than titling the note
+    # with "".
+    # `[#]` and not a bare `#`: in a Crystal regex literal `#{` opens an interpolation.
+    ATX_OPEN  = /\A[ ]{0,3}[#]{1,6}(?:[ \t]+|\z)/
+    ATX_CLOSE = /[ \t]+[#]+\z/
+
     def self.title(text : String) : String?
-      text.split('\n').each do |raw|
+      title_and_detail(text)[0]
+    end
+
+    # `title`, plus the first non-blank line AFTER the one the title came from — the second
+    # line a picker row shows beside the name. Both come off ONE scan because a caller that
+    # re-derives "line one is the title" gets it wrong the moment a title falls through an
+    # empty heading: `Runner#note_link_rows` did exactly that and printed the note's own name
+    # in both columns, which is the thing its comment says it exists to prevent.
+    #
+    # `each_line` with an early return, not `split('\n')`: this runs on the TUI render path —
+    # `NotesView::Note#label` calls it for every chip, every frame — and a note is free text
+    # that may hold a pasted 10k-line response. The old spelling materialised that array to
+    # read line one of it.
+    #
+    # `valid_encoding?` BEFORE the regex, and it is not defensive: a note body is operator
+    # bytes (P7), the MCP and CLI note tools hand this the raw column, and PCRE2 RAISES
+    # `ArgumentError: UTF-8 error: isolated byte with 0x80 bit set` rather than failing to
+    # match. A line gori cannot decode is not a heading it can parse either, so it takes the
+    # pre-Markdown path — `line.strip`, exactly what this returned before — and the caller's
+    # own scrubber still gets its turn on the way out.
+    def self.title_and_detail(text : String) : {String?, String}
+      title = nil.as(String?)
+      text.each_line do |raw|
         line = raw.rstrip('\r')
-        return line.strip unless line.blank?
+        next if line.blank?
+        if found = title
+          return {found, line.strip}
+        end
+        # One `match`, reused for the slice: `matches?` + `sub` walks the line twice.
+        unless line.valid_encoding? && (m = ATX_OPEN.match(line))
+          title = line.strip
+          next
+        end
+        head = line[m.end(0)..].sub(ATX_CLOSE, "").strip
+        # A bare marker ("#", "##   ") heads nothing — fall through to the next line with
+        # text rather than titling the note "".
+        title = head unless head.empty?
       end
-      nil
+      {title, ""}
     end
 
     # Number of editor lines in a note (split on '\n'); an empty note is one line.
