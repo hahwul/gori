@@ -25,10 +25,15 @@ module Gori
     FILTER_CATEGORIES = SCAN_CATEGORIES + [Category::CUSTOM]
 
     # Built-in rules that ship DISABLED and must be explicitly enabled in the Rules sub-tab
-    # before they run. Today only the active request-smuggling / desync detector: it sends
-    # synthetic POST bodies, and under AGGRESSIVE mode its differential-confirm leg puts a
-    # COMPLETE smuggled prefix on the wire (which, against a shared back-end pool, could affect
-    # another user) — so the user-decided posture is off-by-default, opt-in only.
+    # before they run. Two, for two different reasons:
+    #   * request_smuggling — the active desync detector sends synthetic POST bodies, and under
+    #     AGGRESSIVE mode its differential-confirm leg puts a COMPLETE smuggled prefix on the wire
+    #     (which, against a shared back-end pool, could affect another user).
+    #   * sqli_time_based — time-based blind SQLi confirms an injection purely in RESPONSE LATENCY,
+    #     so every confirming leg deliberately WAITS multiple seconds. Harmless but slow, it would
+    #     add real wall-clock to the automatic scan of every in-scope flow, so the operator opts
+    #     in when they want it (a manual per-flow scan enables it for that run either way).
+    # Both are the user-decided posture: off-by-default, opt-in only.
     #
     # The per-project `probe_disabled_rules` store records the operator's DEVIATION FROM DEFAULT,
     # so membership FLIPS meaning for these ids: for an ordinary (default-ON) rule, being in the
@@ -37,7 +42,7 @@ module Gori
     # ordinary rule on and every default-off rule off. Read AND write BOTH go through the three
     # helpers below, so the flip lives in exactly ONE place and no surface (catalog, analyzer,
     # headless scan, the toggle commands) can drift on what "disabled" means.
-    DEFAULT_DISABLED_RULES = Set{"request_smuggling"}
+    DEFAULT_DISABLED_RULES = Set{"request_smuggling", "sqli_time_based"}
 
     # Active rules that run OUT-OF-BAND: they plant an OAST payload and are confirmed by a later
     # callback (`Probe::OutOfBand`), so they can only send when the project has a registered OAST
