@@ -53,8 +53,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     target_controller.diff.cycle_lens(dir)
   end
 
+  # ↑ at the top row leaves for the Sitemap/Discover/Diff strip, the same as every other
+  # list pane in the app (`ColormarkerController#rules_up`, the Comparer, Probe's rules, the
+  # Repeater, Authorize). Diff clamped instead, which is half of why the tab read as a dead
+  # end: `esc` resolved to nothing AND ↑ did nothing, so neither of the two keys a hand
+  # reaches for went anywhere. See `diff.to-menu` for the other half.
   def diff_move(delta : Int32) : Nil
-    target_controller.diff.view.move(delta)
+    view = target_controller.diff.view
+    return request_focus(:subtabs) if delta < 0 && view.at_top?
+    view.move(delta)
   end
 
   def diff_rows_shown? : Bool

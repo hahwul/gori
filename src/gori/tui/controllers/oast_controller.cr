@@ -241,7 +241,10 @@ module Gori::Tui
       if callbacks_sub?
         return keys("↑/↓ move · ⇧arrows select · y copy · {oast.select-line} line · space cmds · ←/esc back") if @cb_detail
         return "type to filter · ↵ keep · esc clear" if @filter_editing
-        keys("↑/↓ select · ‹/› provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds")
+        # `esc sub-tabs`, the way the PROVIDERS line below already ends — `handle_callbacks_key`
+        # and `handle_providers_key` send escape to the same place, and only one of the two
+        # said so.
+        keys("↑/↓ select · ‹/› provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds · esc sub-tabs")
       else
         # `t on/off` and `↵/e edit` — the vocabulary all four rule lists use since the key
         # audit's F4 moved the toggle off `x` (which is select-line everywhere). ↵ has always

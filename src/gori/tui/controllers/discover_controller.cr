@@ -51,7 +51,10 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      return "start from Sitemap/History (space → \"Discover here\")" if @view.empty?
+      # The empty line ends in `esc sub-tabs` like the two below it. `discover.to-menu` has
+      # always bound escape here; the one state where the tab has nothing else to say was the
+      # one that did not say it.
+      return "start from Sitemap/History (space → \"Discover here\") · esc sub-tabs" if @view.empty?
       return @view.filter_hint if querying?
       if @view.focus == :runs
         keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")

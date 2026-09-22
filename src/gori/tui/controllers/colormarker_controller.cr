@@ -202,12 +202,22 @@ module Gori::Tui
         @colors_view.row_capacity(rect, count), count)
     end
 
+    # `esc` on BOTH panes, and it does not mean the same thing on the two. From the colours
+    # pane `handle_colors_key` puts focus back on the RULES list — the hint said "esc tabs"
+    # there, which is where the SECOND press lands, so the line promised a jump that took two
+    # keys and named the wrong destination for the one it described. The rules line named no
+    # exit at all.
     def body_hint(focus : Symbol) : String
       return @filter.hint if list_filter_editing?
       if @focus == :colors
-        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.delete} delete · space cmds · esc tabs")
+        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.delete} delete · space cmds · esc rules")
       else
-        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.filter} filter · {colormarker.copy} copy · {colormarker.delete} delete · space cmds · ↹ colours")
+        # `↹ colours` only when the colours pane is DRAWN. `@colors_shown` is set on the
+        # render path from the pane rect, and it gates both the focus ring (`pane_advance`)
+        # and the ↓ crossing — on a terminal too short to host the pane, ⇥ is a no-op and
+        # this line was naming it anyway.
+        ring = @colors_shown ? " · ↹ colours" : ""
+        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.filter} filter · {colormarker.copy} copy · {colormarker.delete} delete · space cmds#{ring} · esc tabs")
       end
     end
 

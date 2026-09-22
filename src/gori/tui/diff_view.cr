@@ -113,6 +113,13 @@ module Gori::Tui
       @selected = (@selected + delta).clamp(0, @rows.size - 1)
     end
 
+    # For the ↑-at-top release (`Runner#diff_move`). An EMPTY list is "at the top" too: with
+    # no rows there is nothing to walk, so ↑ has to be the way out rather than a dead key —
+    # which is the state the tab opens in, before a baseline is picked.
+    def at_top? : Bool
+      @rows.empty? || @selected <= 0
+    end
+
     def select_index(i : Int32) : Nil
       return if @rows.empty?
       @selected = i.clamp(0, @rows.size - 1)

@@ -265,6 +265,10 @@ module Gori::Tui
 
     # Hints depend on the focused pane and READ vs INS mode. Chord tokens for rebindable
     # verbs resolve through Hotkeys so a rebind is reflected in the status line.
+    #
+    # `esc sub-tabs` past the empty branch: `handle_body_key`'s escape arm ends in
+    # `request_focus(:subtabs)` and the strip is drawn from the first session, so escape has
+    # never reached the tab bar from a live tab. Every one of these lines said `esc tabs`.
     def body_hint(focus : Symbol) : String
       v = current_view
       return "↹/esc tabs · ^N new" unless v
@@ -307,7 +311,7 @@ module Gori::Tui
         return ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · #{find} find · #{send} send · ↹ pane · ⇧↹ back · esc tabs" : grpc_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · #{find} find · #{send} send · ↹ pane · ⇧↹ back · esc sub-tabs" : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
@@ -315,11 +319,11 @@ module Gori::Tui
         if v.target_insert?
           v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · ⇧↹ back · esc read"
         else
-          "#{ins}/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · ⇧↹ back · esc tabs"
+          "#{ins}/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · ⇧↹ back · esc sub-tabs"
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · #{find} find · ↵/#{send} send · ↹ pane · ⇧↹ back · esc tabs"
+        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · #{find} find · ↵/#{send} send · ↹ pane · ⇧↹ back · esc sub-tabs"
       when :request
         if v.request_insert?
           # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
@@ -342,7 +346,7 @@ module Gori::Tui
           # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
           # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
           back = v.ws_http_only? ? keys(" · {repeater.toggle-http2} websocket") : ""
-          "#{ins}/↵ edit · #{read_common} · #{marks} · #{undo} undo · #{goto} goto · #{find} find · #{hex} hex#{back} · ↹ pane · ⇧↹ back · esc tabs"
+          "#{ins}/↵ edit · #{read_common} · #{marks} · #{undo} undo · #{goto} goto · #{find} find · #{hex} hex#{back} · ↹ pane · ⇧↹ back · esc sub-tabs"
         end
       else
         ""
@@ -527,7 +531,7 @@ module Gori::Tui
     # reachable and nothing said so.
     private def ws_resp_hint(v : RepeaterView, read_common : String, send : String) : String
       card = v.resp_pane == :handshake ? "handshake response" : "transcript"
-      keys("↑/↓ move #{card} · #{read_common} · ←/→ char · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · ⇧↹ back · esc tabs")
+      keys("↑/↓ move #{card} · #{read_common} · ←/→ char · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · ⇧↹ back · esc sub-tabs")
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---

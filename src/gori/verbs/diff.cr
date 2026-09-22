@@ -107,6 +107,17 @@ module Gori
         "Record this endpoint in a Note — the same text as the Issue, without the form",
         Verb::Scope::Diff, [Verb::Chord.new("n")],
         available: rows_shown, group: :triage) { |ctx| ctx.diff_note; nil }
+
+      # The way back UP, which this scope did not have. Sitemap and Discover — the two other
+      # sub-tabs under Target — each register their own, because `body.to-menu` lives in
+      # `Verb::Scope::Body` and the resolver's chain is Editor → this scope → Global: a tab
+      # with its own scope never reaches it. Diff was the one of the three that never got the
+      # verb, so `esc` resolved to nothing and the body kept focus. ↑ and ← are body keys
+      # here (`diff.up`, and → is `diff.to-comparer`), so ⇧⇥ to the tab bar was the only way
+      # out of the sub-tab at all.
+      r.register Verb::Definition.new(
+        "diff.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover/Diff strip",
+        Verb::Scope::Diff, [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:subtabs); nil }
     end
   end
 end

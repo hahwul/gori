@@ -180,6 +180,10 @@ module Gori::Tui
       v.pane_insert?(v.focus) ? :editor : :body
     end
 
+    # `esc sub-tabs` on every branch past the empty one: `handle_escape` ends in
+    # `request_focus(:subtabs)`, and `subtab_strip_shown?` is `!@fuzzers.empty?`, so with a
+    # session the strip is drawn and escape stops there. The EMPTY line keeps `esc tabs` —
+    # no strip, and `focus_pane` downgrades it to the bar.
     def body_hint(focus : Symbol) : String
       v = current_view
       return "↹/esc tabs · ^N new" unless v
@@ -203,7 +207,7 @@ module Gori::Tui
         elsif v.target_insert?
           "type URL · #{sni} SNI · ↵/↓ template · #{run} run · ↹ pane · esc read"
         else
-          keys("{editor.insert}/↵ edit · #{read_common} · #{sni} SNI · #{run} run · ↹ pane · esc tabs")
+          keys("{editor.insert}/↵ edit · #{read_common} · #{sni} SNI · #{run} run · ↹ pane · esc sub-tabs")
         end
       when :template
         if v.template_insert?
@@ -217,7 +221,7 @@ module Gori::Tui
           # REPLACES it, which is the whole reason `fuzzer.copy` carries a ctrl chord.
           "type · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^O config · #{run} run · esc read · ↹ text"
         else
-          keys("{editor.insert}/↵ edit · #{read_common} · #{marks} · {editor.undo} undo · {editor.find} find · ^O config · #{run} run · ↹ pane · esc tabs")
+          keys("{editor.insert}/↵ edit · #{read_common} · #{marks} · {editor.undo} undo · {editor.find} find · ^O config · #{run} run · ↹ pane · esc sub-tabs")
         end
       when :config then config_hint(v, run)
       when :results
@@ -232,7 +236,7 @@ module Gori::Tui
         "↑/↓ select · ↵ detail · #{keys("{fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
         "#{run} run · #{stop} stop · space cmds · ↹ pane"
       when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
-      else              "↹/esc tabs"
+      else              "↹/esc sub-tabs"
       end
     end
 
@@ -276,11 +280,17 @@ module Gori::Tui
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
       if v.nil?
-        if nav_up?(ev) # `k` only BARE — see TabController#nav_up?
+        # ↑ AND esc, both to the tab bar. `handle_escape` below answers escape once a session
+        # exists, so the empty tab was the one state where it did not — and deferring it (as
+        # this arm used to, on the strength of a comment naming esc) reaches nothing:
+        # `Runner#resolve_verb_id` walks Editor → Fuzzer → Global, and the escape that would
+        # have caught it is `body.to-menu` in `Verb::Scope::Body`, which is on no tab's chain.
+        # The empty pane's own footer says `↹/esc tabs`, so the key was advertised and dead.
+        if nav_up?(ev) || ev.key.escape? # `k` only BARE — see TabController#nav_up?
           @host.request_focus(:menu)
           return true
         end
-        # No session yet: defer other keys to the central handler (^P palette, esc, …).
+        # No session yet: defer other keys to the central handler (^P palette, …).
         return false
       end
       c = ev.char || ev.key.to_char

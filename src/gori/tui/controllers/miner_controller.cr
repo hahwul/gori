@@ -93,10 +93,21 @@ module Gori::Tui
       v = current_view
       return "↹/esc tabs · mine from History/Repeater (space → Mine parameters)" unless v
       return v.filter_hint if v.filter_editing?
+      # `esc sub-tabs`, not `esc tabs`: `handle_escape` below goes to the strip whenever one
+      # is shown, and `subtab_strip_shown?` is `!@miners.empty?` — every branch under this
+      # point has a `current_view`, so the strip is always up and escape never reaches the
+      # tab bar from here. Same correction as the Repeater's and the Fuzzer's.
+      #
+      # RUN or STOP, never both and never the wrong one. `{mine.stop}` was named
+      # unconditionally, so an idle session's footer advertised the one key that does nothing
+      # there and hid `^R` — the key that starts the mine — behind the card badge alone.
+      # Sequencer's footer names its run key in the same slot; this is that line, made
+      # honest about which half of the pair is live.
+      go = v.running? ? "{mine.stop} stop" : "{mine.run} run"
       case v.focus
-      when :results then keys("↑/↓ select · ↵ detail · {mine.filter} filter · {mine.stop} stop · space cmds · ↹ pane · esc tabs")
+      when :results then keys("↑/↓ select · ↵ detail · {mine.filter} filter · #{go} · space cmds · ↹ pane · esc sub-tabs")
       when :detail  then "↑/↓ scroll · esc back"
-      else               keys("↓ findings · {mine.stop} stop · space cmds · ↹ pane · esc tabs")
+      else               keys("↓ findings · #{go} · space cmds · ↹ pane · esc sub-tabs")
       end
     end
 
