@@ -7,6 +7,10 @@ module Gori::CLI::Run
     oast_subcommand_index(args)
   end
 
+  def self.spec_oast_project_flag_error(flag : String, value : String?) : String?
+    oast_project_flag_error(flag, value)
+  end
+
   def self.spec_strip_project_flags(args : Array(String)) : {Array(String), String?, String?}
     strip_project_flags(args)
   end
@@ -48,8 +52,21 @@ describe "gori run oast — persisted sessions" do
       Gori::CLI::Run.spec_oast_subcommand_index(["--project=lab", "list"]).should eq(1)
       Gori::CLI::Run.spec_oast_subcommand_index(["--project", "list", "resume", "7"]).should eq(2)
       Gori::CLI::Run.spec_oast_subcommand_index(["--db", "/tmp/x.db", "release", "3"]).should eq(2)
+      Gori::CLI::Run.spec_oast_subcommand_index(["--provider", "providers", "listen"]).should eq(2)
+      Gori::CLI::Run.spec_oast_subcommand_index(["listen", "--provider", "providers", "--once"]).should eq(0)
+      Gori::CLI::Run.spec_oast_subcommand_index(["resume", "providers"]).should eq(0)
       Gori::CLI::Run.spec_oast_subcommand_index(["--json"]).should be_nil
       Gori::CLI::Run.spec_oast_subcommand_index([] of String).should be_nil
+    end
+
+    it "refuses a missing or flag-shaped --project/--db value before stripping it" do
+      Gori::CLI::Run.spec_oast_project_flag_error("--project", nil)
+        .should eq("gori run oast: --project needs a value")
+      Gori::CLI::Run.spec_oast_project_flag_error("--db", "--once")
+        .should eq("gori run oast: --db needs a value")
+      Gori::CLI::Run.spec_oast_project_flag_error("--project", "")
+        .should eq("gori run oast: --project needs a value")
+      Gori::CLI::Run.spec_oast_project_flag_error("--project", "providers").should be_nil
     end
 
     # `listen` used to be store-free, so strip_project_flags DISCARDED what it stripped and
