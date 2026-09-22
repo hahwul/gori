@@ -306,9 +306,40 @@ describe Gori::Repeater::FlowRequest do
       String.new(sent.not_nil!).should eq("GET /q HTTP/1.1\r\n\r\n")
     end
 
+    # A version the old ASCII scan missed went with the target, leaving an HTTP/0.9-shaped line
+    # in front of the headers — an origin answers that 400.
+    it "keeps a version followed by trailing whitespace, or spelled in lowercase" do
+      sent = Gori::Repeater::FlowRequest.replace_request_target("GET /x HTTP/1.1 \r\nHost: a\r\n\r\n".to_slice, "/new")
+      String.new(sent.not_nil!).should eq("GET /new HTTP/1.1 \r\nHost: a\r\n\r\n")
+      sent = Gori::Repeater::FlowRequest.replace_request_target("GET /x http/1.1\r\n\r\n".to_slice, "/new")
+      String.new(sent.not_nil!).should eq("GET /new http/1.1\r\n\r\n")
+    end
+
+    it "inserts a target in front of the version when the line has none" do
+      sent = Gori::Repeater::FlowRequest.replace_request_target("GET  HTTP/1.1\r\n\r\n".to_slice, "/new")
+      String.new(sent.not_nil!).should eq("GET  /new HTTP/1.1\r\n\r\n")
+    end
+
+    # The splice and the scope gate have to agree on WHICH span is the target, or the gate
+    # judges one path while the socket carries another.
+    it "tokenizes like the scope gate, so the gate judges the target it was given" do
+      {"GET\v/x HTTP/1.1\r\n\r\n", "GET\u00A0/x HTTP/1.1\r\n\r\n", " \f \r\nGET /x HTTP/1.1\r\n\r\n",
+       "\f\r\nGET /x HTTP/1.1\r\n\r\n"}.each do |raw|
+        sent = Gori::Repeater::FlowRequest.replace_request_target(raw.to_slice, "/admin").not_nil!
+        Gori::Outbound.request_target(sent).should eq("/admin")
+      end
+    end
+
+    it "steps over an invalid byte in the line by the one byte it occupies" do
+      wire = "GET /".to_slice + Bytes[0xff] + " HTTP/1.1\r\n\r\n".to_slice
+      sent = Gori::Repeater::FlowRequest.replace_request_target(wire, "/ok").not_nil!
+      String.new(sent).should eq("GET /ok HTTP/1.1\r\n\r\n")
+    end
+
     it "answers nil when there is no target to replace" do
       Gori::Repeater::FlowRequest.replace_request_target("GARBAGE\r\n\r\n".to_slice, "/x").should be_nil
       Gori::Repeater::FlowRequest.replace_request_target("GET \r\n".to_slice, "/x").should be_nil
+      Gori::Repeater::FlowRequest.replace_request_target("GET\r\n\r\n".to_slice, "/x").should be_nil
       Gori::Repeater::FlowRequest.replace_request_target("\r\n\r\n".to_slice, "/x").should be_nil
       Gori::Repeater::FlowRequest.replace_request_target(Bytes.empty, "/x").should be_nil
     end

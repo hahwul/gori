@@ -1108,22 +1108,21 @@ module Gori
         store = open_store(project, read_only: true)
         # `markers_live` is read HERE, with the store still open: the predicate may have to
         # read the session's source flow (`DraftMarkers.operator_marked?`), and this store is
-        # closed before the send like the flow path's. Its answer is about stored bytes, which
-        # this command never rewrites, so taking it early changes nothing about what it says.
-        rec, host_overrides, markers_live = begin
+        # closed before the send like the flow path's. It is asked of the request THIS send
+        # carries — the `--path` copy when there is one (it edits a COPY for this send; the row
+        # keeps its own, see `FlowRequest.replace_request_target`) — so a `§id§` in the stored
+        # target that `--path` replaced does not refuse a send that no longer carries it.
+        rec, host_overrides, markers_live, request = begin
           r = store.get_repeater_full(id)
-          {r, Gori::HostOverrides.load(store), r ? Repeater::DraftMarkers.live?(store, r) : false}
+          req = r.try { |row| (p = path_override) ? Repeater::FlowRequest.replace_request_target(row.request, p) : row.request }
+          {r, Gori::HostOverrides.load(store), r && req ? Repeater::DraftMarkers.live?(store, r, req) : false, req}
         ensure
           store.close
         end
         abort "gori run repeater send: no repeater session ##{id}" unless rec
-        # `--path` edits a COPY of the stored request for this send; the row keeps its own. See
-        # `FlowRequest.replace_request_target` for what is kept byte-exact around the new target.
-        request = rec.request
-        if p = path_override
-          request = Repeater::FlowRequest.replace_request_target(rec.request, p) ||
-                    abort("gori run repeater send: session ##{id}'s stored request has no request line " \
-                          "target to replace (#{request_line_preview(rec.request)}) — edit the session instead")
+        unless request
+          abort "gori run repeater send: session ##{id}'s stored request has no request line target to " \
+                "replace (#{request_line_preview(rec.request)}) — edit the session instead"
         end
         # After `open_store` (which installs `Env.layer`) and before the plan: `Repeater::Sender`
         # reads the active slot at the seam, so this has to be set before anything builds bytes.
@@ -1252,7 +1251,7 @@ module Gori
         end
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id,
           tls_preset: sent_tls_preset(plan), response_write: response_write, history_write: history_write,
-          cap: cap, request_target: path_override)
+          cap: cap, request_target: path_override && Gori::Outbound.request_target(wire))
         report_path_override_unsaved(id, rec.request, path_override, "gori run repeater send") if result.ok?
         # The STDERR half of the same two answers, in both formats: a human at a terminal reads
         # this line, and a script's pipe still carries the JSON field.
@@ -2233,8 +2232,10 @@ module Gori
           diff = Repeater::Diff.lines(orig, fresh)
         end
 
+        # The target as it went out (after `Env.expand`), read the way the scope gate read it —
+        # not the `--path` argument, whose `$ENV.ID` the wire no longer carries.
         emit_repeater_result(result, new_body, diff, format, diff_capped, tls_preset: sent_tls_preset(plan),
-          cap: cap, request_target: path_override)
+          cap: cap, request_target: path_override && Gori::Outbound.request_target(plan.bytes))
         # `--slot NAME` on a single-flow replay: the same drain the session-send path takes,
         # because it is the same overlay seam and a notice fixed on one of the two would drift.
         report_unbound_slot_overlay("gori run repeater")
@@ -2251,8 +2252,8 @@ module Gori
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
-            # `--path` only: the request-target this send used, so a script looping over paths
-            # can key each object by the one it asked for.
+            # `--path` only: the request-target this send put on the wire (expanded), so a
+            # script looping over paths can key each object by the one it reached.
             j.field("path", request_target) if request_target
             # WHICH HANDSHAKE produced this response (#844) — absent when no override was in
             # play, so two sends differing only in `--tls-preset` are told apart from the JSON

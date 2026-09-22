@@ -94,13 +94,7 @@ module Gori::Repeater
                         body : Bytes?, *, expand : Bool = true) : Built
       m = (method || "GET").upcase
       check_method(m)
-      uri = target.uri
-      path = uri.path
-      path = "/" if path.empty?
-      request_target = uri.query ? "#{path}?#{uri.query}" : path
-      # uri.path/query are decoded views of the URL; a literal CR/LF/NUL here would forge the
-      # request line (split into a fake header or request).
-      reject_token_breakers(request_target, "request target")
+      request_target = request_target_of(target)
 
       lines = [] of {String, String}
       headers.each do |(k, v)|
@@ -123,6 +117,19 @@ module Gori::Repeater
       io << "\r\n"
       io.write(body) if body
       Built.new(io.to_slice, target.scheme, target.host, target.port)
+    end
+
+    # The URL's path and query as the request-target, refused when it holds a byte that would
+    # forge the request line (uri.path/query are decoded views, so a literal CR/LF/NUL can
+    # reach here and split the line into a fake header or request). Public for the same reason
+    # `check_method` is: MCP refuses a bad target before it reads the headers.
+    def self.request_target_of(target : Target) : String
+      uri = target.uri
+      path = uri.path
+      path = "/" if path.empty?
+      request_target = uri.query ? "#{path}?#{uri.query}" : path
+      reject_token_breakers(request_target, "request target")
+      request_target
     end
 
     # A method must be a non-empty token (no whitespace/controls). Any printable non-space char

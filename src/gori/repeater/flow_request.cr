@@ -353,17 +353,23 @@ module Gori
 
       # `wire` with its request-target replaced by `target` — the per-send path/query override
       # (`gori run repeater send --path`, `gori run repeater <flow-id> --path`, #1116) — or nil
-      # when the request line has no target to replace (no whitespace after the method).
+      # when the request line has no method to anchor on.
       #
-      # Everything else is kept byte-exact: the method, the version, the whitespace between the
-      # three (`GET  /x  HTTP/1.1` keeps its double spaces), the line's own terminator, every
-      # header and the body. The line is the FIRST NON-BLANK one, which is where
-      # `Codec::Http1.request_target_line` — the scope gate's reader — finds the target, so a
-      # request opening with a stray CRLF is edited on the line the gate will judge, not on the
-      # blank line in front of it. The target runs from the whitespace after the method to the
-      # whitespace before a trailing `HTTP/…` token; a target carrying a raw space
-      # (`GET /a b HTTP/1.1`, a fuzzer or smuggling shape) is therefore replaced WHOLE. With no
-      # version token (an HTTP/0.9-shaped line) it runs to the end of the line.
+      # The line and its tokens are found EXACTLY as the scope gate finds them
+      # (`Codec::Http1.request_target_line`): the first line that is not blank by `String#strip`,
+      # split on `Char#whitespace?` — Unicode-aware, so a `\v` or a U+00A0 separates tokens here
+      # as it does there. An ASCII-only scan would edit a different span from the one the gate
+      # then judges, and on this path a divergence is a scope bypass rather than a cosmetic
+      # difference (the gate's own comment says the same).
+      #
+      # Token 1 is the method. The version is the LAST token when it starts with `HTTP/` (any
+      # case — `http/1.1` is a probe, not a missing version); the target is everything between
+      # them, so a target carrying a raw space (`GET /a b HTTP/1.1`, a fuzzer or smuggling
+      # shape) is replaced WHOLE. With no version token (an HTTP/0.9-shaped line) the target
+      # runs to the last token; with a version but no target (`GET  HTTP/1.1`) the new target is
+      # inserted in front of the version. Everything outside the replaced span is kept
+      # byte-exact: the whitespace between tokens, trailing whitespace, the line's terminator,
+      # every header and the body.
       #
       # `target` goes in verbatim — it is the operator's bytes (P7) — and it is not expanded
       # here: a session send expands the whole draft afterwards (`Plan`), and a flow replay
@@ -373,43 +379,56 @@ module Gori
         while pos < wire.size
           nl = wire.index(0x0A_u8, pos)
           stop = nl || wire.size
-          line_end = stop > pos && wire[stop - 1] == 0x0D_u8 ? stop - 1 : stop
-          unless (pos...line_end).all? { |i| line_space?(wire[i]) }
-            return splice_request_target(wire, pos, line_end, target)
-          end
+          line = String.new(wire[pos, stop - pos])
+          return splice_request_target(wire, pos, line, target) unless line.strip.empty?
           return nil unless nl
           pos = nl + 1
         end
         nil
       end
 
-      private def self.splice_request_target(wire : Bytes, from : Int32, to : Int32, target : String) : Bytes?
-        method_end = (from...to).find { |i| line_space?(wire[i]) }
-        return nil unless method_end
-        t_start = method_end
-        while t_start < to && line_space?(wire[t_start])
-          t_start += 1
-        end
-        return nil if t_start >= to
-        t_end = to
-        if last = (t_start...to).reverse_each.find { |i| line_space?(wire[i]) }
-          if String.new(wire[(last + 1)...to]).starts_with?("HTTP/")
-            t_end = last
-            while t_end > t_start && line_space?(wire[t_end - 1])
-              t_end -= 1
-            end
+      private def self.splice_request_target(wire : Bytes, at : Int32, line : String, target : String) : Bytes?
+        spans = token_spans(line)
+        return nil if spans.empty?
+        version = spans.size >= 2 && line.byte_slice(spans.last[0], 5).compare("HTTP/", case_insensitive: true) == 0
+        from, to =
+          if version && spans.size == 2
+            {spans[1][0], spans[1][0]} # no target: insert in front of the version
+          elsif version
+            {spans[1][0], spans[-2][1]}
+          elsif spans.size >= 2
+            {spans[1][0], spans[-1][1]}
+          else
+            return nil # a bare method
           end
-        end
-        io = IO::Memory.new(wire.size + target.bytesize)
-        io.write(wire[0, t_start])
-        io << target
-        io.write(wire[t_end, wire.size - t_end])
+        insert = version && spans.size == 2 ? "#{target} " : target
+        io = IO::Memory.new(wire.size + insert.bytesize)
+        io.write(wire[0, at + from])
+        io << insert
+        io.write(wire[(at + to)..])
         io.to_slice
       end
 
-      # SP or HTAB — the separators a request line is tokenized on here.
-      private def self.line_space?(b : UInt8) : Bool
-        b == 0x20_u8 || b == 0x09_u8
+      # {start, end} byte offsets of each whitespace-separated token of `line`, by the same
+      # predicate `String#split` uses. `Char::Reader` so an invalid byte (a U+FFFD to the
+      # reader, never whitespace) still advances by the one byte it occupies.
+      private def self.token_spans(line : String) : Array({Int32, Int32})
+        spans = [] of {Int32, Int32}
+        start = nil.as(Int32?)
+        reader = Char::Reader.new(line)
+        while reader.has_next?
+          if reader.current_char.whitespace?
+            if open_at = start
+              spans << {open_at, reader.pos}
+              start = nil
+            end
+          else
+            start ||= reader.pos
+          end
+          reader.next_char
+        end
+        start.try { |s| spans << {s, line.bytesize} }
+        spans
       end
 
       # Rewrite a request line's HTTP-version token to match the transport when the user

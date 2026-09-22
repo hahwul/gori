@@ -113,6 +113,14 @@ describe Gori::MCP::RequestBuilder do
     out.should eq("POST /x HTTP/1.1\r\nContent-Length: 5\r\n\r\na\nb\nc") # head CRLF, body LFs intact
   end
 
+  # The typed half moved to `Repeater::UrlRequest` (#1116); the refusal a call with two
+  # mistakes gets must not have moved with it — the request-target is judged before the
+  # headers are read, as it always was.
+  it "refuses a bad request-target before an unusable headers value" do
+    args = JSON.parse(%({"url":"http://h.test/a b","headers":5})).as_h
+    expect_raises(Gori::Error, /request target/) { Gori::MCP::RequestBuilder.build(args) }
+  end
+
   it "raises when the url has no host" do
     args = JSON.parse(%({"url":"/relative"})).as_h
     expect_raises(Gori::Error) { Gori::MCP::RequestBuilder.build(args) }

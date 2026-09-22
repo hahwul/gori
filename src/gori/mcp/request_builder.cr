@@ -119,6 +119,9 @@ module Gori
           body = base64_arg(args, "body_base64") ||
                  wire_str(args, "body", "; stringify JSON yourself, or use body_base64 for exact octets")
                    .try { |b| Env.expand(b).to_slice }
+          # …and the request-target before the headers are read: method, body, target, headers is
+          # the order this has always refused two mistakes in.
+          Repeater::UrlRequest.request_target_of(target)
           Repeater::UrlRequest.structured(target, method, RequestBuilder.header_pairs(args["headers"]?), body)
         end
       end
