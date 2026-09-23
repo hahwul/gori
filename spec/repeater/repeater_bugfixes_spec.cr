@@ -86,6 +86,32 @@ describe "Gori::Repeater::Engine (malformed response — fix #8)" do
     String.new(result.body.not_nil!).should eq("ok")
   end
 
+  it "keeps an oversized response head and marks the received bytes as delivered" do
+    oversized = "HTTP/1.1 200 OK\r\nX-Big: #{"a" * (300 * 1024)}\r\nContent-Length: 6\r\n\r\nsecond"
+    port = start_reply_origin(oversized)
+    result = Gori::Repeater::Engine.send("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.ok?.should be_false
+    result.response.should be_nil
+    result.head.size.should eq(256 * 1024)
+    result.delivered?.should be_true
+    result.error.not_nil!.should contain("response head exceeded 256 KiB")
+  end
+
+  it "keeps an EOF-truncated response head as a failure with its received bytes" do
+    partial = "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n"
+    port = start_reply_origin(partial)
+    result = Gori::Repeater::Engine.send("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.ok?.should be_false
+    result.response.should be_nil
+    String.new(result.head).should eq(partial)
+    result.delivered?.should be_true
+    result.error.not_nil!.should contain("response head ended before CRLFCRLF")
+  end
+
   # `Result#delivered?` distinguishes a pre-delivery failure (re-sendable) from a failure
   # AFTER the origin already received the request. The pool's stale-retry keys on it: retrying
   # a non-idempotent request the origin already has doubles its side effect.

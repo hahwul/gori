@@ -314,7 +314,8 @@ module Gori::Repeater
       # so every other value is carried across verbatim.
       Repeater::Result.new(result.head, result.body, result.response, result.duration_us,
         detail ? "#{why} (#{detail})" : why, result.incomplete?,
-        delivered: result.delivered?, timed_out: result.timed_out?, retried: result.retried?)
+        delivered: result.delivered?, timed_out: result.timed_out?, retried: result.retried?,
+        retryable_stale: result.retryable_stale?)
     end
 
     # A Crystal `IO::Error` renders the socket's `inspect` into its message, so the transport's
@@ -499,25 +500,15 @@ module Gori::Repeater
       drain_probe_state(io)
     end
 
-    # A REUSED socket that failed BEFORE any response byte arrived. Per the contract at the
-    # top of this class, an IDEMPOTENT request is then re-sent once on a fresh connection;
-    # anything else stops here with this result. Only ever consulted on the `@idle.pop?`
-    # branch, so "reused" is implicit.
+    # A REUSED socket that failed at the request write or produced zero-byte EOF/reset while
+    # reading its response. Per the contract at the top of this class, an IDEMPOTENT request is
+    # then re-sent once on a fresh connection; timeouts and partial/rejected heads are not.
+    # Only consulted on the `@idle.pop?` branch, so "reused" is implicit.
     #
-    # It used to compare the error string to `no_response_error` exactly, which matches ONLY a
-    # clean EOF. An origin that RESET the parked socket failed with an `Errno`-derived message
-    # instead, so `stale?` said false, the request was NOT retried, and the payload surfaced a
-    # "connection reset" the origin never saw — a silent false negative in the middle of a
-    # sweep, plus `@consecutive_stale` never advanced so `STALE_GIVE_UP` could never bound the
-    # wasted redials against an origin that always resets.
-    #
-    # The discriminator is "no response byte was DELIVERED", not which IO error ended it.
-    # `response.nil?` alone is not that: `exchange` returns `response: nil` for an interim-1xx
-    # failure too (`malformed interim` / `too many interim` / `upstream closed after interim`),
-    # and by then the origin has certainly sent something. `delivered?` is false only before any
-    # response byte arrives — a clean EOF, a reset, or a write failure on a parked socket. An
-    # INCOMPLETE response (head read, body cut) carries a non-nil `response` and so is already
-    # excluded.
+    # retryable_stale? is set by the HTTP/1 exchange at the read/write site, where EOF/reset can
+    # be distinguished from a timeout, an oversized head or a read failure after bytes arrived.
+    # `response.nil?` and `delivered?` alone cannot make that distinction, and an interim-1xx
+    # failure also has no final `response` despite the origin having already answered.
     #
     # What this does NOT establish, and used to be read as establishing, is that the ORIGIN
     # never saw the request. It only means gori heard nothing back. The method gate in `send`
@@ -527,7 +518,7 @@ module Gori::Repeater
     # FIN arrived after the probe, i.e. genuinely while or after gori wrote. This is the narrow
     # ambiguous window the method gate exists for, not the whole idle-close population.
     private def stale?(result : Repeater::Result) : Bool
-      !result.error.nil? && result.response.nil? && !result.delivered?
+      !result.error.nil? && result.response.nil? && result.retryable_stale?
     end
 
     private def drain : Nil

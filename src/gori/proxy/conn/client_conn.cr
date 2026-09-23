@@ -588,13 +588,14 @@ module Gori::Proxy
       # body is sent twice on a stale-reuse redial.
       expects_continue = expect_continue?(req) && !req_framing.none?
       early_head = nil.as(Bytes?)
+      early_head_failure = nil.as(Codec::Http1::HeadReadResult?)
       send_body = true
       client_gone = false
       upstream, reused, sent = acquire_and_send(host, port, retryable) do |up|
         up.write(sent_head)
         if expects_continue
           up.flush # the head must be ON THE WIRE before there is anything to wait for
-          early_head, send_body, client_gone = settle_expectation(up)
+          early_head, early_head_failure, send_body, client_gone = settle_expectation(up)
         end
         if send_body
           req_complete = Codec::Body.stream(@io, up, req_framing, req_len, req_capture, copy_buf)
@@ -628,7 +629,7 @@ module Gori::Proxy
       end
       keep = handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req,
-        pre_read_head: early_head)
+        pre_read_head: early_head, pre_read_failure: early_head_failure)
       # The expectation was settled without the body being pumped, so neither leg is reusable:
       # the client still owes those bytes, and gori sent the origin a head declaring a body it
       # never got — either socket's next bytes are ambiguous, which is where a desync starts.
@@ -932,19 +933,26 @@ module Gori::Proxy
     # deliberately handed back UNPARSED so every gate below (interim handling, framing, M&R,
     # intercept) runs on it exactly as if `read_response_head` had produced it; the one thing it
     # skips is the stale-reuse redial, which cannot apply once a head has been read.
+    # `pre_read_failure` carries an unfinished or rejected head from that same settlement; its
+    # bytes have already been consumed, so it is recorded and the upstream connection retired.
     private def handle_response(upstream : IO, req : Codec::RawRequest, flow_id : Int64,
                                 started : Time::Instant, host : String, port : Int32, scheme : String,
                                 *, reused : Bool, sent_head : Bytes, can_retry : Bool,
-                                sent_req : Codec::RawRequest, pre_read_head : Bytes? = nil) : Bool
-      if pre_read_head
-        resp_head = pre_read_head
-      else
-        resp_head, upstream = read_response_head(upstream, host, port, reused, sent_head, can_retry)
-      end
-      if resp_head.nil?
-        @sink.on_response(FlowMapper.error_response(flow_id, "no response from upstream"))
+                                sent_req : Codec::RawRequest, pre_read_head : Bytes? = nil,
+                                pre_read_failure : Codec::Http1::HeadReadResult? = nil) : Bool
+      if pre_read_failure
+        record_response_head_failure(flow_id, pre_read_failure)
         release_upstream
         return false
+      elsif pre_read_head
+        resp_head = pre_read_head
+      else
+        read_result, upstream = read_response_head(upstream, host, port, reused, sent_head, can_retry)
+        unless resp_head = read_result.head?
+          record_response_head_failure(flow_id, read_result)
+          release_upstream
+          return false
+        end
       end
       resp = Codec::Http1.parse_response_head(resp_head)
 
@@ -1161,15 +1169,23 @@ module Gori::Proxy
             return nil
           end
         end
-        resp_head = safe_read_head(upstream)
-        if resp_head.nil?
-          @sink.on_response(FlowMapper.error_response(flow_id, "upstream closed after interim 1xx response"))
+        read_result = safe_read_head(upstream)
+        unless resp_head = read_result.head?
+          record_response_head_failure(flow_id, read_result, "upstream closed after interim 1xx response")
           release_upstream
           return nil
         end
         resp = Codec::Http1.parse_response_head(resp_head)
       end
       {resp_head, resp}
+    end
+
+    private def record_response_head_failure(flow_id : Int64,
+                                             result : Codec::Http1::HeadReadResult,
+                                             empty_message : String = "no response from upstream") : Nil
+      message = result.state == Codec::Http1::HeadReadResult::State::Empty ? empty_message : result.failure_message("response head",
+        deadline: SocketTuning::HEAD_DEADLINE)
+      @sink.on_response(FlowMapper.error_response(flow_id, message, head: result.bytes))
     end
 
     # Does this request withhold its body until it is answered? RFC 9110 §10.1.1: `Expect` is a
@@ -1196,10 +1212,10 @@ module Gori::Proxy
     # and the client's body being pumped (#728). Reached only through the caller's
     # `expects_continue` gate, so the client is HTTP/1.1, asked, and declared a body — this takes
     # no request: every 1xx it relays is one the client is entitled to and waiting for.
-    # Returns `{early_head, send_body, client_gone}`:
+    # Returns `{early_head, read_failure, send_body, client_gone}`:
     #
     #   - the origin sent `100 Continue` → relay it VERBATIM to the client (P6/P7: the origin's
-    #     own bytes, never a reconstruction) and pump the body: `{nil, true, false}`.
+    #     own bytes, never a reconstruction) and pump the body: `{nil, nil, true, false}`.
     #   - the origin sent some OTHER well-formed 1xx first — 103 Early Hints, 102 Processing —
     #     which is relayed the same way but settles NOTHING. RFC 9110 §10.1.1 makes only the 100
     #     (or a final status) the permission to send a withheld body, so treating a 103 as the
@@ -1210,20 +1226,23 @@ module Gori::Proxy
     #     it can decide without reading the body, both of which RFC 9110 §10.1.1 explicitly
     #     allows — then it does NOT want the body, and pumping one at a server that has stopped
     #     reading is how a request gets smuggled into the next response's framing. Hand the head
-    #     back for relay and send nothing: `{head, false, false}`. A malformed 1xx (one declaring
+    #     back for relay and send nothing: `{head, nil, false, false}`. A malformed 1xx (one declaring
     #     a body) takes this branch too, on purpose: `skip_interim_responses` already knows how
     #     to refuse it, and it gets a flow_id to record against, which this point does not have.
-    #   - the origin closed / reset before answering → `{nil, false, false}`. Uploading a body
-    #     into a dead socket buys nothing; `handle_response` reads the EOF and records
+    #   - the origin closed / reset before answering → `{nil, nil, false, false}`. Uploading a
+    #     body into a dead socket buys nothing; `handle_response` reads the EOF and records
     #     "no response from upstream".
+    #   - the origin started a head but timed out or exceeded the cap → `{nil, failure, false, false}`.
+    #     The later response handler records the failure and the received bytes.
     #   - nothing arrived within EXPECT_CONTINUE_WAIT → gori writes the 100 ITSELF and pumps the
-    #     body: `{nil, true, false}`. An origin that ignores the expectation is normal and
+    #     body: `{nil, nil, true, false}`. An origin that ignores the expectation is normal and
     #     conformant, and it is waiting for exactly the bytes the client is refusing to send, so
-    #     SOMEONE has to move first. If that write fails the client is gone: `{nil, false, true}`.
+    #     SOMEONE has to move first. If that write fails the client is gone:
+    #     `{nil, nil, false, true}`.
     #     (Cost of the self-issued 100: a duplicate is possible when the origin's own 100 lands
     #     just after the deadline. RFC 9110 §15.2 requires a client to tolerate 1xx it did not
     #     even ask for, so a second one is harmless.)
-    private def settle_expectation(upstream : IO) : {Bytes?, Bool, Bool}
+    private def settle_expectation(upstream : IO) : {Bytes?, Codec::Http1::HeadReadResult?, Bool, Bool}
       # ONE budget for the whole settlement, not one per read. A per-iteration timeout is no
       # timeout at all against an origin that emits a 103 every EXPECT_CONTINUE_WAIT - 1ms: it
       # never technically times out and the exchange never finishes. Each pass gets only what is
@@ -1238,51 +1257,55 @@ module Gori::Proxy
         answer = read_head_within(upstream, left)
         if answer.is_a?(NoAnswer)
           # Nothing will ever come: don't spend the client's body on a dead socket.
-          return {nil, false, false} if answer.gone?
+          return {nil, nil, false, false} if answer.gone?
           break # Silent — the origin is ignoring the expectation; gori answers it below.
         end
-        resp = Codec::Http1.parse_response_head(answer)
-        return {answer, false, false} unless interim_response?(resp) && !interim_has_body?(resp)
+        read_result = answer.as?(Codec::Http1::HeadReadResult)
+        head = if read_result
+                 read_result.head? || return {nil, read_result, false, false}
+               else
+                 answer.as(Bytes)
+               end
+        resp = Codec::Http1.parse_response_head(head)
+        return {head, nil, false, false} unless interim_response?(resp) && !interim_has_body?(resp)
         begin
-          @io.write(answer)
+          @io.write(head)
           @io.flush
         rescue
-          return {nil, false, true}
+          return {nil, nil, false, true}
         end
         # THE settlement: only a 100 releases the body.
-        return {nil, true, false} if resp.status == 100
+        return {nil, nil, true, false} if resp.status == 100
         # Reuse the run cap `skip_interim_responses` enforces rather than inventing a second
         # ceiling. A peer that exceeds it gets its body withheld and the connection handed on
         # as-is: the remaining 1xx are still on the socket, and `skip_interim_responses` — which
         # holds a flow_id — refuses the run there and records "too many interim 1xx responses".
         # Across the two stages a hostile origin therefore buys at most 2 × MAX_INTERIM relays.
         relayed += 1
-        return {nil, false, false} if relayed >= MAX_INTERIM
+        return {nil, nil, false, false} if relayed >= MAX_INTERIM
       end
       # The budget ran out, or the wait could not be bounded at all (a non-socket upstream —
       # specs, a future transport). Either way, blocking is the one thing that must not happen.
-      write_own_continue ? {nil, true, false} : {nil, false, true}
+      write_own_continue ? {nil, nil, true, false} : {nil, nil, false, true}
     end
 
-    # Why `read_head_within` came back without a head. The two are NOT interchangeable: an
-    # origin that merely stayed quiet is still reading and still wants the body, while one that
-    # closed or reset will never answer and there is nothing left to send a body to.
+    # Why the first byte did not arrive within the Expect wait. Once a byte arrives,
+    # read_head_within returns a detailed head result so a timeout or oversize keeps its bytes.
     enum NoAnswer
       Silent
       Gone
     end
 
     # Reads ONE response head, giving up if the first byte does not arrive within `wait`.
-    # Returns the head, or which kind of non-answer ended the wait: `Gone` for EOF / reset / a
-    # head that stopped mid-way, `Silent` for the timeout and for a non-socket IO whose read
-    # cannot be bounded at all (the caller must never read `Silent` as "keep waiting").
+    # Returns the head result once bytes arrive, `Gone` for EOF/reset before the first byte,
+    # or `Silent` when the origin did not answer before the short wait.
     #
     # Only the FIRST byte is on the short clock. Once the origin has started to speak, the head
     # is finished under the connection's normal timeout via `safe_read_head` (with the peeked
     # byte pushed back through a `PrefixIO`, the same handoff `handle_connect` uses) — a short
     # deadline spanning the whole head would abandon a partially-consumed response on the socket,
     # which is a desync, not a timeout. That is the one part of `wait` this method cannot honour.
-    private def read_head_within(upstream : IO, wait : Time::Span) : Bytes | NoAnswer
+    private def read_head_within(upstream : IO, wait : Time::Span) : Bytes | NoAnswer | Codec::Http1::HeadReadResult
       sock = SocketTuning.underlying_socket(upstream)
       return NoAnswer::Silent unless sock
       saved = sock.read_timeout
@@ -1303,7 +1326,8 @@ module Gori::Proxy
       return (gone ? NoAnswer::Gone : NoAnswer::Silent) unless first
       # The origin started to speak and then stopped: a truncated head is no more an answer than
       # an EOF, and the socket it left behind cannot be written a body either.
-      safe_read_head(PrefixIO.new(Bytes[first], upstream)) || NoAnswer::Gone
+      result = safe_read_head(PrefixIO.new(Bytes[first], upstream))
+      result.head? || result
     end
 
     # gori's own `100 Continue` to the client. False when the client is gone.
@@ -1509,45 +1533,30 @@ module Gori::Proxy
     end
 
     # Reads the response head, transparently redialing + resending ONCE if a
-    # REUSED idle keep-alive turned out stale (immediate EOF) and the request is
-    # replayable (body-less). Returns {head, upstream} — `upstream` may be a fresh
-    # connection after a retry, so callers must rebind their local.
+    # REUSED idle keep-alive turned out stale (zero-byte EOF/reset) and the request
+    # is replayable (body-less). A timeout or a rejected head is origin activity,
+    # not a stale socket. Returns {outcome, upstream}.
     private def read_response_head(upstream : IO, host : String, port : Int32,
-                                   reused : Bool, sent_head : Bytes, can_retry : Bool) : {Bytes?, IO}
-      resp_head = safe_read_head(upstream)
-      if resp_head.nil? && reused && can_retry
+                                   reused : Bool, sent_head : Bytes, can_retry : Bool) : {Codec::Http1::HeadReadResult, IO}
+      result = safe_read_head(upstream)
+      if result.retryable_empty_read? && reused && can_retry
         release_upstream
         fresh, _ = acquire_upstream(host, port)
         if fresh
           upstream = fresh
-          resp_head = safe_read_head(fresh) if write_request(fresh, sent_head, nil)
+          result = safe_read_head(fresh) if write_request(fresh, sent_head, nil)
         end
       end
-      {resp_head, upstream}
+      {result, upstream}
     end
 
-    # `Codec::Http1.read_head` returns nil on a graceful EOF, but a RESET upstream
-    # (RST, not FIN — e.g. a dead/killed backend) raises instead. Left uncaught, that
-    # unwinds past the already-recorded Pending flow to `run`'s blanket rescue, which
-    # closes the connection without ever marking the flow — it sits in History as
-    # "waiting for response…" forever. Treat a reset the same as a graceful EOF (nil)
-    # so the caller's existing "no response from upstream" handling covers it too.
-    #
-    # The read is bounded the same way the CLIENT head read is (`handle_request` above, and the
-    # sibling `Repeater::Engine#read_response_head`): a slowloris ORIGIN dripping the response
-    # head one byte at a time keeps resetting the per-read `io_timeout` armed in
-    # `acquire_and_send`, so without a total head-assembly deadline this fiber, the client fd,
-    # the upstream fd and one of `Server`'s MAX_CONNECTIONS permits are pinned for as long as
-    # the origin cares to trickle (P6). `read_head_deadlined` restores the socket's baseline
-    # read_timeout in its own ensure, so the body read that follows is untouched, and
-    # `underlying_socket` returning nil (a non-socket IO) keeps the original loop. The
-    # IO::TimeoutError it raises is caught below as a nil head — the caller's existing
-    # "no response from upstream" path, so no new failure mode.
-    private def safe_read_head(io : IO) : Bytes?
-      Codec::Http1.read_head(io,
+    # This keeps clean EOF, reset, timeout, and rejected heads distinct. The total assembly
+    # deadline prevents a slowloris origin from pinning a fiber, client fd, upstream fd or
+    # Server connection permit (P6); the codec restores the socket's baseline timeout before
+    # the body read. A non-socket IO skips the deadline as before.
+    private def safe_read_head(io : IO) : Codec::Http1::HeadReadResult
+      Codec::Http1.read_head_result(io,
         deadline: SocketTuning::HEAD_DEADLINE, timeout_sock: SocketTuning.underlying_socket(io))
-    rescue
-      nil
     end
 
     # Apply response-head Match&Replace; returns the (possibly rewritten) head +
