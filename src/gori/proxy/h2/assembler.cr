@@ -98,6 +98,9 @@ module Gori::Proxy::H2
       getter req = Side.new
       getter resp = Side.new
       property flow_id : Int64? = nil
+      # Authority recorded before the request head is forwarded, so a response rewrite cannot
+      # race the assembler's later projection.
+      property request_authority : String? = nil
       # Monotonic timing for the response's ttfb/duration. h1 records these in
       # client_conn; without them every h2 flow shows a null latency in History /
       # QL / `gori run` JSON (and most HTTPS traffic negotiates h2). `started_at`
@@ -168,6 +171,28 @@ module Gori::Proxy::H2
     # nil when this connection is not tracking the stream (past MAX_LIVE_STREAMS) — the gate
     # then declines to hold rather than inventing a URL to scope-test.
     record RequestRef, method : String, target : String, scheme : String, authority : String
+
+    # Recorded before the request block is forwarded: the response pump may run before
+    # Relay#emit feeds that block into the assembler.
+    def remember_request_authority(stream_id : UInt32, authority : String?) : Nil
+      return if stream_id == 0 || authority.nil? || authority.empty?
+      @mutex.synchronize do
+        stream = @streams[stream_id]?
+        if stream.nil?
+          next if @streams.size >= MAX_LIVE_STREAMS
+          stream = @streams[stream_id] = Stream.new
+        end
+        stream.request_authority = authority
+      end
+    end
+
+    def request_authority(stream_id : UInt32) : String?
+      @mutex.synchronize do
+        stream = @streams[stream_id]?
+        headers = stream.try(&.req.headers)
+        headers.try { |fields| pseudo(fields, ":authority") } || stream.try(&.request_authority)
+      end
+    end
 
     def request_ref(stream_id : UInt32) : RequestRef?
       @mutex.synchronize do

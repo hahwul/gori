@@ -3,6 +3,7 @@
 ## Unreleased
 
 - MCP: a running server picks up another gori process's changes to session slots, global env vars, the User-Agent list and the global view, rule and colour libraries on its next call, so a rotated or deleted credential stops going out without a restart; a running TUI now follows global env vars and User-Agents too (#1215, #1216, #1217, #1218)
+- Proxy: HTTP/2 response rules now use each stream's `:authority` on coalesced connections, so host-scoped rewrites apply to the matching response (#1222)
 - CLI: `gori run capture --max` counts WebSocket and other upgraded flows after their tunnel closes, once their captured transcript is complete (#1221)
 - Proxy: `text/event-streaming` and other media types that only share the SSE prefix are treated as ordinary bodies, so response rules still apply (#1220)
 - Proxy: host-scoped body rules no longer buffer unrelated request and response bodies before streaming them (#1219)
