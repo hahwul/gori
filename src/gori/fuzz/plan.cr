@@ -37,6 +37,9 @@ module Gori::Fuzz
       UnresolvedEnv
       # `--race`/`race_count` below 2 — a race needs at least two connections in flight
       # together, so 1 is just a send (refused, not silently clamped, so the operator sees why).
+      # Also a race group that would send more than `max_requests` (`detail` = the request
+      # count the group needs, warm-ups included; nil for the below-2 case): a group is sent
+      # whole, so the cap can only be honoured by refusing it (#1204).
       BadRaceCount
       # The run's TLS fingerprint override names a preset gori does not have (`detail` = the
       # name as given). Refused rather than ignored, for the reason `Repeater::PlanError`'s
@@ -479,6 +482,7 @@ module Gori::Fuzz
       # would otherwise be reported as "a gRPC field position and --race cannot combine" and the
       # operator would never learn that a race of 1 is refused on its own terms.
       race_count = validate_race_count(options.config.race_count)
+      validate_race_budget(race_count, options.config, options.http2?)
       # Beside the race guard rather than at the `Sender` it feeds, so an unknown preset is
       # refused before the run reads a wordlist off disk or resolves a `.proto` — everything
       # after this point is work the operator does not want done for a run that cannot start.
@@ -745,6 +749,25 @@ module Gori::Fuzz
           "flight together, or it is just a send)")
       end
       race_count
+    end
+
+    # A race group is released whole — splitting it at a budget boundary would break the
+    # synchronization it exists for — so a group larger than `max_requests` cannot be clamped
+    # to the budget, only refused. Refused HERE, before any dial, so the cap stays a true
+    # bound on what leaves gori (#1204); `CappedBackend#send_race` holds the same line at
+    # send time. Counts the group as the engine will run it (clamped to `MAX_RACE_SIZE`),
+    # plus one warm-up per connection when the run carries one — not under h2, where
+    # `Sender#send_race` degrades to independent sends and never sends the warm-up.
+    private def self.validate_race_budget(race_count : Int32?, config : Config, http2 : Bool) : Nil
+      return unless (n = race_count) && (cap = config.max_requests) && cap > 0
+      conns = n.clamp(1, Engine::MAX_RACE_SIZE).to_i64
+      warmup = config.race_warmup && !http2
+      needed = warmup ? conns * 2 : conns
+      return if needed <= cap
+      warm = warmup ? " (a warm-up and the race request on each connection)" : ""
+      raise PlanError.new(PlanError::Reason::BadRaceCount,
+        "a race of #{conns} connections sends #{needed} requests#{warm}, over the " \
+        "#{cap}-request cap; a race group is sent whole, never split", needed.to_s)
     end
 
     # The run's fingerprint override, validated. Same shape and same reasoning as

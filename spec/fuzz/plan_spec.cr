@@ -289,6 +289,33 @@ describe Gori::Fuzz::Plan do
       # plan-input refusal above (see `validate_race_count`).
       ex.reason.should eq(F::PlanError::Reason::BadRaceCount)
     end
+
+    # A group is released whole, so a cap below it can only be honoured by refusing the run
+    # before any dial — not by sending the group and recording a cap that never held (#1204).
+    it "refuses a race group larger than max_requests, warm-ups included" do
+      raw = "GET / HTTP/1.1\r\nHost: t.test\r\n\r\n"
+      ex = expect_raises(F::PlanError, /sends 20 requests, over the 1-request cap/) do
+        F::Plan.build(F::PlanOptions.new(raw, target: "http://t.test",
+          config: F::Config.new(race_count: 20, max_requests: 1_i64)), ungated_outbound)
+      end
+      ex.reason.should eq(F::PlanError::Reason::BadRaceCount)
+      ex.detail.should eq("20")
+
+      ex = expect_raises(F::PlanError, /sends 6 requests/) do
+        F::Plan.build(F::PlanOptions.new(raw, target: "http://t.test",
+          config: F::Config.new(race_count: 3, max_requests: 5_i64, race_warmup: raw.to_slice)), ungated_outbound)
+      end
+      ex.detail.should eq("6")
+      # Under h2 the race degrades to independent sends and no warm-up goes out.
+      F::Plan.build(F::PlanOptions.new(raw, target: "http://t.test", http2: true,
+        config: F::Config.new(race_count: 3, max_requests: 3_i64, race_warmup: raw.to_slice)), ungated_outbound)
+
+      # At the cap, and a request past MAX_RACE_SIZE judged as the clamped group it runs as.
+      F::Plan.build(F::PlanOptions.new(raw, target: "http://t.test",
+        config: F::Config.new(race_count: 3, max_requests: 3_i64)), ungated_outbound)
+      F::Plan.build(F::PlanOptions.new(raw, target: "http://t.test",
+        config: F::Config.new(race_count: 500, max_requests: F::Engine::MAX_RACE_SIZE.to_i64)), ungated_outbound)
+    end
   end
 
   # The Content-Length knob `Fuzz::Config` has always carried and no surface ever wrote.

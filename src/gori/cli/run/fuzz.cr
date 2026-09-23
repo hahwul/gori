@@ -473,7 +473,11 @@ module Gori
         in Fuzz::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
         in Fuzz::PlanError::Reason::BadRaceCount
-          "--race needs at least 2 connections (a race of 1 is just a send)"
+          if needed = ex.detail
+            "--race exceeds --max-requests: #{ex.message} — raise --max-requests to #{needed} or lower --race"
+          else
+            "--race needs at least 2 connections (a race of 1 is just a send)"
+          end
         in Fuzz::PlanError::Reason::TlsPreset
           ex.message || "unknown --tls-preset"
         end

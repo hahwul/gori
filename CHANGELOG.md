@@ -39,6 +39,7 @@
 - Miner: JSON probes add their candidate keys to the captured body instead of re-serializing it, so duplicate members, number spellings and escapes reach the target as captured; the active scanner's JSON injection does the same, and a number past 64 bits no longer hides a body's JSON parameters (#1183)
 - OAST: resuming a saved session polls with the provider it was started with, even when two saved providers share an endpoint with different tokens (#1192)
 - Fuzzer: auto-mark wraps a whole JSON number, exponent included, so `1e5` no longer sends every payload with a trailing `e5` (#1205)
+- Fuzzer: a race group larger than `--max-requests` / `max_requests` (warm-ups included) is refused before any connection is dialled, instead of being sent whole past the cap (#1204)
 
 ## v0.7.1
 
