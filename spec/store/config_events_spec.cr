@@ -257,18 +257,23 @@ describe "rewrite rule audit lines" do
 
   # `set_scope` moves a rule by copying it and deleting the original. Logging that delete put
   # "rule removed" in the trail for a rule that still exists, and the move was never recorded.
+  # In its own home, like the global-default example above: the move SAVES the rule into
+  # settings.json, and restoring memory alone left it on disk in the suite's shared home, where
+  # the next reload of that section (any MCP call, since #1215) read "movable" back in.
   it "records a scope move as a move, not as a removal" do
     cfg_store do |store|
-      rules = Gori::Rules.load(store)
-      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-A", "X-B",
-        name: "movable").should be_true
-      rule = rules.rules.find { |r| r.name == "movable" }.not_nil!
-      rules.set_scope(rule, Gori::Store::RuleScope::Global).should be_true
-      store.flush
+      with_global_home do
+        rules = Gori::Rules.load(store)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-A", "X-B",
+          name: "movable").should be_true
+        rule = rules.rules.find { |r| r.name == "movable" }.not_nil!
+        rules.set_scope(rule, Gori::Store::RuleScope::Global).should be_true
+        store.flush
 
-      kinds = store.events_recent(50, source: Gori::ConfigLog::SOURCE).rows.map(&.kind)
-      kinds.should contain("rule_move")
-      kinds.should_not contain("rule_remove")
+        kinds = store.events_recent(50, source: Gori::ConfigLog::SOURCE).rows.map(&.kind)
+        kinds.should contain("rule_move")
+        kinds.should_not contain("rule_remove")
+      end
     end
   end
 end
