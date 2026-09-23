@@ -20,6 +20,7 @@ private alias HPACK = Gori::Proxy::H2::HPACK
 private class H2Origin
   getter port : Int32
   getter connections = 0
+  getter requests = 0
   # Connections whose serve loop ended because the peer went away. What makes the close
   # example an actual assertion rather than a restatement of `pool.should_not be_nil`.
   getter disconnects = 0
@@ -28,7 +29,7 @@ private class H2Origin
 
   @server : TCPServer
 
-  def initialize(@body : String = "ok")
+  def initialize(@body : String = "ok", @silent_after : Int32? = nil)
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn { accept_loop }
@@ -84,7 +85,9 @@ private class H2Origin
 
   private def respond(conn : TCPSocket, enc : HPACK::Encoder, id : UInt32,
                       seen : Array(UInt32)) : Nil
+    @requests += 1
     seen << id
+    return if @silent_after == @requests
     block = enc.encode([{":status", "200"}, {"server", "gori-test"}])
     conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, id, block).to_bytes)
     conn.write(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, id, @body.to_slice).to_bytes)
@@ -103,10 +106,10 @@ private def eventually(timeout : Time::Span = 3.seconds, &) : Bool
   false
 end
 
-private def h2_sender(port : Int32, keep_alive : Bool) : F::Sender
+private def h2_sender(port : Int32, keep_alive : Bool, timeout : Time::Span = 5.seconds) : F::Sender
   F::Sender.new(F::Origin.new("http", "127.0.0.1", port), ungated_outbound,
     http2: true, verify: false, keep_alive: keep_alive, idle_conns: 1,
-    timeout: 5.seconds)
+    timeout: timeout)
 end
 
 private def get(host_port : String) : Bytes
@@ -362,6 +365,25 @@ private def post(host_port : String, body : String) : Bytes
 end
 
 describe "H2Pool — the connection-scoped state a one-shot never needed" do
+  it "does not re-send a reused request after its response read times out" do
+    origin = H2Origin.new("ok", silent_after: 2)
+    sender = h2_sender(origin.port, keep_alive: true, timeout: 100.milliseconds)
+    begin
+      sender.send(get("127.0.0.1:#{origin.port}")).error.should be_nil
+      result = sender.send(get("127.0.0.1:#{origin.port}"))
+
+      result.error.should_not be_nil
+      result.timed_out?.should be_true
+      result.retried?.should be_false
+      origin.requests.should eq(2)
+      origin.connections.should eq(1)
+      sender.pool.not_nil!.stale_retries.should eq(0_i64)
+    ensure
+      sender.close
+      origin.close
+    end
+  end
+
   it "credits a stream-0 WINDOW_UPDATE read on the RESPONSE path, so a sweep WITH A BODY does " \
      "not exhaust the send window it carries from request to request" do
     # 16 requests × 8 KiB = 128 KiB of request body over one connection, against the 65535-byte

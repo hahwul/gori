@@ -11,6 +11,7 @@
 - Env: `project env set` and both TUI editors preserve assignment values, including empty and surrounding whitespace (#1172)
 - HAR: imports preserve duplicate and malformed Content-Length probes; exports and re-imports preserve colonless request and response headers (#1161, #1164)
 - Import: OpenAPI 3.x and Swagger 2.0 resolve local refs and seed body/formData templates; remote refs are reported and never fetched (#1166)
+- Proxy, Repeater and Fuzzer keep bytes from incomplete or oversized response heads and do not automatically replay those requests (#1167)
 - Env: `$GEN.USER_AGENT` fills in a real desktop browser User-Agent that follows the request's TLS preset, `$GEN.USER_AGENT_CHROME`/`_FIREFOX`/`_SAFARI` pick one browser, and Settings → User-Agents or `gori settings user-agents` replaces the built-in list. `$U` + ↹ now completes to it rather than `$GEN.UUID` (#1112, #1152, #1153, #1154)
 - Probe: SQL injection detection reaches the blind cases — a new boolean-based rule confirms a true/false differential (SimHash-guarded so a dynamic page is not mistaken for an oracle), and a new time-based rule (off by default, since it deliberately waits) confirms an injected `SLEEP`/`pg_sleep`/`WAITFOR` delay that scales across a baseline and two increasing delays (#1110)
 - Probe: the active scanner can confirm remote file inclusion out of band by planting a language-marked OAST resource in include-shaped file, page, template and locale parameters (#1111)

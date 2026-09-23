@@ -235,6 +235,42 @@ describe Gori::Proxy::Codec::Http1 do
         String.new(Http1.read_head(WindowedIO.new(exact.to_slice, 8), exact.bytesize).not_nil!).should eq(exact)
       end
 
+      it "keeps EOF, oversize, and partial-head outcomes distinct with their bytes" do
+        empty = Http1.read_head_result(WindowedIO.new(Bytes.new(0), 4))
+        empty.state.should eq(Http1::HeadReadResult::State::Empty)
+        empty.bytes.should be_empty
+
+        big = "GET / HTTP/1.1\r\n#{"X: y\r\n" * 40}"
+        oversized = Http1.read_head_result(WindowedIO.new(big.to_slice, 8), 64)
+        oversized.state.should eq(Http1::HeadReadResult::State::TooLarge)
+        oversized.bytes.size.should eq(64)
+
+        partial = "GET / HTTP/1.1\r\n"
+        incomplete = Http1.read_head_result(WindowedIO.new(partial.to_slice, 4))
+        incomplete.state.should eq(Http1::HeadReadResult::State::Incomplete)
+        incomplete.head?.should be_nil
+        incomplete.failure_message("response head").should contain("ended before CRLFCRLF")
+        String.new(incomplete.bytes).should eq(partial)
+      end
+
+      it "retains received response bytes when the head-completion deadline expires" do
+        client, origin = UNIXSocket.pair
+        raw = "HTTP/1.1 200 OK\nContent-Length: 6\n\nsecond"
+        begin
+          client.write(raw.to_slice)
+          client.flush
+          result = Http1.read_head_result(origin, deadline: 50.milliseconds, timeout_sock: origin)
+
+          result.state.should eq(Http1::HeadReadResult::State::TimedOut)
+          String.new(result.bytes).should eq(raw)
+          result.error.should be_a(Http1::HeadTimeout)
+          result.error.as(Http1::HeadTimeout).received.should eq(raw.bytesize)
+        ensure
+          client.close
+          origin.close
+        end
+      end
+
       it "returns what arrived when the peer EOFs mid-head, as the byte-at-a-time loop did" do
         partial = "GET / HTTP/1.1\r\n"
         String.new(Http1.read_head(WindowedIO.new(partial.to_slice, 4)).not_nil!).should eq(partial)

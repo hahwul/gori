@@ -21,12 +21,9 @@ module Gori
       # from a *display* truncation (gori capping what it shows).
       getter? incomplete : Bool
       # Whether ANY response byte (even an interim 1xx) was received before this Result was
-      # built. It answers the one question the pool's stale-retry needs and `response.nil?`
-      # cannot: a failure with no response yet means the request never reached the application
-      # and is safe to re-send, but a failure AFTER a 1xx means the origin already has the whole
-      # request (gori writes it up front), so re-sending would double a non-idempotent side
-      # effect. Only set on the error paths; a normal Result carries a non-nil `response`, where
-      # this is irrelevant.
+      # built. A false value does not by itself permit a retry: a timeout or an invalid head
+      # can still follow a delivered request. retryable_stale? carries the narrower read/write
+      # outcome the HTTP/1 pool needs.
       getter? delivered : Bool
       # The read ended on an IDLE TIMEOUT — the origin held the socket open and simply stopped
       # sending — rather than on a close or a completed body. `incomplete?` says the captured
@@ -46,6 +43,11 @@ module Gori
       # request may have been acted on twice. `--format json` and MCP `fuzz_results` are where
       # an agent reads this, and both showed a clean single send.
       getter? retried : Bool
+
+      # Whether a reused HTTP/1 socket failed at the request write or at a zero-byte EOF/reset
+      # read, the narrow cases ConnPool may replay. A timeout or any received response bytes
+      # leave this false even when delivered? is false.
+      getter? retryable_stale : Bool
 
       # The exact request bytes this exchange WROTE, when the sender that made it knows them
       # and a consumer has to hold them. `Fuzz::Sender` sets it because its send seam substitutes
@@ -67,7 +69,7 @@ module Gori
       # leaves the sweep to the compiler.
       def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false, *,
                      @delivered = false, @timed_out = false, @retried = false,
-                     @wire : Bytes? = nil)
+                     @wire : Bytes? = nil, @retryable_stale = false)
       end
 
       # The same outcome, carrying the bytes that produced it. A struct, so this returns a
@@ -75,7 +77,8 @@ module Gori
       # builds the Result.
       def with_wire(wire : Bytes) : Result
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
-          delivered: @delivered, timed_out: @timed_out, retried: @retried, wire: wire)
+          delivered: @delivered, timed_out: @timed_out, retried: @retried, wire: wire,
+          retryable_stale: @retryable_stale)
       end
 
       def ok? : Bool
@@ -92,7 +95,8 @@ module Gori
         # one spec that asserted it. The constructor now REFUSES a positional tail (see there),
         # so this shape is the only one that compiles.
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
-          delivered: @delivered, timed_out: @timed_out, retried: true, wire: @wire)
+          delivered: @delivered, timed_out: @timed_out, retried: true, wire: @wire,
+          retryable_stale: @retryable_stale)
       end
     end
 
@@ -234,7 +238,8 @@ module Gori
       rescue ex
         # A write/flush failure — no response byte was ever attempted, so this is always the
         # pre-delivery case (see `read_response`'s own rescue for the post-head-read one).
-        error(exchange_error(ex, host, port, nil), started, delivered: false)
+        error(exchange_error(ex, host, port, nil), started, delivered: false,
+          retryable_stale: true)
       end
 
       # The read half of `exchange`, split out so a caller can write a request in TWO
@@ -245,8 +250,9 @@ module Gori
       # time-critical once every byte has been written).
       def self.read_response(upstream : IO, request : Bytes, host : String, port : Int32,
                              started : Time::Instant, *, origin_scheme : String = "http") : Result
-        head = read_response_head(upstream)
-        return error(no_response_error(host, port, origin_scheme), started) unless head
+        head_result = read_response_head(upstream)
+        head = head_result.head?
+        return response_head_error(head_result, host, port, started, origin_scheme) unless head
 
         resp = Proxy::Codec::Http1.parse_response_head(head)
         # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured request
@@ -269,8 +275,10 @@ module Gori
           interim_seen += 1
           interim_status = resp.status
           return error("too many interim 1xx responses from #{host}:#{port}", started, delivered: true) if interim_seen > MAX_INTERIM
-          head = read_response_head(upstream)
-          return error("upstream closed after interim 1xx from #{host}:#{port}", started, delivered: true) unless head
+          head_result = read_response_head(upstream)
+          head = head_result.head?
+          return response_head_error(head_result, host, port, started, origin_scheme,
+            interim: interim_status) unless head
           resp = Proxy::Codec::Http1.parse_response_head(head)
         end
         # A reply whose status-line can't be parsed (no HTTP-version, or a non-numeric status —
@@ -307,10 +315,11 @@ module Gori
             incomplete: true, timed_out: ex.is_a?(IO::TimeoutError))
         end
       rescue ex
-        # `head` is nil iff we failed before/at the FIRST head read (a write error, or a reset
-        # on a parked socket) — the pre-delivery case the pool may re-send. A raise AFTER a head
-        # was read (an interim-1xx read that then reset) means the origin already has the whole
-        # request, so mark it delivered and do not re-send a non-idempotent one.
+        # The head reader turns ordinary EOF, reset, timeout, and unfinished-head outcomes into
+        # a Result above. This rescue is for exceptions escaping the read or parser: a complete
+        # head already read (including an interim 1xx) means the origin got the request, so mark
+        # it delivered. Replay eligibility comes only from the explicit stale marker, never
+        # from this exception shape.
         # `timed_out` distinguishes "the origin went silent and the read timed out" from every
         # other way an exchange can fail, and its doc on `Result` has always said so — but only
         # the h2 engine ever set it, so on the h1 path (which is most sends, and every
@@ -327,10 +336,8 @@ module Gori
       # A bare `ex.message` — `"Read timed out"` — names neither the origin nor the one fact
       # that decides what a caller may do next. An origin that answers `100 Continue` and then
       # goes silent is the h1 twin of the case `H2Engine.no_response` writes a careful sentence
-      # for, and it read identically to a plain silent origin: same message, same `error_kind`,
-      # and (before `delivered?` reached a surface) the same `retryable: true`. The two are
-      # opposite instructions — the interim proves the origin has the whole request, because
-      # gori writes it up front.
+      # for, and it read identically to a plain silent origin. The two are opposite instructions
+      # — the interim proves the origin has the whole request, because gori writes it up front.
       #
       # Only the INTERIM case is reworded. With no interim there is nothing gori knows that
       # `ex.message` does not, and inventing a host-shaped sentence for every socket error
@@ -344,6 +351,32 @@ module Gori
         "#{tail} (RFC 9110 §15.2: a 1xx precedes the final response, it is not one)"
       end
 
+      private def self.response_head_error(result : Proxy::Codec::Http1::HeadReadResult,
+                                           host : String, port : Int32, started : Time::Instant,
+                                           origin_scheme : String, interim : Int32? = nil) : Result
+        message = if interim && result.timed_out? && result.bytes.empty?
+                    # Keep the established origin-facing wording for an interim response
+                    # followed by silence. The detailed head reader reports this timeout as
+                    # a result (rather than raising into `read_response`'s rescue), so route
+                    # it through the same sentence used by that older exception path.
+                    exchange_error(result.error || IO::TimeoutError.new("response head read timed out"),
+                      host, port, interim)
+                  elsif result.state == Proxy::Codec::Http1::HeadReadResult::State::Empty
+                    if interim
+                      "upstream closed after interim 1xx from #{host}:#{port}"
+                    else
+                      no_response_error(host, port, origin_scheme)
+                    end
+                  else
+                    detail = result.failure_message("response head",
+                      deadline: Proxy::SocketTuning::HEAD_DEADLINE)
+                    interim ? "#{detail} after interim #{interim} from #{host}:#{port}" : "#{detail} from #{host}:#{port}"
+                  end
+        Result.new(result.bytes, nil, nil, elapsed(started), message,
+          incomplete: result.received?, delivered: result.received? || !interim.nil?,
+          timed_out: result.timed_out?, retryable_stale: result.retryable_empty_read? && interim.nil?)
+      end
+
       # Read a response head with a TOTAL head-assembly deadline (parity with the proxy's
       # client read, client_conn.cr:111). The per-operation io_timeout only bounds the gap
       # BETWEEN reads, so a slowloris origin dripping the head one byte at a time (each byte
@@ -351,8 +384,8 @@ module Gori
       # freeze every other tool. HEAD_DEADLINE caps the whole head. underlying_socket returns
       # nil for an IO with no settable socket, in which case read_head simply skips the
       # deadline (unchanged behaviour), so this is safe on every transport.
-      private def self.read_response_head(upstream : IO) : Bytes?
-        Proxy::Codec::Http1.read_head(upstream,
+      private def self.read_response_head(upstream : IO) : Proxy::Codec::Http1::HeadReadResult
+        Proxy::Codec::Http1.read_head_result(upstream,
           deadline: Proxy::SocketTuning::HEAD_DEADLINE,
           timeout_sock: Proxy::SocketTuning.underlying_socket(upstream))
       end
@@ -360,9 +393,9 @@ module Gori
       # An error Result with no head/body, timed from `started` (shared with the pool, which
       # reports a failed dial the same way `send` does).
       def self.error(message : String, started : Time::Instant, delivered : Bool = false,
-                     timed_out : Bool = false) : Result
+                     timed_out : Bool = false, retryable_stale : Bool = false) : Result
         Result.new(Bytes.new(0), nil, nil, elapsed(started), message,
-          delivered: delivered, timed_out: timed_out)
+          delivered: delivered, timed_out: timed_out, retryable_stale: retryable_stale)
       end
 
       # Why the dial produced no socket.

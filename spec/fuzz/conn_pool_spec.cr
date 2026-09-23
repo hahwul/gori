@@ -77,6 +77,50 @@ private class KeepAliveOrigin
   end
 end
 
+private class SilentResponseOrigin
+  getter port : Int32
+  @requests = Atomic(Int32).new(0)
+  @server : TCPServer
+
+  def initialize(@pause : Time::Span)
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.local_address.port
+    spawn { accept_loop }
+  end
+
+  def requests : Int32
+    @requests.get
+  end
+
+  def close : Nil
+    @server.close rescue nil
+  end
+
+  private def accept_loop : Nil
+    while conn = @server.accept?
+      spawn serve(conn)
+    end
+  rescue
+  end
+
+  private def serve(conn : TCPSocket) : Nil
+    conn.read_timeout = 5.seconds
+    loop do
+      break unless Gori::Proxy::Codec::Http1.read_head(conn)
+      count = (@requests.add(1) + 1).to_i
+      if count == 2
+        sleep @pause
+      else
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\npong"
+        conn.flush
+      end
+    end
+  rescue
+  ensure
+    conn.close rescue nil
+  end
+end
+
 # An origin that answers each request on one socket, but on the chosen path leaves EXTRA bytes
 # on the wire past the framed body (a whole second response glued behind a short
 # Content-Length) — the response-desync shape a keep-alive pool must not paper over by parking
@@ -305,6 +349,26 @@ describe F::ConnPool do
   end
 
   describe "over a real socket" do
+    it "does not replay a reused GET after its response read times out" do
+      origin = SilentResponseOrigin.new(500.milliseconds)
+      pool = F::ConnPool.new("http", "127.0.0.1", origin.port, false, nil,
+        100.milliseconds, nil, 1)
+      begin
+        pool.send(req("GET /one HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")).error.should be_nil
+        result = pool.send(req("GET /two HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"))
+
+        result.error.should_not be_nil
+        result.timed_out?.should be_true
+        result.delivered?.should be_false
+        result.retried?.should be_false
+        pool.stale_retries.should eq(0)
+        origin.requests.should eq(2)
+      ensure
+        pool.close_all
+        origin.close
+      end
+    end
+
     it "serves a whole sweep on one connection per worker" do
       origin = KeepAliveOrigin.new
       tmpl = F::Template.parse("GET /?q=§a§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")

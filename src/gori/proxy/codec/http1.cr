@@ -15,8 +15,9 @@ require "./message"
 # that belongs to the head, falling back to a byte at a time for an IO with no
 # `peek`; see `consume_peeked` for why the bulk form is worth the scan.
 module Gori::Proxy::Codec::Http1
-  CRLF      = "\r\n"
-  CRLF_CRLF = "\r\n\r\n".to_slice
+  CRLF           = "\r\n"
+  CRLF_CRLF      = "\r\n\r\n".to_slice
+  MAX_HEAD_BYTES = 1024 * 256
 
   # A head read that ran out of time, carrying HOW MANY head bytes had arrived when it did.
   #
@@ -30,16 +31,99 @@ module Gori::Proxy::Codec::Http1
   # enforced by SHRINKING `read_timeout` rather than by a clock of its own — so the raise site
   # cannot be read as the answer either.
   #
-  # Subclasses `IO::TimeoutError` deliberately, so every existing caller keeps working
-  # unchanged: `ClientConn#safe_read_head` (bare rescue), `TlsMitm#serve_self_page_once` (bare),
-  # `Repeater::Engine` and `Repeater::WsEngine` (both rescue `IO::TimeoutError` by name), and
-  # `spec/proxy/socket_tuning_spec.cr`'s `expect_raises(IO::TimeoutError)`.
+  # Subclasses IO::TimeoutError so legacy read_head callers keep their exception behavior.
+  # Detailed response readers retain this exception with the received bytes in HeadReadResult.
   class HeadTimeout < IO::TimeoutError
     # Head bytes buffered when the clock ran out. 0 means the peer sent nothing at all.
     getter received : Int32
+    getter bytes : Bytes
 
-    def initialize(message : String, @received : Int32)
+    def initialize(message : String, @received : Int32, @bytes : Bytes = Bytes.new(0))
       super(message)
+    end
+  end
+
+  # The wire outcome of reading one head. read_head keeps its historical projection for its
+  # callers; response readers that must distinguish EOF from a rejected/unfinished head use
+  # this result so bytes do not disappear into the same nil as an empty socket.
+  struct HeadReadResult
+    enum State
+      Complete
+      Incomplete
+      Empty
+      TooLarge
+      TimedOut
+      Failed
+    end
+
+    getter state : State
+    getter bytes : Bytes
+    getter error : Exception?
+
+    def initialize(@state : State, @bytes : Bytes, @error : Exception? = nil)
+    end
+
+    # Only a CRLFCRLF-complete head is usable by detailed response readers. `Incomplete` keeps
+    # its bytes here but is a read failure; `to_legacy_head` retains read_head's older EOF shape.
+    def head? : Bytes?
+      @state == State::Complete ? @bytes : nil
+    end
+
+    def timed_out? : Bool
+      @state == State::TimedOut
+    end
+
+    def received? : Bool
+      !@bytes.empty?
+    end
+
+    # A reused connection can be redialed only when the read found EOF/reset before receiving
+    # any response bytes. Timeouts and rejected heads are not evidence of an idle stale socket.
+    def retryable_empty_read? : Bool
+      return true if @state == State::Empty
+      return false unless @state == State::Failed && @bytes.empty?
+      ex = @error
+      ex.is_a?(IO::Error) && ex.os_error == Errno::ECONNRESET
+    end
+
+    # Restore read_head's established public behavior for callers that do not need the richer
+    # outcome. EOF with a partial head still returns those bytes; oversize still returns nil.
+    def to_legacy_head : Bytes?
+      case @state
+      when State::Complete, State::Incomplete
+        @bytes
+      when State::Empty, State::TooLarge
+        nil
+      when State::TimedOut, State::Failed
+        raise(@error || IO::Error.new("missing error for #{@state} head read"))
+      end
+    end
+
+    # A concise diagnosis for an upstream response head that could not be formed. Keep the
+    # received octets alongside it so History can show the actual origin bytes (P7).
+    def failure_message(label : String, max_bytes : Int32 = MAX_HEAD_BYTES,
+                        deadline : Time::Span = 30.seconds) : String
+      case @state
+      when State::TooLarge
+        "#{label} exceeded #{max_bytes // 1024} KiB (#{@bytes.size} bytes received)"
+      when State::Incomplete
+        "#{label} ended before CRLFCRLF (#{@bytes.size} bytes received)"
+      when State::TimedOut
+        if @bytes.empty?
+          "#{label} read timed out before any bytes arrived"
+        else
+          "#{label} not CRLFCRLF-terminated within #{deadline.total_seconds.to_i} s (#{@bytes.size} bytes received)"
+        end
+      when State::Failed
+        message = @error.try(&.message).presence || "upstream read failed"
+        if @bytes.empty?
+          "#{label} read failed before any bytes arrived: #{message}"
+        else
+          "#{label} read failed after #{@bytes.size} bytes: #{message}"
+        end
+      else
+        "#{label} could not be read"
+      end
     end
   end
 
@@ -55,13 +139,22 @@ module Gori::Proxy::Codec::Http1
   # head AFTER its first byte — the drip-feed slowloris defense a per-read timeout can't provide
   # (a byte-at-a-time trickle keeps resetting a per-read timer). The socket's read_timeout is
   # shrunk toward the deadline before each read and RESTORED on exit, so the body read that
-  # follows sees the caller's baseline, not the leftover head budget. With `deadline`/`timeout_sock`
-  # nil (every caller but the client request-head read) the loop is byte-for-byte the original.
-  def self.read_head(io : IO, max_bytes : Int32 = 1024 * 256, *,
+  # follows sees the caller's baseline, not the leftover head budget. The proxy's client-request
+  # and upstream-response readers pass both deadline arguments; ordinary reads keep the original
+  # per-read timeout behavior.
+  def self.read_head(io : IO, max_bytes : Int32 = MAX_HEAD_BYTES, *,
                      deadline : Time::Span? = nil, timeout_sock : ::Socket? = nil,
                      detect_non_http : Bool = false) : Bytes?
-    # Deadline path only when BOTH are provided (the client request-head read); every other
-    # caller takes the byte-for-byte original fast path.
+    read_head_result(io, max_bytes, deadline: deadline, timeout_sock: timeout_sock,
+      detect_non_http: detect_non_http).to_legacy_head
+  end
+
+  # As read_head, but preserves received octets and the reason a usable head was not returned.
+  def self.read_head_result(io : IO, max_bytes : Int32 = MAX_HEAD_BYTES, *,
+                            deadline : Time::Span? = nil, timeout_sock : ::Socket? = nil,
+                            detect_non_http : Bool = false) : HeadReadResult
+    # Deadline path only when BOTH are provided (proxy client-request and upstream-response
+    # readers); every other caller takes the byte-for-byte original fast path.
     if (sock = timeout_sock) && (dl = deadline)
       return read_head_deadlined(io, sock, dl, max_bytes, detect_non_http)
     end
@@ -84,7 +177,11 @@ module Gori::Proxy::Codec::Http1
       # returning nil for a future client-leg wrapper would otherwise silently disable the #755
       # record. No deadline is armed on this path, so a timeout here is the caller's own baseline
       # and `buf.bytesize` is still the honest count.
-      raise HeadTimeout.new(ex.message || "head read timed out", buf.bytesize)
+      bytes = captured_head(buf)
+      timeout = HeadTimeout.new(ex.message || "head read timed out", buf.bytesize, bytes)
+      return HeadReadResult.new(HeadReadResult::State::TimedOut, bytes, timeout)
+    rescue ex
+      return HeadReadResult.new(HeadReadResult::State::Failed, captured_head(buf), ex)
     end
     finalize_head(buf, max_bytes)
   end
@@ -94,7 +191,7 @@ module Gori::Proxy::Codec::Http1
   # resetting a per-read timer). `sock`'s read_timeout is shrunk toward `deadline` before each
   # read and RESTORED on exit, so the body read that follows sees the caller's baseline.
   private def self.read_head_deadlined(io : IO, sock : ::Socket, deadline : Time::Span, max_bytes : Int32,
-                                       detect_non_http : Bool = false) : Bytes?
+                                       detect_non_http : Bool = false) : HeadReadResult
     buf = IO::Memory.new(512)
     saved_timeout = sock.read_timeout
     head_started = nil.as(Time::Instant?)
@@ -129,7 +226,11 @@ module Gori::Proxy::Codec::Http1
       # shrunk remainder of `deadline`, i.e. a partial head that stalled. `received` is that
       # distinction. Rebuilding the exception costs one allocation on a path that has just
       # spent 30 s waiting.
-      raise HeadTimeout.new(ex.message || "head read timed out", buf.bytesize)
+      bytes = captured_head(buf)
+      timeout = HeadTimeout.new(ex.message || "head read timed out", buf.bytesize, bytes)
+      return HeadReadResult.new(HeadReadResult::State::TimedOut, bytes, timeout)
+    rescue ex
+      return HeadReadResult.new(HeadReadResult::State::Failed, captured_head(buf), ex)
     ensure
       sock.read_timeout = saved_timeout # restore the baseline for the following body read
     end
@@ -261,10 +362,20 @@ module Gori::Proxy::Codec::Http1
   # terminator is an oversized/hostile head — returning it would misframe the body (the real
   # CRLFCRLF is still on the wire), so drop it. Otherwise the view (length = bytesize) is the
   # head's sole owner: it becomes an immutable `raw_head` (P7), so no defensive copy is made.
-  private def self.finalize_head(buf : IO::Memory, max_bytes : Int32) : Bytes?
-    return nil if buf.bytesize == 0
-    return nil if buf.bytesize >= max_bytes && !ends_with_crlf_crlf?(buf)
-    buf.to_slice
+  private def self.finalize_head(buf : IO::Memory, max_bytes : Int32) : HeadReadResult
+    return HeadReadResult.new(HeadReadResult::State::Empty, Bytes.new(0)) if buf.bytesize == 0
+    bytes = captured_head(buf)
+    unless ends_with_crlf_crlf?(buf)
+      if buf.bytesize >= max_bytes
+        return HeadReadResult.new(HeadReadResult::State::TooLarge, bytes)
+      end
+      return HeadReadResult.new(HeadReadResult::State::Incomplete, bytes)
+    end
+    HeadReadResult.new(HeadReadResult::State::Complete, bytes)
+  end
+
+  private def self.captured_head(buf : IO::Memory) : Bytes
+    buf.bytesize == 0 ? Bytes.new(0) : buf.to_slice
   end
 
   # Did the byte just written to `buf` complete the head? CRLFCRLF ends in LF, so only a
@@ -277,6 +388,7 @@ module Gori::Proxy::Codec::Http1
   private def self.ends_with_crlf_crlf?(buf : IO::Memory) : Bool
     s = buf.to_slice
     n = s.size
+    return false if n < 4
     s[n - 4] == 0x0d_u8 && s[n - 3] == 0x0a_u8 && s[n - 2] == 0x0d_u8 && s[n - 1] == 0x0a_u8
   end
 

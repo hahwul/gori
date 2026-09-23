@@ -245,7 +245,7 @@ module Gori
           # a time pins this fiber for as long as it cares to trickle. `underlying_socket`
           # returns nil for an IO with no settable socket, in which case the deadline is skipped
           # and the behaviour is unchanged.
-          head = Proxy::Codec::Http1.read_head(upstream,
+          head_result = Proxy::Codec::Http1.read_head_result(upstream,
             deadline: Proxy::SocketTuning::HEAD_DEADLINE,
             timeout_sock: Proxy::SocketTuning.underlying_socket(upstream))
           # `Engine.no_response_error`, not a local copy of the sentence: a plain `ws://` target
@@ -256,7 +256,17 @@ module Gori
           # dialer resolves it as `http`. Keep the diagnostic on that same origin-scheme axis:
           # a `wss://` no-response must mention HTTPS_PROXY when that is the proxy that carried
           # the successful CONNECT tunnel.
-          return err(Engine.no_response_error(host, port, tls ? "https" : "http"), started) unless head
+          head = head_result.head?
+          unless head
+            message = if head_result.state == Proxy::Codec::Http1::HeadReadResult::State::Empty
+                        Engine.no_response_error(host, port, tls ? "https" : "http")
+                      else
+                        detail = head_result.failure_message("response head",
+                          deadline: Proxy::SocketTuning::HEAD_DEADLINE)
+                        "#{detail} from #{host}:#{port}"
+                      end
+            return Result.new(head_result.bytes, [] of Message, elapsed(started), error: message)
+          end
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
           unless resp.status == 101
