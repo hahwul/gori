@@ -499,12 +499,13 @@ module Gori
       getter workspace_root : String?
       getter bind_error : String?
 
-      # Re-read the per-project `$KEY` env vars from the store into the process
-      # global (Settings.project_env_vars). Cheap: one settings-row read + a JSON
-      # parse (Env.load_project). No-op when unbound. The parsed Array is assigned
-      # synchronously within `call` (no fiber yield between read and assign), so an
-      # in-flight async job fiber — which already expanded its template at build
-      # time and does not re-read env during the run — never sees a torn value.
+      # Re-read what a send expands or overlays: the per-project `$KEY` env vars from the store
+      # into the process global (Settings.project_env_vars), the global env / User-Agent
+      # sections of settings.json, and the session-slot list. Cheap: a stat, one settings-row
+      # read + a JSON parse (Env.load_project). The project half is a no-op when unbound. The
+      # parsed Array is assigned synchronously within `call` (no fiber yield between read and
+      # assign), so an in-flight async job fiber — which already expanded its template at
+      # build time and does not re-read env during the run — never sees a torn value.
       private def refresh_project_env : Nil
         # A PEER's grammar switch, first. An MCP server reads `Settings.env_syntax` once at startup
         # and lives for hours, so a `gori settings env-syntax` run in the operator's terminal left
@@ -514,6 +515,12 @@ module Gori
         # this project and hands back what it did; `Log` is this surface's only channel, since
         # STDOUT belongs to JSON-RPC.
         Gori::EnvMigration.follow_disk(@store, @db_path, @project_name).each { |line| Log.info { line } }
+        # The GLOBAL halves, after the grammar: settings.json's `$ENV.KEY` table (#1217) and the
+        # `$GEN.USER_AGENT` corpus (#1218). Both are read at every send, and this process loaded
+        # them once at startup — so a token the operator rotated or deleted in another terminal
+        # went on leaving from here. A `stat` when the file has not moved (`reload_section`).
+        Settings.reload_env_from_disk
+        Settings.reload_user_agents_from_disk
         return unless s = @store
         Env.load_project(s)
         # RELOAD the existing table rather than replacing it: an extract rule may have been

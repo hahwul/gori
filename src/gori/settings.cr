@@ -537,7 +537,14 @@ module Gori
       nil
     end
 
-    protected def self.reload_section(key : String, & : JSON::Any -> Nil) : Nil
+    #
+    # `absent` is what a PARSED file that lacks `key` means, for a section `serialize` omits when
+    # it is empty (`user_agents`, and `vars` under `env`): there the absence IS the peer's answer
+    # — "no global vars", "the built-in list" — and keeping memory would go on sending a deleted
+    # token. Nil (the default) keeps memory, for sections that are always written once touched.
+    # `object: false` admits a section that is not a JSON object (`user_agents` is an array).
+    protected def self.reload_section(key : String, absent : JSON::Any? = nil, object : Bool = true,
+                                      & : JSON::Any -> Nil) : Nil
       sig = file_signature
       return if sig && @@reloaded_stat[key]? == sig # not written since this section was settled
       raw = load_raw
@@ -547,16 +554,26 @@ module Gori
         @@reloaded_stat[key] = sig if sig # same bytes under a new stat (our own save): settle it
         return
       end
-      root = JSON.parse(raw).as_h?
-      return unless root
-      node = root[key]?
-      return unless node && node.as_h?
+      node = section_node(raw, key, absent, object)
+      return unless node
       yield node
       rebase_section(key)
       @@reloaded_from[key] = here
       @@reloaded_stat[key] = sig if sig
     rescue
       nil
+    end
+
+    # The node `reload_section` folds: `key` in a file that parsed, else `absent`; nil (keep
+    # memory) when the file is not an object or the node is not the shape the section takes.
+    private def self.section_node(raw : String, key : String, absent : JSON::Any?,
+                                  object : Bool) : JSON::Any?
+      root = JSON.parse(raw).as_h?
+      return nil unless root
+      node = root[key]? || absent
+      return nil unless node
+      return nil if object && !node.as_h?
+      node
     end
 
     # Forget what `reload_section` last folded, so the next call re-reads whatever the file says.

@@ -3950,6 +3950,13 @@ module Gori::Tui
       # rewrites stored bytes in this project. Taken on the same cadence, ahead of the rule/binding
       # deltas, so the editors and the database agree before anything else in this pass reads them.
       dirty = follow_env_syntax
+      # Then the global `$ENV.KEY` table and `$GEN.USER_AGENT` corpus, which every send here
+      # expands and which settings.json is the only home of — so a token a peer rotated or deleted
+      # (`gori settings import`, a second TUI) stops going out without a restart (#1217, #1218).
+      # After the grammar, which `reload_env_from_disk` leaves to `follow_env_syntax`. A `stat`
+      # when the file has not moved; the Env card edits its own working copy, not these.
+      Settings.reload_env_from_disk
+      Settings.reload_user_agents_from_disk
       # The rule sets hold their own peer delta rather than returning it, so a re-read cannot eat
       # it — the Rewriter tab's `on_enter` and its `r` key both reload, and a peer's change picked
       # up by one of those is still owed a line. Taking here, on the bare cadence, is what makes
