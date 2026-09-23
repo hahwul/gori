@@ -49,13 +49,15 @@ module Gori
     #   MASK `$KEY` at call time; `list_env`, which would otherwise REPORT a stale set as
     #   fact; and `set_env_var`/`delete_env_var`, which read-modify-WRITE the whole array
     #   (Env.save_project persists it wholesale) — on a stale copy that silently DELETES
-    #   every var another process added since we bound. Deliberately EXCLUDES other read
-    #   tools and the async *_status / *_results / *_stop pollers (a running job already
-    #   captured its fully expanded template at build time) — and `authorize_start`, which
-    #   is the one active *_start that never expands a `$KEY` at all: an authorize run sends
-    #   the CAPTURED bytes under an operator-authored header overlay, so its backend marks
-    #   every buffer verbatim (`Fuzz::Backend.all_verbatim`, see `Authorize::Engine#send_one`).
-    #   A refresh there would re-read the store for a value nothing on that path reads.
+    #   every var another process added since we bound. The same refresh re-reads the
+    #   session-slot list (#1216), so every tool that SENDS under a slot is here too:
+    #   `probe_scan` (its `active: true` sender overlays the active slot) and `authorize_start`
+    #   — which expands no `$KEY` (its backend marks every buffer verbatim, see
+    #   `Authorize::Engine#send_one`) but resolves each identity's `$BIND` values from per-slot
+    #   tables that only a slot reload prunes, so a slot a peer edited or re-created would
+    #   otherwise go out with the discarded identity's captured credential. Deliberately
+    #   EXCLUDES other read tools and the async *_status / *_results / *_stop pollers (a
+    #   running job already captured its fully expanded template at build time).
     #
     # - `read_only` — the `annotations.readOnlyHint` an MCP client reads to decide whether a
     #   call needs the human's approval. DEFAULTS to `!gated`, which is right for the great
