@@ -535,6 +535,19 @@ module Gori
         @bindings.try(&.slots).try(&.reload)
       end
 
+      # The GLOBAL halves of the three libraries that merge settings.json with the project —
+      # saved views (#1215), Match&Replace rules and colour rules/custom colours — re-read before
+      # every tool, as the TUI re-reads them on its peer tick. Every handler that lists, resolves,
+      # validates a name against or mutates one of them reads the class properties this process
+      # loaded at startup, so a peer's `gori run views add --scope global` was an unknown view
+      # here until a restart. A `stat` each when the file has not moved (`reload_section`);
+      # section-only, so nothing else this process holds is clobbered.
+      private def refresh_global_libraries : Nil
+        Settings.reload_saved_views_from_disk
+        Settings.reload_rewriter_from_disk
+        Settings.reload_colormarker_from_disk
+      end
+
       # THE token-grammar reconcile for this surface (#env.syntax). Both bind sites call it — the
       # constructor above and `bind_project` (switch_project / an auto-binding create_project) —
       # because an MCP server binds a project at either, and a re-spelling that only happened at
@@ -1220,6 +1233,7 @@ module Gori
         # dispatch; runs inside this method's rescue, so a store read error becomes an
         # INTERNAL result rather than crashing the loop.
         refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
+        refresh_global_libraries
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
                      "Accepted: #{declared_args[name].to_a.sort.join(", ")}",
