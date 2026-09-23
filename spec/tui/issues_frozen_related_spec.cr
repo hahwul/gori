@@ -83,7 +83,8 @@ describe "the Issues detail's RELATED card with frozen evidence" do
   it "keeps the frozen row when the source is deleted, and its live link goes with the flow" do
     # `delete_flows` cascades the flow's entity_links (a hand-delete is the operator dropping
     # the capture); the retention sweep leaves them to go stale instead — the store spec
-    # pins that path. Either way the copy is untouched: it is the reason the row exists.
+    # pins that path. The copied bytes stay untouched; its source is marked detached so it
+    # cannot rebind to the id a later capture may inherit.
     with_store do |store|
       src = frozen_flow(store, "/x")
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
@@ -96,12 +97,14 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       view.open_detail(store).should be_true
       view.related_rows.size.should eq(1)
       view.related_rows[0].frozen?.should be_true
-      view.selected_evidence.not_nil!.source_id.should eq(src)
+      meta = view.selected_evidence.not_nil!
+      meta.source_id.should eq(-src)
+      meta.source_label.should eq("hist ##{src} (deleted)")
       backend = render(view)
       rel, _ = view.detail_split(Rect.new(0, 0, 100, 22))
       backend.row(rel.y + 1).should contain("FROZEN")
       backend.row(rel.y + 1).should contain("GET acme.test/x")
-      backend.row(rel.y + 1).should contain("hist ##{src}")
+      backend.row(rel.y + 1).should contain("hist ##{src} (deleted)")
     end
   end
 

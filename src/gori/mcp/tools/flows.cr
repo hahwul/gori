@@ -52,15 +52,19 @@ module Gori
             "INVALID_ARGUMENT", field: "since")
         end
         # `flows.id` is a REUSABLE rowid, so a clear (or deleting the newest flow) restarts
-        # numbering — and a forward cursor held from before that is then permanently ahead of
-        # every row. `since: 22` returned `[]` forever while the rows sat right there at ids
-        # 1-3, with no signal an agent could act on: "no new flows" and "your cursor is
-        # stranded" were the same answer. Say which. Cheap enough to check per call (a
-        # rightmost-leaf seek), and it also covers a cursor held across a project switch.
-        if (cur = since_id) && (newest = store.max_flow_id) && cur > newest
-          return err("cursor #{cur} is ahead of the newest flow #{newest} — history was cleared " \
-                     "or the flows were deleted; restart from since=0",
-            "INVALID_ARGUMENT", field: "since")
+        # numbering. A cursor ahead of the new maximum is stranded; during the empty interval
+        # `max_flow_id` is nil and used to skip that diagnosis, letting the caller keep a cursor
+        # that would strand it as soon as low ids came back. Treat that interval as stale too.
+        # `count?` distinguishes an empty table from a transient failure in `max_flow_id`.
+        if (cur = since_id) && cur > 0
+          newest = store.max_flow_id
+          stale = newest ? cur > newest : store.count? == 0
+          if stale
+            newest_label = newest.try(&.to_s) || "none"
+            return err("cursor #{cur} is ahead of the newest flow #{newest_label} — history was cleared " \
+                       "or the flows were deleted; restart from since=0",
+              "INVALID_ARGUMENT", field: "since")
+          end
         end
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)

@@ -222,6 +222,7 @@ module Gori
         j.field "issue_ids", m.issue_ids
         j.field "source_kind", m.source_kind.label
         j.field "source_id", m.source_id
+        j.field "source_detached", true if m.source_detached?
         j.field "frozen_at", m.created_at
         j.field "method", one_line(m.method)
         j.field "url", one_line(m.url)

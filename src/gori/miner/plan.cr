@@ -27,8 +27,11 @@ module Gori::Miner
       # A target was given but no host could be parsed out of it (`detail` = the
       # Env-expanded string that failed, for surfaces that quote it back).
       BadTarget
-      # Nothing to mine: the surface asked for an empty location set, or auto-detection
-      # found none that apply to this request.
+      # Nothing to mine: the surface asked for an empty location set, auto-detection found
+      # none that apply to this request, or EVERY location the surface named is one this
+      # request cannot carry (`detail` = why, per location, from `Detect.inapplicable_reason`;
+      # nil for the other two). Refused before any send: a run with nothing to inject still
+      # sent its baseline and then reported every name as tested and clean (#1203).
       NoLocations
       # The user wordlist could not be read (`detail` = the underlying message).
       Wordlist
@@ -156,9 +159,9 @@ module Gori::Miner
     # The candidate parameter names (built-in list + the user wordlist).
     getter names : Array(String)
 
-    # Resolved locations that `Detect` says do NOT apply to this request — a surface can
-    # only reach these by naming them explicitly, and `gori run mine` warns per location
-    # rather than dropping them silently.
+    # Named locations that `Detect` says do NOT apply to this request, dropped from the run —
+    # a surface can only reach these by naming them explicitly, so each one says so
+    # (`gori run mine` per location on stderr, MCP as `not-applicable` skipped rows).
     getter inapplicable : Array(Location)
 
     def initialize(@engine : Engine, @sender : Fuzz::Sender, @config : Config,
@@ -214,9 +217,19 @@ module Gori::Miner
       detected = Detect.detect(request)
       # Written back into the caller's live Config: the engine reads its `locations`, and
       # `gori run mine` prints them, so the resolved set has to be the one everyone sees.
-      config.locations = options.locations || detected.default
-      raise PlanError.new(PlanError::Reason::NoLocations, "no applicable locations for this request") if config.locations.empty?
-      inapplicable = config.locations - detected.applicable
+      #
+      # A named location this request cannot carry is DROPPED from the run, not kept in it: the
+      # engine could inject nothing there, yet counted its names as tested and clean (#1203).
+      # The plan and the engine both keep the list, so every surface can say what was skipped.
+      # Refused BEFORE the write-back, so a refusal leaves the TUI's live selection as it was.
+      requested = options.locations || detected.default
+      inapplicable = requested - detected.applicable
+      runnable = requested - inapplicable
+      if runnable.empty?
+        why = inapplicable.empty? ? nil : inapplicable.map { |loc| "#{loc.label}: #{Detect.inapplicable_reason(loc, request)}" }.join("; ")
+        raise PlanError.new(PlanError::Reason::NoLocations, "no applicable locations for this request", why)
+      end
+      config.locations = runnable
       if b = options.bucket
         config.locations.each { |loc| config.bucket_size[loc] = b }
       end
@@ -255,7 +268,7 @@ module Gori::Miner
       # the plan holds for `pool`/`blocked` reporting; `HookBackend` delegates those down to it.
       backend = hook_argv ? HookBackend.new(sender, hook_argv,
         Gori::Settings.hook_timeout_secs.seconds, hook_env(origin)) : sender
-      new(engine: Engine.new(request, options.http2?, names, backend, config), sender: sender,
+      new(engine: Engine.new(request, options.http2?, names, backend, config, inapplicable), sender: sender,
         config: config, origin: origin, http2: options.http2?, request: request,
         request_target: request_target, names: names, inapplicable: inapplicable)
     end

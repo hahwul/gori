@@ -26,8 +26,14 @@ module Gori
         sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host,
           Outbound.exclude_url(origin.scheme, origin.host, "/", origin.port))
         return scope_blocked(sc) if sc.blocked?
-        if total && total > FUZZ_MAX_REQUESTS
-          return err("too many requests (#{total} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads", "BUDGET_EXHAUSTED")
+        # Judged on what the run can SEND: a caller `max_requests` is a hard cap, so a capped
+        # draw from a set larger than the ceiling is as bounded as a small set (#1209), and
+        # `budget_warning` below says it will not check every candidate. An unknown total is
+        # still let through — the engine's own cap is never above FUZZ_MAX_REQUESTS.
+        caller_cap = optional_int_arg(h, "max_requests")
+        if (bound = Fuzz.request_bound(total, caller_cap)) && bound > FUZZ_MAX_REQUESTS
+          return err("too many requests (#{bound} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads " \
+                     "or pass max_requests (at most #{FUZZ_MAX_REQUESTS})", "BUDGET_EXHAUSTED")
         end
         @job_seq += 1
         id = "fz_#{@job_seq}"
@@ -55,7 +61,7 @@ module Gori
         fjob.reframe_grpc = bool_arg(h, "reframe_grpc", false)
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
-        warn = budget_warning(total, optional_int_arg(h, "max_requests"))
+        warn = budget_warning(total, caller_cap)
         # A `marks` token that occurs ONLY inside `§…§` that were already there — or flush
         # against one, where a second pair would merge into it — makes no position of its own,
         # and the builder can neither refuse the run (those earlier positions are real) nor
@@ -176,8 +182,8 @@ module Gori
           # Permanent storage is deliberately independent of the selective/capped live cache.
           # A write failure is absorbed by Persistence and never stops outbound traffic.
           fjob.persistence.try(&.append(ev.result))
-          flow_id = maybe_record_fuzz_flow(fjob, ev.result)
-          store_fuzz_result(fjob, ev.result, flow_id)
+          flow_id, flow_ref = maybe_record_fuzz_flow(fjob, ev.result)
+          store_fuzz_result(fjob, ev.result, flow_id, flow_ref)
         when Fuzz::DoneEvent
           apply_fuzz_progress(fjob, ev.progress)
           terminal = fuzz_terminal_status(fjob, ev.progress, ev.stopped)
@@ -207,18 +213,19 @@ module Gori
       # record_history asks (matched → matched results, all → every sent request),
       # returning the new flow id. Bounded by FUZZ_HISTORY_MAX to cap DB growth for
       # `all`. Recording must never break the run — a failure just yields nil.
-      private def maybe_record_fuzz_flow(fjob : FuzzJob, r : Fuzz::Result) : Int64?
-        return nil if fjob.record_history == :none
-        return nil unless fjob.record_history == :all || r.matched?
+      private def maybe_record_fuzz_flow(fjob : FuzzJob, r : Fuzz::Result) : {Int64?, String?}
+        return {nil, nil} if fjob.record_history == :none
+        return {nil, nil} unless fjob.record_history == :all || r.matched?
         req = r.request
-        return nil unless req
+        return {nil, nil} unless req
         if fjob.recorded_flows >= FUZZ_HISTORY_MAX
           fjob.history_truncated = true
-          return nil
+          return {nil, nil}
         end
-        fid = record_fuzz_flow(fjob, req, fjob.origin, fjob.http2?, r)
+        flow_ref = fjob.next_history_source_ref
+        fid = record_fuzz_flow(fjob, req, fjob.origin, fjob.http2?, r, flow_ref)
         fjob.recorded_flows += 1 if fid
-        fid
+        {fid, fid ? flow_ref : nil}
       end
 
       # Reconstruct a History flow (request head/body + response head/body) from a fuzz Result.
@@ -229,11 +236,12 @@ module Gori
       # is how the two would have drifted on the next fix. What stays MCP's is the REPORTING:
       # recording runs per result, so a store that fails every insert must not log once per
       # request — the failure is counted against this job's drain budget instead.
-      private def record_fuzz_flow(fjob : FuzzJob, request : Bytes, origin : Fuzz::Origin, http2 : Bool, r : Fuzz::Result) : Int64?
+      private def record_fuzz_flow(fjob : FuzzJob, request : Bytes, origin : Fuzz::Origin,
+                                   http2 : Bool, r : Fuzz::Result, flow_ref : String) : Int64?
         Fuzz::HistoryRecord.record(store, r,
           scheme: origin.scheme, host: origin.host, port: origin.port, http2: http2,
           source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Mcp,
-          source_ref: fjob.id, websocket: fjob.websocket?) do |ex|
+          source_ref: flow_ref, websocket: fjob.websocket?) do |ex|
           fjob.drain_errors += 1
           Log.warn(exception: ex) { "fuzz history record failed" } if fjob.drain_errors <= DRAIN_LOG_CAP
         end
@@ -301,7 +309,7 @@ module Gori
         fjob.ws_note_reason = p.ws_note_reason
       end
 
-      private def store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result, flow_id : Int64?) : Nil
+      private def store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result, flow_id : Int64?, flow_ref : String?) : Nil
         # A RE-SENT row is stored even when it did not match: its request reached the origin
         # twice, and "stored results are matched-only" would put the duplicate back out of an
         # agent's reach entirely (the CLI at least printed a connections summary). `resent?` (a
@@ -346,6 +354,7 @@ module Gori
         end
         fjob.results << r
         fjob.result_flow_ids << flow_id
+        fjob.result_flow_source_refs << flow_ref
       end
 
       @[Tool("fuzz_status", gated: true, read_only: true)]
@@ -445,6 +454,7 @@ module Gori
         # History flow that IS its evidence.
         rows = fjob.results
         flow_ids = fjob.result_flow_ids
+        flow_refs = fjob.result_flow_source_refs
         matched_only = bool_arg(h, "matched_only", false)
         picked = (0...rows.size).to_a
         picked.select! { |i| rows[i].matched? } if matched_only
@@ -454,9 +464,33 @@ module Gori
         limit = clamp(req_lim, 100, 1000)
         last = offset < picked.size ? Math.min(offset + limit, picked.size) : offset
         returned = last - offset
+        # A live MCP job can outlast a peer's History clear. Its saved bare ids must only be
+        # returned while they still name this exact result's Fuzzer row; a later Import/capture
+        # or another result from the same job may otherwise inherit the id.
+        page_flow_ids = [] of Int64
+        (offset...last).each do |k|
+          flow_ids[picked[k]]?.try { |id| page_flow_ids << id }
+        end
+        current_flow_refs = {} of Int64 => String
+        store.flow_rows(page_flow_ids.uniq).each do |row|
+          if row.source.try(&.fuzzer?) == true
+            row.source_ref.try { |ref| current_flow_refs[row.id] = ref }
+          end
+        end
         Result.new(JSON.build do |j|
           j.object do
-            j.field("results") { j.array { (offset...last).each { |k| Serialize.fuzz_result(j, rows[picked[k]], flow_ids[picked[k]]?) } } }
+            j.field "results" do
+              j.array do
+                (offset...last).each do |k|
+                  flow_id = flow_ids[picked[k]]?
+                  if fid = flow_id
+                    expected_ref = flow_refs[picked[k]]?
+                    flow_id = nil unless expected_ref && current_flow_refs[fid]? == expected_ref
+                  end
+                  Serialize.fuzz_result(j, rows[picked[k]], flow_id)
+                end
+              end
+            end
             j.field "returned", returned
             j.field "offset", offset
             j.field "total_available", picked.size
@@ -644,7 +678,11 @@ module Gori
         in Fuzz::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
         in Fuzz::PlanError::Reason::BadRaceCount
-          "race_count must be at least 2 (a race needs at least two connections in flight; 1 is just a send)"
+          if needed = ex.detail
+            "race_count exceeds max_requests: #{ex.message} — raise max_requests to #{needed} or lower race_count"
+          else
+            "race_count must be at least 2 (a race needs at least two connections in flight; 1 is just a send)"
+          end
         in Fuzz::PlanError::Reason::TlsPreset
           ex.message || "unknown tls_preset"
         end
@@ -1344,7 +1382,7 @@ module Gori
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "max_requests", intprop("caller cap on total requests")
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
-          s.field "record_history", enumprop("record each sent request+response as a History flow for audit/evidence (default none); matched results carry the flow_id in fuzz_results (fetch full detail with get_flow). 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.", RECORD_HISTORY_MODES)
+          s.field "record_history", enumprop("record each sent request+response as a History flow for audit/evidence (default none); matched results carry the flow_id in fuzz_results while that History row still belongs to this job (fetch full detail with get_flow). A clear or delete detaches the result before the id can be reused. 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.", RECORD_HISTORY_MODES)
           s.field "save_results", boolprop("persist EVERY result permanently in this project, including full rendered request, final wire request, response head and response body. Independent of record_history and of the bounded live-job cache. The start/status/results replies include run_id + save_status; inspect it later with list_fuzz_runs/get_fuzz_run.")
           s.field "update_content_length", boolprop("recompute Content-Length after each payload is spliced into the body, AND add one when the request carries a body but declares none (default true). Set FALSE to send your template's framing verbatim — a Content-Length shorter or longer than the body, or Content-Length alongside Transfer-Encoding, is the canonical request-smuggling primitive, and with the default on every payload is silently re-framed to fit before it leaves. Note that false also leaves a body with no Content-Length and no chunked Transfer-Encoding UNFRAMED, which an HTTP/1.1 origin reads as a zero-length body. Mirrors CLI `gori run fuzz --verbatim` and intercept_forward_edit{update_content_length:false}.")
           s.field "reframe_grpc", boolprop("recompute the gRPC 5-byte length prefix after each payload is spliced into a gRPC message body (default FALSE). With the default, a payload that changes the message length leaves the prefix declaring the old one — a real gRPC server rejects those, and fuzz_status reports it as grpc_stale_prefix rather than silently repairing the operator's bytes (a deliberately-wrong length prefix is a standard parser test). Set TRUE for an ordinary unary sweep where framing rejections are noise rather than the test. Applies to unary messages only; a client-streaming body is left alone and still reported. Mirrors CLI `gori run fuzz --reframe-grpc`.")
@@ -1364,7 +1402,7 @@ module Gori
 
         tool j, "fuzz_results",
           "Paged matched results for a fuzz job (status/length/words/lines/duration/" \
-          "extracted, plus a per-result flow_id when the run used record_history). No raw " \
+          "extracted, plus a per-result flow_id when the run used record_history and its History row still exists. No raw " \
           "bodies are inlined: fetch a hit's full request+response with get_flow(flow_id), " \
           "or re-issue it with send_request by substituting the payload into your template." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
