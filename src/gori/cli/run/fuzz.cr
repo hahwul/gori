@@ -4,7 +4,7 @@
 module Gori
   module CLI
     module Run
-      FUZZ_AUTO_CAP = 100_000_i64 # above this (or unknown), require --force
+      FUZZ_AUTO_CAP = 100_000_i64 # above this (or unknown), require --force or --max-requests
 
       # What a `--flow` / `--repeater` / `--request` / stdin source resolved to.
       #
@@ -398,7 +398,7 @@ module Gori
         # job fiber that calibrates, and the TUI's confirm dialog gates `start_run`, which is
         # what hands the engine over and calibrates.
         total = fuzz_preflight(plan.engine, outbound, mode, race, origin.scheme, origin.host, origin.port, force,
-          plan.tls_preset)
+          plan.tls_preset, plan.config.max_requests)
         # One writable project handle serves optional History recording and permanent result
         # storage. Opened only after every preflight/refusal, so a run that never sends does not
         # create an empty saved-run row.
@@ -929,7 +929,7 @@ module Gori
       private def self.fuzz_preflight(engine : Fuzz::Engine, outbound : Gori::Outbound,
                                       mode : Fuzz::Mode, race : Int32?, scheme : String,
                                       host : String, port : Int32, force : Bool,
-                                      tls_preset : String? = nil) : Int64?
+                                      tls_preset : String? = nil, max_requests : Int64? = nil) : Int64?
         total = begin
           engine.total
         rescue ex
@@ -950,9 +950,13 @@ module Gori
         # sends no ClientHello, and printing a preset there would name a hello nobody sent.
         tls = tls_preset && scheme == "https" ? " · tls #{tls_preset}" : ""
         STDERR.puts "fuzzing #{scheme}://#{host}:#{port} · #{total || "?"} requests · #{label}#{tls}"
-        if (total.nil? || total > FUZZ_AUTO_CAP) && !force
+        # Judged on what the run can SEND, not the candidate count: `--max-requests` is a hard
+        # cap, so a capped run of a huge set is as bounded as a small one (#1209).
+        bound = Fuzz.request_bound(total, max_requests)
+        if (bound.nil? || bound > FUZZ_AUTO_CAP) && !force
           outbound.close
-          abort "gori run fuzz: refusing to send #{total ? total.to_s : "an unbounded number of"} requests without --force (narrow positions/payloads or pass --force)"
+          abort "gori run fuzz: refusing to send #{bound ? bound.to_s : "an unbounded number of"} requests without --force " \
+                "(narrow positions/payloads, pass --max-requests N, or pass --force)"
         end
         total
       end
