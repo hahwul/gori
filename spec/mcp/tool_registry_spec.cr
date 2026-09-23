@@ -85,8 +85,12 @@ describe "MCP tool registry" do
     # `run_retest` joins the senders for the same reason they are here: a retest step replays
     # a Repeater session whose bytes may carry a `$KEY`, so the project's env has to be
     # re-read before the run rather than at whatever point this server last looked.
+    # `minimize_repeater` for the same reason: every probe it sends is `Env.expand_wire`d.
+    # `probe_scan` and `authorize_start` because the refresh also re-reads the session-slot
+    # list their sends overlay and resolve bindings against (#1216).
     Gori::MCP::Tools::ENV_REFRESH_TOOLS.should eq(Set{"send_request", "send_websocket", "fuzz_start", "mine_start",
                                                       "sequence_start", "discover_start", "run_retest",
+                                                      "minimize_repeater", "probe_scan", "authorize_start",
                                                       "list_env", "set_env_var", "delete_env_var"})
     Gori::MCP::Tools::UNBOUND_SAFE.should contain("decode")
     Gori::MCP::Tools::UNBOUND_SAFE.should_not contain("list_history")

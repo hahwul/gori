@@ -499,12 +499,13 @@ module Gori
       getter workspace_root : String?
       getter bind_error : String?
 
-      # Re-read the per-project `$KEY` env vars from the store into the process
-      # global (Settings.project_env_vars). Cheap: one settings-row read + a JSON
-      # parse (Env.load_project). No-op when unbound. The parsed Array is assigned
-      # synchronously within `call` (no fiber yield between read and assign), so an
-      # in-flight async job fiber — which already expanded its template at build
-      # time and does not re-read env during the run — never sees a torn value.
+      # Re-read what a send expands or overlays: the per-project `$KEY` env vars from the store
+      # into the process global (Settings.project_env_vars), the global env / User-Agent
+      # sections of settings.json, and the session-slot list. Cheap: a stat, one settings-row
+      # read + a JSON parse (Env.load_project). The project half is a no-op when unbound. The
+      # parsed Array is assigned synchronously within `call` (no fiber yield between read and
+      # assign), so an in-flight async job fiber — which already expanded its template at
+      # build time and does not re-read env during the run — never sees a torn value.
       private def refresh_project_env : Nil
         # A PEER's grammar switch, first. An MCP server reads `Settings.env_syntax` once at startup
         # and lives for hours, so a `gori settings env-syntax` run in the operator's terminal left
@@ -514,12 +515,37 @@ module Gori
         # this project and hands back what it did; `Log` is this surface's only channel, since
         # STDOUT belongs to JSON-RPC.
         Gori::EnvMigration.follow_disk(@store, @db_path, @project_name).each { |line| Log.info { line } }
+        # The GLOBAL halves, after the grammar: settings.json's `$ENV.KEY` table (#1217) and the
+        # `$GEN.USER_AGENT` corpus (#1218). Both are read at every send, and this process loaded
+        # them once at startup — so a token the operator rotated or deleted in another terminal
+        # went on leaving from here. A `stat` when the file has not moved (`reload_section`).
+        Settings.reload_env_from_disk
+        Settings.reload_user_agents_from_disk
         return unless s = @store
         Env.load_project(s)
         # RELOAD the existing table rather than replacing it: an extract rule may have been
         # added by the TUI or `gori run` since the last call, but the VALUES this process
         # observed are its own and must survive the refresh.
         @bindings.try(&.reload)
+        # And the session-slot LIST (#1216), which `Env.overlay_slot` applies at every send.
+        # `Bindings#reload` re-reads the extract rules only, so a slot a peer deleted or edited
+        # kept overlaying its old headers until a slot tool happened to call `fresh_slots`.
+        # `SessionSlots#reload` drops the active pointer when its slot is gone, and is one row
+        # read when nothing moved.
+        @bindings.try(&.slots).try(&.reload)
+      end
+
+      # The GLOBAL halves of the three libraries that merge settings.json with the project —
+      # saved views (#1215), Match&Replace rules and colour rules/custom colours — re-read before
+      # every tool, as the TUI re-reads them on its peer tick. Every handler that lists, resolves,
+      # validates a name against or mutates one of them reads the class properties this process
+      # loaded at startup, so a peer's `gori run views add --scope global` was an unknown view
+      # here until a restart. A `stat` each when the file has not moved (`reload_section`);
+      # section-only, so nothing else this process holds is clobbered.
+      private def refresh_global_libraries : Nil
+        Settings.reload_saved_views_from_disk
+        Settings.reload_rewriter_from_disk
+        Settings.reload_colormarker_from_disk
       end
 
       # THE token-grammar reconcile for this surface (#env.syntax). Both bind sites call it — the
@@ -1207,6 +1233,7 @@ module Gori
         # dispatch; runs inside this method's rescue, so a store read error becomes an
         # INTERNAL result rather than crashing the loop.
         refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
+        refresh_global_libraries
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
                      "Accepted: #{declared_args[name].to_a.sort.join(", ")}",

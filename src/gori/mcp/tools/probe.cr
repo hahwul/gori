@@ -21,7 +21,7 @@ module Gori
       # light-touch active checks that SEND requests — gated on write access AND project scope
       # (the same two-layer `Gori::Outbound` model as the CLI/TUI: an allowlist filter per flow
       # + a per-send Sandbox/exclude hard block inside the sender).
-      @[Tool("probe_scan", read_only: false)]
+      @[Tool("probe_scan", read_only: false, env_refresh: true)]
       private def probe_scan(h) : Result
         filter = probe_scan_filter(h)
         return filter if filter.is_a?(Result)

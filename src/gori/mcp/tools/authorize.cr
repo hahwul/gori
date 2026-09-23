@@ -20,7 +20,7 @@ module Gori
       # of them: it dials a FRESH connection per identity on purpose (`Engine.live`), so a
       # ten-flow selection under three identities is thirty handshakes.
 
-      @[Tool("authorize_start", gated: true, agent_action: true,
+      @[Tool("authorize_start", gated: true, agent_action: true, env_refresh: true,
         requires: ["authorize_status", "authorize_results", "authorize_stop", "ql_reference"])]
       private def authorize_start(h) : Result
         allow_unscoped = bool_arg(h, "allow_unscoped", false)

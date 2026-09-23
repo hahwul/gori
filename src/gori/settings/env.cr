@@ -197,6 +197,38 @@ module Gori::Settings
     self.env_vars = parse_env_vars(e["vars"]?) if e.has_key?("vars")
   end
 
+  # Re-read the global `$KEY` table and prefix from settings.json, leaving every other section
+  # alone — the twin of `reload_saved_views_from_disk` (see `Settings.reload_section`). A
+  # long-lived process (a `gori mcp` server, a TUI) expands `$ENV.KEY` from `env_vars` at every
+  # send, so without this a token a peer rotated or deleted kept going out until a restart.
+  #
+  # The GRAMMAR is not folded here: switching it re-spells the open project, which is
+  # `EnvMigration.follow_disk`'s job — call that first. An absent `vars` / `prefix` is the
+  # empty table / default prefix, because `serialize_env` omits both at those values.
+  # Bumps the highlight revision only when the table actually moved.
+  def self.reload_env_from_disk : Nil
+    reload_section("env", absent: JSON::Any.new({} of String => JSON::Any)) do |node|
+      e = node.as_h
+      pref = e["prefix"]?.try(&.as_s?)
+      prefix = pref.nil? || pref.empty? ? DEFAULT_ENV_PREFIX : pref
+      vars = parse_env_vars(e["vars"]?)
+      next if prefix == env_prefix && vars == env_vars
+      self.env_prefix = prefix
+      self.env_vars = vars
+      Env.bump_highlight_rev
+    end
+  end
+
+  # Re-read the operator's `$GEN.USER_AGENT` corpus (#1154) from settings.json, for the reason
+  # `reload_env_from_disk` gives. An absent section is the built-in list: `serialize_user_agents`
+  # omits an empty one, so that is how a peer's reset to built-in reaches the file.
+  def self.reload_user_agents_from_disk : Nil
+    reload_section("user_agents", absent: JSON::Any.new([] of JSON::Any), object: false) do |node|
+      list = parse_user_agent_list(node)
+      self.user_agents = list unless list == user_agents
+    end
+  end
+
   # Tolerant: a non-array reads as "none" and an unusable entry is dropped — each with a load
   # warning, since a dropped line silently changing which browser gori claims to be is the
   # failure this key exists to avoid. Surrounding whitespace is trimmed (a hand-edited file's

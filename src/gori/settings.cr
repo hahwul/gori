@@ -537,26 +537,39 @@ module Gori
       nil
     end
 
-    protected def self.reload_section(key : String, & : JSON::Any -> Nil) : Nil
+    #
+    # `absent` is what a PARSED file that lacks `key` means, for a section `serialize` omits when
+    # it is empty (`user_agents`, and `vars` under `env`): there the absence IS the peer's answer
+    # — "no global vars", "the built-in list" — and keeping memory would go on sending a deleted
+    # token. Nil (the default) keeps memory, for sections that are always written once touched.
+    # `object: false` admits a section that is not a JSON object (`user_agents` is an array).
+    protected def self.reload_section(key : String, absent : JSON::Any? = nil, object : Bool = true,
+                                      & : JSON::Any -> Nil) : Nil
       sig = file_signature
       return if sig && @@reloaded_stat[key]? == sig # not written since this section was settled
       raw = load_raw
       return unless raw
       here = {path, raw}
-      if @@reloaded_from[key]? == here
-        @@reloaded_stat[key] = sig if sig # same bytes under a new stat (our own save): settle it
-        return
-      end
+      # Same bytes under a new stat (our own save): settle it.
+      return settle_section(key, here, sig) if @@reloaded_from[key]? == here
       root = JSON.parse(raw).as_h?
       return unless root
-      node = root[key]?
-      return unless node && node.as_h?
+      node = root[key]? || absent
+      # A file that parsed and has nothing to fold for this key is settled too, so an install that
+      # never writes the section (no global views, say) costs the next call a `stat`, not a parse.
+      return settle_section(key, here, sig) unless node
+      return if object && !node.as_h?
       yield node
       rebase_section(key)
-      @@reloaded_from[key] = here
-      @@reloaded_stat[key] = sig if sig
+      settle_section(key, here, sig)
     rescue
       nil
+    end
+
+    private def self.settle_section(key : String, here : {String, String},
+                                    sig : {String, Time, Int64}?) : Nil
+      @@reloaded_from[key] = here
+      @@reloaded_stat[key] = sig if sig
     end
 
     # Forget what `reload_section` last folded, so the next call re-reads whatever the file says.
