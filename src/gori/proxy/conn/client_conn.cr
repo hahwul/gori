@@ -3194,6 +3194,7 @@ module Gori::Proxy
     # to the upstream request means the origin closes, even if the client's request didn't.
     private def origin_keep_alive?(sent_req : Codec::RawRequest, resp : Codec::RawResponse,
                                    resp_framing : Codec::BodyFraming) : Bool
+      return false if resp.malformed?
       return false if resp_framing.close_delimited?
       return false if sent_req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")

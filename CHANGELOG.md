@@ -5,6 +5,7 @@
 - MCP: `list_history` flags stale `since` cursors even when History is empty, so clients can reset after a clear (#1199)
 - TUI: History refreshes path and colour data after a peer clears or deletes flows, including when returning to the tab (#1202)
 - History: deleted flows detach retest and frozen-evidence links, and MCP fuzz results omit stale flow IDs before reuse (#1208, #1212)
+- Proxy: malformed response status lines use explicit body framing and retire the origin connection (#1207)
 - Issues: the SARIF export keeps each `Set-Cookie` field separate instead of comma-joining cookies into one fabricated value, joins repeated `Cookie` fields with `; `, and writes credential header values as `[REDACTED]` unless `gori run issues --include-sensitive` asks for them (#1190, #1191)
 - Import: generated Insomnia, Postman, and OpenAPI query parameters now stay before URL fragments (#1184)
 - CLI: piped decoder and minimized request output stay byte-exact, while forged cookies and encoded JWTs retain a trailing newline for text pipelines (#1185)
