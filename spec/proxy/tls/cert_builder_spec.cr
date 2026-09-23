@@ -87,14 +87,14 @@ end
 # #1168: Python 3.13+ turns on X509_V_FLAG_X509_STRICT in ssl.create_default_context(), which
 # rejects a leaf without an AKI and a CA without an SKI + keyUsage. gori minted neither.
 describe Gori::Proxy::Tls::CertBuilder do
-  it "gives the root an SKI, a matching AKI and a critical CA keyUsage" do
+  it "gives the root an SKI, a matching AKI and a critical keyUsage" do
     with_tmp_dir do |dir|
       root, _ = Gori::Proxy::Tls::CertBuilder.build_root("gori test CA")
       text = ext_text(root, dir, "subjectKeyIdentifier,authorityKeyIdentifier,keyUsage")
       ski = key_id(text, "Subject Key Identifier")
       ski.split(':').size.should eq(20) # SHA-1, RFC 5280 §4.2.1.2 method (1)
       key_id(text, "Authority Key Identifier").should eq(ski)
-      text.should match(/Key Usage: critical\s*\n\s*Certificate Sign, CRL Sign/)
+      text.should match(/Key Usage: critical\s*\n\s*Digital Signature, Certificate Sign, CRL Sign/)
     end
   end
 
@@ -109,6 +109,41 @@ describe Gori::Proxy::Tls::CertBuilder do
       text.should match(/Key Usage: critical\s*\n\s*Digital Signature/)
       text.should match(/Extended Key Usage:\s*\n\s*TLS Web Server Authentication/)
     end
+  end
+
+  # A root's keyUsage must not stop it serving as a self-signed end-entity certificate, which
+  # is what it was before #1168 gave it one (no keyUsage allows every usage): an ECDSA server
+  # cert on TLS 1.2 and a TLS client cert both need digitalSignature.
+  it "leaves the root usable as a self-signed server and client certificate" do
+    cert, key = Gori::Proxy::Tls::CertBuilder.build_root("origin.test")
+    server_ctx = Gori::Proxy::Tls::ContextFactory.server_context(cert, key, advertise_h2: false)
+    server_ctx.verify_mode = OpenSSL::SSL::VerifyMode::PEER
+    store = LibSSL.ssl_ctx_get_cert_store(server_ctx.to_unsafe)
+    LibCrypto.x509_store_add_cert(store, cert.handle) # trusts the same cert presented as client
+    client_ctx = OpenSSL::SSL::Context::Client.insecure
+    client_ctx.add_options(OpenSSL::SSL::Options::NO_TLS_V1_3) # TLS 1.2: the ECDSA usage check
+    LibSSL.ssl_ctx_use_certificate(client_ctx.to_unsafe, cert.handle)
+    LibSSL.ssl_ctx_use_privatekey(client_ctx.to_unsafe, key.handle)
+
+    tcp_server = TCPServer.new("127.0.0.1", 0)
+    port = tcp_server.local_address.port
+    seen = Channel(String).new(2)
+    spawn do
+      ssl = OpenSSL::SSL::Socket::Server.new(tcp_server.accept, server_ctx, sync_close: true)
+      seen.send(ssl.peer_certificate ? "client cert accepted" : "no client cert")
+      ssl.close
+    rescue ex
+      seen.send("server-error: #{ex.message}")
+    end
+    begin
+      ssl = OpenSSL::SSL::Socket::Client.new(TCPSocket.new("127.0.0.1", port), context: client_ctx, sync_close: true)
+      ssl.tls_version.should eq("TLSv1.2")
+      ssl.close rescue nil
+    rescue ex
+      seen.send("client-error: #{ex.message}")
+    end
+    seen.receive.should eq("client cert accepted")
+    tcp_server.close
   end
 
   # A CA already on disk is not re-issued, so the leaf's AKI must match THAT key. Without an

@@ -55,7 +55,11 @@ module Gori::Proxy::Tls
 
         add_ext(x, NID_BASIC_CONSTR, is_ca ? "critical,CA:TRUE" : "critical,CA:FALSE")
         if is_ca
-          add_ext(x, NID_KEY_USAGE, "critical,keyCertSign,cRLSign")
+          # keyCertSign + cRLSign are what a strict verifier wants of a CA; digitalSignature
+          # keeps the root usable as a self-signed end-entity cert, as it was before it had any
+          # keyUsage (OpenSSL refuses an ECDSA cert without it as a TLS 1.2 server or a client
+          # cert). RFC 5280 permits it on a CA, and Go's `generate_cert -ca` sets it too.
+          add_ext(x, NID_KEY_USAGE, "critical,digitalSignature,keyCertSign,cRLSign")
         else
           # Leaf keys are always EC (KeyPair.generate_ec), which signs the handshake and
           # never enciphers a key, so digitalSignature is the whole of it.
