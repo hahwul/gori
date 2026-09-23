@@ -33,6 +33,7 @@
 - TLS: gori's root CA and the certificates it mints carry key identifiers and key usage, so Python 3.13+ and other strict clients accept them — a root minted by an older gori still needs `gori ca regenerate`, which `gori ca` now points out (#1168)
 - Discover: a `<meta http-equiv="refresh">` is followed whatever its attribute order and when its URL is quoted and relative (`content="0; url='next'"`) (#1182)
 - Miner: JSON probes add their candidate keys to the captured body instead of re-serializing it, so duplicate members, number spellings and escapes reach the target as captured; the active scanner's JSON injection does the same, and a number past 64 bits no longer hides a body's JSON parameters (#1183)
+- OAST: resuming a saved session polls with the provider it was started with, even when two saved providers share an endpoint with different tokens (#1192)
 
 ## v0.7.1
 

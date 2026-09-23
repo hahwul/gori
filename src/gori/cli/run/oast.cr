@@ -692,6 +692,7 @@ module Gori
         if bound.is_a?(Oast::Sessions::Problem)
           abort "gori run oast #{verb}: #{Oast::Sessions.message_for(bound, id)}"
         end
+        Oast::Sessions.ambiguity_note(bound, id).try { |note| STDERR.puts "gori run oast #{verb}: note — #{note}" }
         bound
       end
 
@@ -933,8 +934,11 @@ module Gori
         # prints a notice saying exactly that).
         session_row = 0_i64
         if store
+          # provider_key "": registered with no saved provider, so no saved provider that merely
+          # shares this endpoint may lend a resume its token (#1192).
           session_row = store.insert_oast_session(nil, kind.label, session.server_url,
-            session.correlation_id, session.secret, session.private_key_pem, session.token)
+            session.correlation_id, session.secret, session.private_key_pem, session.token,
+            provider_key: Oast::Sessions.recorded_key(nil))
           if session_row == 0
             store.close
             STDERR.puts "gori run oast: --save could not write the session (project busy or unwritable)"

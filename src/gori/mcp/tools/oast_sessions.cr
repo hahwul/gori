@@ -95,7 +95,8 @@ module Gori
         store.touch_oast_session(row)
         Result.new({session_id: sid, store_session_id: row, provider: bound.session.kind.label,
                     payload_url: bound.provider.generate_payload(bound.session),
-                    hits: store.oast_callback_count(row), resumed: true}.to_json)
+                    hits: store.oast_callback_count(row), resumed: true,
+                    provider_note: Oast::Sessions.ambiguity_note(bound, row)}.to_json)
       end
 
       # Deregister the session's SERVER-side state. The row and every callback it collected
@@ -133,7 +134,8 @@ module Gori
         Result.new({released:       row,
                     callbacks_kept: callbacks,
                     deregistered:   outcome.released?,
-                    note:           Oast::Sessions.release_message(outcome, bound, row, callbacks)}.to_json)
+                    note:           Oast::Sessions.release_message(outcome, bound, row, callbacks),
+                    provider_note:  Oast::Sessions.ambiguity_note(bound, row)}.to_json)
       end
 
       # The `oast_sessions` row id an argument names: `7`, or the `#7` the TUI and

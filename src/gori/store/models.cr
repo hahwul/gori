@@ -1609,9 +1609,12 @@ module Gori
       getter private_key_pem : String?
       getter token : String?
       getter last_poll_at : Int64?
+      # The GLOBAL provider it was registered with (`g_<id>`), "" for none, nil when not
+      # recorded — see schema V29.
+      getter provider_key : String?
 
       def initialize(@id, @created_at, @provider_id, @kind, @server_url, @correlation_id,
-                     @secret, @private_key_pem, @token, @last_poll_at)
+                     @secret, @private_key_pem, @token, @last_poll_at, @provider_key = nil)
       end
     end
 
