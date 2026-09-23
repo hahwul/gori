@@ -61,7 +61,12 @@ module Gori
 
         lines_a = compare_lines(detail_a, pane)
         lines_b = compare_lines(detail_b, pane)
-        truncated = Repeater::Diff.truncated?(lines_a, lines_b)
+        # A body the capture cap already cut is a stored PREFIX, so matching prefixes are not
+        # matching bodies — the same rule MCP `compare_flows` applies (`source_truncated`).
+        cut_sides = [] of String
+        cut_sides << "a" if body_cut?(detail_a, pane)
+        cut_sides << "b" if body_cut?(detail_b, pane)
+        line_capped = Repeater::Diff.truncated?(lines_a, lines_b)
         full_diff = Repeater::Diff.lines(lines_a, lines_b)
         change_count = Repeater::Diff.change_count(full_diff)
         folded = if changes_only
@@ -72,8 +77,12 @@ module Gori
                    full_diff.map { |dl| Repeater::Diff::Folded.new(dl, 0) }
                  end
 
-        emit_compare_result(id_a, id_b, pane, folded, change_count, truncated, format,
+        emit_compare_result(id_a, id_b, pane, folded, change_count, line_capped, cut_sides, format,
           Repeater::ExchangeMeta.of(detail_a.row), Repeater::ExchangeMeta.of(detail_b.row))
+      end
+
+      private def self.body_cut?(d : Store::FlowDetail, pane : Symbol) : Bool
+        pane == :request ? d.request_body_truncated? : d.response_body_truncated?
       end
 
       private def self.compare_lines(d : Store::FlowDetail, pane : Symbol) : Array(String)
@@ -86,9 +95,10 @@ module Gori
 
       private def self.emit_compare_result(id_a : Int64, id_b : Int64, pane : Symbol,
                                            diff : Array(Repeater::Diff::Folded), change_count : Int32,
-                                           truncated : Bool, format : Symbol,
+                                           line_capped : Bool, cut_sides : Array(String), format : Symbol,
                                            meta_a : Repeater::ExchangeMeta,
                                            meta_b : Repeater::ExchangeMeta) : Nil
+        truncated = line_capped || !cut_sides.empty?
         if format == :json
           puts(JSON.build do |j|
             j.object do
@@ -96,7 +106,13 @@ module Gori
               j.field "flow_id_b", id_b
               j.field "pane", pane.to_s
               j.field "changed_lines", change_count
+              # `changed_lines: 0` over a cut comparison means "none in what was compared", so
+              # the equality claim is its own field and is never true there (MCP's shape).
+              j.field "identical", change_count == 0 && !truncated
               j.field "truncated", truncated
+              unless cut_sides.empty?
+                j.field "source_truncated" { j.array { cut_sides.each { |side| j.string side } } }
+              end
               j.field "meta" { emit_compare_meta(j, meta_a, meta_b) }
               j.field "diff" do
                 j.array do
@@ -124,9 +140,21 @@ module Gori
             STDERR.puts d
           end
           print_folded_diff(diff)
-          STDERR.puts "(truncated to #{Repeater::Diff::MAX_LINES} lines/side)" if truncated
-          STDERR.puts(change_count == 0 ? "no differences" : "#{change_count} line#{change_count == 1 ? "" : "s"} changed")
+          if line_capped
+            STDERR.puts "(truncated to #{Repeater::Diff::MAX_LINES} lines/side — later lines were not compared)"
+          end
+          unless cut_sides.empty?
+            STDERR.puts "(the capture cap cut the stored #{pane} body of #{cut_sides.map { |side| side == "a" ? "##{id_a}" : "##{id_b}" }.join(" and ")} — only its stored prefix was compared)"
+          end
+          STDERR.puts compare_verdict(change_count, truncated)
         end
+      end
+
+      # The last line of the text form. A cut comparison with no change in what WAS compared
+      # says exactly that, never a bare "no differences" (#1162).
+      def self.compare_verdict(change_count : Int32, truncated : Bool) : String
+        return "#{change_count} line#{change_count == 1 ? "" : "s"} changed" if change_count > 0
+        truncated ? "no differences in the compared part — the rest is unknown" : "no differences"
       end
 
       private def self.emit_compare_meta(j : JSON::Builder, a : Repeater::ExchangeMeta,

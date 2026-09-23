@@ -50,9 +50,11 @@ class Gori::Tui::RepeaterView
     rescue
       nil
     end
+    # The request is one wire blob; split it so its body is projected as a body (#1162).
+    req_head, req_body = req ? Repeater::MessageLines.split_wire(req) : {nil, nil}
     ComparerSlot.from_exchange(
       "repeater", ComparerSlot.method_of(req), @target,
-      req, nil, res.head.empty? ? nil : res.head, res.body,
+      req_head, req_body, res.head.empty? ? nil : res.head, res.body,
       status: res.response.try(&.status), duration_us: res.duration_us, error: res.error)
   end
 

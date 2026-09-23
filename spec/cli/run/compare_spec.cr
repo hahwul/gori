@@ -131,4 +131,23 @@ describe Gori::Repeater::ExchangeMeta do
     m.status_text.should eq("ERR")
     m.errored?.should be_true
   end
+
+  # #1162: a diff cut at MAX_LINES with no change in the compared part printed a bare
+  # "no differences", over lines it never looked at.
+  it "never gives a bare 'no differences' over a truncated comparison" do
+    Gori::CLI::Run.compare_verdict(0, false).should eq("no differences")
+    Gori::CLI::Run.compare_verdict(0, true).should_not eq("no differences")
+    Gori::CLI::Run.compare_verdict(0, true).should contain("unknown")
+    Gori::CLI::Run.compare_verdict(2, true).should eq("2 lines changed")
+  end
+
+  it "reports two same-size binary response bodies as changed" do
+    a = flow_detail("GET / HTTP/1.1\r\n\r\n", response_head: "HTTP/1.1 200 OK\r\n\r\n",
+      response_body: "\0ROLE=user\0\1\2".to_slice)
+    b = flow_detail("GET / HTTP/1.1\r\n\r\n", response_head: "HTTP/1.1 200 OK\r\n\r\n",
+      response_body: "\0ROLE=admn\0\1\2".to_slice)
+    diff = Gori::Repeater::Diff.lines(Gori::CLI::Run.compare_lines_for_spec(a, :response),
+      Gori::CLI::Run.compare_lines_for_spec(b, :response))
+    Gori::Repeater::Diff.change_count(diff).should be > 0
+  end
 end
