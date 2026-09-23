@@ -155,7 +155,7 @@ module Gori
       # predicate this seam exists to have one of, so it is gone.)
       def refusal(bytes : Bytes) : String?
         return refusal_wired(bytes) unless resolve_bindings?
-        refusal_wired(expand_send(bytes))
+        refusal_wired(expand_send(bytes, generation))
       end
 
       # FINAL bytes: the rule itself, asked about the slice the socket gets.
@@ -182,6 +182,12 @@ module Gori
       # two answers agreeing.
       private def resolve_bindings? : Bool
         @expand_bindings && (!@evidence || !@evidence_literals.nil?)
+      end
+
+      # A fresh mint context for one request (or frame) on this sender's dial, so a plain
+      # `$GEN.USER_AGENT` agrees with the TLS preset the handshake presents (#1153).
+      private def generation : Gori::Env::Generation
+        Gori::Env::Generation.for_dial(@host, @scheme, @tls_preset)
       end
 
       # THE send pass, so the gate's prediction (`refusal`) and the bytes the socket gets
@@ -263,7 +269,7 @@ module Gori
       # header overlay are two expansions of ONE outbound request, and a context per pass would
       # put two different ids on the same socket write.
       def wire(bytes : Bytes) : Bytes
-        gen = Gori::Env::Generation.new
+        gen = generation
         bytes = expand_send(bytes, gen) if resolve_bindings?
         Gori::Env.overlay_slot(bytes, gen)
       end
@@ -400,7 +406,8 @@ module Gori
         return messages unless @expand_bindings
         messages.map do |m|
           next m if m.evidence # captured bytes: see `ws_message_refusal`
-          expanded = Gori::Env.expand_bindings(String.new(m.payload), guard_boundary: false).to_slice
+          expanded = Gori::Env.expand_bindings(String.new(m.payload), guard_boundary: false,
+            generation: generation).to_slice
           # `m.shape` rides along. Rebuilding without it silently reset every frame a binding
           # touched back to FIN=1/RSV=0/fresh-mask — the exact shape this round exists to stop
           # being the only one.

@@ -3223,3 +3223,33 @@ alone: storing another endpoint's answer beside the row would show the tab a res
 request it does not hold, and make the next `--diff` compare against the wrong endpoint. The
 same line holds for `--headers-only` / `--max-body` (#1119): they shape what is printed, never
 what is sent, stored or recorded.
+
+### 2026-09-23: a generated User-Agent follows the handshake it rides on, and a header set is not a token
+
+`$GEN.USER_AGENT` (#1112) drew from every browser alike, so with the `chrome` TLS preset most
+sends claimed Firefox or Safari over a Chrome-shaped ClientHello, the mismatch bot management
+keys on first. #1153 narrows the plain name to the family of the preset the dial will really
+use: the send's own override (#844) when it has one, else the destination's `outbound_tls`
+rule, judged on the dialed host exactly as `Upstream.dial_tls_result` judges it. It applies to
+`https`/`wss` only, and `curl` or no preset leaves the whole list. The explicit
+`USER_AGENT_CHROME`/`_FIREFOX`/`_SAFARI` names stay the operator's choice. The narrowing
+never leaves the list in force: with an operator list (#1154) that has none of the preset's
+browser, the plain name keeps drawing from the whole operator list. An engagement may require
+an identifying UA, and the plain name promised the operator's list, not a browser.
+
+The mint happens before the dial, so the send path has to carry the dial to it:
+`Env::Generation.for_dial(host, scheme, tls_preset)`, used by Repeater, Fuzz (and so Authorize,
+Miner, Sequencer and Probe through `Fuzz::Sender`), Discover and Intercept. The failure the
+issue named is a *forgotten* site, which is silent: one leftover `Generation.new` on a send
+path mints a Firefox UA over a Chrome hello and no test notices. So
+`spec/send_seam_generation_spec.cr` sweeps `src/gori` and holds every dial-less construction to
+a named reason and count, and every send-side expansion to a passed context, the same shape
+as the stdin-door sweep. The family is resolved lazily, so a fuzz run that never names the
+token never pays the preset lookup.
+
+`Sec-CH-UA` stays out of `$GEN`. Chromium sends it; Firefox and Safari do not send the header
+at all. A token can change a value but cannot delete the line it sits on, so `sec-ch-ua:
+$GEN.…` is wrong for two of the three families whatever it mints. And its brand list carries
+Chromium's per-major GREASE entry, which gori would have to reproduce exactly rather than
+approximate. If gori grows client hints, they belong to the TLS preset, as a header set the
+preset owns and emits only when it is a Chromium one.

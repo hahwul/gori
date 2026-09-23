@@ -226,8 +226,9 @@ module Gori::Discover
     def request_head(scheme : String, host : String, port : Int32, target : String) : Bytes
       wire = build_get(scheme, host, port, target, binding_headers)
       # ONE generation across both passes (see `Repeater::Sender#wire`): a `$GEN.UUID` in a
-      # `--header` and one in the active slot's overlay are the same fetch.
-      gen = Gori::Env::Generation.new
+      # `--header` and one in the active slot's overlay are the same fetch. Discover has no
+      # per-send TLS preset, so the destination rule decides the UA family (#1153).
+      gen = Gori::Env::Generation.for_dial(host, scheme)
       wire = Gori::Env.expand_bindings(wire, resolve: Gori::Env::Owns::Gen, generation: gen) if @header_generators
       Gori::Env.overlay_slot(wire, gen)
     end

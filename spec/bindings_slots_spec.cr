@@ -663,9 +663,9 @@ describe "Bindings × session slots" do
         slots.activate(nil)
 
         with_layer(b) do
-          admin = Gori::Authorize.resolve(slots.find("admin").not_nil!)
+          admin = Gori::Authorize.resolve(slots.find("admin").not_nil!, Gori::Env::Generation.new)
           admin.set_headers.should eq([{"Cookie", "sid=ADMINTOKEN"}])
-          user = Gori::Authorize.resolve(slots.find("user").not_nil!)
+          user = Gori::Authorize.resolve(slots.find("user").not_nil!, Gori::Env::Generation.new)
           # Nothing bound for `user`: the literal goes out and THAT is what must be said, or
           # the 401 it draws reads as access control working.
           user.set_headers.should eq([{"Cookie", "sid=$SESSION"}])

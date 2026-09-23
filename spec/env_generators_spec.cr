@@ -254,7 +254,7 @@ describe "Gori::Env generators" do
     with_generators do
       id = Gori::Authorize::Identity.new("admin",
         set_headers: [{"X-A", "$GEN.UUID"}, {"X-B", "$GEN.UUID"}])
-      resolved = Gori::Authorize.resolve_without_report(id)
+      resolved = Gori::Authorize.resolve_without_report(id, Gori::Env::Generation.new)
       ids = resolved.set_headers.map(&.[1])
       ids.map(&.matches?(UUID_RE)).should eq([true, true])
       ids.uniq.size.should eq(1)

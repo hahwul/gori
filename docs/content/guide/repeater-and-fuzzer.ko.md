@@ -69,12 +69,12 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 | `$GEN.TIMESTAMP` | Unix 초 |
 | `$GEN.TIMESTAMP_MS` | Unix 밀리초 |
 | `$GEN.ISO8601` | 밀리초를 포함한 현재 UTC 시각의 RFC 3339 표현 |
-| `$GEN.USER_AGENT` | gori에 내장된 목록에서 무작위로 고른 실제 데스크톱 브라우저 User-Agent(Chrome, Edge, Firefox, Safari)입니다. 연속한 두 요청이 같은 값을 받을 수 있으며, 공백이 들어 있으므로 요청 줄이 아니라 헤더에 넣어야 합니다 |
+| `$GEN.USER_AGENT` | gori에 내장된 목록에서 무작위로 고른 실제 데스크톱 브라우저 User-Agent(Chrome, Edge, Firefox, Safari)입니다. 연속한 두 요청이 같은 값을 받을 수 있습니다. `https`/`wss` 요청의 TLS 프리셋(송신 자체의 것, 또는 목적지의 `outbound_tls` 규칙)이 `chrome`, `firefox`, `safari`면 그 브라우저의 값만 골라 헤더가 핸드셰이크와 어긋나지 않게 합니다. 공백이 들어 있으므로 요청 줄이 아니라 헤더에 넣어야 합니다 |
 | `$GEN.USER_AGENT_CHROME` | 위와 같되 Chrome·Edge로 좁힌 값으로, `chrome` TLS 프리셋과 짝을 이룹니다 |
 | `$GEN.USER_AGENT_FIREFOX` | 위와 같되 Firefox로 좁힌 값으로, `firefox` TLS 프리셋과 짝을 이룹니다 |
 | `$GEN.USER_AGENT_SAFARI` | 위와 같되 Safari로 좁힌 값으로, `safari` TLS 프리셋과 짝을 이룹니다 |
 
-직접 만든 목록에서 고르게 하려면 **Settings → Editor & Keys → User-Agents**(또는 `Ctrl-P` → **Settings: User-Agents**)를 열어 한 줄에 하나씩 User-Agent를 입력하거나, `gori settings user-agents --set FILE`을 실행합니다(`-`는 stdin에서 읽고, `--reset`은 내장 목록으로 되돌립니다). 직접 만든 목록은 내장 목록을 대체합니다. 해당 계열의 줄이 목록에 없는 패밀리 이름(예: Safari 줄이 없을 때의 `$GEN.USER_AGENT_SAFARI`)은 내장 패밀리를 그대로 씁니다. `gori settings user-agents`는 현재 쓰는 목록을 출력하고, MCP `list_env`는 그것이 직접 만든 목록인지 알려 줍니다.
+직접 만든 목록에서 고르게 하려면 **Settings → Editor & Keys → User-Agents**(또는 `Ctrl-P` → **Settings: User-Agents**)를 열어 한 줄에 하나씩 User-Agent를 입력하거나, `gori settings user-agents --set FILE`을 실행합니다(`-`는 stdin에서 읽고, `--reset`은 내장 목록으로 되돌립니다). 직접 만든 목록은 내장 목록을 대체합니다. 해당 계열의 줄이 목록에 없는 패밀리 이름(예: Safari 줄이 없을 때의 `$GEN.USER_AGENT_SAFARI`)은 내장 패밀리를 그대로 씁니다. 브라우저 TLS 프리셋 아래에서 이름 그대로의 `$GEN.USER_AGENT`는 목록에서 그 브라우저의 줄을 쓰고, 그런 줄이 없으면 목록 전체를 씁니다. `gori settings user-agents`는 현재 쓰는 목록을 출력하고, MCP `list_env`는 그것이 직접 만든 목록인지 알려 줍니다.
 
 한 요청 안에서 같은 생성기 이름을 여러 번 쓰면 같은 값이 들어갑니다. 다음 요청에서는 다시 생성합니다. 생성기는 최종 전송 지점에서 운영자가 작성한 요청 텍스트에만 적용되며, 캡처 증거와 Fuzzer 페이로드 바이트는 리터럴로 유지됩니다.
 

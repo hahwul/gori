@@ -701,7 +701,9 @@ module Gori
     # so a failure forwards what the operator decided on.
     private def overlay_slot(item : Item, bytes : Bytes) : Bytes
       return bytes unless item.kind.request?
-      overlaid = Gori::Env.overlay_slot(bytes)
+      # The slot's `$GEN` values are minted for this item's destination, whose TLS rule the
+      # proxy's upstream dial applies (#1153).
+      overlaid = Gori::Env.overlay_slot(bytes, Gori::Env::Generation.for_dial(item.host, item.scheme))
       # Pointer identity, not `==`: `Env.overlay_slot` returns the ARGUMENT when no slot is
       # active, and a content compare would walk every byte of every forwarded message to
       # learn what the pointer already says (P6).

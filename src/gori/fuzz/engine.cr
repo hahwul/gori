@@ -313,6 +313,12 @@ module Gori::Fuzz
     # the one surface that remembered.
     getter sni : String?
 
+    # A fresh mint context for one request (or frame) on this sender's dial, so a plain
+    # `$GEN.USER_AGENT` agrees with the TLS preset the handshake presents (#1153).
+    private def generation : Gori::Env::Generation
+      Gori::Env::Generation.for_dial(@origin.host, @origin.scheme, @tls_preset)
+    end
+
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
@@ -380,7 +386,7 @@ module Gori::Fuzz
       # ONE generation across the two passes below (see `Repeater::Sender#wire`): the request's
       # own `$GEN.UUID` and one in the active slot's header overlay are the same outbound
       # request, so they resolve to the same value.
-      gen = Gori::Env::Generation.new
+      gen = generation
       bytes = Gori::Env.expand_bindings(bytes, verbatim, generation: gen)
       # The ACTIVE SESSION SLOT's header overlay, after the `$NAME` pass and BEFORE the scope
       # gate below — the gate keys on the target actually sent, and an overlay is header-only
@@ -437,7 +443,7 @@ module Gori::Fuzz
       # The FRAMES carry provenance individually (`WsFrame#evidence`) because the two
       # populations mix in one script — a `--message` override sits beside seeded rows.
       verbatim = Backend.all_verbatim(handshake) if @evidence
-      ws_gen = Gori::Env::Generation.new
+      ws_gen = generation
       wire = Gori::Env.expand_bindings(handshake, verbatim, generation: ws_gen)
       # The handshake takes the session-slot overlay and the frames do not. It IS an HTTP
       # request head — the session a WebSocket rides is chosen there — while a frame has no
@@ -450,7 +456,7 @@ module Gori::Fuzz
         return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}
       end
       msgs = frames.map do |f|
-        payload = f.evidence ? f.payload : Gori::Env.expand_bindings_frame(f.payload, f.payload_spans)
+        payload = f.evidence ? f.payload : Gori::Env.expand_bindings_frame(f.payload, f.payload_spans, generation: generation)
         # `f.shape` rides along. Rebuilding without it silently resets every frame a binding
         # touched back to FIN=1 / RSV=0 / fresh-mask — the one defect
         # `Repeater::Sender#expand_messages` names in its own comment.
@@ -559,7 +565,7 @@ module Gori::Fuzz
       # mints a new value per pass, so the gate judged a target the socket never got. One pass
       # per member, and the verdict is taken on the bytes the pipeline will write.
       reqs = requests.map do |b|
-        gen = Gori::Env::Generation.new
+        gen = generation
         wired = @evidence ? b : Gori::Env.expand_bindings(b, generation: gen)
         Gori::Env.overlay_slot(wired, gen)
       end
@@ -594,7 +600,7 @@ module Gori::Fuzz
 
       bytes = jobs[0].bytes
       verbatim = @evidence ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
-      race_gen = Gori::Env::Generation.new
+      race_gen = generation
       expanded = Gori::Env.overlay_slot(Gori::Env.expand_bindings(bytes, verbatim, generation: race_gen), race_gen)
       # Nothing to hold back — degrade rather than slice a negative/empty tail. Never hit by a
       # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
