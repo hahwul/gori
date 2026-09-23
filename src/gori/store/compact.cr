@@ -270,6 +270,7 @@ class Gori::Store
     cutoff -= 1
     return if cutoff <= 0
     conn.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
+    conn.exec("DELETE FROM capture_tunnel_completions WHERE flow_id <= ?", cutoff)
     conn.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
     conn.exec("DELETE FROM flows WHERE id <= ?", cutoff)
     # Reap a connection's raw log only once it is neither referenced by a surviving

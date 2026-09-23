@@ -1069,32 +1069,33 @@ module Gori::Proxy
         # otherwise tear a quiet tunnel down). Keepalive (both legs) reaps a truly dead peer.
         SocketTuning.relax(@io)
         SocketTuning.relax(upstream)
-        if websocket_upgrade?(resp)
-          # `@rewriter` carries Match & Replace (#500 step 1) and `@interceptor` the message
-          # hold (step 2) into the tunnel; `ctx` is the 101 handshake's identity, which both
-          # scope on — a WebSocket message has no authority, scheme or path of its own. The
-          # relay asks each lens ONCE, here, whether it can reach this host; a socket that
-          # answers "no" to both keeps the byte-exact pump (P6/P7).
-          # `target` here is what `Interceptor#intercepts_ws?` scopes every message on, so it
-          # takes the same gate-side recovery as the two HTTP gates (see `gate_target`) —
-          # otherwise a handshake with a malformed request line hands the WS message gate an
-          # empty path and every frame on that socket escapes a path-scoped rule.
-          ws_ctx = WS::Context.new(host: host, port: port, scheme: scheme,
-            method: sent_req.method, target: Codec::Http1.gate_target(sent_req))
-          # frames until close
-          WS::Relay.run(@io, upstream, flow_id, @sink, @rewriter, ws_ctx, @interceptor, notice: ws_notice)
-        else
-          # A 101 that is NOT a WebSocket — kubectl exec/attach/port-forward speaks
-          # `Upgrade: SPDY/3.1` and the Docker Engine API `Upgrade: tcp` — is relayed
-          # byte-exact and deliberately NOT decoded (see `Pump`). That decision used to be
-          # invisible: the WebSocket branch above carries `notice:` and this one said nothing
-          # anywhere, so a `101 / complete / empty transcript` flow could not be told from one
-          # gori simply failed to capture (#736). Recorded AFTER the tunnel returns, because
-          # `blind_tunnel` only comes back when both directions are closed and the byte counts
-          # are what make this a report rather than a guess. Exactly one per connection —
-          # this branch `return false`s immediately below, so there is nothing to rate-limit.
-          moved = Pump.blind_tunnel(@io, upstream) # non-WS upgrade: raw pipe until close
-          record_opaque_upgrade(flow_id, resp, req, host, sent_req.target, moved)
+        begin
+          if websocket_upgrade?(resp)
+            # `@rewriter` carries Match & Replace (#500 step 1) and `@interceptor` the message
+            # hold (step 2) into the tunnel; `ctx` is the 101 handshake's identity, which both
+            # scope on — a WebSocket message has no authority, scheme or path of its own. The
+            # relay asks each lens ONCE, here, whether it can reach this host; a socket that
+            # answers "no" to both keeps the byte-exact pump (P6/P7).
+            # `target` here is what `Interceptor#intercepts_ws?` scopes every message on, so it
+            # takes the same gate-side recovery as the two HTTP gates (see `gate_target`) —
+            # otherwise a handshake with a malformed request line hands the WS message gate an
+            # empty path and every frame on that socket escapes a path-scoped rule.
+            ws_ctx = WS::Context.new(host: host, port: port, scheme: scheme,
+              method: sent_req.method, target: Codec::Http1.gate_target(sent_req))
+            # frames until close
+            WS::Relay.run(@io, upstream, flow_id, @sink, @rewriter, ws_ctx, @interceptor, notice: ws_notice)
+          else
+            # A 101 that is NOT a WebSocket — kubectl exec/attach/port-forward speaks
+            # `Upgrade: SPDY/3.1` and the Docker Engine API `Upgrade: tcp` — is relayed
+            # byte-exact and deliberately NOT decoded (see `Pump`). Record its notice only
+            # after the tunnel returns, when its direction byte counts are known (#736).
+            moved = Pump.blind_tunnel(@io, upstream) # non-WS upgrade: raw pipe until close
+            record_opaque_upgrade(flow_id, resp, req, host, sent_req.target, moved)
+          end
+        ensure
+          # A 101 is printed/countable only when its tunnel ends. WebSocket frame writes above
+          # are synchronous, so this follows the complete captured transcript.
+          @sink.on_tunnel_complete(flow_id)
         end
         return false
       end

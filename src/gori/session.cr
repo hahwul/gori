@@ -75,12 +75,14 @@ module Gori
 
     def self.open(config : Config, ca : Proxy::Tls::CertAuthority,
                   registry : Verb::Registry, project : Project,
-                  bind_fallback : Bool = false) : Session
+                  bind_fallback : Bool = false,
+                  track_tunnel_completions : Bool = false) : Session
       events = Channel(Store::FlowEvent).new(1024)
       probe_events = Channel(Store::FlowEvent).new(256)
       authorize_events = Channel(Store::FlowEvent).new(256)
       store = Store.open(project.db_path, events, probe_events, Settings.retention_flows,
-        authorize_events: authorize_events)
+        authorize_events: authorize_events,
+        track_tunnel_completions: track_tunnel_completions)
       probe = nil.as(Probe::Analyzer?)
       begin
         # THE token-grammar reconcile, and it runs FIRST — before the rule sets, the slots, the
@@ -168,6 +170,7 @@ module Gori
             lock = CaptureLock.try_at(project.capture_lock_path)
             if lock
               begin
+                store.reset_capture_tunnel_completions
                 proxy.start(fallback: bind_fallback)
                 # Each extra listener binds independently: a transparent listener on a
                 # privileged port failing must not stop capture on the primary, but the failure

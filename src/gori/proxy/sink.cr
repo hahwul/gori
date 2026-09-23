@@ -19,6 +19,17 @@ module Gori::Proxy
     abstract def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                                shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
 
+    # Called after an upgraded tunnel closes and its captured transcript has been written.
+    # The default keeps sinks that only record HTTP flows source-compatible.
+    def on_tunnel_complete(flow_id : Int64) : Nil
+    end
+
+    # H2 writes its completion ledger row atomically with the final response before this
+    # callback. Test sinks inherit the ordinary callback; StoreSink only publishes a wakeup.
+    def on_tunnel_complete_recorded(flow_id : Int64) : Nil
+      on_tunnel_complete(flow_id)
+    end
+
     # --- HTTP/2 (raw-frame fidelity) -----------------------------------------
     # Default no-ops so non-h2 sinks (and test doubles) need not implement them.
 
@@ -51,6 +62,14 @@ module Gori::Proxy
                       shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
       return if flow_id <= 0
       @store.insert_ws_message(flow_id, direction, opcode, payload, shape: shape)
+    end
+
+    def on_tunnel_complete(flow_id : Int64) : Nil
+      @store.notify_tunnel_complete(flow_id)
+    end
+
+    def on_tunnel_complete_recorded(flow_id : Int64) : Nil
+      @store.publish_tunnel_complete(flow_id)
     end
 
     def on_h2_open(host : String, port : Int32, alpn : String) : Int64

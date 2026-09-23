@@ -1,8 +1,9 @@
 require "../spec_helper"
 
-private def with_store(events : Channel(Gori::Store::FlowEvent)? = nil, &)
+private def with_store(events : Channel(Gori::Store::FlowEvent)? = nil, *,
+                       track_tunnel_completions : Bool = false, &)
   path = File.tempname("gori-test", ".db")
-  store = Gori::Store.open(path, events)
+  store = Gori::Store.open(path, events, track_tunnel_completions: track_tunnel_completions)
   begin
     yield store
   ensure
@@ -381,6 +382,88 @@ describe Gori::Store do
       updated = events.receive
       updated.kind.should eq(:updated)
       updated.id.should eq(id)
+    end
+  end
+
+  it "publishes tunnel completion after the captured WebSocket transcript" do
+    events = Channel(Gori::Store::FlowEvent).new(16)
+    with_store(events) do |store|
+      id = store.insert_flow(sample_request)
+      events.receive.kind.should eq(:inserted)
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 101,
+        head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice))
+      events.receive.kind.should eq(:updated)
+      store.insert_ws_message(id, "out", 1, "payload".to_slice)
+      events.receive.kind.should eq(:updated)
+
+      store.notify_tunnel_complete(id)
+      completed = events.receive
+      completed.id.should eq(id)
+      completed.kind.should eq(:tunnel_completed)
+    end
+  end
+
+  it "records an HTTP/2 tunnel completion with its final response update" do
+    events = Channel(Gori::Store::FlowEvent).new(0)
+    with_store(events, track_tunnel_completions: true) do |store|
+      id = store.insert_flow(sample_request(method: "CONNECT", target: "/ws"))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/2 200".to_slice,
+        tunnel_completed: true))
+
+      store.capture_tunnel_completion_page(0_i64, 1).map(&.flow_id).should eq([id])
+    end
+  end
+
+  it "pages durable tunnel completions when the live event channel drops them" do
+    events = Channel(Gori::Store::FlowEvent).new(0)
+    with_store(events, track_tunnel_completions: true) do |store|
+      ids = [] of Int64
+      3.times do |i|
+        id = store.insert_flow(sample_request(target: "/ws-#{i}"))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 101, head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice))
+        store.notify_tunnel_complete(id)
+        ids << id
+      end
+
+      # A synchronous Store barrier waits for the fire-and-forget completion rows to commit.
+      store.flush
+      first = store.capture_tunnel_completion_page(0_i64, 2)
+      first.map(&.flow_id).should eq([ids[0], ids[1]])
+      store.acknowledge_tunnel_completions(first.last.sequence)
+
+      second = store.capture_tunnel_completion_page(first.last.sequence, 2)
+      second.map(&.flow_id).should eq([ids.last])
+      store.acknowledge_tunnel_completions(second.last.sequence)
+      store.capture_tunnel_completion_page(second.last.sequence, 2).should be_empty
+    end
+  end
+
+  it "removes durable tunnel completions when their flow is deleted" do
+    events = Channel(Gori::Store::FlowEvent).new(0)
+    with_store(events, track_tunnel_completions: true) do |store|
+      id = store.insert_flow(sample_request)
+      store.notify_tunnel_complete(id)
+      store.flush
+      store.capture_tunnel_completion_page(0_i64, 1).map(&.flow_id).should eq([id])
+
+      store.delete_flow(id).should be_true
+      store.capture_tunnel_completion_page(0_i64, 1).should be_empty
+    end
+  end
+
+  it "resets the capture completion ledger without clearing flow history" do
+    events = Channel(Gori::Store::FlowEvent).new(0)
+    with_store(events, track_tunnel_completions: true) do |store|
+      id = store.insert_flow(sample_request)
+      store.notify_tunnel_complete(id)
+      store.flush
+
+      store.reset_capture_tunnel_completions
+      store.capture_tunnel_completion_page(0_i64, 1).should be_empty
+      store.flow_row(id).should_not be_nil
     end
   end
 

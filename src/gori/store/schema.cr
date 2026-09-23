@@ -1407,8 +1407,23 @@ module Gori
         "ALTER TABLE oast_sessions ADD COLUMN provider_key TEXT",
       ]
 
+      # A headless capture can be slower to print than the proxy is to close tunnels. Keep
+      # completion notices in SQLite so the proxy never accumulates an unbounded in-memory
+      # queue and the printer can recover notices after its bounded FlowEvent channel drops.
+      # Rows are acknowledged by the printer and stale rows are cleared when a new capture run
+      # starts; flow deletions also remove their ledger entries in the same write transaction.
+      V30 = [
+        <<-SQL,
+          CREATE TABLE capture_tunnel_completions (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            flow_id INTEGER NOT NULL UNIQUE
+          )
+          SQL
+        "CREATE INDEX idx_capture_tunnel_completions_flow ON capture_tunnel_completions (flow_id)",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

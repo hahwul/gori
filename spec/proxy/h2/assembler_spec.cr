@@ -53,6 +53,7 @@ end
 private class RecSink < Gori::Proxy::FlowSink
   getter requests = [] of Gori::Store::CapturedRequest
   getter responses = [] of Gori::Store::CapturedResponse
+  getter tunnel_completions = [] of Int64
   @id = 0_i64
 
   def on_request(req : Gori::Store::CapturedRequest) : Int64
@@ -66,6 +67,10 @@ private class RecSink < Gori::Proxy::FlowSink
 
   def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                     shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
+  end
+
+  def on_tunnel_complete(flow_id : Int64) : Nil
+    @tunnel_completions << flow_id
   end
 end
 
@@ -624,7 +629,9 @@ describe Gori::Proxy::H2::Assembler do
     assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS, connect_block))
     # The origin accepts, relays frames, and both halves END_STREAM: state Complete.
     assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0x88_u8]))
+    sink.tunnel_completions.should be_empty
     assembler.feed("in", data_frame(1_u32, Frame::END_STREAM, "\x81\x03one"))
+    sink.tunnel_completions.should be_empty # wait for the client's CLOSE / END_STREAM too
     assembler.feed("out", data_frame(1_u32, Frame::END_STREAM, "\x88\x02\x03\xe8"))
 
     sink.requests.size.should eq(1)
@@ -634,7 +641,9 @@ describe Gori::Proxy::H2::Assembler do
     # fills in underneath it. The row is written again at teardown with the final state and the
     # full duration — `update_response` is last-write-wins.
     sink.responses.size.should eq(2)
+    sink.responses.first.tunnel_completed?.should be_false
     resp = sink.responses.last
+    resp.tunnel_completed?.should be_true
     resp.state.should eq(Gori::Store::FlowState::Complete)
     resp.error.should be_nil # the stream really did complete — this is not a failure
     # `advisory_of` joins the accumulated set onto BOTH halves, so it survives to the request
@@ -646,6 +655,7 @@ describe Gori::Proxy::H2::Assembler do
     # `spec/proxy/h2/ws_capture_spec.cr` for the transcript itself.
     resp.advisory.not_nil!.should contain("gori read its frames")
     resp.advisory.not_nil!.should contain("Match&Replace are NOT available")
+    sink.tunnel_completions.should eq([1_i64])
     # ... and the head names the stream shape, which the pseudo filter dropped entirely.
     String.new(sink.requests.first.head).should contain("X-Gori-Protocol: websocket")
   end
@@ -662,10 +672,34 @@ describe Gori::Proxy::H2::Assembler do
     # `.last`, not `.first`: the 200 that opened the socket is projected when it arrives (see
     # the spec above), so the ABORT is the second write to the same row.
     resp = sink.responses.last
+    resp.tunnel_completed?.should be_true
     resp.state.should eq(Gori::Store::FlowState::Aborted)
     resp.error.not_nil!.should contain("h2 connection closed")
     resp.error.not_nil!.should contain("RFC 8441 extended CONNECT")
     resp.advisory.not_nil!.should contain("RFC 8441 extended CONNECT")
+    sink.tunnel_completions.should eq([1_i64])
+  end
+
+  it "notifies capture completion for accepted WebSockets past the transcript cap" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443, 1_i64)
+    max = Gori::Proxy::H2::WsCapture::MAX_STREAMS
+    ids = (0..max).map { |i| (i * 2 + 1).to_u32 }
+
+    ids.each do |id|
+      assembler.feed("out", headers_frame(id, Frame::END_HEADERS, connect_block))
+      assembler.feed("in", headers_frame(id, Frame::END_HEADERS,
+        Gori::Proxy::H2::HPACK::Encoder.new.encode([{":status", "200"}])))
+    end
+    sink.tunnel_completions.should be_empty # all sockets remain open
+
+    assembler.finalize_all("h2 connection closed")
+
+    sink.requests.size.should eq(max + 1)
+    sink.responses.count(&.tunnel_completed?).should eq(max + 1)
+    sink.responses.last.tunnel_completed?.should be_true
+    sink.tunnel_completions.should eq(Array(Int64).new(max + 1) { |i| (i + 1).to_i64 })
+    sink.requests.last.advisory.not_nil!.should contain("no message transcript")
   end
 
   # A REFUSED extended CONNECT, which is the common answer: a WAF, a gateway or an origin with

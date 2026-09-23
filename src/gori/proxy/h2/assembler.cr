@@ -58,12 +58,12 @@ module Gori::Proxy::H2
       # can't grow `headers` without bound. Per-block caps (MAX_HEADER_BLOCK, HPACK
       # MAX_HEADER_LIST) only bound ONE block; this bounds the accumulation.
       property header_bytes = 0
-      property ended = false
+      property? ended = false
       # True between a HEADERS without END_HEADERS and the CONTINUATION that ends the block.
       # A CONTINUATION is only legal while this holds (RFC 9113 §6.10); one arriving otherwise
       # is a protocol violation a hostile peer uses to fabricate or erase a flow, so it is
       # dropped (#409).
-      property awaiting_continuation = false
+      property? awaiting_continuation = false
       # Names of the fields that arrived in a TRAILING HEADERS block. `finish_header_block`
       # merges trailers into `headers` (that merge is what makes grpc-status reachable), and
       # after it nothing distinguished a trailer from a real response header. Recorded here
@@ -125,10 +125,17 @@ module Gori::Proxy::H2
       # The WebSocket transcript of an RFC 8441 extended CONNECT stream (#733), or nil for
       # every other stream — which is all of them on an ordinary connection.
       property ws : WsCapture? = nil
+      # Any recognized WebSocket extended CONNECT, including one past the transcript cap.
+      # Separate from ws_armed because an unarmed accepted tunnel still needs completion notice.
+      property? websocket_candidate = false
       # Whether this stream's frames WILL be read, decided the moment the request head is
       # recognised and before `emit_request` stores the advisory that says so. `ws` itself
       # cannot answer it there: it needs the flow id that `emit_request` is what produces.
-      property ws_armed = false
+      property? ws_armed = false
+      # An accepted extended CONNECT stays live after the HTTP response is projected. Its
+      # capture printer event must wait until END_STREAM/RST/connection close flushes frames.
+      property? websocket_accepted = false
+      property? tunnel_completion_notified = false
     end
 
     # `connection_created_at` is kept as a positional argument for call-site compatibility
@@ -279,7 +286,7 @@ module Gori::Proxy::H2
         # (RFC 9113 §6.10) — a hostile peer uses one to complete a fabricated flow on a
         # never-opened stream, or to append to an already-finished one, spoofing gori's view
         # even though the raw frame log stays byte-exact. Drop it (#409).
-        return unless side.awaiting_continuation
+        return unless side.awaiting_continuation?
         append_header_fragment(side, frame.payload)
         if frame.end_headers?
           side.awaiting_continuation = false
@@ -316,8 +323,8 @@ module Gori::Proxy::H2
     # delete the stream in that case, or the later request END_STREAM would allocate a
     # fresh empty stream and lose both halves entirely.
     private def emit_ready(stream_id : UInt32, stream : Stream) : Nil
-      emit_request(stream_id, stream) if stream.req.ended && stream.req.headers && stream.flow_id.nil?
-      if stream.resp.ended && stream.resp.headers && stream.flow_id
+      emit_request(stream_id, stream) if stream.req.ended? && stream.req.headers && stream.flow_id.nil?
+      if stream.resp.ended? && stream.resp.headers && stream.flow_id
         # `flow_id` used to imply the request half was closed, because that is the only thing
         # that produced one. An extended CONNECT's flow is projected at the request HEAD
         # (`open_ws_capture` says why it must be), so on a live WebSocket it no longer does —
@@ -326,9 +333,10 @@ module Gori::Proxy::H2
         # have had the stream deleted out from under it, dropping the client's last frames and
         # the §7.1.1 closing handshake with them. Wait for the client's half; if it never comes,
         # `finalize_all` flushes at connection close as it always has.
-        return if stream.ws && !stream.req.ended
+        return if stream.ws && !stream.req.ended?
         close_ws(stream) # flush a message whose FIN never came, ahead of the flow's own row
-        emit_response(stream)
+        emit_response(stream, tunnel_completed: stream.websocket_accepted?)
+        notify_tunnel_complete(stream)
         # The exchange is complete; a stream id is never reused on a connection
         # (RFC 7540 §5.1.1), so drop its buffers to bound per-connection memory.
         #
@@ -342,13 +350,11 @@ module Gori::Proxy::H2
         # deleted, the client's next frame on that id allocated a fresh `Stream`, and History
         # gained one invented `GET /` row per refused upgrade against the real target host.
         #
-        # `ws_armed` is the durable spelling of "this `flow_id` does not mean the request half
-        # closed": it is set exactly where `emit_request` is called early, and `close_ws` does
-        # not clear it. The response row is still written above — a refused upgrade's error body
-        # is an ordinary response and must not wait for a half-close that may never come — only
-        # the FORGETTING waits. Whatever arrives next settles it, and `finalize_all` flushes at
-        # connection close as it always has.
-        @streams.delete(stream_id) if stream.req.ended || !stream.ws_armed
+        # Any WebSocket candidate stays tracked until its request half closes, even when the
+        # transcript cap left ws nil and no flow row was emitted early. An accepted unarmed
+        # tunnel still needs its final completion event, and a refusal must not turn a later
+        # request frame into a new flow on the same stream id.
+        @streams.delete(stream_id) if stream.req.ended? || !stream.websocket_candidate?
       end
     end
 
@@ -566,7 +572,7 @@ module Gori::Proxy::H2
     end
 
     private def emit_response(stream : Stream, *, state : Store::FlowState = Store::FlowState::Complete,
-                              error : String? = nil) : Nil
+                              error : String? = nil, tunnel_completed : Bool = false) : Nil
       flow_id = stream.flow_id
       return unless flow_id # request not yet projected (rare interleaving) — drop
       headers = stream.resp.headers.not_nil!
@@ -584,7 +590,8 @@ module Gori::Proxy::H2
         flow_id: flow_id, status: status, head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
         content_type: content_type, content_encoding: content_encoding, state: state, error: error,
-        ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream)))
+        ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream),
+        tunnel_completed: tunnel_completed))
     end
 
     # A trailing header block carried a pseudo-header, which RFC 9113 §8.1 forbids in a
@@ -651,15 +658,17 @@ module Gori::Proxy::H2
       return unless flow_id # never saw request headers — nothing to project
       reason = extended_connect_note(stream, reason)
       if stream.resp.headers
-        if stream.resp.ended
-          emit_response(stream) # response fully received; only the request never cleanly closed
+        if stream.resp.ended?
+          emit_response(stream, tunnel_completed: stream.websocket_accepted?)
         else
-          emit_response(stream, state: Store::FlowState::Aborted, error: reason)
+          emit_response(stream, state: Store::FlowState::Aborted, error: reason,
+            tunnel_completed: stream.websocket_accepted?)
         end
       else
         duration_us = (Time.instant - stream.started_at).total_microseconds.to_i64
         @sink.on_response(FlowMapper.aborted_response(flow_id, reason, duration_us: duration_us))
       end
+      notify_tunnel_complete(stream)
     end
 
     # --- RFC 8441 extended CONNECT (a WebSocket over HTTP/2) -----------------------------
@@ -671,7 +680,8 @@ module Gori::Proxy::H2
       request ? open_ws_capture(stream_id, stream) : answer_ws_capture(stream)
     end
 
-    # Arm the transcript for an extended CONNECT whose `:protocol` is `websocket`.
+    # Recognize an extended CONNECT whose `:protocol` is `websocket`, then arm its transcript
+    # when a capture slot is available.
     #
     # The flow row has to be projected HERE, at the request head, and not where every other
     # stream's is. `emit_ready` emits a request when it HALF-CLOSES, and a CONNECT stream's
@@ -684,10 +694,11 @@ module Gori::Proxy::H2
       return unless headers
       protocol = extended_connect_protocol(headers)
       return unless protocol && WsCapture.websocket?(protocol)
+      stream.websocket_candidate = true
       # Decided BEFORE `emit_request`, because the advisory it stores has to say which of the
       # two dispositions this stream got.
       stream.ws_armed = @ws_captures < WsCapture::MAX_STREAMS
-      return unless stream.ws_armed
+      return unless stream.ws_armed?
       emit_request(stream_id, stream)
       flow_id = stream.flow_id
       return unless flow_id # the request insert failed — nothing to attach a transcript to
@@ -695,21 +706,21 @@ module Gori::Proxy::H2
       stream.ws = WsCapture.new(flow_id, @sink)
     end
 
-    # The origin's answer to an armed extended CONNECT. A 2xx opens the socket (RFC 8441 §5.1);
-    # anything else refuses it, and what follows on that stream is an ordinary error body — so
-    # the codec is taken back off it rather than left to invent messages out of HTML.
+    # The origin's answer to a recognized extended CONNECT. A 2xx opens the socket (RFC 8441
+    # §5.1); anything else refuses it, and what follows is an ordinary error body — so an armed
+    # codec is taken back off rather than left to invent messages out of HTML.
     private def answer_ws_capture(stream : Stream) : Nil
       ws = stream.ws
-      return if ws.nil? || ws.active?
-      headers = stream.resp.headers
-      return unless headers
-      status = pseudo(headers, ":status").try(&.to_i?)
+      return unless stream.websocket_candidate?
+      return if ws.try(&.active?)
+      status = final_response_status(stream)
       return unless status
-      return if status >= 100 && status < 200 # interim; the real answer is still coming
-      unless status >= 200 && status < 300
-        close_ws(stream)
+      unless successful_websocket_response?(status)
+        close_ws(stream) if ws
         return
       end
+      stream.websocket_accepted = true
+      return unless ws
       # DATA the client sent before the answer arrived. A conforming client sends none, but one
       # that does would otherwise hand the reassembler a stream that starts mid-frame — desynced
       # for the socket's whole life. Skipped when the capped buffer already dropped bytes, since
@@ -721,6 +732,29 @@ module Gori::Proxy::H2
       # transcript fills in underneath it. `finalize_stream`/`emit_ready` write the row again
       # with the final state and the full duration; `update_response` is last-write-wins.
       emit_response(stream)
+    end
+
+    # An interim answer does not decide whether extended CONNECT opened the tunnel.
+    private def final_response_status(stream : Stream) : Int32?
+      headers = stream.resp.headers || return
+      status = pseudo(headers, ":status").try(&.to_i?) || return
+      return if status >= 100 && status < 200
+      status
+    end
+
+    private def successful_websocket_response?(status : Int32) : Bool
+      status >= 200 && status < 300
+    end
+
+    # Called after the last transcript message and response projection are committed. The
+    # stream may reach this from clean END_STREAM or from abnormal finalization; either means
+    # the captured socket has ended and is ready for `capture --max`.
+    private def notify_tunnel_complete(stream : Stream) : Nil
+      return unless stream.websocket_accepted?
+      return if stream.tunnel_completion_notified?
+      flow_id = stream.flow_id || return
+      stream.tunnel_completion_notified = true
+      @sink.on_tunnel_complete_recorded(flow_id)
     end
 
     # Stop reading this stream's frames and surface whatever was mid-message. Idempotent, and
@@ -799,7 +833,7 @@ module Gori::Proxy::H2
         return "#{head}. gori relayed it byte-for-byte but did not decode it — that protocol " \
                "is not WebSocket framing, so this stream has no message transcript"
       end
-      unless stream.ws_armed
+      unless stream.ws_armed?
         return "#{head} — a WebSocket over HTTP/2. gori relayed it byte-for-byte but did not " \
                "decode it: more than #{WsCapture::MAX_STREAMS} such streams were already being " \
                "read on this connection, so this socket has no message transcript"

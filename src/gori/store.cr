@@ -55,6 +55,8 @@ module Gori
   # writer, so all writes funnel through one writer fiber fed by a Channel,
   # while reads go straight through the WAL connection pool.
   class Store
+    record CaptureTunnelCompletion, sequence : Int64, flow_id : Int64
+
     # Write commands enqueued to the writer fiber.
     abstract struct WriteOp
     end
@@ -266,6 +268,9 @@ module Gori
     FTS_INDEX_MAX = 8 * 1024
 
     @events : Channel(FlowEvent)?
+    # Headless capture persists tunnel completions in a paged SQLite ledger. Other surfaces do
+    # not write it; the Store writer channel bounds in-flight notices in memory.
+    @track_tunnel_completions : Bool
     # Second post-commit notification channel feeding the Probe analyzer. Separate from
     # `@events` because a Crystal Channel is single-consumer — the TUI history refresh and
     # Probe can't share one. Same best-effort drop-on-full semantics (see #publish).
@@ -299,6 +304,9 @@ module Gori
     # enabled, a view-only second TUI — passes false, because an idle tick that takes the
     # write lock is the #752 two-writer condition, and those surfaces already drain on demand
     # (`index_pending!` before a `body:` query). Ignored when `read_only` (there is no writer).
+    #
+    # `track_tunnel_completions` retains final tunnel ids for headless capture to reconcile
+    # if its bounded event channel drops a notification. Off for other surfaces.
     def self.open(path : String, events : Channel(FlowEvent)? = nil,
                   probe_events : Channel(FlowEvent)? = nil,
                   retention_flows : Int32 = RETENTION_DEFAULT,
@@ -307,7 +315,8 @@ module Gori
                   background_index : Bool = true,
                   events_retention : Int32 = EVENTS_RETENTION,
                   busy_timeout_ms : Int32 = SQLITE_BUSY_TIMEOUT_MS,
-                  checkout_timeout_seconds : Float64 = DB_CHECKOUT_TIMEOUT_SECONDS) : Store
+                  checkout_timeout_seconds : Float64 = DB_CHECKOUT_TIMEOUT_SECONDS,
+                  track_tunnel_completions : Bool = false) : Store
       # `cache_size` is negative because SQLite reads that as KiB rather than pages: -64000
       # is 64 MiB. The default is -2000 (2 MiB) PER CONNECTION, which on a long-lived project
       # means every unindexed History filter re-reads pages off disk with almost no reuse —
@@ -391,7 +400,8 @@ module Gori
       new(db, events, probe_events, retention_flows, authorize_events: authorize_events,
         open_lock: open_lock, read_only: read_only,
         background_index: background_index && !read_only,
-        events_retention: events_retention)
+        events_retention: events_retention,
+        track_tunnel_completions: track_tunnel_completions)
     end
 
     # Memory-mapped read window. The default is 0 — every read is a `read()` syscall — and
@@ -698,10 +708,12 @@ module Gori
                    @events_trim_interval : Int32 = EVENTS_TRIM_INTERVAL,
                    @open_lock : OpenLock? = nil,
                    @read_only : Bool = false,
-                   @background_index : Bool = true)
+                   @background_index : Bool = true,
+                   track_tunnel_completions : Bool = false)
       @writes = Channel(WriteOp).new(1024) # widened: h2 frames now queue fire-and-forget
       @done = Channel(Nil).new
       @closed = false # see #close: a second drain would park forever on @done
+      @track_tunnel_completions = track_tunnel_completions
       @write_failures = Atomic(Int32).new(0)
       @h2_frames_dropped = Atomic(Int32).new(0)
       @inserts_since_prune = 0
@@ -842,6 +854,59 @@ module Gori
       reply.receive
     rescue Channel::ClosedError
       nil
+    end
+
+    # HTTP/1 calls this after both tunnel directions and their transcript finish. Record the
+    # completion durably before publishing its best-effort wakeup; this path has no multiplexed
+    # H2 connection mutex held. H2 records completion in its final UpdateResp transaction and
+    # calls `publish_tunnel_complete` directly.
+    def notify_tunnel_complete(flow_id : Int64) : Nil
+      return if flow_id <= 0
+      if @track_tunnel_completions
+        recorded = exec_task_ok ->(conn : DB::Connection) {
+          conn.exec(
+            "INSERT OR IGNORE INTO capture_tunnel_completions (flow_id) SELECT id FROM flows WHERE id = ?",
+            flow_id)
+          nil
+        }
+        ::Log.error { "store could not commit tunnel completion for flow #{flow_id}" } unless recorded || @closed
+      end
+      publish_tunnel_complete(flow_id)
+    end
+
+    # Best-effort wakeup after a completion is already durable. This remains non-blocking for
+    # the HTTP/2 assembler, which calls it while the connection-wide feed mutex is held.
+    def publish_tunnel_complete(flow_id : Int64) : Nil
+      return if flow_id <= 0
+      events = @events || return
+      select
+      when events.send(FlowEvent.new(flow_id, :tunnel_completed))
+      else
+        # Same best-effort, non-blocking policy as ordinary flow events; never stall the proxy.
+      end
+    rescue Channel::ClosedError
+      # session shutdown raced with the final tunnel close
+    end
+
+    # Delete ledger rows the capture printer has already emitted. This write is on the printer
+    # fiber, never the proxy's forwarding path.
+    def acknowledge_tunnel_completions(through_sequence : Int64) : Nil
+      return unless @track_tunnel_completions
+      exec_task ->(conn : DB::Connection) {
+        conn.exec("DELETE FROM capture_tunnel_completions WHERE id <= ?", through_sequence)
+        nil
+      }
+    end
+
+    # Starts a fresh headless capture ledger. Called only after this session owns the capture
+    # lock, so a view-only opener or a competing capture attempt cannot erase a live printer's
+    # notices. Runs before the listener starts accepting traffic.
+    def reset_capture_tunnel_completions : Nil
+      return unless @track_tunnel_completions
+      exec_task ->(conn : DB::Connection) {
+        conn.exec("DELETE FROM capture_tunnel_completions")
+        nil
+      }
     end
 
     # Restores a flow's captured WebSocket transcript — the import path, where the messages
@@ -1579,6 +1644,7 @@ module Gori
         # (cutoff is always > 0 here) matched EVERY repeater row and wiped saved repeater traffic
         # on each sweep. Gate on repeater_id so repeater-owned rows are never reaped by flow retention.
         c.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
+        c.exec("DELETE FROM capture_tunnel_completions WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
         # Read changes() IMMEDIATELY after the flows delete — it reports the most recent
@@ -1907,6 +1973,11 @@ module Gori
         response_size,
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.advisory, resp.flow_id)
+      if @track_tunnel_completions && resp.tunnel_completed?
+        conn.exec(
+          "INSERT OR IGNORE INTO capture_tunnel_completions (flow_id) SELECT id FROM flows WHERE id = ?",
+          resp.flow_id)
+      end
       # `fts_dirty = 1` again: the response side just appeared (or changed), so whatever the
       # indexer wrote for this row is stale. Re-dirtying an already-dirty row is a no-op, so
       # the common case — response landing before the indexer ever reached the row — is

@@ -286,6 +286,20 @@ module Gori
       nil
     end
 
+    # A bounded page of durable tunnel completions for `gori run capture`. The sequence is a
+    # database cursor, so a printer can stop between pages without retaining an unbounded list.
+    def capture_tunnel_completion_page(after_sequence : Int64, limit : Int32) : Array(CaptureTunnelCompletion)
+      rows = [] of CaptureTunnelCompletion
+      return rows unless @track_tunnel_completions
+      return rows if limit <= 0
+      @db.query(
+        "SELECT id, flow_id FROM capture_tunnel_completions WHERE id > ? ORDER BY id ASC LIMIT ?",
+        after_sequence, limit) do |rs|
+        rs.each { rows << CaptureTunnelCompletion.new(rs.read(Int64), rs.read(Int64)) }
+      end
+      rows
+    end
+
     # The same projection for a NAMED SET of ids, in one round trip — the read behind MCP
     # `list_history{ids}`, which hands back the rows an operator marked in the TUI (#1091).
     #
@@ -543,6 +557,7 @@ module Gori
     # empty.
     def clear_flows : Bool
       exec_task_ok ->(c : DB::Connection) {
+        c.exec("DELETE FROM capture_tunnel_completions")
         # Captured WS only — WebSocket-Repeater output is keyed by repeater_id.
         c.exec("DELETE FROM ws_messages WHERE repeater_id IS NULL")
         # contentless FTS: per-row DELETE is a tombstone; wipe the whole index in one go
@@ -561,6 +576,7 @@ module Gori
 
     # Cascade for one flow id (writer connection). Shared by delete_flow.
     private def delete_flow_one(conn : DB::Connection, id : Int64) : Nil
+      conn.exec("DELETE FROM capture_tunnel_completions WHERE flow_id = ?", id)
       conn.exec("DELETE FROM ws_messages WHERE flow_id = ? AND repeater_id IS NULL", id)
       conn.exec("DELETE FROM flows_fts WHERE rowid = ?", id)
       conn.exec("DELETE FROM entity_links WHERE ref_kind = 'flow' AND ref_id = ?", id)

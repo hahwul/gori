@@ -9,6 +9,7 @@ require "./session"
 require "./store"
 require "./proxy/tls/cert_authority"
 require "./cli/output"
+require "./capture_completion"
 require "./verb"
 require "./verbs/core"
 require "./verbs/history"
@@ -51,7 +52,10 @@ module Gori
     # keyboard nor that poll, so it re-reads both on a timer instead. A couple of seconds
     # keeps external edits feeling live without hammering the store — matching the OAST
     # poller's interval scale.
-    RELOAD_POLL_INTERVAL = 2.seconds
+    RELOAD_POLL_INTERVAL             = 2.seconds
+    CAPTURE_COMPLETION_POLL_INTERVAL = 100.milliseconds
+    CAPTURE_COMPLETION_PAGE_SIZE     =   128
+    CAPTURE_PENDING_TUNNEL_LIMIT     = 4_096
 
     # Signals headless `gori run capture` winds down on, rather than dying from.
     CAPTURE_SIGNALS = [Signal::INT, Signal::TERM]
@@ -264,7 +268,7 @@ module Gori
       setup_logging(STDERR)
       session =
         begin
-          Session.open(@config, @ca, @registry, project)
+          Session.open(@config, @ca, @registry, project, track_tunnel_completions: true)
         rescue ex : DB::Error | SQLite3::Exception
           # Mirror the read-side commands: a --db that isn't a SQLite database (or is
           # unreadable) gets a clean error, not a raw DB::ConnectionRefused backtrace.
@@ -380,30 +384,61 @@ module Gori
 
     private def capture_printer(session : Session, format : Symbol, max : Int32?) : Nil
       printed = 0
-      seen = Set(Int64).new
+      completion_cursor = 0_i64
+      completion = CaptureCompletion.new
+      pending_tunnels = Set(Int64).new
       loop do
-        event = session.flow_events.receive
-        next unless event.kind == :updated # one line per completed/errored flow
-        # A WebSocket flow emits an :updated PER message on the SAME id; print + count it ONCE
-        # (its first update), else it prints duplicate rows and its own messages trip --max,
-        # tearing the live connection down mid-stream. That is 101 over h1, but 2xx plus the
-        # `websocket` connect protocol over h2 — use the same lightweight predicate the PROTO
-        # column uses rather than spelling only the first transport here.
-        next if seen.includes?(event.id)
-        if row = session.store.flow_row(event.id)
-          # Only WS re-emits :updated, so only WS ids need de-dup tracking — keeping `seen`
-          # bounded by concurrent WS flows instead of growing per HTTP flow for the lifetime
-          # of a long `gori run capture` session.
-          seen << event.id if Proto.websocket?(row.status, row.connect_protocol)
-          # Stream the SAME row rendering `gori run history` prints, so capture and
-          # history output never drift (text = human-readable; json = stable contract).
-          puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))
-          STDOUT.flush # stream each flow promptly even when piped (block-buffered)
-          printed += 1
-          if max && printed >= max
-            @shutdown.send(nil) rescue nil # hit --max: ask the main fiber to wind down
-            break
+        event = nil.as(Store::FlowEvent?)
+        select
+        when received = session.flow_events.receive
+          event = received
+        when timeout(CAPTURE_COMPLETION_POLL_INTERVAL)
+        end
+
+        if event && event.kind == :updated && !pending_tunnels.includes?(event.id)
+          if row = session.store.flow_row(event.id)
+            if completion.awaits_tunnel?(row)
+              # Every captured WS message publishes another update on this id. Once the first
+              # handshake update identifies a live tunnel, skip those until it closes. Cap this
+              # optimization: the durable ledger carries completions while stdout is stalled.
+              pending_tunnels << event.id if pending_tunnels.size < CAPTURE_PENDING_TUNNEL_LIMIT
+            elsif completion.ready?(event, row)
+              # Stream the SAME row rendering `gori run history` prints, so capture and
+              # history output never drift (text = human-readable; json = stable contract).
+              puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))
+              STDOUT.flush # stream each flow promptly even when piped (block-buffered)
+              printed += 1
+              if max && printed >= max
+                @shutdown.send(nil) rescue nil # hit --max: ask the main fiber to wind down
+                break
+              end
+            end
           end
+        end
+
+        # Events are only wakeup hints. The durable ledger is read in bounded pages, so a full
+        # FlowEvent channel or a slow stdout consumer cannot lose a completion or grow RAM.
+        completed = session.store.capture_tunnel_completion_page(completion_cursor,
+          CAPTURE_COMPLETION_PAGE_SIZE)
+        unless completed.empty?
+          rows = session.store.flow_rows(completed.map(&.flow_id)).to_h { |flow_row| {flow_row.id, flow_row} }
+          completed.each do |notice|
+            completion_cursor = notice.sequence
+            pending_tunnels.delete(notice.flow_id)
+            if row = rows[notice.flow_id]?
+              tunnel_event = Store::FlowEvent.new(notice.flow_id, :tunnel_completed)
+              next unless completion.ready?(tunnel_event, row)
+              puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))
+              STDOUT.flush
+              printed += 1
+              if max && printed >= max
+                session.store.acknowledge_tunnel_completions(completion_cursor)
+                @shutdown.send(nil) rescue nil
+                return
+              end
+            end
+          end
+          session.store.acknowledge_tunnel_completions(completion_cursor)
         end
       end
     rescue Channel::ClosedError
