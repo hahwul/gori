@@ -39,7 +39,8 @@ module Gori
     # ASCII punctuation — "add a letter or a digit" always fixes it, which is what an
     # operator needs, while spelling the full rule here would only invite a second copy of
     # it. See `#slugify` for why a dot-run must never become a path.
-    UNSLUGGABLE_NAME = "invalid project name: it needs at least one letter or digit"
+    UNSLUGGABLE_NAME  = "invalid project name: it needs at least one letter or digit"
+    INVALID_UTF8_NAME = "invalid project name: it must be valid UTF-8"
 
     # …and why a RENAME was refused, which is a different rule: a rename never touches the
     # directory slug (see #rename), so the only name it cannot take is an empty one. Its own
@@ -261,6 +262,7 @@ module Gori
     # reads it from here instead of guessing beforehand with #find, which also matches a
     # short-id prefix and would call a brand-new project a reopen.
     def create_or_reopen(name : String, description : String = "") : {Project, Bool}
+      raise Gori::Error.new(INVALID_UTF8_NAME) unless name.valid_encoding?
       display = name.strip
       slug = slugify(display)
       raise Gori::Error.new(UNSLUGGABLE_NAME) if slug.empty?

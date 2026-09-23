@@ -1,3 +1,5 @@
+require "../utf8"
+
 module Gori
   # OAST (out-of-band application security testing): register a payload URL with an
   # interaction server (interactsh and friends), then observe the DNS/HTTP/SMTP callbacks
@@ -32,7 +34,7 @@ module Gori
       # Accepts the label OR the enum name (case-insensitive, - / _ / . all equivalent) so
       # both `--provider custom-http` and a stored "CustomHttp" token round-trip.
       def self.parse?(token : String) : ProviderKind?
-        norm = token.downcase.gsub(/[-_.]/, "")
+        norm = Utf8.subject(token).downcase.gsub(/[-_.]/, "")
         case norm
         when "interactsh"  then Interactsh
         when "customhttp"  then CustomHttp

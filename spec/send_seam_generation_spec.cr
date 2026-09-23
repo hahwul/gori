@@ -76,6 +76,32 @@ describe "the send seam's $GEN context" do
   end
 end
 
+# The `chrome` preset's client hints (#1174) are written by `Env.client_hints` after the slot
+# overlay, at the same seams — so the two calls are held together per file. The one file that
+# overlays WITHOUT hints is the intercept forward: those are a client's own bytes on the proxy
+# path, and a browser that sent no hints must not gain them there.
+private HINTLESS_OVERLAY = {"interceptor.cr" => "a client's own request, forwarded"}
+
+describe "the send seam's client hints" do
+  it "follow the slot overlay at every gori-originated seam" do
+    overlays = Hash(String, Int32).new(0)
+    hints = Hash(String, Int32).new(0)
+    Dir.glob(File.join(SRC, "**", "*.cr")).each do |path|
+      rel = path.lchop(SRC + "/")
+      next if rel == "env.cr" # where both are defined
+      File.each_line(path) do |line|
+        next if line.lstrip.starts_with?("#")
+        overlays[rel] += line.scan(/Env\.overlay_slot\(/).size
+        hints[rel] += line.scan(/Env\.client_hints\(/).size
+      end
+    end
+    overlays.reject! { |rel, n| n.zero? || HINTLESS_OVERLAY.has_key?(rel) }
+    hints.reject! { |_, n| n.zero? }
+    hints.should eq(overlays)
+    HINTLESS_OVERLAY.each_key { |rel| File.read(File.join(SRC, rel)).should contain("Env.overlay_slot(") }
+  end
+end
+
 describe "Env.ua_family_for" do
   it "reads the send's own preset first, then the destination rule, on a TLS leg only" do
     with_tls_rules([Gori::Settings::OutboundTlsRule.new(host: "fx.test", preset: "firefox"),

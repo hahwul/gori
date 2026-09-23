@@ -18,6 +18,12 @@ describe Gori::Oast::ProviderConfig do
   end
 end
 
+describe Gori::Oast::ProviderKind do
+  it "treats invalid UTF-8 as an unknown kind instead of raising from PCRE2" do
+    Gori::Oast::ProviderKind.parse?(String.new(Bytes[0xff])).should be_nil
+  end
+end
+
 describe "Gori::Settings global-provider CRUD" do
   it "adds, updates, toggles, and deletes a global provider" do
     # These mutators call `save` (real disk I/O), so — like settings_spec.cr's save-exercising

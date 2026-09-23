@@ -376,6 +376,7 @@ describe "gori run sitemap tag — the key a tag is filed under" do
   it "keeps the query string, so a query-bearing endpoint keys on its own node" do
     Gori::CLI::Run.sitemap_tag_path_for_spec("/login?a=1").should eq("/login?a=1")
     Gori::CLI::Run.sitemap_tag_path_for_spec("/api/users").should eq("/api/users")
+    Gori::CLI::Run.sitemap_tag_path_for_spec("/api/users/").should eq("/api/users")
     Gori::CLI::Run.sitemap_tag_path_for_spec("  /api/users  ").should eq("/api/users")
   end
 

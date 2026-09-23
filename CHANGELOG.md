@@ -5,6 +5,9 @@
 - CLI: a `--db` file that is not a gori project (another tool's SQLite database, or an empty file on a read command) is refused before anything touches it, instead of having gori's schema migrated into it (#1171)
 - Projects: a name that points at two projects (one's slug and another's display name, or a display name two projects share) is refused on every `--project`, MCP `switch_project`, `delete_project` and `diff_projects` with each one's slug and short id, instead of silently picking one, and create or rename refuses a name that is already another project's slug or short id (#1163)
 - Retest: deleting a Repeater session marks the issue retest steps that used it as deleted, so they keep refusing to run instead of silently re-binding to the next session that reuses its id (#1160)
+- Sitemap: CLI and MCP tags on paths with a trailing slash now match and display on the captured endpoint (#1165)
+- CLI: invalid UTF-8 arguments now receive command errors instead of PCRE2 backtraces (#1170)
+- Env: `project env set` and both TUI editors preserve assignment values, including empty and surrounding whitespace (#1172)
 - HAR: imports preserve duplicate and malformed Content-Length probes; exports and re-imports preserve colonless request and response headers (#1161, #1164)
 - Import: OpenAPI 3.x and Swagger 2.0 resolve local refs and seed body/formData templates; remote refs are reported and never fetched (#1166)
 - Env: `$GEN.USER_AGENT` fills in a real desktop browser User-Agent that follows the request's TLS preset, `$GEN.USER_AGENT_CHROME`/`_FIREFOX`/`_SAFARI` pick one browser, and Settings → User-Agents or `gori settings user-agents` replaces the built-in list. `$U` + ↹ now completes to it rather than `$GEN.UUID` (#1112, #1152, #1153, #1154)
@@ -24,6 +27,7 @@
 - CLI: every create and add subcommand (`repeater create`, `issues create`, `notes create`, `views add`, `colormarker add`, `rewriter add`, `rewriter extract add`, `probe rules add`, `oast providers add`, `links add`, `project scope add`, `project host-override add`) takes `--format json` and prints the new row as its listing does, id included; `scope add` names the id in text too, and `links add` no longer calls a link a busy project did not save "already linked" (#1117)
 - Comparer: two same-size binary bodies no longer compare as "no differences" (the placeholder carries a digest), and a diff cut at the line cap or by the capture cap no longer calls the pair identical, in the Comparer and Repeater diff tabs, `gori run compare` (whose JSON gains `identical` and `source_truncated`, as MCP has) and `repeater send --diff` (#1162)
 - JWT: a claim number past 64 bits (`18446744073709551615`, `1.5e400`) no longer blanks the payload — decode keeps its digits, and re-signing or `--set` keeps every other claim, refusing a payload it cannot read instead of rebuilding it from `{}`; the passive JWT checks no longer go blind on such a token (#1169)
+- TLS: the `chrome` preset sends Chrome's `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` hints on `https` requests gori sends, computed from that request's own User-Agent, and adds none when you typed any of them (#1174)
 
 ## v0.7.1
 
