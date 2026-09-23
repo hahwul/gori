@@ -1843,13 +1843,15 @@ module Gori::Tui
       payload = r.payloads.join(", ")
       payload = "#{payload[0, 23]}…" if payload.size > 24
       req = v.result_request(r).bytes
+      # One wire blob; split so its body is projected as a body (#1162).
+      req_head, req_body = Repeater::MessageLines.split_wire(req)
       ComparerSlot.from_exchange(
         # The source chip says "rebuilt" when the row kept no request bytes and this is a
         # reconstruction — the same caveat `fuzz.repeater` carries in its label, and it has
         # to survive into the Comparer header where the two sides are read against each other.
         v.result_request_note(r) ? "fuzz·rebuilt" : "fuzz",
         ComparerSlot.method_of(req), v.result_target_origin,
-        req, nil, r.head, r.body,
+        req_head, req_body, r.head, r.body,
         status: r.status, duration_us: r.duration_us, error: r.error, size: r.length,
         label: "##{r.index} #{payload}".rstrip)
     end

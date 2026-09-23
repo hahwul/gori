@@ -51,7 +51,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     view = comparer_controller.view
     return (@toast = "pick flow A and flow B first") unless view.both_set?
     unless view.jump_change(dir)
-      @toast = "no differences — the two are identical"
+      @toast = if view.truncated?
+                 "no differences in the compared part — the rest was not compared"
+               else
+                 "no differences — the two are identical"
+               end
       return
     end
     @toast = nil # the footer's "n/total" readout is the answer; a toast would just cover it

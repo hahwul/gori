@@ -183,13 +183,10 @@ class Gori::Tui::RepeaterView
     io.to_slice
   end
 
+  # The shared projection (`Repeater::MessageLines`), so the diff tab tells two same-size binary
+  # bodies apart by digest instead of reading them as equal (#1162).
   private def message_lines(head : Bytes?, body : Bytes?) : Array(String)
-    lines = bytes_to_lines(head)
-    if body && !body.empty?
-      lines << ""
-      lines.concat(bytes_to_lines(body))
-    end
-    lines
+    Repeater::MessageLines.of(head, body, decode: false)
   end
 
   # A RESPONSE body decoded for display (gzip/deflate/br/zstd + de-chunk), or the
@@ -200,10 +197,5 @@ class Gori::Tui::RepeaterView
   private def display_body(head : Bytes?, body : Bytes?) : Bytes?
     decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
     decoded || body
-  end
-
-  private def bytes_to_lines(bytes : Bytes?) : Array(String)
-    return [] of String unless bytes
-    String.new(bytes).split('\n').map(&.rstrip('\r'))
   end
 end

@@ -222,7 +222,6 @@ module Gori
         # header. The old code defaulted to "" and then blamed "invalid header JSON" for a
         # header the caller never touched.
         header = raw_header || (token ? Jwt.header_json(token.strip) : "{}")
-        payload = raw_payload || (token ? Jwt.payload_json(token.strip) : "{}")
         alg = str(h, "alg") || "HS256"
         # `secret` and `key` fill the SAME engine slot; the alg decides how it is read. Both
         # present would silently pick one, so refuse rather than sign with the wrong material.
@@ -244,6 +243,10 @@ module Gori
           return Result.new("'payload' and 'set' are mutually exclusive", is_error: true)
         end
         begin
+          # A token's claims come through `signing_payload`, which refuses a payload segment it
+          # cannot read rather than answer "" — `set` would otherwise re-sign `{}` plus the
+          # patch and drop every other claim (#1169).
+          payload = raw_payload || (token ? Jwt.signing_payload(token) : "{}")
           payload = Jwt.patch_payload(payload, sets) unless sets.empty?
           signed = Jwt.encode(header, payload, alg, secret)
         rescue ex : Jwt::ForgeError

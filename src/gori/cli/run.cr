@@ -1911,25 +1911,10 @@ module Gori
         false
       end
 
-      # head lines + blank + body lines (scrubbed), for the --diff line comparison.
+      # head lines + blank + body lines, for the --diff line comparison. The shared projection,
+      # so a binary or non-UTF-8 body carries its digest here as in `compare` (#1162).
       private def self.message_lines(head : Bytes?, body : Bytes?) : Array(String)
-        lines = bytes_to_lines(head)
-        # The head BLOB ends with the CRLF CRLF that terminates the header block,
-        # so splitting it leaves trailing empty lines; drop them and add exactly one
-        # blank separator before the body (matches the non-diff text view).
-        while !lines.empty? && lines.last.empty?
-          lines.pop
-        end
-        if body && !body.empty?
-          lines << ""
-          lines.concat(bytes_to_lines(body))
-        end
-        lines
-      end
-
-      private def self.bytes_to_lines(bytes : Bytes?) : Array(String)
-        return [] of String unless bytes
-        String.new(bytes).scrub.split('\n').map(&.rstrip('\r'))
+        Repeater::MessageLines.of(head, body, decode: false)
       end
 
       private def self.print_diff(diff : Array(Repeater::DiffLine)) : Nil

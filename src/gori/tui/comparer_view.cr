@@ -96,6 +96,7 @@ module Gori::Tui
       @word_cache = {} of Int32 => {Highlight::Line, Highlight::Line}
       @word_rev = 0_u32
       @truncated = false
+      @source_cut = false
       @change_count = 0 # cached with @rows_cache so the footer doesn't recount each frame
     end
 
@@ -291,6 +292,14 @@ module Gori::Tui
     # 60-line response and pressing `f` sent the cursor back to line 1.
     private def row_covering(src : Int32) : Int32
       display.rindex { |d| d.src <= src } || 0
+    end
+
+    # Whether the diff covers only part of the two messages — cut at `Diff::MAX_LINES`, or a
+    # body the capture cap already cut — so "no changed row" is not "identical". Builds the
+    # rows if they are not built yet.
+    def truncated? : Bool
+      rows
+      @truncated || @source_cut
     end
 
     # Move the row cursor to the next (`dir` 1) or previous (−1) CHANGED row, wrapping at
@@ -494,6 +503,7 @@ module Gori::Tui
       al = lines_a
       bl = lines_b
       @truncated = Repeater::Diff.truncated?(al, bl)
+      @source_cut = @slot_a.try(&.cut?(@pane)) || @slot_b.try(&.cut?(@pane)) || false
       result = Repeater::SideBySide.rows(Repeater::Diff.lines(al, bl))
       @change_count = Repeater::SideBySide.change_count(result)
       result
@@ -795,7 +805,15 @@ module Gori::Tui
     private def draw_footer(screen : Screen, rect : Rect, y : Int32) : Nil
       return if y <= rect.y + 1 # no room: header + divider already fill the frame
       changed = @change_count
-      note = changed == 0 ? "identical" : "#{changed} changed line#{changed == 1 ? "" : "s"}"
+      # Past the line cap nothing was compared, so zero changes there is "none in the compared
+      # part", not "identical" (#1162) — the cap note below says where the cut is.
+      note = if changed > 0
+               "#{changed} changed line#{changed == 1 ? "" : "s"}"
+             elsif @truncated || @source_cut
+               "no changes in the compared part"
+             else
+               "identical"
+             end
       # Which change the cursor is on, so ⇧N/⇧P reads as progress through the diff rather than
       # as an unanchored jump.
       if changed > 0 && (pos = change_position)
@@ -803,6 +821,7 @@ module Gori::Tui
       end
       note += " · folded" if @fold
       note += " · truncated to #{Repeater::Diff::MAX_LINES}/side" if @truncated
+      note += " · body cut at capture" if @source_cut
       note += " · col #{@xscroll}" if @xscroll > 0                              # only when scrolled: otherwise it's noise
       screen.text(rect.x + 1, y, note, Theme.muted, width: {rect.w - 2, 1}.max) # pane + ←/→ moved to the divider selector
     end

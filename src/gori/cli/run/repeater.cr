@@ -1684,9 +1684,9 @@ module Gori
             # Never a bare "no differences" over a CUT diff: `Diff.lines` caps both sides at
             # MAX_LINES, so a change past the cut is absent from the diff AND from the count
             # — and a longer new response (an appended payload, a stack trace) puts its extra
-            # lines exactly there. `cmd_compare` in this directory has always said so; the
-            # repeater paths did not, and "no differences" is the answer an operator acts on.
-            STDERR.puts(n == 0 ? "no differences" : "#{n} line#{n == 1 ? "" : "s"} changed")
+            # lines exactly there. "no differences" is the answer an operator acts on, so the
+            # verdict line itself says when it only covers the compared part (`compare_verdict`).
+            STDERR.puts compare_verdict(n, diff_capped)
             STDERR.puts "(diff truncated to #{Repeater::Diff::MAX_LINES} lines/side — lines past the cut were not compared)" if diff_capped
           else
             print_message_text(result.head, new_body, result.body, cap)

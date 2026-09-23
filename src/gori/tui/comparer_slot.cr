@@ -40,7 +40,8 @@ module Gori::Tui
                    @source = nil, @flow_id = nil, @named = false,
                    @request_head : Bytes? = nil, @request_body : Bytes? = nil,
                    @response_head : Bytes? = nil, @response_body : Bytes? = nil,
-                   @error : String? = nil, @text : Array(String)? = nil)
+                   @error : String? = nil, @text : Array(String)? = nil,
+                   @request_cut : Bool = false, @response_cut : Bool = false)
       @req_lines = nil.as(Array(String)?)
       @resp_lines = nil.as(Array(String)?)
     end
@@ -58,7 +59,8 @@ module Gori::Tui
         row.method, row.url, row.host, Url.origin_path(row.target),
         Repeater::ExchangeMeta.of(row), source: source, flow_id: row.id,
         request_head: d.request_head, request_body: d.request_body,
-        response_head: d.response_head, response_body: d.response_body, error: d.error)
+        response_head: d.response_head, response_body: d.response_body, error: d.error,
+        request_cut: d.request_body_truncated?, response_cut: d.response_body_truncated?)
     end
 
     # A live exchange that was never captured as a flow: a Repeater send, a Fuzz result.
@@ -69,7 +71,8 @@ module Gori::Tui
                            response_head : Bytes?, response_body : Bytes?, *,
                            status : Int32? = nil, duration_us : Int64? = nil,
                            error : String? = nil, flow_id : Int64? = nil,
-                           size : Int64? = nil, label : String? = nil) : ComparerSlot
+                           size : Int64? = nil, label : String? = nil,
+                           request_cut : Bool = false, response_cut : Bool = false) : ComparerSlot
       host, path = split_url(url)
       # `label` overrides the method+path chip for a source whose rows are not told apart by
       # their target — every row of a fuzz run shares one, and the payload is what names it.
@@ -80,7 +83,8 @@ module Gori::Tui
       new(label || "#{method} #{path}", method, url, host, path, meta,
         source: source, flow_id: flow_id, named: !label.nil?,
         request_head: request_head, request_body: request_body,
-        response_head: response_head, response_body: response_body, error: error)
+        response_head: response_head, response_body: response_body, error: error,
+        request_cut: request_cut, response_cut: response_cut)
     end
 
     # An immutable Evidence snapshot. Unlike a live source, every byte needed by the diff
@@ -94,7 +98,8 @@ module Gori::Tui
       from_exchange("evidence", m.method, m.url,
         ev.request_head, ev.request_body, ev.response_head, ev.response_body,
         status: m.status, duration_us: m.duration_us, error: m.error,
-        size: response_size, label: "##{m.id}")
+        size: response_size, label: "##{m.id}",
+        request_cut: m.request_truncated?, response_cut: m.response_truncated?)
     end
 
     # Raw text with no HTTP shape at all — a paste, a decoder output. It has no request
@@ -118,6 +123,13 @@ module Gori::Tui
       else
         @resp_lines ||= Repeater::MessageLines.of(@response_head, @response_body, decode: true, error: @error)
       end
+    end
+
+    # Whether the capture cap cut this half's stored body — then its lines are a PREFIX, and a
+    # diff that finds no change in them has not shown the two bodies match (the rule MCP
+    # `compare_flows` and `gori run compare` report as `source_truncated`).
+    def cut?(pane : Symbol) : Bool
+      pane == :request ? @request_cut : @response_cut
     end
 
     # Live, so a theme switch reshades a slot that was built under the old one.

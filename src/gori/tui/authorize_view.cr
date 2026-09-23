@@ -119,6 +119,8 @@ module Gori::Tui
     end
 
     def initialize
+      # {head, body, error, lines} — see `response_lines`.
+      @resp_lines_memo = nil.as({Bytes?, Bytes?, String?, Array(String)}?)
       @entries = [] of Entry
       @identities = AuthorizeView.default_identities
       @identity_rev = 0
@@ -722,8 +724,7 @@ module Gori::Tui
       screen.text(x, y, head, Theme.text_bright, Theme.bg, Attribute::Bold, width: right - x)
       y += 1
       top = y
-      lines = Repeater::MessageLines.of(trial.response_head, trial.response_body,
-        decode: true, error: summary.error)
+      lines = response_lines(trial, summary.error)
       # CLAMPED to the last page, here rather than at the keypress — `scroll_detail` is called
       # from ⇟ and the wheel, neither of which knows how many lines this response has or how
       # tall the pane is. Unclamped, a couple of page-downs put the offset past the end and the
@@ -738,6 +739,28 @@ module Gori::Tui
       end
       Frame.scroll_gauge(screen, Rect.new(x, top, right - x, rows), lines.size,
         @detail_scroll, false)
+    end
+
+    # The selected trial's response lines, memoized on the bytes they came from: this runs every
+    # frame, and the projection decodes the body and digests a binary one (#1162).
+    #
+    # Matched by IDENTITY (same buffer, same length), not content, which would cost what the memo
+    # saves. The memo holds the slices themselves, so a buffer it matched cannot be freed and its
+    # address reused by different bytes.
+    private def response_lines(trial : Authorize::Trial, error : String?) : Array(String)
+      head = trial.response_head
+      body = trial.response_body
+      if (memo = @resp_lines_memo) && same_bytes?(memo[0], head) && same_bytes?(memo[1], body) && memo[2] == error
+        return memo[3]
+      end
+      lines = Repeater::MessageLines.of(head, body, decode: true, error: error)
+      @resp_lines_memo = {head, body, error, lines}
+      lines
+    end
+
+    private def same_bytes?(a : Bytes?, b : Bytes?) : Bool
+      return a.nil? && b.nil? unless a && b
+      a.to_unsafe == b.to_unsafe && a.size == b.size
     end
 
     # ── labels / colours ────────────────────────────────────────────────────────

@@ -48,6 +48,24 @@ describe Gori::Probe::Passive::JwtWeaknesses do
     end
   end
 
+  # #1169: one number past Int64 failed `JSON.parse`, so the header read as "not an object" and
+  # EVERY check was skipped — an attacker-addable field that switched off the High finding.
+  it "still flags alg:none when the header carries a number past Int64" do
+    with_store do |store|
+      tok = token(%({"alg":"none","n":18446744073709551615}), %({"sub":"1","exp":9999999999}), "")
+      codes(jwt(store, req_headers: "Authorization: Bearer #{tok}\r\n")).should contain("jwt_alg_none")
+    end
+  end
+
+  it "still reads the claims beside a u64 id, and an oversized exp still counts as an exp" do
+    with_store do |store|
+      tok = token(%({"alg":"HS256"}), %({"uid":18446744073709551615,"exp":18446744073709551615}))
+      codes(jwt(store, req_headers: "Authorization: Bearer #{tok}\r\n")).should_not contain("jwt_no_expiry")
+      tok = token(%({"alg":"HS256"}), %({"uid":18446744073709551615}))
+      codes(jwt(store, req_headers: "Authorization: Bearer #{tok}\r\n")).should contain("jwt_no_expiry")
+    end
+  end
+
   it "flags alg:none case-insensitively" do
     with_store do |store|
       tok = token(%({"alg":"NoNe"}), %({"sub":"1","exp":9999999999}), "")

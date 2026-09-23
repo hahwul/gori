@@ -115,6 +115,19 @@ describe "the decode panes over an encoded body" do
       found.map(&.token).should contain(token)
       found.first.location.should contain("response body")
     end
+
+    it "still recognises a token whose header carries a number past Int64 (#1169)" do
+      header = Base64.urlsafe_encode(%({"alg":"HS256","n":18446744073709551615}), padding: false)
+      Gori::Jwt.jwt?("#{header}.#{Base64.urlsafe_encode(%({"sub":"1"}), padding: false)}.c2ln").should be_true
+    end
+
+    it "still reads exp for the brief when another claim is past Int64 (#1169)" do
+      header = Base64.urlsafe_encode(%({"alg":"HS256"}), padding: false)
+      payload = Base64.urlsafe_encode(%({"uid":18446744073709551615,"exp":0}), padding: false)
+      token = "#{header}.#{payload}.c2ln"
+      found = Gori::Jwt.from_flow("/x?t=#{token}", nil, nil, nil, nil)
+      found.first.brief.should eq("alg HS256 · exp 1970-01-01 00:00:00Z")
+    end
   end
 
   describe "SAML" do

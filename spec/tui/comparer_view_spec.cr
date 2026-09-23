@@ -453,6 +453,39 @@ describe "ComparerView change navigation and folding" do
     v.jump_change(1).should be_false
   end
 
+  # #1162: the footer said "identical" over a diff cut at MAX_LINES — lines past the cut were
+  # never compared, so a change there was reported as equality.
+  it "does not call a diff identical when it was cut before the change" do
+    lines = (1..(Gori::Repeater::Diff::MAX_LINES + 10)).map { |i| "line #{i}" }
+    v = ComparerView.new
+    v.set_pair(flow("GET", "/a", body: (lines + ["A"]).join('\n')), flow("GET", "/a", body: (lines + ["B"]).join('\n')))
+    b = MemoryBackend.new(100, 20)
+    v.render(Screen.new(b), Rect.new(0, 0, 100, 20), true)
+    v.truncated?.should be_true
+    v.jump_change(1).should be_false
+    footer = (0...20).map { |y| b.row(y) }.join('\n')
+    footer.should contain("no changes in the compared part")
+    footer.should_not contain("identical")
+  end
+
+  # The capture cap already cut both stored bodies: matching prefixes are not matching bodies
+  # (MCP `compare_flows` and `gori run compare` say `source_truncated`).
+  it "does not call a pair identical when the capture cap cut a body" do
+    cut = ->(body : String) {
+      d = flow("GET", "/a", body: body)
+      Gori::Store::FlowDetail.new(d.row, "HTTP/1.1", d.request_head, nil, d.response_head, d.response_body,
+        response_body_truncated: true)
+    }
+    v = ComparerView.new
+    v.set_pair(cut.call("same prefix"), cut.call("same prefix"))
+    b = MemoryBackend.new(100, 20)
+    v.render(Screen.new(b), Rect.new(0, 0, 100, 20), true)
+    v.truncated?.should be_true
+    screen = (0...20).map { |y| b.row(y) }.join('\n')
+    screen.should contain("body cut at capture")
+    screen.should_not contain("identical")
+  end
+
   it "folds the unchanged runs to a marker that keeps context around the change" do
     v = long_pair.call
     v.fold?.should be_false

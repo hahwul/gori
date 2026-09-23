@@ -113,8 +113,9 @@ describe "Gori::Tui::RepeaterView soft wrap" do
     view.apply(Gori::Repeater::Result.new(hdr.to_slice, payload.to_slice, nil, 1000_i64))
     view.toggle_resp_mode # response → diff
     view.render(Screen.new(MemoryBackend.new(80, 14)), rect)
-    # The diff's own line list: status, header, its blank separators, then the two body lines.
-    body_li = 5
+    # The diff's own line list (`Repeater::MessageLines`): status, header, the one blank
+    # separator, then the two body lines.
+    body_li = 3
     body_li.times { view.resp_move(1, 0) }
     view.resp_cursor.cy.should eq(body_li)
     view.resp_cursor.cx.should eq(0)
@@ -146,9 +147,9 @@ describe "Gori::Tui::RepeaterView soft wrap" do
     view.apply(Gori::Repeater::Result.new(hdr.to_slice, payload.to_slice, nil, 1000_i64))
     view.toggle_resp_mode
     view.render(Screen.new(MemoryBackend.new(80, 14)), rect)
-    body_li = 5
-    # Column 0 of that line's SECOND drawn row — the five short lines above it take one row
-    # each, so it is the sixth row of the pane.
+    body_li = 3
+    # Column 0 of that line's SECOND drawn row — the three short lines above it take one row
+    # each, so it is the fifth row of the pane.
     view.resp_click_to_cursor(rect, body.x + gw, body.y + body_li + 1)
     view.resp_cursor.cy.should eq(body_li)
     view.resp_cursor.cx.should eq(cw - 2) # the decoration ate two columns of this row
