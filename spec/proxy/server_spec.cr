@@ -1360,6 +1360,84 @@ describe Gori::Proxy::Server do
     sink.responses.first.error.should_not be_nil
   end
 
+  it "records a truncated upstream CONNECT reply without starting a tunnel (#1211)" do
+    upstream = TCPServer.new("127.0.0.1", 0)
+    upstream_port = upstream.local_address.port
+    tunnel_data = Channel(Bytes?).new(1)
+    spawn do
+      conn = upstream.accept
+      Gori::Proxy::Codec::Http1.read_head(conn)
+      conn << "HTTP/1.1 200 Connection Established\r\nX-Test: truncated\r\n"
+      conn.flush
+      conn.close_write
+      data = Bytes.new(64)
+      count = conn.read(data)
+      tunnel_data.send(count > 0 ? data[0, count].dup : nil)
+      conn.close rescue nil
+    rescue
+      tunnel_data.send(nil)
+    end
+
+    previous_proxy = Gori::Settings.upstream_proxy
+    previous_passthrough = Gori::Settings.tls_passthrough
+    Gori::Settings.upstream_proxy = "127.0.0.1:#{upstream_port}"
+    Gori::Settings.tls_passthrough = ["example.test"]
+    done = Channel(Nil).new(1)
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    begin
+      request = IO::Memory.new
+      request << "CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n"
+      request.write(Bytes[0x16_u8, 0x03_u8, 0x01_u8, 0x00_u8])
+      client.write(request.to_slice)
+      client.flush
+
+      response = Gori::Proxy::Codec::Http1.parse_response_head(
+        Gori::Proxy::Codec::Http1.read_head(client).not_nil!)
+      response.status.should eq(502)
+      done.receive
+      tunnel_data.receive.should be_nil
+      sink.responses.first.state.should eq(Gori::Store::FlowState::Error)
+      sink.responses.first.error.not_nil!.should contain("incomplete CONNECT reply")
+      sink.responses.first.error.not_nil!.should contain("200 Connection Established")
+    ensure
+      client.close rescue nil
+      proxy.stop
+      upstream.close rescue nil
+      Gori::Settings.upstream_proxy = previous_proxy
+      Gori::Settings.tls_passthrough = previous_passthrough
+    end
+  end
+
+  it "rejects a CONNECT authority with a nonnumeric port and records the reason" do
+    done = Channel(Nil).new(1)
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    begin
+      client.write("CONNECT example.test:notaport HTTP/1.1\r\nHost: example.test:notaport\r\n\r\n".to_slice)
+      client.flush
+      response_head = Gori::Proxy::Codec::Http1.read_head(client).not_nil!
+      response = Gori::Proxy::Codec::Http1.parse_response_head(response_head)
+      body = Bytes.new(response.headers.get?("Content-Length").not_nil!.to_i)
+      client.read_fully(body)
+      done.receive
+
+      response.status.should eq(400)
+      String.new(body).should contain("CONNECT port must be a decimal number")
+      sink.requests.first.port.should eq(0)
+      sink.responses.first.state.should eq(Gori::Store::FlowState::Error)
+      sink.responses.first.error.not_nil!.should contain("CONNECT port must be a decimal number")
+    ensure
+      client.close rescue nil
+      proxy.stop
+    end
+  end
   it "records an error when the client truncates the request body" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)

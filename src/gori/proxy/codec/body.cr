@@ -194,8 +194,8 @@ module Gori::Proxy::Codec
       # obfuscated_header? on purpose — see Http1.framing_ambiguous?. RFC 7230 §3.2.4
       # explicitly sanctions refusing a message here rather than guessing.
       raise Gori::Error.new("ambiguous framing headers (a lenient recipient would frame this response differently)") if Http1.framing_ambiguous?(resp.raw_head, resp.headers)
-      # Allocation-free case-insensitive match (per response); `.upcase` allocated a String.
-      if request_method.compare("HEAD", case_insensitive: true) == 0
+      # Methods are case-sensitive tokens: `head` is an extension method, not HEAD.
+      if request_method == "HEAD"
         return {BodyFraming::None, 0_i64}
       end
       s = resp.status
@@ -203,10 +203,10 @@ module Gori::Proxy::Codec
       # (the tunnel is open). Non-2xx (407 Proxy Auth Required, 502, …) may carry an
       # entity the client must read; treating EVERY CONNECT reply as bodyless left that
       # entity on the wire to misframe the next message on a reused upstream.
-      if request_method.compare("CONNECT", case_insensitive: true) == 0 && (200..299).includes?(s)
+      if request_method == "CONNECT" && (200..299).includes?(s)
         return {BodyFraming::None, 0_i64}
       end
-      return {BodyFraming::None, 0_i64} if (s >= 100 && s < 200) || s == 204 || s == 304
+      return {BodyFraming::None, 0_i64} if !resp.malformed? && ((s >= 100 && s < 200) || s == 204 || s == 304)
 
       te = resp.headers.has?("Transfer-Encoding") ? resp.headers.get_all("Transfer-Encoding") : EMPTY_TE
       if chunked?(te)

@@ -376,7 +376,7 @@ module Gori::Proxy
       end
 
       req = Codec::Http1.parse_request_head(head)
-      return handle_connect(req) if req.method.compare("CONNECT", case_insensitive: true) == 0
+      return handle_connect(req, now_us) if req.method.compare("CONNECT", case_insensitive: true) == 0
 
       started = Time.instant
       created_at = now_us
@@ -823,7 +823,7 @@ module Gori::Proxy
     # a 1xx/204, so it is left off entirely there; a 304 and a HEAD response keep it — it
     # describes the entity that WOULD be sent — but carry no body of their own.
     private def stub_framing(stub : HeadRewriter::Stub, method : String) : {Bool, Bool}
-      head_only = method.compare("HEAD", case_insensitive: true) == 0
+      head_only = method == "HEAD"
       omit_length = stub.status == 204 || (100..199).includes?(stub.status)
       {omit_length, !head_only && !omit_length && stub.status != 304}
     end
@@ -1734,11 +1734,11 @@ module Gori::Proxy
     # path whose whole job is to relay. If that changes, it changes there first.
     #
     # So the refusal is delivered where an operator actually looks: a `gori.log` line, and an
-    # error flow for the CONNECT itself. CONNECT is otherwise never a captured flow — the
-    # reserved-host and self-loop refusals above record nothing — but those refuse BEFORE the
-    # 200, where the client still gets an answer it can read. This one cannot, so the record is
-    # the only thing left, and a row saying which rule or setting refused the tunnel is worth
-    # more than a socket that closes for no stated reason.
+    # error flow for the CONNECT itself. The upstream tunnel path records dial failures too;
+    # the reserved-host and self-loop refusals above still record nothing because they happen
+    # before the 200 and the client gets a usable local answer. This refusal happens after the
+    # 200, which an h2 client cannot read, so History is the only place left to name why the
+    # tunnel died.
     private def refuse_h2c(req : Codec::RawRequest, host : String, port : Int32,
                            reason : String) : Nil
       advice = "The client committed to HTTP/2 by sending the preface, so there is nothing to " \
@@ -2101,8 +2101,17 @@ module Gori::Proxy
     # download nor open a tunnel the sandbox refuses. Reading Settings here (not in the
     # Tunnel) is what makes the bypass cover the h2c-in-CONNECT branch too: the byte peek
     # below never happens for a passthrough host.
-    private def handle_connect(req : Codec::RawRequest) : Bool
-      host, port = Upstream.split_host_port(req.target, 443)
+    private def handle_connect(req : Codec::RawRequest, created_at : Int64) : Bool
+      host, port =
+        begin
+          Upstream.split_connect_host_port(req.target, 443)
+        rescue ex : Gori::Error
+          parsed_host, _ = Upstream.split_host_port(req.target, 443)
+          reason = ex.message || "invalid CONNECT authority"
+          record_error(req, "https", parsed_host, 0, created_at, reason)
+          write_bad_request(reason)
+          return false
+        end
 
       # A LISTENER-pinned connection is not a forward proxy. The destination was settled before
       # this request existed — a reverse listener's declared origin, or the client's own SOCKS5
@@ -2130,9 +2139,11 @@ module Gori::Proxy
         # URL needs, and the MITM branch's own dial (`dial_tls_result`) already says so. The
         # default `"http"` picked `HTTP_PROXY`, so an environment exporting only `HTTPS_PROXY`
         # sent this — the one shape that proxy exists to carry — direct instead (#1114).
-        upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin,
-          origin_scheme: "https")
+        upstream, dial_error = Upstream.dial_result(host, port, overrides: @host_overrides,
+          pin: dial_pin, origin_scheme: "https")
+        @last_dial_error = dial_error
         unless upstream
+          record_error(req, "https", host, port, created_at, upstream_error_message(host, port, nil))
           write_gateway_error
           return false
         end
@@ -2331,7 +2342,7 @@ module Gori::Proxy
       tls = @tls
       unless sa && tls && tls.serve_landing?
         # Same shape as the CONNECT self-loop refusal: refuse before the 200, record nothing
-        # (CONNECT is never a captured flow), and above all never dial the reserved name.
+        # for this local answer, and above all never dial the reserved name.
         return write_gateway_error
       end
 
@@ -3150,9 +3161,17 @@ module Gori::Proxy
     rescue
     end
 
+    private def write_bad_request(reason : String) : Nil
+      body = "#{reason}\n"
+      @io.write("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n" \
+                "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n".to_slice)
+      @io.write(body.to_slice)
+      @io.flush
+    rescue
+    end
+
     private def get_or_head?(req : Codec::RawRequest) : Bool
-      req.method.compare("GET", case_insensitive: true) == 0 ||
-        req.method.compare("HEAD", case_insensitive: true) == 0
+      req.method == "GET" || req.method == "HEAD"
     end
 
     # Serve the welcome + CA-download page (see the two guards in handle_request: a direct
@@ -3194,6 +3213,7 @@ module Gori::Proxy
     # to the upstream request means the origin closes, even if the client's request didn't.
     private def origin_keep_alive?(sent_req : Codec::RawRequest, resp : Codec::RawResponse,
                                    resp_framing : Codec::BodyFraming) : Bool
+      return false if resp.malformed?
       return false if resp_framing.close_delimited?
       return false if sent_req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")

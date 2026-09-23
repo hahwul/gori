@@ -169,6 +169,16 @@ describe Gori::Proxy::Codec::Http1 do
       resp.malformed?.should be_false
     end
 
+    it "keeps a nonnumeric status token malformed and preserves its reason and bytes" do
+      raw = bytes("HTTP/1.1 204x Odd\r\nContent-Length: 4\r\n\r\n")
+      resp = Http1.parse_response_head(raw)
+
+      resp.status.should eq(0)
+      resp.reason.should eq("Odd")
+      resp.malformed?.should be_true
+      resp.raw_head.should eq(raw)
+    end
+
     # The h2 capture path spells its synthesized version `HTTP/2` (no minor), and this
     # predicate is shared, so the check is the `HTTP/` name and not a `\d.\d` match.
     it "accepts the HTTP/2 projection's version" do

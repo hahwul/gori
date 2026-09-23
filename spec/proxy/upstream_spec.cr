@@ -228,6 +228,45 @@ describe Gori::Proxy::Upstream do
       end
     end
 
+    it "fails a 2xx CONNECT reply that reaches EOF before its header terminator" do
+      proxy = TCPServer.new("127.0.0.1", 0)
+      pport = proxy.local_address.port
+      tunnel_data = Channel(Bytes?).new(1)
+      spawn do
+        conn = proxy.accept
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 Connection Established\r\nX-Test: truncated\r\n"
+        conn.flush
+        conn.close_write
+        data = Bytes.new(32)
+        count = conn.read(data)
+        tunnel_data.send(count > 0 ? data[0, count].dup : nil)
+        conn.close rescue nil
+      rescue
+        tunnel_data.send(nil)
+      end
+
+      previous = Gori::Settings.upstream_proxy
+      Gori::Settings.upstream_proxy = "127.0.0.1:#{pport}"
+      begin
+        sock, error = Gori::Proxy::Upstream.dial_result("example.test", 443)
+        if tunnel = sock
+          tunnel.write("TLS client hello".to_slice)
+          tunnel.flush
+          tunnel.close
+        end
+        sock.should be_nil
+        error.should_not be_nil
+        error.not_nil!.kind.should eq(Gori::Proxy::Upstream::DialErrorKind::Proxy)
+        error.not_nil!.detail.not_nil!.should contain("incomplete CONNECT reply")
+        error.not_nil!.detail.not_nil!.should contain("200 Connection Established")
+        tunnel_data.receive.should be_nil
+      ensure
+        Gori::Settings.upstream_proxy = previous
+        proxy.close rescue nil
+      end
+    end
+
     # Round 9 / r9-tls Finding 2. A proxy that answers `200 Connection Established` and then
     # closes WITHOUT relaying anything (an overloaded proxy, an ACL that 200s before checking,
     # a proxy whose own backend dial failed after it already committed) hands back a socket
@@ -582,6 +621,23 @@ describe Gori::Proxy::Upstream do
       # host:port semantics win — split on the LAST colon.
       Gori::Proxy::Upstream.split_host_port("127.0.0.1:19110:bogus", 80).should eq({"127.0.0.1:19110", 80})
       Gori::Proxy::Upstream.split_host_port("127.0.0.1:80", 443).should eq({"127.0.0.1", 80})
+    end
+  end
+
+  describe ".split_connect_host_port" do
+    it "accepts a hostname or explicit numeric port without changing IPv6 parsing" do
+      Gori::Proxy::Upstream.split_connect_host_port("example.com", 443).should eq({"example.com", 443})
+      Gori::Proxy::Upstream.split_connect_host_port("example.com:8443", 443).should eq({"example.com", 8443})
+      Gori::Proxy::Upstream.split_connect_host_port("[::1]:8443", 443).should eq({"::1", 8443})
+      Gori::Proxy::Upstream.split_connect_host_port("::1", 443).should eq({"::1", 443})
+    end
+
+    it "rejects an explicit port that cannot be parsed instead of using the default" do
+      ["example.com:notaport", "example.com:", "example.com:65536", "[::1]:bogus"].each do |authority|
+        expect_raises(Gori::Error) do
+          Gori::Proxy::Upstream.split_connect_host_port(authority, 443)
+        end
+      end
     end
   end
 

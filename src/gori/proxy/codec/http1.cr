@@ -589,7 +589,9 @@ module Gori::Proxy::Codec::Http1
     second_sp = rest.index(' ')
     code_str = second_sp ? rest[0...second_sp] : rest
     reason = second_sp ? rest[(second_sp + 1)..] : ""
-    status = code_str.to_i?(strict: false) || 0
+    status_token_valid = code_str.size == 3 && code_str[0].ascii_number? &&
+                         code_str[1].ascii_number? && code_str[2].ascii_number?
+    status = status_token_valid ? (code_str.to_i? || 0) : 0
     # The version token has to BE a version, not merely be present. A status line is the one
     # place junk can hide in plain sight: `split(' ')` finds "200" in the second field of
     # `<leftover bytes>HTTP/1.1 200 OK` just as happily as in a real status line, so a

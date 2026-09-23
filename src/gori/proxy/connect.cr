@@ -55,8 +55,8 @@ module Gori::Proxy
     # just hang the client. One place for every caller — ClientConn's direct-hit path, its
     # plaintext CONNECT path, and the TLS tunnel — so they can't drift.
     def self_page_reply(method : String, target : String, listen : {String, Int32}) : Bytes
-      head_only = method.compare("HEAD", case_insensitive: true) == 0
-      unless head_only || method.compare("GET", case_insensitive: true) == 0
+      head_only = method == "HEAD"
+      unless head_only || method == "GET"
         return SelfPage.method_not_allowed(head_only)
       end
       SelfPage.respond(target,

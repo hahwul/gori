@@ -163,6 +163,18 @@ describe Gori::Proxy::Codec::Body do
       Body.response_framing(ok, "HEAD").should eq({BodyFraming::None, 0_i64})
     end
 
+    it "frames lowercase extension methods as ordinary responses" do
+      ok = Http1.parse_response_head("HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n".to_slice)
+      Body.response_framing(ok, "head").should eq({BodyFraming::Length, 4_i64})
+      Body.response_framing(ok, "connect").should eq({BodyFraming::Length, 4_i64})
+    end
+
+    it "uses explicit framing for a malformed status instead of assuming a bodyless status" do
+      malformed = Http1.parse_response_head(
+        "HTTP/1.1 204x Odd\r\nContent-Length: 4\r\n\r\n".to_slice)
+      Body.response_framing(malformed, "GET").should eq({BodyFraming::Length, 4_i64})
+    end
+
     it "treats a 2xx CONNECT response as bodyless but frames a non-2xx CONNECT entity" do
       # RFC 7230 §3.3.3 / RFC 9112 §6.3: only a successful CONNECT is bodyless.
       ok = Http1.parse_response_head("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)

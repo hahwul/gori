@@ -717,13 +717,21 @@ module Gori::Proxy
       parts = status.chomp.split(' ', 3)
       code = parts.size >= 2 ? (parts[1].to_i? || 0) : 0
       read = 0
+      headers_complete = false
       while line = sock.gets('\n', MAX_CONNECT_LINE)
         read += line.bytesize
         if read > MAX_CONNECT_HEADERS
           return DialError.new(DialErrorKind::Proxy,
             "#{proxy_label(route)} sent an oversized CONNECT reply header section (> #{MAX_CONNECT_HEADERS} bytes)")
         end
-        break if line.chomp.empty?
+        if line.chomp.empty?
+          headers_complete = true
+          break
+        end
+      end
+      unless headers_complete
+        return DialError.new(DialErrorKind::Proxy,
+          "#{proxy_label(route)} sent an incomplete CONNECT reply before the terminating blank line: #{status_text(status)}")
       end
       return nil if (code // 100) == 2
       DialError.new(DialErrorKind::Proxy,
@@ -1241,6 +1249,48 @@ module Gori::Proxy
       host = authority[0...idx]
       port = authority[(idx + 1)..].to_i? || default_port
       {host, port}
+    end
+
+    # CONNECT's authority is destination input, so a failed explicit port parse must not
+    # turn into the default port. Keep `split_host_port` permissive for its other projection
+    # callers; this strict sibling is only for opening a client-requested tunnel.
+    def self.split_connect_host_port(authority : String, default_port : Int32) : {String, Int32}
+      value = authority.strip
+      raise Gori::Error.new("CONNECT authority must name a host") if value.empty?
+
+      if value.starts_with?('[')
+        closing = value.index(']')
+        raise Gori::Error.new("CONNECT authority has an unterminated bracketed host") unless closing
+        host = value[1...closing]
+        raise Gori::Error.new("CONNECT authority must name a host") if host.empty?
+        suffix = value[(closing + 1)..]
+        return {host, default_port} if suffix.empty?
+        raise Gori::Error.new("CONNECT authority has an invalid port separator") unless suffix.starts_with?(':')
+        port = connect_authority_port(suffix[1..])
+        return {host, port}
+      end
+
+      return {value, default_port} if valid_ipv6?(value)
+      colon_count = value.count(':')
+      raise Gori::Error.new("CONNECT IPv6 literals must be bracketed") if colon_count > 1
+      return {value, default_port} if colon_count == 0
+
+      split = value.index!(':')
+      host = value[0...split]
+      raise Gori::Error.new("CONNECT authority must name a host") if host.empty?
+      port = connect_authority_port(value[(split + 1)..])
+      {host, port}
+    end
+
+    private def self.connect_authority_port(value : String) : Int32
+      if value.empty? || !value.each_char.all?(&.ascii_number?)
+        raise Gori::Error.new("CONNECT port must be a decimal number from 0 to 65535")
+      end
+      port = value.to_i?
+      unless port && port <= 65_535
+        raise Gori::Error.new("CONNECT port must be a decimal number from 0 to 65535")
+      end
+      port
     end
   end
 end

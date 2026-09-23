@@ -1006,6 +1006,50 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  it "resets malformed sandboxed request headers with PROTOCOL_ERROR" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "host", "api.example.com")
+      scope.add("exclude", "string", "/blocked")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      cases = [
+        {1_u32, request("/allowed") + [{":path", "/blocked"}]},
+        {3_u32, request("/allowed") + [{":method", "POST"}]},
+        {5_u32, request("/allowed") + [{":scheme", "http"}]},
+        {7_u32, request("/allowed") + [{":authority", "evil.example.com"}]},
+        {9_u32, request("/allowed") + [{"host", "evil.example.com"}]},
+        {11_u32, request("/allowed") + [{"host", "api.example.com"}, {"host", "api.example.com"}]},
+      ]
+
+      cases.each do |(stream_id, fields)|
+        rig.c2s.accept(headers(stream_id, rig.enc_out.encode(fields)))
+      end
+
+      rig.to_origin.should be_empty
+      resets = rig.to_client
+      resets.map(&.stream_id).should eq([1_u32, 3_u32, 5_u32, 7_u32, 9_u32, 11_u32])
+      resets.each do |reset|
+        reset.frame_type.should eq(Frame::Type::RstStream)
+        IO::ByteFormat::BigEndian.decode(UInt32, reset.payload).should eq(Gate::PROTOCOL_ERROR)
+      end
+      rig.sink.responses.map(&.error).should eq(Array.new(cases.size, Gate::SANDBOX_PROTOCOL_ERROR_REASON))
+    end
+  end
+
+  it "preserves duplicate pseudo-header bytes when the sandbox is off (P7)" do
+    with_ic(intercept: false) do |ic, _scope|
+      rig = Rig.new(ic)
+      block = rig.enc_out.encode(request("/allowed") + [{":path", "/blocked"}])
+
+      rig.c2s.accept(headers(1_u32, block))
+
+      sent = rig.to_origin
+      sent.map(&.frame_type).should eq([Frame::Type::Headers])
+      sent.first.payload.should eq(block)
+      rig.to_client.should be_empty
+    end
+  end
+
   # RFC 9113 §6.9.1: the connection window is only reduced by DATA and only restored by a
   # WINDOW_UPDATE — RST_STREAM refunds nothing. gori is normally transparent (it forwards DATA
   # and the far end's WINDOW_UPDATEs come back through it), but a SWALLOWED frame never reaches
