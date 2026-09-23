@@ -354,6 +354,7 @@ module Gori
       private def self.sarif_web_request(flow : Store::FlowDetail) : ::Sarif::WebRequest
         req = Proxy::Codec::Http1.parse_request_head(flow.request_head)
         row = flow.row
+        headers, bag = sarif_headers(req.headers)
         ::Sarif::WebRequest.new(
           protocol: one_line(row.scheme),
           version: sarif_http_version(req.version.presence || flow.http_version),
@@ -362,8 +363,9 @@ module Gori
           # operator's, and `row.method` is the upcased projection of it. Same rule the HAR
           # writer follows.
           method: one_line(req.method.presence || row.method),
-          headers: sarif_headers(req.headers),
+          headers: headers,
           body: sarif_body(flow.request_head, flow.request_body),
+          properties: bag,
         )
       end
 
@@ -374,6 +376,7 @@ module Gori
         return ::Sarif::WebResponse.new(no_response_received: true) if head.nil? || head.empty?
         resp = Proxy::Codec::Http1.parse_response_head(head)
         row = flow.row
+        headers, bag = sarif_headers(resp.headers)
         ::Sarif::WebResponse.new(
           protocol: one_line(row.scheme),
           # The RESPONSE's own version, not the request's — 1.0 vs 1.1 is semantically
@@ -384,8 +387,9 @@ module Gori
           # at the code) and an h1 status line may omit it, and `"reasonPhrase": ""` is noise —
           # every other optional field in this record omits itself the same way.
           reason_phrase: one_line(resp.reason).presence,
-          headers: sarif_headers(resp.headers),
+          headers: headers,
           body: sarif_body(head, flow.response_body),
+          properties: bag,
         )
       end
 
@@ -397,12 +401,23 @@ module Gori
         v.presence
       end
 
-      # SARIF's `headers` is a JSON object, but HTTP allows repeats (Set-Cookie above all), so
-      # fold duplicates by joining with ", " — the standard collapse, and the same one a
-      # combined field-value would have used on the wire. Names and values are `one_line`d
-      # because header BYTES are attacker-controlled and can be invalid UTF-8 (an obs-text or
-      # an h2 pseudo-header carrying a raw 0x80): unscrubbed, one of them makes the whole
-      # document fail `valid_encoding?` and breaks it for a strict consumer.
+      # A head's fields for SARIF: `{headers, gori/setCookie}`.
+      #
+      # SARIF's `headers` is a JSON object, but HTTP allows repeats, so each name's values are
+      # combined into one string — and HOW is the field's own rule, not one rule for all:
+      #
+      #   - a list-valued field joins with ", ", the combination RFC 9110 §5.3 makes equivalent;
+      #   - `Cookie` joins with "; ", the one form its pairs combine into (RFC 9113 §8.2.3);
+      #   - `Set-Cookie` does not combine AT ALL (RFC 9110 §5.3, RFC 6265 §3): each field is one
+      #     cookie, and its `Expires` date carries a comma of its own. ", " presented two cookies
+      #     as one fabricated field (#1190). They join with "\n" instead — a byte no field value
+      #     can hold, so every boundary is recoverable — and when there is more than one they
+      #     also ride, one array element per field, in the message's `gori/setCookie` property.
+      #
+      # Names and values are `one_line`d because header BYTES are attacker-controlled and can be
+      # invalid UTF-8 (an obs-text or an h2 pseudo-header carrying a raw 0x80): unscrubbed, one
+      # of them makes the whole document fail `valid_encoding?` and breaks it for a strict
+      # consumer.
       #
       # An obs-fold CONTINUATION (RFC 9112 §5.2 — a line whose first byte is SP/HTAB) is part of
       # the value above it, and `one_line` strips exactly the whitespace that says so. A folded
@@ -416,36 +431,47 @@ module Gori
       # `"  X-Fake"`. Three surfaces, three header sets, one head. Folded into the previous value
       # with a single SP, which is what a recipient that accepts obs-fold must do. (A continuation
       # with no colon never reaches here at all: `Http1.parse_headers` drops a colon-less line.)
-      private def self.sarif_headers(list : Proxy::Codec::HeaderList) : Hash(String, String)?
-        out = {} of String => String
-        seen = {} of String => String # downcased name => the casing first seen on the wire
-        last = nil.as(String?)        # the key an obs-fold continuation continues
+      private def self.sarif_headers(list : Proxy::Codec::HeaderList) : {Hash(String, String)?, ::Sarif::PropertyBag?}
+        fields = {} of String => Array(String) # displayed name => one value per field, in order
+        seen = {} of String => String          # downcased name => the casing first seen on the wire
+        last = nil.as(String?)                 # the key an obs-fold continuation continues
         list.each do |h|
           if fold_name?(h.name)
             # Not a field. It continues the one above — or nothing, if it opened the block, in
             # which case it belongs to no field and must not become one.
             if key = last
               cont = "#{one_line(h.name)}: #{one_line(h.value)}".strip
-              out[key] = out[key].empty? ? cont : "#{out[key]} #{cont}" unless cont.empty?
+              values = fields[key]
+              values[-1] = values[-1].empty? ? cont : "#{values[-1]} #{cont}" unless cont.empty?
             end
             next
           end
           name = one_line(h.name)
           next if name.empty?
-          value = one_line(h.value)
-          # Fold on the DOWNCASED name — field names are case-insensitive (RFC 9110 §5.1), so a
+          # Keyed on the DOWNCASED name — field names are case-insensitive (RFC 9110 §5.1), so a
           # head carrying both `set-cookie` and `Set-Cookie` is one field with two values, and
-          # keying on the raw name emitted it as two JSON keys instead of one folded value.
+          # keying on the raw name emitted it as two JSON keys instead of one.
           # The first casing seen is what's displayed, so the output still looks like the wire.
           key = seen[name.downcase] ||= name
-          if prev = out[key]?
-            out[key] = "#{prev}, #{value}"
-          else
-            out[key] = value
-          end
+          (fields[key] ||= [] of String) << one_line(h.value)
           last = key
         end
-        out.empty? ? nil : out
+        return {nil, nil} if fields.empty?
+        headers = {} of String => String
+        bag = nil.as(::Sarif::PropertyBag?)
+        fields.each do |key, values|
+          case key.downcase
+          when "set-cookie"
+            headers[key] = values.join('\n')
+            if values.size > 1
+              bag = ::Sarif::PropertyBag.new
+              bag["gori/setCookie"] = JSON::Any.new(values.map { |v| JSON::Any.new(v) })
+            end
+          when "cookie" then headers[key] = values.join("; ")
+          else               headers[key] = values.join(", ")
+          end
+        end
+        {headers, bag}
       end
 
       # Is this parsed field NAME really an obs-fold continuation — i.e. did its line start with

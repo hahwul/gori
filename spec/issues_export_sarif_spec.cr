@@ -303,25 +303,44 @@ describe Gori::Issues::Export do
       end
     end
 
-    it "folds repeated headers into one comma-joined value" do
-      # SARIF's `headers` is a JSON object but HTTP allows repeats (Set-Cookie above all);
-      # dropping all but one would lose evidence.
+    it "folds a repeated list-valued header into one comma-joined value" do
+      # SARIF's `headers` is a JSON object but HTTP allows repeats; dropping all but one would
+      # lose evidence. RFC 9110 §5.3 makes ", " the equivalent combination for a list field.
       with_store do |store|
         fid = seed_flow(store,
-          resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n")
-        store.insert_issue("cookies", Gori::Store::Severity::Info, "h.test", fid)
-        only_result(store)["webResponse"]["headers"]["Set-Cookie"].as_s.should eq("a=1, b=2")
-      end
-
-      # Field names are case-insensitive (RFC 9110 §5.1), so `set-cookie` and `Set-Cookie` are
-      # ONE field with two values — keying the fold on the raw name emitted two JSON keys.
-      with_store do |store|
-        fid = seed_flow(store,
-          resp_head: "HTTP/1.1 200 OK\r\nset-cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n")
-        store.insert_issue("cookies", Gori::Store::Severity::Info, "h.test", fid)
+          resp_head: "HTTP/1.1 200 OK\r\nVary: Accept\r\nvary: Origin\r\n\r\n")
+        store.insert_issue("vary", Gori::Store::Severity::Info, "h.test", fid)
         headers = only_result(store)["webResponse"]["headers"].as_h
-        headers.keys.count { |k| k.downcase == "set-cookie" }.should eq(1)
-        headers["set-cookie"].as_s.should eq("a=1, b=2") # first casing seen on the wire
+        # Field names are case-insensitive (RFC 9110 §5.1): ONE key, first casing seen.
+        headers.keys.count { |k| k.downcase == "vary" }.should eq(1)
+        headers["Vary"].as_s.should eq("Accept, Origin")
+      end
+    end
+
+    # #1190: Set-Cookie never combines (RFC 9110 §5.3, RFC 6265 §3) — each field is a cookie and
+    # an `Expires` date holds a comma of its own, so ", " made two cookies read as one field.
+    it "keeps every Set-Cookie field separate instead of comma-joining them (#1190)" do
+      with_store do |store|
+        fid = seed_flow(store, resp_head: "HTTP/1.1 200 OK\r\n" \
+                                          "Set-Cookie: sid=one; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/\r\n" \
+                                          "set-cookie: theme=dark; Path=/\r\n\r\n")
+        store.insert_issue("cookies", Gori::Store::Severity::Info, "h.test", fid)
+        resp = only_result(store)["webResponse"]
+        resp["headers"].as_h.keys.count { |k| k.downcase == "set-cookie" }.should eq(1)
+        fields = ["sid=one; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/", "theme=dark; Path=/"]
+        resp["headers"]["Set-Cookie"].as_s.should eq(fields.join('\n'))
+        resp["properties"]["gori/setCookie"].as_a.map(&.as_s).should eq(fields)
+        Sarif::Validator.new.validate(Sarif.parse!(export(store))).valid?.should be_true
+      end
+    end
+
+    it "joins repeated Cookie fields with the one separator cookie pairs combine with" do
+      with_store do |store|
+        fid = seed_flow(store, req_head: "GET /a HTTP/1.1\r\nHost: h.test\r\nCookie: a=1\r\nCookie: b=2\r\n\r\n")
+        store.insert_issue("cookies", Gori::Store::Severity::Info, "h.test", fid)
+        req = only_result(store)["webRequest"]
+        req["headers"]["Cookie"].as_s.should eq("a=1; b=2")
+        req["properties"]?.should be_nil # only a repeated Set-Cookie needs the per-field array
       end
     end
 
