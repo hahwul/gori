@@ -1,6 +1,7 @@
 require "uri"
 require "../store/models"
 require "../proxy/codec/body"
+require "../proxy/codec/http1"
 require "../discover/url" # Url.default_port? — the scheme/port default predicate
 
 module Gori
@@ -267,17 +268,17 @@ module Gori
           # of advertising the prefix length as the whole entity.
           #
           # NEITHER of those reasons applies when the source stated BOTH framings — see
-          # `both_framings?`. There the pair IS the payload, so both lines go out verbatim
-          # and nothing is synthesized beside them.
+          # `preserve_request_framing?`. There the source's framing lines are the payload, so
+          # they go out in order and nothing is synthesized beside them.
           #
           # What gets re-emitted is `synthesized_length`'s answer, which is nil only when the
           # source described no length at all — a body is not the gate, since a source can state
           # a length and ship no entity.
           wire_chunked = wire_chunked?(headers, body, truncated)
-          both = both_framings?(headers)
+          preserve_framing = preserve_request_framing?(headers)
           headers.each do |k, v|
-            next if !both && k.compare("content-length", case_insensitive: true) == 0
-            next if !both && !wire_chunked && transfer_encoding?(k)
+            next if !preserve_framing && k.compare("content-length", case_insensitive: true) == 0
+            next if !preserve_framing && !wire_chunked && transfer_encoding?(k)
             b << k << ": " << v << "\r\n"
           end
           # The verbatim-body suppression is scoped to a version that FRAMES its own body
@@ -289,7 +290,7 @@ module Gori
           # sendable. So `frame_body: false` only reaches `synthesized_length` under implicit
           # framing; otherwise a length is synthesized as it always was.
           frame = frame_body || !implicit_body_framing?(http_version)
-          if !both && !wire_chunked && (length = synthesized_length(headers, body, content_length, frame))
+          if !preserve_framing && !wire_chunked && (length = synthesized_length(headers, body, content_length, frame))
             b << "Content-Length: " << length << "\r\n"
           end
           b << "\r\n"
@@ -381,6 +382,24 @@ module Gori
           return true if has_cl && has_te
         end
         false
+      end
+
+      # Preserve the framing bytes the source supplied when they describe a probe gori cannot
+      # safely rewrite: CL+TE, multiple Content-Length lines, or one line the shared HTTP/1
+      # predicate refuses to canonicalize. A lone decimal Content-Length keeps the existing
+      # body-derived rewrite behavior. Names are lstripped only to recognize an obs-folded
+      # Content-Length; the shared predicate then refuses to rewrite its indented wire line.
+      private def self.preserve_request_framing?(headers : Headers) : Bool
+        content_lengths = 0
+        has_transfer_encoding = false
+        headers.each do |(name, value)|
+          has_transfer_encoding = true if transfer_encoding?(name)
+          next unless name.lstrip.compare("content-length", case_insensitive: true) == 0
+          content_lengths += 1
+          return true if content_lengths > 1
+          return true unless Proxy::Codec::Http1.rewritable_length_header?("#{name}: #{value}")
+        end
+        content_lengths > 0 && has_transfer_encoding
       end
 
       # Whether this message is chunk-framed AS STORED — a `Transfer-Encoding` header AND a
@@ -533,10 +552,11 @@ module Gori
                                frame_body : Bool = true,
                                source : FlowSource::Kind = FlowSource::Kind::Import,
                                source_surface : FlowSource::Surface? = nil,
-                               source_ref : String? = nil) : FlowPair
+                               source_ref : String? = nil,
+                               request_head_override : Bytes? = nil) : FlowPair
         scheme, host, port, target = endpoint(url)
         stored, trunc, size = capped(body, declared_body_size)
-        head = request_head(method, target, http_version, scheme, host, port, headers, body,
+        head = request_head_override || request_head(method, target, http_version, scheme, host, port, headers, body,
           trunc ? size : nil, trunc, frame_body)
         # The `flows.method` COLUMN keeps the source's case too, matching live capture:
         # `FlowMapper.request` passes `req.method` straight through, and the consumers that
@@ -568,10 +588,12 @@ module Gori
                              frame_body : Bool = true,
                              source : FlowSource::Kind = FlowSource::Kind::Import,
                              source_surface : FlowSource::Surface? = nil,
-                             source_ref : String? = nil) : FlowPair
+                             source_ref : String? = nil,
+                             request_head_override : Bytes? = nil,
+                             response_head_override : Bytes? = nil) : FlowPair
         scheme, host, port, target = endpoint(url)
         req_stored, req_trunc, req_size = capped(req_body, declared_req_body_size)
-        req_head = request_head(method, target, http_version, scheme, host, port, req_headers, req_body,
+        req_head = request_head_override || request_head(method, target, http_version, scheme, host, port, req_headers, req_body,
           req_trunc ? req_size : nil, req_trunc, frame_body)
         # The RFC 8441 `:protocol` the importer recovered, when it could (V16). Threaded rather
         # than lifted off `req_head` here, so the decision about whether a given format's bytes
@@ -583,8 +605,9 @@ module Gori
           connect_protocol: connect_protocol,
           source: source, source_surface: source_surface, source_ref: source_ref)
         # `response_head` keeps an incoming Content-Length verbatim, so a truncated response
-        # already re-serializes with the origin's true length — no override needed on this side.
-        # It does need to KNOW the body was cut short, though, or a capped chunked response
+        # already re-serializes with the origin's true length. A raw override is used only when
+        # the source format carries a complete head. The response builder does need to KNOW the
+        # body was cut short, though, or a capped chunked response
         # loses its Transfer-Encoding (`wire_chunked?`), so cap first and tell it.
         resp_stored, resp_trunc, resp_size = capped(resp_body, declared_resp_body_size)
         # The RESPONSE's own version when the source recorded one, falling back to the
@@ -597,7 +620,7 @@ module Gori
         # the response's version: a HTTP/1.1 request answered over h2 came back as
         # `HTTP/1.1 200` with no phrase — the reason-less status line that is supposed to mean
         # the origin really sent one.
-        resp_head = response_head(resp_http_version || http_version, status, reason,
+        resp_head = response_head_override || response_head(resp_http_version || http_version, status, reason,
           resp_headers, resp_body, resp_trunc)
         content_encoding = resp_headers.find { |(k, _)| k.compare("content-encoding", case_insensitive: true) == 0 }.try(&.[1])
         resp = Store::CapturedResponse.new(

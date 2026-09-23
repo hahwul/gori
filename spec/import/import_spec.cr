@@ -1250,6 +1250,25 @@ describe Gori::Import::Builder do
       head.should_not contain("Content-Length: 999")
     end
 
+    it "keeps a CL.CL pair in source order without synthesizing another length" do
+      headers = Gori::Import::Builder::Headers.new
+      headers << {"Content-Length", "4"}
+      headers << {"Content-Length", "5"}
+      head = String.new(Gori::Import::Builder.request_head("POST", "/clcl", "HTTP/1.1",
+        scheme: "http", host: "h.test", port: 80, headers: headers, body: "ABCD".to_slice))
+      head.should contain("Content-Length: 4\r\nContent-Length: 5\r\n")
+      head.scan(/^Content-Length:/im).size.should eq(2)
+    end
+
+    it "keeps a Content-Length value the repeater refuses to rewrite" do
+      headers = Gori::Import::Builder::Headers.new
+      headers << {"Content-Length", "0abc"}
+      head = String.new(Gori::Import::Builder.request_head("POST", "/bad-length", "HTTP/1.1",
+        scheme: "http", host: "h.test", port: 80, headers: headers, body: "ABCD".to_slice))
+      head.should contain("Content-Length: 0abc\r\n")
+      head.should_not contain("Content-Length: 4\r\n")
+    end
+
     it "still drops a lone Transfer-Encoding the body does not back" do
       headers = Gori::Import::Builder::Headers.new
       headers << {"Transfer-Encoding", "chunked"}
@@ -1292,6 +1311,40 @@ describe Gori::Import::Builder do
             "POST /clte HTTP/1.1\r\nHost: 127.0.0.1:19802\r\n" \
             "Content-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n")
           detail.request_body.should eq("5\r\nhello\r\n0\r\n\r\n".to_slice)
+        end
+      ensure
+        File.delete?(har)
+      end
+    end
+
+    it "imports CL.CL and malformed Content-Length HAR entries without rewriting them" do
+      har = File.tempname("gori", ".har")
+      request = ->(path : String, headers : Array({String, String})) do
+        {
+          "startedDateTime" => "2026-07-31T00:00:00.000Z",
+          "request"         => {"method" => "POST", "url" => "http://127.0.0.1:19802#{path}",
+                        "httpVersion" => "HTTP/1.1",
+                        "headers" => headers.map { |(name, value)| {"name" => name, "value" => value} },
+                        "postData" => {"mimeType" => "text/plain", "text" => "ABCD"}},
+          "response" => {"status" => 200, "statusText" => "OK", "httpVersion" => "HTTP/1.1",
+                         "headers" => [] of String,
+                         "content" => {"size" => 0, "mimeType" => ""}},
+        }
+      end
+      begin
+        clcl = [{"Host", "127.0.0.1:19802"}, {"Content-Length", "4"}, {"Content-Length", "5"}]
+        malformed = [{"Host", "127.0.0.1:19802"}, {"Content-Length", "0abc"}]
+        File.write(har, {"log" => {"version" => "1.2", "creator" => {"name" => "hand", "version" => "1"},
+                                   "entries" => [request.call("/clcl", clcl), request.call("/bad", malformed)]}}.to_json)
+        with_store do |store|
+          Gori::Import.import_file(store, :har, har).count.should eq(2)
+          details = store.recent_flows(2).map { |row| store.get_flow(row.id).not_nil! }
+          clcl_detail = details.find { |detail| detail.row.target == "/clcl" }.not_nil!
+          malformed_detail = details.find { |detail| detail.row.target == "/bad" }.not_nil!
+          String.new(clcl_detail.request_head).should contain(
+            "Content-Length: 4\r\nContent-Length: 5\r\n")
+          String.new(malformed_detail.request_head).should contain("Content-Length: 0abc\r\n")
+          String.new(malformed_detail.request_head).should_not contain("Content-Length: 4\r\n")
         end
       ensure
         File.delete?(har)

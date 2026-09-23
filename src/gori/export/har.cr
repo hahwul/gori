@@ -91,6 +91,12 @@ module Gori
       # so it is named on the entry rather than left silent (#488/#489/#491).
       SCRUBBED_MARK = "gori: invalid UTF-8 in the captured head replaced with U+FFFD; the store keeps the original bytes"
 
+      # HAR's ordered header array has no representation for a colonless line. Carry a raw
+      # request or response head only when it has one, so gori's export→import round trip can
+      # retain those malformed header probes byte-for-byte.
+      RAW_REQUEST_HEAD  = "_goriRawRequestHead"
+      RAW_RESPONSE_HEAD = "_goriRawResponseHead"
+
       # gori records one round-trip duration, not a phase breakdown, so `send`/`receive`
       # are the spec's own "not applicable" (-1) rather than a fabricated 0, and `time`
       # stays equal to the sum of the non-negative timings as §timings requires.
@@ -316,6 +322,7 @@ module Gori
               j.field "httpVersion", text(version)
               j.field "cookies" { request_cookies(j, req.headers) }
               j.field "headers" { headers(j, req.headers) }
+              raw_head_extension(j, RAW_REQUEST_HEAD, detail.request_head)
               j.field "queryString" { query_string(j, row.target) }
               post_data(j, req.headers, detail.request_body, req_body_size,
                 detail.request_body_truncated?)
@@ -336,6 +343,7 @@ module Gori
               j.field "httpVersion", text(resp.version.presence || version)
               j.field "cookies" { response_cookies(j, resp.headers) }
               j.field "headers" { headers(j, resp.headers) }
+              raw_head_extension(j, RAW_RESPONSE_HEAD, resp_head)
               j.field "redirectURL", text(resp.headers.get?("location") || "")
               j.field "headersSize", resp_head.size
               j.field "bodySize", resp_body_size
@@ -479,9 +487,10 @@ module Gori
         end
       end
 
-      # Wire order, duplicates kept, original casing kept. HAR's `headers` is the only
-      # place the message's own header block survives, and it is what `Import::Har` reads
-      # back — `cookies` and `queryString` below are derived views over it.
+      # Wire order, duplicates kept, original casing kept. HAR's `headers` field carries all
+      # parseable lines; the raw-head extension above carries any colonless lines it cannot
+      # represent. `Import::Har` reads the two forms back — `cookies` and `queryString` below
+      # are derived views over the parsed headers.
       private def self.headers(j : JSON::Builder, list : Proxy::Codec::HeaderList) : Nil
         j.array do
           list.each do |h|
@@ -491,6 +500,44 @@ module Gori
             end
           end
         end
+      end
+
+      private def self.raw_head_extension(j : JSON::Builder, key : String, head : Bytes) : Nil
+        j.field key, Base64.strict_encode(head) if has_colonless_header_line?(head)
+      end
+
+      # Does this raw request header block contain a line the HAR header array cannot express?
+      # Scan bytes rather than constructing Strings so malformed/obs-text heads stay safe.
+      private def self.has_colonless_header_line?(head : Bytes) : Bool
+        line_start = crlf_at(head, 0)
+        return false unless line_start
+        line_start += 2
+        while line_start < head.size
+          line_end = crlf_at(head, line_start)
+          return false unless line_end
+          break if line_end == line_start
+          has_colon = false
+          i = line_start
+          while i < line_end
+            if head.unsafe_fetch(i) == 0x3a_u8
+              has_colon = true
+              break
+            end
+            i += 1
+          end
+          return true unless has_colon
+          line_start = line_end + 2
+        end
+        false
+      end
+
+      private def self.crlf_at(bytes : Bytes, from : Int32) : Int32?
+        i = from
+        while i + 1 < bytes.size
+          return i if bytes.unsafe_fetch(i) == 0x0d_u8 && bytes.unsafe_fetch(i + 1) == 0x0a_u8
+          i += 1
+        end
+        nil
       end
 
       # The query as it appeared on the wire, NOT percent-decoded. A gori capture's query is

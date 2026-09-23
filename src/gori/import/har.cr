@@ -181,6 +181,7 @@ module Gori
 
         req_headers = headers_list(req["headers"]?)
         req_body, req_frame = post_body(req["postData"]?)
+        raw_request_head = req["_goriRawRequestHead"]?.try(&.as_s?).try { |s| Base64.decode(s) }
         # HAR's `bodySize` is the size the body had ON THE WIRE, which is not necessarily the
         # size of the text the file carries: `Export::Har` writes the true size beside a body
         # that was capped at capture time. Passing it through keeps that flow truncated
@@ -192,8 +193,10 @@ module Gori
         unless resp
           return Builder.pending_request(created_at, url, method, req_headers, req_body,
             http_version, req_declared, frame_body: req_frame,
-            source_surface: prov.surface, source_ref: prov.ref)
+            source_surface: prov.surface, source_ref: prov.ref,
+            request_head_override: raw_request_head)
         end
+        raw_response_head = resp["_goriRawResponseHead"]?.try(&.as_s?).try { |s| Base64.decode(s) }
 
         # `number_i64`, not `as_i`: a fractional `"status": 200.5` raises `TypeCastError`
         # out of `as_i`, which the per-entry rescue turned into a dropped request.
@@ -236,7 +239,9 @@ module Gori
           status, reason, resp_headers, resp_body, content_type, duration_us,
           req_declared, resp_declared, connect_protocol(req_headers),
           resp_http_version: resp_version, frame_body: req_frame,
-          source_surface: prov.surface, source_ref: prov.ref)
+          source_surface: prov.surface, source_ref: prov.ref,
+          request_head_override: raw_request_head,
+          response_head_override: raw_response_head)
         msgs = ws_messages(entry, created_at)
         msgs.empty? ? pair : Builder::FlowPair.new(pair.request, pair.response, msgs)
       end
