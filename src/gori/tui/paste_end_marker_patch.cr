@@ -26,10 +26,10 @@ require "termisu"
 # WHAT IS LEFT, after the #1125 lock bump. This file used to carry a third override,
 # `read_paste_end_tail`, because the probe that matches `\e[201~` skipped the fd entirely
 # whenever its poll budget was 0 — and 0 is what `Event::Source::Input#run_loop` drains with,
-# so `Key::PasteEnd` was never emitted at all. termisu b790d91 rewrote that method around
-# `@reader.read_byte(paste_wait_ms)` and fixed it upstream, so the override is gone and the
-# shard's own version runs. The remaining two are about what happens when the marker never
-# arrives, which upstream still does not handle.
+# so `Key::PasteEnd` was never emitted at all. termisu b790d91 (5bdf493 on its rewritten main)
+# rewrote that method around `@reader.read_byte(paste_wait_ms)` and fixed it upstream, so the
+# override is gone and the shard's own version runs. The remaining two are about what happens
+# when the marker never arrives, which upstream still does not handle.
 #
 # THE GIVE-UP BRANCH, in `parse_paste_escape`: the pinned parser bounds the marker window, but
 # when it expires it returns a bare `Escape` and leaves `@in_paste` SET. That is not a
