@@ -354,7 +354,14 @@ module Gori
       private def self.response_head_error(result : Proxy::Codec::Http1::HeadReadResult,
                                            host : String, port : Int32, started : Time::Instant,
                                            origin_scheme : String, interim : Int32? = nil) : Result
-        message = if result.state == Proxy::Codec::Http1::HeadReadResult::State::Empty
+        message = if interim && result.timed_out? && result.bytes.empty?
+                    # Keep the established origin-facing wording for an interim response
+                    # followed by silence. The detailed head reader reports this timeout as
+                    # a result (rather than raising into `read_response`'s rescue), so route
+                    # it through the same sentence used by that older exception path.
+                    exchange_error(result.error || IO::TimeoutError.new("response head read timed out"),
+                      host, port, interim)
+                  elsif result.state == Proxy::Codec::Http1::HeadReadResult::State::Empty
                     if interim
                       "upstream closed after interim 1xx from #{host}:#{port}"
                     else
