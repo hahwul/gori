@@ -693,6 +693,17 @@ module Gori::Proxy::Codec::Http1
     true
   end
 
+  # Whether rewriting a Content-Length line to a canonical count preserves its meaning. The
+  # whole line is replaced by the rewrite, so an indented obs-fold or non-decimal value is an
+  # operator-authored probe and must stay untouched. Shared by Repeater and structured import.
+  def self.rewritable_length_header?(line : String) : Bool
+    return false if line.starts_with?(' ') || line.starts_with?('\t')
+    value = line.split(':', 2)[1]?
+    return false unless value
+    digits = value.strip
+    !digits.empty? && digits.each_char.all?(&.ascii_number?)
+  end
+
   # Index of the CRLF at or after `from`, or nil if none. Scans the raw bytes so
   # the parser never materializes the whole head as a String (P7: raw is truth).
   private def self.index_crlf(raw : Bytes, from : Int32) : Int32?

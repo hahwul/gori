@@ -634,6 +634,36 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "imports local OpenAPI refs through the shared importer" do
+      with_store do |store|
+        path = File.tempname("gori-mcp-import", ".json")
+        File.write(path, <<-JSON)
+          {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "1"},
+            "servers": [{"url": "https://api.example.test"}],
+            "components": {"parameters": {
+              "UserId": {"name": "id", "in": "path", "required": true,
+                         "schema": {"type": "integer"}}
+            }},
+            "paths": {"/users/{id}": {
+              "parameters": [{"$ref": "#/components/parameters/UserId"}],
+              "get": {"responses": {"200": {"description": "ok"}}}
+            }}
+          }
+          JSON
+        begin
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"kind":"oas","path":#{path.to_json}}}})
+          payload = mcp_tool_payload(mcp_drive(store, call)[0])
+          payload["count"].as_i.should eq(1)
+          detail = store.get_flow(store.recent_flows(1).first.id).not_nil!
+          detail.row.target.should eq("/users/1")
+        ensure
+          File.delete?(path)
+        end
+      end
+    end
+
     it "returns a clean error for a missing file" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"import_flows","arguments":{"kind":"urls","path":"/no/such/file.txt"}}})

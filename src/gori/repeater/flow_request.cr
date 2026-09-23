@@ -197,11 +197,7 @@ module Gori
       # `RepeaterView#plain_numeric_header?` (the visible header) both read it, and they used
       # to answer differently for the same line.
       def self.rewritable_length_header?(line : String) : Bool
-        return false if line.starts_with?(' ') || line.starts_with?('\t')
-        value = line.split(':', 2)[1]?
-        return false unless value
-        digits = value.strip
-        !digits.empty? && digits.each_char.all?(&.ascii_number?)
+        Proxy::Codec::Http1.rewritable_length_header?(line)
       end
 
       # The CAPTURED-FLOW replay policy, as opposed to the repeater's auto-CL toggle above.

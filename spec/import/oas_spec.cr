@@ -32,6 +32,138 @@ describe Gori::Import::Oas do
     end
   end
 
+  it "resolves local parameter, requestBody, and schema refs at path and operation level" do
+    body = <<-JSON
+      {
+        "openapi": "3.0.3",
+        "info": {"title": "t", "version": "1"},
+        "servers": [{"url": "http://api.example.test/v1"}],
+        "components": {
+          "parameters": {
+            "UserId": {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}},
+            "ApiVer": {"name": "api_version", "in": "query", "required": true, "schema": {"type": "string"}}
+          },
+          "requestBodies": {
+            "User": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/User"}}}}
+          },
+          "schemas": {"User": {"type": "object"}, "UserList": {"type": "array"}}
+        },
+        "paths": {
+          "/users/{id}": {
+            "parameters": [{"$ref": "#/components/parameters/UserId"}],
+            "get": {
+              "parameters": [{"$ref": "#/components/parameters/ApiVer"}],
+              "responses": {"200": {"description": "ok"}}
+            },
+            "put": {
+              "requestBody": {"$ref": "#/components/requestBodies/User"},
+              "responses": {"200": {"description": "ok"}}
+            }
+          },
+          "/users": {
+            "post": {
+              "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/UserList"}}}},
+              "responses": {"200": {"description": "ok"}}
+            }
+          }
+        }
+      }
+      JSON
+
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.flows.size.should eq(3)
+      get = String.new(result.flows[0].request.head)
+      put = String.new(result.flows[1].request.head)
+      get.should contain("GET /v1/users/1?api_version=api_version HTTP/1.1")
+      put.should contain("PUT /v1/users/1 HTTP/1.1")
+      put.should contain("Content-Type: application/json\r\n")
+      String.new(result.flows[1].request.body.not_nil!).should eq("{}")
+      String.new(result.flows[2].request.body.not_nil!).should eq("[]")
+    end
+  end
+
+  it "imports Swagger 2 host, basePath, body, formData, and consumes" do
+    body = <<-JSON
+      {
+        "swagger": "2.0",
+        "info": {"title": "t", "version": "1"},
+        "host": "127.0.0.1:18501",
+        "basePath": "/v1",
+        "schemes": ["http"],
+        "consumes": ["application/json"],
+        "definitions": {"Payload": {"type": "object"}},
+        "paths": {
+          "/users/{id}": {
+            "parameters": [{"name": "id", "in": "path", "required": true, "type": "integer"}],
+            "post": {
+              "parameters": [{"name": "body", "in": "body", "schema": {"$ref": "#/definitions/Payload"}}],
+              "responses": {"200": {"description": "ok"}}
+            }
+          },
+          "/form": {
+            "post": {
+              "consumes": ["application/x-www-form-urlencoded"],
+              "parameters": [{"name": "name", "in": "formData", "required": true, "type": "string"}],
+              "responses": {"200": {"description": "ok"}}
+            }
+          },
+          "/upload": {
+            "post": {
+              "consumes": ["multipart/form-data"],
+              "parameters": [{"name": "file", "in": "formData", "required": true, "type": "file"}],
+              "responses": {"200": {"description": "ok"}}
+            }
+          }
+        }
+      }
+      JSON
+
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.flows.size.should eq(3)
+      request = String.new(result.flows[0].request.head)
+      request.should contain("POST /v1/users/1 HTTP/1.1")
+      request.should contain("Host: 127.0.0.1:18501\r\n")
+      request.should contain("Content-Type: application/json\r\n")
+      String.new(result.flows[0].request.body.not_nil!).should eq("{}")
+      form_head = String.new(result.flows[1].request.head)
+      form_head.should contain("Content-Type: application/x-www-form-urlencoded\r\n")
+      String.new(result.flows[1].request.body.not_nil!).should eq("name=name")
+      upload_head = String.new(result.flows[2].request.head)
+      upload_head.should contain("Content-Type: multipart/form-data; boundary=gori-openapi-boundary\r\n")
+      String.new(result.flows[2].request.body.not_nil!).should contain("filename=\"file\"")
+    end
+  end
+
+  it "reports remote refs without fetching them" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://api.example.test"}],"paths":{"/a":{"get":{
+         "parameters":[{"$ref":"https://example.test/parameters.json#/Token"}],
+         "responses":{"200":{"description":"ok"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      expect_raises(Gori::Error, /remote.*\$ref|\$ref.*remote/i) { Gori::Import::Oas.parse_file(path) }
+    end
+  end
+
+  it "bounds local ref cycles and counts the affected operation as skipped" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://api.example.test"}],
+       "components":{"parameters":{"A":{"$ref":"#/components/parameters/B"},
+                                     "B":{"$ref":"#/components/parameters/A"}}},
+       "paths":{"/a":{"get":{"parameters":[{"$ref":"#/components/parameters/A"}],
+         "responses":{"200":{"description":"ok"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.flows.should be_empty
+      result.skipped.should eq(1)
+    end
+  end
+
   # `URI.parse` RAISES on a port an author can type by hand: one that overflows Int32 comes
   # back as `OverflowError`, a non-numeric one as `URI::Error`. Neither is a `Gori::Error`, so
   # both left `server_base` as a raw backtrace out of the CLI.

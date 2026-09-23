@@ -242,6 +242,26 @@ describe Gori::Export::Har do
     end
   end
 
+  it "round-trips colonless request header lines through its raw-head extension" do
+    with_store do |store|
+      raw_head = "GET /fold HTTP/1.1\r\nHost: shop.test\r\nX-Note: a\r\n" \
+                 " folded-no-colon\r\nNoColonLine\r\nConnection: close\r\n\r\n"
+      raw_response_head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nX-Note: a\r\n" \
+                          " folded-no-colon\r\nNoColonLine\r\nContent-Length: 9\r\n\r\n"
+      detail = capture_flow(store, req_head: raw_head, resp_head: raw_response_head,
+        target: "/fold", content_type: "text/plain")
+      har = export([detail])[0]
+      entry = JSON.parse(har)["log"]["entries"][0]
+
+      entry["request"]["_goriRawRequestHead"].as_s.should eq(Base64.strict_encode(raw_head.to_slice))
+      entry["response"]["_goriRawResponseHead"].as_s.should eq(Base64.strict_encode(raw_response_head.to_slice))
+      back = reimport(har)
+      back.request_head.should eq(raw_head.to_slice)
+      back.response_head.not_nil!.should eq(raw_response_head.to_slice)
+      export([back])[0].should eq(har)
+    end
+  end
+
   # A chunked message is stored RAW-chunked, so the byte count in the HAR is not the entity
   # length — and re-emitting it as a Content-Length manufactured the CL+TE shape gori's own
   # `Codec::Body.request_framing` REJECTS as illegal, out of a flow that had been captured
