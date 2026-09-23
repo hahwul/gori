@@ -403,6 +403,10 @@ module Gori::Fuzz
       # per send (`Authorize`). Since `verbatim` cannot express "leave the headers alone",
       # a sender that MEANS a specific identity has to be able to say so at construction.
       bytes = Gori::Env.overlay_slot(bytes, gen) if @slot_overlay
+      # The `chrome` preset's client hints (#1174), last, from the User-Agent these bytes now
+      # carry — with or without the slot overlay, since an Authorize identity is still sent
+      # over the same handshake.
+      bytes = Gori::Env.client_hints(bytes, gen)
       # Sandbox mode / an explicit EXCLUDE rule hard-blocks BEFORE the socket, so a
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect
@@ -450,6 +454,9 @@ module Gori::Fuzz
       # header lines for a header-only overlay to write. `Repeater::Sender#send_ws` draws the
       # line in the same place and for the same reason.
       wire = Gori::Env.overlay_slot(wire, ws_gen) if @slot_overlay
+      # A handshake gets no hints (`ClientHints.apply` says why); called so this seam holds the
+      # same pair as every other and a later answer lands here too.
+      wire = Gori::Env.client_hints(wire, ws_gen)
       if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire), @origin.port)
         @blocked += 1
         @blocked_reason ||= err
@@ -567,7 +574,7 @@ module Gori::Fuzz
       reqs = requests.map do |b|
         gen = generation
         wired = @evidence ? b : Gori::Env.expand_bindings(b, generation: gen)
-        Gori::Env.overlay_slot(wired, gen)
+        Gori::Env.client_hints(Gori::Env.overlay_slot(wired, gen), gen)
       end
       # GROUP-GATE, sweep-side, mirroring `Repeater::Sender#group_refusal`: one blocked member
       # refuses the WHOLE batch and returns all-error Results — a group is one connection
@@ -602,6 +609,7 @@ module Gori::Fuzz
       verbatim = @evidence ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
       race_gen = generation
       expanded = Gori::Env.overlay_slot(Gori::Env.expand_bindings(bytes, verbatim, generation: race_gen), race_gen)
+      expanded = Gori::Env.client_hints(expanded, race_gen)
       # Nothing to hold back — degrade rather than slice a negative/empty tail. Never hit by a
       # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
       return super if expanded.size < 2

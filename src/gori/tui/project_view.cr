@@ -1848,8 +1848,8 @@ module Gori::Tui
     end
 
     def env_commit : Symbol
-      text = @env_field.value.strip
-      return :empty if text.empty?
+      text = @env_field.value
+      return :empty if text.strip.empty?
       parsed = Env.parse_line(text)
       return :invalid unless parsed
       key, val = parsed

@@ -3,6 +3,7 @@ require "random/secure"
 require "uuid"
 require "./settings"
 require "./session_slot"
+require "./client_hints"
 require "./store"
 
 module Gori
@@ -169,6 +170,11 @@ module Gori
       # does not claim Firefox over a Chrome-shaped ClientHello.
       def ua_family : String?
         (d = @dial) ? Env.ua_family_for(*d) : nil
+      end
+
+      # The scheme this request is dialed over, or nil without a dial.
+      def dial_scheme : String?
+        @dial.try(&.[1])
       end
 
       # A context for one request dialed to `host` over `scheme`. The constructor every on-wire
@@ -771,6 +777,15 @@ module Gori
     # author — a captured replay, a fuzz template with its payload already spliced.
     def self.overlay_slot(wire : Bytes, generation : Generation? = nil) : Bytes
       (l = @@layer) ? l.overlay(wire, generation) : wire
+    end
+
+    # The `chrome` TLS preset's client hints (#1174), written into a gori-originated request
+    # after `overlay_slot` — the last header-only pass, so the User-Agent it reads is the one the
+    # socket gets. Every send seam that mints in `Generation.for_dial` calls it; the intercept
+    # forward is the one that must not, since those are a client's own bytes on the proxy path.
+    # spec/send_seam_generation_spec.cr holds the two lists together. See `ClientHints.apply`.
+    def self.client_hints(wire : Bytes, generation : Generation) : Bytes
+      ClientHints.apply(wire, generation.dial_scheme) { generation.ua_family }
     end
 
     # ── a slot overlay's own unresolved references ────────────────────────────
@@ -2219,16 +2234,15 @@ module Gori
     # whitespace, not on the `=` buried inside the value. Returns nil when KEY is
     # invalid.
     def self.parse_line(text : String) : {String, String}?
-      # `.scrub` first: `text` is an operator-supplied env line (`gori run project env set
-      # KEY VALUE`, the TUI env editor), and both the `index(/\s/)` and `split(/\s+/, 2)`
-      # below are PCRE2 calls, which raise `ArgumentError` on a subject that is not valid
-      # UTF-8. That escapes `CLI.run`'s `Gori::Error`-only rescue as a raw backtrace.
-      raw = text.scrub.strip
+      # The whitespace lookup and split below use PCRE2. Ignore indentation before the key,
+      # refuse invalid text before they run, and retain every byte after `=`.
+      return nil unless text.valid_encoding?
+      raw = text.lstrip
       return nil if raw.empty?
       eq = raw.index('=')
       ws = raw.index(/\s/)
       if eq && (ws.nil? || eq < ws)
-        key = raw[0...eq].strip
+        key = raw[0...eq]
         val = raw[eq + 1..]
         return nil unless valid_key?(key)
         {key, val}
@@ -2382,7 +2396,7 @@ module Gori
     end
 
     def self.valid_key?(key : String) : Bool
-      return false if key.empty?
+      return false if key.empty? || !key.valid_encoding?
       return false unless KEY_HEAD.matches?(key[0].to_s)
       key.chars[1..].all? { |c| KEY_TAIL.matches?(c.to_s) }
     end
