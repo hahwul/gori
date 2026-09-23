@@ -2102,7 +2102,16 @@ module Gori::Proxy
     # Tunnel) is what makes the bypass cover the h2c-in-CONNECT branch too: the byte peek
     # below never happens for a passthrough host.
     private def handle_connect(req : Codec::RawRequest, created_at : Int64) : Bool
-      host, port = Upstream.split_host_port(req.target, 443)
+      host, port =
+        begin
+          Upstream.split_connect_host_port(req.target, 443)
+        rescue ex : Gori::Error
+          parsed_host, _ = Upstream.split_host_port(req.target, 443)
+          reason = ex.message || "invalid CONNECT authority"
+          record_error(req, "https", parsed_host, 0, created_at, reason)
+          write_bad_request(reason)
+          return false
+        end
 
       # A LISTENER-pinned connection is not a forward proxy. The destination was settled before
       # this request existed — a reverse listener's declared origin, or the client's own SOCKS5
@@ -3148,6 +3157,15 @@ module Gori::Proxy
 
     private def write_gateway_error : Nil
       @io.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n".to_slice)
+      @io.flush
+    rescue
+    end
+
+    private def write_bad_request(reason : String) : Nil
+      body = "#{reason}\n"
+      @io.write("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n" \
+                "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n".to_slice)
+      @io.write(body.to_slice)
       @io.flush
     rescue
     end

@@ -624,6 +624,23 @@ describe Gori::Proxy::Upstream do
     end
   end
 
+  describe ".split_connect_host_port" do
+    it "accepts a hostname or explicit numeric port without changing IPv6 parsing" do
+      Gori::Proxy::Upstream.split_connect_host_port("example.com", 443).should eq({"example.com", 443})
+      Gori::Proxy::Upstream.split_connect_host_port("example.com:8443", 443).should eq({"example.com", 8443})
+      Gori::Proxy::Upstream.split_connect_host_port("[::1]:8443", 443).should eq({"::1", 8443})
+      Gori::Proxy::Upstream.split_connect_host_port("::1", 443).should eq({"::1", 443})
+    end
+
+    it "rejects an explicit port that cannot be parsed instead of using the default" do
+      ["example.com:notaport", "example.com:", "example.com:65536", "[::1]:bogus"].each do |authority|
+        expect_raises(Gori::Error) do
+          Gori::Proxy::Upstream.split_connect_host_port(authority, 443)
+        end
+      end
+    end
+  end
+
   # The self-page / self-loop detection. The interesting case is a WILDCARD bind
   # (0.0.0.0 / ::): the proxy answers on every interface, so a request whose Host
   # names the LAN/interface IP the client connected through is the proxy itself —

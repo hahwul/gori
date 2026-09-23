@@ -1411,6 +1411,33 @@ describe Gori::Proxy::Server do
       Gori::Settings.tls_passthrough = previous_passthrough
     end
   end
+
+  it "rejects a CONNECT authority with a nonnumeric port and records the reason" do
+    done = Channel(Nil).new(1)
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    begin
+      client.write("CONNECT example.test:notaport HTTP/1.1\r\nHost: example.test:notaport\r\n\r\n".to_slice)
+      client.flush
+      response_head = Gori::Proxy::Codec::Http1.read_head(client).not_nil!
+      response = Gori::Proxy::Codec::Http1.parse_response_head(response_head)
+      body = Bytes.new(response.headers.get?("Content-Length").not_nil!.to_i)
+      client.read_fully(body)
+      done.receive
+
+      response.status.should eq(400)
+      String.new(body).should contain("CONNECT port must be a decimal number")
+      sink.requests.first.port.should eq(0)
+      sink.responses.first.state.should eq(Gori::Store::FlowState::Error)
+      sink.responses.first.error.not_nil!.should contain("CONNECT port must be a decimal number")
+    ensure
+      client.close rescue nil
+      proxy.stop
+    end
+  end
   it "records an error when the client truncates the request body" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)
