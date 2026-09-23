@@ -232,6 +232,28 @@ Spec.after_suite { FileUtils.rm_rf(RESUME_CA_ROOT) }
 
 # A real Session with ONE project-scoped provider and ONE persisted OAST session against it —
 # the state a reopened project is actually in, which is the state resume exists to serve.
+# An endpoint a resume can dial without reaching anything: a loopback port nothing listens on.
+# `resume_session` builds a REAL provider from the row, so the one request it makes has to fail
+# at once and stay off every proxy (loopback is always dialed direct). A public-looking name
+# resolved later, from a fiber that outlived its example, and went out through the upstream
+# proxy the next spec file configured (spec/discover/sender_spec.cr, run in one process).
+private CLOSED_ENDPOINT = begin
+  probe = TCPServer.new("127.0.0.1", 0)
+  port = probe.local_address.port
+  probe.close
+  "https://127.0.0.1:#{port}"
+end
+
+# Wait out every register/resume round trip still in flight, so its fiber ends inside the
+# example that started it. Bounded, so a broken future fails the example rather than the suite.
+private def settle_registrations(controller : OastController) : Nil
+  500.times do
+    break if controller.@registering.empty?
+    sleep 10.milliseconds
+    controller.drain_events
+  end
+end
+
 private def with_oast_controller(&)
   root = File.tempname("gori-oast-resume")
   Dir.mkdir_p(root)
@@ -244,8 +266,15 @@ private def with_oast_controller(&)
     sid = session.store.insert_oast_session(pid, "interactsh", "https://oast.test",
       "c0rr3lat10n", "s3cret", nil, nil)
     host = FakeHost.new(session)
-    yield OastController.new(host), host, session, sid, pid
+    controller = OastController.new(host)
+    yield controller, host, session, sid, pid
   ensure
+    # Nothing an example starts may outlive it: a poller keeps polling on its interval and a
+    # resume fiber dials once, both long after the next example has reconfigured the process.
+    if c = controller
+      c.stop_all
+      settle_registrations(c)
+    end
     session.close
     FileUtils.rm_rf(root) if Dir.exists?(root)
   end
@@ -356,12 +385,13 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
   # configured interactsh once and reuses it across projects permanently unresumable, which is
   # the ordinary setup, not the edge case.
   it "re-resolves a global provider's session by kind and endpoint, not by row id" do
-    Gori::Settings.oast_providers = [] of Gori::Settings::OastProvider
-    Gori::Settings.add_oast_provider("Shared interactsh", "interactsh", "oast.global", nil)
+    # In memory only: `add_oast_provider` saves settings.json, which a later spec would reload.
+    Gori::Settings.oast_providers = [Gori::Settings::OastProvider.new("5h", "Shared interactsh",
+      "interactsh", CLOSED_ENDPOINT, nil, true)]
     begin
       with_oast_controller do |controller, host, session, _sid, _pid|
         # provider_id NULL, and the server_url in its normalised form — what register wrote.
-        global = session.store.insert_oast_session(nil, "interactsh", "https://oast.global",
+        global = session.store.insert_oast_session(nil, "interactsh", CLOSED_ENDPOINT,
           "gl0balc0rr", "s3c", nil, nil)
         controller.reload
 
@@ -384,21 +414,21 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
   it "records the global provider a registration used, and resumes under it" do
     # In memory only: `add_oast_provider` saves settings.json, which a later spec would reload.
     second = "b2"
-    Gori::Settings.oast_providers = [Gori::Settings::OastProvider.new("a1", "First", "interactsh", "oast.shared", "A", true),
-                                     Gori::Settings::OastProvider.new(second, "Second", "interactsh", "oast.shared", "B", true)]
+    Gori::Settings.oast_providers = [Gori::Settings::OastProvider.new("a1", "First", "interactsh", CLOSED_ENDPOINT, "A", true),
+                                     Gori::Settings::OastProvider.new(second, "Second", "interactsh", CLOSED_ENDPOINT, "B", true)]
     begin
       with_oast_controller do |controller, _host, session, _sid, _pid|
         controller.reload
         fresh = Gori::Oast::Session.new(0_i64, Gori::Oast::ProviderKind::Interactsh,
-          "https://oast.shared", "fr3shc0rr", "s3c", token: "B", registered: true)
-        provider = Gori::Oast::Provider.build(Gori::Oast::ProviderKind::Interactsh, "https://oast.shared", "B")
-        controller.@reg_events.send(OastController::RegOk.new(fresh, provider, "g_#{second}", nil, "Second", false))
+          CLOSED_ENDPOINT, "fr3shc0rr", "s3c", token: "B", registered: true)
+        # A provider that never dials: draining this starts a real Poller on its interval.
+        controller.@reg_events.send(OastController::RegOk.new(fresh, SilentProvider.new, "g_#{second}", nil, "Second", false))
         controller.drain_events
         session.store.oast_sessions.last.provider_key.should eq("g_#{second}")
       end
       # …and a row that recorded it resumes under that provider, not the first on the endpoint.
       with_oast_controller do |controller, host, session, _sid, _pid|
-        recorded = session.store.insert_oast_session(nil, "interactsh", "https://oast.shared",
+        recorded = session.store.insert_oast_session(nil, "interactsh", CLOSED_ENDPOINT,
           "r3c0rded", "s3c", nil, "B", provider_key: "g_#{second}")
         controller.reload
         controller.resume_session(recorded)
@@ -410,11 +440,11 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
   end
 
   it "refuses to file an unrecorded session under one of several same-endpoint providers" do
-    Gori::Settings.oast_providers = [Gori::Settings::OastProvider.new("a1", "First", "interactsh", "oast.shared", "A", true),
-                                     Gori::Settings::OastProvider.new("b2", "Second", "interactsh", "oast.shared", "B", true)]
+    Gori::Settings.oast_providers = [Gori::Settings::OastProvider.new("a1", "First", "interactsh", CLOSED_ENDPOINT, "A", true),
+                                     Gori::Settings::OastProvider.new("b2", "Second", "interactsh", CLOSED_ENDPOINT, "B", true)]
     begin
       with_oast_controller do |controller, host, session, _sid, _pid|
-        legacy = session.store.insert_oast_session(nil, "interactsh", "https://oast.shared",
+        legacy = session.store.insert_oast_session(nil, "interactsh", CLOSED_ENDPOINT,
           "l3gacy", "s3c", nil, "ROTATED")
         controller.reload
         controller.resume_session(legacy)
@@ -498,7 +528,12 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
   end
 
   it "releases the server state without touching the callbacks it collected" do
-    with_oast_controller do |controller, host, session, sid, _pid|
+    with_oast_controller do |controller, host, session, _sid, pid|
+      # Its own row at an endpoint that refuses at once: a session with no live listener is
+      # released through a REAL provider built from the row, and that deregister must not
+      # outlive this example (see CLOSED_ENDPOINT).
+      sid = session.store.insert_oast_session(pid, "interactsh", CLOSED_ENDPOINT,
+        "r3l3asec0rr", "s3cret", nil, nil)
       deliver(controller, sid, interaction(1))
       deliver(controller, sid, interaction(2))
 
@@ -512,6 +547,12 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
       # DOING here and what it DID on a later tick — see the release describe below, which pins
       # both outcomes against providers that cannot reach a socket.
       host.statuses.last.should contain("releasing session ##{sid}")
+      500.times do
+        break unless host.statuses.last.includes?("releasing")
+        sleep 10.milliseconds
+        controller.drain_events
+      end
+      host.statuses.last.should_not contain("releasing") # the deregister fiber has ended
     end
   end
 end
