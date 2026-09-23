@@ -3,6 +3,7 @@ require "random/secure"
 require "uuid"
 require "./settings"
 require "./session_slot"
+require "./client_hints"
 require "./store"
 
 module Gori
@@ -169,6 +170,11 @@ module Gori
       # does not claim Firefox over a Chrome-shaped ClientHello.
       def ua_family : String?
         (d = @dial) ? Env.ua_family_for(*d) : nil
+      end
+
+      # The scheme this request is dialed over, or nil without a dial.
+      def dial_scheme : String?
+        @dial.try(&.[1])
       end
 
       # A context for one request dialed to `host` over `scheme`. The constructor every on-wire
@@ -771,6 +777,15 @@ module Gori
     # author — a captured replay, a fuzz template with its payload already spliced.
     def self.overlay_slot(wire : Bytes, generation : Generation? = nil) : Bytes
       (l = @@layer) ? l.overlay(wire, generation) : wire
+    end
+
+    # The `chrome` TLS preset's client hints (#1174), written into a gori-originated request
+    # after `overlay_slot` — the last header-only pass, so the User-Agent it reads is the one the
+    # socket gets. Every send seam that mints in `Generation.for_dial` calls it; the intercept
+    # forward is the one that must not, since those are a client's own bytes on the proxy path.
+    # spec/send_seam_generation_spec.cr holds the two lists together. See `ClientHints.apply`.
+    def self.client_hints(wire : Bytes, generation : Generation) : Bytes
+      ClientHints.apply(wire, generation.dial_scheme) { generation.ua_family }
     end
 
     # ── a slot overlay's own unresolved references ────────────────────────────

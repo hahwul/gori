@@ -230,7 +230,7 @@ module Gori::Discover
       # per-send TLS preset, so the destination rule decides the UA family (#1153).
       gen = Gori::Env::Generation.for_dial(host, scheme)
       wire = Gori::Env.expand_bindings(wire, resolve: Gori::Env::Owns::Gen, generation: gen) if @header_generators
-      Gori::Env.overlay_slot(wire, gen)
+      Gori::Env.client_hints(Gori::Env.overlay_slot(wire, gen), gen)
     end
 
     def close : Nil

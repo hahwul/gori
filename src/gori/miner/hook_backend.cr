@@ -105,6 +105,9 @@ module Gori::Miner
       # The active slot's identity headers, BEFORE the hook signs them (the inner sender's own
       # overlay is off — see the class comment). A no-op when no slot is active.
       prepared = Gori::Env.overlay_slot(prepared, gen)
+      # ...and the `chrome` preset's client hints (#1174), also before the hook, so a signature
+      # over the headers covers them. The inner sender's own pass then finds them and adds none.
+      prepared = Gori::Env.client_hints(prepared, gen)
       sent, reason = Inject.hook(prepared, @argv, @timeout, @env)
       if sent.nil?
         # A hook that could not run is a SKIP with a reported reason, never a clean negative:
