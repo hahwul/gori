@@ -29,13 +29,13 @@ private def seed_flow(store : Gori::Store, *, target : String = "/a", method : S
   id
 end
 
-private def export(store : Gori::Store, project : String = "proj") : String
-  Gori::Issues::Export.sarif(store.issues, store, project)
+private def export(store : Gori::Store, project : String = "proj", include_sensitive : Bool = false) : String
+  Gori::Issues::Export.sarif(store.issues, store, project, include_sensitive)
 end
 
 # The single result of a one-issue export, as parsed JSON.
-private def only_result(store : Gori::Store) : JSON::Any
-  JSON.parse(export(store))["runs"][0]["results"][0]
+private def only_result(store : Gori::Store, include_sensitive : Bool = false) : JSON::Any
+  JSON.parse(export(store, include_sensitive: include_sensitive))["runs"][0]["results"][0]
 end
 
 describe Gori::Issues::Export do
@@ -303,25 +303,83 @@ describe Gori::Issues::Export do
       end
     end
 
-    it "folds repeated headers into one comma-joined value" do
-      # SARIF's `headers` is a JSON object but HTTP allows repeats (Set-Cookie above all);
-      # dropping all but one would lose evidence.
+    it "folds a repeated list-valued header into one comma-joined value" do
+      # SARIF's `headers` is a JSON object but HTTP allows repeats; dropping all but one would
+      # lose evidence. RFC 9110 §5.3 makes ", " the equivalent combination for a list field.
       with_store do |store|
         fid = seed_flow(store,
-          resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n")
-        store.insert_issue("cookies", Gori::Store::Severity::Info, "h.test", fid)
-        only_result(store)["webResponse"]["headers"]["Set-Cookie"].as_s.should eq("a=1, b=2")
-      end
-
-      # Field names are case-insensitive (RFC 9110 §5.1), so `set-cookie` and `Set-Cookie` are
-      # ONE field with two values — keying the fold on the raw name emitted two JSON keys.
-      with_store do |store|
-        fid = seed_flow(store,
-          resp_head: "HTTP/1.1 200 OK\r\nset-cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n")
-        store.insert_issue("cookies", Gori::Store::Severity::Info, "h.test", fid)
+          resp_head: "HTTP/1.1 200 OK\r\nVary: Accept\r\nvary: Origin\r\n\r\n")
+        store.insert_issue("vary", Gori::Store::Severity::Info, "h.test", fid)
         headers = only_result(store)["webResponse"]["headers"].as_h
-        headers.keys.count { |k| k.downcase == "set-cookie" }.should eq(1)
-        headers["set-cookie"].as_s.should eq("a=1, b=2") # first casing seen on the wire
+        # Field names are case-insensitive (RFC 9110 §5.1): ONE key, first casing seen.
+        headers.keys.count { |k| k.downcase == "vary" }.should eq(1)
+        headers["Vary"].as_s.should eq("Accept, Origin")
+      end
+    end
+
+    # #1190: Set-Cookie never combines (RFC 9110 §5.3, RFC 6265 §3) — each field is a cookie and
+    # an `Expires` date holds a comma of its own, so ", " made two cookies read as one field.
+    it "keeps every Set-Cookie field separate instead of comma-joining them (#1190)" do
+      with_store do |store|
+        fid = seed_flow(store, resp_head: "HTTP/1.1 200 OK\r\n" \
+                                          "Set-Cookie: sid=one; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/\r\n" \
+                                          "set-cookie: theme=dark; Path=/\r\n\r\n")
+        store.insert_issue("cookies", Gori::Store::Severity::Info, "h.test", fid)
+        resp = only_result(store, include_sensitive: true)["webResponse"]
+        resp["headers"].as_h.keys.count { |k| k.downcase == "set-cookie" }.should eq(1)
+        fields = ["sid=one; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/", "theme=dark; Path=/"]
+        resp["headers"]["Set-Cookie"].as_s.should eq(fields.join('\n'))
+        resp["properties"]["gori/setCookie"].as_a.map(&.as_s).should eq(fields)
+        Sarif::Validator.new.validate(Sarif.parse!(export(store))).valid?.should be_true
+
+        # Redacted (the default, #1191), each field still counts as its own.
+        redacted = only_result(store)["webResponse"]
+        redacted["headers"]["Set-Cookie"].as_s.should eq("[REDACTED]\n[REDACTED]")
+        redacted["properties"]["gori/setCookie"].as_a.map(&.as_s).should eq(["[REDACTED]", "[REDACTED]"])
+      end
+    end
+
+    # #1191: a SARIF log is made to leave the machine, so credential header values take the
+    # default history JSON and `evidence show` already have — `[REDACTED]` unless opted in.
+    it "redacts credential header values by default, every casing and obs-fold included (#1191)" do
+      with_store do |store|
+        fid = seed_flow(store,
+          req_head: "GET /a HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer local-secret-123\r\n" \
+                    "COOKIE: sid=local-secret-cookie\r\nX-Api-Key: k1\r\n  folded-secret: x\r\nAccept: */*\r\n\r\n",
+          resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=new-secret\r\nServer: nginx\r\n\r\n")
+        store.insert_issue("creds", Gori::Store::Severity::High, "h.test", fid)
+
+        json = export(store)
+        json.should_not contain("local-secret")
+        json.should_not contain("folded-secret")
+        json.should_not contain("new-secret")
+        res = JSON.parse(json)["runs"][0]["results"][0]
+        req = res["webRequest"]
+        req["headers"]["Authorization"].as_s.should eq("[REDACTED]")
+        req["headers"]["COOKIE"].as_s.should eq("[REDACTED]")
+        req["headers"]["X-Api-Key"].as_s.should eq("[REDACTED]")
+        req["headers"]["Accept"].as_s.should eq("*/*") # everything else as captured
+        req["properties"]["gori/sensitiveHeadersRedacted"].as_bool.should be_true
+        resp = res["webResponse"]
+        resp["headers"]["Set-Cookie"].as_s.should eq("[REDACTED]")
+        resp["headers"]["Server"].as_s.should eq("nginx")
+        resp["properties"]["gori/sensitiveHeadersRedacted"].as_bool.should be_true
+
+        raw = only_result(store, include_sensitive: true)
+        raw["webRequest"]["headers"]["Authorization"].as_s.should eq("Bearer local-secret-123")
+        raw["webRequest"]["headers"]["X-Api-Key"].as_s.should eq("k1 folded-secret: x")
+        raw["webResponse"]["headers"]["Set-Cookie"].as_s.should eq("sid=new-secret")
+        raw["webRequest"]["properties"]?.should be_nil
+      end
+    end
+
+    it "joins repeated Cookie fields with the one separator cookie pairs combine with" do
+      with_store do |store|
+        fid = seed_flow(store, req_head: "GET /a HTTP/1.1\r\nHost: h.test\r\nCookie: a=1\r\nCookie: b=2\r\n\r\n")
+        store.insert_issue("cookies", Gori::Store::Severity::Info, "h.test", fid)
+        req = only_result(store, include_sensitive: true)["webRequest"]
+        req["headers"]["Cookie"].as_s.should eq("a=1; b=2")
+        req["properties"]?.should be_nil # only a repeated Set-Cookie needs the per-field array
       end
     end
 

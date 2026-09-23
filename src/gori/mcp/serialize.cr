@@ -10,6 +10,7 @@ require "../proxy/codec/content_decode"
 require "../proxy/h2/grpc"
 require "../protobuf"
 require "../redact/wire"
+require "../redact/headers"
 
 module Gori
   module MCP
@@ -27,14 +28,13 @@ module Gori
 
       # Header names whose VALUES carry credentials/session material. Redacted to
       # [REDACTED] in read-tool output (get_flow, get_repeater_context content)
-      # unless the caller opts in with include_sensitive:true. One canonical list
-      # so Flow and Repeater views share a single policy (send_request reuses
-      # `sensitive_header?` too).
-      SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cookie",
-                           "x-api-key", "api-key", "x-auth-token"}
+      # unless the caller opts in with include_sensitive:true. The list lives in
+      # `Redact::SENSITIVE_HEADERS` (redact/headers.cr) so the SARIF export shares it
+      # without reaching into MCP; these are the names every MCP/CLI caller already uses.
+      SENSITIVE_HEADERS = Redact::SENSITIVE_HEADERS
 
       def self.sensitive_header?(name : String) : Bool
-        SENSITIVE_HEADERS.includes?(name.strip.downcase)
+        Redact.sensitive_header?(name)
       end
 
       # The auth schemes a credential header may carry in FRONT of its secret. Kept verbatim

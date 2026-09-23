@@ -275,6 +275,18 @@ describe "gori run issues --format markdown" do
     end
   end
 
+  # #1191: SARIF redacts credential headers unless opted in. `cmd_issues_list` opens a store
+  # and writes to STDOUT, so — like `history --include-sensitive` — the forwarding is asserted
+  # over the source: the flag is declared, and the SARIF emit site passes a fourth argument
+  # (without it the export silently stays redacted whatever the operator asked for).
+  it "declares --include-sensitive and forwards it to the SARIF export" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "issues.cr"))
+    src.should contain("p.on(\"--include-sensitive\"")
+    sites = src.scan(/Export\.sarif\(([^)]*)\)/)
+    sites.size.should eq(1)
+    sites[0][1].split(',').size.should eq(4)
+  end
+
   it "scrubs control bytes on the STDOUT path but keeps a file export verbatim" do
     # The Markdown report embeds attacker-controlled evidence bodies; printed to a TTY a
     # raw OSC could drive the terminal. `--export PATH` writes the bytes untouched — a
