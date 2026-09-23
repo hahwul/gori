@@ -95,7 +95,7 @@ module Gori
       # The session JSON, pretty-printed — decompressing first when the segment is marked.
       # "(undecodable payload)" when it doesn't base64url→JSON, mirroring jwt_decode.
       def payload_pretty(p : Parsed) : String
-        JSON.parse(String.new(payload_bytes(p))).to_pretty_json
+        RawJson.reformat(String.new(payload_bytes(p)), "  ")
       rescue
         "(undecodable payload)"
       end
@@ -135,13 +135,13 @@ module Gori
       # --- internals ----------------------------------------------------------
 
       private def payload_json_or_null(p : Parsed) : String
-        JSON.parse(String.new(payload_bytes(p))).to_json
+        RawJson.reformat(String.new(payload_bytes(p)))
       rescue
         "null"
       end
 
       private def compact_json(json : String) : String
-        JSON.parse(json).to_json
+        RawJson.reformat(json) # numbers and duplicate keys as written (#1200, as #1169 for JWT)
       rescue ex : JSON::ParseException
         raise CookieError.new("invalid payload JSON: #{ex.message}")
       end

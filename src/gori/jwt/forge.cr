@@ -4,7 +4,7 @@ require "crypto/subtle"
 require "openssl/hmac"
 require "./asym"
 require "./jwe"
-require "./raw_json"
+require "../raw_json"
 
 module Gori
   # Encode / re-sign side of the JWT workbench. The scanner in `../jwt.cr` is decode-only

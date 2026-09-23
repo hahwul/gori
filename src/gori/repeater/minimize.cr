@@ -1,4 +1,5 @@
 require "json"
+require "../raw_json"
 require "./engine"
 require "./flow_request"
 require "../media_type"
@@ -716,7 +717,8 @@ module Gori::Repeater
     end
 
     private def self.json_keys(body : String) : Array(String)
-      (JSON.parse(body).as_h?.try(&.keys) rescue nil) || [] of String
+      # `RawJson.members`: an oversized number in any member no longer hides every key (#1200).
+      (RawJson.members(body).try(&.map(&.[0]).uniq!) rescue nil) || [] of String
     end
 
     private def self.looks_json?(body : String) : Bool

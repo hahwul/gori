@@ -41,6 +41,13 @@ describe Gori::Pretty do
       t.lines.size.should be > 1
     end
 
+    it "reflows JSON carrying a number past Int64/Float64, keeping its digits (#1200)" do
+      t = text(pretty("application/json", %({"id":18446744073709551615,"f":1.5e400,"a":[1]})))
+      t.should contain(%("id": 18446744073709551615))
+      t.should contain(%("f": 1.5e400))
+      t.lines.size.should be > 1
+    end
+
     it "is a no-op on already-pretty JSON (idempotent → nil)" do
       r1 = pretty("application/json", %({"a":1})).not_nil!
       pretty("application/json", String.new(r1.bytes)).should be_nil

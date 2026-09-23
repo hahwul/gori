@@ -35,6 +35,7 @@ module Gori::Sequencer
         j.field "max_len", rep.max_len
         j.field "variable_length", rep.variable_length
         j.field "constant_positions", rep.constant_positions
+        j.field "partial_positions", rep.partial_positions
         # Which end of the token the per-position window was anchored to — without it a
         # consumer cannot tell WHICH `min_len` bytes `constant_positions` counted.
         j.field "entropy_alignment", rep.aligned_from_end ? "end" : "start"
@@ -134,7 +135,8 @@ module Gori::Sequencer
     private def self.structure_line(rep : Stats::Report) : String
       return "—" if rep.min_len <= 0
       anchor = rep.aligned_from_end ? "from token end" : "from token start"
-      "#{rep.constant_positions}/#{rep.min_len} fixed positions (#{anchor})"
+      partial = rep.partial_positions > 0 ? ", #{rep.partial_positions} partially fixed" : ""
+      "#{rep.constant_positions}/#{rep.min_len} fixed positions#{partial} (#{anchor})"
     end
 
     private def self.row(io : IO, label : String, value : String) : Nil

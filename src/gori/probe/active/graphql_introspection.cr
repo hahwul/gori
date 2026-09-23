@@ -1,4 +1,5 @@
 require "json"
+require "../../raw_json"
 require "../../utf8"
 require "./types"
 require "../../ascii_bytes"
@@ -153,7 +154,7 @@ module Gori
             # Twin of the same gate in `Passive::Tech`, down to the `Utf8.text` spelling: the
             # prefilter above has already decided this body is worth parsing, so the repair only
             # has to not cost a full character walk on the valid bodies that reach it.
-            JSON.parse(Utf8.text(capped)).as_h?.try(&.["query"]?).try(&.as_s?)
+            RawJson.parse(Utf8.text(capped)).as_h?.try(&.["query"]?).try(&.as_s?)
           rescue JSON::ParseException
             nil
           end

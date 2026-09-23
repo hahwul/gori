@@ -1,4 +1,5 @@
 require "json"
+require "../../raw_json"
 require "./rule"
 require "../../utf8"
 require "../../ascii_bytes"
@@ -189,7 +190,7 @@ module Gori
           return false unless AsciiBytes.contains_ci?(capped, QUERY_KEY)
           text = Utf8.text(capped)
           q = begin
-            JSON.parse(text).as_h?.try(&.["query"]?).try(&.as_s?)
+            RawJson.parse(text).as_h?.try(&.["query"]?).try(&.as_s?) # numbers of any size (#1200)
           rescue JSON::ParseException
             nil
           end

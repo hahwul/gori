@@ -72,6 +72,23 @@ describe Gori::Retest::Assertion do
     a.value.should eq("?page=2")
   end
 
+  it "refuses a JSON path it cannot resolve when the step is written (#1201)" do
+    # Stored, such a path resolved as "absent", and `json-absent:` PASSED against a response
+    # still carrying the field — a live leak reported as fixed.
+    ["json-absent:$..token", "json-absent:data.*", "json:items[", "json:a[?(@.x)]=1", "json-absent:a..b"].each do |text|
+      msg = RT::Assertion.parse(text)
+      msg.should be_a(String)
+      msg.as(String).should contain("json")
+    end
+  end
+
+  it "accepts the bracketed path spelling and splits json: on the first = outside brackets" do
+    a = RT::Assertion.parse(%(json:$.data["a=b"]=x=y)).as(RT::Assertion)
+    a.path.should eq(%($.data["a=b"]))
+    a.value.should eq("x=y")
+    RT::Assertion.parse("json:$.items[0].id").as(RT::Assertion).to_s.should eq("json:$.items[0].id")
+  end
+
   it "refuses a status that is not a code, a class or a range — by name" do
     RT::Assertion.parse("status:").should be_a(String)
     RT::Assertion.parse("status:99").as(String).should contain("100-599")
@@ -124,6 +141,16 @@ describe "Gori::Retest.evaluate" do
     RT.evaluate(RT::Assertion.parse("json:data.items.9.id").as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
   end
 
+  it "fails json-absent on a JSONPath-spelled field the response still carries (#1201)" do
+    body = %({"data":{"token":"s3cr3t","items":[{"secret":"x"}]}})
+    ["json-absent:$.data.token", "json-absent:data.items[0].secret", "json-absent:data.items.0.secret"].each do |text|
+      outcome, detail = RT.evaluate(RT::Assertion.parse(text).as(RT::Assertion), obs(body: body), nil)
+      outcome.fail?.should be_true
+      detail.should contain("is present")
+    end
+    RT.evaluate(RT::Assertion.parse(%(json:$["data"].token=s3cr3t)).as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+  end
+
   it "counts a present-but-null field as PRESENT" do
     # `{"error": null}` HAS the field. A reader that answered "absent" would let a step
     # asserting `json-absent:error` pass on a response that carries it.
@@ -160,6 +187,26 @@ describe "Gori::Retest.evaluate" do
       obs(body: "<html>500</html>"), nil)
     outcome.inconclusive?.should be_true
     detail.should contain("not JSON")
+  end
+
+  it "reads a JSON body whose other numbers are past Int64, and compares one by its digits (#1200)" do
+    # `JSON.parse` raised on the uint64 id, so every assertion on this body — about `role`,
+    # which has nothing to do with it — answered INCONCLUSIVE and the retest could never decide.
+    body = %({"id":18446744073709551615,"big":1.5e400,"role":"user"})
+    RT.evaluate(RT::Assertion.parse("json:role=user").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json-absent:admin").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json:id=18446744073709551615").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json:id=18446744073709551614").as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
+    RT.evaluate(RT::Assertion.parse("json-absent:big").as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
+  end
+
+  it "shows and compares an oversized number as the digits it was, never a quoted string" do
+    # The read tree carries such a number as a String; writing it back out quoted it, so
+    # `json:ids=[…]` FAILED against the very array it named and the row read `"1844…"`.
+    body = %({"id":18446744073709551615,"ids":[18446744073709551615,1.50]})
+    _, detail = RT.evaluate(RT::Assertion.parse("json:id").as(RT::Assertion), obs(body: body), nil)
+    detail.should eq("id = 18446744073709551615")
+    RT.evaluate(RT::Assertion.parse("json:ids=[18446744073709551615,1.50]").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
   end
 
   it "answers INCONCLUSIVE for a body comparison with no baseline behind it" do

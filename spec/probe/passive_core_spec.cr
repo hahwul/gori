@@ -472,6 +472,15 @@ describe "Gori::Probe::Passive (FP reduction)" do
     end
   end
 
+  it "fingerprints GraphQL when the variables carry a number past Int64 (#1200)" do
+    with_store do |store|
+      gql = probe_analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/gw",
+        method: "POST", req_headers: "Content-Type: application/json\r\n",
+        req_body: %({"query":"query($id:ID){node(id:$id){id}}","variables":{"id":18446744073709551615}}), content_type: nil)
+      probe_codes_of(gql).should contain("tech_graphql")
+    end
+  end
+
   # The fingerprint's content-type gate was `json`, so a GraphQL request under the raw-document
   # type or as a urlencoded body was not GraphQL to it — the two shapes a JSON-content-type
   # filter is bypassed with, on an endpoint whose path does not say `/graphql`.

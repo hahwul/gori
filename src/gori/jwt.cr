@@ -139,7 +139,7 @@ module Gori
     end
 
     private def claim_s(seg : String, key : String) : String?
-      Jwt::RawJson.member(String.new(Base64.decode(seg)), key).try(&.as_s?)
+      RawJson.member(String.new(Base64.decode(seg)), key).try(&.as_s?)
     rescue
       nil
     end
@@ -147,7 +147,7 @@ module Gori
     private def claim_i(seg : String, key : String) : Int64?
       # RFC 7519 NumericDate permits a non-integer value (sub-second precision), so `exp`
       # can arrive as a JSON float — take its integer part rather than dropping the claim.
-      v = Jwt::RawJson.member(String.new(Base64.decode(seg)), key)
+      v = RawJson.member(String.new(Base64.decode(seg)), key)
       v.try(&.as_i64?) || v.try(&.as_f?).try(&.to_i64)
     rescue
       nil

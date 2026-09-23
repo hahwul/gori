@@ -41,7 +41,7 @@ private JSON_FIELDS = %w[
   rating rationale sample_count usable_count
   effective_entropy_bits shannon_bits_per_char
   charset_size charset min_len max_len variable_length
-  constant_positions entropy_alignment
+  constant_positions partial_positions entropy_alignment
   uniqueness duplicate_count sequential tests
 ]
 

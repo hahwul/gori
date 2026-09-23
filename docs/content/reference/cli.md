@@ -1068,6 +1068,8 @@ Assertions — one per step:
 | `body:same` | The decoded body is identical to the last `baseline` step's |
 | `body:diff` | It differs from it |
 
+A JSON path is the same one `sequence --jsonpath` takes: dotted (`data.items.0.id`) or bracketed (`$.data.items[0]["id"]`). A path gori cannot read — a wildcard, a filter, `..`, an unclosed bracket — is refused when the step is added, so a `json-absent:` can never pass just because its path was never read. A readable path to a field that is not there is an ordinary absence.
+
 A step sends whatever its Repeater tab holds when the run happens — that is what makes a retest track a request as it is fixed, where `gori run evidence` freezes one as it was. Each send goes out under the project's scope and Sandbox gates and is recorded in History as `src:retest` with the issue and step on the row, so a result row still opens the exact response it reported long after the tab moved on. The tab's own stored response is never overwritten.
 
 A `setup` step that fails halts the measurement steps (its precondition is what everything after it measures against) but cleanup still runs. Once gori **refuses** a send — scope, Sandbox, an exclude rule — the rest of the run is skipped, cleanup included, unless `--allow-cleanup` says otherwise; every skipped step still gets a row saying why, so a partial run can never read as a pass. A `body:` assertion is `inconclusive`, never a pass, when there is no baseline behind it — and equally when the last `baseline` step **missed its own expected result**: a baseline that did not establish its reading anchors nothing, so comparing a variant against the 403 error page a `status:200` baseline was handed would otherwise report "the body is unchanged" about two error pages.

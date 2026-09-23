@@ -12,7 +12,7 @@ module Gori
   #   - numbers are converted (`1.0e2` → `100.0`), and one past Int64/Float64 raises outright;
   #   - string escapes (`\u00e9`, `\/`) and all whitespace are re-spelled.
   #
-  # `Jwt::RawJson` keeps members and numbers too, but through the pull parser, which reports
+  # `RawJson` keeps members and numbers too, but through the pull parser, which reports
   # values and not their offsets — so it can re-emit a document, not edit one in place.
   #
   # Validity is decided by the stdlib lexer (`JSON::PullParser#skip`, which checks syntax

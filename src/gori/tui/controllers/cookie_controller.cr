@@ -931,9 +931,11 @@ module Gori::Tui
         @host.status("INPUT is empty — nothing to load")
         return
       end
-      begin
-        doc = JSON.parse(Cookie.decode_json(token, decode_format(s)))
-      rescue
+      # `RawJson`, not `JSON.parse`: the decoded payload keeps a number past Int64 as its digits
+      # (#1200), and the forge editor must be seeded with those digits, not a parse failure.
+      json = (Cookie.decode_json(token, decode_format(s)) rescue nil)
+      doc = json.try { |j| Gori::RawJson.claims(j) }
+      unless json && doc
         @host.status("INPUT is not a decodable cookie")
         return
       end
@@ -942,7 +944,8 @@ module Gori::Tui
       if effective_format(s) == "rack"
         s.payload.set_text(doc["value_base64"]?.try(&.as_s?) || "")
       elsif (pl = doc["payload"]?) && !pl.raw.nil?
-        s.payload.set_text(pl.to_pretty_json)
+        raw = Gori::RawJson.members(json).try(&.reverse_each.find { |(k, _)| k == "payload" }).try(&.[1])
+        s.payload.set_text(raw ? Gori::RawJson.reformat(raw, "  ") : pl.to_pretty_json)
       else
         s.payload.set_text("")
       end

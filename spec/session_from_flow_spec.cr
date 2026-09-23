@@ -165,6 +165,16 @@ describe Gori::SessionFromFlow do
       headers["Authorization"].should eq("Bearer eyJhbGciOiJIUzI1NiJ9.x")
     end
 
+    it "reads the JSON token beside a number past Int64, but never takes such a number AS one (#1200)" do
+      beside = flow("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        response_body: %({"user_id":18446744073709551615,"access_token":"eyJ.x.y"}))
+      headers_of(beside)["Authorization"].should eq("Bearer eyJ.x.y")
+
+      numeric = flow("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        response_body: %({"access_token":18446744073709551615}))
+      refusal(numeric).should be_a(FromFlow::Refusal)
+    end
+
     # Provenance goes back to the operator, and a VALUE never does — this line is printed to
     # scrollback and returned over MCP, and a session cookie is a credential.
     it "names where each header came from, and never what it holds" do
@@ -238,6 +248,15 @@ describe Gori::SessionFromFlow do
     it "skips a cookie the response is DELETING" do
       detail = flow("HTTP/1.1 200 OK\r\n" \
                     "Set-Cookie: sessionid=; Max-Age=0; Path=/\r\n" \
+                    "Set-Cookie: keep=yes\r\n\r\n")
+      headers_of(detail)["Cookie"].should eq("keep=yes")
+    end
+
+    it "does not carry a tombstone VALUE the response is deleting (#1206)" do
+      # `deleted; Max-Age=0` is a deletion with a non-empty value; so is a past `Expires`.
+      detail = flow("HTTP/1.1 200 OK\r\n" \
+                    "Set-Cookie: sid=deleted; Max-Age=0; Path=/\r\n" \
+                    "Set-Cookie: old=gone; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n" \
                     "Set-Cookie: keep=yes\r\n\r\n")
       headers_of(detail)["Cookie"].should eq("keep=yes")
     end

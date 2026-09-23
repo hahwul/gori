@@ -51,7 +51,7 @@ A small sample (fewer than ~20 usable tokens) softens hard failures to warnings 
 
 ### Structure Is Not Secret
 
-Real tokens usually carry a skeleton: a `sess_v1_` prefix, a version byte, base64 padding. The **Structure** row reports how many positions never vary across the sample, and every byte-level test then measures the *varying* region only.
+Real tokens usually carry a skeleton: a `sess_v1_` prefix, a version byte, base64 padding. The **Structure** row reports how many positions never vary across the sample, and every byte-level test then measures the *varying* region only. A position that varies over only a small slice of the alphabet, like a UUIDv4's variant nibble (`8`/`9`/`a`/`b`), counts as partially fixed: the tests skip it too, and it adds only its own measured entropy to the estimate.
 
 That distinction decides the grade. A token of `sess_v1_` plus 24 random hex characters looks like a 19-character alphabet if you count the prefix, which is not a power of two, which switches off the entire bit-test battery as not-applicable; chi-square and compression then fail on a distribution skewed purely by the prefix. Measured against the varying region instead, the same sample is what it actually is: lower-hex, full battery active, every row passing.
 

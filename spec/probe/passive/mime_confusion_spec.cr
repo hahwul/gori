@@ -56,6 +56,13 @@ describe Gori::Probe::Passive::MimeConfusion do
     end
   end
 
+  it "flags a JSON body served as text/html when a number in it is past Int64 (#1200)" do
+    with_store do |store|
+      dets = mime(store, content_type: "text/html", body: %({"id":18446744073709551615,"user":"<b>x</b>"}))
+      codes(dets).should contain("mime_json_as_html")
+    end
+  end
+
   it "does not flag an HTML body under text/html (the correct type)" do
     with_store do |store|
       mime(store, content_type: "text/html", body: "<html><body>hi</body></html>").should be_empty

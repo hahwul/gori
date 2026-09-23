@@ -4,6 +4,7 @@ require "./bindings"
 require "./store"
 require "./proxy/codec/http1"
 require "./proxy/codec/content_decode"
+require "./raw_json"
 
 module Gori
   # One captured login flow → one session slot's header overlay.
@@ -210,28 +211,16 @@ module Gori
     # `name=value; name=value` from every `Set-Cookie` on the response, plus how many went in,
     # or nil when the response sets none worth carrying.
     #
-    # Attributes are dropped (everything from the first `;`) — a `Cookie:` request header is
-    # pairs and nothing else, per RFC 6265 §5.4. A cookie whose VALUE is empty is skipped: an
-    # empty value paired with `Max-Age=0`/an expiry in the past is how a server DELETES a
-    # cookie, and carrying the deletion forward would send the tombstone as a session.
+    # The jar is `TokenExtract.set_cookie_jar`, the one every cookie extractor reads, so a
+    # later field replaces an earlier one and an expired field (`sid=deleted; Max-Age=0`)
+    # deletes rather than carries the tombstone forward as a session (#1206). Attributes are
+    # dropped — a `Cookie:` request header is pairs and nothing else, per RFC 6265 §5.4 — and a
+    # cookie whose VALUE is empty is skipped too: an empty value is the other common spelling
+    # of a deletion.
     private def cookie_header(resp : Proxy::Codec::RawResponse) : {String, Int32}?
-      names = [] of String
-      values = {} of String => String
-      resp.headers.get_all("set-cookie").each do |sc|
-        pair = sc.split(';', 2)[0]
-        eq = pair.index('=')
-        next unless eq
-        name = pair[0...eq].strip
-        value = pair[(eq + 1)..].strip
-        next if name.empty? || value.empty?
-        # Last value wins for a repeated name — the later `Set-Cookie` is the one a client
-        # would hold — but the FIRST appearance keeps its place, so the line reads in the
-        # order the origin wrote it.
-        names << name unless values.has_key?(name)
-        values[name] = value
-      end
-      return nil if names.empty?
-      {names.map { |n| "#{n}=#{values[n]}" }.join("; "), names.size}
+      pairs = TokenExtract.set_cookie_jar(resp.headers).reject { |_, v| v.empty? }
+      return nil if pairs.empty?
+      {pairs.map { |n, v| "#{n}=#{v}" }.join("; "), pairs.size}
     end
 
     # The `Authorization` value to carry, and where it came from. See the module comment for
@@ -262,7 +251,7 @@ module Gori
     #
     # The leaf must be a STRING: `{"token": {"value": …}}` is an envelope, not a token, and
     # stringifying it would put a JSON object in an `Authorization` header. Content-Type is
-    # not consulted — `JSON.parse` succeeding IS the test, and an API that mislabels its
+    # not consulted — a parse succeeding IS the test, and an API that mislabels its
     # login response should not cost the operator the feature.
     private def json_token(detail : Store::FlowDetail) : {String, String}?
       body = detail.response_body
@@ -272,13 +261,12 @@ module Gori
       # Never repair origin bytes into a different credential. An invalid body simply is not
       # a JSON token source; credentials carried by response headers remain usable.
       return nil unless text.valid_encoding?
-      obj = JSON.parse(text).as_h? || return nil
+      # `RawJson.member`, so an oversized number beside the token no longer hides it (#1200) —
+      # and one AT a token key stays a number (nil), not the String `RawJson.parse` would carry.
       TOKEN_KEYS.each do |key|
-        v = obj[key]?.try(&.as_s?)
+        v = RawJson.member(text, key).try(&.as_s?)
         return {v, key} if v && !v.empty?
       end
-      nil
-    rescue JSON::ParseException
       nil
     end
 

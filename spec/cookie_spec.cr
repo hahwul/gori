@@ -155,6 +155,13 @@ describe Gori::Cookie do
       Gori::Cookie::Flask.verify(forged, "other").should be_false
     end
 
+    it "forges and decodes a payload with a number past Int64, keeping its digits (#1200)" do
+      forged = Gori::Cookie::Flask.forge(%({"uid":18446744073709551615,"admin":true}), SECRET, 1785656674_i64)
+      Gori::Cookie::Flask.verify(forged, SECRET).should be_true
+      Gori::Cookie.decode(forged, "flask").should contain("18446744073709551615")
+      Gori::Cookie.decode_json(forged, "flask").should contain(%("uid":18446744073709551615))
+    end
+
     it "decodes a cookie with a mangled timestamp instead of crashing (Django parity)" do
       # A crafted timestamp segment must not refuse the whole cookie: the payload and
       # signature are perfectly readable, and Django already degrades this gracefully.
@@ -196,6 +203,12 @@ describe Gori::Cookie do
     it "forges a fresh cookie that verifies" do
       forged = Gori::Cookie::Django.forge(%({"admin":true}), SECRET, 1785656674_i64)
       Gori::Cookie::Django.verify(forged, SECRET).should be_true
+    end
+
+    it "forges and decodes a payload with a number past Int64, keeping its digits (#1200)" do
+      forged = Gori::Cookie::Django.forge(%({"uid":18446744073709551615}), SECRET, 1785656674_i64)
+      Gori::Cookie::Django.verify(forged, SECRET).should be_true
+      Gori::Cookie.decode(forged, "django").should contain("18446744073709551615")
     end
   end
 

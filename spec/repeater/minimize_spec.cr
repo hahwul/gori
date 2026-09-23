@@ -303,6 +303,22 @@ describe Gori::Repeater::Minimize do
     report.removed.map(&.label).should contain("drop")
   end
 
+  it "still enumerates JSON keys when another member holds a number past Int64 (#1200)" do
+    body = %({"keep":1,"id":18446744073709551615,"drop":2})
+    text = [
+      "POST /j HTTP/1.1",
+      "Host: h",
+      "Content-Type: application/json",
+      "Content-Length: #{body.bytesize}",
+      "",
+      body,
+    ].join("\n")
+
+    report = minimize(JsonOrigin.new, text, auto_cl: true)
+    report.removed.map(&.label).should contain("drop")
+    report.minimized_text.should contain(%("keep":1))
+  end
+
   # The gate was `ct.includes?("application/json")`, and that substring is absent from every
   # `+json` structured-syntax type — `application/graphql+json`, `application/vnd.api+json`.
   # The content-type being non-empty, the `looks_json?` fallback did not run either, so the
