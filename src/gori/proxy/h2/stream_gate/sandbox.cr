@@ -14,7 +14,8 @@ class Gori::Proxy::H2::StreamGate
   # goes — not the memory bound, and not the guarantee. Generous on purpose: it is per
   # connection and only refusals count, so reaching it means thousands of refused streams on
   # one connection, i.e. a client that has ignored thousands of RST_STREAMs.
-  MAX_REFUSED_STREAMS = 4096
+  MAX_REFUSED_STREAMS           = 4096
+  SANDBOX_PROTOCOL_ERROR_REASON = "h2 sandbox: malformed request headers (duplicate pseudo-header or conflicting authority)"
 
   # The URL test both refusal gates below make, and the only place the stream's own
   # `:authority` and the connection's host are reconciled. Returns the blocked request's
@@ -44,9 +45,10 @@ class Gori::Proxy::H2::StreamGate
   # names are equal and the second test is skipped, so the common path costs one evaluation.
   private def sandbox_blocked_url(block : HeadRewrite::Block) : {String, String, String}?
     fields = block.fields
-    authority = HeadCodec.pseudo_of(fields, ":authority") || @host
-    host, port = Upstream.split_host_port(authority, @port)
     scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
+    host_header = fields.find { |field| field.name.compare("host", case_insensitive: true) == 0 }.try(&.value)
+    authority = HeadCodec.pseudo_of(fields, ":authority") || host_header || @host
+    host, port = Upstream.split_host_port(authority, @port)
     # `:path` reduced to its origin form BEFORE either test, because `Url.request_url` returns
     # an ABSOLUTE-form target VERBATIM — so a peer that spells `:path` as a full URL picks the
     # string this gate evaluates, and both tests below then read the authority IT chose instead
@@ -71,9 +73,94 @@ class Gori::Proxy::H2::StreamGate
   private def sandbox_refuses_locked(block : HeadRewrite::Block) : Bool
     return false unless @ordered   # a response exists only for a request already allowed
     return false unless block.head # trailers/PUSH_PROMISE carry no request URL to test
+    return false unless @interceptor.sandbox_enabled?
+    if sandbox_request_malformed?(block.fields)
+      refuse_locked(block, SANDBOX_PROTOCOL_ERROR_REASON, PROTOCOL_ERROR)
+      return true
+    end
     return false unless sandbox_blocked_url(block)
     refuse_locked(block)
     true
+  end
+
+  private def sandbox_request_malformed?(fields : Array(HPACK::Field)) : Bool
+    authorities = sandbox_authorities(fields)
+    return true unless authorities
+    authority, host = authorities
+    scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
+    authority_key = authority.try { |value| sandbox_authority_key(value, scheme) }
+    host_key = host.try { |value| sandbox_authority_key(value, scheme) }
+    return true if (authority && authority_key.nil?) || (host && host_key.nil?)
+    !!(authority && host && authority_key != host_key)
+  end
+
+  private def sandbox_authorities(fields : Array(HPACK::Field)) : {String?, String?}?
+    pseudo_names = Set(String).new
+    authority = nil.as(String?)
+    host = nil.as(String?)
+    fields.each do |field|
+      if field.name.starts_with?(':')
+        return nil if pseudo_names.includes?(field.name)
+        pseudo_names << field.name
+        authority = field.value if field.name == ":authority"
+      elsif field.name.compare("host", case_insensitive: true) == 0
+        return nil if host
+        host = field.value
+      end
+    end
+    {authority, host}
+  end
+
+  private def sandbox_authority_key(value : String, scheme : String) : {String, Int32}?
+    authority = value.strip
+    return nil if authority.empty?
+    default_port = sandbox_default_port(scheme)
+    parts = sandbox_authority_parts(authority, default_port)
+    return nil unless parts
+    host, port = parts
+    return nil if host.empty?
+    {host.downcase, port}
+  end
+
+  private def sandbox_default_port(scheme : String) : Int32
+    if scheme.compare("http", case_insensitive: true) == 0
+      80
+    elsif scheme.compare("https", case_insensitive: true) == 0
+      443
+    else
+      @port
+    end
+  end
+
+  private def sandbox_authority_parts(authority : String, default_port : Int32) : {String, Int32}?
+    if authority.starts_with?('[')
+      closing = authority.index(']')
+      return nil unless closing
+      host = authority[1...closing]
+      suffix = authority[(closing + 1)..]
+      return {host, default_port} if suffix.empty?
+      return nil unless suffix.starts_with?(':')
+      port = sandbox_port(suffix[1..])
+      return nil unless port
+      {host, port}
+    else
+      colon_count = authority.count(':')
+      return {authority, default_port} if colon_count == 0
+      # URI authorities must bracket IPv6 literals; an unbracketed colon run cannot
+      # unambiguously say whether its tail is an address or an explicit port.
+      return nil if colon_count != 1
+      split = authority.index!(':')
+      host = authority[0...split]
+      port = sandbox_port(authority[(split + 1)..])
+      return nil unless port
+      {host, port}
+    end
+  end
+
+  private def sandbox_port(value : String) : Int32?
+    return nil if value.empty? || !value.each_char.all?(&.ascii_number?)
+    port = value.to_i?
+    port if port && port > 0 && port <= 65_535
   end
 
   # The same containment gate for a request the ORIGIN invented (RFC 9113 §8.4 server push).
@@ -115,7 +202,7 @@ class Gori::Proxy::H2::StreamGate
     project(block)
     @assembler.drop_stream(promised, SANDBOX_REASON)
     remember_refused(promised)
-    @deferred_cross << promised
+    @deferred_cross << {promised, CANCEL}
     true
   end
 
@@ -144,12 +231,13 @@ class Gori::Proxy::H2::StreamGate
   # the client-bound direction makes gori a SECOND producer of HPACK-bearing frames there,
   # correct only while dynamic-table insertion stays off. A refusal is the last place to spend
   # that, since it would be spent on every out-of-scope subresource of every page.
-  private def refuse_locked(block : HeadRewrite::Block) : Nil
+  private def refuse_locked(block : HeadRewrite::Block, reason : String = SANDBOX_REASON,
+                            reset_code : UInt32 = CANCEL) : Nil
     @heads.latch # suppressing a block desyncs HPACK exactly as reordering one does
     project(block)
-    @assembler.drop_stream(block.stream_id, SANDBOX_REASON)
+    @assembler.drop_stream(block.stream_id, reason)
     remember_refused(block.stream_id)
-    @deferred_cross << block.stream_id
+    @deferred_cross << {block.stream_id, reset_code}
   end
 
   # Past the ceiling the connection goes. Everywhere else in this file an overflow fails OPEN

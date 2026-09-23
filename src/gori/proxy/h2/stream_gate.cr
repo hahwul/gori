@@ -131,7 +131,9 @@ module Gori::Proxy::H2
     # client to retry is telling it to loop. One code for both also keeps the wire honest —
     # which of gori's two refusals fired is an operator's business, and History says which
     # (`DROP_REQUEST_REASON` vs `SANDBOX_REASON`), not the client's.
-    CANCEL = 0x8_u32
+    CANCEL         = 0x8_u32
+    PROTOCOL_ERROR = 0x1_u32
+    alias CrossRst = Tuple(UInt32, UInt32)
 
     # Ceiling on the frames parked behind one deferred stream. A sender is already throttled by
     # its own flow-control window — it gets no credit for bytes the far end never saw — so this
@@ -262,7 +264,7 @@ module Gori::Proxy::H2
       # synchronously inside `@heads.accept`, under the same already-held `@mutex`. The lock
       # invariant is intact: this is still "hand the peer's work back as data", not "touch
       # `@peer` under the lock".
-      @deferred_cross = [] of UInt32
+      @deferred_cross = [] of CrossRst
       @closed = false
       @warned_body = false
       @warned_length = false
@@ -417,7 +419,7 @@ module Gori::Proxy::H2
 
     # --- pump side (locked) --------------------------------------------------
 
-    private def accept_locked(frame : Frame::Header) : Array(UInt32)
+    private def accept_locked(frame : Frame::Header) : Array(CrossRst)
       return NO_CROSS if @closed
       check_waiting_locked
       cross = NO_CROSS
@@ -503,7 +505,7 @@ module Gori::Proxy::H2
 
     # `defer?` cannot return cross-direction work, so it parks it here. Merged on the way out
     # of the lock, where `accept` hands the whole list to `run_cross`.
-    private def take_deferred_cross(cross : Array(UInt32)) : Array(UInt32)
+    private def take_deferred_cross(cross : Array(CrossRst)) : Array(CrossRst)
       return cross if @deferred_cross.empty?
       taken = cross + @deferred_cross
       @deferred_cross.clear
@@ -514,7 +516,7 @@ module Gori::Proxy::H2
     # queue row back, project the attempt, discard the buffers — and forward the RST only to a
     # leg that actually has the stream open: a deferred REQUEST never reached the origin, and
     # RST_STREAM on an idle stream is itself a connection error (RFC 9113 §6.4).
-    private def abandon_locked(slot : Slot, frame : Frame::Header) : Array(UInt32)
+    private def abandon_locked(slot : Slot, frame : Frame::Header) : Array(CrossRst)
       slot.item.try { |it| @interceptor.forward(it.id) }
       slot.item = nil
       if b = slot.pending
@@ -787,7 +789,7 @@ module Gori::Proxy::H2
     end
 
     private def resolve_locked(item : Gori::Interceptor::Item, block : HeadRewrite::Block,
-                               decision : Gori::Interceptor::Decision) : Array(UInt32)
+                               decision : Gori::Interceptor::Decision) : Array(CrossRst)
       return NO_CROSS if @closed
       slot = @slots[block.stream_id]?
       # Already abandoned (peer RST), failed open, or torn down: the decision arrived too late
@@ -892,7 +894,7 @@ module Gori::Proxy::H2
     # --- release -------------------------------------------------------------
 
     # Release every slot that can now go out, in the only order that is legal.
-    private def drain_locked : Array(UInt32)
+    private def drain_locked : Array(CrossRst)
       cross = NO_CROSS
       if @ordered
         # Request direction: releases follow stream-id order, because that is the order the
@@ -912,7 +914,7 @@ module Gori::Proxy::H2
       cross
     end
 
-    private def release_locked(slot : Slot) : Array(UInt32)
+    private def release_locked(slot : Slot) : Array(CrossRst)
       return drop_locked(slot) if slot.dropped?
       body = slot.rebuilt
       if b = slot.decided || slot.pending
@@ -941,7 +943,7 @@ module Gori::Proxy::H2
     # an RST for it (RFC 9113 §6.4); only the client is told. A dropped RESPONSE is open on both
     # legs, so both are told: the client stops waiting and the origin stops sending a body we
     # are discarding.
-    private def drop_locked(slot : Slot) : Array(UInt32)
+    private def drop_locked(slot : Slot) : Array(CrossRst)
       if b = slot.pending
         project(b)
         # A dropped REQUEST carries its buffered body into History the way h1's
@@ -961,7 +963,7 @@ module Gori::Proxy::H2
       # Its parked DATA is never written on either leg — see `charge_swallowed`.
       charge_swallowed(slot)
       remember_refused(slot.stream_id)
-      [slot.stream_id]
+      [{slot.stream_id, CANCEL}]
     end
 
     # --- writing -------------------------------------------------------------
@@ -1014,29 +1016,29 @@ module Gori::Proxy::H2
       Frame::Header.new(f.type, f.flags & ~Frame::END_STREAM, f.stream_id, f.payload, nil)
     end
 
-    private def rst_frame(stream_id : UInt32) : Frame::Header
+    private def rst_frame(stream_id : UInt32, error_code : UInt32 = CANCEL) : Frame::Header
       payload = Bytes.new(4)
-      IO::ByteFormat::BigEndian.encode(CANCEL, payload)
+      IO::ByteFormat::BigEndian.encode(error_code, payload)
       Frame::Header.new(Frame::Type::RstStream.value, 0_u8, stream_id, payload)
     end
 
     # Called by the OPPOSITE direction's gate. Takes this gate's lock and nothing else — the
     # caller has already released its own. See the lock invariant in the class comment.
-    def write_cross_rst(stream_id : UInt32) : Nil
+    def write_cross_rst(stream_id : UInt32, error_code : UInt32 = CANCEL) : Nil
       @mutex.synchronize do
         return if @closed
-        write(rst_frame(stream_id), nil)
+        write(rst_frame(stream_id, error_code), nil)
       end
     rescue
       # this leg is already gone; the drop still happened on the leg that mattered
     end
 
     # The ONLY place `@peer` is touched, and it runs with `@mutex` released.
-    private def run_cross(ids : Array(UInt32)) : Nil
-      return if ids.empty?
+    private def run_cross(resets : Array(CrossRst)) : Nil
+      return if resets.empty?
       peer = @peer
       return unless peer
-      ids.each { |id| peer.write_cross_rst(id) }
+      resets.each { |(id, error_code)| peer.write_cross_rst(id, error_code) }
     end
 
     # Count a slot's parked DATA as owed credit. Called where those frames are DISCARDED
@@ -1099,7 +1101,7 @@ module Gori::Proxy::H2
 
     # --- small helpers -------------------------------------------------------
 
-    private NO_CROSS = [] of UInt32
+    private NO_CROSS = [] of CrossRst
 
     private def remove(slot : Slot) : Nil
       @slots.delete(slot.stream_id)
