@@ -217,13 +217,33 @@ describe Gori::Miner::Plan do
       plan.config.locations.should eq([M::Location::Query])
     end
 
-    it "keeps an explicitly named location that does not apply, and reports it" do
-      # The CLI warns per location rather than dropping it, so the run still carries it.
+    it "drops an explicitly named location that does not apply, and reports it (#1203)" do
+      # Kept in the run, it injected nothing yet counted its names as tested and clean. Dropped,
+      # its names leave `total_names`, and the plan and engine still name it for every surface.
       plan = M::Plan.build(M::PlanOptions.new("GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n",
         target: "http://t.test", locations: [M::Location::Query, M::Location::Form],
         config: config), ungated_outbound)
-      plan.config.locations.should eq([M::Location::Query, M::Location::Form])
+      plan.config.locations.should eq([M::Location::Query])
       plan.inapplicable.should eq([M::Location::Form])
+      plan.engine.inapplicable.should eq([M::Location::Form])
+      query_only = M::Plan.build(M::PlanOptions.new("GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n",
+        target: "http://t.test", locations: [M::Location::Query], config: M::Config.new), ungated_outbound)
+      plan.total_names.should eq(query_only.total_names)
+    end
+
+    it "refuses, before any send, a run whose every named location does not apply (#1203)" do
+      live = M::Config.new
+      live.locations = [M::Location::Json]
+      ex = expect_raises(M::PlanError) do
+        M::Plan.build(M::PlanOptions.new("GET /a HTTP/1.1\r\nHost: t.test\r\n\r\n",
+          target: "http://t.test", locations: [M::Location::Json, M::Location::Form],
+          config: live), ungated_outbound)
+      end
+      # The TUI hands its live Config in: a refusal must not have emptied its selection.
+      live.locations.should eq([M::Location::Json])
+      ex.reason.should eq(M::PlanError::Reason::NoLocations)
+      ex.detail.should eq("json: not applicable to this request (no matching existing body); " \
+                          "form: not applicable to this request (no matching existing body)")
     end
 
     it "offers the locations the RUN will see, expanding the request first" do
@@ -427,7 +447,9 @@ describe Gori::Miner::Plan do
       plan = M::Plan.build(M::PlanOptions.new(
         "POST /api HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
         "Transfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n9\r\n$id\r\n0\r\n\r\n",
-        target: "http://t.test", locations: [M::Location::Json], config: config), ungated_outbound)
+        # Query, not Json: a chunked body is no JSON document, and a run naming only a location
+        # the request cannot carry is refused (#1203). The head is what this example is about.
+        target: "http://t.test", locations: [M::Location::Query], config: config), ungated_outbound)
       String.new(plan.request).should contain("Content-Length: 5\r\n")
     ensure
       Gori::Settings.env_vars = [] of {String, String}

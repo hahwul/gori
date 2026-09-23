@@ -139,6 +139,9 @@ module Gori
             # can still reconcile the count it was given against the wordlist it supplied.
             engine.skipped_names.each { |(loc, n)| mine_skip_row(j, loc, n, "invalid-at-location") }
             engine.present_names.each { |(loc, n)| mine_skip_row(j, loc, n, "already-in-request") }
+            # A named location this request cannot carry at all: every candidate name went
+            # untested there, and `names_total` counts none of them (#1203).
+            engine.inapplicable.each { |loc| mine_skip_row(j, loc, engine.candidate_names, "not-applicable") }
           end
         end
       end
@@ -261,7 +264,7 @@ module Gori
         in Miner::PlanError::Reason::BadTarget
           "could not parse a host from '#{ex.detail}'"
         in Miner::PlanError::Reason::NoLocations
-          "no applicable locations for this request"
+          (why = ex.detail) ? "no requested location applies to this request — #{why}" : "no applicable locations for this request"
         in Miner::PlanError::Reason::Wordlist
           "wordlist error: #{ex.detail}"
         in Miner::PlanError::Reason::NoNames
@@ -357,9 +360,10 @@ module Gori
                                "budget_exhausted means max_requests halted the run before every name was tried; see incomplete_reason. " \
                                "`skipped` lists wordlist names that were NOT tested, per location, against `candidate_names` " \
                                "(the wordlist's own size), each with a reason: `invalid-at-location` (a header/cookie name must be " \
-                               "an RFC 7230 token, and framing headers are never injected) or `already-in-request` (a name the " \
-                               "request already carries there is a VISIBLE parameter, not a hidden one). names_total counts only " \
-                               "the names that survived both filters, so without `skipped` an incomplete sweep reads as a clean " \
+                               "an RFC 7230 token, and framing headers are never injected), `already-in-request` (a name the " \
+                               "request already carries there is a VISIBLE parameter, not a hidden one) or `not-applicable` (a " \
+                               "requested location this request cannot carry, e.g. json with no JSON body; every name at it). " \
+                               "names_total counts only the names that survived those filters, so without `skipped` an incomplete sweep reads as a clean " \
                                "one. `baseline_warning` names anything that makes findings tentative — READ IT even when " \
                                "baseline_stable is true: the endpoint-echoes-any-input note (reflection findings are disabled " \
                                "at those locations) is independent of stability." do |s|

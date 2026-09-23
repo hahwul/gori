@@ -284,6 +284,35 @@ describe "MCP mine_status{skipped}" do
       end
     end
   end
+
+  # A named location this request cannot carry injected nothing, yet its names were counted
+  # as tested: `names_done:434, found:0, skipped:[]` for a run that tested none (#1203).
+  it "refuses a run whose every location is inapplicable, before starting a job" do
+    with_store do |store|
+      text, err = call_raw(tools_for(store), "mine_start",
+        {"template" => "GET /x HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n", "url" => "http://127.0.0.1:9",
+         "locations" => "json", "allow_unscoped" => true}.to_json)
+      err.should be_true
+      text.should contain("no requested location applies to this request — json: not applicable")
+    end
+  end
+
+  it "reports an inapplicable location as not-applicable, outside names_total" do
+    port = HTML_ORIGIN_PORT
+    with_store do |store|
+      tools = tools_for(store)
+      start = call_json(tools, "mine_start",
+        {"template" => "GET /m HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+         "url" => "http://127.0.0.1:#{port}", "locations" => "query,json", "max_requests" => 1,
+         "concurrency" => 1, "allow_unscoped" => true}.to_json)
+      st = call_json(tools, "mine_status", %({"job_id":#{start["job_id"].as_s.to_json}}))
+      row = st["skipped"].as_a.find! { |r| r["location"].as_s == "json" }
+      row["reason"].as_s.should eq("not-applicable")
+      row["names"].as_i.should eq(st["candidate_names"].as_i)
+      st["names_total"].as_i.should be <= st["candidate_names"].as_i
+      call_json(tools, "mine_stop", %({"job_id":#{start["job_id"].as_s.to_json}}))
+    end
+  end
 end
 
 # ── sequence_start's runaway guard ────────────────────────────────────────────────────────

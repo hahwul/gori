@@ -126,8 +126,14 @@ module Gori::Miner
     # set means the run produced no verdict at all — it was refused, not answered.
     getter successful_sends : Int64 = 0_i64
 
+    # Named locations this request cannot carry, which `Plan.build` dropped from
+    # `config.locations` — held here only so a live surface polling the engine can report them
+    # beside `skipped_names` (MCP's `not-applicable` rows).
+    getter inapplicable : Array(Location)
+
     def initialize(@base : Bytes, @http2 : Bool, @names : Array(String),
-                   backend : Fuzz::Backend, @config : Config)
+                   backend : Fuzz::Backend, @config : Config,
+                   @inapplicable : Array(Location) = [] of Location)
       # Wrap the backend so max_requests is enforced at every real send (baseline,
       # bucket, and confirm), not just as a racy pre-dispatch check.
       @backend = Fuzz::CappedBackend.new(backend, @config.max_requests)

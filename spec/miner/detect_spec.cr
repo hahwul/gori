@@ -141,3 +141,28 @@ describe Gori::Miner::Detect do
     end
   end
 end
+
+# The one sentence every surface quotes for a named location this request cannot carry — the
+# CLI's per-location warning and the `NoLocations` refusal on all three (#1203). JSON on a body
+# that EXISTS but is not valid UTF-8 gets its own reason: "no matching existing body" tells the
+# operator the wrong thing about a request that plainly has one.
+describe "Gori::Miner::Detect.inapplicable_reason" do
+  generic = "not applicable to this request (no matching existing body)"
+  json_head = "POST / HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 4\r\n\r\n"
+
+  it "gives JSON its own accurate reason when the body exists but is not valid UTF-8" do
+    reason = M::Detect.inapplicable_reason(M::Location::Json, req_with_body(json_head, Bytes[0xFF, 0xFE, 0x01, 0x02]))
+    reason.should contain("not valid UTF-8")
+    reason.should_not contain("no matching existing body")
+  end
+
+  it "keeps the generic reason for JSON with no body, or a valid UTF-8 one (complement)" do
+    M::Detect.inapplicable_reason(M::Location::Json, req("GET / HTTP/1.1\r\nHost: x\r\n\r\n")).should eq(generic)
+    M::Detect.inapplicable_reason(M::Location::Json, req_with_body(json_head, %([1]\n).to_slice)).should eq(generic)
+  end
+
+  it "keeps the generic reason for a non-JSON location regardless of body encoding (complement)" do
+    head = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\n"
+    M::Detect.inapplicable_reason(M::Location::Form, req_with_body(head, Bytes[0xFF, 0xFE, 0x01, 0x02])).should eq(generic)
+  end
+end

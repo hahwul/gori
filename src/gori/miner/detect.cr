@@ -40,6 +40,24 @@ module Gori::Miner
       Applicability.new(applicable, default)
     end
 
+    # Why `loc` is not applicable to `request` — one sentence every surface quotes (the CLI's
+    # per-location warning, the `NoLocations` refusal on all three).
+    #
+    # "No matching existing body" is right for form/multipart/json when there truly is no such
+    # body, but wrong for `json` on a body that EXISTS and is not valid UTF-8: `Detect`/`Inject`
+    # refuse to offer Json there (a non-UTF-8 body cannot round-trip through `JSON::Any`), and
+    # naming that "no matching existing body" tells the operator the wrong thing about a request
+    # that plainly has a body. That case gets its own sentence.
+    def self.inapplicable_reason(loc : Location, request : Bytes) : String
+      if loc.json?
+        _, body, _ = Inject.split(request)
+        if !body.empty? && !String.new(body).valid_encoding?
+          return "the body is not valid UTF-8 and cannot round-trip through JSON"
+        end
+      end
+      "not applicable to this request (no matching existing body)"
+    end
+
     # JSON location when the body carries at least one injectable object node — a root object,
     # an object inside a root array, or a nested object. Shares Inject's node counter so Detect
     # and the injector never disagree about whether Json is applicable.
