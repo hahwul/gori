@@ -520,6 +520,12 @@ module Gori
         # added by the TUI or `gori run` since the last call, but the VALUES this process
         # observed are its own and must survive the refresh.
         @bindings.try(&.reload)
+        # And the session-slot LIST (#1216), which `Env.overlay_slot` applies at every send.
+        # `Bindings#reload` re-reads the extract rules only, so a slot a peer deleted or edited
+        # kept overlaying its old headers until a slot tool happened to call `fresh_slots`.
+        # `SessionSlots#reload` drops the active pointer when its slot is gone, and is one row
+        # read when nothing moved.
+        @bindings.try(&.slots).try(&.reload)
       end
 
       # THE token-grammar reconcile for this surface (#env.syntax). Both bind sites call it — the
