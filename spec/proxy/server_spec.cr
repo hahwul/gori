@@ -54,6 +54,14 @@ private class BodyRewriter < Gori::Proxy::HeadRewriter
     true
   end
 
+  def rewrites_request_body_for_host?(host : String) : Bool
+    true
+  end
+
+  def rewrites_response_body_for_host?(host : String) : Bool
+    true
+  end
+
   def rewrites_response_body? : Bool
     true
   end
@@ -289,8 +297,20 @@ private class HostScopedBodyRewriter < Gori::Proxy::HeadRewriter
     head
   end
 
+  def rewrites_request_body? : Bool
+    true
+  end
+
   def rewrites_response_body? : Bool
     true
+  end
+
+  def rewrites_request_body_for_host?(host : String) : Bool
+    @host_match
+  end
+
+  def rewrites_response_body_for_host?(host : String) : Bool
+    @host_match
   end
 
   def rewrites_body_for_host?(host : String) : Bool
@@ -1931,6 +1951,96 @@ describe Gori::Proxy::Server do
     proxy.stop
 
     sink.responses.first.advisory.should be_nil
+  end
+
+  it "streams an unrelated request body while a host-scoped body rule is live" do
+    seen_head = Channel(String).new(1)
+    seen_body = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      conn = origin.accept
+      head = Gori::Proxy::Codec::Http1.read_head(conn)
+      seen_head.send(head ? String.new(head) : "")
+      body = Bytes.new(5)
+      conn.read_fully(body)
+      seen_body.send(String.new(body))
+      conn << "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+      conn.flush
+      conn.close
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink,
+      rewriter: HostScopedBodyRewriter.new(host_match: false))
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "POST /upload HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nContent-Length: 5\r\n\r\nA"
+    client.flush
+
+    saw_head_before_body = false
+    select
+    when head = seen_head.receive
+      head.should contain("POST /upload")
+      saw_head_before_body = true
+    when timeout(1.second)
+    end
+
+    client << "BCDE"
+    client.flush
+    client.gets_to_end
+    client.close
+    receive_within(done, what: "the captured response")
+    proxy.stop
+    origin.close
+
+    saw_head_before_body.should be_true
+    receive_within(seen_body, what: "the complete streamed request body").should eq("ABCDE")
+  end
+
+  it "streams an unrelated response body while a host-scoped body rule is live" do
+    response_head = Channel(String).new(1)
+    release_body = Channel(Nil).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      conn = origin.accept
+      Gori::Proxy::Codec::Http1.read_head(conn)
+      conn << "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nA"
+      conn.flush
+      release_body.receive
+      conn << "BCDE"
+      conn.flush
+      conn.close
+    end
+
+    sink = RecordingSink.new(Channel(Nil).new(1))
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink,
+      rewriter: HostScopedBodyRewriter.new(host_match: false))
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /download HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: close\r\n\r\n"
+    client.flush
+    spawn do
+      head = Gori::Proxy::Codec::Http1.read_head(client)
+      response_head.send(head ? String.new(head) : "")
+    end
+
+    saw_head_before_body = false
+    select
+    when head = response_head.receive
+      head.should contain("200 OK")
+      saw_head_before_body = true
+    when timeout(1.second)
+    end
+    release_body.send(nil)
+    client.gets_to_end
+    client.close
+    proxy.stop
+    origin.close
+
+    saw_head_before_body.should be_true
   end
 
   # The two rates, in one example (#745 point 1). EVERY affected flow is annotated — "did my

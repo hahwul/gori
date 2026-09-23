@@ -63,7 +63,8 @@ module Gori
       # array allocation entirely when nothing would match. The head counts gate the head
       # rewrite (replace-head AND the header ops, which all act on the head), split PER
       # DIRECTION like the body counts so a request-only rule doesn't tax every response
-      # (and vice versa); the body counts also gate whether ClientConn buffers a body at all.
+      # (and vice versa); the host- and direction-scoped body gates decide whether ClientConn
+      # buffers a particular message.
       @req_head_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Head))
       @resp_head_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Body))
@@ -111,8 +112,8 @@ module Gori
     # it out, and the counts did not: the rule landed in `@ws_out_count`, which is what
     # decides whether `WS::Relay` keeps its byte-exact pump — so a rule that can never fire
     # took every message on that socket off frame-exact forwarding (P7). `part: body` is the
-    # same defect one notch louder: it makes `rewrites_body_for_host?` true, which buffers
-    # every body AND costs the host HTTP/2 (`tls/tunnel.cr`). Counting on the same predicate
+    # same defect one notch louder: it made `rewrites_body_for_host?` true, which downgraded
+    # every matching host from HTTP/2 (`tls/tunnel.cr`). Counting on the same predicate
     # that applies is what keeps "a rule is live" from meaning two different things.
     private def rewrites?(rule : Store::MatchRule, target : Store::RuleTarget?,
                           part : Store::RulePart) : Bool
@@ -613,8 +614,9 @@ module Gori
       apply(head, Store::RuleTarget::Response, Store::RulePart::Head, @resp_head_count, host)
     end
 
-    # A body rule is live iff at least one enabled, non-empty rule targets that side's
-    # body — ClientConn keys the (expensive) body buffer on these.
+    # Host-blind summaries used where only the overall rule-set state matters. ClientConn
+    # uses the host-scoped directional predicates below when deciding whether this message's
+    # body needs the (expensive) rewrite buffer.
     def rewrites_request_body? : Bool
       @req_body_count.get > 0
     end
@@ -623,23 +625,40 @@ module Gori
       @resp_body_count.get > 0
     end
 
-    # Whether a body rule that can actually MATCH `host` is live (#526). The two predicates
-    # above answer "is any body rule live", which is the right question for `ClientConn` (it
-    # is deciding whether to pay for a body buffer on a connection already pinned to one
-    # host) and the wrong one for the h2 downgrade gate: that gate costs the host its
-    # protocol, and a rule scoped to `alpha.test` was costing `127.0.0.1` its protocol too.
+    # Whether either body direction has a rule that can actually MATCH `host` (#526). This is
+    # the combined question the h2 downgrade gate needs: it costs a host its protocol, and a
+    # rule scoped to `alpha.test` must not cost `127.0.0.1` anything.
     #
     # The atomic counts are still the fast path — no body rule anywhere means no lock and no
     # select — and `host_matches?` (memoised, see below) then decides the rest. Both sides
     # are folded into one question because the gate downgrades for either.
     #
-    # Once per CONNECT, so the mutex here is not on any hot path.
+    # Called at the h2 CONNECT gate, not per frame.
     def rewrites_body_for_host?(host : String) : Bool
       return false if @req_body_count.get == 0 && @resp_body_count.get == 0 # lock-free fast path
       @mutex.synchronize do
         @rules.any? do |r|
           rewrites?(r, nil, Store::RulePart::Body) && host_matches?(r.host, host)
         end
+      end
+    end
+
+    # HTTP/1 forward-proxy connections can carry requests for several hosts, so the buffer
+    # decision must narrow both the direction and host before reading an entity. These are
+    # per-message checks; the atomic side count avoids taking the rules mutex when that side has
+    # no body rules.
+    def rewrites_request_body_for_host?(host : String) : Bool
+      body_rule_for_host?(Store::RuleTarget::Request, @req_body_count, host)
+    end
+
+    def rewrites_response_body_for_host?(host : String) : Bool
+      body_rule_for_host?(Store::RuleTarget::Response, @resp_body_count, host)
+    end
+
+    private def body_rule_for_host?(target : Store::RuleTarget, count : Atomic(Int32), host : String) : Bool
+      return false if count.get == 0 # lock-free fast path
+      @mutex.synchronize do
+        @rules.any? { |r| rewrites?(r, target, Store::RulePart::Body) && host_matches?(r.host, host) }
       end
     end
 

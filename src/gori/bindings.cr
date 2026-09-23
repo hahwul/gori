@@ -738,13 +738,9 @@ module Gori
     end
 
     # Whether a BODY-scoped extract rule that can actually MATCH `host` is live (#526/#531).
-    # `extracts_body?` above answers "is any live", which is the right question for `ClientConn`
-    # (already pinned to one host, deciding whether to pay for a buffer) and the WRONG one for
-    # the h2 downgrade gate: that gate costs the host its protocol, and a rule scoped to
-    # `alpha.test` must not cost `127.0.0.1` anything. Same split, same shape and the same
-    # atomic-count fast path as `Rules#rewrites_body_for_host?`.
-    #
-    # Once per CONNECT, so the mutex here is not on any hot path.
+    # The response buffer and h2 downgrade gates both need the host-specific answer: an
+    # unrelated body condition must not buffer this response or cost this host its protocol.
+    # Same split and atomic-count fast path as `Rules#rewrites_body_for_host?`.
     def extracts_body_for_host?(host : String) : Bool
       return false if @body_count.get == 0 # lock-free fast path
       @mutex.synchronize do

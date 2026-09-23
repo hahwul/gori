@@ -875,6 +875,26 @@ describe Gori::Rules do
     end
   end
 
+  describe "host and direction scoped body rewrite gates" do
+    it "only selects body rules for the current host and direction" do
+      with_store do |store|
+        store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body,
+          "upload-secret", "masked", host: "upload.test")
+        store.insert_rule(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body,
+          "download-secret", "masked", host: "download.test")
+        rules = Gori::Rules.load(store)
+
+        rules.rewrites_request_body_for_host?("upload.test").should be_true
+        rules.rewrites_request_body_for_host?("download.test").should be_false
+        rules.rewrites_response_body_for_host?("download.test").should be_true
+        rules.rewrites_response_body_for_host?("upload.test").should be_false
+        # The h2 downgrade question remains intentionally combined across both directions.
+        rules.rewrites_body_for_host?("upload.test").should be_true
+        rules.rewrites_body_for_host?("download.test").should be_true
+      end
+    end
+  end
+
   # `match_rules` carries no CHECK constraint on `target`/`part`, so a hand-edited DB — or a
   # project file written by a build whose label set has drifted — can hold a value the enum
   # does not know. Two of the four enum readers on that row were TOTAL (`RuleOp`, `MatchKind`)
