@@ -1385,7 +1385,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--no-project` | Start unbound even inside a Git workspace (agent picks via list/create/switch) |
 | `--insecure-upstream` | `send_request`: skip upstream TLS verification |
 | `--read-only` | Disable action tools (`send_request`, create/update issues, fuzz/mine); `switch_project` (and `create_project` when unbound) stay available |
-| `--tools=SPEC` | Advertise only these tools: comma-separated names/globs, a leading `-` subtracts (`list_*,get_*,send_request` or `-fuzz_*,-mine_*`). The full catalogue is ~43k tokens of client context; this trims it |
+| `--tools=SPEC` | Advertise only these tools: comma-separated names, globs or profiles (`@minimal`, `@recon`), a leading `-` subtracts (`@recon`, `@minimal,send_request` or `-fuzz_*,-mine_*`). The startup log reports the size of what is served; see [Choosing which tools are exposed](/guide/mcp/#choosing-which-tools-are-exposed) |
 | `--install-claude` | Write Claude Desktop `mcpServers` config |
 | `--install-claude-code` | Write Claude Code `~/.claude.json` `mcpServers` entry |
 | `--install-codex` | Write OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` |

@@ -21,7 +21,7 @@ gori mcp --install-claude-code   # Claude Code
 
 다른 호스트도 같은 방식으로 설치합니다: `--install-claude`(Claude Desktop), `--install-codex`(OpenAI Codex), `--install-agy`(Antigravity), `--install-grok`(Grok), `--install-hermes`(Hermes), `--install-pi`(Pi, MCP 어댑터 패키지를 통해 서버를 읽습니다). 각 명령은 쓴 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 TOML `[mcp_servers.gori]` 테이블을, Hermes는 YAML `mcp_servers:` 항목을 씁니다(JSON이 아닙니다). 이후 클라이언트를 재시작(또는 세션을 다시 열기)해 MCP 서버를 다시 읽게 하세요.
 
-두 가지 선택이 그 기록된 명령에 함께 실립니다. **읽기 전용 대 전체 접근**: 기본적으로 에이전트는 액션 도구(`send_request`, 이슈 쓰기, 인터셉트 뮤테이터)도 받습니다. `--read-only`를 더하면 읽기 도구만 노출됩니다. **어느 프로젝트**: 엔게이지먼트의 Git 저장소 안에서 설치를 실행하면 gori가 그 워크스페이스를 자체 프로젝트에 경로-바인딩합니다. 그 밖에서는 서버가 언바운드로 시작하고 에이전트가 도구로 프로젝트를 고릅니다. `--project`나 `--db`로 명시적으로 고정하면, 절대 경로로 기록된 명령에 쓰입니다:
+세 가지 선택이 그 기록된 명령에 함께 실립니다. **읽기 전용 대 전체 접근**: 기본적으로 에이전트는 액션 도구(`send_request`, 이슈 쓰기, 인터셉트 뮤테이터)도 받습니다. `--read-only`를 더하면 읽기 도구만 노출됩니다. **도구를 얼마나**: 전체 카탈로그는 세션 내내 모델 컨텍스트를 차지합니다. `--tools=@recon`(또는 `@minimal`)을 더하면 이름 붙은 작은 묶음만 노출되며, [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed)에서 비교합니다. **어느 프로젝트**: 엔게이지먼트의 Git 저장소 안에서 설치를 실행하면 gori가 그 워크스페이스를 자체 프로젝트에 경로-바인딩합니다. 그 밖에서는 서버가 언바운드로 시작하고 에이전트가 도구로 프로젝트를 고릅니다. `--project`나 `--db`로 명시적으로 고정하면, 절대 경로로 기록된 명령에 쓰입니다:
 
 ```bash
 gori mcp --project my-engagement --install-codex

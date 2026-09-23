@@ -11,7 +11,7 @@ require "../spec_helper"
 #      under --read-only before the handler runs, and everything not `unbound:` is refused
 #      with NO_PROJECT while no project is bound.
 #
-# Every call below is made with EMPTY arguments. That is what keeps a sweep over 160 tools
+# Every call below is made with EMPTY arguments. That is what keeps a sweep over every tool
 # safe: a gated tool is refused before its handler runs, an unbound-refused tool likewise,
 # and a read tool handed nothing either lists an empty project or refuses the missing
 # argument. It is also why the non-gated arm asserts "not INTERNAL": an empty argument

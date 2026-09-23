@@ -1,8 +1,9 @@
 require "../spec_helper"
 
-# `gori mcp --tools=SPEC`. The catalogue is ~172 KB of JSON — about 43,000 tokens an MCP
-# client parks in the model's context for the whole session before a single question is
-# asked — and `--read-only` was the only lever, cutting along one axis only.
+# `gori mcp --tools=SPEC`. The catalogue is JSON an MCP client parks in the model's context
+# for the whole session before a single question is asked — how much is measured, not written
+# here (spec/mcp/catalogue_size_spec.cr) — and `--read-only` was the only lever, cutting along
+# one axis only.
 
 private def names_for(spec : String, known = Gori::MCP::Tools::TOOL_NAMES) : Array(String)
   f = Gori::MCP::ToolFilter.parse(spec, known)
@@ -58,6 +59,75 @@ describe Gori::MCP::ToolFilter do
   it "refuses a spec that would advertise nothing" do
     refusal_for("list_*,-list_*").should contain("selects no tools")
     refusal_for("  ").should contain("no tool patterns")
+  end
+
+  # Named profiles (#1137): a small catalogue an operator can pick without knowing the
+  # registry's naming, resolved as one more kind of term.
+  describe "profiles" do
+    profiles = Gori::MCP::ToolFilter::PROFILES
+
+    it "selects exactly a profile's tools, and composes with other terms" do
+      recon = profiles.find! { |pr| pr.name == "recon" }
+      names_for("@recon").should eq(recon.tools.sort)
+      names_for("@minimal,send_request").should contain("send_request")
+      names_for("@recon,-send_request").should_not contain("send_request")
+      # A leading subtraction starts from everything, as it does for a glob.
+      rest = names_for("-@minimal")
+      rest.size.should eq(Gori::MCP::Tools::TOOL_NAMES.size - Gori::MCP::ToolFilter::MINIMAL.size)
+      rest.should_not contain("list_history")
+    end
+
+    # A profile member `known` lacks would abort `gori mcp` at start-up with a refusal the
+    # operator can do nothing about — so every member has to be a tool that exists, and a
+    # profile names each at most once.
+    it "names only real tools" do
+      profiles.each do |profile|
+        profile.tools.uniq.size.should eq(profile.tools.size), "@#{profile.name} repeats a tool"
+        (profile.tools - Gori::MCP::Tools::TOOL_NAMES).should be_empty, "@#{profile.name} names a tool that does not exist"
+      end
+    end
+
+    # A glob inside a profile would let it grow with the registry, the silent growth a
+    # profile exists to rule out.
+    it "names tools, never globs" do
+      profiles.each do |profile|
+        profile.tools.none?(&.includes?('*')).should be_true, "@#{profile.name} carries a glob"
+      end
+    end
+
+    it "keeps @minimal inside @recon" do
+      recon = profiles.find! { |pr| pr.name == "recon" }
+      (Gori::MCP::ToolFilter::MINIMAL - recon.tools).should be_empty
+    end
+
+    # A profile has to survive every start it can be handed: unbound (#1136 — and BOTH
+    # pickers, because `switch_project` has nothing to switch to on a host with no project yet,
+    # where only `create_project` gets the agent out) and `--read-only` (a profile of gated
+    # tools would abort).
+    it "works unbound and under --read-only" do
+      profiles.each do |profile|
+        (Gori::MCP::Tools::PROJECT_PICKERS - profile.tools).should be_empty,
+          "@#{profile.name} leaves out a project picker"
+        filter = Gori::MCP::ToolFilter.parse("@#{profile.name}", Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter)
+        served = Gori::MCP::Tools.served_names(filter, allow_actions: false)
+        served.should contain("project_info")
+        served.should contain("list_history")
+      end
+    end
+
+    it "refuses an unknown profile, and a profile named without its sigil" do
+      refusal_for("@recn").should contain("did you mean @recon")
+      refusal_for("@nope").should contain("unknown profile")
+      refusal_for("@nope").should contain("@minimal, @recon")
+      refusal_for("-@nope").should contain("unknown profile")
+      refusal_for("recon").should contain("did you mean @recon")
+    end
+
+    it "refuses a profile against a registry that lacks one of its tools" do
+      # Only reachable through a gori bug (the example above pins the real registry), and
+      # then refused rather than served short.
+      refusal_for("@minimal", ["list_history", "get_flow"]).should contain("does not serve")
+    end
   end
 
   describe "served through Tools" do

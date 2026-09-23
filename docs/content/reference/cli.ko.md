@@ -1373,7 +1373,7 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--no-project` | Git 워크스페이스 안에서도 unbound로 시작 (에이전트가 list/create/switch로 선택) |
 | `--insecure-upstream` | `send_request`: 업스트림 TLS 검증 생략 |
 | `--read-only` | 액션 도구 비활성화 (`send_request`, 이슈 생성/수정, fuzz/mine); `switch_project`(및 unbound 시 `create_project`)는 유지 |
-| `--tools=SPEC` | 지정한 도구만 노출: 쉼표로 구분한 이름/글롭이며, 앞에 `-`를 붙이면 제외 (`list_*,get_*,send_request` 또는 `-fuzz_*,-mine_*`). 전체 카탈로그는 클라이언트 컨텍스트 약 43k 토큰이므로 이것으로 줄입니다 |
+| `--tools=SPEC` | 지정한 도구만 노출: 쉼표로 구분한 이름, 글롭, 프로필(`@minimal`, `@recon`)이며, 앞에 `-`를 붙이면 제외 (`@recon`, `@minimal,send_request` 또는 `-fuzz_*,-mine_*`). 제공하는 카탈로그 크기는 시작 로그에 나옵니다. [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed) 참고 |
 | `--install-claude` | Claude Desktop `mcpServers` 설정 기록 |
 | `--install-claude-code` | Claude Code `~/.claude.json` `mcpServers` 항목 기록 |
 | `--install-codex` | OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` 기록 |

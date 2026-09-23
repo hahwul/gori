@@ -388,11 +388,13 @@ describe Gori::MCP::Install do
     end
 
     it "carries --tools into the installed argv" do
-      # Dropped here, the client spawns a server advertising all 160 tools while the
+      # Dropped here, the client spawns a server advertising every tool while the
       # operator's own command trimmed it to a handful — the whole point of the flag is the
       # context the CLIENT loads, so it is worthless if only the hand-run server honours it.
       Gori::MCP::Install.build_args(tools_spec: "list_*,get_*").should eq(
         ["mcp", "--tools=list_*,get_*"])
+      # A profile is a spec like any other: written as typed, resolved by the spawned server.
+      Gori::MCP::Install.build_args(tools_spec: "@recon").should eq(["mcp", "--tools=@recon"])
       Gori::MCP::Install.build_args(project: "eng", read_only: true, tools_spec: "-fuzz_*").should eq(
         ["mcp", "--project=eng", "--read-only", "--tools=-fuzz_*"])
       Gori::MCP::Install.build_args(tools_spec: "").should eq(["mcp"])

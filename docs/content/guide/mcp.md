@@ -69,19 +69,39 @@ One consequence is worth knowing: free-text search (`body:`) reads an index that
 
 ## Choosing Which Tools Are Exposed
 
-gori exposes about 160 MCP tools. A client loads that whole catalogue into the model's context before you ask the first question and keeps it there for the session — roughly 43,000 tokens. `--read-only` cuts it to 53 tools (~12,000 tokens), but only along one axis. `--tools` lets you pick directly:
+By default `gori mcp` advertises every tool, so an agent can reach the whole workbench without a restart. The price is context: a client loads the entire catalogue into the model's context before the first question and keeps it for the session. Every start logs how many tools it serves and how large `tools/list` is. For a client with a tight context budget, start from a profile:
+
+| Start with | Tools | `tools/list` | Tokens | For |
+| --- | ---: | ---: | ---: | --- |
+| `gori mcp` | 179 | ~203 KB | ~52k | Everything (the default) |
+| `--read-only` | 62 | ~66 KB | ~17k | Read tools and pure compute; no live requests |
+| `--tools=@recon` | 32 | ~46 KB | ~12k | Read and map the capture, replay a request, record issues and notes |
+| `--tools=@recon --read-only` | 25 | ~33 KB | ~9k | `@recon` minus what `--read-only` disables |
+| `--tools=@minimal` | 13 | ~20 KB | ~5k | Read History and single flows, talk to the operator |
+
+Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
+
+| Profile | Tools |
+| --- | --- |
+| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `operator_messages`, `reply_to_operator` |
+| `@recon` | `@minimal`, plus `list_sitemap`, `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `get_issue`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+
+A profile is a fixed list of names, not a glob, so a later gori that adds a `list_*` tool does not quietly grow `@recon`. Both keep `switch_project` and `create_project`, so they work on an unbound start, even on a machine with no project yet.
+
+`--tools` takes a comma-separated list of tool names, `*` globs and `@profiles`, applied left to right; a term prefixed with `-` subtracts:
 
 ```bash
-gori mcp --tools='list_*,get_*,ql_*,project_info,switch_project,send_request'   # recon + replay, ~11k tokens
+gori mcp --tools=@recon                                          # a profile
+gori mcp --tools='@minimal,send_request'                         # a profile plus one tool
+gori mcp --tools='@recon,-send_request'                          # a profile minus one
 gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # everything but the async workbench
-gori mcp --tools='*,-intercept_*'                                # same idea, spelled out
 ```
 
-The spec is a comma-separated list of tool names and `*` globs, applied left to right; a term prefixed with `-` subtracts. Because the tools are already named in prefix families (`list_*`, `intercept_*`, `fuzz_*`, `oast_*`), globbing gives you groups without a separate catalogue to keep in step. A spec that starts with a subtraction begins from every tool, so it keeps working when a later gori adds one.
+Because the tools are named in prefix families (`list_*`, `intercept_*`, `fuzz_*`, `oast_*`), a glob selects a group. A spec that starts with a subtraction begins from every tool, so it keeps working when a later gori adds one.
 
 A narrow spec can also leave the server with no way to *pick* a project. If it starts unbound — outside a Git workspace, with `--no-project`, or because the configured database would not open — and the spec keeps neither `switch_project` nor `create_project`, nothing the agent calls can bind one. `list_projects` does not count: it lists projects and binds none of them. gori warns at startup, and the `NO_PROJECT` errors say the same thing instead of naming tools that are not there. Keep `switch_project` in the spec, or pass `--project`/`--db`.
 
-A pattern that matches nothing aborts at startup with a suggestion (`--tools: "list_hisotry" matches no tool — did you mean list_history?`) rather than quietly serving a smaller set — a server missing a tool looks exactly like a gori that never had the feature. Tools left out are absent from `tools/list` **and** refused if called anyway, naming the flag that hid them. `--tools` composes with `--read-only`, and like every other flag it is written into the command when you pass it alongside `--install-*`.
+A pattern or profile that matches nothing aborts at startup with a suggestion (`--tools: "list_hisotry" matches no tool — did you mean list_history?`) rather than quietly serving a smaller set — a server missing a tool looks exactly like a gori that never had the feature. Tools left out are absent from `tools/list` **and** refused if called anyway, naming the flag that hid them. `--tools` composes with `--read-only`, and like every other flag it is written into the command when you pass it alongside `--install-*`.
 
 ## Seeing an Agent From the TUI
 

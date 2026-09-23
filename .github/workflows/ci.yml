@@ -23,6 +23,11 @@ on:
       # an edit to the generated file alone, which would otherwise merge with the
       # job that reads it never waking up.
       - nix/shards.nix
+      # Read by a spec, not just rendered: `spec/mcp/catalogue_size_spec.cr` checks the
+      # MCP guide's catalogue table against the build (#1137). A docs-only edit to a row
+      # would otherwise merge unchecked, and fail the next unrelated `.cr` PR instead.
+      - docs/content/guide/mcp.md
+      - docs/content/guide/mcp.ko.md
       # `docker/Dockerfile` is deliberately absent: nothing in this workflow
       # builds the image any more (see the note under `tests`), so listing it
       # would only wake the Crystal build and the spec matrix to test nothing

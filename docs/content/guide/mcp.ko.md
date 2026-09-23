@@ -69,19 +69,39 @@ gori mcp --read-only
 
 ## 노출할 도구 고르기 {#choosing-which-tools-are-exposed}
 
-gori는 MCP 도구를 약 160개 제공합니다. 클라이언트는 첫 질문을 던지기 전에 이 목록 전체를 모델 컨텍스트에 싣고 세션 내내 유지합니다 — 대략 43,000 토큰입니다. `--read-only`는 53개(~12,000 토큰)로 줄여주지만 축이 하나뿐입니다. `--tools`는 직접 고르게 해줍니다:
+기본적으로 `gori mcp`는 모든 도구를 노출하므로, 에이전트는 재시작 없이 워크벤치 전체를 쓸 수 있습니다. 대가는 컨텍스트입니다. 클라이언트는 첫 질문 전에 카탈로그 전체를 모델 컨텍스트에 싣고 세션 내내 유지합니다. gori는 시작할 때마다 제공하는 도구 수와 `tools/list` 크기를 로그에 남깁니다. 컨텍스트가 빠듯한 클라이언트라면 프로필에서 시작하세요:
+
+| 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
+| --- | ---: | ---: | ---: | --- |
+| `gori mcp` | 179 | ~203 KB | ~52k | 전부 (기본값) |
+| `--read-only` | 62 | ~66 KB | ~17k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `--tools=@recon` | 32 | ~46 KB | ~12k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon --read-only` | 25 | ~33 KB | ~9k | `--read-only`가 끄는 도구를 뺀 `@recon` |
+| `--tools=@minimal` | 13 | ~20 KB | ~5k | History와 개별 flow 읽기, 오퍼레이터와 대화 |
+
+토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
+
+| 프로필 | 도구 |
+| --- | --- |
+| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `operator_messages`, `reply_to_operator` |
+| `@recon` | `@minimal`에 더해 `list_sitemap`, `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `get_issue`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+
+프로필은 글롭이 아니라 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`이 조용히 커지지 않습니다. 둘 다 `switch_project`와 `create_project`를 포함하므로, 프로젝트가 하나도 없는 머신에서 바인딩 없이 시작해도 동작합니다.
+
+`--tools`는 도구 이름, `*` 글롭, `@프로필`을 쉼표로 나열한 것이고 왼쪽부터 적용됩니다. `-`를 앞에 붙인 항목은 빼냅니다:
 
 ```bash
-gori mcp --tools='list_*,get_*,ql_*,project_info,switch_project,send_request'   # 정찰 + 재전송, ~11k 토큰
+gori mcp --tools=@recon                                          # 프로필
+gori mcp --tools='@minimal,send_request'                         # 프로필 + 도구 하나
+gori mcp --tools='@recon,-send_request'                          # 프로필 - 도구 하나
 gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워크벤치만 제외
-gori mcp --tools='*,-intercept_*'                                # 같은 뜻을 명시적으로
 ```
 
-스펙은 도구 이름과 `*` 글롭을 쉼표로 나열한 것이고 왼쪽부터 적용됩니다. `-`를 앞에 붙인 항목은 빼냅니다. 도구 이름이 이미 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로, 글롭만으로 별도 카탈로그 없이 그룹이 생깁니다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 그대로 동작합니다.
+도구 이름이 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로 글롭 하나로 그룹을 고를 수 있습니다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 그대로 동작합니다.
 
 스펙을 너무 좁히면 서버가 프로젝트를 *고를* 방법조차 잃을 수 있습니다. Git 워크스페이스 밖이거나 `--no-project`로 시작했거나 지정한 데이터베이스가 열리지 않아 바인딩이 없는데 스펙이 `switch_project`와 `create_project`를 둘 다 남기지 않으면, 에이전트가 무엇을 호출해도 프로젝트를 붙일 수 없습니다. `list_projects`는 여기 포함되지 않습니다 — 목록만 보여줄 뿐 아무것도 바인딩하지 않습니다. gori는 이를 시작 시점에 경고하고, `NO_PROJECT` 오류도 없는 도구를 가리키는 대신 같은 사실을 말합니다. 스펙에 `switch_project`를 남기거나 `--project`/`--db`를 넘기세요.
 
-아무것도 매치하지 않는 패턴은 조용히 좁히는 대신 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 도구가 빠진 서버는 그 기능이 아예 없는 gori와 구분되지 않기 때문입니다. 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다.
+아무것도 매치하지 않는 패턴이나 프로필은 조용히 좁히는 대신 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 도구가 빠진 서버는 그 기능이 아예 없는 gori와 구분되지 않기 때문입니다. 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다.
 
 ## TUI에서 에이전트 보기 {#seeing-an-agent-from-the-tui}
 

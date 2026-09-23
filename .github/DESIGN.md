@@ -3173,3 +3173,30 @@ served the honest answer is that the recovery is not in the agent's hands at all
 operator has to restart — and that is said once at start-up on stderr, from both unbound
 entry points (`--no-project` and the degrade-to-unbound path a bad database takes), because
 stderr is the only surface the operator who made the mistake is looking at.
+
+### 2026-09-23: the catalogue's weight is measured, not written down, and a profile is a list of names
+
+Refines: [P4](#p4). `--tools` profiles, #1137.
+
+Every number gori had written about its own MCP catalogue was wrong by the time #1137 measured
+it: the guide said about 160 tools, and 53 under `--read-only`, of a 179/62 registry; the
+`--tools` help and two comments said ~43k tokens of a `tools/list` past 200 KB. A size compiled
+into help text or prose drifts the moment a tool lands. So the weight is measured where it is
+spent: `gori mcp` builds the listing it is about to serve (`Tools.catalogue_json`, on a storeless
+instance — exact, because the listing may not vary with the connection) and logs its size on
+every start. The guide keeps one table of counts and sizes, and
+`spec/mcp/catalogue_size_spec.cr` fails when a row drifts from the build.
+
+**The full catalogue stays the default.** Narrowing it is a trade the operator makes, and a
+default that hid the workbench would read to an agent exactly like a gori without it — the
+failure `--tools` already refuses to produce by accident.
+
+**A profile is a list of names, never a glob.** `--tools=@recon` and `@minimal` resolve inside
+the same spec grammar, so they compose (`@minimal,send_request`, `-@recon`). A glob would let a
+profile grow with the registry — `list_*` gains every new lister — which is the silent growth
+#1137 was filed about, moved inside the lever meant to contain it. A tool joins a profile by
+being written into `ToolFilter::PROFILES`. Every profile keeps both project pickers, since
+`switch_project` has nothing to switch to on a host with no project yet (#1136), and a
+member's description may not send the agent to a tool the profile leaves out: the model reads
+it as fact, and each such pointer is a call spent on `UNKNOWN_TOOL`. The spec holds the
+exceptions — mentions that are not instructions — in a list with a reason each.
