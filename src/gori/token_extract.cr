@@ -1,5 +1,6 @@
 require "json"
 require "./raw_json"
+require "./json_path"
 require "./repeater/engine"
 require "./proxy/codec/content_decode"
 
@@ -288,9 +289,10 @@ module Gori
       String.new(body[lo...hi])
     end
 
-    # A leaf value at a dotted/bracketed path into a JSON body. Supports `$`, `.key`,
-    # `["key"]`, `['key']`, and `[index]`; no filters or wildcards (v1). Non-JSON or a
-    # missing path yields nil; a leaf is stringified (raw string, else its JSON form).
+    # A leaf value at a dotted/bracketed path into a JSON body, in the grammar `JsonPath`
+    # shares with Retest's `json:` assertions (`$.a.b[0]`, `a.b.0`, `["k"]`). Non-JSON, a
+    # missing path or one `JsonPath` refuses yields nil; a leaf is stringified (raw string,
+    # else its JSON form).
     def self.json_path(raw : Repeater::Result, path : String) : String?
       json_path(ExtractSubject.response(raw.head, raw.body), path)
     end
@@ -300,7 +302,7 @@ module Gori
       # `RawJson`: a number past Int64 anywhere in the body no longer hides the one asked for,
       # and one asked for comes back as its own digits (#1200).
       root = RawJson.parse(decoded_text(subject))
-      node = walk(root, path)
+      node = JsonPath.resolve(root, path)
       return nil unless node
       node.as_s? || (node.raw.nil? ? nil : node.to_json)
     rescue JSON::ParseException
@@ -346,58 +348,6 @@ module Gori
         names << h.name unless names.includes?(h.name)
       end
       names
-    end
-
-    private def self.walk(node : JSON::Any, path : String) : JSON::Any?
-      segments(path).each do |seg|
-        case seg
-        when Int32
-          arr = node.as_a?
-          return nil unless arr && seg >= 0 && seg < arr.size
-          node = arr[seg]
-        else
-          obj = node.as_h?
-          return nil unless obj
-          v = obj[seg]?
-          return nil unless v
-          node = v
-        end
-      end
-      node
-    end
-
-    # Tokenize `$.a.b[0]["c"]` into ["a", "b", 0, "c"] (String keys, Int32 indices).
-    private def self.segments(path : String) : Array(String | Int32)
-      acc = [] of String | Int32
-      i = 0
-      p = path.lstrip
-      p = p[1..] if p.starts_with?('$')
-      while i < p.size
-        c = p[i]
-        if c == '.'
-          i += 1
-        elsif c == '['
-          close = p.index(']', i)
-          break unless close
-          inner = p[(i + 1)...close].strip
-          if (inner.starts_with?('"') && inner.ends_with?('"')) || (inner.starts_with?('\'') && inner.ends_with?('\''))
-            acc << inner[1...-1]
-          elsif idx = inner.to_i32?
-            acc << idx
-          else
-            acc << inner
-          end
-          i = close + 1
-        else
-          j = i
-          while j < p.size && p[j] != '.' && p[j] != '['
-            j += 1
-          end
-          acc << p[i...j]
-          i = j
-        end
-      end
-      acc
     end
 
     # The decoded entity, byte-exact (gzip/br/zstd handled through the same seam

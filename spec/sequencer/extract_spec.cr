@@ -57,6 +57,14 @@ describe Gori::Sequencer::Extract do
     Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.n[0]")).should eq("99999999999999999999")
   end
 
+  it "reads the path grammar Retest reads, and refuses a path it cannot resolve (#1201)" do
+    r = response(HEAD, BODY)
+    Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "items.1")).should eq("b")
+    # An unclosed bracket used to be dropped, silently resolving `$.data` instead.
+    Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.data[")).should be_nil
+    Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$..token")).should be_nil
+  end
+
   it "auto-detects the first Set-Cookie as the token location" do
     loc = Q::Extract.autodetect(response(HEAD, BODY))
     loc.not_nil!.kind.should eq(Q::ExtractKind::Cookie)

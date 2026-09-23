@@ -5,6 +5,7 @@ require "./env"
 require "./evidence"
 require "./proxy/codec/http1"
 require "./raw_json"
+require "./json_path"
 require "./repeater/flow_request"
 require "./repeater/draft_markers"
 
@@ -76,7 +77,7 @@ module Gori
       end
 
       getter kind : Kind
-      getter path : String  # JSON dotted path, for the three Json* kinds
+      getter path : String  # JSON path (`JsonPath` grammar), for the three Json* kinds
       getter value : String # the literal, for JsonEquals
       getter lo : Int32     # inclusive status bounds, for Status
       getter hi : Int32
@@ -101,7 +102,7 @@ module Gori
         "status:<code>            e.g. status:200",
         "status:<class>           e.g. status:2xx",
         "status:<lo>-<hi>         e.g. status:200-299",
-        "json:<path>              the JSON field is present, e.g. json:data.user.id",
+        "json:<path>              the JSON field is present, e.g. json:data.user.id or json:$.items[0].id",
         "json:<path>=<literal>    the JSON field equals a literal, e.g. json:data.role=admin",
         "json-absent:<path>       the JSON field is absent, e.g. json-absent:data.token",
         "body:same                the decoded body is identical to the baseline's",
@@ -118,17 +119,11 @@ module Gori
           return parse_status(rest)
         end
         if rest = chop(s, "json-absent:")
-          return rest.empty? ? "json-absent: needs a field path (json-absent:data.token)" : new(Kind::JsonAbsent, path: rest)
+          return "json-absent: needs a field path (json-absent:data.token)" if rest.empty?
+          return path_error("json-absent:", rest) || new(Kind::JsonAbsent, path: rest)
         end
         if rest = chop(s, "json:")
-          # `=` splits the PATH from the literal, and the FIRST one wins: a path segment
-          # cannot contain `=` while a literal very much can (`json:data.next=?page=2`).
-          if at = rest.index('=')
-            path = rest[0...at]
-            return "json: needs a field path before the = (json:data.role=admin)" if path.empty?
-            return new(Kind::JsonEquals, path: path, value: rest[(at + 1)..])
-          end
-          return rest.empty? ? "json: needs a field path (json:data.user.id)" : new(Kind::JsonPresent, path: rest)
+          return parse_json(rest)
         end
         if rest = chop(s, "body:")
           case rest.downcase
@@ -138,6 +133,45 @@ module Gori
           end
         end
         "unknown assertion #{s.inspect} — expected one of:\n  #{FORMS.join("\n  ")}"
+      end
+
+      # `=` splits the PATH from the literal, and the first one outside a `[...]` wins: a literal
+      # may contain `=` (`json:data.next=?page=2`), and so may a quoted member name
+      # (`json:["a=b"]=1`), but a bare path step cannot.
+      private def self.parse_json(rest : String) : Assertion | String
+        if at = equals_at(rest)
+          path = rest[0...at]
+          return "json: needs a field path before the = (json:data.role=admin)" if path.empty?
+          return path_error("json:", path) || new(Kind::JsonEquals, path: path, value: rest[(at + 1)..])
+        end
+        return "json: needs a field path (json:data.user.id)" if rest.empty?
+        path_error("json:", rest) || new(Kind::JsonPresent, path: rest)
+      end
+
+      # A path `JsonPath` cannot read is refused HERE, when the step is written — never stored
+      # and later resolved as "absent", which a `json-absent:` reports as PASS (#1201).
+      private def self.path_error(kind : String, path : String) : String?
+        steps = JsonPath.parse(path)
+        steps.is_a?(String) ? "#{kind} #{steps}" : nil
+      end
+
+      private def self.equals_at(rest : String) : Int32?
+        depth = 0
+        quote = nil.as(Char?)
+        rest.each_char_with_index do |c, i|
+          if q = quote
+            quote = nil if c == q
+          elsif depth > 0 && (c == '"' || c == '\'')
+            quote = c
+          elsif c == '['
+            depth += 1
+          elsif c == ']'
+            depth -= 1 if depth > 0
+          elsif c == '=' && depth == 0
+            return i
+          end
+        end
+        nil
       end
 
       private def self.chop(s : String, prefix : String) : String?
@@ -589,7 +623,11 @@ module Gori
         # the exact false clean bill of health this outcome exists to keep apart.
         return {Outcome::Inconclusive, clip("response body is not JSON (#{ex.message || "parse error"})")}
       end
-      found = json_at(doc, a.path)
+      steps = JsonPath.parse(a.path)
+      # Unreachable from a step `Assertion.parse` accepted; kept so a path that grammar ever
+      # stops reading answers INCONCLUSIVE rather than "absent".
+      return {Outcome::Inconclusive, clip("cannot read JSON path #{a.path} (#{steps})")} if steps.is_a?(String)
+      found = JsonPath.resolve(doc, steps)
       case a.kind
       when .json_present?
         found ? {Outcome::Pass, "#{a.path} = #{render(found)}"} : {Outcome::Fail, "#{a.path} is absent"}
@@ -631,35 +669,6 @@ module Gori
     private def self.compare_bodies(a : Bytes, b : Bytes) : Bool
       return a == b if a.size <= BODY_COMPARE_MAX && b.size <= BODY_COMPARE_MAX
       a[0, {a.size, BODY_COMPARE_MAX}.min] == b[0, {b.size, BODY_COMPARE_MAX}.min]
-    end
-
-    # Walk a dotted path. A numeric segment indexes an ARRAY; on an object it is tried as a
-    # key first, because a JSON object may legitimately be keyed `"0"` and the key is the
-    # more specific reading.
-    #
-    # Returns nil for "no such field". A field whose value is JSON `null` returns the
-    # `JSON::Any` holding nil, which `json_at` cannot express — so presence is answered by
-    # the caller through the nilable RETURN, and a present-but-null field reads as PRESENT.
-    # That is the right reading: `{"error": null}` has the field.
-    def self.json_at(doc : JSON::Any, path : String) : JSON::Any?
-      node = doc
-      path.split('.').each do |seg|
-        next if seg.empty?
-        if h = node.as_h?
-          child = h[seg]?
-          return nil unless child
-          node = child
-        elsif arr = node.as_a?
-          idx = seg.to_i?
-          return nil unless idx
-          idx += arr.size if idx < 0
-          return nil unless 0 <= idx < arr.size
-          node = arr[idx]
-        else
-          return nil
-        end
-      end
-      node
     end
 
     # Compare a resolved JSON value against the typed literal.

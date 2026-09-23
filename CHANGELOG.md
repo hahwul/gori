@@ -9,7 +9,7 @@
 - Postman: URL variables replace path placeholders only, leaving query and fragment values intact (#1187)
 - CLI: a `--db` file that is not a gori project (another tool's SQLite database, or an empty file on a read command) is refused before anything touches it, instead of having gori's schema migrated into it (#1171)
 - Projects: a name that points at two projects (one's slug and another's display name, or a display name two projects share) is refused on every `--project`, MCP `switch_project`, `delete_project` and `diff_projects` with each one's slug and short id, instead of silently picking one, and create or rename refuses a name that is already another project's slug or short id (#1163)
-- Retest: deleting a Repeater session marks the issue retest steps that used it as deleted, so they keep refusing to run instead of silently re-binding to the next session that reuses its id (#1160)
+- Retest: deleting a Repeater session marks the issue retest steps that used it as deleted, so they keep refusing to run instead of silently re-binding to the next session that reuses its id (#1160); `json:` and `json-absent:` read the same JSON paths as `--jsonpath` and bindings (`$.data.items[0]`, `items.0`), and a path none of them can read (`..`, `*`, a filter, an unclosed bracket) is refused instead of passing `json-absent:` (#1201)
 - Sitemap: CLI and MCP tags on paths with a trailing slash now match and display on the captured endpoint (#1165)
 - CLI: invalid UTF-8 arguments now receive command errors instead of PCRE2 backtraces (#1170)
 - Env: `project env set` and both TUI editors preserve assignment values, including empty and surrounding whitespace (#1172)
