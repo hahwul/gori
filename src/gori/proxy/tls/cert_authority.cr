@@ -123,7 +123,7 @@ module Gori::Proxy::Tls
     # Adopt an externally-created root CA (`gori ca import`): read the cert + key
     # PEMs, verify they are a usable CA pair, then swap them in over the current
     # root exactly like `regenerate!`. Returns a human warning (expired / not-yet-
-    # valid) if the cert is time-invalid but otherwise usable, else nil. Raises
+    # valid / rejected by strict clients) if the cert is otherwise usable, else nil. Raises
     # Gori::Error (leaving the current CA untouched) if a PEM won't parse or the
     # pair is unusable — validation runs BEFORE anything is written.
     def import!(cert_path : String, key_path : String) : String?
@@ -167,7 +167,7 @@ module Gori::Proxy::Tls
     end
 
     # Reject an imported pair that can't serve as a signing root; return a soft
-    # warning for a time-invalid-but-usable cert. A mismatched key would make every
+    # warning for a time-invalid or strict-verify-deficient but usable cert. A mismatched key would make every
     # minted leaf fail verification, and a non-CA cert (basicConstraints CA:FALSE)
     # makes clients reject any leaf it signs — both are hard errors we catch up front.
     # A class method: it inspects the two handles via the FFI, no instance state.
@@ -201,13 +201,39 @@ module Gori::Proxy::Tls
           "with SHA-256, which Ed25519 and Ed448 keys do not support; use an EC P-256 or an " \
           "RSA root CA")
       end
+      warnings = [] of String
       if LibCrypto.x509_cmp_time(LibCrypto.x509_getm_not_after(cert.handle), Pointer(Void).null) < 0
-        return "certificate is expired"
+        warnings << "certificate is expired"
+      elsif LibCrypto.x509_cmp_time(LibCrypto.x509_getm_not_before(cert.handle), Pointer(Void).null) > 0
+        warnings << "certificate is not valid yet"
       end
-      if LibCrypto.x509_cmp_time(LibCrypto.x509_getm_not_before(cert.handle), Pointer(Void).null) > 0
-        return "certificate is not valid yet"
+      if (gaps = strict_verify_gaps(cert)).present?
+        warnings << strict_verify_warning(gaps)
       end
-      nil
+      warnings.empty? ? nil : warnings.join("; ")
+    end
+
+    # Extensions this root lacks that a STRICT verifier requires of a CA (#1168): OpenSSL's
+    # X509_V_FLAG_X509_STRICT, on by default in Python 3.13+'s `ssl.create_default_context()`,
+    # rejects a CA without a subjectKeyIdentifier or a keyUsage. gori's leaves carry an AKI
+    # whatever the root (CertBuilder.issuer_key_id), but it cannot add these to a root it
+    # does not re-issue: a root minted by an older gori, or an imported one, keeps failing
+    # strict clients until it is regenerated. Soft — lenient clients (browsers, curl) accept
+    # it — so this is only ever a warning.
+    def self.strict_verify_gaps(cert : Cert) : Array(String)
+      gaps = [] of String
+      gaps << "subjectKeyIdentifier" if LibCrypto.x509_get0_subject_key_id(cert.handle).null?
+      gaps << "keyUsage" if LibCrypto.x509_get_ext_by_nid(cert.handle, NID_KEY_USAGE, -1) < 0
+      gaps
+    end
+
+    def strict_verify_gaps : Array(String)
+      @mutex.synchronize { CertAuthority.strict_verify_gaps(@cert) }
+    end
+
+    def self.strict_verify_warning(gaps : Array(String)) : String
+      "the root CA has no #{gaps.join(" or ")} extension, so strict TLS clients (Python 3.13+, " \
+      "`openssl verify -x509_strict`) reject its certificates"
     end
 
     # Persist a cert/key pair over the on-disk root (write_pair) and swap it live. Shared by

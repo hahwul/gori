@@ -129,6 +129,9 @@ module Gori::CLI
                       "Clients will reject every certificate gori mints. Run " \
                       "`gori ca regenerate` (or `gori ca import`) to install a working pair, " \
                       "then re-trust it."
+        elsif (gaps = ca.strict_verify_gaps).present?
+          STDERR.puts "gori ca: note — #{Proxy::Tls::CertAuthority.strict_verify_warning(gaps)}. " \
+                      "Run `gori ca regenerate` to mint a root that has them, then re-trust it."
         end
       rescue
         # Its own guard, or "non-fatally" above would be a lie: this block sits INSIDE the

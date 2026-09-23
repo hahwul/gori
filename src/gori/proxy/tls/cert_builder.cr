@@ -2,9 +2,11 @@ require "socket"
 require "./key_pair"
 
 module Gori::Proxy::Tls
-  # Mints + signs X509 certificates via the FFI. The skeleton keeps extensions
-  # minimal: basicConstraints (required for trust) + subjectAltName (required
-  # for hostname verification). AKI/SKI and upstream-cert mirroring are deferred.
+  # Mints + signs X509 certificates via the FFI. Beyond basicConstraints (trust) and
+  # subjectAltName (hostname verification), every cert carries the extensions a STRICT
+  # verifier demands (#1168): OpenSSL's X509_V_FLAG_X509_STRICT, which Python 3.13+ turns
+  # on in `ssl.create_default_context()`, rejects a leaf without an authorityKeyIdentifier
+  # and a CA without a subjectKeyIdentifier + keyUsage. Upstream-cert mirroring is deferred.
   module CertBuilder
     # OpenSSL enforces ub-common-name = 64 bytes on the CN attribute;
     # X509_NAME_add_entry_by_txt fails (returns 0) for a longer value, silently
@@ -52,6 +54,24 @@ module Gori::Proxy::Tls
         LibCrypto.x509_set_pubkey(x, pubkey.handle)
 
         add_ext(x, NID_BASIC_CONSTR, is_ca ? "critical,CA:TRUE" : "critical,CA:FALSE")
+        if is_ca
+          add_ext(x, NID_KEY_USAGE, "critical,keyCertSign,cRLSign")
+        else
+          # Leaf keys are always EC (KeyPair.generate_ec), which signs the handshake and
+          # never enciphers a key, so digitalSignature is the whole of it.
+          add_ext(x, NID_KEY_USAGE, "critical,digitalSignature")
+          add_ext(x, NID_EXT_KEY_USE, "serverAuth")
+        end
+        ski = pubkey_hash(x)
+        add_ext(x, NID_SUBJECT_KEY, "DER:#{der_hex(0x04, ski)}")
+        # The AKI names the ISSUER's key, and it has to agree with whatever that issuer
+        # actually carries: OpenSSL's chain building compares a leaf's AKI keyid against the
+        # CA's SKI byte-for-byte when both exist. A root minted before #1168, or an imported
+        # one, is a CA gori does not re-issue — so its own SKI wins when it has one, and a
+        # CA without one gets the RFC 5280 method-(1) hash of its key, which is what an SKI
+        # would hold. A self-signed root is its own issuer.
+        aki = issuer ? issuer_key_id(issuer) : ski
+        add_ext(x, NID_AUTH_KEY, "DER:#{der_hex(0x30, der(0x80, aki))}")
         if san_dns && safe_san?(san_dns)
           # RFC 5280 §4.2.1.6: a cert with an empty subject DN MUST carry a CRITICAL
           # SAN, or strict TLS stacks (curl/LibreSSL, browsers) reject the handshake.
@@ -129,6 +149,58 @@ module Gori::Proxy::Tls
       added = LibCrypto.x509_add_ext(x, ext, -1)
       LibCrypto.x509_extension_free(ext)
       raise Gori::Error.new("X509_add_ext(#{nid}) failed") if added.null?
+    end
+
+    # The key identifier a CA's leaves must carry in their AKI: its SKI when it has one,
+    # else the hash of its public key. Public so `CertAuthority` can ask the same question
+    # the builder does (see CertAuthority#strict_verify_gaps).
+    def self.issuer_key_id(issuer : Cert) : Bytes
+      skid = LibCrypto.x509_get0_subject_key_id(issuer.handle)
+      if !skid.null? && (len = LibCrypto.asn1_string_length(skid)) > 0
+        Slice.new(LibCrypto.asn1_string_get0_data(skid), len).dup
+      else
+        pubkey_hash(issuer.handle)
+      end
+    end
+
+    # RFC 5280 §4.2.1.2 method (1): SHA-1 over the subjectPublicKey BIT STRING contents —
+    # byte-identical to OpenSSL's `subjectKeyIdentifier = hash`.
+    private def self.pubkey_hash(x : LibCrypto::X509) : Bytes
+      md = Bytes.new(20) # SHA-1
+      len = 0_u32
+      if LibCrypto.x509_pubkey_digest(x, LibCrypto.evp_sha1, md.to_unsafe, pointerof(len)) != 1 || len != 20
+        raise Gori::Error.new("X509_pubkey_digest failed")
+      end
+      md
+    end
+
+    # One DER TLV. Key identifiers are 20 bytes when gori mints them, but an imported CA's
+    # SKI is whatever its issuer chose (RFC 7093 allows a 32-byte SHA-256), so the length is
+    # encoded properly rather than assumed to fit one byte.
+    private def self.der(tag : Int32, body : Bytes) : Bytes
+      io = IO::Memory.new
+      io.write_byte(tag.to_u8)
+      n = body.size
+      if n < 0x80
+        io.write_byte(n.to_u8)
+      elsif n <= 0xff
+        io.write_byte(0x81_u8)
+        io.write_byte(n.to_u8)
+      else
+        raise Gori::Error.new("key identifier too long (#{n} bytes)") if n > 0xffff
+        io.write_byte(0x82_u8)
+        io.write_byte((n >> 8).to_u8)
+        io.write_byte((n & 0xff).to_u8)
+      end
+      io.write(body)
+      io.to_slice
+    end
+
+    # The `DER:` value X509V3_EXT_nconf_nid accepts for any extension: colon-separated hex of
+    # the extension's inner DER. It needs no X509V3_CTX, unlike `keyid`/`hash`, which would
+    # read the issuer's SKI and fail outright on a CA minted before it had one.
+    private def self.der_hex(tag : Int32, body : Bytes) : String
+      der(tag, body).join(':') { |b| "%02X" % b }
     end
 
     private def self.random_serial : Int64
