@@ -153,14 +153,10 @@ module Gori
         entries.size >= Store::SITEMAP_MAX ? nil : false
       end
 
-      # A sitemap tag's key is the node path the tree stamps, which Sitemap.normalize_path
-      # produces — and that KEEPS the query string ("/login?a=1" is a distinct node from
-      # "/login"). Normalizing through the same function is what makes a tag set here the one
-      # the TUI Sitemap tab shows; stripping the query would file it under a key no node has.
+      # A sitemap tag's key is the exact node path the tree stamps. `node_path` shares its
+      # segment reduction, including trailing-slash removal, query retention and depth cuts.
       private def sitemap_tag_path(target : String) : String
-        path = Sitemap.normalize_path(target.strip)
-        return "/" if path.empty?
-        path.starts_with?('/') ? path : "/#{path}"
+        Sitemap.node_path(target.strip)
       end
 
       # At most this many raw targets are carried on a folded row. A folded /search can stand

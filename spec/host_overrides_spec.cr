@@ -157,6 +157,11 @@ describe Gori::HostOverrides do
       Gori::HostOverrides.valid?("ex ample.com", "10.0.0.1").should be_false
     end
 
+    it "rejects invalid UTF-8 in the host without raising from PCRE2" do
+      invalid = String.new(Bytes[0xff])
+      Gori::HostOverrides.valid?(invalid, "10.0.0.1").should be_false
+    end
+
     # Judged on the KEY, so the answer matches what the lookup will actually do with it: a
     # fully-qualified spelling is fine, but a host that is NOTHING but dots folds to empty
     # and is the dead override HOST_RE exists to refuse.
@@ -249,6 +254,10 @@ describe Gori::HostOverrides do
       Gori::HostOverrides.parse_line("notanip example.com").should be_nil # ip not a literal
       Gori::HostOverrides.parse_line("10.0.0.1 foo bar").should be_nil    # host has a space
       Gori::HostOverrides.parse_line("   ").should be_nil
+    end
+
+    it "returns nil for an invalid UTF-8 line without raising from PCRE2" do
+      Gori::HostOverrides.parse_line(String.new(Bytes[0xff, 0xfe])).should be_nil
     end
   end
 end

@@ -329,8 +329,8 @@ module Gori::Tui
     # landmine the moment one is added: the shell would run this field parser instead of the
     # closure and read its truthy Symbol as "close me". (`commit_prefix` does not collide.)
     def commit_entry : Symbol
-      text = @field.value.strip
-      return :empty if text.empty?
+      text = @field.value
+      return :empty if text.strip.empty?
       parsed = Env.parse_line(text)
       return :invalid unless parsed
       key, val = parsed

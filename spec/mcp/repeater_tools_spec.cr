@@ -409,10 +409,10 @@ describe "code-review follow-ups" do
       hit["matches_endpoint"].as_bool.should be_true
       hit.as_h.has_key?("warning").should be_false
 
-      # Sitemap.add drops a trailing slash, so /api/users/ is a key no node ever has.
-      miss = mcp_ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/api/users/","tag":"typo"}))
-      miss["matches_endpoint"].as_bool.should be_false
-      miss["warning"].as_s.should contain("no captured endpoint")
+      # Sitemap.add drops a trailing slash, so this tag must share /api/users' node key.
+      slash = mcp_ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/api/users/","tag":"slash"}))
+      slash["matches_endpoint"].as_bool.should be_true
+      slash.as_h.has_key?("warning").should be_false
     end
   end
 end

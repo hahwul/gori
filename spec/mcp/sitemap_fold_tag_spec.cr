@@ -71,6 +71,20 @@ describe "MCP list_sitemap tag stamping" do
     end
   end
 
+  it "matches a trailing-slash tag to the node path shown in the tree" do
+    with_store do |store|
+      seed(store, "/api/users/")
+      tools = tools_for(store)
+
+      set = call_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/api/users/","tag":"users"}))
+      set["matches_endpoint"].as_bool.should be_true
+      set.as_h.has_key?("warning").should be_false
+
+      rows = call_json(tools, "list_sitemap", "{}")["entries"].as_a
+      rows.any? { |row| row["tag"]?.try(&.as_s?) == "users" }.should be_true
+    end
+  end
+
   it "reports a tag pinned on a variant through variant_tags, and through fold_query:false" do
     with_store do |store|
       seed(store, "/search?q=1")

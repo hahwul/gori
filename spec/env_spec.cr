@@ -37,6 +37,13 @@ describe Gori::Env do
     Gori::Env.parse_line("TOKEN=a=b c=d").should eq({"TOKEN", "a=b c=d"})
   end
 
+  it "preserves the complete assignment value and refuses invalid key bytes" do
+    Gori::Env.parse_line("TOKEN=  x  ").should eq({"TOKEN", "  x  "})
+    Gori::Env.parse_line("  TOKEN=  x  ").should eq({"TOKEN", "  x  "})
+    Gori::Env.parse_line("TOKEN=#{String.new(Bytes[0xff])}").should be_nil
+    Gori::Env.valid_key?(String.new(Bytes[0xff])).should be_false
+  end
+
   it "token_regions marks known vs unknown" do
     Gori::Settings.env_vars = [{"HOST", "h"}]
     Gori::Settings.project_env_vars = [] of {String, String}

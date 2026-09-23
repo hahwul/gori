@@ -76,6 +76,14 @@ describe "gori run project create" do
     end
   end
 
+  it "refuses a project name containing invalid UTF-8 as a clean registry error" do
+    with_project_root do |registry|
+      invalid = String.new(Bytes[0xff, 0xfe])
+      error = expect_raises(Gori::Error) { registry.create(invalid) }
+      error.message.not_nil!.should contain("valid UTF-8")
+    end
+  end
+
   it "leaves an existing DB untouched when create reopens the project" do
     with_project_root do |registry|
       project = registry.create("spec proj")
