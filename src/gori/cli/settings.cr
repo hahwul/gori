@@ -1,5 +1,6 @@
 require "../proxy/tls/fingerprint"
 require "../proxy/upstream"
+require "../tty_path"
 
 # `gori settings` — inspect, export and import the settings file. Reopens Gori::CLI;
 # the argv dispatch that reaches these lives in cli.cr. Export refuses to write over the
@@ -78,6 +79,7 @@ module Gori::CLI
     when "import"          then run_settings_import(args[1..])
     when "sections"        then run_settings_sections(args[1..])
     when "env-syntax"      then run_settings_env_syntax(args[1..])
+    when "user-agents"     then run_settings_user_agents(args[1..])
     when "tls-fingerprint" then run_settings_tls_fingerprint(args[1..])
     else                        return false
     end
@@ -451,6 +453,62 @@ module Gori::CLI
     end
     env_syntax_write_lines(was, syntax).each { |line| puts line }
     global.try { |g| puts g.line }
+  end
+
+  # `gori settings user-agents` — the list `$GEN.USER_AGENT` draws from (#1154). With no flag it
+  # prints the ACTIVE list, one per line under a `#` line naming its source, which is exactly the
+  # text `--set` reads back — so `… > ua.txt`, an edit, and `--set ua.txt` is the round trip.
+  # `--set` REPLACES the built-in list with the file's lines; `--reset` returns to the built-in.
+  private def self.run_settings_user_agents(args : Array(String)) : Nil
+    set_from = nil.as(String?)
+    reset = false
+    parser = OptionParser.new do |p|
+      p.banner = "Usage: gori settings user-agents [--set FILE|- | --reset]"
+      p.on("--set FILE", "Replace the built-in list with FILE's lines (one User-Agent per line; - reads stdin)") { |v| set_from = v }
+      p.on("--reset", "Go back to the built-in list") { reset = true }
+      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+      p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+      p.missing_option { |flag| abort "missing value for #{flag}" }
+    end
+    reject_stray_args!("user-agents", parser, args)
+    abort "gori settings user-agents: --set and --reset cannot be combined" if set_from && reset
+
+    Settings.load
+    unless set_from || reset
+      puts "# #{Env.user_agents_source} list (#{Env.user_agents.size}) — `gori settings user-agents --set FILE` replaces it"
+      Env.user_agents.each { |ua| puts ua }
+      return
+    end
+    # Read (and refuse) BEFORE touching the file: a refused list must leave the old one in place.
+    list = (from = set_from) ? read_user_agent_list(from) : [] of String
+    abort_on_degraded_settings!("user-agents")
+    Settings.user_agents = list
+    abort "gori settings user-agents: could not write #{Settings.path}" unless Settings.save
+    puts reset ? "User-Agent list: built-in (#{Env.user_agents.size})" : "User-Agent list: #{list.size} from settings"
+  end
+
+  private def self.read_user_agent_list(from : String) : Array(String)
+    text =
+      if from == "-"
+        # `!STDIN.tty?`, the guard shape spec/cli/run/stdin_terminal_spec.cr sweeps for.
+        !STDIN.tty? ? STDIN.gets_to_end : abort("gori settings user-agents: stdin is a terminal — pipe the list in")
+      else
+        if Gori::TtyPath.terminal?(from)
+          abort "gori settings user-agents: #{from} is a terminal, not a file — pipe the list in with --set -"
+        end
+        begin
+          File.read(from)
+        rescue ex : File::Error
+          abort "gori settings user-agents: cannot read #{from}: #{ex.message}"
+        end
+      end
+    case parsed = Settings.user_agents_from_text(text)
+    in String
+      abort "gori settings user-agents: #{from}: #{parsed} — nothing changed"
+    in Array(String)
+      abort "gori settings user-agents: #{from} holds no User-Agent line — use --reset for the built-in list" if parsed.empty?
+      parsed
+    end
   end
 
   # `migrate_global_rules(from: was, …)` re-spells the global rewrite rules, and `was` has to be a

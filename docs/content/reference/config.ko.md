@@ -537,6 +537,21 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 
 [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요.
 
+### user_agents {#user-agents}
+
+[`$GEN.USER_AGENT`](/ko/guide/repeater-and-fuzzer/#environment-variables)와 패밀리 이름들이 쓰는 직접 만든 목록입니다. 설정하면 내장 브라우저 목록을 **대체**하고, 없거나 비어 있으면 내장 목록을 씁니다.
+
+```json
+{
+  "user_agents": [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:156.0) Gecko/20100101 Firefox/156.0"
+  ]
+}
+```
+
+각 항목은 헤더에 그대로 들어가므로, 비어 있거나 제어 문자·보이지 않는 서식 문자가 들어 있는 항목은 불러올 때 경고와 함께 버려집니다. `$GEN.USER_AGENT_CHROME` / `_FIREFOX` / `_SAFARI`는 목록에서 해당 브라우저의 줄(`Chrome/`, `Firefox/`, 또는 둘 다 없는 `Safari/`)을 쓰고, 그런 줄이 없으면 내장 패밀리를 씁니다. Preferences → **Editor & Keys** → **User-Agents** 또는 [`gori settings user-agents`](/ko/reference/cli/#user-agents)로 편집합니다.
+
 ### general {#general}
 
 Preferences → **General** → **General**:
@@ -813,6 +828,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `tabs` | 표시/숨김할 TUI 탭 |
 | `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname-overrides) 참고 |
 | `env` | Env 토큰 문법(`syntax`), 시길, 전역 값. 위의 [env](#env) 참고 |
+| `user_agents` | `$GEN.USER_AGENT`가 쓰는 직접 만든 목록으로, 내장 목록을 대체합니다. 위의 [user_agents](#user-agents) 참고 |
 | `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `command_modifier` + `keyset` + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
 | `hooks` | 외부 프로세스 훅: `timeout_secs`(기본 5, 1~60으로 클램프)는 모든 이음매에서 훅 한 번이 받는 벽시계 예산입니다. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
 | `decoder` | 이름 붙인 Decoder 체인. 모든 프로젝트가 공유하며 체인 단계에서 이름으로 부를 수 있습니다(열려 있는 서브탭은 프로젝트 DB에 있습니다) |

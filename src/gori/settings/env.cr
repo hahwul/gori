@@ -113,6 +113,43 @@ module Gori::Settings
   class_property env_vars : Array({String, String}) = [] of {String, String}
   class_property project_env_vars : Array({String, String}) = [] of {String, String}
 
+  # The operator's own `$GEN.USER_AGENT` corpus (#1154): when non-empty it REPLACES the built-in
+  # list (`Env::USER_AGENTS`), because the operator knows the population they need to blend into
+  # and a built-in list goes stale in weeks. Empty — the default — means the built-in one. Every
+  # entry lands in a header verbatim, so text reaches it only through `user_agents_from_text`
+  # and the loader drops what `user_agent_error` refuses (with a load warning, never silently).
+  #
+  # Its OWN top-level section (`"user_agents": [...]`), not a key under `env`: `merge_with_disk`
+  # takes a changed section whole, and `env` is saved by the Env card on every keystroke — so a
+  # list set from `gori settings user-agents` while a TUI was open was deleted by that TUI's next
+  # env var edit, and the reverse. Two doors, two decisions, two sections.
+  class_property user_agents : Array(String) = [] of String
+
+  # Why `line` cannot be a User-Agent value, or nil. A control byte (CR/LF above all) would
+  # split or corrupt the header it lands in; a blank line is not a value anyone typed.
+  def self.user_agent_error(line : String) : String?
+    return "is blank" if line.strip.empty?
+    return "carries a control character" if line.each_char.any?(&.control?)
+    nil
+  end
+
+  # An operator's list as TEXT — one User-Agent per line, blank and `#` lines skipped, each line
+  # trimmed — the shape both the TUI editor and `gori settings user-agents --set` take. Returns
+  # the list, or the first line that cannot be one (by its line number in `text`), never both:
+  # a list with one line quietly dropped would claim a browser mix the operator did not write.
+  def self.user_agents_from_text(text : String) : Array(String) | String
+    out = [] of String
+    text.each_line(chomp: true).with_index(1) do |raw, n|
+      line = raw.strip
+      next if line.empty? || line.starts_with?('#')
+      if why = user_agent_error(line)
+        return "line #{n} #{why}"
+      end
+      out << line
+    end
+    out
+  end
+
   # `syntax` is assigned ONLY when the key is present, and the "an absent key means this file
   # predates namespaces" rule lives in `Settings.load` instead. That split is not cosmetic:
   # `import_document` reuses `apply_sections` over a FILTERED document, so a theme-only profile
@@ -158,6 +195,36 @@ module Gori::Settings
     # token VALUES included) over a profile that said nothing about vars at all. `{"vars": []}` is
     # still how a profile says "no vars", the same wholesale-replace rule every list section has.
     self.env_vars = parse_env_vars(e["vars"]?) if e.has_key?("vars")
+  end
+
+  # Tolerant: a non-array reads as "none" and an unusable entry is dropped — each with a load
+  # warning, since a dropped line silently changing which browser gori claims to be is the
+  # failure this key exists to avoid. Surrounding whitespace is trimmed (a hand-edited file's
+  # indentation is not part of the value).
+  # An ABSENT section keeps the list in memory (a profile import that does not name it is not
+  # a request to empty it), the rule `vars` and `hostname_overrides` follow.
+  private def self.parse_user_agents(node : JSON::Any?) : Nil
+    return unless node
+    self.user_agents = parse_user_agent_list(node)
+  end
+
+  private def self.parse_user_agent_list(node : JSON::Any) : Array(String)
+    unless arr = node.as_a?
+      note_load_warning("settings: user_agents must be an array of strings (got #{node.to_json}) " \
+                        "— using the built-in User-Agent list")
+      return [] of String
+    end
+    out = [] of String
+    arr.each_with_index do |entry, i|
+      line = entry.as_s?.try(&.strip)
+      why = line ? user_agent_error(line) : "is not a string"
+      if why || line.nil?
+        note_load_warning("settings: user_agents entry #{i + 1} #{why} — dropped")
+        next
+      end
+      out << line
+    end
+    out
   end
 
   # Recover the token grammar from a settings file that would not PARSE, textually.
@@ -254,6 +321,18 @@ module Gori::Settings
   private def self.reset_env : Nil
     self.env_vars = [] of {String, String}
     self.env_prefix = DEFAULT_ENV_PREFIX
+  end
+
+  # Operator data like the env values, so only the full factory reset clears it (and its confirm
+  # names it).
+  private def self.reset_user_agents : Nil
+    self.user_agents = [] of String
+  end
+
+  # Omit when empty so an untouched install never writes "user_agents": [].
+  private def self.serialize_user_agents(j : JSON::Builder) : Nil
+    return if user_agents.empty?
+    j.field "user_agents" { j.array { user_agents.each { |ua| j.string ua } } }
   end
 
   # Omit when empty so an untouched install never writes "hostname_overrides": [].

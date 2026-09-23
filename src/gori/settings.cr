@@ -414,6 +414,7 @@ module Gori
       self.tab_prefs = parse_tab_prefs(root["tabs"]?)
       self.hostname_overrides = parse_hostname_overrides(root["hostname_overrides"]?)
       parse_env(root["env"]?)
+      parse_user_agents(root["user_agents"]?)
       self.scan_rules = parse_scan_rules(root["scan_rules"]?)
       self.oast_providers = parse_oast_providers(root["oast_providers"]?)
       parse_hotkeys(root["hotkeys"]?)
@@ -1119,7 +1120,7 @@ module Gori
       theme mouse mouse_drag pretty_bodies layout statusline display companion notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
-      hooks colormarker saved_views redaction mcp
+      hooks colormarker saved_views redaction mcp user_agents
     ]
 
     # Every top-level key the current settings would write — i.e. which sections this install
@@ -1525,6 +1526,7 @@ module Gori
       reset_tabs
       reset_hostname_overrides
       reset_env
+      reset_user_agents
       reset_scan_rules
       reset_oast_providers
       reset_hotkeys
@@ -1570,6 +1572,7 @@ module Gori
           serialize_tabs(j)
           serialize_hostname_overrides(j)
           serialize_env(j)
+          serialize_user_agents(j)
           serialize_scan_rules(j)
           serialize_oast_providers(j)
           serialize_hotkeys(j)

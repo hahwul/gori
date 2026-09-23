@@ -8,7 +8,7 @@ include Gori::Tui
 # and the tab opener would hit Runner's internal "unknown settings section" guard.
 KNOWN_SETTINGS_SECTIONS = [
   :network, :editor, :mouse, :keys, :theme, :layout, :statusline, :display, :companion, :notifications,
-  :general, :tabs, :hosts, :env, :hotkeys, :reset_all, :mcp,
+  :general, :tabs, :hosts, :env, :user_agents, :hotkeys, :reset_all, :mcp,
 ]
 
 # SettingsCatalog is the single source of truth both the Ctrl-P palette and the Settings
@@ -55,10 +55,10 @@ describe Gori::Tui::SettingsCatalog do
   # ^R in the Preferences modal advertises itself on every row. `resettable` is what makes
   # that honest for the OPENER rows, which have no working copy there: false means "there is
   # nothing to restore here", and the view says so instead of falling through to silence. The
-  # two false ones hold operator DATA (typed env values, a hand-built hostname map) rather
+  # false ones hold operator DATA (typed env values, a hand-built hostname map, a User-Agent list) rather
   # than preferences — only the full factory reset clears those, and it warns first.
   it "marks exactly the data-holding openers as having no factory default" do
-    SettingsCatalog.all.reject(&.resettable).map(&.sym).sort_by(&.to_s).should eq([:env, :hosts])
+    SettingsCatalog.all.reject(&.resettable).map(&.sym).sort_by(&.to_s).should eq([:env, :hosts, :user_agents])
   end
 
   it "keeps the Hostnames section out of the tab (reachable via Network's opener field)" do

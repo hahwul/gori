@@ -210,6 +210,43 @@ module Gori
       }
     {% end %}
 
+    # The browser a User-Agent claims, as a `USER_AGENT_FAMILIES` key, or nil when it claims none
+    # of them. The macro above splits the built-in file by the SAME rule; this is its runtime twin
+    # for the operator's own list (#1154), and a spec holds the two in step over the built-in one.
+    def self.user_agent_family(ua : String) : String?
+      return "CHROME" if ua.includes?("Chrome/")
+      return "FIREFOX" if ua.includes?("Firefox/")
+      return "SAFARI" if ua.includes?("Safari/")
+      nil
+    end
+
+    # The operator's list split by family, cached against the exact Array `Settings` holds — every
+    # assignment of `Settings.user_agents` is a new Array, so an edit invalidates this without
+    # the settings layer knowing it exists. A send is one pick, not a re-split of the list.
+    @@user_agent_split : {Array(String), Hash(String, Array(String))}? = nil
+
+    # Where `$GEN.USER_AGENT` draws from: the operator's `Settings.user_agents` when set, else the
+    # built-in corpus. For a FAMILY, the operator's lines of that family — and the built-in family
+    # when the operator listed none of it, because the alternative is a token that cannot resolve
+    # at the send seam, or a Firefox value under a name that promised Chrome.
+    def self.user_agents(family : String? = nil) : Array(String)
+      custom = Settings.user_agents
+      return family ? USER_AGENT_FAMILIES[family] : USER_AGENTS if custom.empty?
+      return custom unless family
+      split = @@user_agent_split
+      unless split && split[0].same?(custom)
+        split = {custom, custom.group_by { |ua| user_agent_family(ua) || "" }}
+        @@user_agent_split = split
+      end
+      split[1][family]? || USER_AGENT_FAMILIES[family]
+    end
+
+    # Which list `$GEN.USER_AGENT` draws from, for a surface to NAME: an operator list that
+    # replaced the built-in one is otherwise invisible from every place the token is offered.
+    def self.user_agents_source : String
+      Settings.user_agents.empty? ? "built-in" : "settings"
+    end
+
     # Built-ins that mint a fresh value at the final send seam. Names encode every format
     # choice the no-argument `$NS.NAME` grammar needs to make explicit.
     GENERATORS = {
@@ -219,12 +256,12 @@ module Gori
       "TIMESTAMP"    => Generator.new("Unix seconds · per send", ->(g : Generation) { g.now.to_unix.to_s }),
       "TIMESTAMP_MS" => Generator.new("Unix milliseconds · per send", ->(g : Generation) { g.now.to_unix_ms.to_s }),
       "ISO8601"      => Generator.new("UTC RFC 3339 · per send", ->(g : Generation) { g.now.to_rfc3339(fraction_digits: 3) }),
-      "USER_AGENT"   => Generator.new("desktop browser User-Agent · random pick per send", ->(_g : Generation) { USER_AGENTS.sample }),
+      "USER_AGENT"   => Generator.new("browser User-Agent · random pick per send", ->(_g : Generation) { Env.user_agents.sample }),
       # One per `chrome` / `firefox` / `safari` TLS preset, so a UA can agree with the handshake
       # it rides on (#1152). Named, not parameterised: `$GEN` takes no arguments.
-      "USER_AGENT_CHROME"  => Generator.new("Chrome/Edge User-Agent · pairs with TLS preset chrome", ->(_g : Generation) { USER_AGENT_FAMILIES["CHROME"].sample }),
-      "USER_AGENT_FIREFOX" => Generator.new("Firefox User-Agent · pairs with TLS preset firefox", ->(_g : Generation) { USER_AGENT_FAMILIES["FIREFOX"].sample }),
-      "USER_AGENT_SAFARI"  => Generator.new("Safari User-Agent · pairs with TLS preset safari", ->(_g : Generation) { USER_AGENT_FAMILIES["SAFARI"].sample }),
+      "USER_AGENT_CHROME"  => Generator.new("Chrome/Edge User-Agent · pairs with TLS preset chrome", ->(_g : Generation) { Env.user_agents("CHROME").sample }),
+      "USER_AGENT_FIREFOX" => Generator.new("Firefox User-Agent · pairs with TLS preset firefox", ->(_g : Generation) { Env.user_agents("FIREFOX").sample }),
+      "USER_AGENT_SAFARI"  => Generator.new("Safari User-Agent · pairs with TLS preset safari", ->(_g : Generation) { Env.user_agents("SAFARI").sample }),
     }
 
     # The catalog as the NAME → FORMAT table the surfaces print, derived from the one above so

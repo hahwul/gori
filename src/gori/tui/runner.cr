@@ -76,6 +76,7 @@ require "./settings_view"
 require "./tabs_overlay"
 require "./hosts_overlay"
 require "./env_overlay"
+require "./user_agents_overlay"
 require "./env_syntax_seam"
 require "./hotkeys_overlay"
 require "./palette"
@@ -6088,12 +6089,13 @@ module Gori::Tui
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
       when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general, :mcp
-        open_preferences(section)                       # the unified grouped modal, positioned at this section
-      when :theme   then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
-      when :tabs    then open_overlay(tabs_editor(back))
-      when :hosts   then open_overlay(hosts_editor(back))
-      when :env     then open_overlay(env_editor(back))
-      when :hotkeys then open_overlay(hotkeys_editor(back))
+        open_preferences(section)                           # the unified grouped modal, positioned at this section
+      when :theme       then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
+      when :tabs        then open_overlay(tabs_editor(back))
+      when :hosts       then open_overlay(hosts_editor(back))
+      when :env         then open_overlay(env_editor(back))
+      when :user_agents then open_overlay(user_agents_editor(back))
+      when :hotkeys     then open_overlay(hotkeys_editor(back))
       when :reset_all
         # The palette's "Settings: Reset" entry. Same verb the modal's Reset row runs, so it
         # goes through the same confirm rather than a second copy of the wording. `back` is
@@ -6182,6 +6184,28 @@ module Gori::Tui
       ov
     end
 
+    # Saves on close, not per keystroke: a half-typed line is not a User-Agent. A list that did
+    # not parse (only reachable when the card could not be drawn to refuse it) is not written.
+    private def user_agents_editor(back : PreferencesOverlay?) : UserAgentsOverlay
+      ov = UserAgentsOverlay.new
+      ov.on_close = -> { resume_preferences(back) }
+      ov.on_commit = -> {
+        list = ov.parsed
+        if list.is_a?(Array(String)) && list != Settings.user_agents
+          Settings.user_agents = list
+          @toast = if !Settings.save
+                     "User-Agents applied — could not save to #{Settings.path}"
+                   elsif list.empty?
+                     "User-Agents: back to the built-in list"
+                   else
+                     "User-Agents: #{list.size} saved"
+                   end
+        end
+        true
+      }
+      ov
+    end
+
     private def hotkeys_editor(back : PreferencesOverlay?) : HotkeysOverlay
       ov = HotkeysOverlay.new(@session.registry)
       ov.on_close = -> { resume_preferences(back) }
@@ -6264,15 +6288,16 @@ module Gori::Tui
 
     # The whole settings file back to a fresh install's state — the palette's
     # "Settings: Reset" and the modal's Reset row. Named in the body, not summarised: this is
-    # the one reset that also drops operator DATA (env VALUES, the hostname map, OAST tokens,
+    # the one reset that also drops operator DATA (env VALUES, the User-Agent list, the hostname map, OAST tokens,
     # saved decoder chains, global rewriter/colormarker rules), and an operator who reads
     # "every setting" alone would not expect their tokens to go with it.
     private def confirm_factory_reset(prefs : PreferencesOverlay? = nil) : Nil
       confirm("FACTORY RESET",
         "Restore every setting to its factory default?\n" \
-        "This also drops your global env values, hostname\n" \
-        "overrides, OAST tokens, saved decoder chains and\n" \
-        "global rewriter/colormarker rules. Projects are kept.",
+        "This also drops your global env values, User-Agent\n" \
+        "list, hostname overrides, OAST tokens, saved decoder\n" \
+        "chains and global rewriter/colormarker rules.\n" \
+        "Projects are kept.",
         confirm_label: "reset", danger: true, return_to: :preferences) do
         # `Refused` means NOTHING was touched — not the file, not memory — so it must not run
         # the live re-apply (which would rebind the proxy and reconcile listeners off the back

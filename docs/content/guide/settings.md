@@ -34,7 +34,7 @@ The modal has a group strip across the top (four groups) and the focused group's
 
 Edits are a working copy: nothing is written until you press `↵`, and `Esc` throws them away. Saving applies live, with no restart.
 
-`Ctrl-R` follows the same rule on a field row: it restores that section's defaults into the working copy, and still needs `↵`. On an **opener** row there is no working copy to edit, so it asks first and then writes immediately: the tab bar, the theme, and your hotkeys can each be put back that way. **Env** and **Hostname overrides** hold entries you typed rather than preferences, so `Ctrl-R` there says so instead of quietly emptying them. The factory reset below is what clears those, and it warns you.
+`Ctrl-R` follows the same rule on a field row: it restores that section's defaults into the working copy, and still needs `↵`. On an **opener** row there is no working copy to edit, so it asks first and then writes immediately: the tab bar, the theme, and your hotkeys can each be put back that way. **Env**, **User-Agents** and **Hostname overrides** hold entries you typed rather than preferences, so `Ctrl-R` there says so instead of quietly emptying them. The factory reset below is what clears those, and it warns you.
 
 ## Field Types
 
@@ -91,6 +91,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 | **Mouse** | Mouse, Drag release |
 | **Keys** | Command modifier |
 | **Env** | Opener: global `$ENV.KEY` variables for outbound requests. It also reports the token grammar in force; switching that is [`gori settings env-syntax`](/reference/cli/#env-syntax), which re-spells the tokens already stored |
+| **User-Agents** | Opener: your own list for `$GEN.USER_AGENT`, one per line. It replaces the built-in browser list; empty means the built-in one |
 | **Hotkeys** | Opener: rebind any shortcut, or pick an OS default profile |
 
 **External editor** is what `^E` opens in editable fields; blank falls back to `$VISUAL` / `$EDITOR` / `vi`.

@@ -1542,6 +1542,7 @@ gori settings export [-o FILE]     # 공유 가능한 프로필 출력(기본 st
 gori settings import FILE          # 프로필의 섹션들을 적용
 gori settings tls-fingerprint      # 목적지별로 gori가 보내는 JA3/JA4
 gori settings env-syntax [VALUE]   # env 토큰 문법 읽기 / 설정
+gori settings user-agents          # $GEN.USER_AGENT가 고르는 목록
 ```
 
 ### `gori settings env-syntax` {#env-syntax}
@@ -1563,6 +1564,19 @@ gori settings env-syntax bare
 문법은 모두에게 namespaced입니다. 그래서 `settings.json`에 `env.syntax`가 없다는 것은 그 파일이 네임스페이스보다 먼저 쓰였다는 뜻입니다. 다음 시작에서 `namespaced`를 채택하고, **전역** 재작성 규칙을 다시 적고(`settings.json.pre-namespaced-<타임스탬프>` 복사본을 남깁니다), 키를 파일에 씁니다. 각 **프로젝트**는 문법이 바뀐 뒤 처음 열릴 때 다시 적힙니다. TUI든, 아무 `gori run …`이든, `gori mcp` 서버든 마찬가지입니다. 데이터베이스 옆에 `gori.db.pre-<grammar>-<타임스탬프>` 백업(`VACUUM INTO`이므로 WAL까지 포함)을 쓰고, 토큰 몇 개가 옮겨졌는지 프로젝트마다 한 줄씩 stderr로 알려 줍니다. 다시 적는 대상: Repeater 초안(request, target, SNI, 이름)과 그 WebSocket 메시지, Fuzzer 템플릿, Miner·Sequencer 요청, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더 값, 그리고 이슈 제목·메모와 노트 본문에 마스킹된 토큰입니다. 그대로 두는 것: 출처가 캡처인 모든 행(`flow_id`가 있는 행 — 캡처는 확장되지 않습니다), 대상 문법에 같은 바이트를 보내는 표기가 없는 행, 그리고 토큰이 아니라 테이블 키인 이름들(환경 변수, extract 규칙, 규칙 패턴, 페이로드 세트)입니다.
 
 `env.syntax = bare`가 옵트아웃이며, 각 프로젝트는 다음에 열릴 때 되돌려 다시 적힙니다. 이때 그대로 두면 해석되기 시작할 리터럴 `$NAME`은 이스케이프됩니다. [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요. `gori settings import`는 프로필의 `env.syntax`가 이 설치와 다르면 stderr로 알려 줍니다. 임포트는 문법을 바꾸지 않습니다.
+
+### `gori settings user-agents` {#user-agents}
+
+[`$GEN.USER_AGENT`](/ko/guide/repeater-and-fuzzer/#environment-variables)가 고르는 목록입니다. 플래그 없이 실행하면 출처를 밝히는 `#` 줄 아래에 현재 쓰는 목록을 출력합니다. `--set`은 같은 형식을 그대로 읽으므로, 출력을 저장해 고친 뒤 다시 설정할 수 있습니다. `--set`은 파일의 줄로 내장 목록을 **대체**합니다. 한 줄에 User-Agent 하나이며, 빈 줄과 `#` 줄은 건너뜁니다. 헤더에 넣을 수 없는 줄이 하나라도 있으면 파일 전체를 거절하고 아무것도 바꾸지 않습니다. `--reset`은 내장 목록으로 되돌립니다.
+
+```bash
+gori settings user-agents > ua.txt       # 현재 쓰는 목록
+gori settings user-agents --set ua.txt   # 내장 목록 대체
+generator | gori settings user-agents --set -
+gori settings user-agents --reset        # 내장 목록으로 되돌리기
+```
+
+`settings.json`에는 [`user_agents`](/ko/reference/config/#user-agents)로 저장되며, TUI에서는 Preferences → **Editor & Keys** → **User-Agents**에서 편집합니다.
 
 ### 프로필 {#profiles}
 

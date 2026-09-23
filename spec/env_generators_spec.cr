@@ -115,6 +115,40 @@ describe "Gori::Env generators" do
     end
   end
 
+  # The runtime classifier is the macro's twin for the operator's list (#1154); over the
+  # built-in list the two must agree line for line.
+  it "classifies a User-Agent exactly as the built-in family split does" do
+    Gori::Env::USER_AGENT_FAMILIES.each do |family, list|
+      list.each { |ua| Gori::Env.user_agent_family(ua).should eq(family) }
+    end
+    Gori::Env.user_agent_family("curl/8.9.1").should be_nil
+  end
+
+  it "draws from the operator's list when one is set, falling back per family" do
+    mine = ["Mine/1.0 (X11)", "Mozilla/5.0 (X11; rv:156.0) Gecko/20100101 Firefox/156.0"]
+    previous = Gori::Settings.user_agents
+    Gori::Settings.user_agents = mine
+    begin
+      Gori::Env.user_agents_source.should eq("settings")
+      Gori::Env.user_agents.should eq(mine)
+      Gori::Env.user_agents("FIREFOX").should eq([mine[1]])
+      # No Chromium line of the operator's: the built-in family, never a Firefox value under
+      # a name that promised Chrome, and never a token that cannot resolve.
+      Gori::Env.user_agents("CHROME").should eq(Gori::Env::USER_AGENT_FAMILIES["CHROME"])
+      with_generators do
+        mine.should contain(generated("$GEN.USER_AGENT"))
+        generated("$GEN.USER_AGENT_FIREFOX").should eq(mine[1])
+      end
+      # A new list is a new Array, so the cached split cannot outlive an edit.
+      Gori::Settings.user_agents = ["Mozilla/5.0 (Macintosh) Version/27.0 Safari/605.1.15"]
+      Gori::Env.user_agents("FIREFOX").should eq(Gori::Env::USER_AGENT_FAMILIES["FIREFOX"])
+      Gori::Env.user_agents("SAFARI").size.should eq(1)
+    ensure
+      Gori::Settings.user_agents = previous
+    end
+    Gori::Env.user_agents_source.should eq("built-in")
+  end
+
   it "picks one User-Agent per request, the same wherever the request names it" do
     with_generators do
       a, b = generated("$GEN.USER_AGENT|$GEN.USER_AGENT").split('|')

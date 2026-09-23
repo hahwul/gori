@@ -539,6 +539,21 @@ Tokens like `$ENV.TOKEN` expand at send time in Repeater, Fuzzer, Miner, Interce
 
 See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
 
+### user_agents {#user-agents}
+
+Your own list for [`$GEN.USER_AGENT`](/guide/repeater-and-fuzzer/#environment-variables) and its family names. When set, it **replaces** the built-in browser list; absent or empty means the built-in one:
+
+```json
+{
+  "user_agents": [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:156.0) Gecko/20100101 Firefox/156.0"
+  ]
+}
+```
+
+Each entry goes into a header verbatim, so an entry that is blank or carries a control or invisible format character is dropped on load, with a warning. `$GEN.USER_AGENT_CHROME` / `_FIREFOX` / `_SAFARI` draw from your lines of that browser (`Chrome/`, `Firefox/`, or `Safari/` without either), and from the built-in family when you listed none. Edit it from Preferences → **Editor & Keys** → **User-Agents**, or with [`gori settings user-agents`](/reference/cli/#user-agents).
+
 ### general
 
 Preferences → **General** → **General**:
@@ -815,6 +830,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `tabs` | Which TUI tabs are shown/hidden |
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname-overrides) above |
 | `env` | Env-token grammar (`syntax`), sigil and global values. See [env](#env) above |
+| `user_agents` | Your own list for `$GEN.USER_AGENT`, replacing the built-in one. See [user_agents](#user-agents) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `keyset` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
 | `hooks` | External process hooks: `timeout_secs` (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See [Process hooks](/guide/scripting/#process-hooks) |
 | `decoder` | Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database) |
