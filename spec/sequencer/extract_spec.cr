@@ -23,6 +23,45 @@ describe Gori::Sequencer::Extract do
     Q::Extract.extract(r, Q::TokenLoc.cookie("nope")).should be_nil
   end
 
+  it "takes the cookie a client would hold: the LAST Set-Cookie, and none after a deletion (#1206)" do
+    regen = response("HTTP/1.1 200 OK\r\n" \
+                     "Set-Cookie: sid=deleted; Max-Age=0; Path=/\r\n" \
+                     "Set-Cookie: sid=0f3ae760; Path=/; HttpOnly\r\n\r\n", "ok")
+    Q::Extract.extract(regen, Q::TokenLoc.cookie("sid")).should eq("0f3ae760")
+
+    replaced = response("HTTP/1.1 200 OK\r\nSet-Cookie: sid=a\r\nSet-Cookie: sid=b\r\n\r\n", "ok")
+    Q::Extract.extract(replaced, Q::TokenLoc.cookie("sid")).should eq("b")
+
+    logout = response("HTTP/1.1 200 OK\r\n" \
+                      "Set-Cookie: sid=live\r\n" \
+                      "Set-Cookie: sid=deleted; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n\r\n", "ok")
+    Q::Extract.extract(logout, Q::TokenLoc.cookie("sid")).should be_nil
+
+    # Max-Age outranks Expires (RFC 6265 §5.3 step 3), and an unparsable Max-Age is ignored.
+    kept = response("HTTP/1.1 200 OK\r\n" \
+                    "Set-Cookie: sid=x; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=60\r\n" \
+                    "Set-Cookie: t=y; Max-Age=soon\r\n\r\n", "ok")
+    Q::Extract.extract(kept, Q::TokenLoc.cookie("sid")).should eq("x")
+    Q::Extract.extract(kept, Q::TokenLoc.cookie("t")).should eq("y")
+
+    # `+0` is not a Max-Age (§5.2.2) and an overflowing one is a long-lived cookie.
+    odd = response("HTTP/1.1 200 OK\r\n" \
+                   "Set-Cookie: a=1; Max-Age=+0\r\n" \
+                   "Set-Cookie: b=2; Max-Age=99999999999999999999; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n" \
+                   "Set-Cookie: c=3; Max-Age=-1\r\n\r\n", "ok")
+    Q::Extract.extract(odd, Q::TokenLoc.cookie("a")).should eq("1")
+    Q::Extract.extract(odd, Q::TokenLoc.cookie("b")).should eq("2")
+    Q::Extract.extract(odd, Q::TokenLoc.cookie("c")).should be_nil
+  end
+
+  it "judges Expires against the response's own Date, so a stored flow reads the same later" do
+    # Captured in 2001 with a cookie good for 30 minutes: still set, whatever today's date is.
+    stored = response("HTTP/1.1 200 OK\r\n" \
+                      "Date: Mon, 01 Jan 2001 00:00:00 GMT\r\n" \
+                      "Set-Cookie: sid=abc; Expires=Mon, 01 Jan 2001 00:30:00 GMT\r\n\r\n", "ok")
+    Q::Extract.extract(stored, Q::TokenLoc.cookie("sid")).should eq("abc")
+  end
+
   it "extracts a named header (case-insensitive)" do
     r = response(HEAD, BODY)
     loc = Q::TokenLoc.new(Q::ExtractKind::Header, "x-csrf-token")

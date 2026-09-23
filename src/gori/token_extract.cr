@@ -195,8 +195,8 @@ module Gori
       end
     end
 
-    # First `name=value` across all Set-Cookie headers (there are usually several).
-    # Case-sensitive cookie name per RFC 6265; strips at the first attribute `;`.
+    # The value a client's jar holds for `name` once the response's Set-Cookie fields are
+    # applied — see `set_cookie_jar`. Case-sensitive cookie name per RFC 6265.
     def self.cookie(raw : Repeater::Result, name : String) : String?
       resp = raw.response
       return nil unless resp
@@ -219,14 +219,69 @@ module Gori
         end
         return nil
       end
-      subject.headers.get_all("set-cookie").each do |sc|
-        pair = sc.split(';', 2).first
-        eq = pair.index('=')
-        next unless eq
-        key = pair[0...eq].strip
-        return pair[(eq + 1)..].strip if key == name
+      set_cookie_jar(subject.headers)[name]?
+    end
+
+    # What a client's cookie jar holds after applying every `Set-Cookie` field IN ORDER, as
+    # name → value (attributes dropped), in the order each name was first kept.
+    #
+    # The FIRST field for a name used to win. Session regeneration routinely clears and then
+    # re-sets in one response — `sid=deleted; Max-Age=0` followed by `sid=<new>` — so every
+    # reader bound the tombstone: `$BIND.SID` sent `deleted` and the Sequencer rated a fresh
+    # 128-bit token CRITICAL on 30 identical samples (#1206). RFC 6265 §5.3 has a later cookie
+    # replace an earlier one of the same name, and one that is already expired (`Max-Age` <= 0,
+    # or an `Expires` in the past with no `Max-Age`, §5.3 step 3) removes it rather than setting
+    # anything, so a trailing deletion leaves the name out of the jar entirely. Domain and path
+    # are not modelled: a response is read as one client on one origin would receive it.
+    #
+    # "Already expired" is judged against the response's own `Date`, not the clock: these readers
+    # also run over STORED flows (display columns, `session from-flow`), and a cookie captured
+    # with an `Expires` thirty minutes out must not vanish from the same flow half an hour later.
+    # Only a response with no readable `Date` falls back to now.
+    def self.set_cookie_jar(headers : Proxy::Codec::HeaderList) : Hash(String, String)
+      jar = {} of String => String
+      sent_at = headers.get?("date").try { |d| HTTP.parse_time(d) } || Time.utc
+      headers.get_all("set-cookie").each do |sc|
+        parts = sc.split(';')
+        pair = parts.first
+        eq = pair.index('=') || next
+        name = pair[0...eq].strip
+        next if name.empty?
+        if expired_set_cookie?(parts, sent_at)
+          jar.delete(name)
+        else
+          jar[name] = pair[(eq + 1)..].strip
+        end
       end
-      nil
+      jar
+    end
+
+    # §5.2.2: `Max-Age` outranks `Expires`; a delta that is not `-`? followed by digits only is
+    # ignored (`+0`, `soon`), and a non-positive one expires at once. Read as text rather than
+    # an Int64 so an overflowing delta is a long-lived cookie, not an ignored attribute.
+    private def self.expired_set_cookie?(parts : Array(String), sent_at : Time) : Bool
+      max_age_expired = nil.as(Bool?)
+      expires = nil.as(Time?)
+      parts.each_with_index do |attr, i|
+        next if i == 0
+        eq = attr.index('=') || next
+        v = attr[(eq + 1)..].strip
+        case attr[0...eq].strip.downcase
+        when "max-age"
+          digits = v.lchop('-')
+          next if digits.empty? || !digits.each_char.all?(&.ascii_number?)
+          max_age_expired = v.starts_with?('-') || digits.each_char.all?('0')
+        when "expires"
+          HTTP.parse_time(v).try { |t| expires = t }
+        end
+      end
+      unless max_age_expired.nil?
+        return max_age_expired
+      end
+      if ex = expires
+        return ex <= sent_at
+      end
+      false
     end
 
     # A named response header value (case-insensitive lookup, last-wins per HeaderList).

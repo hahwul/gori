@@ -252,6 +252,15 @@ describe Gori::SessionFromFlow do
       headers_of(detail)["Cookie"].should eq("keep=yes")
     end
 
+    it "does not carry a tombstone VALUE the response is deleting (#1206)" do
+      # `deleted; Max-Age=0` is a deletion with a non-empty value; so is a past `Expires`.
+      detail = flow("HTTP/1.1 200 OK\r\n" \
+                    "Set-Cookie: sid=deleted; Max-Age=0; Path=/\r\n" \
+                    "Set-Cookie: old=gone; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n" \
+                    "Set-Cookie: keep=yes\r\n\r\n")
+      headers_of(detail)["Cookie"].should eq("keep=yes")
+    end
+
     # A repeated name: the LATER value is the one a client would hold, but the line keeps the
     # order the origin wrote it in.
     it "lets the last value win for a repeated name, in first-appearance order" do
