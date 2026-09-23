@@ -65,6 +65,9 @@ describe "MCP list_env grammar report" do
   it "says when the USER_AGENT generators draw from the operator's own list" do
     with_store_env do |store|
       previous = Gori::Settings.user_agents
+      # Settle the section first: `list_env` re-reads it from the home's settings.json (#1218),
+      # and an unsettled cache would fold the file over the in-memory pin below.
+      Gori::Settings.reload_user_agents_from_disk
       Gori::Settings.user_agents = ["Mine/1.0"]
       begin
         got = env_result(store)
@@ -80,6 +83,7 @@ describe "MCP list_env grammar report" do
     with_store_env do |store|
       was = Gori::Settings.env_prefix
       begin
+        Gori::Settings.reload_env_from_disk # settle it, so `list_env` keeps the pin (#1217)
         Gori::Settings.env_prefix = "%"
         with_env_syntax(Gori::Env::Syntax::Namespaced) do
           got = env_result(store)

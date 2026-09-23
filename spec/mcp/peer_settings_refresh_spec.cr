@@ -111,8 +111,10 @@ describe "MCP follows a peer's settings between calls" do
             port = server.local_address.port
             sent(tools, port, %({"X-Token":"$TOKEN"}), seen).should eq("old")
 
-            File.write(path, %({"env":{"syntax":"bare","vars":[{"key":"TOKEN","value":"new"}]}}))
-            sent(tools, port, %({"X-Token":"$TOKEN"}), seen).should eq("new")
+            # A different LENGTH as well as a different value: `reload_section` skips a file whose
+            # (mtime, size) has not moved, and a coarse-mtime filesystem can stamp both writes alike.
+            File.write(path, %({"env":{"syntax":"bare","vars":[{"key":"TOKEN","value":"rotated"}]}}))
+            sent(tools, port, %({"X-Token":"$TOKEN"}), seen).should eq("rotated")
 
             # The last var deleted: `serialize_env` omits `vars` entirely.
             File.write(path, %({"env":{"syntax":"bare"}}))

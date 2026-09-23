@@ -95,6 +95,8 @@ describe "MCP discover_start refuses a header it will not send" do
         # Built BEFORE the vars are set: constructing Tools runs `Env.load_project(store)`,
         # which would otherwise reset them from the (empty) project.
         tools = tools_for(store)
+        # Settle the global env section, so the per-call re-read (#1217) keeps the pin below.
+        Gori::Settings.reload_env_from_disk
         Gori::Settings.env_prefix = "$"
         # The header the caller passed is fine; the VALUE bound to TOKEN is not. (A purely
         # TRAILING newline is not this case: both `unsafe_expanded` and `Headers.expand`
