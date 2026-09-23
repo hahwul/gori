@@ -94,6 +94,8 @@ describe Gori::Sequencer::Extract do
     # The oversized number itself comes back as the digits the body carried.
     Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.id")).should eq("18446744073709551615")
     Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.n[0]")).should eq("99999999999999999999")
+    # A container comes back as its own text — the oversized number unquoted.
+    Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.n")).should eq("[99999999999999999999]")
   end
 
   it "reads the path grammar Retest reads, and refuses a path it cannot resolve (#1201)" do

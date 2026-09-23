@@ -353,13 +353,16 @@ module Gori
     end
 
     def self.json_path(subject : ExtractSubject, path : String) : String?
-      return nil if path.empty?
+      steps = JsonPath.parse(path)
+      return nil if steps.is_a?(String)
       # `RawJson`: a number past Int64 anywhere in the body no longer hides the one asked for,
-      # and one asked for comes back as its own digits (#1200).
-      root = RawJson.parse(decoded_text(subject))
-      node = JsonPath.resolve(root, path)
+      # and one asked for comes back as its own digits (#1200). A non-string leaf is the
+      # value's own text (`raw_at`), never the tree written back out, which would quote such a
+      # number inside a container.
+      text = decoded_text(subject)
+      node = JsonPath.resolve(RawJson.parse(text), steps)
       return nil unless node
-      node.as_s? || (node.raw.nil? ? nil : node.to_json)
+      node.as_s? || (node.raw.nil? ? nil : JsonPath.raw_at(text, steps))
     rescue JSON::ParseException
       nil
     end

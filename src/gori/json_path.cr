@@ -1,4 +1,5 @@
 require "json"
+require "./raw_json"
 
 module Gori
   # The one path grammar every JSON field reader shares: Retest's `json:`/`json-absent:`
@@ -77,6 +78,37 @@ module Gori
         end
       end
       node
+    end
+
+    # The value at `steps` as JSON TEXT read straight off `json` — compact, but with every number
+    # as its literal digits and every duplicated member kept — or nil when there is no such
+    # field. The twin of `resolve` for a reader that has to SHOW or COMPARE a value: a tree from
+    # `RawJson.parse` carries a number past Int64 as a String, so writing a container back out
+    # of it would quote that number (`{"id":"18446744073709551615"}`). Same last-wins rule for
+    # a duplicated key as `resolve`. Raises JSON::ParseException when `json` is not JSON.
+    def raw_at(json : String, steps : Array(Step)) : String?
+      return RawJson.reformat(json) if steps.empty?
+      text = json
+      steps.each do |st|
+        pull = JSON::PullParser.new(text)
+        case pull.kind
+        when .begin_object?
+          key = st.key || return nil
+          found = nil.as(String?)
+          pull.read_object { |k| (raw = pull.read_raw; found = raw if k == key) }
+          text = found || return nil
+        when .begin_array?
+          idx = st.index || return nil
+          elems = [] of String
+          pull.read_array { elems << pull.read_raw }
+          idx += elems.size if idx < 0
+          return nil unless 0 <= idx < elems.size
+          text = elems[idx]
+        else
+          return nil
+        end
+      end
+      text
     end
 
     # nil for a missing field AND for a path `parse` refuses — for a reader that has no one to

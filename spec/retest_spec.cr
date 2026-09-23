@@ -200,6 +200,15 @@ describe "Gori::Retest.evaluate" do
     RT.evaluate(RT::Assertion.parse("json-absent:big").as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
   end
 
+  it "shows and compares an oversized number as the digits it was, never a quoted string" do
+    # The read tree carries such a number as a String; writing it back out quoted it, so
+    # `json:ids=[…]` FAILED against the very array it named and the row read `"1844…"`.
+    body = %({"id":18446744073709551615,"ids":[18446744073709551615,1.50]})
+    _, detail = RT.evaluate(RT::Assertion.parse("json:id").as(RT::Assertion), obs(body: body), nil)
+    detail.should eq("id = 18446744073709551615")
+    RT.evaluate(RT::Assertion.parse("json:ids=[18446744073709551615,1.50]").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+  end
+
   it "answers INCONCLUSIVE for a body comparison with no baseline behind it" do
     outcome, detail = RT.evaluate(RT::Assertion.parse("body:same").as(RT::Assertion), obs(body: "x"), nil)
     outcome.inconclusive?.should be_true

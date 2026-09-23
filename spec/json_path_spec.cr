@@ -51,6 +51,16 @@ describe Gori::JsonPath do
     at(doc, %(data[ "token" ])).try(&.as_s?).should eq("s3cr3t")
   end
 
+  it "returns a value's own text, oversized numbers and duplicate members intact" do
+    json = %({"a":{"id":18446744073709551615,"f":1.50,"d":1,"d":2},"xs":[1,[2,99999999999999999999]]})
+    JP.raw_at(json, JP.parse("a").as(Array)).should eq(%({"id":18446744073709551615,"f":1.50,"d":1,"d":2}))
+    JP.raw_at(json, JP.parse("a.id").as(Array)).should eq("18446744073709551615")
+    JP.raw_at(json, JP.parse("a.d").as(Array)).should eq("2") # last wins, as `resolve`
+    JP.raw_at(json, JP.parse("xs[-1]").as(Array)).should eq("[2,99999999999999999999]")
+    JP.raw_at(json, JP.parse("xs.5").as(Array)).should be_nil
+    JP.raw_at(json, JP.parse("a.nope").as(Array)).should be_nil
+  end
+
   it "keeps a quoted name's characters, JSONPath syntax included" do
     JP.parse(%(a["*[x]:y"])).should eq([JP::Step.new(key: "a", index: nil), JP::Step.new(key: "*[x]:y")])
   end

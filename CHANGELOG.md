@@ -39,7 +39,7 @@
 - Miner: JSON probes add their candidate keys to the captured body instead of re-serializing it, so duplicate members, number spellings and escapes reach the target as captured; the active scanner's JSON injection does the same, and a number past 64 bits no longer hides a body's JSON parameters (#1183)
 - OAST: resuming a saved session polls with the provider it was started with, even when two saved providers share an endpoint with different tokens (#1192)
 - Cookies: session bindings, the Sequencer `--cookie`, display columns and `session from-flow` read the cookie a client would hold — the last `Set-Cookie` for a name, and none once a later field expires it — instead of the first, so a `sid=deleted` before a fresh `sid` no longer binds the tombstone (#1206)
-- JSON bodies: a number past 64 bits (`18446744073709551615`) no longer makes a body "not JSON" to Retest `json:` assertions, Sequencer `--jsonpath`, session-slot bindings and display columns, the Minimizer, login-token capture, GraphQL fingerprinting, the MIME-confusion check, the pretty view, or Flask/Django cookie decode and forge, which keep its digits (#1200)
+- JSON: a number past 64 bits (`18446744073709551615`) no longer makes a captured body "not JSON" to Retest, `--jsonpath`, bindings and columns, the Minimizer, GraphQL and MIME probes, the pretty view, or Flask/Django cookies, and each keeps its digits (#1200)
 - Sequencer: random UUIDv4 tokens rate Secure instead of Weak or Critical, since a column confined to a few values (the variant nibble) is now treated as structure and credited its own entropy (#1198)
 
 ## v0.7.1

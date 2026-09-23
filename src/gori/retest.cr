@@ -613,10 +613,11 @@ module Gori
     private def self.evaluate_json(a : Assertion, obs : Observation) : {Outcome, String}
       body = obs.body
       return {Outcome::Inconclusive, "no response body to read #{a.path} from"} if body.nil? || body.empty?
+      text = String.new(body).scrub
       doc = begin
         # `RawJson`, not `JSON.parse`: one number past Int64 anywhere in the body (a uint64 id)
         # made the whole document "not JSON" and every assertion on it INCONCLUSIVE (#1200).
-        RawJson.parse(String.new(body).scrub)
+        RawJson.parse(text)
       rescue ex : JSON::ParseException
         # INCONCLUSIVE, not fail. "The field is absent" and "this is not JSON" are different
         # findings, and an HTML error page answering a `json-absent:` assertion as PASS is
@@ -628,17 +629,24 @@ module Gori
       # stops reading answers INCONCLUSIVE rather than "absent".
       return {Outcome::Inconclusive, clip("cannot read JSON path #{a.path} (#{steps})")} if steps.is_a?(String)
       found = JsonPath.resolve(doc, steps)
+      # What a result row shows and a container is compared by is the value's own TEXT, never
+      # the tree written back out — the tree holds an oversized number as a String (#1200).
+      raw = found ? (JsonPath.raw_at(text, steps) || found.to_json) : ""
+      judge_json(a, found, raw)
+    end
+
+    private def self.judge_json(a : Assertion, found : JSON::Any?, raw : String) : {Outcome, String}
       case a.kind
       when .json_present?
-        found ? {Outcome::Pass, "#{a.path} = #{render(found)}"} : {Outcome::Fail, "#{a.path} is absent"}
+        found ? {Outcome::Pass, "#{a.path} = #{render(raw)}"} : {Outcome::Fail, "#{a.path} is absent"}
       when .json_absent?
-        found ? {Outcome::Fail, clip("#{a.path} is present (#{render(found)})")} : {Outcome::Pass, "#{a.path} is absent"}
+        found ? {Outcome::Fail, clip("#{a.path} is present (#{render(raw)})")} : {Outcome::Pass, "#{a.path} is absent"}
       else
         return {Outcome::Fail, "#{a.path} is absent, expected #{a.value}"} unless found
-        if json_equals?(found, a.value)
-          {Outcome::Pass, clip("#{a.path} = #{render(found)}")}
+        if json_equals?(found, raw, a.value)
+          {Outcome::Pass, clip("#{a.path} = #{render(raw)}")}
         else
-          {Outcome::Fail, clip("#{a.path} = #{render(found)}, expected #{a.value}")}
+          {Outcome::Fail, clip("#{a.path} = #{render(raw)}, expected #{a.value}")}
         end
       end
     end
@@ -684,7 +692,11 @@ module Gori
     # quotes its numbers — for a reason the operator cannot see from the assertion, on a
     # grammar whose whole point is that one short line says what to look at and what it
     # should be. A type-exact comparison is the deferred "scriptable assertions" idea.
-    def self.json_equals?(node : JSON::Any, literal : String) : Bool
+    #
+    # `raw` is the value's own JSON text (`JsonPath.raw_at`). It decides the two cases the tree
+    # cannot: a String that is really a number past Int64 (unquoted text — compared by its
+    # digits), and a container (compared as written, oversized numbers included).
+    def self.json_equals?(node : JSON::Any, raw : String, literal : String) : Bool
       if s = node.as_s?
         return s == literal
       end
@@ -708,13 +720,13 @@ module Gori
       end
       # An object or an array: compare the compact JSON text, which is the only literal an
       # operator could have typed for one.
-      node.to_json == literal
+      raw == literal
     end
 
     # A JSON value as the result row quotes it — the compact JSON text, so a string keeps its
     # quotes and cannot be confused with a number that happens to print the same.
-    def self.render(node : JSON::Any) : String
-      node.to_json.scrub
+    def self.render(raw : String) : String
+      raw.scrub
     end
 
     # The "actual result" sentence for a step whose assertion passed, or which had none.
