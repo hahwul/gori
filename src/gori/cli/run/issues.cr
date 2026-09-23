@@ -25,11 +25,20 @@ module Gori
         end
       end
 
+      # SARIF is the one format that carries header VALUES structurally: text and json have
+      # none, and markdown's evidence blocks are the captured head as a whole. Inert elsewhere,
+      # and said so rather than silently ignored (the `history --include-sensitive` rule).
+      private def self.warn_inert_include_sensitive(format : Symbol) : Nil
+        return if format == :sarif
+        STDERR.puts "gori run issues: --include-sensitive only changes --format sarif"
+      end
+
       private def self.cmd_issues_list(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         format = :text
         export_path : String? = nil
+        include_sensitive = false
         leftover = [] of String
 
         parser = OptionParser.new do |p|
@@ -43,6 +52,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json | markdown | sarif") { |v| format = parse_format(v, [:text, :json, :markdown, :sarif]) }
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
+          p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format sarif's webRequest/webResponse headers instead of [REDACTED]") { include_sensitive = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run issues: unknown option: #{f}\n#{p}" }
@@ -53,6 +63,7 @@ module Gori
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project, read_only: true)
+        warn_inert_include_sensitive(format) if include_sensitive
         # Build the report while the store is open (markdown resolves linked-flow
         # evidence), then close BEFORE any file I/O so a write failure can't leak the
         # connection — and so the abort below runs after a clean close.
@@ -69,7 +80,7 @@ module Gori
             case format
             when :json     then Issues::Export.json(issues, store)
             when :markdown then Issues::Export.markdown(issues, store, project.name)
-            when :sarif    then Issues::Export.sarif(issues, store, project.name)
+            when :sarif    then Issues::Export.sarif(issues, store, project.name, include_sensitive)
             else                issues_text(issues)
             end
           {content, issues.size}

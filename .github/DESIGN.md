@@ -3295,3 +3295,18 @@ code chooses, which Chromium's source does not state, so they get none. That inc
 built-in corpus's Edge line. A WebSocket handshake gets none either, because Chromium's
 source does not establish that hints are sent there. Header names are lowercase and go
 immediately before `User-Agent`, the order Chrome uses on a navigation.
+
+### 2026-09-23: a report that leaves the machine redacts credential headers; an interchange document does not
+
+`gori run issues --format sarif` (and the TUI's SARIF export) writes `Authorization`,
+`Cookie`, `Set-Cookie` and the API-key headers as `[REDACTED]` unless `--include-sensitive`
+is passed (#1191). The line is the one #1002 drew for `history --format json`: a structured
+document meant for another system (a code-scanning upload, a CI artifact, a dashboard) takes
+the redacted default, and HAR stays verbatim because an interchange document has to carry the
+message in full to be replayed. SARIF cannot replay anything, since its `headers` object
+already combines repeated fields, so it belongs on the redacted side. The predicate moved to
+`Redact.sensitive_header?` (redact/headers.cr) so the exporter asks the same list as MCP and
+the CLI without depending on a surface. The TUI export has no opt-in, the same choice its
+evidence export makes. The Markdown issue report still embeds each linked flow's head
+verbatim. It is a human-readable report rather than a machine feed, and changing it is a
+separate decision.

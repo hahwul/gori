@@ -943,11 +943,14 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 | -------- | ------------- |
 | `--format` | `text` (default) \| `json` \| `markdown` \| `sarif`, the same reports the TUI's Export writes |
 | `--export=PATH` | Write to `PATH` instead of STDOUT (bytes verbatim; STDOUT is escape-scrubbed) |
+| `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values in `sarif`'s `webRequest`/`webResponse` headers instead of `[REDACTED]`. Inert in the other formats, which say so on STDERR |
 | `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
 | `update <id>` | `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes` (empty to clear), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
 | `delete <id>` | Delete the issue and its evidence links. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
 
 `--format sarif` writes a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log, the format GitHub code scanning, DefectDojo and Azure DevOps ingest. Each issue becomes one result: its severity maps to a SARIF `level` (with `rank` and the rule's `security-severity` preserving the full five-way scale), a `false-positive` or `resolved` triage status becomes a `suppression` so a dismissed finding does not reappear as open, and a linked flow rides along as `webRequest`/`webResponse` with real headers and (decoded, 64 KiB-capped) bodies.
+
+**Credential header values are `[REDACTED]` in that log by default**, and the message is marked `gori/sensitiveHeadersRedacted: true` when anything was withheld. A SARIF log is made to leave the machine, so it gets the same default as `history --format json` and `evidence show`; `--include-sensitive` writes the exact values. A repeated header is combined the way that field allows: list values with `, `, `Cookie` pairs with `; `. `Set-Cookie` never combines, so its fields are joined with a newline and also listed one per field in the message's `gori/setCookie` property.
 
 Notes are readable and writable too. `notes` with no argument lists them (`*` marks the active note); `notes <n>` prints one by index:
 

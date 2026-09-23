@@ -4,6 +4,7 @@ require "sarif"
 require "../store"
 require "../links"
 require "../proxy/codec/http1"
+require "../redact/headers"
 
 module Gori
   module Issues
@@ -117,7 +118,14 @@ module Gori
         end
       end
 
-      def self.sarif(issues : Array(Store::Issue), store : Store, project_name : String) : String
+      # `include_sensitive`: credential header values (`Redact.sensitive_header?`) are written
+      # as `[REDACTED]` unless this is set (#1191). A SARIF log is made to leave the machine —
+      # uploaded to code scanning, attached to a CI run, ingested by a dashboard — so it takes
+      # the default `gori run history --format json` and `gori run evidence show` already have,
+      # and the same `--include-sensitive` opt-in. Names and the per-field count survive, so
+      # the redacted log still says what the exchange carried.
+      def self.sarif(issues : Array(Store::Issue), store : Store, project_name : String,
+                     include_sensitive : Bool = false) : String
         # One rule per DISTINCT title, in first-seen order, so `find_rule_index` links each
         # result to its rule and a repeated finding collapses to one entry in a rules list.
         rules = {} of String => String # rule id => the title that first claimed it
@@ -157,7 +165,7 @@ module Gori
         run.results ||= [] of ::Sarif::Result
         # Results FIRST: a rule's `security-severity` is the worst severity among the results
         # that cite it, and it reads those off the property bags this pass writes.
-        annotate_results(run, issues, flows, links, project_name, rule_index)
+        annotate_results(run, issues, flows, links, project_name, rule_index, include_sensitive)
         annotate_rules(run)
         log.to_pretty_json
       end
@@ -171,7 +179,8 @@ module Gori
                                         flows : Array(Store::FlowDetail?),
                                         links : Array(Array(Links::Resolved)),
                                         project_name : String,
-                                        rule_index : Hash(String, Int32)) : Nil
+                                        rule_index : Hash(String, Int32),
+                                        include_sensitive : Bool) : Nil
         results = run.results
         return unless results
         results.each_with_index do |res, i|
@@ -199,8 +208,8 @@ module Gori
           res.properties = bag
 
           if flow = flows[i]
-            res.web_request = sarif_web_request(flow)
-            res.web_response = sarif_web_response(flow)
+            res.web_request = sarif_web_request(flow, include_sensitive)
+            res.web_response = sarif_web_response(flow, include_sensitive)
           end
         end
       end
@@ -351,10 +360,10 @@ module Gori
           status: ::Sarif::SuppressionStatus::Accepted)
       end
 
-      private def self.sarif_web_request(flow : Store::FlowDetail) : ::Sarif::WebRequest
+      private def self.sarif_web_request(flow : Store::FlowDetail, include_sensitive : Bool) : ::Sarif::WebRequest
         req = Proxy::Codec::Http1.parse_request_head(flow.request_head)
         row = flow.row
-        headers, bag = sarif_headers(req.headers)
+        headers, bag = sarif_headers(req.headers, include_sensitive)
         ::Sarif::WebRequest.new(
           protocol: one_line(row.scheme),
           version: sarif_http_version(req.version.presence || flow.http_version),
@@ -369,14 +378,14 @@ module Gori
         )
       end
 
-      private def self.sarif_web_response(flow : Store::FlowDetail) : ::Sarif::WebResponse?
+      private def self.sarif_web_response(flow : Store::FlowDetail, include_sensitive : Bool) : ::Sarif::WebResponse?
         head = flow.response_head
         # An Error/Aborted flow never got one. SARIF says so explicitly rather than emitting
         # a webResponse full of nils.
         return ::Sarif::WebResponse.new(no_response_received: true) if head.nil? || head.empty?
         resp = Proxy::Codec::Http1.parse_response_head(head)
         row = flow.row
-        headers, bag = sarif_headers(resp.headers)
+        headers, bag = sarif_headers(resp.headers, include_sensitive)
         ::Sarif::WebResponse.new(
           protocol: one_line(row.scheme),
           # The RESPONSE's own version, not the request's — 1.0 vs 1.1 is semantically
@@ -401,7 +410,8 @@ module Gori
         v.presence
       end
 
-      # A head's fields for SARIF: `{headers, gori/setCookie}`.
+      # A head's fields for SARIF: `{headers, properties}` — the property bag carries
+      # `gori/setCookie` and `gori/sensitiveHeadersRedacted` when either applies.
       #
       # SARIF's `headers` is a JSON object, but HTTP allows repeats, so each name's values are
       # combined into one string — and HOW is the field's own rule, not one rule for all:
@@ -413,6 +423,11 @@ module Gori
       #     as one fabricated field (#1190). They join with "\n" instead — a byte no field value
       #     can hold, so every boundary is recoverable — and when there is more than one they
       #     also ride, one array element per field, in the message's `gori/setCookie` property.
+      #
+      # A credential field's value is `[REDACTED]`, once per field, unless `include_sensitive`
+      # (#1191) — and an obs-fold continuation of it is part of that value, so it is withheld
+      # too rather than appended in the clear. When anything was withheld the bag says
+      # `gori/sensitiveHeadersRedacted: true`, the marker history JSON puts on its rows.
       #
       # Names and values are `one_line`d because header BYTES are attacker-controlled and can be
       # invalid UTF-8 (an obs-text or an h2 pseudo-header carrying a raw 0x80): unscrubbed, one
@@ -431,15 +446,17 @@ module Gori
       # `"  X-Fake"`. Three surfaces, three header sets, one head. Folded into the previous value
       # with a single SP, which is what a recipient that accepts obs-fold must do. (A continuation
       # with no colon never reaches here at all: `Http1.parse_headers` drops a colon-less line.)
-      private def self.sarif_headers(list : Proxy::Codec::HeaderList) : {Hash(String, String)?, ::Sarif::PropertyBag?}
+      private def self.sarif_headers(list : Proxy::Codec::HeaderList,
+                                     include_sensitive : Bool) : {Hash(String, String)?, ::Sarif::PropertyBag?}
         fields = {} of String => Array(String) # displayed name => one value per field, in order
         seen = {} of String => String          # downcased name => the casing first seen on the wire
         last = nil.as(String?)                 # the key an obs-fold continuation continues
+        redacted = false
         list.each do |h|
           if fold_name?(h.name)
             # Not a field. It continues the one above — or nothing, if it opened the block, in
             # which case it belongs to no field and must not become one.
-            if key = last
+            if (key = last) && !withheld?(key, include_sensitive)
               cont = "#{one_line(h.name)}: #{one_line(h.value)}".strip
               values = fields[key]
               values[-1] = values[-1].empty? ? cont : "#{values[-1]} #{cont}" unless cont.empty?
@@ -453,10 +470,19 @@ module Gori
           # keying on the raw name emitted it as two JSON keys instead of one.
           # The first casing seen is what's displayed, so the output still looks like the wire.
           key = seen[name.downcase] ||= name
-          (fields[key] ||= [] of String) << one_line(h.value)
+          withhold = withheld?(key, include_sensitive)
+          redacted ||= withhold
+          (fields[key] ||= [] of String) << (withhold ? "[REDACTED]" : one_line(h.value))
           last = key
         end
         return {nil, nil} if fields.empty?
+        combine_fields(fields, redacted)
+      end
+
+      # `sarif_headers`' fields as the `headers` object — each name's values combined by its own
+      # rule — plus the property bag that says what the object alone cannot.
+      private def self.combine_fields(fields : Hash(String, Array(String)),
+                                      redacted : Bool) : {Hash(String, String), ::Sarif::PropertyBag?}
         headers = {} of String => String
         bag = nil.as(::Sarif::PropertyBag?)
         fields.each do |key, values|
@@ -464,14 +490,24 @@ module Gori
           when "set-cookie"
             headers[key] = values.join('\n')
             if values.size > 1
-              bag = ::Sarif::PropertyBag.new
+              bag ||= ::Sarif::PropertyBag.new
               bag["gori/setCookie"] = JSON::Any.new(values.map { |v| JSON::Any.new(v) })
             end
           when "cookie" then headers[key] = values.join("; ")
           else               headers[key] = values.join(", ")
           end
         end
+        if redacted
+          bag ||= ::Sarif::PropertyBag.new
+          bag["gori/sensitiveHeadersRedacted"] = JSON::Any.new(true)
+        end
         {headers, bag}
+      end
+
+      # Is this field's value withheld from the log? Keyed on the name, so every casing of a
+      # credential header redacts (`COOKIE:` as well as `Cookie:`).
+      private def self.withheld?(name : String, include_sensitive : Bool) : Bool
+        !include_sensitive && Redact.sensitive_header?(name)
       end
 
       # Is this parsed field NAME really an obs-fold continuation — i.e. did its line start with

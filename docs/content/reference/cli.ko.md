@@ -931,11 +931,14 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 |--------|-------------|
 | `--format` | `text`(기본) \| `json` \| `markdown` \| `sarif`. TUI의 Export가 쓰는 것과 같은 리포트 |
 | `--export=PATH` | STDOUT 대신 `PATH`에 기록(바이트 그대로. STDOUT은 이스케이프를 제거) |
+| `--include-sensitive` | `sarif`의 `webRequest`/`webResponse` 헤더에서 `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API 키 값을 `[REDACTED]` 대신 그대로 씁니다. 다른 형식에서는 효과가 없으며 STDERR로 알려 줍니다 |
 | `create` | `-t`/`--title` (필수), `--cvss` (점수 또는 벡터. 이 값에서 severity를 자동 산정), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
 | `update <id>` | `-t`/`--title`, `--cvss` (새 점수/벡터. 빈 문자열로 초기화), `-s`/`--severity`, `-n`/`--notes` (빈 문자열로 초기화), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
 | `delete <id>` | 이슈와 그 증거 링크를 삭제합니다. 보고서에는 남기고 닫힌 상태로만 표시하려면 `update <id> --status=resolved`를 쓰세요 |
 
 `--format sarif`는 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) 로그를 씁니다. GitHub code scanning, DefectDojo, Azure DevOps가 그대로 읽는 형식입니다. 이슈 하나가 result 하나가 되며, severity는 SARIF `level`로 매핑되고(5단계 원본은 `rank`와 룰의 `security-severity`에 보존), `false-positive`/`resolved` 상태는 `suppression`으로 나가 정리한 이슈가 다시 열린 것으로 보이지 않습니다. 연결된 플로우는 실제 헤더와 (디코딩·64 KiB 상한) 본문을 담은 `webRequest`/`webResponse`로 함께 실립니다.
+
+**이 로그에서 자격 증명 헤더 값은 기본적으로 `[REDACTED]`** 이며, 무언가 가려졌으면 메시지에 `gori/sensitiveHeadersRedacted: true`가 붙습니다. SARIF 로그는 머신 밖으로 나가도록 만들어지는 문서라서 `history --format json`, `evidence show`와 같은 기본값을 따르고, `--include-sensitive`를 주면 값을 그대로 씁니다. 반복된 헤더는 그 필드가 허용하는 방식으로 합칩니다. 리스트 값은 `, `로, `Cookie` 쌍은 `; `로 잇습니다. `Set-Cookie`는 합칠 수 없으므로 필드들을 줄바꿈으로 이어 쓰고, 메시지의 `gori/setCookie` 속성에도 필드마다 하나씩 나열합니다.
 
 노트도 읽고 쓸 수 있습니다. 인자 없이 `notes`를 실행하면 목록을 보여주고(`*`가 활성 노트), `notes <n>`은 인덱스로 하나를 출력합니다:
 
