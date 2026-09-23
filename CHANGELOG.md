@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- MCP: `list_history` flags stale `since` cursors even when History is empty, so clients can reset after a clear (#1199)
 - Issues: the SARIF export keeps each `Set-Cookie` field separate instead of comma-joining cookies into one fabricated value, joins repeated `Cookie` fields with `; `, and writes credential header values as `[REDACTED]` unless `gori run issues --include-sensitive` asks for them (#1190, #1191)
 - Import: generated Insomnia, Postman, and OpenAPI query parameters now stay before URL fragments (#1184)
 - CLI: piped decoder and minimized request output stay byte-exact, while forged cookies and encoded JWTs retain a trailing newline for text pipelines (#1185)

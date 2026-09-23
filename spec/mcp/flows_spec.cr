@@ -52,6 +52,20 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "rejects a nonzero 'since' cursor while history is empty after a clear" do
+      with_store do |store|
+        3.times { |i| mcp_seed_flow(store, "h.test", "GET", "/p#{i}", 200) }
+        store.clear_flows.should be_true
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"since":22}}})
+        resp = mcp_drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        text = resp["result"]["content"][0]["text"].as_s
+        text.should contain("history was cleared")
+        text.should contain("since=0")
+      end
+    end
+
     it "still answers an in-range 'since' cursor normally" do
       with_store do |store|
         a = mcp_seed_flow(store, "h.test", "GET", "/a", 200)
