@@ -560,7 +560,7 @@ module Gori::Proxy
       # (no body rule) falls straight through to zero-buffer streaming below (P6). A body
       # whose declared length exceeds MAX_REWRITE_BODY is left byte-exact (see the constant)
       # so a huge upload can't grow the proxy heap while a rule is on.
-      if (rw = @rewriter) && rewrite_request_body?(rw, req_framing, req_len)
+      if (rw = @rewriter) && rewrite_request_body?(rw, req_framing, req_len, host)
         return forward_request_rewriting_body(rw, req, sent_req, sent_head, host, port,
           scheme, created_at, started, req_framing, req_len)
       end
@@ -701,7 +701,7 @@ module Gori::Proxy
       # already M&R'd into `sent_head`. A body rule re-frames to Content-Length, so re-parse
       # the (possibly rewritten) head for the hold metadata + capture.
       advisory = nil.as(String?)
-      if (rw = @rewriter) && rw.rewrites_request_body?
+      if (rw = @rewriter) && rw.rewrites_request_body_for_host?(host)
         sent_head, buffered, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
           host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
         sent_req = Codec::Http1.parse_request_head(sent_head)
@@ -1036,7 +1036,7 @@ module Gori::Proxy
       # and a body-scoped extract rule records that it had no body to read. A body whose
       # declared length exceeds MAX_REWRITE_BODY is likewise left byte-exact (see the constant)
       # so one huge download can't grow the proxy heap while a rule is on.
-      if buffer_response_body?(resp, resp_framing, resp_len)
+      if buffer_response_body?(resp, resp_framing, resp_len, host)
         return forward_response_rewriting_body(upstream, req, sent_req, flow_id, host, port,
           scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started, extract_ref)
       end
@@ -1069,32 +1069,33 @@ module Gori::Proxy
         # otherwise tear a quiet tunnel down). Keepalive (both legs) reaps a truly dead peer.
         SocketTuning.relax(@io)
         SocketTuning.relax(upstream)
-        if websocket_upgrade?(resp)
-          # `@rewriter` carries Match & Replace (#500 step 1) and `@interceptor` the message
-          # hold (step 2) into the tunnel; `ctx` is the 101 handshake's identity, which both
-          # scope on — a WebSocket message has no authority, scheme or path of its own. The
-          # relay asks each lens ONCE, here, whether it can reach this host; a socket that
-          # answers "no" to both keeps the byte-exact pump (P6/P7).
-          # `target` here is what `Interceptor#intercepts_ws?` scopes every message on, so it
-          # takes the same gate-side recovery as the two HTTP gates (see `gate_target`) —
-          # otherwise a handshake with a malformed request line hands the WS message gate an
-          # empty path and every frame on that socket escapes a path-scoped rule.
-          ws_ctx = WS::Context.new(host: host, port: port, scheme: scheme,
-            method: sent_req.method, target: Codec::Http1.gate_target(sent_req))
-          # frames until close
-          WS::Relay.run(@io, upstream, flow_id, @sink, @rewriter, ws_ctx, @interceptor, notice: ws_notice)
-        else
-          # A 101 that is NOT a WebSocket — kubectl exec/attach/port-forward speaks
-          # `Upgrade: SPDY/3.1` and the Docker Engine API `Upgrade: tcp` — is relayed
-          # byte-exact and deliberately NOT decoded (see `Pump`). That decision used to be
-          # invisible: the WebSocket branch above carries `notice:` and this one said nothing
-          # anywhere, so a `101 / complete / empty transcript` flow could not be told from one
-          # gori simply failed to capture (#736). Recorded AFTER the tunnel returns, because
-          # `blind_tunnel` only comes back when both directions are closed and the byte counts
-          # are what make this a report rather than a guess. Exactly one per connection —
-          # this branch `return false`s immediately below, so there is nothing to rate-limit.
-          moved = Pump.blind_tunnel(@io, upstream) # non-WS upgrade: raw pipe until close
-          record_opaque_upgrade(flow_id, resp, req, host, sent_req.target, moved)
+        begin
+          if websocket_upgrade?(resp)
+            # `@rewriter` carries Match & Replace (#500 step 1) and `@interceptor` the message
+            # hold (step 2) into the tunnel; `ctx` is the 101 handshake's identity, which both
+            # scope on — a WebSocket message has no authority, scheme or path of its own. The
+            # relay asks each lens ONCE, here, whether it can reach this host; a socket that
+            # answers "no" to both keeps the byte-exact pump (P6/P7).
+            # `target` here is what `Interceptor#intercepts_ws?` scopes every message on, so it
+            # takes the same gate-side recovery as the two HTTP gates (see `gate_target`) —
+            # otherwise a handshake with a malformed request line hands the WS message gate an
+            # empty path and every frame on that socket escapes a path-scoped rule.
+            ws_ctx = WS::Context.new(host: host, port: port, scheme: scheme,
+              method: sent_req.method, target: Codec::Http1.gate_target(sent_req))
+            # frames until close
+            WS::Relay.run(@io, upstream, flow_id, @sink, @rewriter, ws_ctx, @interceptor, notice: ws_notice)
+          else
+            # A 101 that is NOT a WebSocket — kubectl exec/attach/port-forward speaks
+            # `Upgrade: SPDY/3.1` and the Docker Engine API `Upgrade: tcp` — is relayed
+            # byte-exact and deliberately NOT decoded (see `Pump`). Record its notice only
+            # after the tunnel returns, when its direction byte counts are known (#736).
+            moved = Pump.blind_tunnel(@io, upstream) # non-WS upgrade: raw pipe until close
+            record_opaque_upgrade(flow_id, resp, req, host, sent_req.target, moved)
+          end
+        ensure
+          # A 101 is printed/countable only when its tunnel ends. WebSocket frame writes above
+          # are synchronous, so this follows the complete captured transcript.
+          @sink.on_tunnel_complete(flow_id)
         end
         return false
       end
@@ -1496,11 +1497,12 @@ module Gori::Proxy
       buf = IO::Memory.new
       resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
       rw = @rewriter
-      # `live` is false when only a body-scoped EXTRACT rule brought this response here: no
-      # rewrite rule lost its chance, so there is nothing to say about one.
+      # `live` is false when only a body-scoped EXTRACT rule brought this response here, or
+      # when a rewrite rule exists only for another host: no applicable rewrite lost its
+      # chance, so there is nothing to say about one.
       sent_resp_head, fwd_body, advisory = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing,
-        host: host, response: true, live: !!rw.try(&.rewrites_response_body?)) do |e|
-        rw && rw.rewrites_response_body? ? rw.rewrite_response_body(e, host) : e
+        host: host, response: true, live: !!rw.try(&.rewrites_response_body_for_host?(host))) do |e|
+        rw && rw.rewrites_response_body_for_host?(host) ? rw.rewrite_response_body(e, host) : e
       end
       sent_resp = Codec::Http1.parse_response_head(sent_resp_head) # head may have been re-framed
       stored, trunc, size = capped(fwd_body)
@@ -1593,7 +1595,7 @@ module Gori::Proxy
       # re-frames the head to Content-Length; `resp` (status/version/Connection) is
       # untouched by that, so keep it as the origin's framing/keep-alive truth.
       advisory = nil.as(String?)
-      if (rw = @rewriter) && rw.rewrites_response_body?
+      if (rw = @rewriter) && rw.rewrites_response_body_for_host?(host)
         sent_resp_head, body, advisory = apply_body_rewrite(sent_resp_head, body, resp_framing,
           host: host, response: true, live: true) { |e| rw.rewrite_response_body(e, host) }
       end
@@ -2908,14 +2910,15 @@ module Gori::Proxy
     # to buffer. Extracted from handle_response so the dispatch stays flat (it just tests +
     # branches).
     #
-    # Two things can need it, and neither pays anything when it is not configured: a
-    # Match&Replace body rule (which rewrites the entity) and a body-scoped extract rule
-    # (which reads it). Both predicates are lock-free atomic counts, so the overwhelmingly
-    # common no-rule response is one integer compare away from the streaming path (P6).
+    # Two things can need it: a Match&Replace body rule (which rewrites the entity) and a
+    # body-scoped extract rule (which reads it). Narrow each to this response's request host
+    # before buffering; forward-proxy connections can carry unrelated hosts on one socket.
+    # Both retain a lock-free fast path when no body rule exists (P6).
     private def buffer_response_body?(resp : Codec::RawResponse,
-                                      framing : Codec::BodyFraming, len : Int64) : Bool
-      return false unless @rewriter.try(&.rewrites_response_body?) ||
-                          @extractor.try(&.extracts_body?)
+                                      framing : Codec::BodyFraming, len : Int64,
+                                      host : String) : Bool
+      return false unless @rewriter.try(&.rewrites_response_body_for_host?(host)) ||
+                          @extractor.try(&.extracts_body_for_host?(host))
       (framing.length? || framing.chunked?) && !sse?(resp) && resp.status != 101 &&
         rewritable_body_size?(framing, len)
     end
@@ -2959,8 +2962,9 @@ module Gori::Proxy
 
     # Whether the request-body Match&Replace path applies: a body rule is live, there IS a
     # body, and it's small enough to buffer. Extracted from handle_request (see above).
-    private def rewrite_request_body?(rw : HeadRewriter, framing : Codec::BodyFraming, len : Int64) : Bool
-      rw.rewrites_request_body? && !framing.none? && rewritable_body_size?(framing, len)
+    private def rewrite_request_body?(rw : HeadRewriter, framing : Codec::BodyFraming,
+                                      len : Int64, host : String) : Bool
+      rw.rewrites_request_body_for_host?(host) && !framing.none? && rewritable_body_size?(framing, len)
     end
 
     # Apply a body Match&Replace to a buffered wire body and return {head, forward_body}.
@@ -3017,17 +3021,10 @@ module Gori::Proxy
     # conditions, and both are required:
     #
     #   - a body rule is LIVE for this direction — the caller's `live`, above;
-    #   - a body rule MATCHES THIS HOST — `rewrites_body_for_host?`, the host-narrowed
-    #     predicate #526 added for the h2 downgrade gate. Without it a rule scoped to
+    #   - a body rule MATCHES THIS HOST and direction — the host-narrowed
+    #     predicate #526 first added for the h2 downgrade gate. Without it a rule scoped to
     #     `alpha.test` would annotate every compressed flow on every other host with a claim
     #     that it failed to fire there.
-    #
-    # That predicate folds the two directions into one question (it was written for a gate that
-    # downgrades for either), so the pair can be satisfied by a REQUEST-side rule matching this
-    # host while the live RESPONSE-side rule is scoped elsewhere. The sentence stays true under
-    # that reading — a body rule matching this host did not run on this body — and the
-    # alternative is a second host-scoped predicate per direction for a case that needs two
-    # rules pointing in opposite directions to occur at all.
     #
     # It takes the rewriter's lock (once per refused body, never on the fast path): reached only
     # with a body rule live somewhere AND a compressed body in hand, which is the same bargain
@@ -3035,7 +3032,12 @@ module Gori::Proxy
     private def compressed_skip_advisory(head : Bytes, host : String, *,
                                          response : Bool, live : Bool) : String?
       return nil unless live
-      return nil unless @rewriter.try(&.rewrites_body_for_host?(host))
+      applies = if rw = @rewriter
+                  response ? rw.rewrites_response_body_for_host?(host) : rw.rewrites_request_body_for_host?(host)
+                else
+                  false
+                end
+      return nil unless applies
       side = response ? "response" : "request"
       codings = Codec::ContentDecode.declared_codings(head)
       # `content_encoded?` also fails closed on an obs-folded encoding header, where the coding
@@ -3144,12 +3146,12 @@ module Gori::Proxy
     # Is this response an event stream? `Sse.sse?` and not a `downcase.includes?` scan, which
     # is the brittle test that module's own header says it exists to replace — and which every
     # OTHER surface had already left behind: `Proto.classify` asks `Sse.sse?`, `QL` compiles
-    # `proto:sse` to `LIKE 'text/event-stream%'`, and History's EVENTS pane asks
-    # `Sse.event_stream?`. A substring match makes this the only reader that says yes to a
-    # `Content-Type` merely CARRYING the token in a parameter — and this is the reader with
-    # side effects: `application/json; profile="urn:x:text/event-stream"` on a Content-Length
-    # body took the streaming path, so the intercept response hold was skipped, a Match&Replace
-    # body rule no-opped, and the client connection was closed instead of kept alive, while
+    # `proto:sse` to an exact media-type essence, and History's EVENTS pane asks
+    # `Sse.event_stream?`. A substring/prefix match makes this the only reader that says yes to
+    # a `Content-Type` merely carrying the token in a parameter or a longer subtype. This
+    # reader has side effects: `application/json; profile="urn:x:text/event-stream"` on a
+    # Content-Length body took the streaming path, so the intercept response hold was skipped,
+    # a Match&Replace body rule no-opped, and the client connection was closed instead of kept alive, while
     # every display and query surface reported an ordinary JSON flow.
     private def sse?(resp : Codec::RawResponse) : Bool
       Gori::Sse.sse?(resp.headers.get?("Content-Type"))

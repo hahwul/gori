@@ -22,16 +22,15 @@ module Gori::Proxy
   # `extracts?` is a LOCK-FREE atomic read, checked before anything is allocated: a proxy with
   # no extract rule pays one integer compare per response and nothing else (P6).
   #
-  # `extracts_body?` is the expensive one. A head-scoped descriptor (cookie / header) reads the
-  # parsed head, which every response already has; a body-scoped one (regex / position /
-  # jsonpath) needs the entity, which means BUFFERING a response that would otherwise stream —
-  # exactly what `HeadRewriter#rewrites_response_body?` gates today, and gated the same way.
+  # `extracts_body?` is the host-blind summary. A head-scoped descriptor (cookie / header) reads
+  # the parsed head, which every response already has; a body-scoped one (regex / position /
+  # jsonpath) needs the entity, which means buffering a response that would otherwise stream.
   #
-  # `extracts_body_for_host?` is the same question asked ABOUT ONE HOST, and it exists for one
-  # caller: the h2 downgrade gate (`tls/tunnel.cr`). A body-scoped extraction is the same
-  # requirement as a body rewrite — the entity has to be in hand — so it earns the same
-  # downgrade to HTTP/1.1, and per #526 it must earn it only for the hosts its glob can
-  # actually match. Downgrading a host no rule matches is the regression #531 fixed.
+  # `extracts_body_for_host?` is the same question asked ABOUT ONE HOST. ClientConn uses it for
+  # each response on a multi-host HTTP/1 connection; the h2 downgrade gate uses it for the
+  # CONNECT host. A body-scoped extraction needs the entity in hand, so it earns the same
+  # downgrade to HTTP/1.1 only for hosts its glob can actually match. Downgrading a host no rule
+  # matches is the regression #531 fixed.
   module ResponseExtract
     # Is ANY enabled extract rule live? Read per response, so it must not lock.
     def extracts? : Bool
@@ -44,10 +43,11 @@ module Gori::Proxy
       false
     end
 
-    # `extracts_body?` narrowed to one host. Called once per CONNECT, never per message, so an
-    # implementation may take a lock.
+    # `extracts_body?` narrowed to one host. HTTP/1 forward-proxy connections can carry multiple
+    # hosts, so ClientConn asks this before buffering each response. The h2 downgrade gate asks
+    # it once for its CONNECT host.
     def extracts_body_for_host?(host : String) : Bool
-      false
+      extracts_body?
     end
 
     # Offer one DELIVERED response to the extract rules.

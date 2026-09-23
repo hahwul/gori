@@ -384,6 +384,25 @@ describe Gori::Store do
     end
   end
 
+  it "publishes tunnel completion after the captured WebSocket transcript" do
+    events = Channel(Gori::Store::FlowEvent).new(16)
+    with_store(events) do |store|
+      id = store.insert_flow(sample_request)
+      events.receive.kind.should eq(:inserted)
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 101,
+        head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice))
+      events.receive.kind.should eq(:updated)
+      store.insert_ws_message(id, "out", 1, "payload".to_slice)
+      events.receive.kind.should eq(:updated)
+
+      store.notify_tunnel_complete(id)
+      completed = events.receive
+      completed.id.should eq(id)
+      completed.kind.should eq(:tunnel_completed)
+    end
+  end
+
   it "prunes the oldest flows (and their ws messages) once retention is exceeded" do
     path = File.tempname("gori-ret", ".db")
     db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")

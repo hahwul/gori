@@ -299,6 +299,7 @@ module Gori
     # enabled, a view-only second TUI — passes false, because an idle tick that takes the
     # write lock is the #752 two-writer condition, and those surfaces already drain on demand
     # (`index_pending!` before a `body:` query). Ignored when `read_only` (there is no writer).
+    #
     def self.open(path : String, events : Channel(FlowEvent)? = nil,
                   probe_events : Channel(FlowEvent)? = nil,
                   retention_flows : Int32 = RETENTION_DEFAULT,
@@ -842,6 +843,21 @@ module Gori
       reply.receive
     rescue Channel::ClosedError
       nil
+    end
+
+    # Called after both tunnel directions and their transcript finish. This is only a wakeup
+    # hint for the headless capture printer, so keep it on the same non-blocking, drop-on-full
+    # path as ordinary flow events (P6).
+    def notify_tunnel_complete(flow_id : Int64) : Nil
+      return if flow_id <= 0
+      events = @events || return
+      select
+      when events.send(FlowEvent.new(flow_id, :tunnel_completed))
+      else
+        # Same best-effort, non-blocking policy as ordinary flow events; never stall the proxy.
+      end
+    rescue Channel::ClosedError
+      # session shutdown raced with the final tunnel close
     end
 
     # Restores a flow's captured WebSocket transcript — the import path, where the messages

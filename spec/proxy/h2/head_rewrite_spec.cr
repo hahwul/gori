@@ -43,6 +43,26 @@ private class SubRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+private class HostSelectiveResponseRewriter < Gori::Proxy::HeadRewriter
+  getter response_hosts = [] of String
+
+  def initialize(@match_host : String)
+  end
+
+  def active? : Bool
+    true
+  end
+
+  def rewrite_request(head : Bytes, host : String) : Bytes
+    head
+  end
+
+  def rewrite_response(head : Bytes, host : String) : Bytes
+    @response_hosts << host
+    host == @match_host ? String.new(head).gsub("x-marker: original", "x-marker: rewritten").to_slice : head
+  end
+end
+
 # The sandbox's BLOCKING gate: `StreamGate#undecodable` raises to end the connection when the
 # sandbox is on and a head arrives with no URL to scope-test.
 private class BlockingDeferrer
@@ -313,6 +333,85 @@ describe Gori::Proxy::H2::HeadRewrite do
     pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
     HPACK::Decoder.new.decode(emitted.first.payload)
       .find { |(n, _)| n == ":status" }.not_nil![1].should eq("503")
+  end
+
+  it "scopes a coalesced response rewrite to that stream's request authority" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
+    rewriter = HostSelectiveResponseRewriter.new("other.example.com")
+    pipe = Gori::Proxy::H2::HeadRewrite.new("in", rewriter, assembler, "api.example.com")
+    api_request = HPACK::Encoder.new.encode([
+      {":method", "GET"}, {":scheme", "https"}, {":authority", "api.example.com"},
+      {":path", "/api"},
+    ])
+    other_request = HPACK::Encoder.new.encode([
+      {":method", "GET"}, {":scheme", "https"}, {":authority", "other.example.com:443"},
+      {":path", "/resource"},
+    ])
+    assembler.feed("out", headers(1_u32, api_request))
+    assembler.feed("out", headers(3_u32, other_request))
+
+    api_response = HPACK::Encoder.new.encode([{":status", "200"}, {"x-marker", "original"}])
+    api_emitted = [] of Frame::Header
+    pipe.accept(headers(1_u32, api_response)) do |frame, pre|
+      api_emitted << frame
+      assembler.feed("in", frame, pre)
+    end
+    other_response = HPACK::Encoder.new.encode([{":status", "200"}, {"x-marker", "original"}])
+    other_emitted = [] of Frame::Header
+    pipe.accept(headers(3_u32, other_response)) do |frame, pre|
+      other_emitted << frame
+      assembler.feed("in", frame, pre)
+    end
+
+    rewriter.response_hosts.should eq(["api.example.com", "other.example.com"])
+    HPACK::Decoder.new.decode(api_emitted.first.payload)
+      .find { |(name, _)| name == "x-marker" }.not_nil![1].should eq("original")
+    HPACK::Decoder.new.decode(other_emitted.first.payload)
+      .find { |(name, _)| name == "x-marker" }.not_nil![1].should eq("rewritten")
+  end
+
+  it "records request authority before forwarding can wake the response pump" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
+    rewriter = HostSelectiveResponseRewriter.new("other.example.com")
+    out = Gori::Proxy::H2::HeadRewrite.new("out", rewriter, assembler, "api.example.com")
+    incoming = Gori::Proxy::H2::HeadRewrite.new("in", rewriter, assembler, "api.example.com")
+    request = HPACK::Encoder.new.encode([
+      {":method", "GET"}, {":scheme", "https"}, {":authority", "other.example.com:443"},
+      {":path", "/resource"},
+    ])
+    # The callback would write then feed the request into Assembler. Leave it parked here to
+    # model the response pump running as soon as the upstream write wakes the origin.
+    out.accept(headers(1_u32, request)) { |_frame, _pre| }
+
+    response = HPACK::Encoder.new.encode([{":status", "200"}, {"x-marker", "original"}])
+    emitted = [] of Frame::Header
+    incoming.accept(headers(1_u32, response)) do |frame, pre|
+      emitted << frame
+      assembler.feed("in", frame, pre)
+    end
+
+    rewriter.response_hosts.should eq(["other.example.com"])
+    HPACK::Decoder.new.decode(emitted.first.payload)
+      .find { |(name, _)| name == "x-marker" }.not_nil![1].should eq("rewritten")
+  end
+
+  it "falls back to the CONNECT host when no request reference exists" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
+    rewriter = HostSelectiveResponseRewriter.new("api.example.com")
+    pipe = Gori::Proxy::H2::HeadRewrite.new("in", rewriter, assembler, "api.example.com")
+    response = HPACK::Encoder.new.encode([{":status", "200"}, {"x-marker", "original"}])
+    emitted = [] of Frame::Header
+    pipe.accept(headers(1_u32, response)) do |frame, pre|
+      emitted << frame
+      assembler.feed("in", frame, pre)
+    end
+
+    rewriter.response_hosts.should eq(["api.example.com"])
+    HPACK::Decoder.new.decode(emitted.first.payload)
+      .find { |(name, _)| name == "x-marker" }.not_nil![1].should eq("rewritten")
   end
 
   describe "the h3 Alt-Svc strip (settings network.strip_alt_svc)" do

@@ -31,6 +31,8 @@ describe Gori::Proto do
     it "classifies SSE by Content-Type, tolerating charset params" do
       Gori::Proto.classify(200, "text/event-stream", nil, nil).should eq(Gori::Proto::Kind::Sse)
       Gori::Proto.classify(200, "text/event-stream; charset=utf-8", nil, nil).should eq(Gori::Proto::Kind::Sse)
+      Gori::Proto.classify(200, "text/event-streaming", nil, nil).should eq(Gori::Proto::Kind::Http)
+      Gori::Proto.classify(200, "text/event-streamx", nil, nil).should eq(Gori::Proto::Kind::Http)
     end
 
     it "treats everything else — including a pending/typeless flow — as HTTP" do

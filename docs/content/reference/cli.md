@@ -155,7 +155,7 @@ gori run capture --port 8070 --format json --for 5m
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
 | `--format=FMT` | `text` or `json` (JSON Lines) |
 | `--for=DURATION` | Stop after e.g. `30s`, `5m`, `1h` |
-| `--max=N` | Stop after N flows |
+| `--max=N` | Stop after N completed flows; upgraded tunnels count after they close |
 
 ### run history / ls
 

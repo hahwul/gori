@@ -9,6 +9,7 @@ require "./session"
 require "./store"
 require "./proxy/tls/cert_authority"
 require "./cli/output"
+require "./capture_completion"
 require "./verb"
 require "./verbs/core"
 require "./verbs/history"
@@ -380,30 +381,20 @@ module Gori
 
     private def capture_printer(session : Session, format : Symbol, max : Int32?) : Nil
       printed = 0
-      seen = Set(Int64).new
+      completion = CaptureCompletion.new
       loop do
         event = session.flow_events.receive
-        next unless event.kind == :updated # one line per completed/errored flow
-        # A WebSocket flow emits an :updated PER message on the SAME id; print + count it ONCE
-        # (its first update), else it prints duplicate rows and its own messages trip --max,
-        # tearing the live connection down mid-stream. That is 101 over h1, but 2xx plus the
-        # `websocket` connect protocol over h2 — use the same lightweight predicate the PROTO
-        # column uses rather than spelling only the first transport here.
-        next if seen.includes?(event.id)
-        if row = session.store.flow_row(event.id)
-          # Only WS re-emits :updated, so only WS ids need de-dup tracking — keeping `seen`
-          # bounded by concurrent WS flows instead of growing per HTTP flow for the lifetime
-          # of a long `gori run capture` session.
-          seen << event.id if Proto.websocket?(row.status, row.connect_protocol)
-          # Stream the SAME row rendering `gori run history` prints, so capture and
-          # history output never drift (text = human-readable; json = stable contract).
-          puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))
-          STDOUT.flush # stream each flow promptly even when piped (block-buffered)
-          printed += 1
-          if max && printed >= max
-            @shutdown.send(nil) rescue nil # hit --max: ask the main fiber to wind down
-            break
-          end
+        next unless row = session.store.flow_row(event.id)
+        next unless completion.ready?(event, row)
+        # An upgraded flow emits an :updated event for its handshake and another :updated event
+        # for each captured message. Count it only on the one completion event after the tunnel
+        # closes; ordinary flows still count on their response update.
+        puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))
+        STDOUT.flush # stream each flow promptly even when piped (block-buffered)
+        printed += 1
+        if max && printed >= max
+          @shutdown.send(nil) rescue nil # hit --max: ask the main fiber to wind down
+          break
         end
       end
     rescue Channel::ClosedError

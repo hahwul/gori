@@ -1877,8 +1877,9 @@ module Gori
       end
     end
 
-    # Best-effort notification that a flow row changed. Published AFTER commit.
-    record FlowEvent, id : Int64, kind : Symbol # :inserted | :updated
+    # Best-effort notification that a flow row changed or an upgraded tunnel closed. Row
+    # changes publish AFTER commit; tunnel completion is a non-blocking wakeup after transcript writes.
+    record FlowEvent, id : Int64, kind : Symbol # :inserted | :updated | :tunnel_completed
 
     # One row of the #124 append-only event feed (the AI firehose the MCP process tails).
     # `id` is the forward cursor key (monotonic AUTOINCREMENT); `created_at` is unix micros

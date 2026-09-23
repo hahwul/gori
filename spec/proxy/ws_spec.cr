@@ -24,8 +24,9 @@ end
 private class IntegSink < Gori::Proxy::FlowSink
   getter ws = [] of {String, String}
   getter heads = [] of String
+  getter tunnel_completions = [] of Int64
 
-  def initialize(@ws_chan : Channel(Nil))
+  def initialize(@ws_chan : Channel(Nil), @tunnel_chan : Channel(Int64)? = nil)
     @next = 0_i64
   end
 
@@ -41,6 +42,11 @@ private class IntegSink < Gori::Proxy::FlowSink
                     shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
     @ws << {direction, String.new(payload)}
     @ws_chan.send(nil)
+  end
+
+  def on_tunnel_complete(flow_id : Int64) : Nil
+    @tunnel_completions << flow_id
+    @tunnel_chan.try(&.send(flow_id))
   end
 end
 
@@ -1207,18 +1213,24 @@ describe "WebSocket through the proxy (end-to-end)" do
     port = origin.local_address.port
     spawn do
       conn = origin.accept
-      Gori::Proxy::Codec::Http1.read_head(conn) # the upgrade GET
-      conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
-      conn.flush
-      frame = Gori::Proxy::WS.read_frame(conn).not_nil!    # client's (masked) frame
-      conn.write(Bytes[0x81_u8, frame.payload.size.to_u8]) # unmasked echo
-      conn.write(frame.payload)
-      conn.flush
-    rescue
+      begin
+        Gori::Proxy::Codec::Http1.read_head(conn) # the upgrade GET
+        conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+        conn.flush
+        frame = Gori::Proxy::WS.read_frame(conn).not_nil!    # client's (masked) frame
+        conn.write(Bytes[0x81_u8, frame.payload.size.to_u8]) # unmasked echo
+        conn.write(frame.payload)
+        conn.flush
+        conn.read(Bytes.new(1)) # keep the server leg open until the client closes the tunnel
+      rescue
+      ensure
+        conn.close rescue nil
+      end
     end
 
     ws_chan = Channel(Nil).new(4)
-    sink = IntegSink.new(ws_chan)
+    tunnel_chan = Channel(Int64).new(1)
+    sink = IntegSink.new(ws_chan, tunnel_chan)
     proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
     proxy.start
 
@@ -1238,11 +1250,19 @@ describe "WebSocket through the proxy (end-to-end)" do
 
     receive_within(ws_chan) # out
     receive_within(ws_chan) # in
+    select
+    when tunnel_chan.receive
+      fail "the upgrade was marked complete while the client tunnel was still open"
+    else
+    end
     client.close
+    receive_within(tunnel_chan, 5, "the upgrade tunnel to finish after its transcript").should eq(1_i64)
     proxy.stop
+    origin.close rescue nil
 
     sink.ws.should contain({"out", "ping"})
     sink.ws.should contain({"in", "ping"})
+    sink.tunnel_completions.should eq([1_i64])
   end
 
   it "relays client frames when the 101 also carries Content-Type: text/event-stream" do

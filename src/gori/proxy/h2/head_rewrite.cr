@@ -191,6 +191,9 @@ module Gori::Proxy::H2
         return nil
       end
       fields = restore_length ? HeadCodec.restore_content_length(parsed, block.fields) : parsed
+      if block.request && message_head?(fields, true)
+        @assembler.remember_request_authority(block.stream_id, HeadCodec.pseudo_of(fields, ":authority"))
+      end
       @engaged = true
       Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
         Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
@@ -377,6 +380,9 @@ module Gori::Proxy::H2
       notice_unreachable(fields) if request && head
       rewritten = head ? rewrite(fields, head, request, stream_id) : nil
       emit_fields = rewritten || fields
+      if request && message_head?(emit_fields, request)
+        @assembler.remember_request_authority(stream_id, HeadCodec.pseudo_of(emit_fields, ":authority"))
+      end
       # The OFF half of the h3 `Alt-Svc` seam (#835), on the fields actually going out — see
       # `note_alt_svc_kept`. Gated exactly as the strip is: a trailer block, a PUSH_PROMISE and
       # an interim 1xx all arrive on this direction and none is a head a client acts on an
@@ -428,9 +434,10 @@ module Gori::Proxy::H2
       return nil if first.frame_type == Frame::Type::PushPromise
       return nil unless message_head?(fields, request)
       tuples = pairs(fields)
-      # Scope on the stream's own `:authority` rather than the CONNECT host, so a host-scoped
-      # rule (and a host-scoped intercept) is right even on a coalesced connection. Responses
-      # have no authority to read, so those fall back to the connection's host.
+      # A request's synthetic Host comes from the stream's own `:authority`, so request-head
+      # rules and intercepts stay scoped on a coalesced connection. This helper only builds the
+      # synthetic request/response text; response-rule scope is recovered from the request
+      # authority for this stream in `rewrite`.
       request ? HeadCodec.synth_request(tuples, HeadCodec.pseudo(tuples, ":authority") || @host) : HeadCodec.synth_response(tuples)
     end
 
@@ -452,10 +459,11 @@ module Gori::Proxy::H2
       # every other host-scoping site in this pipeline passes (`notice_unreachable` below,
       # `H2::Extract`, `StreamGate`'s three gates). `:authority` may carry a port, and
       # `Rules.host_matches?` compiles an anchored regex — so `api.example.com:8443` silently
-      # matched no `*.example.com` glob, leaving a head rule that fires on h1 and on this
-      # stream's own RESPONSE head (which gets the bare `@host`) inert on the request.
-      authority = request ? request_host(fields) : @host
-      rewritten_head = request ? rw.rewrite_request(head, authority) : rw.rewrite_response(head, @host)
+      # matched no `*.example.com` glob. Both directions need the stream's bare authority: this
+      # request reads it from its own fields, while a response recovers it from the request mapped
+      # to this stream because coalesced h2 connections can carry a different host per stream.
+      authority = request ? request_host(fields) : response_host(stream_id)
+      rewritten_head = request ? rw.rewrite_request(head, authority) : rw.rewrite_response(head, authority)
       return nil if rewritten_head == head # `Rules` returns the same content when nothing matched
 
       parsed = request ? HeadCodec.parse_request(rewritten_head, fields) : HeadCodec.parse_response(rewritten_head, fields)
@@ -638,7 +646,18 @@ module Gori::Proxy::H2
     # block carries no `:authority`. One spelling of "which host is this stream for", so the
     # rule gate and the notices below cannot drift on it.
     private def request_host(fields : Array(HPACK::Field)) : String
-      authority = HeadCodec.pseudo_of(fields, ":authority")
+      bare_host(HeadCodec.pseudo_of(fields, ":authority"))
+    end
+
+    # The response has no `:authority`; use its stream's request when available, and fall back
+    # to the CONNECT host for untracked or malformed streams.
+    private def response_host(stream_id : UInt32) : String
+      bare_host(@assembler.request_authority(stream_id))
+    end
+
+    # Strip an optional port from the authority using the same parser for requests and
+    # responses. Rules match bare hosts, including for IPv6 literals.
+    private def bare_host(authority : String?) : String
       return @host if authority.nil? || authority.empty?
       host, _ = Upstream.split_host_port(authority, 0)
       host.empty? ? @host : host
