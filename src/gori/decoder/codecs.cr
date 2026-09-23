@@ -33,10 +33,7 @@ module Gori::Decoder
     # common (no-whitespace) input decodes with zero extra allocation — the byte
     # scan returns the original string untouched instead of the old regex copy.
     def base64_decode(s : String) : Bytes
-      cleaned = strip_ascii_ws(s)
-      decoded = Base64.decode(cleaned)
-      validate_base64_pad_bits(cleaned)
-      decoded
+      Base64.decode(strip_ascii_ws(s))
     rescue ex : Base64::Error
       raise DecoderError.new("invalid base64: #{ex.message}")
     end
@@ -49,41 +46,6 @@ module Gori::Decoder
       return s unless bytes.any? { |b| ascii_ws?(b) }
       String.build(bytes.size) do |io|
         bytes.each { |b| io.write_byte(b) unless ascii_ws?(b) }
-      end
-    end
-
-    # Crystal's decoder accepts non-zero unused bits in a short Base64 tail (for
-    # example, `Zh` decodes to `f`). Those bits cannot belong to an output byte and
-    # must be zero for a canonical encoding; keep the stdlib's alphabet/padding
-    # handling, but refuse that lossy tail shape.
-    private def validate_base64_pad_bits(s : String) : Nil
-      bytes = s.to_slice
-      symbols = bytes.size
-      while symbols > 0 && bytes[symbols - 1] == 0x3d_u8
-        symbols -= 1
-      end
-
-      unused_bits = case symbols % 4
-                    when 2 then 4
-                    when 3 then 2
-                    when 0 then 0
-                    else        raise DecoderError.new("invalid base64 length")
-                    end
-      return if unused_bits == 0
-
-      last = base64_symbol_value(bytes[symbols - 1])
-      mask = (1_u8 << unused_bits) - 1
-      raise DecoderError.new("non-zero unused base64 bits") unless (last & mask) == 0
-    end
-
-    private def base64_symbol_value(b : UInt8) : UInt8
-      case b
-      when 0x41_u8..0x5a_u8 then (b - 0x41_u8).to_u8
-      when 0x61_u8..0x7a_u8 then (b.to_i - 0x61 + 26).to_u8
-      when 0x30_u8..0x39_u8 then (b.to_i - 0x30 + 52).to_u8
-      when 0x2b_u8, 0x2d_u8 then 62_u8 # '+' and URL-safe '-'
-      when 0x2f_u8, 0x5f_u8 then 63_u8 # '/' and URL-safe '_'
-      else                       raise DecoderError.new("invalid base64 symbol")
       end
     end
 
@@ -196,7 +158,7 @@ module Gori::Decoder
           n += 1
         end
       end
-      validate_base32_tail(symbols, padding, acc, bits)
+      validate_base32_tail(symbols, padding)
       buf[0, n]
     end
 
@@ -230,16 +192,15 @@ module Gori::Decoder
           n += 1
         end
       end
-      validate_base32_tail(symbols, padding, acc, bits)
+      validate_base32_tail(symbols, padding)
       buf[0, n]
     end
 
     # RFC 4648 base32 tails can carry 0, 1, 2, 3, or 4 bytes. Their symbol counts
     # modulo eight are 0, 2, 4, 5, or 7; every other count leaves an impossible group.
-    # Unpadded valid tails remain accepted, but explicit padding must match its quantum,
-    # and the unused low bits in the last symbol must be zero.
-    private def validate_base32_tail(symbols : Int32, padding : Int32,
-                                     acc : UInt32, bits : Int32) : Nil
+    # Unpadded valid tails remain accepted, but explicit padding must match its quantum.
+    # Unused low bits are ignored, like the stdlib's Base64 decoder.
+    private def validate_base32_tail(symbols : Int32, padding : Int32) : Nil
       tail = symbols % 8
       expected_padding = case tail
                          when 0 then 0
@@ -251,9 +212,6 @@ module Gori::Decoder
                          end
       if padding > 0 && padding != expected_padding
         raise DecoderError.new("invalid base32 padding")
-      end
-      if bits > 0 && (acc & ((1_u32 << bits) - 1)) != 0
-        raise DecoderError.new("non-zero unused base32 bits")
       end
     end
 

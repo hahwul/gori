@@ -111,13 +111,13 @@ describe Gori::Decoder do
       conv("base64-decode", "aGVs bG8g\td29y\r\nbG Q=").should eq "hello world"
     end
 
-    it "rejects non-zero unused base64 bits while allowing valid unpadded tails" do
+    it "accepts non-zero unused base64 bits and valid unpadded tails" do
       conv("base64-decode", "Zg").should eq "f"
       conv("base64-decode", "Zg==").should eq "f"
       conv("base64-decode", "Zm8").should eq "fo"
-      expect_raises(Gori::Decoder::DecoderError) { conv("base64-decode", "Zh") }
-      expect_raises(Gori::Decoder::DecoderError) { conv("base64-decode", "Zh==") }
-      expect_raises(Gori::Decoder::DecoderError) { conv("base64-decode", "Zm9") }
+      conv("base64-decode", "Zh").should eq "f"
+      conv("base64-decode", "Zh==").should eq "f"
+      conv("base64-decode", "Zm9").should eq "fo"
     end
 
     it "url encode/decode (form style)" do
@@ -174,21 +174,27 @@ describe Gori::Decoder do
     end
 
     it "rejects symbol counts that cannot form a base32 byte tail" do
-      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZX") }
+      ["M", "MZX", "MZXW6Y"].each do |encoded|
+        expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", encoded) }
+      end
     end
 
-    it "rejects non-zero unused bits for every partial group size" do
-      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZ") }
-      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZ======") }
-      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZXR") }
-      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZXW7") }
-      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZXW6YR") }
+    it "accepts non-zero unused bits in padded and unpadded base32 tails" do
+      conv("base32-decode", "MZ").should eq "f"
+      conv("base32-decode", "MZ======").should eq "f"
+      conv("base32-decode", "MZXR").should eq "fo"
+      conv("base32-decode", "MZXW7").should eq "foo"
+      conv("base32-decode", "MZXW6YR").should eq "foob"
+    end
+
+    it "rejects malformed and misplaced base32 padding" do
       expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "M=Y======") }
       expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MY=====") }
+      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZXW6YTBOI=======") }
     end
 
     it "validates tails after Unicode whitespace filtering too" do
-      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZ#{0x2003.chr}") }
+      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZX#{0x2003.chr}") }
     end
 
     it "base32-encode emits exact RFC 4648 length + padding across input sizes" do
