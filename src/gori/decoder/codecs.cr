@@ -6,6 +6,7 @@ require "compress/deflate"
 require "big"
 require "../cookie"
 require "../jwt/jwe"
+require "../jwt/raw_json"
 require "../proxy/codec/brotli"
 require "../proxy/codec/zstd"
 
@@ -503,14 +504,16 @@ module Gori::Decoder
 
     # The `alg` from a JWT header segment (base64url JSON), or nil if unreadable.
     private def jwt_alg(header_seg : String) : String?
-      JSON.parse(String.new(Base64.decode(header_seg)))["alg"]?.try(&.as_s?)
+      Gori::Jwt::RawJson.member(String.new(Base64.decode(header_seg)), "alg").try(&.as_s?)
     rescue
       nil
     end
 
+    # Numbers are shown as the digits the token carries (`Jwt::RawJson`): one claim past
+    # Int64/Float64 (an unsigned 64-bit id) used to make the WHOLE segment undecodable.
     private def pretty_json_segment(seg : String) : String
       bytes = Base64.decode(seg) # urlsafe + missing-pad tolerant
-      JSON.parse(String.new(bytes)).to_pretty_json
+      Gori::Jwt::RawJson.reformat(String.new(bytes), "  ")
     rescue
       "(undecodable segment)"
     end

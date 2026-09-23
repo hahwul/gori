@@ -219,7 +219,8 @@ module Gori
         private def payload_object(token : String) : Hash(String, JSON::Any)?
           seg = token.split('.')[1]?
           return nil if seg.nil? || seg.empty?
-          JSON.parse(String.new(Base64.decode(seg))).as_h?
+          # `RawJson.claims`: one number past Int64 (a u64 id) no longer hides every claim (#1169).
+          Gori::Jwt::RawJson.claims(String.new(Base64.decode(seg)))
         rescue
           nil
         end
@@ -230,7 +231,9 @@ module Gori
         private def header_object(token : String) : Hash(String, JSON::Any)?
           seg = token.split('.')[0]?
           return nil if seg.nil? || seg.empty?
-          JSON.parse(String.new(Base64.decode(seg))).as_h?
+          # `RawJson.claims`, so an oversized number in the header cannot switch off every check
+          # here — `jwt_alg_none` included (#1169).
+          Gori::Jwt::RawJson.claims(String.new(Base64.decode(seg)))
         rescue
           nil
         end

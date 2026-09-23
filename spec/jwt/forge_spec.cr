@@ -139,6 +139,48 @@ describe Gori::Jwt do
     end
   end
 
+  describe "a claim number outside Int64/Float64 (#1169)" do
+    big = %({"sub":"admin","uid":18446744073709551615,"f":1.5e400})
+    token = "#{b64(%({"alg":"HS256","typ":"JWT"}))}.#{b64(big)}.sig"
+
+    it "decodes the payload with the number's digits intact" do
+      Gori::Jwt.payload_json(token).should contain(%("uid": 18446744073709551615))
+      Gori::Jwt.payload_json(token).should contain(%("f": 1.5e400))
+      Gori::Jwt.decode_json(token).should contain(%("payload":{"sub":"admin","uid":18446744073709551615,"f":1.5e400}))
+    end
+
+    it "patches a claim without dropping the others" do
+      patched = Gori::Jwt.patch_payload(Gori::Jwt.signing_payload(token), ["role=x"])
+      patched.should eq(%({"sub":"admin","uid":18446744073709551615,"f":1.5e400,"role":"x"}))
+    end
+
+    it "re-signs without --set keeping every claim" do
+      signed = Gori::Jwt.encode(Gori::Jwt.header_json(token), Gori::Jwt.signing_payload(token), "HS256", "k")
+      String.new(Base64.decode(signed.split('.')[1])).should eq(big)
+    end
+
+    it "sets an oversized number as a number, not a string" do
+      Gori::Jwt.patch_payload(%({}), ["uid=18446744073709551616"]).should eq(%({"uid":18446744073709551616}))
+    end
+
+    it "replaces every occurrence of a duplicated claim it patches" do
+      Gori::Jwt.patch_payload(%({"sub":"a","x":1,"sub":"b"}), ["sub=admin"])
+        .should eq(%({"sub":"admin","x":1,"sub":"admin"}))
+    end
+  end
+
+  describe ".signing_payload" do
+    it "refuses a payload segment that is not JSON rather than answer blank" do
+      token = "#{b64(%({"alg":"HS256"}))}.#{b64("notjson")}.sig"
+      Gori::Jwt.payload_json(token).should eq("") # the display seed stays blank
+      expect_raises(Gori::Jwt::ForgeError, /payload is not JSON.*refusing/) { Gori::Jwt.signing_payload(token) }
+    end
+
+    it "is blank only when the token has no payload segment" do
+      Gori::Jwt.signing_payload("#{b64(%({"alg":"HS256"}))}..sig").should eq("")
+    end
+  end
+
   describe ".attacks" do
     it "returns an empty list for a non-JWT string" do
       Gori::Jwt.attacks("plainstring").should be_empty       # 1 segment

@@ -135,14 +135,15 @@ module Gori
       private def self.emit_jwt_encode(token : String, alg : String, secret : String,
                                        payload_override : String?, sets : Array(String), format : Symbol) : Nil
         header = Jwt.header_json(token)
-        base_payload = Jwt.payload_json(token)
-        abort "gori run jwt: not a decodable JWT (need header.payload)" if header.empty? && base_payload.empty?
+        abort "gori run jwt: not a decodable JWT (need header.payload)" if header.empty? && Jwt.payload_json(token).empty?
+        # The token's own claims only when they are the base: `signing_payload` refuses a payload
+        # it cannot read, where a blank would re-sign `{}` plus the patch (#1169).
         payload = if po = payload_override
                     po
                   elsif !sets.empty?
-                    Jwt.patch_payload(base_payload, sets)
+                    Jwt.patch_payload(Jwt.signing_payload(token), sets)
                   else
-                    base_payload
+                    Jwt.signing_payload(token)
                   end
         signed = Jwt.encode(header, payload, alg, secret)
         if format == :json

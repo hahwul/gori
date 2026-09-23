@@ -4,6 +4,7 @@ require "crypto/subtle"
 require "openssl/hmac"
 require "./asym"
 require "./jwe"
+require "./raw_json"
 
 module Gori
   # Encode / re-sign side of the JWT workbench. The scanner in `../jwt.cr` is decode-only
@@ -148,26 +149,55 @@ module Gori
     # on how a claim is typed. Each value is parsed as JSON when it parses — so `admin=true` and
     # `exp=9999999999` keep their boolean/number type — and taken as a string literal otherwise
     # (`role=admin`). A `key=` with an empty value sets the empty string. `base_payload` blank →
-    # start from `{}`. Raises ForgeError when the payload isn't a JSON object (nothing to key
-    # into) or a patch carries no `=`.
+    # start from `{}` — so a caller re-signing a TOKEN reads its base with `signing_payload`,
+    # which refuses rather than hand back a blank for claims it could not read. Untouched claims
+    # keep their order and their numbers' literal digits (`RawJson`); a patched key that occurs
+    # more than once is replaced at every occurrence, so no parser reads the old value. Raises
+    # ForgeError when the payload isn't a JSON object (nothing to key into) or a patch carries
+    # no `=`.
     def patch_payload(base_payload : String, sets : Array(String)) : String
-      obj = parse_object(base_payload.presence || "{}", "payload")
+      members = object_members(base_payload.presence || "{}", "payload")
       sets.each do |kv|
         key, sep, val = kv.partition('=')
         raise ForgeError.new("invalid claim patch #{kv.inspect} (expected key=value)") if sep.empty?
         raise ForgeError.new("invalid claim patch #{kv.inspect} (empty key)") if key.empty?
-        obj[key] = parse_claim_value(val)
+        value = claim_value_json(val)
+        if members.any? { |(k, _)| k == key }
+          members.map! { |(k, v)| k == key ? {k, value} : {k, v} }
+        else
+          members << {key, value}
+        end
       end
-      obj.to_json
+      RawJson.object(members)
     end
 
-    # `admin=true` → the boolean, `n=3` → the number, `role=admin` → the string. A value that
-    # parses as JSON keeps its type; anything else is a string literal (quote it — `s="1"` — to
+    # `admin=true` → the boolean, `n=3` → the number, `role=admin` → the string, as the JSON
+    # text to splice in. A value that parses as JSON keeps its type — a number past Int64 stays
+    # a number, digits intact — and anything else is a string literal (quote it — `s="1"` — to
     # force a numeric-looking string).
-    private def parse_claim_value(val : String) : JSON::Any
-      JSON.parse(val)
+    private def claim_value_json(val : String) : String
+      RawJson.reformat(val)
     rescue JSON::ParseException
-      JSON::Any.new(val)
+      val.to_json
+    end
+
+    # The token's payload JSON to RE-SIGN from. `payload_json` is a display seed and answers ""
+    # for a segment it cannot read, which a patch then treats as "no claims" and rebuilds from
+    # `{}`. Here a payload segment that is present but unreadable is a ForgeError naming why;
+    # "" only when the token has no payload segment at all.
+    def signing_payload(token : String) : String
+      seg = token.strip.split('.')[1]?
+      return "" if seg.nil? || seg.empty?
+      text = begin
+        String.new(Base64.decode(seg))
+      rescue
+        raise ForgeError.new("the token's payload segment is not base64url — refusing to re-sign without its claims")
+      end
+      begin
+        RawJson.reformat(text, "  ")
+      rescue ex : JSON::ParseException
+        raise ForgeError.new("the token's payload is not JSON (#{ex.message}) — refusing to re-sign without its claims")
+      end
     end
 
     # The pretty-printed JSON of a token's header / payload segment, for seeding the
@@ -185,7 +215,7 @@ module Gori
     def token_alg(token : String) : String?
       seg = token.strip.split('.')[0]?
       return nil unless seg
-      JSON.parse(String.new(Base64.decode(seg)))["alg"]?.try(&.as_s?)
+      RawJson.member(String.new(Base64.decode(seg)), "alg").try(&.as_s?)
     rescue
       nil
     end
@@ -194,32 +224,36 @@ module Gori
 
     private def segment_json(seg : String?) : String
       return "" if seg.nil? || seg.empty?
-      JSON.parse(String.new(Base64.decode(seg))).to_pretty_json
+      RawJson.reformat(String.new(Base64.decode(seg)), "  ")
     rescue
       ""
     end
 
-    # Parse the header JSON to an object, splice in `alg`, re-serialize compact. Raises
-    # ForgeError when the header isn't a JSON object.
+    # Parse the header JSON to an object, set `alg` (in place when present, every occurrence),
+    # re-serialize compact. Raises ForgeError when the header isn't a JSON object.
     private def force_alg(header_json : String, alg : String) : String
-      obj = parse_object(header_json, "header")
-      obj["alg"] = JSON::Any.new(alg)
-      obj.to_json
+      members = object_members(header_json, "header")
+      value = alg.to_json
+      if members.any? { |(k, _)| k == "alg" }
+        members.map! { |(k, v)| k == "alg" ? {k, value} : {k, v} }
+      else
+        members << {"alg", value}
+      end
+      RawJson.object(members)
     end
 
-    # Compact any JSON value (payload need not be an object). ForgeError on parse failure.
+    # Compact any JSON value (payload need not be an object), numbers kept as written.
+    # ForgeError on parse failure.
     private def compact_json(json : String, what : String) : String
-      JSON.parse(json).to_json
+      RawJson.reformat(json)
     rescue ex : JSON::ParseException
       raise ForgeError.new("invalid #{what} JSON: #{ex.message}")
     end
 
-    private def parse_object(json : String, what : String) : Hash(String, JSON::Any)
-      JSON.parse(json).as_h
+    private def object_members(json : String, what : String) : Array({String, String})
+      RawJson.members(json) || raise ForgeError.new("#{what} must be a JSON object")
     rescue JSON::ParseException
       raise ForgeError.new("invalid #{what} JSON")
-    rescue TypeCastError
-      raise ForgeError.new("#{what} must be a JSON object")
     end
   end
 end

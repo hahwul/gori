@@ -109,7 +109,7 @@ module Gori
     # header_json/payload_json return PRETTY JSON; compact it so the emitted object is a
     # single clean line (valid either way — this is just tidier).
     private def segment_field(j : JSON::Builder, name : String, seg_json : String) : Nil
-      j.field(name) { seg_json.empty? ? j.null : j.raw(JSON.parse(seg_json).to_json) }
+      j.field(name) { seg_json.empty? ? j.null : j.raw(RawJson.reformat(seg_json)) }
     end
   end
 end

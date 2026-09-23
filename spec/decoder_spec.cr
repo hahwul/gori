@@ -699,6 +699,14 @@ describe Gori::Decoder do
       out.should contain "not verified"
     end
 
+    it "decodes a payload holding a number past Int64 instead of calling it undecodable (#1169)" do
+      h = Base64.urlsafe_encode(%({"alg":"HS256"}), padding: false)
+      p = Base64.urlsafe_encode(%({"sub":"admin","uid":18446744073709551615}), padding: false)
+      out = conv("jwt-decode", "#{h}.#{p}.sig")
+      out.should contain %("uid": 18446744073709551615)
+      out.should_not contain "undecodable"
+    end
+
     it "raises a clean error on junk" do
       expect_raises(Gori::Decoder::DecoderError) { conv("jwt-decode", "not-a-jwt") }
     end

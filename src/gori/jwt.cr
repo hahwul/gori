@@ -72,7 +72,8 @@ module Gori
     def jwt?(s : String) : Bool
       return false unless s =~ JWT_RE
       header = Base64.decode(s.split('.', 2).first)
-      JSON.parse(String.new(header)).as_h? != nil
+      # `RawJson`: an oversized number in the header must not hide the token (#1169).
+      !RawJson.members(String.new(header)).nil?
     rescue
       false
     end
@@ -138,7 +139,7 @@ module Gori
     end
 
     private def claim_s(seg : String, key : String) : String?
-      JSON.parse(String.new(Base64.decode(seg)))[key]?.try(&.as_s?)
+      Jwt::RawJson.member(String.new(Base64.decode(seg)), key).try(&.as_s?)
     rescue
       nil
     end
@@ -146,7 +147,7 @@ module Gori
     private def claim_i(seg : String, key : String) : Int64?
       # RFC 7519 NumericDate permits a non-integer value (sub-second precision), so `exp`
       # can arrive as a JSON float — take its integer part rather than dropping the claim.
-      v = JSON.parse(String.new(Base64.decode(seg)))[key]?
+      v = Jwt::RawJson.member(String.new(Base64.decode(seg)), key)
       v.try(&.as_i64?) || v.try(&.as_f?).try(&.to_i64)
     rescue
       nil

@@ -222,6 +222,36 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "jwt_decode and jwt_encode set keep a token whose claim is past Int64 (#1169)" do
+      h = Base64.urlsafe_encode(%({"alg":"HS256","typ":"JWT"}), padding: false)
+      p = Base64.urlsafe_encode(%({"sub":"admin","uid":18446744073709551615}), padding: false)
+      big = "#{h}.#{p}.sig"
+      with_store do |store|
+        # Read raw: the reply carries the digits as a JSON number, which Crystal's own
+        # `JSON.parse` (the harness) cannot hold either — that inability was the bug.
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_decode","arguments":{"token":"#{big}"}}})
+        output = IO::Memory.new
+        Gori::MCP::Server.new(store, allow_actions: false, verify_upstream: true, input: IO::Memory.new(call + "\n"), output: output).run
+        output.to_s.should contain(%(\\"payload\\":{\\"sub\\":\\"admin\\",\\"uid\\":18446744073709551615}))
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"token":"#{big}","set":["role=x"],"secret":"k"}}})
+        token = mcp_tool_payload(mcp_drive(store, call)[0])["token"].as_s
+        String.new(Base64.decode(token.split('.')[1]))
+          .should eq(%({"sub":"admin","uid":18446744073709551615,"role":"x"}))
+      end
+    end
+
+    it "jwt_encode refuses to patch a token whose payload is not JSON instead of starting from {}" do
+      h = Base64.urlsafe_encode(%({"alg":"HS256"}), padding: false)
+      bad = "#{h}.#{Base64.urlsafe_encode("notjson", padding: false)}.sig"
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"token":"#{bad}","set":["role=x"],"secret":"k"}}})
+        resp = mcp_drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("refusing to re-sign")
+      end
+    end
+
     it "jwt_encode refuses payload and set together" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"payload":"{}","set":["role=admin"],"secret":"k"}}})
