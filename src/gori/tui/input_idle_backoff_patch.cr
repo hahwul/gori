@@ -46,9 +46,9 @@ require "termisu"
 #
 # WHAT THIS WIDENS, disclosed because it is not zero. It used to be a double-fiber race:
 # `resume_input_processing` flipped `@running` back on and spawned a fresh fiber while the
-# previous one was still parked in the sleep. That race is gone at b790d91 — `Source::Input`
-# serializes `start`/`stop` on a lifecycle lock and `stop` blocks on `@done` until the old
-# fiber's `ensure` runs, so two can no longer coexist.
+# previous one was still parked in the sleep. That race is gone at b790d91 (5bdf493 on
+# termisu's rewritten main) — `Source::Input` serializes `start`/`stop` on a lifecycle lock and
+# `stop` blocks on `@done` until the old fiber's `ensure` runs, so two can no longer coexist.
 #
 # What replaces it is the mirror image: `stop` now WAITS for that fiber, and the loop does not
 # select on the stop signal while sleeping. So every mode transition that pauses input —

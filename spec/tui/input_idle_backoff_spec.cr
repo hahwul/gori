@@ -13,7 +13,7 @@ describe "the termisu pin the carried input back-off is written against" do
     lock = File.read(File.join(__DIR__, "..", "..", "shard.lock"))
     pinned = lock[/termisu:.*?commit\.([0-9a-f]{40})/m, 1]?
 
-    pinned.should eq("b790d9147d6b08edfcc60854406a8a78b4a97ded")
+    pinned.should eq("5bdf49380e935dfc21bcdbd9e9296347f5991112")
   end
 
   # The patch reopens `Termisu::Event::Source::Input` and overrides a PRIVATE method, so no spec
