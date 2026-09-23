@@ -54,6 +54,17 @@ describe Gori::Import::Postman do
     result.flows[2].request.port.should eq(8443)
   end
 
+  it "places component query parameters before a path fragment" do
+    result = parse(<<-JSON)
+      {"info": {"name": "n"},
+       "item": [{"request": {"method": "GET", "url": {
+          "protocol": "https", "host": ["a", "test"],
+          "path": ["search#client-fragment"],
+          "query": [{"key": "q", "value": "wanted"}]}}}]}
+      JSON
+    result.flows.first.request.target.should eq("/search?q=wanted")
+  end
+
   it "expands {{variables}} from the collection and from folder scope" do
     result = parse(<<-JSON)
       {"info": {"name": "n"},

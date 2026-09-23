@@ -77,6 +77,22 @@ describe Gori::Import::Insomnia do
     result.flows.first.request.target.should eq("/s?pre=0&page=2&q=a+b")
   end
 
+  it "inserts separate parameters before the URL fragment" do
+    result = parse(<<-JSON)
+      {"_type": "export", "__export_format": 4, "resources": [
+        {"_id": "req_1", "_type": "request", "method": "GET",
+         "url": "https://a.test/search?pre=0#client-fragment",
+         "parameters": [{"name": "page", "value": "2"}]},
+        {"_id": "req_2", "_type": "request", "method": "GET",
+         "url": "https://a.test/search#client-fragment?not-a-query",
+         "parameters": [{"name": "q", "value": "wanted"}]}]}
+      JSON
+    result.flows.map(&.request.target).should eq([
+      "/search?pre=0&page=2",
+      "/search?q=wanted",
+    ])
+  end
+
   it "resolves an environment value that is itself templated" do
     result = parse(<<-JSON)
       {"_type": "export", "__export_format": 4, "resources": [

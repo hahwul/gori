@@ -151,12 +151,12 @@ module Gori
           next if key.empty?
           "#{key}=#{Vars.value_to_s(qh["value"]?)}"
         end.join('&')
-        String.build do |b|
+        url = String.build do |b|
           b << proto << "://" << host
           b << ':' << port if port
           b << '/' << path unless path.empty?
-          b << '?' << query unless query.empty?
         end
+        Builder.append_query(url, query)
       end
 
       # `host`/`path` are arrays of segments ("api", "example", "com"), but both are

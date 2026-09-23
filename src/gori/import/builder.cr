@@ -36,6 +36,23 @@ module Gori
         {body, true_size > size, true_size}
       end
 
+      # Add generated query parameters before a URL fragment: the query is part of the request
+      # target, while a `#fragment` is not sent and must not swallow it.
+      def self.append_query(url : String, query : String) : String
+        return url if query.empty?
+
+        if fragment_at = url.index('#')
+          base = url[0...fragment_at]
+          fragment = url[fragment_at..]
+        else
+          base = url
+          fragment = ""
+        end
+
+        separator = base.includes?('?') ? '&' : '?'
+        "#{base}#{separator}#{query}#{fragment}"
+      end
+
       # A scheme is `scheme://` at the very START of the string (RFC 3986 §3.1); a
       # `://` later on (e.g. inside a query, `?next=http://x`) is NOT a scheme, so
       # match the leading scheme only — else a scheme-less endpoint carrying a URL in

@@ -175,7 +175,7 @@ module Gori
         params = merge_params(spec, item, op)
         filled = fill_path_params(spec, path, params) # /users/{id} -> /users/1
         query = query_string(spec, params)            # required query params -> a=1&b=2
-        target = query.empty? ? filled : "#{filled}?#{query}"
+        target = Builder.append_query(filled, query)
         url = join_url(base, target)
         headers = Builder::Headers.new
         ct, body = request_payload(spec, op, params, swagger2)

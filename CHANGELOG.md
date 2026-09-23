@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Issues: the SARIF export keeps each `Set-Cookie` field separate instead of comma-joining cookies into one fabricated value, joins repeated `Cookie` fields with `; `, and writes credential header values as `[REDACTED]` unless `gori run issues --include-sensitive` asks for them (#1190, #1191)
+- Import: generated Insomnia, Postman, and OpenAPI query parameters now stay before URL fragments (#1184)
 - CLI: a `--db` file that is not a gori project (another tool's SQLite database, or an empty file on a read command) is refused before anything touches it, instead of having gori's schema migrated into it (#1171)
 - Projects: a name that points at two projects (one's slug and another's display name, or a display name two projects share) is refused on every `--project`, MCP `switch_project`, `delete_project` and `diff_projects` with each one's slug and short id, instead of silently picking one, and create or rename refuses a name that is already another project's slug or short id (#1163)
 - Retest: deleting a Repeater session marks the issue retest steps that used it as deleted, so they keep refusing to run instead of silently re-binding to the next session that reuses its id (#1160)
