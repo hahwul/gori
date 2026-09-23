@@ -232,6 +232,7 @@ module Gori
         selector = ""
         range_s = ""
         disabled = false
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter extract add --name=SESSION --kind=cookie --selector=sid [options]\n\n" \
@@ -248,6 +249,7 @@ module Gori
           p.on("--selector=SEL", "Cookie/header name, regex, or JSON path") { |v| selector = v }
           p.on("--range=A:B", "position only: a half-open byte range of the decoded body") { |v| range_s = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run rewriter extract add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run rewriter extract add: missing value for #{f}" }
@@ -278,10 +280,25 @@ module Gori
             abort "gori run rewriter extract add: rule ##{id} was created but the disable did not persist " \
                   "(store busy or unwritable) — it is ENABLED and already binding; retry the disable"
           end
-          puts "Extract rule ##{id} added — #{Env.spell(name, Env::Namespace::Bind)} binds from #{kind.label}."
+          puts extract_added_output(store, id, name, kind, format)
         ensure
           store.close
         end
+      end
+
+      # What `extract add` prints once the insert (and any `--disabled`) committed.
+      # `--format json` (#1117) is the rule's `rewriter extract list --format json` object,
+      # through the same `extract_rule_json`, read back AFTER the disable so `enabled` is the
+      # state that landed. A rule a peer removed in that instant has no row, and the command
+      # refuses rather than print one the listing never shows.
+      private def self.extract_added_output(store : Store, id : Int64, name : String,
+                                            kind : Gori::ExtractKind, format : Symbol) : String
+        unless format == :json
+          return "Extract rule ##{id} added — #{Env.spell(name, Env::Namespace::Bind)} binds from #{kind.label}."
+        end
+        rule = store.extract_rules.find(&.id.==(id)) ||
+               abort_closing(store, "gori run rewriter extract add: rule ##{id} was created, but it was gone before it could be read back")
+        JSON.build { |j| extract_rule_json(j, rule) }
       end
 
       private def self.parse_extract_range(raw : String) : {Int32, Int32}
@@ -550,6 +567,7 @@ module Gori
         body_file = ""
         response_file : String? = nil
         scope = Store::RuleScope::Project
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter add [options]\n\n" \
@@ -576,6 +594,7 @@ module Gori
           p.on("--response-file=PATH", "short_circuit: read the canned response from PATH ('-' = stdin, which needs a pipe or a redirect — a terminal is refused)") { |v| response_file = v }
           p.on("--body-file=PATH", "short_circuit: serve PATH as the response BODY (re-read when it changes)") { |v| body_file = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run rewriter add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run rewriter add: missing value for #{f}" }
@@ -622,10 +641,27 @@ module Gori
             abort "gori run rewriter add: failed to persist rule " \
                   "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
           end
-          puts scope.global? ? "Global rule ##{id} added — it applies in every project." : "Rule ##{id} added."
+          puts rewriter_added_output(store, id, scope, format)
         ensure
           store.close
         end
+      end
+
+      # What `rewriter add` prints once the write committed. `--format json` (#1117) is the
+      # rule's `gori run rewriter --format json` object, through the same `rewriter_rule_json`,
+      # read back through `Rules.merged` — the listing's own read — so `enabled`, `scope` and
+      # the normalized target/part are what the listing will say, not what the flags said. A
+      # rule a peer removed in that instant has no row, and the command refuses rather than
+      # print one the listing never shows. Its own method because `cmd_rewriter_add` is at the
+      # complexity bar the lint gate holds.
+      private def self.rewriter_added_output(store : Store, id : Int64, scope : Store::RuleScope,
+                                             format : Symbol) : String
+        unless format == :json
+          return scope.global? ? "Global rule ##{id} added — it applies in every project." : "Rule ##{id} added."
+        end
+        rule = Gori::Rules.merged(store).find { |r| r.scope == scope && r.id == id } ||
+               abort_closing(store, "gori run rewriter add: rule ##{id} was created, but it was gone before it could be read back")
+        JSON.build { |j| rewriter_rule_json(j, rule) }
       end
 
       # Validate the short-circuit-only flags and resolve --response-file into the stub text.

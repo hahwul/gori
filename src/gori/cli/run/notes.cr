@@ -78,6 +78,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         text : String? = nil
+        format = :text
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -87,6 +88,7 @@ module Gori
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--text=TEXT", "Note body (else positional args, else STDIN)") { |v| text = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run notes create: unknown option: #{f}\n#{p}" }
@@ -119,14 +121,28 @@ module Gori
           # The position is a DISPLAY figure read back after the commit, so it names the note
           # where it actually landed among a peer's; a peer that deletes it in that instant
           # leaves nothing to number, and the id is then the only honest thing to print.
-          doc = Notes.load(store)
-          if idx = doc.notes.index { |n| n.id == new_id }
-            puts "Note ##{idx + 1} created."
-          else
-            puts "Note created (id #{new_id})."
-          end
+          puts note_created_output(Notes.load(store), new_id, format, store)
         ensure
           store.close
+        end
+      end
+
+      # What `notes create` prints, from the set read back after the commit. `--format json`
+      # (#1117) is the note's row from `gori run notes --format json` — the listing view, so
+      # no `text`: the caller just supplied it — with `id` the stable id and `index` the
+      # position the text sentence names. A note a peer deleted in that instant has no row,
+      # and where text degrades to the id, JSON refuses rather than print an object whose
+      # `index` the listing could never show.
+      private def self.note_created_output(doc : Notes::Doc, new_id : Int64, format : Symbol,
+                                           store : Store? = nil) : String
+        idx = doc.notes.index { |n| n.id == new_id }
+        if format == :json
+          i = idx || abort_closing(store, "gori run notes create: note (id #{new_id}) was created, but it was gone before it could be read back")
+          CLI::Output.note_object_json(i, doc.notes[i], current: doc.cur == i, with_text: false)
+        elsif idx
+          "Note ##{idx + 1} created."
+        else
+          "Note created (id #{new_id})."
         end
       end
 

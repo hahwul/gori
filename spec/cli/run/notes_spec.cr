@@ -210,4 +210,39 @@ module Gori::CLI::Run
                                                    yes : Bool) : String?
     note_delete_confirmation_error(n, entry, yes)
   end
+
+  def self.note_created_output_for_spec(doc : Notes::Doc, new_id : Int64, format : Symbol) : String
+    note_created_output(doc, new_id, format)
+  end
+end
+
+# --- `notes create --format json` (#1117) ----------------------------------------------
+#
+# The object is the note's row from `gori run notes --format json`, built from the set read
+# back after the commit, so `id` is the stable id and `index` the position the text names.
+describe "gori run notes create --format json" do
+  it "prints the new note's listing row, id included" do
+    with_store do |store|
+      Gori::Notes.create(store, "first")
+      new_id = Gori::Notes.create(store, "# Login bypass\nsteps").should_not be_nil
+      doc = Gori::Notes.load(store)
+      created = JSON.parse(Gori::CLI::Run.note_created_output_for_spec(doc, new_id, :json))
+      created["id"].as_i64.should eq(new_id)
+      created["index"].as_i.should eq(2)
+      created["title"].as_s.should eq("Login bypass")
+      created["current"].as_bool.should be_true # `create` makes the new note the active one
+
+      listed = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: false)).as_a
+        .find! { |o| o["id"].as_i64 == new_id }
+      created.as_h.keys.should eq(listed.as_h.keys)
+      created.should eq(listed)
+    end
+  end
+
+  it "keeps both text sentences unchanged" do
+    doc = Gori::Notes::Doc.new(0, [Gori::Notes::NoteEntry.new(4_i64, "x")], 5_i64)
+    Gori::CLI::Run.note_created_output_for_spec(doc, 4_i64, :text).should eq("Note #1 created.")
+    # A peer deleted it in that instant: text falls back to the id, as it always has.
+    Gori::CLI::Run.note_created_output_for_spec(doc, 9_i64, :text).should eq("Note created (id 9).")
+  end
 end

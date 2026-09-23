@@ -48,9 +48,11 @@ module Gori::Repeater
     # routinely not valid UTF-8. `marker_bytes_in?` is a byte scan over the two-byte UTF-8
     # encoding of `§` and is exactly as precise (UTF-8 is self-synchronizing), so the char walk
     # — and the flow read below it — only ever run on a buffer that really does carry one.
-    def self.live?(store : Store, rec : Store::RepeaterRecord) : Bool
-      return false unless Fuzz::Template.marker_bytes_in?(rec.request)
-      return false if Fuzz::Template.marked_spans(String.new(rec.request)).empty?
+    # `request` is the bytes the send will carry — the row's own by default, or a per-send copy
+    # (`repeater send --path`) that may no longer hold the stored marker at all.
+    def self.live?(store : Store, rec : Store::RepeaterRecord, request : Bytes = rec.request) : Bool
+      return false unless Fuzz::Template.marker_bytes_in?(request)
+      return false if Fuzz::Template.marked_spans(String.new(request)).empty?
       fid = rec.flow_id
       return true unless fid
       operator_marked?(store, fid)

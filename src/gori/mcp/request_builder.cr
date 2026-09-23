@@ -2,7 +2,7 @@ require "base64"
 require "json"
 require "uri"
 require "../env"
-require "../proxy/codec/http1"
+require "../repeater/url_request"
 
 module Gori
   module MCP
@@ -10,10 +10,13 @@ module Gori
     # request bytes the repeater engines expect, plus the scheme/host/port they dial.
     # Two modes: structured ({method,url,headers,body}) or a verbatim `raw` request
     # string (still taking scheme/host/port from `url`, since the engines need a
-    # target to dial). Byte-exactness is the engines' contract (P7), so we only add
-    # Host/Content-Length when the caller omitted them.
+    # target to dial).
+    #
+    # What is left here is the JSON half — reading those arguments, the `*_base64` byte forms,
+    # the header shapes an agent sends. Resolving the URL, validating and framing the request is
+    # `Repeater::UrlRequest`, which `gori run send` shares (#1116).
     module RequestBuilder
-      record Built, bytes : Bytes, scheme : String, host : String, port : Int32
+      alias Built = Repeater::UrlRequest::Built
 
       # `headers` as name→value pairs, in the caller's order.
       #
@@ -92,92 +95,49 @@ module Gori
       end
 
       # `args` is the tool's `arguments` object (a parsed JSON hash).
+      #
+      # The URL is resolved FIRST, before any other argument is read, so a call with a bad URL
+      # and a second mistake reports the URL — the order this method has always refused in.
       def self.build(args : Hash(String, JSON::Any)) : Built
-        uri, scheme, host, port = parse_origin(args)
+        target = Repeater::UrlRequest.target(url_arg(args))
 
-        bytes =
-          if b64 = base64_arg(args, "raw_base64")
-            # A base64 input IS the wire: the caller encoded the exact octets it wants sent,
-            # so there is nothing to normalise and nothing to expand. See `verbatim?`.
-            b64
-          elsif (raw = wire_str(args, "raw", "; use raw_base64 for exact octets")) && !raw.empty?
-            # `verbatim` means the operator's bytes ARE the message: no `$VAR` expansion and no
-            # bare-LF promotion. `normalize_raw` exists so a hand-typed request still frames,
-            # but a bare-LF header terminator is a standard front-end/back-end desync
-            # primitive, so promoting it removes a payload class from this surface — the TUI's
-            # byte modes have always been able to send it. An unresolved `$VAR` is not refused
-            # anywhere any more (see `Env::Escape`); the literal `$` is the SSTI/shell payload
-            # this flag exists to deliver, and now every surface delivers it.
-            raw_bytes(raw, args)
-          else
-            build_from_parts(uri, scheme, host, port, args)
-          end
-
-        Built.new(bytes, scheme, host, port)
+        if b64 = base64_arg(args, "raw_base64")
+          # A base64 input IS the wire: the caller encoded the exact octets it wants sent,
+          # so there is nothing to normalise and nothing to expand. See `verbatim?`.
+          Repeater::UrlRequest.bytes(target, b64)
+        elsif (raw = wire_str(args, "raw", "; use raw_base64 for exact octets")) && !raw.empty?
+          # `verbatim` means the operator's bytes ARE the message: no `$VAR` expansion and no
+          # bare-LF promotion. See `Repeater::UrlRequest.raw`.
+          Repeater::UrlRequest.raw(target, raw, verbatim?(args))
+        else
+          method = (wire_str(args, "method") || "GET").upcase
+          # Refused before the body is read, the order this has always reported two mistakes in.
+          Repeater::UrlRequest.check_method(method)
+          # `body_base64` wins over `body`: it is the byte-exact form, and a caller that sent
+          # both meant the precise one. It is NOT env-expanded — the caller already decided
+          # every octet, and expanding would change the length it encoded.
+          body = base64_arg(args, "body_base64") ||
+                 wire_str(args, "body", "; stringify JSON yourself, or use body_base64 for exact octets")
+                   .try { |b| Env.expand(b).to_slice }
+          # …and the request-target before the headers are read: method, body, target, headers is
+          # the order this has always refused two mistakes in.
+          Repeater::UrlRequest.request_target_of(target)
+          Repeater::UrlRequest.structured(target, method, RequestBuilder.header_pairs(args["headers"]?), body)
+        end
       end
 
-      # The dialed origin (scheme, host, port) from `url`, with every check `build` runs — a
-      # missing/malformed host, a non-http scheme, a CR/LF in the authority, an out-of-range
-      # port. Extracted so the FIELD-NATIVE send path (`h2_fields`) resolves the same origin
-      # without also building request bytes it will never send: the fields are the message.
+      # The dialed origin (scheme, host, port) from `url`, with every check `build` runs.
+      # Extracted so the FIELD-NATIVE send path (`h2_fields`) resolves the same origin without
+      # also building request bytes it will never send: the fields are the message.
       def self.origin(args : Hash(String, JSON::Any)) : {String, String, Int32}
-        _, scheme, host, port = parse_origin(args)
-        {scheme, host, port}
+        t = Repeater::UrlRequest.target(url_arg(args))
+        {t.scheme, t.host, t.port}
       end
 
-      private def self.parse_origin(args : Hash(String, JSON::Any)) : {URI, String, String, Int32}
+      private def self.url_arg(args : Hash(String, JSON::Any)) : String
         url = wire_str(args, "url")
         raise Gori::Error.new("'url' is required") if url.nil? || url.empty?
-        url = Env.expand(url)
-
-        # URI.parse raises URI::Error on a malformed authority (e.g. a non-numeric
-        # port "example.com:abc"); turn that into a clean Gori::Error so the caller
-        # gets an actionable message instead of send_request's generic "tool error:"
-        # leaking the parser's internal "bad port at character N".
-        uri =
-          begin
-            URI.parse(url)
-          rescue ex : URI::Error | OverflowError
-            # `OverflowError` too, not `URI::Error` alone: an over-long port
-            # (`http://h:99999999999/`) overflows `Int32` inside `URI.parse` rather than
-            # raising `URI::Error`, so it escaped this rescue and reached the agent as the
-            # generic INTERNAL "tool error: Arithmetic overflow" this clause exists to prevent.
-            # The overflow's own message ("Arithmetic overflow") names nothing an agent can
-            # act on, so say what actually broke.
-            why = ex.is_a?(OverflowError) ? "port is out of range" : ex.message
-            raise Gori::Error.new("invalid url #{url.inspect}: #{why}")
-          end
-        scheme = (uri.scheme || "http").downcase
-        host = uri.host
-        # Check the host BEFORE the scheme allowlist: a scheme-less "host:port/path" parses
-        # with the bare hostname as `scheme` and a nil host, so a nil host is itself the
-        # signal to emit the friendlier "include a scheme" hint rather than a misleading
-        # "unsupported scheme: <host>". A genuine ftp://host still has a host and reaches
-        # the scheme error below.
-        if host.nil? || host.empty?
-          hint = url.includes?("://") ? "" : " — include a scheme, e.g. https://#{url}"
-          raise Gori::Error.new("url has no host: #{url}#{hint}")
-        end
-        raise Gori::Error.new("unsupported scheme: #{scheme} (only http/https)") unless scheme.in?("http", "https")
-        # URI.parse keeps a CR/LF embedded in the authority as part of `host`
-        # (e.g. "http://h.com\r\nEvil: x/"), which would otherwise be written into
-        # the auto-generated Host header and inject. Reject it on BOTH paths (raw
-        # too — `host` becomes the dialed target and, on the structured path, the
-        # Host line).
-        reject_token_breakers(host, "url host")
-        port = uri.port || default_port(scheme)
-        # URI.parse accepts any digit run as a port (it doesn't range-check), so an
-        # out-of-range ":99999" would otherwise reach the dialer as a doomed connect.
-        # Reject it up front with a clean message (a valid TCP port is 1..65535).
-        raise Gori::Error.new("invalid port #{port} in url (expected 1..65535)") unless 1 <= port <= 65535
-        {uri, scheme, host, port}
-      end
-
-      # `verbatim` means the operator's bytes ARE the message. Kept out of `build` so that
-      # method's branch count stays where it was.
-      private def self.raw_bytes(raw : String, args : Hash(String, JSON::Any)) : Bytes
-        return raw.to_slice if verbatim?(args)
-        normalize_raw(Env.expand(raw))
+        url
       end
 
       # `as_bool?` alone read a STRINGIFIED `"true"` — which LLM clients emit constantly,
@@ -232,155 +192,10 @@ module Gori
         end
       end
 
-      private def self.build_from_parts(uri : URI, scheme : String, host : String, port : Int32,
-                                        args : Hash(String, JSON::Any)) : Bytes
-        method = (wire_str(args, "method") || "GET").upcase
-        validate_method(method)
-        # `body_base64` wins over `body`: it is the byte-exact form, and a caller that sent
-        # both meant the precise one. It is NOT env-expanded — the caller already decided
-        # every octet, and expanding would change the length it encoded.
-        body = base64_arg(args, "body_base64") ||
-               wire_str(args, "body", "; stringify JSON yourself, or use body_base64 for exact octets")
-                 .try { |b| Env.expand(b).to_slice }
-
-        path = uri.path
-        path = "/" if path.empty?
-        target = uri.query ? "#{path}?#{uri.query}" : path
-        # uri.path/query are decoded views of the URL; a literal CR/LF/NUL here
-        # would forge the request line (split into a fake header or request).
-        reject_token_breakers(target, "request target")
-
-        headers = [] of {String, String}
-        RequestBuilder.header_pairs(args["headers"]?).each do |(k, v)|
-          value = Env.expand(v)
-          validate_header(k, value)
-          headers << {k, value}
-        end
-
-        unless headers.any? { |(k, _)| k.compare("host", case_insensitive: true) == 0 }
-          hostline = port == default_port(scheme) ? host : "#{host}:#{port}"
-          headers << {"Host", hostline}
-        end
-        if body && !headers.any? { |(k, _)| k.compare("content-length", case_insensitive: true) == 0 ||
-           k.compare("transfer-encoding", case_insensitive: true) == 0 }
-          headers << {"Content-Length", body.size.to_s}
-        end
-
-        io = IO::Memory.new
-        io << method << ' ' << target << " HTTP/1.1\r\n"
-        headers.each { |(k, v)| io << k << ": " << v << "\r\n" }
-        io << "\r\n"
-        io.write(body) if body
-        io.to_slice
-      end
-
-      private def self.default_port(scheme : String) : Int32
-        scheme == "https" ? 443 : 80
-      end
-
-      # The structured path frames the request itself, so a header name/value (or
-      # the method/target/host) carrying a framing octet would split one logical
-      # header into many, smuggle a whole second request, or forge the request
-      # line — past the caller's intent. We validate them here so a tool arg can't
-      # desync framing. Callers who need deliberately malformed bytes use `raw`
-      # (byte-exact by contract); the body is sent verbatim with a matching
-      # Content-Length, so it cannot smuggle and is not checked.
-      #
-      # A header VALUE may legitimately contain spaces, so it only forbids the
-      # framing octets CR/LF/NUL. A header NAME is a single token: whitespace
-      # there is never valid and would forge an obs-fold line AND evade the
-      # case-insensitive Host/Content-Length dedup (a padded " Content-Length"
-      # would slip a second, conflicting length onto the wire).
-      private def self.validate_header(name : String, value : String) : Nil
-        raise Gori::Error.new("header name must not be empty") if name.empty?
-        reject_token_breakers(name, "header name #{name.inspect}")
-        # A header name is an RFC 7230 token (tchar only). reject_token_breakers stops
-        # whitespace/controls, but a printable non-token char — especially ':' — evades
-        # the case-insensitive Host/Content-Length dedup and puts a second, conflicting
-        # line on the wire (name "Content-Length:0" writes `Content-Length:0: x` next to
-        # the auto `Content-Length: <bodylen>`).
-        # `valid_encoding?` first: PCRE2 raises `ArgumentError` on a non-UTF-8 subject, and
-        # `reject_token_breakers` deliberately allows bytes >= 0x80 through — so a header
-        # name carrying one reached this regex and surfaced as an INTERNAL error instead of
-        # the INVALID_ARGUMENT this check exists to report. A name that is not valid UTF-8
-        # cannot be an RFC 7230 token either, so it fails the same way, with the right words.
-        if !name.valid_encoding? || name =~ /[^!#$%&'*+\-.^_`|~0-9A-Za-z]/
-          raise Gori::Error.new("illegal character in header name #{name.inspect} (must be an RFC 7230 token)")
-        end
-        raise Gori::Error.new("illegal CR/LF/NUL in value of header #{name.inspect}") if injection_char?(value)
-      end
-
-      # A method must be a non-empty token (no whitespace/controls). Any printable
-      # non-space char is allowed, so custom verbs (PROPFIND/PURGE/QUERY) pass.
-      private def self.validate_method(method : String) : Nil
-        raise Gori::Error.new("method must not be empty") if method.empty?
-        reject_token_breakers(method, "method #{method.inspect}")
-      end
-
-      # Raise unless `s` is safe as one request-line token. Used for the method, header
-      # names, the request target, and the host. The rule itself is
-      # `Codec::Http1.request_token_safe?` — this is only the MCP-shaped error around it, so
-      # that this surface and the engines that build a request line out of remote-chosen text
-      # (`Fuzz::Engine`'s redirect follower) cannot drift apart.
-      private def self.reject_token_breakers(s : String, what : String) : Nil
-        unless Proxy::Codec::Http1.request_token_safe?(s)
-          raise Gori::Error.new("illegal whitespace/control character in #{what}")
-        end
-      end
-
-      private def self.injection_char?(s : String) : Bool
-        s.includes?('\r') || s.includes?('\n') || s.includes?('\0')
-      end
-
-      # A `raw` request is sent byte-for-byte EXCEPT that lone LFs in the HEADER
-      # block are promoted to CRLF, so a hand-typed request still frames. The body
-      # (everything after the first blank line) is left UNTOUCHED — rewriting a bare
-      # LF there would grow the payload past the caller's Content-Length and desync
-      # the origin (request smuggling), and would corrupt any body whose bytes are
-      # not line-oriented text. The header terminator is the first blank line
-      # (`\r\n\r\n` or `\n\n`, whichever comes first).
-      #
-      # PUBLIC because `intercept_forward_edit` needs the identical rule: it used to
-      # gsub the WHOLE message, silently rewriting 0x0A bytes inside the body it was
-      # meant to forward verbatim. One rule, one implementation.
-      # Done in BYTE space, not through a regex `gsub`. Two reasons, and the byte-exactness
-      # contract above is the important one:
-      #
-      #   * PCRE2 raises `ArgumentError` on a subject that is not valid UTF-8, so a `raw`
-      #     carrying a deliberately malformed byte (a desync primitive, a binary body, a
-      #     smuggling probe — exactly what this tool exists to send) failed here instead of
-      #     being sent, and surfaced to the caller as an INTERNAL error.
-      #   * `.scrub`bing it to appease the regex is NOT the fix: that would rewrite the
-      #     operator's bytes and send something other than what was asked for.
-      #
-      # The boundary rule is unchanged (first of `\r\n\r\n` / `\n\n`, terminator included),
-      # only moved from char indices to byte indices — which is what a byte-exact sender
-      # wanted all along.
+      # The head-only CRLF promotion `raw` gets without `verbatim`. Kept on this module because
+      # `intercept_forward_edit` calls it here; the rule itself is `Repeater::UrlRequest`'s.
       def self.normalize_raw(raw : String) : Bytes
-        bytes = raw.to_slice
-        crlf = raw.byte_index("\r\n\r\n")
-        lf = raw.byte_index("\n\n")
-        ends = [] of Int32
-        ends << crlf + 4 if crlf
-        ends << lf + 2 if lf
-        head_len = ends.min? || bytes.size
-        io = IO::Memory.new(bytes.size + 16)
-        i = 0
-        while i < head_len
-          b = bytes[i]
-          if b == 0x0D_u8 && i + 1 < head_len && bytes[i + 1] == 0x0A_u8
-            io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # already CRLF
-            i += 2
-          elsif b == 0x0A_u8
-            io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # lone LF promoted
-            i += 1
-          else
-            io.write_byte(b)
-            i += 1
-          end
-        end
-        io.write(bytes[head_len..]) if head_len < bytes.size
-        io.to_slice
+        Repeater::UrlRequest.normalize_raw(raw)
       end
     end
   end

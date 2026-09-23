@@ -1,5 +1,6 @@
 require "../../spec_helper"
 require "file_utils"
+require "json"
 
 # `gori run project create / delete` — project resolution and the delete preview. These
 # operate on the on-disk registry, so they are the CLI surface where a wrong answer
@@ -19,6 +20,10 @@ module Gori::CLI::Run
   def self.delete_preview_verdict_for_spec(project : Gori::Project, locked : Bool,
                                            open_elsewhere : Bool) : String
     delete_preview_verdict(project, locked, open_elsewhere)
+  end
+
+  def self.scope_rule_json_for_spec(rule : Gori::Scope::Rule) : JSON::Any
+    JSON.parse(JSON.build { |j| scope_rule_json(j, rule) })
   end
 end
 
@@ -193,6 +198,23 @@ describe "gori run project delete (resolution)" do
     with_project_root do |registry|
       registry.create("alpha")
       Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "no-such-project").should be_false
+    end
+  end
+end
+
+# `scope add --format json` (#1117): the success line used to carry no id at all, so a script
+# that added a rule it meant to remove later had nothing to remove it by. The object is the one
+# `scope --format json` lists, because both call `scope_rule_json`.
+describe "gori run project scope add --format json" do
+  it "is the listed rule, id included" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", " api.example.test ").should be_true
+      rule = scope.rules.find { |r| r.pattern == "api.example.test" }.not_nil!
+      j = Gori::CLI::Run.scope_rule_json_for_spec(rule)
+      j.as_h.keys.should eq(["id", "kind", "type", "pattern"])
+      {j["id"].as_i64, j["kind"].as_s, j["type"].as_s, j["pattern"].as_s}
+        .should eq({rule.id, "include", "host", "api.example.test"})
     end
   end
 end

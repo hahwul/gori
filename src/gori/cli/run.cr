@@ -54,6 +54,7 @@ require "./run/history"
 require "./run/redact"
 require "./run/repeater"
 require "./run/repeater_minimize"
+require "./run/send"
 require "./run/compare"
 require "./run/diff"
 require "./run/intercept"
@@ -82,6 +83,7 @@ require "./run/rewriter"
 require "./run/colormarker"
 require "./run/views"
 require "./run/project"
+require "./run/project_network"
 
 module Gori
   module CLI
@@ -690,6 +692,14 @@ module Gori
         # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
         # holding the pointer. See `reapply_active_slot`.
         reapply_active_slot
+      end
+
+      # `abort` for a refusal raised while `store` is open. `abort` calls `exit`, which skips the
+      # caller's `ensure store.close`, so the store is closed HERE — its writer fiber stopped and
+      # its open-lock released — before the process goes. nil for a path that opened no project.
+      private def self.abort_closing(store : Store?, message : String) : NoReturn
+        store.try &.close
+        abort message
       end
 
       # The one sentence for a project that could not be opened: SQLite's own words (or the
@@ -1689,34 +1699,91 @@ module Gori
         bytes ? String.new(bytes).scrub : nil
       end
 
+      # How much of a message BODY an output prints — `--headers-only` / `--max-body` (#1119).
+      # A 146 KB JSON answer used to be dumped whole into the terminal on every `repeater send`,
+      # with redirecting to a file and grepping it as the only way to read the status line.
+      #
+      # `omit` drops the body and `max` keeps a prefix; both leave a marker naming the full size,
+      # because a cut body must never read as a SHORT one. What is capped is the DECODED body the
+      # output shows (de-chunked, inflated), so the size in the marker is the one a reader of an
+      # uncut dump would have seen. The wire bytes are untouched: this is display only, and a
+      # `--record-history` flow or a stored session response still holds the whole message.
+      record BodyCap, max : Int32? = nil, omit : Bool = false do
+        def whole? : Bool
+          max.nil? && !omit
+        end
+
+        # How the flag is named in a marker, so the reader knows the cut was asked for.
+        def flag : String
+          omit ? "--headers-only" : "--max-body"
+        end
+      end
+
+      HEADERS_ONLY_HELP = "Print the status line and headers only: the body is replaced by one line naming its " \
+                          "size (--format json keeps the body's encoding and size, adds omitted:true)"
+      MAX_BODY_HELP = "Print at most BYTES of the decoded body, then a marker naming the full size " \
+                      "(--format json: text/base64 hold the prefix, size the total, shown_size the prefix)"
+
+      # nil when the pair is usable; the sentence to refuse with otherwise. One says "no body"
+      # and the other "this much body", and quietly honouring either one is a guess about which
+      # the operator meant. Split from the abort so a spec can drive it.
+      def self.body_cap_error(headers_only : Bool, max_body : Int32?) : String?
+        return nil unless headers_only && max_body
+        "--headers-only and --max-body cannot be combined — --headers-only prints no body at all"
+      end
+
+      private def self.body_cap(headers_only : Bool, max_body : Int32?, prefix : String) : BodyCap
+        if err = body_cap_error(headers_only, max_body)
+          abort "#{prefix}: #{err}"
+        end
+        headers_only ? BodyCap.new(omit: true) : BodyCap.new(max: max_body)
+      end
+
+      # The first `max` bytes of `bytes`, backed off so the cut never lands inside a UTF-8
+      # sequence (at most three continuation bytes): a prefix ending mid-codepoint would render
+      # as U+FFFD in text and flip a valid JSON body to `encoding: base64` for no reason the
+      # reader could see. A non-UTF-8 body loses at most three bytes of prefix to the same rule,
+      # and the marker counts what was actually shown.
+      def self.body_prefix(bytes : Bytes, max : Int32) : Bytes
+        return bytes if bytes.size <= max
+        cut = max
+        back = 0
+        while back < 3 && cut > 0 && (bytes[cut] & 0xC0_u8) == 0x80_u8
+          cut -= 1
+          back += 1
+        end
+        bytes[0, cut]
+      end
+
       # The CLI counterpart of MCP's Serialize.emit_body (src/gori/mcp/serialize.cr)
       # — same object shape ({encoding, size, truncated, text|base64, binary?,
       # wire_truncated?, note?}) so a script gets a consistent contract whether it
-      # reads `gori mcp` or `gori run … --format json`. UNCLIPPED: unlike MCP (which
-      # caps at MAX_TEXT/MAX_B64 for an LLM's context window), the CLI is read by a
-      # script that expects the whole value, so no size cap is applied here.
-      private def self.emit_body_json(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?, wire_truncated : Bool) : Nil
+      # reads `gori mcp` or `gori run … --format json`. UNCLIPPED unless the operator asked:
+      # unlike MCP (which caps at MAX_TEXT/MAX_B64 for an LLM's context window), the CLI is read
+      # by a script that expects the whole value, so only `cap` (`--max-body` /
+      # `--headers-only`) shortens it. A capped body keeps `size` as the WHOLE decoded size and
+      # adds `shown_size` for the prefix; `truncated` is then true, as it is on MCP for any cut.
+      private def self.emit_body_json(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?,
+                                      wire_truncated : Bool, cap : BodyCap = BodyCap.new) : Nil
         if body.nil? || body.empty?
           j.field field_name, nil
           return
         end
         decoded, note, complete = Proxy::Codec::ContentDecode.decode_full(head, body)
         bytes = decoded || body
-        s = String.new(bytes)
+        shown = (max = cap.max) ? body_prefix(bytes, max) : bytes
+        cut = shown.size < bytes.size
+        s = String.new(shown)
         j.field field_name do
           j.object do
             if s.valid_encoding?
               j.field "encoding", "text"
-              j.field "size", bytes.size
-              j.field "truncated", wire_truncated
-              j.field "text", s
             else
               j.field "encoding", "base64"
               j.field "binary", true
-              j.field "size", bytes.size
-              j.field "truncated", wire_truncated
-              j.field "base64", Base64.strict_encode(bytes)
             end
+            j.field "size", bytes.size
+            emit_body_payload_json(j, s, shown, cut, wire_truncated, cap.omit)
             j.field "wire_truncated", true if wire_truncated
             j.field "note", note if note
             # A coding that stopped mid-stream. Distinct from `truncated`/`wire_truncated`,
@@ -1727,6 +1794,20 @@ module Gori
             emit_trailers_json(j, head, body)
           end
         end
+      end
+
+      # The bytes half of a body object: the text or base64 (with `shown_size` when `--max-body`
+      # cut it), or — `--headers-only` — nothing but `omitted`, MCP's `body_mode: none` shape.
+      private def self.emit_body_payload_json(j : JSON::Builder, s : String, shown : Bytes, cut : Bool,
+                                              wire_truncated : Bool, omit : Bool) : Nil
+        if omit
+          j.field "omitted", true
+          j.field "truncated", wire_truncated
+          return
+        end
+        j.field "shown_size", shown.size if cut
+        j.field "truncated", wire_truncated || cut
+        s.valid_encoding? ? j.field("text", s) : j.field("base64", Base64.strict_encode(shown))
       end
 
       # The chunked message's TRAILER fields (RFC 7230 §4.1.2), beside the de-chunked body.
@@ -1759,21 +1840,32 @@ module Gori
 
       # `body` is the DECODED body (de-chunked/inflated) that the operator reads; `wire_body`
       # is the stored wire form the trailers still live in, and is optional only because a
-      # caller with no chunked wire form has nothing to pass.
-      private def self.print_message_text(head : Bytes?, body : Bytes?, wire_body : Bytes? = nil) : Nil
+      # caller with no chunked wire form has nothing to pass. `cap` is `--headers-only` /
+      # `--max-body` (see `BodyCap`): the marker it leaves goes on STDOUT, in the body's place,
+      # because a script reading the dump has to be able to tell a cut body from a short one.
+      private def self.print_message_text(head : Bytes?, body : Bytes?, wire_body : Bytes? = nil,
+                                          cap : BodyCap = BodyCap.new) : Nil
         # Neutralize ANSI/OSC/CSI escapes in captured (attacker-controlled) head/body
         # before writing to the live terminal; `binary_body?` only sniffs for NUL, so an
         # escape-only payload would otherwise pass through. `--format raw` stays exact.
         STDOUT.puts(CLI::Output.term_safe_multiline(String.new(head || Bytes.empty).scrub).rstrip)
         if body && !body.empty?
           STDOUT.puts ""
-          if binary_body?(body)
+          if cap.omit
+            STDOUT.puts "[body omitted by --headers-only: #{body.size} bytes]"
+          elsif binary_body?(body)
             STDOUT.puts "[binary body, #{body.size} bytes — use --format raw for exact bytes, or view hex]"
           else
-            STDOUT.puts(CLI::Output.term_safe_multiline(String.new(body).scrub))
+            shown = (max = cap.max) ? body_prefix(body, max) : body
+            STDOUT.puts(CLI::Output.term_safe_multiline(String.new(shown).scrub))
+            if shown.size < body.size
+              STDOUT.puts "[… truncated by --max-body: showing #{shown.size} of #{body.size} bytes]"
+            end
           end
         end
-        print_decode_note(head, wire_body)
+        # The decode note describes the body text, so it goes with it; trailers are header
+        # fields the origin sent after the body, and stay under --headers-only too.
+        print_decode_note(head, wire_body) unless cap.omit
         print_trailers_text(head, wire_body)
       end
 

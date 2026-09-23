@@ -68,6 +68,16 @@ module Gori::CLI::Run
   def self.read_stub_response_for_spec(path : String) : String
     read_stub_response(path)
   end
+
+  def self.rewriter_added_output_for_spec(store : Store, id : Int64, scope : Store::RuleScope,
+                                          format : Symbol) : String
+    rewriter_added_output(store, id, scope, format)
+  end
+
+  def self.extract_added_output_for_spec(store : Store, id : Int64, name : String,
+                                         kind : ExtractKind, format : Symbol) : String
+    extract_added_output(store, id, name, kind, format)
+  end
 end
 
 private def rule(id = 1_i64, enabled = true,
@@ -306,6 +316,63 @@ describe "gori run rewriter extract" do
     j["selector"].as_s.should eq("")
     j["pos_start"].as_i.should eq(3)
     j["pos_end"].as_i.should eq(9)
+  end
+end
+
+# `rewriter add --format json` and `extract add --format json` (#1117): the listing's object
+# for the rule just written, read back after the commit.
+describe "gori run rewriter add --format json" do
+  it "prints the new rule's listing object, id included" do
+    with_store do |store|
+      # `--op=add_header` with the default `--part`: `Rules.normalize_shape` rewrites the
+      # shape, and the object says what was STORED, which is what the listing will say.
+      id = Gori::Rules.load(store).create(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "X-Trace", "on", Gori::Store::RuleOp::AddHeader, name: "trace", enabled: false)
+      o = JSON.parse(Gori::CLI::Run.rewriter_added_output_for_spec(store, id,
+        Gori::Store::RuleScope::Project, :json))
+      o["id"].as_i64.should eq(id)
+      o["scope"].as_s.should eq("project")
+      o["enabled"].as_bool.should be_false
+      o["op"].as_s.should eq("add_header")
+
+      listed = JSON.parse(Gori::CLI::Run.rewriter_rule_json_for_spec(
+        Gori::Rules.merged(store).find! { |r| !r.global? && r.id == id }))
+      o.as_h.keys.should eq(listed.as_h.keys)
+      o.should eq(listed)
+    end
+  end
+
+  it "keeps both text sentences unchanged" do
+    with_store do |store|
+      Gori::CLI::Run.rewriter_added_output_for_spec(store, 3_i64, Gori::Store::RuleScope::Project, :text)
+        .should eq("Rule #3 added.")
+      Gori::CLI::Run.rewriter_added_output_for_spec(store, 3_i64, Gori::Store::RuleScope::Global, :text)
+        .should eq("Global rule #3 added — it applies in every project.")
+    end
+  end
+end
+
+describe "gori run rewriter extract add --format json" do
+  it "prints the new rule's listing object, with the state that landed" do
+    with_store do |store|
+      id = store.insert_extract_rule("SESSION", "status:200", Gori::ExtractKind::Cookie, "sid")
+      store.set_extract_rule_enabled(id, false).should be_true # what `--disabled` does next
+      o = JSON.parse(Gori::CLI::Run.extract_added_output_for_spec(store, id, "SESSION",
+        Gori::ExtractKind::Cookie, :json))
+      o["id"].as_i64.should eq(id)
+      o["enabled"].as_bool.should be_false
+
+      listed = JSON.parse(Gori::CLI::Run.extract_rule_json_for_spec(store.extract_rules.find! { |r| r.id == id }))
+      o.as_h.keys.should eq(listed.as_h.keys)
+      o.should eq(listed)
+    end
+  end
+
+  it "keeps the text sentence unchanged" do
+    with_store do |store|
+      Gori::CLI::Run.extract_added_output_for_spec(store, 2_i64, "SESSION", Gori::ExtractKind::Header, :text)
+        .should eq("Extract rule #2 added — #{Gori::Env.spell("SESSION", Gori::Env::Namespace::Bind)} binds from header.")
+    end
   end
 end
 

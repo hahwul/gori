@@ -12,6 +12,7 @@ module Gori
         {"project sandbox", "Get/set the hard-containment sandbox gate (status, on, off)"},
         {"project env", "Manage project env vars ($ENV.KEY substitution; bare syntax: $KEY)"},
         {"project host-override", "Manage host overrides (list, add, update, delete)"},
+        {"project network", "Get/set the project's own network settings (net.*: upstream proxy, timeouts, capture cap, bind)"},
       ])]
       private def self.cmd_project(args : Array(String)) : Nil
         sub = args.first?
@@ -34,15 +35,21 @@ module Gori
           cmd_project_env(args[1..])
         when "host-override", "host-overrides"
           cmd_project_host_override(args[1..])
+        when "network", "net"
+          cmd_project_network(args[1..])
         else
-          # Flags only (e.g. --format json) → list projects
-          if (s = sub) && s.starts_with?('-')
-            cmd_project_list(args)
-          else
-            STDERR.puts "gori run project: unknown subcommand '#{sub}'"
-            print_project_help
-            exit 1
-          end
+          cmd_project_other(sub, args)
+        end
+      end
+
+      # Flags only (e.g. `--format json`) → list projects; any other word is refused.
+      private def self.cmd_project_other(sub : String, args : Array(String)) : Nil
+        if sub.starts_with?('-')
+          cmd_project_list(args)
+        else
+          STDERR.puts "gori run project: unknown subcommand '#{sub}'"
+          print_project_help
+          exit 1
         end
       end
 
@@ -62,6 +69,8 @@ module Gori
             sandbox            Get/set the hard-containment sandbox gate (status, on, off)
             env                Manage project env vars ($ENV.KEY substitution; bare syntax: $KEY)
             host-override      Manage host overrides (list, add, update, delete)
+            network            Get/set the project's own network settings (net.*): upstream proxy
+                               and credentials, destination host, timeouts, capture cap, bind
 
           Examples:
             gori run project --format json
@@ -73,6 +82,8 @@ module Gori
             gori run project sandbox on
             gori run project env set TOKEN=secret
             gori run project host-override add --host=api.example.com --ip=10.0.0.1
+            gori run project network set upstream_proxy=http://proxy.corp.example:3128
+            gori run project network
 
           See 'gori run project <subcommand> --help' for more.
           HELP
@@ -591,16 +602,7 @@ module Gori
               j.object do
                 j.field "enabled", scope.enabled?
                 j.field "rules" do
-                  j.array do
-                    scope.rules.each do |r|
-                      j.object do
-                        j.field "id", r.id
-                        j.field "kind", r.kind
-                        j.field "type", r.match_type
-                        j.field "pattern", r.pattern
-                      end
-                    end
-                  end
+                  j.array { scope.rules.each { |r| scope_rule_json(j, r) } }
                 end
               end
             end)
@@ -616,6 +618,18 @@ module Gori
           end
         ensure
           store.close
+        end
+      end
+
+      # One scope rule as JSON — the element of `scope list --format json`'s `rules`, and the
+      # whole of `scope add --format json` (#1117): a script gets the same object whether it
+      # reads the rule back or has just made it.
+      private def self.scope_rule_json(j : JSON::Builder, r : Scope::Rule) : Nil
+        j.object do
+          j.field "id", r.id
+          j.field "kind", r.kind
+          j.field "type", r.match_type
+          j.field "pattern", r.pattern
         end
       end
 
@@ -699,6 +713,7 @@ module Gori
         kind = "include"
         match_type = "host"
         pattern : String? = nil
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project scope add [options]"
@@ -707,6 +722,7 @@ module Gori
           p.on("-kKIND", "--kind=KIND", "Rule kind: include|exclude (default: include)") { |v| kind = v }
           p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex (default: host)") { |v| match_type = v }
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match (required)") { |v| pattern = v }
+          p.on("--format=FMT", "Output: text (default) | json — the new rule, as `scope --format json` lists it") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run project scope add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project scope add: missing value for #{f}" }
@@ -730,7 +746,23 @@ module Gori
             abort "gori run project scope add: rule NOT added (duplicate, empty, invalid, " \
                   "or the store was busy/unwritable); the scope is unchanged"
           end
-          puts "Scope rule added successfully."
+          # `Scope#add` reloads its own rule list, so the new rule — and the id every later
+          # `scope update`/`delete` takes — is found by the triple it was added under (the
+          # table is UNIQUE on it). It used to be printed nowhere, so a script adding a rule it
+          # meant to remove later had no handle for it (#1117).
+          added = scope.rules.find { |r| r.kind == kind && r.match_type == match_type && r.pattern == pat.strip }
+          if format == :json
+            unless rule = added
+              # Committed, then gone before the read — a peer deleted it in between. Refused like
+              # every other create's read-back: an `"id": null` a script feeds to `scope delete`
+              # fails there, far from the cause.
+              store.close
+              abort "gori run project scope add: the rule was added, but another gori removed it before it could be read back"
+            end
+            puts(JSON.build { |j| scope_rule_json(j, rule) })
+          else
+            puts added ? "Scope rule ##{added.id} added successfully (#{kind} #{match_type} #{pat.strip})." : "Scope rule added successfully."
+          end
         ensure
           store.close
         end
@@ -1156,17 +1188,7 @@ module Gori
         begin
           ov = HostOverrides.load(store)
           if format == :json
-            puts(JSON.build do |j|
-              j.array do
-                ov.entries.each do |e|
-                  j.object do
-                    j.field "id", e.id
-                    j.field "host", e.host
-                    j.field "ip", e.ip
-                  end
-                end
-              end
-            end)
+            puts(JSON.build { |j| j.array { ov.entries.each { |e| host_override_json(j, e.id, e.host, e.ip) } } })
           elsif ov.entries.empty?
             STDERR.puts "no host overrides configured"
           else
@@ -1179,11 +1201,22 @@ module Gori
         end
       end
 
+      # One host override as JSON — the element of `host-override --format json`, and the whole
+      # of `host-override add --format json` (#1117).
+      private def self.host_override_json(j : JSON::Builder, id : Int64, host : String, ip : String) : Nil
+        j.object do
+          j.field "id", id
+          j.field "host", host
+          j.field "ip", ip
+        end
+      end
+
       private def self.cmd_host_override_add(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         host : String? = nil
         ip : String? = nil
+        format = :text
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -1194,6 +1227,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--host=HOST", "Hostname to override (case-insensitive)") { |v| host = v }
           p.on("--ip=IP", "IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
+          p.on("--format=FMT", "Output: text (default) | json — the new override, as `host-override --format json` lists it") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run project host-override add: unknown option: #{f}\n#{p}" }
@@ -1232,7 +1266,14 @@ module Gori
           # the id-less fallback below — the id being the operator's only handle for a later
           # `update`/`delete`, and the echoed name one the table does not contain.
           key = OverrideHost.key(h)
-          if e = ov.entries.find { |x| x.host == key }
+          e = ov.entries.find { |x| x.host == key }
+          if format == :json
+            unless e
+              store.close
+              abort "gori run project host-override add: the override was added, but it was gone before it could be read back"
+            end
+            puts(JSON.build { |j| host_override_json(j, e.id, e.host, e.ip) })
+          elsif e
             puts "Host override ##{e.id} added: #{e.ip} → #{e.host}"
           else
             puts "Host override added: #{i} → #{key}"

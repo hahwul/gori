@@ -315,6 +315,7 @@ module Gori
         filter : String? = nil
         disabled = false
         scope = Store::RuleScope::Project
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run colormarker add --when=FILTER [options]\n\n" \
@@ -332,6 +333,7 @@ module Gori
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_color_scope(v) }
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker add: missing value for #{f}" }
@@ -352,7 +354,7 @@ module Gori
         if scope.global?
           id = Settings.add_colormarker_rule(f, color, style.label, name, !disabled)
           abort "gori run colormarker add: failed to persist rule (settings not writable)" if id == 0
-          puts "Global colour rule ##{id} added — it applies in every project."
+          puts format == :json ? colormarker_added_json(id, nil) : "Global colour rule ##{id} added — it applies in every project."
           print_color_advice(f)
           return
         end
@@ -365,11 +367,25 @@ module Gori
             store.close
             abort "gori run colormarker add: project is busy (write did not commit) — try again"
           end
-          puts "Colour rule ##{id} added."
+          puts format == :json ? colormarker_added_json(id, store) : "Colour rule ##{id} added."
           print_color_advice(f)
         ensure
           store.close
         end
+      end
+
+      # `add --format json` (#1117): the new rule's `colormarker list --format json` object,
+      # through the same `colormarker_rule_json`, read back from the store it was written to —
+      # settings.json for a global rule (`store` nil: that path opens no project), this
+      # project's table otherwise. A global rule needs no project's override map: ids are
+      # never reused (`Settings.add_colormarker_rule`), so no project can override one that
+      # did not exist a moment ago, and `enabled` is its default. A rule a peer removed in
+      # that instant has no row, and the command refuses rather than print one the listing
+      # never shows.
+      private def self.colormarker_added_json(id : Int64, store : Store?) : String
+        found = store ? store.color_rules.find(&.id.==(id)) : Settings.colormarker_rules.find(&.id.==(id)).try(&.to_rule)
+        rule = found || abort_closing(store, "gori run colormarker add: rule ##{id} was created, but it was gone before it could be read back")
+        JSON.build { |j| colormarker_rule_json(j, rule) }
       end
 
       # Edit an existing rule's fields in place. Present for the same reason `colormarker color

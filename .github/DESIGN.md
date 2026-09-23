@@ -3200,3 +3200,26 @@ being written into `ToolFilter::PROFILES`. Every profile keeps both project pick
 member's description may not send the agent to a tool the profile leaves out: the model reads
 it as fact, and each such pointer is a call spent on `UNKNOWN_TOOL`. The spec holds the
 exceptions — mentions that are not instructions — in a list with a reason each.
+
+### 2026-09-23: a command that names one setting pins it; a card saved whole folds
+
+`gori run project network set KEY VALUE` (#1115) writes the same `net.*` rows as the TUI's
+Project settings card, and deliberately does NOT share the card's rule that a value equal to
+the global is stored as "inherit". The card needs that rule: it is saved whole from what it
+displayed, so it cannot tell a value the operator typed from an inherited one left alone, and
+without the fold every save would freeze a copy of the global into the project. A command
+that names one key has no such ambiguity — `set` says pin, `unset` says inherit — and folding
+there is wrong in one case that matters: an empty `upstream_proxy` is a DIRECT pin, while
+"inherit" still lets `upstream_rules` and `HTTPS_PROXY` route the project through a proxy. So
+the command pins and says so when the pin equals the global; the card keeps folding.
+
+Both surfaces keep the one invariant that is about safety rather than ergonomics: credentials
+pin the upstream they were validated against, in the same write (`set_settings`), so a busy
+store cannot leave a password beside an address it was never entered for.
+
+**A per-send override edits the send, not the session.** `repeater send --path` (#1116) sends
+the session's request to another target and leaves the stored request AND its last response
+alone: storing another endpoint's answer beside the row would show the tab a response to a
+request it does not hold, and make the next `--diff` compare against the wrong endpoint. The
+same line holds for `--headers-only` / `--max-body` (#1119): they shape what is printed, never
+what is sent, stored or recorded.

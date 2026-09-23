@@ -12,6 +12,10 @@
 - CLI: OAST subcommands no longer mistake option values for verbs, and missing `--project`/`--db` values are rejected (#1144)
 - TUI: `esc` leaves every tab body and the footer names where it lands — it did nothing at all on the Diff sub-tab (where `↑` was dead too) or on an empty Fuzzer, several tabs never advertised it, the Repeater, Fuzzer, Miner and Colormarker lines named the wrong destination, and the Fuzzer's results footer printed a raw `{fuzz.sort}` for a key that was never bound (#1147)
 - Notes: a Markdown heading marker no longer rides into the note's title — the sub-tab chip, `gori run notes`, the MCP listing and the exported filename all drop the leading `#` (#1147)
+- CLI: `gori run project network` lists, reads, pins and unsets a project's own network settings (`net.*`: upstream proxy and credentials, destination host, timeouts, capture cap, bind), so a per-project proxy no longer means editing the database by hand (#1115)
+- CLI: `gori run send` sends one request from a URL (curl-shaped) or a raw request without creating a Repeater session, and `--path` sends a session or a captured flow to another path for one send (#1116)
+- CLI: `--headers-only` and `--max-body=BYTES` keep a large response out of the terminal on `repeater send`, `repeater <flow-id>`, `repeater h2`, `send` and `show`, with a marker naming the full size (#1119)
+- CLI: every create and add subcommand (`repeater create`, `issues create`, `notes create`, `views add`, `colormarker add`, `rewriter add`, `rewriter extract add`, `probe rules add`, `oast providers add`, `links add`, `project scope add`, `project host-override add`) takes `--format json` and prints the new row as its listing does, id included; `scope add` names the id in text too, and `links add` no longer calls a link a busy project did not save "already linked" (#1117)
 
 ## v0.7.1
 

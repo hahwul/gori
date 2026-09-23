@@ -128,6 +128,16 @@ describe Gori::Repeater::DraftMarkers do
     end
   end
 
+  # `repeater send --path` sends an edited COPY; a marker the edit replaced is not on the wire,
+  # so it must not refuse the send (#1116).
+  it "answers about the request it is handed, not the stored one" do
+    with_store do |store|
+      rec = rec_for("GET /items/§id§ HTTP/1.1\r\nHost: h\r\n\r\n")
+      Gori::Repeater::DraftMarkers.live?(store, rec).should be_true
+      Gori::Repeater::DraftMarkers.live?(store, rec, "GET /items/42 HTTP/1.1\r\nHost: h\r\n\r\n".to_slice).should be_false
+    end
+  end
+
   it "writes ONE sentence both headless surfaces can carry" do
     msg = DM.refusal(7_i64, "Remedy here.")
     msg.should contain("repeater #7")

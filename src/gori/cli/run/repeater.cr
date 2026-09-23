@@ -22,6 +22,48 @@ module Gori
                       "positions, where `--repeater` escapes them), or pass --verbatim to say " \
                       "the stored bytes ARE the message and send them as they are."
 
+      # `--path`, written once for the two commands that take it (#1116). The contract that
+      # matters is the last sentence: the override edits THIS send, never the stored row.
+      PATH_OVERRIDE_HELP = "Send to this request-target (path and query, e.g. '/api/v1/items/42?lang=en') " \
+                           "instead of the stored one, for this send only — method, version, headers and " \
+                           "body are unchanged, and the value goes on the request line as written. A session's " \
+                           "stored request and last response are left as they were"
+
+      # nil when `--path` is usable (or absent); the refusal otherwise. Empty is refused for the
+      # reason `Plan` refuses a blank `--target`: `--path "$MAYBE_UNSET"` would otherwise put a
+      # request line with no target on the wire, somewhere the operator did not name.
+      def self.path_override_error(path : String?) : String?
+        return nil if path.nil? || !path.empty?
+        "--path must not be empty (to send the stored target, leave --path out)"
+      end
+
+      # nil unless the output flags and `--diff` disagree. `--max-body` cuts a body the diff
+      # would still compare in full, so the two answers could not be read side by side;
+      # `--headers-only` with `--diff` is the head-only comparison and is allowed.
+      def self.output_diff_error(cap : BodyCap, diff : Bool) : String?
+        return nil unless diff && cap.max
+        "--max-body cannot be combined with --diff — the diff compares whole messages " \
+        "(--headers-only --diff compares the heads alone)"
+      end
+
+      # The first line of a request, short and terminal-safe, for a refusal that has to show
+      # which line it could not use.
+      def self.request_line_preview(bytes : Bytes) : String
+        nl = bytes.index(0x0A_u8)
+        line = String.new(nl ? bytes[0, nl] : bytes).rstrip('\r')
+        CLI::Output.term_safe(line.size > 60 ? "#{line[0, 60]}…" : line).inspect
+      end
+
+      # After a `--path` send: the session's stored response was deliberately NOT replaced (see
+      # the persist in `cmd_repeater_send`), and a later `repeater send <id>` or the TUI tab would
+      # otherwise show the old answer with nothing saying why. STDERR, so a piped JSON stays one
+      # object — whose `response_saved` is absent for the same reason (no write was attempted).
+      private def self.report_path_override_unsaved(id : Int64, stored : Bytes, path : String?, prefix : String) : Nil
+        return unless path
+        STDERR.puts "#{prefix}: --path: session ##{id}'s stored request (#{request_line_preview(stored)}) " \
+                    "and its last response were left unchanged"
+      end
+
       # `gori run repeater [list|create|send|minimize|h2|move|delete] …`, or a bare flow id /
       # `--flow` for the one-shot resend.
       #
@@ -83,6 +125,8 @@ module Gori
         format = :text
         timeout : Time::Span? = nil
         tls_preset : String? = nil
+        headers_only = false
+        max_body : Int32? = nil
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater h2 --target URL --fields FILE [options]\n\n" \
@@ -96,6 +140,8 @@ module Gori
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
+          p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
+          p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run repeater h2: unknown option: #{f}\n#{p}" }
@@ -104,6 +150,7 @@ module Gori
         # A stray word here is refused, not dropped — see `Run.parse_no_positionals`.
         parse_no_positionals(parser, args, "gori run repeater h2",
           "pass the origin as --target URL and the field list as --fields FILE")
+        cap = body_cap(headers_only, max_body, "gori run repeater h2")
 
         tgt = target
         abort "gori run repeater h2: --target is required" if tgt.nil? || tgt.empty?
@@ -134,7 +181,7 @@ module Gori
         outbound.close
 
         new_body, _ = decode_body(result.head, result.body)
-        emit_repeater_result(result, new_body, nil, format, tls_preset: sent_tls_preset(plan))
+        emit_repeater_result(result, new_body, nil, format, tls_preset: sent_tls_preset(plan), cap: cap)
         exit 1 unless result.ok?
       end
 
@@ -202,38 +249,7 @@ module Gori
           repeaters = store.repeaters_mcp
           if format == :json
             puts(JSON.build do |j|
-              j.array do
-                repeaters.each_with_index do |r, i|
-                  j.object do
-                    j.field "id", r.id
-                    # Both numbers, named. `position` is the ordering COLUMN; `tui_index` is
-                    # what the TUI paints on the sub-tab chip, which is the number the
-                    # operator reads and the one MCP's repeater replies carry.
-                    j.field "tui_index", i + 1
-                    j.field "position", r.position
-                    j.field "name", r.name || "Untitled"
-                    j.field "tags", r.tags
-                    j.field "target", r.target
-                    j.field "http2", r.http2?
-                    j.field "auto_content_length", r.auto_content_length?
-                    j.field "flow_id", r.flow_id
-                    j.field "sni", r.sni
-                    # The session's TLS fingerprint (#844) — null for a session with no
-                    # override, which is what every session meant before it existed.
-                    j.field "tls_preset", r.tls_preset
-                    # Only when it is TRUE, so a workbench of well-formed sessions prints the
-                    # listing it always did. It is here because the stored bytes of an
-                    # unterminated request render identically to a terminated one in every
-                    # view gori has — the whole reason #1075 cost a debugging session — and a
-                    # listing is where an operator goes to find the odd tab out.
-                    if unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
-                      j.field "head_unterminated", true
-                    end
-                    j.field "last_error", r.response_error
-                    j.field "last_duration_us", r.response_duration_us
-                  end
-                end
-              end
+              j.array { repeaters.each_with_index { |r, i| j.object { repeater_row_fields(j, r, i + 1) } } }
             end)
           else
             if repeaters.empty?
@@ -265,6 +281,37 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # One session's fields as `repeater list --format json` prints them — shared with
+      # `repeater create --format json` (#1117), so a script sees the same object whether it
+      # lists the session or has just created it.
+      private def self.repeater_row_fields(j : JSON::Builder, r : Store::RepeaterRecord, tui_index : Int32) : Nil
+        j.field "id", r.id
+        # Both numbers, named. `position` is the ordering COLUMN; `tui_index` is what the TUI
+        # paints on the sub-tab chip, which is the number the operator reads and the one MCP's
+        # repeater replies carry.
+        j.field "tui_index", tui_index
+        j.field "position", r.position
+        j.field "name", r.name || "Untitled"
+        j.field "tags", r.tags
+        j.field "target", r.target
+        j.field "http2", r.http2?
+        j.field "auto_content_length", r.auto_content_length?
+        j.field "flow_id", r.flow_id
+        j.field "sni", r.sni
+        # The session's TLS fingerprint (#844) — null for a session with no override, which is
+        # what every session meant before it existed.
+        j.field "tls_preset", r.tls_preset
+        # Only when it is TRUE, so a workbench of well-formed sessions prints the listing it
+        # always did. It is here because the stored bytes of an unterminated request render
+        # identically to a terminated one in every view gori has — the whole reason #1075 cost a
+        # debugging session — and a listing is where an operator goes to find the odd tab out.
+        if unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
+          j.field "head_unterminated", true
+        end
+        j.field "last_error", r.response_error
+        j.field "last_duration_us", r.response_duration_us
       end
 
       # `gori run repeater move <id> --to N | --up | --down` — rearrange the sub-tab strip.
@@ -603,6 +650,7 @@ module Gori
         ws_http_only = false
         keep_request_line = false
         tls_preset : String? = nil
+        format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater create [options]\n\n#{EVIDENCE_LINK_HELP}\n"
@@ -627,6 +675,7 @@ module Gori
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}. Stored on the session, so `repeater send` and a reopened TUI tab present it too") { |v| tls_preset = v }
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (lets an absent/short/duplicate/non-base64 key be tested)") { ws_keep_key = true }
           p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) read as the response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
+          p.on("--format=FMT", "Output: text (default) | json — the new session as `repeater list --format json` prints it, plus websocket / ws_messages / request_line_rewritten") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
@@ -675,6 +724,7 @@ module Gori
           tgt_str : String = tgt_val ? tgt_val : ""
           ws_messages = [] of Store::WsOutMessage
           is_ws = false
+          rewrote_request_line = false
 
           if fid = flow_id
             detail = store.get_flow(fid)
@@ -686,6 +736,7 @@ module Gori
             # workbench door, and the rewrite is reported either way (see `Built`).
             built = Repeater::FlowRequest.build(detail, rewrite_absolute_form: !keep_request_line)
             warn_request_line_rewrite(built, "gori run repeater create")
+            rewrote_request_line = built.rewrote_request_line
             # Only seed the request from the flow when the user didn't hand one in: --flow
             # doubles as provenance (the flow_id column) for a custom --request-raw/-file/-stdin,
             # so an explicit request must NOT be silently overwritten by the flow's bytes.
@@ -794,9 +845,41 @@ module Gori
           if unterminated_head?(req_content.to_slice, ws_http_only: ws_http_only, http2: http2)
             STDERR.puts "gori run repeater create: #{unterminated_head_note}"
           end
-          puts "Repeater session ##{id} created successfully."
+          if format == :json
+            puts repeater_created_json(store, id, is_ws, ws_messages.size, rewrote_request_line)
+          else
+            puts "Repeater session ##{id} created successfully."
+          end
         ensure
           store.close
+        end
+      end
+
+      # `repeater create --format json` (#1117): the row as `repeater list --format json` prints
+      # it — READ BACK, because the list shape carries what the store made of the arguments (the
+      # masked name, the tab number, the position the strip gave it) — plus the three facts only
+      # the create knows. A script used to scrape the id out of "Repeater session #7 created
+      # successfully.", which breaks on any rewording. `abort`s (the row committed a moment ago)
+      # only if a peer deleted it before it could be read, which the object could not describe.
+      private def self.repeater_created_json(store : Store, id : Int64, websocket : Bool,
+                                             ws_messages : Int32, rewrote_request_line : Bool) : String
+        rows = store.repeaters_mcp
+        i = rows.index { |r| r.id == id }
+        unless i
+          store.close
+          abort "gori run repeater create: session ##{id} was created, but another gori deleted it before it could be read back"
+        end
+        JSON.build do |j|
+          j.object do
+            repeater_row_fields(j, rows[i], i + 1)
+            j.field "websocket", websocket
+            # How many frames were stored with it — the count MCP's `create_repeater` reports,
+            # so a seeded WebSocket session's frames can be asserted rather than trusted.
+            j.field "ws_messages", ws_messages if websocket
+            # Only when it FIRED: a `--flow` seed's absolute-form line rewritten to origin-form
+            # is persisted into the row, so this is the one record that it was ever there.
+            j.field "request_line_rewritten", true if rewrote_request_line
+          end
         end
       end
 
@@ -853,8 +936,9 @@ module Gori
                                             verbatim : Bool = false,
                                             timeout : Time::Span? = nil,
                                             reframe_grpc : Bool = false,
-                                            tls_preset : String? = nil) : Repeater::PlanOptions
-        Repeater::PlanOptions.new([rec.request],
+                                            tls_preset : String? = nil,
+                                            request : Bytes = rec.request) : Repeater::PlanOptions
+        Repeater::PlanOptions.new([request],
           reframe_grpc: reframe_grpc,
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
           timeout: timeout,
@@ -963,6 +1047,9 @@ module Gori
         # There is no `--websocket` counterpart: the stored default IS WebSocket unless the
         # operator turned it off, so the only direction that needs a per-send override is this one.
         http_only : Bool? = nil
+        path_override : String? = nil
+        headers_only = false
+        max_body : Int32? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -987,6 +1074,9 @@ module Gori
           p.on("--http", "WebSocket: send the handshake as an ordinary HTTP request and print the response, instead of performing the framed exchange (overrides the session's stored setting for this send). The bytes are unchanged — this selects the engine, not a rewrite") { http_only = true }
           p.on("--record-history", "Also write the outbound request + response to History as a captured flow, and print its flow id (default: off — a Repeater send leaves no flow). HTTP only") { record_history = true }
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the session's stored one for this send") { |v| tls_preset = v }
+          p.on("--path=TARGET", PATH_OVERRIDE_HELP) { |v| path_override = v }
+          p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
+          p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -997,6 +1087,13 @@ module Gori
         abort "gori run repeater send: missing <repeater-id>\n#{parser}" if positional.empty?
         abort "gori run repeater send: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
         id = positional[0].to_i64? || abort "gori run repeater send: invalid repeater id '#{positional[0]}'"
+        cap = body_cap(headers_only, max_body, "gori run repeater send")
+        if err = output_diff_error(cap, do_diff)
+          abort "gori run repeater send: #{err}"
+        end
+        if err = path_override_error(path_override)
+          abort "gori run repeater send: #{err}"
+        end
 
         # Resolved ONCE and reused by the response persist / History record after the send —
         # `resolve_read_project` with no --project/--db falls through to the project sorted
@@ -1011,15 +1108,22 @@ module Gori
         store = open_store(project, read_only: true)
         # `markers_live` is read HERE, with the store still open: the predicate may have to
         # read the session's source flow (`DraftMarkers.operator_marked?`), and this store is
-        # closed before the send like the flow path's. Its answer is about stored bytes, which
-        # this command never rewrites, so taking it early changes nothing about what it says.
-        rec, host_overrides, markers_live = begin
+        # closed before the send like the flow path's. It is asked of the request THIS send
+        # carries — the `--path` copy when there is one (it edits a COPY for this send; the row
+        # keeps its own, see `FlowRequest.replace_request_target`) — so a `§id§` in the stored
+        # target that `--path` replaced does not refuse a send that no longer carries it.
+        rec, host_overrides, markers_live, request = begin
           r = store.get_repeater_full(id)
-          {r, Gori::HostOverrides.load(store), r ? Repeater::DraftMarkers.live?(store, r) : false}
+          req = r.try { |row| (p = path_override) ? Repeater::FlowRequest.replace_request_target(row.request, p) : row.request }
+          {r, Gori::HostOverrides.load(store), r && req ? Repeater::DraftMarkers.live?(store, r, req) : false, req}
         ensure
           store.close
         end
         abort "gori run repeater send: no repeater session ##{id}" unless rec
+        unless request
+          abort "gori run repeater send: session ##{id}'s stored request has no request line target to " \
+                "replace (#{request_line_preview(rec.request)}) — edit the session instead"
+        end
         # After `open_store` (which installs `Env.layer`) and before the plan: `Repeater::Sender`
         # reads the active slot at the seam, so this has to be set before anything builds bytes.
         activate_slot(slot, "gori run repeater send")
@@ -1029,7 +1133,8 @@ module Gori
         outbound = project_outbound(project_name, db_path, allow_unscoped)
 
         plan = begin
-          Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc, tls_preset), outbound)
+          Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc,
+            tls_preset, request: request), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end
@@ -1045,6 +1150,12 @@ module Gori
         if !use_ws && (!ws_messages.empty? || idle_ms)
           outbound.close
           abort "gori run repeater send: --message / --message-frame / --idle-ms apply to a WebSocket exchange — session ##{id} is being sent as HTTP"
+        end
+        # …and the other direction: a framed exchange prints a TRANSCRIPT, not a response body.
+        if use_ws && !cap.whole?
+          outbound.close
+          abort "gori run repeater send: #{cap.flag} applies to an HTTP response — session ##{id} is a " \
+                "WebSocket exchange (pass --http to send its handshake as an ordinary request)"
         end
         # The HTTP path only, and AFTER `use_ws` for that reason: a framed WS exchange takes
         # `--message` markers as a documented sweep input (a different contract), while a
@@ -1073,7 +1184,8 @@ module Gori
           # or MCP `ws_out_messages` leaves it nil and its rows stay the operator's draft.
           cmd_repeater_send_ws(id, plan, project, idle_ms, ws_messages, outbound, format,
             verbatim, ws_keep_key || rec.ws_keep_key?, !rec.flow_id.nil?,
-            Evidence.request_digest(rec.request))
+            Evidence.request_digest(rec.request), persist: path_override.nil?)
+          report_path_override_unsaved(id, rec.request, path_override, "gori run repeater send")
           return
         end
 
@@ -1101,8 +1213,9 @@ module Gori
         diff = nil.as(Array(Repeater::DiffLine)?)
         diff_capped = false
         if do_diff && (base_head = rec.response_head)
-          orig = message_lines(base_head, display_body(base_head, rec.response_body))
-          fresh = message_lines(result.head, new_body)
+          # `--headers-only --diff` compares the two HEADS: status and headers, no body lines.
+          orig = message_lines(base_head, cap.omit ? nil : display_body(base_head, rec.response_body))
+          fresh = message_lines(result.head, cap.omit ? nil : new_body)
           diff_capped = Repeater::Diff.truncated?(orig, fresh)
           diff = Repeater::Diff.lines(orig, fresh)
         end
@@ -1127,13 +1240,19 @@ module Gori
         # wire may differ (`--set`, `$NAME` expansion, the slot overlay) and deliberately does
         # not count: the drift check compares the ROW's request, not what went out.
         # Only on ok?: a failed resend must not wipe a good stored response.
+        #
+        # NOT under `--path`: the row's request still names its own target, so storing another
+        # target's answer beside it would show the TUI tab a response to a request it does not
+        # hold — and make the next `send --diff` compare against the wrong endpoint.
         response_write = nil.as(WriteOutcome?)
-        if result.ok?
+        if result.ok? && path_override.nil?
           response_write = WriteOutcome.new(persist_repeater_response(id, result.head, result.body, result.error,
             result.duration_us, project, Evidence.request_digest(rec.request)))
         end
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id,
-          tls_preset: sent_tls_preset(plan), response_write: response_write, history_write: history_write)
+          tls_preset: sent_tls_preset(plan), response_write: response_write, history_write: history_write,
+          cap: cap, request_target: path_override && Gori::Outbound.request_target(wire))
+        report_path_override_unsaved(id, rec.request, path_override, "gori run repeater send") if result.ok?
         # The STDERR half of the same two answers, in both formats: a human at a terminal reads
         # this line, and a script's pipe still carries the JSON field.
         if (hw = history_write) && (why = hw.error)
@@ -1158,9 +1277,10 @@ module Gori
       # a failure. The caller puts the id AND the failure on the OUTPUT (`recorded_flow_id` /
       # `history_saved` in JSON, a STDERR note in text) rather than this method printing — a
       # `recorded_flow_id: null` alone was indistinguishable from `--record-history` not passed.
+      # `session_id` is nil for `gori run send`, which has no session for the row to point back at.
       private def self.record_repeater_send_to_history(plan : Repeater::Plan, wire : Bytes,
                                                        result : Repeater::Result,
-                                                       created_at : Int64, session_id : Int64,
+                                                       created_at : Int64, session_id : Int64?,
                                                        project : Project) : Int64 | String
         store = begin
           open_store(project, abort_on_failure: false)
@@ -1169,7 +1289,7 @@ module Gori
         end
         begin
           Repeater::HistoryRecord.record(store, plan, result, created_at, wire,
-            surface: Gori::FlowSource::Surface::Cli, source_ref: session_id.to_s)
+            surface: Gori::FlowSource::Surface::Cli, source_ref: session_id.try(&.to_s))
         rescue Gori::Error | DB::Error | SQLite3::Exception
           project_write_failure("History was NOT saved", project)
         ensure
@@ -1187,7 +1307,8 @@ module Gori
                                             outbound : Gori::Outbound, format : Symbol,
                                             verbatim : Bool, keep_key : Bool,
                                             evidence : Bool = false,
-                                            request_sha256 : String? = nil) : Nil
+                                            request_sha256 : String? = nil,
+                                            persist : Bool = true) : Nil
         abort_if_blocked!(plan, "gori run repeater send")
 
         store = open_store(project, read_only: true)
@@ -1207,7 +1328,7 @@ module Gori
         # (a 403/426 where the stored row holds a 101 IS the news, and it was being dropped).
         # See `WsEngine::Result#answered?`.
         response_write = nil.as(WriteOutcome?)
-        if result.answered?
+        if result.answered? && persist
           response_write = WriteOutcome.new(persist_repeater_response(id, result.handshake_head, Bytes.empty,
             result.error, result.duration_us, project, request_sha256))
         end
@@ -1542,15 +1663,21 @@ module Gori
                                             recorded_flow_id : Int64? = nil,
                                             tls_preset : String? = nil,
                                             response_write : WriteOutcome? = nil,
-                                            history_write : WriteOutcome? = nil) : Nil
+                                            history_write : WriteOutcome? = nil,
+                                            cap : BodyCap = BodyCap.new,
+                                            request_target : String? = nil) : Nil
         # Text mode: the id goes to STDERR beside the other status lines, so a `> resp.txt`
         # redirect still captures exactly the response and nothing else.
         STDERR.puts "recorded to History as flow ##{recorded_flow_id}" if recorded_flow_id && format != :json
+        # A `--path` send names its target on the status line: a loop over forty paths reads
+        # forty `→ 200` lines otherwise, with nothing tying each to the request it answered.
+        at = request_target.try { |t| " · #{CLI::Output.term_safe(t)}" } || ""
         if format == :json
           puts repeater_json(result, diff, diff_capped, recorded_flow_id, tls_preset,
-            response_write: response_write, history_write: history_write)
+            response_write: response_write, history_write: history_write, cap: cap,
+            request_target: request_target)
         elsif result.ok?
-          STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
+          STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{at}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
           if d = diff
             print_diff(d)
             n = Repeater::Diff.change_count(d)
@@ -1562,7 +1689,7 @@ module Gori
             STDERR.puts(n == 0 ? "no differences" : "#{n} line#{n == 1 ? "" : "s"} changed")
             STDERR.puts "(diff truncated to #{Repeater::Diff::MAX_LINES} lines/side — lines past the cut were not compared)" if diff_capped
           else
-            print_message_text(result.head, new_body, result.body)
+            print_message_text(result.head, new_body, result.body, cap)
           end
         else
           STDERR.puts "repeater failed: #{result.error}"
@@ -1575,8 +1702,8 @@ module Gori
           # the head, so the answer that IS the finding was visible on every rendering except
           # the default one.
           unless result.head.empty?
-            STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
-            print_message_text(result.head, new_body, result.body)
+            STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{at}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
+            print_message_text(result.head, new_body, result.body, cap)
           end
         end
       end
@@ -1900,6 +2027,9 @@ module Gori
         slot : String? = nil
         timeout : Time::Span? = nil
         tls_preset : String? = nil
+        path_override : String? = nil
+        headers_only = false
+        max_body : Int32? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -1913,7 +2043,8 @@ module Gori
                      "Options (single-flow replay):"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept") { |v| target_override = v }
+          p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept (see --path)") { |v| target_override = v }
+          p.on("--path=TARGET", PATH_OVERRIDE_HELP) { |v| path_override = v }
           p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { http2_override = true }
           p.on("--http1", "Force HTTP/1.1 — downgrades an h2-captured flow (default follows how the flow was captured)") { http2_override = false }
           p.on("--no-http2", "Alias for --http1") { http2_override = false }
@@ -1928,6 +2059,8 @@ module Gori
           p.on("--keep-request-line", "Send the stored request line as-is — do not rewrite an absolute-form line (\"GET http://h/p\") to origin-form") { keep_request_line = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
+          p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -1936,6 +2069,10 @@ module Gori
         end
         parser.parse(args)
         id = take_flow_id(positional, "repeater")
+        cap = body_cap(headers_only, max_body, "gori run repeater")
+        if err = output_diff_error(cap, do_diff) || path_override_error(path_override)
+          abort "gori run repeater: #{err}"
+        end
 
         # get_flow loads all the BLOBs, so the store can close before the send. Also
         # cheaply probe whether a repeater SESSION shares this id (get_repeater reads
@@ -2047,6 +2184,14 @@ module Gori
         refuse_unresolved_overrides(target_override, sni_override)
 
         wire, explicit_cl = build_single_flow_request(head_bytes, body_bytes, headers, body_override, target_override, removed_headers)
+        # `--path` last, over the merged wire: no other override touches the request line, and
+        # the value is the operator's, so it expands like `-H`/`-b` do (the capture around it
+        # does not — see `build_single_flow_request`).
+        if p = path_override
+          wire = Repeater::FlowRequest.replace_request_target(wire, Env.expand(p)) ||
+                 abort("gori run repeater: flow ##{id}'s request has no request line target to replace " \
+                       "(#{request_line_preview(wire)})")
+        end
         outbound = project_outbound(project_name, db_path, allow_unscoped)
         # Copied out of the closure-captured var first — Crystal keeps that one `Bool?`.
         forced = http2_override
@@ -2080,13 +2225,17 @@ module Gori
         diff = nil.as(Array(Repeater::DiffLine)?)
         diff_capped = false
         if do_diff
-          orig = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
-          fresh = message_lines(result.head, new_body)
+          # `--headers-only --diff` compares the two HEADS: status and headers, no body lines.
+          orig = message_lines(detail.response_head, cap.omit ? nil : display_body(detail.response_head, detail.response_body))
+          fresh = message_lines(result.head, cap.omit ? nil : new_body)
           diff_capped = Repeater::Diff.truncated?(orig, fresh)
           diff = Repeater::Diff.lines(orig, fresh)
         end
 
-        emit_repeater_result(result, new_body, diff, format, diff_capped, tls_preset: sent_tls_preset(plan))
+        # The target as it went out (after `Env.expand`), read the way the scope gate read it —
+        # not the `--path` argument, whose `$ENV.ID` the wire no longer carries.
+        emit_repeater_result(result, new_body, diff, format, diff_capped, tls_preset: sent_tls_preset(plan),
+          cap: cap, request_target: path_override && Gori::Outbound.request_target(plan.bytes))
         # `--slot NAME` on a single-flow replay: the same drain the session-send path takes,
         # because it is the same overlay seam and a notice fixed on one of the two would drift.
         report_unbound_slot_overlay("gori run repeater")
@@ -2097,10 +2246,15 @@ module Gori
                                      diff_capped : Bool = false, recorded_flow_id : Int64? = nil,
                                      tls_preset : String? = nil, *,
                                      response_write : WriteOutcome? = nil,
-                                     history_write : WriteOutcome? = nil) : String
+                                     history_write : WriteOutcome? = nil,
+                                     cap : BodyCap = BodyCap.new,
+                                     request_target : String? = nil) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
+            # `--path` only: the request-target this send put on the wire (expanded), so a
+            # script looping over paths can key each object by the one it reached.
+            j.field("path", request_target) if request_target
             # WHICH HANDSHAKE produced this response (#844) — absent when no override was in
             # play, so two sends differing only in `--tls-preset` are told apart from the JSON
             # alone. The name gori APPLIED, not a JA3 it can prove: see `--tls-preset`'s help.
@@ -2138,7 +2292,7 @@ module Gori
               j.field "head_lossy", true
               j.field "head_base64", Base64.strict_encode(result.head)
             end
-            emit_body_json(j, "body", result.head, result.body, result.incomplete?)
+            emit_body_json(j, "body", result.head, result.body, result.incomplete?, cap)
             if d = diff
               j.field "changed_lines", Repeater::Diff.change_count(d)
               # Sibling to changed_lines, exactly as `cmd_compare`'s JSON carries it: a

@@ -833,7 +833,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 
 A project can also carry its own **redaction** config under the `redaction` key — its own profiles, which one is active, and its own answer to "sanitize by default" (including an explicit `false` that turns a global default off for one engagement). Written by [`gori run redact`](/reference/cli/#run-redact); resolution is project, then global, then built-in, first match by name.
 
-A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **Project settings** sub-tab.
+A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **Project settings** sub-tab, or headless with [`gori run project network`](/reference/cli/#project-network) (`list`, `get`, `set`, `unset`).
 
 **Destination host** limits proxy routing to one case-insensitive host pattern. `*` is the default and makes every destination eligible; `example.com` covers that host and its subdomains, while `*.example.com` covers subdomains only. Domain, IPv4, IPv6, and `*`-based IP patterns are accepted. A non-match always goes direct and does not fall through to `upstream_rules` or `network.upstream_proxy`. This gate applies to every gori-owned dial while the project is active, including capture, replay, scanners, the updater, and OAST traffic.
 
@@ -861,7 +861,7 @@ The timeout and capture-limit keys are engagement properties rather than machine
 | 3 | `settings.json` `network.*` |
 | 4 (lowest) | Factory defaults `127.0.0.1:8070` / direct |
 
-Saving a Project-tab field that equals the current global value deletes that KV key, so the project keeps inheriting future global edits instead of freezing a duplicate. **Destination host** has no global counterpart; saving its default `*` deletes its project key.
+Saving a Project-tab field that equals the current global value deletes that KV key, so the project keeps inheriting future global edits instead of freezing a duplicate. **Destination host** has no global counterpart; saving its default `*` deletes its project key. `gori run project network set` names one key, so it pins even a value equal to the global (`unset` is the way to inherit), and an empty `upstream_proxy` pins a direct route rather than inheriting.
 
 ## Projects & Database
 

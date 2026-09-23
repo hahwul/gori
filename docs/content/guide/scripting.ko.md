@@ -79,6 +79,13 @@ gori run capture --project ci-run --for 5m --format jsonl > flows.jsonl
 
 # 퍼저가 반사된 마커를 찾으면 CI 잡을 실패시키기
 gori run fuzz 42 --wordlist payloads.txt --mr 'gori-canary' --fail-if-no-matches
+
+# create 계열 명령의 --format json은 새로 생긴 행 그대로이고 id도 포함 — 텍스트를 긁어낼 필요 없음
+id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
+rule=$(gori run project scope add --pattern=api.example.com --format json | jq .id)
+
+# 경로마다 요청 하나, 경로마다 세션은 만들지 않음, 상태와 헤더만
+for p in /api/v1/items/{1..38}; do gori run send "https://api.example.com$p" --headers-only; done
 ```
 
 ## 스코프 지키기
@@ -197,13 +204,14 @@ Rewriter 룰과 같은 신뢰 수준입니다. gori가 훅을 스스로 만들�
 |-------|-----------|
 | CI에서 헤드리스로 트래픽 캡처 | `capture` |
 | History 질의·내보내기(HAR 포함) | `history`, `show` |
+| 세션 없이 요청 하나 보내기 | `send` |
 | 요청 재전송과 비교 | `repeater`, `compare` |
 | 페이로드 스윕, 숨은 파라미터 탐색 | `fuzz`, `mine` |
 | 엔드포인트 크롤링·브루트포스 | `discover`, `sitemap` |
 | 아이덴티티별 접근 제어 시험 | `authorize` |
 | 스캔과 트리아지 | `probe`, `issues`, `notes` |
 | 프로젝트 없이 순수 계산 | `decoder`, `jwt`, `cookie` |
-| 프로젝트·스코프·env·규칙 관리 | `project`, `rewriter`, `colormarker` |
+| 프로젝트·스코프·env·네트워크·규칙 관리 | `project`, `rewriter`, `colormarker` |
 
 ## 다음 단계
 

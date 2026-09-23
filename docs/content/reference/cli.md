@@ -59,6 +59,7 @@ gori run <subcommand> [verb] [options]
 | `compare <id-a> <id-b>` | Diff two flows' request or response |
 | `diff --from A --to B` | Retest report: diff two projects at endpoint scale (added / gone / changed / unchanged / removed) |
 | `intercept` | Inspect and drive a capturing TUI's live intercept queue |
+| `send [URL]` | Send one request built from a URL (curl-shaped) or a raw request, without creating a Repeater session |
 | `repeater <flow-id>` · `list` · `create` · `send` | Re-send a captured flow, or list / create / execute Repeater sessions (incl. WebSocket) |
 | `repeater minimize <id>` | Strip a saved request to the smallest form that keeps the response |
 | `repeater h2` | Send a field-native HTTP/2 request from an ordered HPACK field list |
@@ -98,6 +99,7 @@ gori run <subcommand> [verb] [options]
 | `project sandbox` | Get / set the hard-containment sandbox gate (`status`, `on`, `off`) |
 | `project env` | List / set / delete project env vars (`$ENV.KEY` substitution) |
 | `project host-override` | List / add / update / delete project host to IP dial overrides |
+| `project network` | List / get / set / unset the project's own network settings (`net.*`: upstream proxy and credentials, destination host, timeouts, capture cap, bind) |
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`). Global flags go **after** the verb: `gori run rewriter rm 1 --project=x`, not `gori run rewriter --project=x rm 1`, which is rejected as a usage error rather than silently listing.
 
@@ -131,6 +133,13 @@ Where a run streams, `json` and `jsonl` are not always the same shape:
 | `130` | Interrupted by SIGINT/SIGTERM. `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
 
 Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins.
+
+**A create takes `--format json` and answers with the new row.** `repeater create`, `issues create`, `notes create`, `views add`, `colormarker add`, `rewriter add`, `rewriter extract add`, `probe rules add`, `oast providers add`, `links add`, `project scope add` and `project host-override add` print one object on STDOUT, read back after the write committed, in exactly the shape that family's listing prints for the same row. A script therefore takes the id with `jq .id` instead of scraping it out of a sentence. The id is whatever the rest of that family takes: a number for most, the rule name (`custom_p_7`) for a probe rule and the provider key (`p_3`) for an OAST provider. A view is addressed by name, so its object carries `name` and `key` rather than an id. `notes create` adds `index`, the position the text line names, and `links add` adds `created`, which is `false` for a pair that was already linked (with that link's id). Text output is unchanged.
+
+```bash
+issue=$(gori run issues create --title "IDOR on /v1/users/{id}" --severity high --format json | jq .id)
+gori run links add --owner=issue --id="$issue" --ref=flow --ref-id=42 --format json
+```
 
 ### run capture
 
@@ -190,6 +199,8 @@ Every row also carries `source`, where the flow came from (`proxy`, `repeater`, 
 ```bash
 gori run show <flow-id> --format raw
 ```
+
+`--headers-only` and `--max-body=BYTES` make the `text` and `json` views compact: `--headers-only` replaces each body with a line naming its size (`[body omitted by --headers-only: 149504 bytes]`; in JSON the body object keeps `encoding` and `size` and gains `omitted: true`), and `--max-body` prints the first BYTES of each decoded body followed by `[… truncated by --max-body: showing 2048 of 149504 bytes]` (in JSON `text`/`base64` hold the prefix, `size` the total, `shown_size` the prefix, and `truncated` is true). Either one also leaves out the sections derived from the bodies: decoded views, gRPC messages, WebSocket frames and SSE events. A transcript is still named with its count (`=== SSE EVENTS (40) — not printed under --max-body ===`, or `{"count": 40, "omitted": true}`). They are refused with the other formats, each of which writes the whole message, and with each other.
 
 `--format` is `text`, `json`, `raw` (exact bytes), `har` (a one-entry HAR log), or one of the **request-as-code** serializers: `curl`, `python` (requests), `fetch` (JavaScript), `go` (net/http), `httpie`, and `csrf` (a self-submitting HTML CSRF PoC). Each emits byte-identical text to the TUI's `Space → Y` **Copy as…** row of the same name. `--request-only` / `--response-only` limit the output and do not apply to `har`; every request-as-code format *is* the request, so `--response-only` is refused for all of them. Two caveats go to STDERR rather than into the snippet on STDOUT: a request body cut at the capture cap is carried **short**, and a WebSocket flow serializes as the upgrade handshake with none of its frames. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
 
@@ -323,6 +334,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | Option | Description |
 | -------- | ------------- |
 | `--target=URL` | Send to a different origin; path and query are kept |
+| `--path=TARGET` | Send to a different request-target (path and query, e.g. `/api/v1/items/42?lang=en`) on the same origin. Everything else on the request line, every header and the body are kept byte-exact; the value goes on the line as written |
 | `--http2` / `--http1` (`--no-http2`) | Force a protocol; the default follows how the flow was captured |
 | `--sni=HOST` | TLS SNI override |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
@@ -333,7 +345,11 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--keep-request-line` | Send the stored request line as-is; do not rewrite an absolute-form line (`GET http://h/p`) to origin-form |
 | `--diff` | Diff against the original response |
 | `--allow-unscoped` | Send outside the project scope. Sandbox mode and explicit excludes still refuse each send |
+| `--headers-only` | Print the status line and headers only; the body is replaced by one line naming its size |
+| `--max-body=BYTES` | Print at most BYTES of the decoded response body, then a marker naming the full size |
 | `--format=FMT` | `text` (default) or `json` |
+
+`--headers-only` and `--max-body` shape what is **printed**, never what is sent or stored: the body is replaced by `[body omitted by --headers-only: 149504 bytes]`, or cut and followed by `[… truncated by --max-body: showing 2048 of 149504 bytes]`, so a cut body never reads as a short one. The size is the decoded body's (de-chunked, decompressed), the one an uncut dump prints. In `--format json` the `body` object keeps `size` as the whole decoded size; `--max-body` holds the prefix in `text`/`base64` and adds `shown_size`, with `truncated: true`, and `--headers-only` drops the bytes and adds `omitted: true`. The two flags are refused together. `--headers-only --diff` compares the two heads alone; `--max-body` is refused with `--diff`, whose comparison is of the whole messages. They take the same shape on `repeater send`, `repeater h2`, [`send`](#run-send) and [`show`](#run-show).
 
 **`repeater list`**: list saved Repeater sessions (`--format text|json`).
 
@@ -383,6 +399,12 @@ backtrace, as the flag doors already did.
 | `--keep-request-line` | With `--flow`: store the request line as captured, absolute-form included |
 | `--ws-keep-key` | WebSocket: send the request's own `Sec-WebSocket-Key` so an absent, short, duplicate, or non-base64 key can be tested |
 | `--ws-http-only` | WebSocket: store this session as plain HTTP: the upgrade is sent as an ordinary request and the `101` read as a response |
+| `--format=FMT` | `text` (default: `Repeater session #7 created successfully.`) or `json`: the new session as `repeater list --format json` prints it (`id`, `tui_index`, `position`, `name`, `target`, `http2`, …) plus `websocket`, the stored `ws_messages` count, and `request_line_rewritten` when a `--flow` seed's line was rewritten |
+
+```bash
+id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
+gori run repeater send "$id"
+```
 
 **`repeater send <repeater-id>`**: execute a saved session, HTTP or WebSocket.
 
@@ -401,7 +423,18 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--idle-ms=N` | WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000) |
 | `--http` | WebSocket: send the handshake as an ordinary HTTP request for this send only. Selects the engine, not a rewrite |
 | `--record-history` | Also write the outbound request + response to History as a captured flow, and print its flow id on stdout (HTTP only; a Repeater send leaves no flow by default) |
-| `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--format` | As above |
+| `--path=TARGET` | Send this request-target (path and query) instead of the stored one, for this send only |
+| `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--headers-only`, `--max-body`, `--format` | As above (`--headers-only` / `--max-body` are HTTP-only: a WebSocket exchange prints a transcript) |
+
+`--path` sweeps one session's request across endpoints that differ only in path, without a session per path:
+
+```bash
+for n in $(seq 1 38); do
+  gori run repeater send 1 --path "/api/v1/items/$n" --headers-only
+done
+```
+
+It edits a copy of the stored request for this send: the session keeps its own request **and its last response**, because storing another target's answer beside it would show the TUI tab a response to a request it does not hold, and make the next `--diff` compare against the wrong endpoint. So `response_saved` is absent from `--format json`, a `path` field names the target that was sent, and the text status line ends with it (`→ 200 in 218.4ms · /api/v1/items/42`). `--record-history` still records the request as it went out, new path included, and `--diff` compares against the session's stored response.
 
 A send that reached the origin exits `0` even when the writes after it fail, so a shell does not resend it. `--format json` says which: `response_saved` (present once a response was written to the session, `false` with `response_save_error` when the project refused the write or the session was deleted mid-send, in which case a later `--diff` would compare against the previous response) and, under `--record-history`, `history_saved` with `history_error` beside a `recorded_flow_id` that is then absent. Text mode prints the same sentence on STDERR.
 
@@ -422,7 +455,32 @@ gori run repeater move 5 --down
 gori run repeater h2 --target https://api.example.com --fields fields.json
 ```
 
-`--fields=FILE` is a JSON file holding either a bare `[[name, value], …]` array or `{"fields": [[name, value], …], "body": "…"}` (`body_base64` for binary). Nothing in the list is normalized: a leading colon, a leading-space value, an uppercase name are the payload. `--target` sets the dial origin, so the `:authority` and `:scheme` fields may deliberately disagree with it. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--allow-unscoped`, `--tls-preset=NAME` and `--format text|json` behave as on `repeater send`.
+`--fields=FILE` is a JSON file holding either a bare `[[name, value], …]` array or `{"fields": [[name, value], …], "body": "…"}` (`body_base64` for binary). Nothing in the list is normalized: a leading colon, a leading-space value, an uppercase name are the payload. `--target` sets the dial origin, so the `:authority` and `:scheme` fields may deliberately disagree with it. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--allow-unscoped`, `--tls-preset=NAME`, `--headers-only`, `--max-body` and `--format text|json` behave as on `repeater send`.
+
+### run send
+
+Send one request and print the response, without creating a Repeater session: the headless form of MCP `send_request{url}`, built by the same code. It goes out through the project's upstream proxy, host overrides, scope and Sandbox like every other gori send, and leaves nothing behind unless you pass `--record-history`.
+
+```bash
+gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json'
+gori run send --url https://api.example.com/v1/items -X POST -b '{"name":"x"}' --record-history
+gori run send --url https://api.example.com --request-file req.http --headers-only
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--url=URL` (or the URL as the only argument) | Absolute `http://` / `https://` URL. Its path and query become the request-target; with a raw request it only names where to dial |
+| `-X`, `--method=METHOD` | HTTP method (default `GET`) |
+| `-H`, `--header=HEADER` | `Name: value`, repeatable, sent in order. `Host` and `Content-Length` are added only when you leave them out. A header that would split into two lines, or a name that is not a token, is refused: a raw request is the form for malformed bytes |
+| `-b`, `--body=BODY` | Request body; `$ENV.KEY` tokens expand |
+| `--body-file=FILE` | Request body read byte-for-byte, never expanded |
+| `-f`, `--request-file=FILE` · `-r`, `--request-raw=RAW` · `--request-stdin` | Send this raw HTTP request instead of building one. Refused beside `-X`/`-H`/`-b`/`--body-file`, which it would otherwise silently drop. The head's bare LFs are promoted to CRLF unless `--verbatim` |
+| `--verbatim` | No token expansion in `-H`, `-b` or a raw request, no bare-LF promotion, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial |
+| `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--slot=NAME`, `--allow-unscoped` | As on `repeater send` |
+| `--record-history` | Also write the request and response to History as a flow (`source: repeater`, `source_surface: cli`) and print its id. Off by default, as on `repeater send` |
+| `--headers-only`, `--max-body=BYTES`, `--format=FMT` | As on `repeater send` |
+
+A request that is a WebSocket handshake goes out as an ordinary request and its `101` is the answer, which the command says on STDERR. A framed exchange needs a session: `repeater create`, then `repeater send`.
 
 ### run fuzz
 
@@ -1274,7 +1332,7 @@ gori run project scope disable
 | Option / subcommand | Description |
 | --------------------- | ------------- |
 | (default) | List rules; `--format` is `text` or `json` |
-| `add` | `--kind=include\|exclude` (default `include`), `--type=host\|string\|regex` (default `host`), `--pattern=…` (required) |
+| `add` | `--kind=include\|exclude` (default `include`), `--type=host\|string\|regex` (default `host`), `--pattern=…` (required). Prints the new rule's id; `--format json` prints the rule as the listing does (`id`, `kind`, `type`, `pattern`) |
 | `update <rule-id>` (`edit`) | Change a rule's `--kind` / `--type` / `--pattern`; a field you omit keeps its value |
 | `delete <rule-id>` | Remove a rule by id |
 | `enable` / `disable` | Toggle whether scope filtering is applied |
@@ -1333,9 +1391,43 @@ gori run project host-override delete 1
 | Option / subcommand | Description |
 | --------------------- | ------------- |
 | (default) | List overrides; `--format` is `text` or `json` |
-| `add` | `--host=…` + `--ip=…`, or positional `IP HOST` |
+| `add` | `--host=…` + `--ip=…`, or positional `IP HOST`. `--format json` prints the new override as the listing does (`id`, `host`, `ip`) |
 | `update <id>` | `--host=…` + `--ip=…` (both required) |
 | `delete <id>` | Remove an override by id |
+
+#### project network
+
+Read and edit the project's **own** network settings, the `net.*` rows the TUI's **Project settings** card writes. A value set here wins over the global `network.*` in `settings.json` for this project only; `unset` returns the key to the global value. See [Per-Project Overrides](/reference/config/#per-project-overrides) for what each key does and where it applies. Alias: `net`.
+
+```bash
+gori run project network                                   # every key: its value here, and where it comes from
+gori run project network --format json
+gori run project network set upstream_proxy=http://proxy.corp.example:3128
+gori run project network get upstream_proxy
+printf %s "$PROXY_PASS" | gori run project network set upstream_auth alice --password-stdin
+gori run project network set capture_max_mib 16
+gori run project network unset capture_max_mib
+```
+
+| Key (`net.` prefix optional) | Value |
+| ------ | ------- |
+| `bind_host` · `bind_port` | Proxy listen address and port. Applied only where gori listens: the TUI and `gori run capture` |
+| `upstream_proxy` | `http://`, `http+tls://`, `socks5://` or `socks5h://` URI. **Empty pins a direct route**: no global proxy, `upstream_rules` entry or `HTTP(S)_PROXY` applies to the project any more. Credentials in the URI are refused |
+| `upstream_destination_host` | Host pattern the project's proxy routing applies to; anything else goes direct. `*` (the default) clears the row |
+| `upstream_auth` | Proxy credentials: the value is the username, the password is read from stdin with `--password-stdin` (never the argument vector, which would put it in the process listing). HTTP Basic for an HTTP proxy, RFC 1929 for SOCKS5 |
+| `connect_timeout_secs` · `io_timeout_secs` | Outbound connect and idle timeouts, seconds (min 1) |
+| `capture_max_mib` | Body bytes captured and stored per message, MiB (1-2047) |
+
+| Subcommand | Description |
+| --------------------- | ------------- |
+| (default) / `list` | Every key with the value in effect and its source (`· project`, `· global`); `--format json` carries `value` (the project's own row, `null` when unset), `inherited` and `effective` |
+| `get KEY` | The value in effect: the project's own, else the inherited one (named on STDERR, so `$(…)` captures the value alone). Credentials print the method and username; the password is never printed |
+| `set KEY=VALUE` · `set KEY VALUE` | Pin a value, **even one equal to the global**, which is what keeps a later global edit from reaching the project. (The Project settings card folds a value equal to the global back to inherit when it saves; `set` does not, because it names one key.) |
+| `unset KEY` (`rm`) | Drop the project's value so it inherits again. A key that is not set is not an error |
+
+Credentials pin the upstream they were entered for, as they do in the Project settings card: `set upstream_auth` also pins an inherited global upstream to the project, in the same write, so the password can never follow a later global edit or an upstream rule to a different proxy; `set upstream_proxy` moves stored credentials to the new address (re-deriving Basic vs SOCKS5 for it); and `unset upstream_proxy` is refused until `unset upstream_auth`. The multi-row edits are one transaction, so a busy project cannot store a password beside an address it was not validated against. Every edit is recorded in the project's event feed, without the credential.
+
+A gori that already has the project open (a TUI, a capture, an MCP server) read these rows when it opened the project and keeps them until the project is reopened there; the command says so on STDERR when that is the case.
 
 ### run redact
 

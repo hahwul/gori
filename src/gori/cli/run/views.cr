@@ -137,6 +137,7 @@ module Gori
         project_name : String? = nil
         query : String? = nil
         scope = "project"
+        format = :text
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run views add <name> --query=QL [options]\n\n" \
                      "--query is a History QL query — the same language the filter bar and\n" \
@@ -147,6 +148,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "The view's query (required)") { |v| query = v }
           p.on("--scope=SCOPE", "project (default) | global — a global view appears in EVERY project") { |v| scope = parse_view_scope(v) }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.missing_option { |f| abort "gori run views add: missing value for #{f}" }
         end
@@ -162,7 +164,23 @@ module Gori
           unless created = SavedViews.add(store, name, q, scope)
             abort "gori run views add: failed to persist the view (#{views_write_hint(scope)})"
           end
-          puts scope == "global" ? "Global view '#{created.name}' added — it appears in every project." : "View '#{created.name}' added."
+          puts view_added_output(store, created, format)
+        end
+      end
+
+      # What `views add` prints once the write committed. `--format json` (#1117) is the view's
+      # `gori run views --format json` object, through the same `view_json`. It has no `id`,
+      # because the listing has none: a view is addressed by name, and `key` is its unique
+      # spelling across the three scopes (see the header). `SavedViews.add` answers with the
+      # row it wrote, so there is nothing to read back — only `active`, which the listing
+      # computes from the project's stored choice.
+      private def self.view_added_output(store : Store, created : SavedViews::View, format : Symbol) : String
+        if format == :json
+          JSON.build { |j| view_json(j, created, SavedViews.active(store)) }
+        elsif created.global?
+          "Global view '#{created.name}' added — it appears in every project."
+        else
+          "View '#{created.name}' added."
         end
       end
 

@@ -831,7 +831,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 
 프로젝트는 `redaction` 키 아래에 자체 **리댁션** 설정도 가질 수 있습니다. 자체 프로파일, 어떤 것이 활성인지, 그리고 "기본으로 정제할지"에 대한 자체 답(전역 기본값을 이 engagement에서만 끄는 명시적 `false` 포함)입니다. [`gori run redact`](/ko/reference/cli/#run-redact)가 기록하며, 해석 순서는 프로젝트 → 전역 → 내장이고 이름이 같으면 먼저 나온 것이 이깁니다.
 
-프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **Project settings** 서브탭에서 편집합니다.
+프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **Project settings** 서브탭에서, 또는 헤드리스로는 [`gori run project network`](/ko/reference/cli/#project-network)(`list`, `get`, `set`, `unset`)로 편집합니다.
 
 **Destination host**는 프록시 라우팅을 대소문자를 구분하지 않는 하나의 호스트 패턴으로 제한합니다. 기본값 `*`는 모든 목적지를 프록시 대상으로 허용합니다. `example.com`은 해당 호스트와 서브도메인을 포함하고, `*.example.com`은 서브도메인만 포함합니다. 도메인, IPv4, IPv6 및 `*` 기반 IP 패턴을 사용할 수 있습니다. 일치하지 않는 목적지는 항상 직접 연결되며 `upstream_rules`나 `network.upstream_proxy`로 폴백하지 않습니다. 이 게이트는 프로젝트가 활성화된 동안 캡처, 재생, 스캐너, 업데이터 및 OAST 트래픽을 포함해 gori가 여는 모든 연결에 적용됩니다.
 
@@ -859,7 +859,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | 3 | `settings.json` `network.*` |
 | 4 (최하위) | 공장 기본값 `127.0.0.1:8070` / 직접 연결 |
 
-현재 전역 값과 같은 Project 탭 필드를 저장하면 해당 KV 키가 삭제되므로, 프로젝트는 중복을 고정하는 대신 이후의 전역 변경을 계속 상속합니다. **Destination host**에는 전역 대응 값이 없으며, 기본값 `*`를 저장하면 프로젝트 키가 삭제됩니다.
+현재 전역 값과 같은 Project 탭 필드를 저장하면 해당 KV 키가 삭제되므로, 프로젝트는 중복을 고정하는 대신 이후의 전역 변경을 계속 상속합니다. **Destination host**에는 전역 대응 값이 없으며, 기본값 `*`를 저장하면 프로젝트 키가 삭제됩니다. `gori run project network set`은 키 하나를 지목하므로 전역과 같은 값이라도 그대로 고정하며(`unset`이 상속으로 되돌리는 방법입니다), 빈 `upstream_proxy`는 상속하는 대신 직접 연결을 고정합니다.
 
 ## 프로젝트와 데이터베이스 {#projects-database}
 
