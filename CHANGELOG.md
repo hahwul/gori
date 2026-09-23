@@ -9,6 +9,7 @@
 - HTTP/2: refuse duplicate pseudo-headers and conflicting `:authority`/`host` fields under the sandbox (#1210)
 - Proxy: reject incomplete upstream CONNECT replies and keep the failure reason on the CONNECT flow (#1211)
 - Proxy: reject nonnumeric CONNECT ports with a recorded 400 instead of defaulting to 443 (#1213)
+- Proxy: frame lowercase extension methods by their response headers instead of treating them as HEAD or CONNECT (#1214)
 - Issues: the SARIF export keeps each `Set-Cookie` field separate instead of comma-joining cookies into one fabricated value, joins repeated `Cookie` fields with `; `, and writes credential header values as `[REDACTED]` unless `gori run issues --include-sensitive` asks for them (#1190, #1191)
 - Import: generated Insomnia, Postman, and OpenAPI query parameters now stay before URL fragments (#1184)
 - CLI: piped decoder and minimized request output stay byte-exact, while forged cookies and encoded JWTs retain a trailing newline for text pipelines (#1185)

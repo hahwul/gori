@@ -823,7 +823,7 @@ module Gori::Proxy
     # a 1xx/204, so it is left off entirely there; a 304 and a HEAD response keep it — it
     # describes the entity that WOULD be sent — but carry no body of their own.
     private def stub_framing(stub : HeadRewriter::Stub, method : String) : {Bool, Bool}
-      head_only = method.compare("HEAD", case_insensitive: true) == 0
+      head_only = method == "HEAD"
       omit_length = stub.status == 204 || (100..199).includes?(stub.status)
       {omit_length, !head_only && !omit_length && stub.status != 304}
     end
@@ -3171,8 +3171,7 @@ module Gori::Proxy
     end
 
     private def get_or_head?(req : Codec::RawRequest) : Bool
-      req.method.compare("GET", case_insensitive: true) == 0 ||
-        req.method.compare("HEAD", case_insensitive: true) == 0
+      req.method == "GET" || req.method == "HEAD"
     end
 
     # Serve the welcome + CA-download page (see the two guards in handle_request: a direct

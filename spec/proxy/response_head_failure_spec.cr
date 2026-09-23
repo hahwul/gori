@@ -3,13 +3,16 @@ require "socket"
 
 private class ResponseHeadFailureSink < Gori::Proxy::FlowSink
   getter responses : Channel(Gori::Store::CapturedResponse)
+  getter methods : Array(String)
 
   def initialize
     @next_id = 0_i64
     @responses = Channel(Gori::Store::CapturedResponse).new(4)
+    @methods = [] of String
   end
 
   def on_request(req : Gori::Store::CapturedRequest) : Int64
+    @methods << req.method
     @next_id += 1
   end
 
@@ -32,6 +35,63 @@ private def response_head_failure_read_response(client : TCPSocket) : String
 end
 
 describe "proxy response head failures" do
+  it "frames a lowercase extension method body and keeps the next response aligned (#1214)" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    requests = Atomic(Int32).new(0)
+
+    spawn do
+      while conn = origin.accept?
+        begin
+          loop do
+            request = Gori::Proxy::Codec::Http1.read_head(conn)
+            break unless request
+            response = if requests.add(1) + 1 == 1
+                         "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: keep-alive\r\n\r\nJUNK"
+                       else
+                         "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\nhello"
+                       end
+            conn << response
+            conn.flush
+          end
+        rescue
+        ensure
+          conn.close rescue nil
+        end
+      end
+    rescue
+    end
+
+    sink = ResponseHeadFailureSink.new
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    begin
+      client << "head http://127.0.0.1:#{origin_port}/one HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: keep-alive\r\n\r\n"
+      client.flush
+      response_head_failure_read_response(client).should eq("JUNK")
+
+      client << "GET http://127.0.0.1:#{origin_port}/two HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: keep-alive\r\n\r\n"
+      client.flush
+      response_head_failure_read_response(client).should eq("hello")
+
+      first = sink.responses.receive
+      second = sink.responses.receive
+      first.body.should_not be_nil
+      String.new(first.body.not_nil!).should eq("JUNK")
+      sink.methods.first.should eq("head")
+      second.status.should eq(200)
+      String.new(second.body.not_nil!).should eq("hello")
+      requests.get.should eq(2)
+    ensure
+      client.close rescue nil
+      proxy.stop
+      origin.close rescue nil
+    end
+  end
+
   it "uses the declared body framing for a malformed status and retires that origin connection (#1207)" do
     origin = TCPServer.new("127.0.0.1", 0)
     origin_port = origin.local_address.port
