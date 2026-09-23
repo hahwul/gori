@@ -38,6 +38,7 @@
 - Discover: a `<meta http-equiv="refresh">` is followed whatever its attribute order and when its URL is quoted and relative (`content="0; url='next'"`) (#1182)
 - Miner: JSON probes add their candidate keys to the captured body instead of re-serializing it, so duplicate members, number spellings and escapes reach the target as captured; the active scanner's JSON injection does the same, and a number past 64 bits no longer hides a body's JSON parameters (#1183)
 - OAST: resuming a saved session polls with the provider it was started with, even when two saved providers share an endpoint with different tokens (#1192)
+- Fuzzer: auto-mark wraps a whole JSON number, exponent included, so `1e5` no longer sends every payload with a trailing `e5` (#1205)
 
 ## v0.7.1
 

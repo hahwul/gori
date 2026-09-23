@@ -849,7 +849,11 @@ module Gori::Fuzz
       out = body.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*")((?:[^"\\]|\\.)*)(")/) do |m|
         $2.empty? ? m : "#{$1}#{MARKER}#{$2}#{MARKER}#{$3}"
       end
-      out = out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?)/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
+      # The WHOLE RFC 8259 §6 number token is the position — sign, fraction and exponent. A
+      # mantissa-only match turned `1e5` into `§1§e5`, so every payload went out with a
+      # trailing `e5` (#1205). The lookahead refuses a token that runs on into something
+      # that is not a number (`0x1F`, `1.2.3`): leaving it unmarked beats a partial position.
+      out = out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w.+\-])/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
       # Also mark boolean/null scalar values so `--auto` exercises flag-style fields
       # (e.g. "admin":true) as documented. (Array-element values are still unmarked.)
       out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(true|false|null)\b/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }

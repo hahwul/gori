@@ -100,6 +100,16 @@ describe F::Template do
     F::Template.parse(marked).position_count.should eq(4) # name, admin, age, gone
   end
 
+  it "auto-marks the whole JSON number token, exponent included (#1205)" do
+    body = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"n\":1e5,\"m\":-2.5E-3,\"p\":10.0e+2,\"k\":12}"
+    marked = F::Template.auto_mark(body)
+    t = F::Template.parse(marked)
+    t.position_count.should eq(4)
+    String.new(t.render(["ZZ"] * 4)).ends_with?("{\"n\":ZZ,\"m\":ZZ,\"p\":ZZ,\"k\":ZZ}").should be_true
+    # A token that runs on into a non-number is left unmarked rather than split.
+    F::Template.auto_mark_payload("{\"h\":0x1F,\"v\":1.2.3}").includes?('§').should be_false
+  end
+
   it "toggles a marker around the word at the cursor" do
     # cursor inside "admin"
     F::Template.mark_word("user=admin", 7).should eq("user=§admin§")
