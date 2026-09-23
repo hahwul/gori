@@ -85,6 +85,10 @@ module Gori::Tui
         "Click/scroll navigation, and whether releasing a drag also copies the selection", :editor, :form),
       Section.new(:env, "settings.env", "Env",
         "Global environment variables you can reference in requests", :editor, :opener, resettable: false),
+      # Operator DATA like Env's values (#1154): the list the USER_AGENT generators draw from.
+      # Its default — the built-in list — is reached by emptying it, not by ^R.
+      Section.new(:user_agents, "settings.user-agents", "User-Agents",
+        "Your own list for $GEN.USER_AGENT — replaces the built-in browser list", :editor, :opener, resettable: false),
       Section.new(:hotkeys, "settings.hotkeys", "Hotkeys",
         "Rebind keyboard shortcuts (press a key) + pick an OS default profile", :editor, :opener),
       # Network & Tabs

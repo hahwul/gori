@@ -73,7 +73,8 @@ private MAXIMAL_PROFILE = <<-JSON
     "colormarker": { "next_rule_id": 2, "rules": [] },
     "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
     "redaction": { "active": "p1", "default": true, "profiles": [ { "name": "p1", "json_fields": ["password"] } ] },
-    "mcp": { "channels": true }
+    "mcp": { "channels": true },
+    "user_agents": [ "Profile/1.0" ]
   }
   JSON
 
@@ -126,6 +127,7 @@ private def with_every_section_populated(&)
   redaction_active = Gori::Settings.redaction_active
   redaction_default = Gori::Settings.redaction_default?
   mcp_channels = Gori::Settings.mcp_channels?
+  user_agents = Gori::Settings.user_agents
   begin
     yield
   ensure
@@ -149,6 +151,7 @@ private def with_every_section_populated(&)
     Gori::Settings.editor = editor
     Gori::Settings.tab_prefs = tabs
     Gori::Settings.hostname_overrides = overrides
+    Gori::Settings.user_agents = user_agents
     Gori::Settings.scan_rules = scan_rules
     Gori::Settings.oast_providers = oast
     Gori::Settings.keymap_os = keymap_os

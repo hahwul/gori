@@ -74,6 +74,8 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 | `$GEN.USER_AGENT_FIREFOX` | 위와 같되 Firefox로 좁힌 값으로, `firefox` TLS 프리셋과 짝을 이룹니다 |
 | `$GEN.USER_AGENT_SAFARI` | 위와 같되 Safari로 좁힌 값으로, `safari` TLS 프리셋과 짝을 이룹니다 |
 
+직접 만든 목록에서 고르게 하려면 **Settings → Editor & Keys → User-Agents**(또는 `Ctrl-P` → **Settings: User-Agents**)를 열어 한 줄에 하나씩 User-Agent를 입력하거나, `gori settings user-agents --set FILE`을 실행합니다(`-`는 stdin에서 읽고, `--reset`은 내장 목록으로 되돌립니다). 직접 만든 목록은 내장 목록을 대체합니다. 해당 계열의 줄이 목록에 없는 패밀리 이름(예: Safari 줄이 없을 때의 `$GEN.USER_AGENT_SAFARI`)은 내장 패밀리를 그대로 씁니다. `gori settings user-agents`는 현재 쓰는 목록을 출력하고, MCP `list_env`는 그것이 직접 만든 목록인지 알려 줍니다.
+
 한 요청 안에서 같은 생성기 이름을 여러 번 쓰면 같은 값이 들어갑니다. 다음 요청에서는 다시 생성합니다. 생성기는 최종 전송 지점에서 운영자가 작성한 요청 텍스트에만 적용되며, 캡처 증거와 Fuzzer 페이로드 바이트는 리터럴로 유지됩니다.
 
 환경 변수는 두 곳에서 정의합니다(키 충돌 시 프로젝트가 우선).

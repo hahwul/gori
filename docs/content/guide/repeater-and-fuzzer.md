@@ -74,6 +74,8 @@ Tokens stay as literal text in the editor and expand only on the way out: in Rep
 | `$GEN.USER_AGENT_FIREFOX` | the same, narrowed to Firefox, to pair with the `firefox` TLS preset |
 | `$GEN.USER_AGENT_SAFARI` | the same, narrowed to Safari, to pair with the `safari` TLS preset |
 
+To draw from your own list instead, open **Settings → Editor & Keys → User-Agents** (or `Ctrl-P` → **Settings: User-Agents**) and enter one User-Agent per line, or run `gori settings user-agents --set FILE` (`-` reads stdin; `--reset` goes back to the built-in list). Your list replaces the built-in one. A family name with none of your lines, for example `$GEN.USER_AGENT_SAFARI` with no Safari line, still uses the built-in family. `gori settings user-agents` prints the list in use, and MCP `list_env` reports whether it is yours.
+
 The same generator name used more than once in one request has the same value. The next request mints again. Generators run only for operator-authored request text at the final send seam; captured evidence and Fuzzer payload bytes remain literal.
 
 Define env vars in two places (project wins on a key collision):

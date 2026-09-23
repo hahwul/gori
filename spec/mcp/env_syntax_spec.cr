@@ -55,6 +55,23 @@ describe "MCP list_env grammar report" do
         generators.map(&.["token"].as_s).should contain("$GEN.UUID")
         generators.find! { |row| row["name"].as_s == "RANDOM_HEX" }["description"].as_s
           .should contain("128-bit hex")
+        got["user_agents"]["source"].as_s.should eq("built-in")
+        got["user_agents"]["count"].as_i.should eq(Gori::Env::USER_AGENTS.size)
+      end
+    end
+  end
+
+  # #1154: an operator list that replaced the built-in one is named, not hidden.
+  it "says when the USER_AGENT generators draw from the operator's own list" do
+    with_store_env do |store|
+      previous = Gori::Settings.user_agents
+      Gori::Settings.user_agents = ["Mine/1.0"]
+      begin
+        got = env_result(store)
+        got["user_agents"]["source"].as_s.should eq("settings")
+        got["user_agents"]["count"].as_i.should eq(1)
+      ensure
+        Gori::Settings.user_agents = previous
       end
     end
   end

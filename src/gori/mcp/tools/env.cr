@@ -38,6 +38,15 @@ module Gori
                 end
               end
             end
+            # Where the USER_AGENT generators draw from (#1154): the operator's own list in
+            # settings, or the built-in one. Counts only — the lines are public browser strings,
+            # but an agent choosing a family name needs to know whether it is the operator's.
+            j.field "user_agents" do
+              j.object do
+                j.field "source", Env.user_agents_source
+                j.field "count", Env.user_agents.size
+              end
+            end
           end
         end)
       end
@@ -115,9 +124,12 @@ module Gori
       private def list_env_tools(j : JSON::Builder) : Nil
         tool j, "list_env",
           "List the project's env vars, substituted into outbound requests (send_request/" \
-          "send_websocket). Result: {syntax, prefix, example, vars:[…], generators:[…]}. " \
+          "send_websocket). Result: {syntax, prefix, example, vars:[…], generators:[…], " \
+          "user_agents:{source, count}}. " \
           "Each generator row has its name, complete token and output format; generators are " \
-          "available under namespaced syntax and mint a fresh value per request. 'syntax' is THIS " \
+          "available under namespaced syntax and mint a fresh value per request; 'user_agents' says " \
+          "whether the USER_AGENT generators draw from the operator's settings list or the " \
+          "built-in one. 'syntax' is THIS " \
           "install's token grammar and decides how you write a reference: namespaced = " \
           "$ENV.KEY (session bindings are $BIND.NAME), bare = $KEY (the legacy grammar, where " \
           "an app's own $id/$ne/$filter in a body IS a reference and needs the $$ escape). " \

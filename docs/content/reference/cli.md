@@ -1462,6 +1462,7 @@ gori settings export [-o FILE]     # write a shareable profile (stdout by defaul
 gori settings import FILE          # apply a profile's sections
 gori settings tls-fingerprint      # the JA3/JA4 gori sends to each destination
 gori settings env-syntax [VALUE]   # read or set the env-token grammar
+gori settings user-agents          # the list $GEN.USER_AGENT draws from
 ```
 
 ### `gori settings env-syntax` {#env-syntax}
@@ -1483,6 +1484,19 @@ gori settings env-syntax bare
 Namespaced is the grammar for everyone, so the absence of `env.syntax` in `settings.json` means the file predates namespaces: the next start adopts `namespaced`, re-spells the **global** rewrite rules (keeping a `settings.json.pre-namespaced-<timestamp>` copy) and writes the key. Each **project** is re-spelled the first time it opens after the grammar moved — in the TUI, in any `gori run …`, or in a `gori mcp` server — with a `gori.db.pre-<grammar>-<timestamp>` backup beside the database (`VACUUM INTO`, so the WAL is included) and one line per project on stderr saying how many tokens moved. Rewritten: Repeater drafts (request, target, SNI, name) and their WebSocket messages, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot header values, and the masked tokens in issue titles/notes and note bodies. Left alone: every row whose provenance is a capture (`flow_id` set — a capture expands nothing), any row the target grammar has no equivalent spelling for, and names that are table keys rather than tokens (env vars, extract rules, rule patterns, payload sets).
 
 `env.syntax = bare` is the opt-out and re-spells each project back on its next open, escaping a literal `$NAME` that would otherwise start resolving. See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables). `gori settings import` says on stderr when a profile's `env.syntax` differs from this install's: an import never changes the grammar.
+
+### `gori settings user-agents` {#user-agents}
+
+The list [`$GEN.USER_AGENT`](/guide/repeater-and-fuzzer/#environment-variables) draws from. With no flag it prints the list in use under a `#` line naming its source. `--set` reads that same format back, so you can save the output, edit it, and set it again. `--set` **replaces** the built-in list with the file's lines, one User-Agent per line, with blank and `#` lines skipped. A line gori cannot put in a header refuses the whole file and changes nothing. `--reset` goes back to the built-in list.
+
+```bash
+gori settings user-agents > ua.txt       # the list in use
+gori settings user-agents --set ua.txt   # replace the built-in list
+generator | gori settings user-agents --set -
+gori settings user-agents --reset        # back to the built-in list
+```
+
+Stored as [`user_agents`](/reference/config/#user-agents) in `settings.json`, and editable in the TUI from Preferences → **Editor & Keys** → **User-Agents**.
 
 ### Profiles
 
