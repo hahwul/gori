@@ -173,13 +173,47 @@ module Gori
 
       # `/users/:id` + `url.variable: [{key: "id", value: "1"}]` -> `/users/1`, mirroring
       # `Oas.fill_path_params`. `:name` only matches a word after a colon, so neither
-      # `https://` nor a `:443` port is touched (and an undeclared `:token` passes through).
-      PATH_PARAM = /:([A-Za-z_][A-Za-z0-9_-]*)/
+      # the URL authority, query, or fragment is changed; an undeclared `:token` also passes through.
+      PATH_PARAM  = /:([A-Za-z_][A-Za-z0-9_-]*)/
+      SCHEME_NAME = /\A[a-z][a-z0-9+.-]*\z/i
 
       private def self.fill_path_params(url : String, node : JSON::Any?, vars : Vars::Table) : String
         table = Vars.merge!(Vars::Table.new, node)
         return url if table.empty?
-        url.gsub(PATH_PARAM) { |full, m| table[m[1]]?.try { |v| Vars.expand(v, vars) } || full }
+
+        bounds = path_bounds(url)
+        return url unless bounds
+
+        start, path_end = bounds
+        path = url[start...path_end]
+        replaced = path.gsub(PATH_PARAM) { |full, m| table[m[1]]?.try { |v| Vars.expand(v, vars) } || full }
+        "#{url[0...start]}#{replaced}#{url[path_end..]}"
+      end
+
+      private def self.path_bounds(url : String) : {Int32, Int32}?
+        bytes = url.to_slice
+        i = authority_end(url)
+        while i < bytes.size
+          case bytes[i]
+          when 0x2f_u8 # '/'
+            path_end = i
+            while path_end < bytes.size && bytes[path_end] != 0x3f_u8 && bytes[path_end] != 0x23_u8
+              path_end += 1
+            end
+            return {i, path_end}
+          when 0x3f_u8, 0x23_u8 # '?' or '#', before any path
+            return nil
+          end
+          i += 1
+        end
+        nil
+      end
+
+      private def self.authority_end(url : String) : Int32
+        if scheme_sep = url.index("://")
+          return scheme_sep + 3 if url[0...scheme_sep].matches?(SCHEME_NAME)
+        end
+        url.starts_with?("//") ? 2 : 0
       end
 
       # --- headers / body / auth ------------------------------------------------
