@@ -39,9 +39,11 @@ describe Gori::MCP::ToolFilter do
   end
 
   it "applies terms left to right, so a later subtraction wins" do
-    names_for("list_*,-list_history").should_not contain("list_history")
+    known = ["list_history", "list_scope"]
+    no_dependencies = {} of String => Array(String)
+    names_for("list_*,-list_history", known, no_dependencies).should_not contain("list_history")
     # …and a later addition puts one back.
-    names_for("-list_*,list_history").should contain("list_history")
+    names_for("-list_*,list_history", known, no_dependencies).should contain("list_history")
   end
 
   it "anchors a glob at both ends" do
@@ -75,12 +77,9 @@ describe Gori::MCP::ToolFilter do
       names_for("@recon").should eq(recon.tools.sort)
       names_for("@minimal,send_request").should contain("send_request")
       names_for("@recon,-send_request").should_not contain("send_request")
-      # A leading subtraction starts from everything, as it does for a glob.
-      rest = names_for("-@minimal")
-      # Shared companions are restored when selected workflows still need them.
-      rest.should contain("get_flow")
-      rest.should contain("get_response_body_chunk")
-      rest.should_not contain("list_history")
+      # A leading subtraction starts from everything, as it does for a glob, but cannot
+      # silently remove a companion still required by one of the remaining workflows.
+      refusal_for("-@minimal").should contain("explicitly excludes it")
     end
 
     # A profile member `known` lacks would abort `gori mcp` at start-up with a refusal the
@@ -164,15 +163,24 @@ describe Gori::MCP::ToolFilter do
       names_for("oast_start").should contain("oast_resume")
       names_for("oast_start").should contain("oast_release")
       names_for("oast_stop").should contain("oast_release")
-      names_for("oast_start,-oast_resume").should contain("oast_resume")
+      refusal_for("oast_start,-oast_resume").should contain("explicitly excludes it")
       names_for("get_repeater_context").should contain("get_response_body_chunk")
-      {"list_history", "get_issue", "list_sitemap", "intercept_get", "intercept_list",
-       "get_repeater_context", "get_response_body_chunk"}.each do |name|
+      {"list_history", "get_issue", "list_sitemap", "get_repeater_context",
+       "get_response_body_chunk"}.each do |name|
         names_for("get_current_context").should contain(name)
       end
 
-      # A required companion cannot be subtracted while its parent remains selected.
-      names_for("fuzz_start,-fuzz_stop").should contain("fuzz_stop")
+      # A hard workflow dependency cannot override the operator's explicit allowlist.
+      refusal_for("fuzz_start,-fuzz_stop").should contain("explicitly excludes it")
+      # A later explicit addition clears that exclusion, so closure is safe again.
+      names_for("fuzz_start,-fuzz_stop,fuzz_stop").should contain("fuzz_stop")
+    end
+
+    it "does not restore explicitly excluded conditional intercept readers" do
+      selected = names_for("get_current_context,-intercept_get,-intercept_list")
+      selected.should contain("get_current_context")
+      selected.should_not contain("intercept_get")
+      selected.should_not contain("intercept_list")
     end
 
     it "advertises each selected async workflow with every described companion" do
@@ -198,8 +206,8 @@ describe Gori::MCP::ToolFilter do
           "oast_start"          => ["oast_resume", "oast_release"],
           "oast_stop"           => ["oast_release"],
           "get_current_context" => [
-            "list_history", "get_issue", "list_sitemap", "intercept_get", "intercept_list",
-            "get_repeater_context", "get_response_body_chunk",
+            "list_history", "get_issue", "list_sitemap", "get_repeater_context",
+            "get_response_body_chunk",
           ],
         }
 

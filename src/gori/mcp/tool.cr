@@ -83,9 +83,10 @@ module Gori
     #   sentence, because the default side IS the bound project.
     #
     # - `requires` — other MCP tools this tool's advertised description or schema tells the
-    #   agent to call as part of the same workflow. `--tools` adds these transitively, even
-    #   when a later subtraction named one of them: a selected tool's documented workflow
-    #   must remain callable as one unit.
+    #   agent it must call as part of the same workflow. `--tools` adds these transitively;
+    #   if the operator explicitly excludes one while retaining its parent, startup refuses
+    #   the conflicting filter rather than widening the allowlist or advertising a broken
+    #   workflow.
     annotation Tool
     end
   end

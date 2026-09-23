@@ -193,7 +193,7 @@ module Gori::CLI
     String.build do |io|
       io << "Advertise only these tools: comma-separated names, globs or @profiles,\n"
       io << "'-' subtracts (e.g. '@recon', '@minimal,send_request', '-fuzz_*,-mine_*').\n"
-      io << "Required companions for selected workflows are included automatically.\n"
+      io << "Required companions are included automatically; conflicting explicit exclusions are refused.\n"
       io << "The client loads every advertised tool into the model's context; the\n"
       io << "startup log says how much. Profiles:"
       MCP::ToolFilter::PROFILES.each do |pr|

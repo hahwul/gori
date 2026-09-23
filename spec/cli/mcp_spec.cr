@@ -39,8 +39,9 @@ describe "gori mcp catalogue wording" do
       help.should_not match(/\d\s*(KB|tokens|k\b)/)
     end
 
-    it "explains that selected workflows bring their required tools" do
-      help.should contain("Required companions for selected workflows are included automatically")
+    it "explains required companions and conflicting exclusions" do
+      help.should contain("Required companions are included automatically")
+      help.should contain("conflicting explicit exclusions are refused")
     end
   end
 

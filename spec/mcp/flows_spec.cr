@@ -5,6 +5,14 @@ require "../../src/gori/tui/tab_controller"
 # The zero-arg call every get_current_context example makes.
 private CONTEXT_CALL = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_current_context","arguments":{}}})
 
+private def mcp_drive_with_filter(store, filter : Gori::MCP::ToolFilter, *lines) : Array(JSON::Any)
+  input = IO::Memory.new(lines.join('\n') + "\n")
+  output = IO::Memory.new
+  Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: true,
+    tool_filter: filter, input: input, output: output).run
+  output.to_s.each_line.reject(&.strip.empty?).map { |line| JSON.parse(line) }.to_a
+end
+
 private def gzip_bytes(text : String) : Bytes
   io = IO::Memory.new
   Compress::Gzip::Writer.open(io, &.print(text))
@@ -485,6 +493,43 @@ describe Gori::MCP::Server do
         # Only History has a one-call form, and saying so beats an agent discovering it by
         # calling get_flow once per id.
         payload["selection_next_call"].as_s.should contain("list_history{ids")
+      end
+    end
+
+    it "honors excluded intercept readers and does not suggest a hidden tool" do
+      with_store do |store|
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"intercept","selection":) +
+                                                     %({"kind":"intercept_item","ids":[7],"target_source":"cursor","marked_count":0,"truncated":false}}))
+        filter = Gori::MCP::ToolFilter.parse("get_current_context,-intercept_get,-intercept_list",
+          Gori::MCP::Tools::TOOL_NAMES, Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+        responses = mcp_drive_with_filter(store, filter,
+          %({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+          %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_current_context","arguments":{}}}),
+          %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"intercept_get","arguments":{"item_id":7,"include_sensitive":true}}}))
+
+        listed = responses[0]["result"]["tools"].as_a.map(&.["name"].as_s)
+        listed.should contain("get_current_context")
+        listed.should_not contain("intercept_get")
+        listed.should_not contain("intercept_list")
+
+        context = mcp_tool_payload(responses[1])
+        context["selection_next_call"].as_s.should contain("intercept_get is not exposed")
+        context["selection_next_call"].as_s.should contain("cannot be read through MCP")
+
+        responses[2]["error"]["message"].as_s.should contain("not served by this gori MCP server")
+      end
+    end
+
+    it "points to list previews when full intercept detail is excluded" do
+      with_store do |store|
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"intercept","selection":) +
+                                                     %({"kind":"intercept_item","ids":[7],"target_source":"cursor","marked_count":0,"truncated":false}}))
+        filter = Gori::MCP::ToolFilter.parse("get_current_context,intercept_list,-intercept_get",
+          Gori::MCP::Tools::TOOL_NAMES, Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_current_context","arguments":{}}})
+        payload = mcp_tool_payload(mcp_drive_with_filter(store, filter, call)[0])
+        payload["selection_next_call"].as_s.should contain("intercept_list can show this item's preview and metadata")
+        payload["selection_next_call"].as_s.should contain("full detail is unavailable")
       end
     end
 

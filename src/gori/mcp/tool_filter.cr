@@ -36,11 +36,13 @@ module Gori
     #
     # A spec whose first term subtracts starts from EVERYTHING; otherwise it starts from
     # nothing and adds. After the ordered terms resolve, required companion tools are added
-    # transitively. A subtraction cannot leave a selected tool's advertised workflow broken;
-    # for example, `fuzz_start,-fuzz_stop` still serves `fuzz_stop`. A term matching no known
-    # tool is a startup ABORT rather than a silent narrowing: the failure mode this is meant
-    # to prevent is a server that quietly serves three tools because a name was misspelled,
-    # which reads to the agent exactly like a feature that does not exist.
+    # transitively. Explicit exclusions win: if one conflicts with a selected tool's required
+    # workflow, startup ABORTS rather than silently overriding the operator's allowlist. For
+    # example, `fuzz_start,-fuzz_stop` is refused; remove `fuzz_start` too, or add `fuzz_stop`
+    # after the subtraction. A term matching no known tool is also a startup ABORT rather than
+    # a silent narrowing: the failure mode this is meant to prevent is a server that quietly
+    # serves three tools because a name was misspelled, which reads to the agent exactly like
+    # a feature that does not exist.
     struct ToolFilter
       # A named, curated catalogue: `--tools=@name` selects `tools`, and `-@name` takes them
       # away, so a profile composes with globs and names like any other term.
@@ -82,7 +84,7 @@ module Gori
       # (spec/mcp/tool_filter_spec.cr), and the guide's table reports each profile's count
       # and weight (spec/mcp/catalogue_size_spec.cr).
       PROFILES = [
-        Profile.new("minimal", "read History and single flows; talk to the operator", MINIMAL),
+        Profile.new("minimal", "read History, flows and current TUI context; talk to the operator", MINIMAL),
         Profile.new("recon", "@minimal + scope, findings, decoders, send_request, " \
                              "issue and note writes", RECON),
       ]
@@ -109,6 +111,7 @@ module Gori
         # Leading subtraction means "everything, except…" — the common shape, and the one that
         # keeps working when a later gori adds a tool the operator never listed.
         selected = terms.first.starts_with?('-') ? all.to_set : Set(String).new
+        explicitly_excluded = Set(String).new
         terms.each do |term|
           subtract = term.starts_with?('-')
           pattern = subtract ? term[1..] : term
@@ -122,9 +125,15 @@ module Gori
               return "--tools: #{pattern.inspect} matches no tool#{suggestion(pattern, all)}"
             end
           end
-          subtract ? selected.subtract(hits) : selected.concat(hits)
+          if subtract
+            selected.subtract(hits)
+            explicitly_excluded.concat(hits)
+          else
+            selected.concat(hits)
+            explicitly_excluded.subtract(hits)
+          end
         end
-        if dependency_error = include_dependencies(selected, all, dependencies)
+        if dependency_error = include_dependencies(selected, all, dependencies, explicitly_excluded)
           return dependency_error
         end
         if selected.empty?
@@ -202,15 +211,21 @@ module Gori
       # Walk the handler-declared dependency graph from the user's final selection. Adding a
       # dependency to the same set before pushing it bounds the traversal even if a future
       # workflow has a cycle; the registry macro separately refuses references to missing
-      # tools.
+      # tools. An explicitly excluded dependency is a filter conflict, not permission to
+      # silently widen the operator's allowlist.
       private def self.include_dependencies(selected : Set(String), known : Array(String),
-                                            dependencies : Hash(String, Array(String))) : String?
+                                            dependencies : Hash(String, Array(String)),
+                                            explicitly_excluded : Set(String)) : String?
         pending = selected.to_a
         while name = pending.pop?
           next unless required = dependencies[name]?
           required.each do |dependency|
             unless known.includes?(dependency)
               return "--tools: required tool #{dependency.inspect} for #{name.inspect} is missing from the registry"
+            end
+            if explicitly_excluded.includes?(dependency)
+              return "--tools: #{name.inspect} requires #{dependency.inspect}, but the filter explicitly excludes it; " \
+                     "include #{dependency.inspect} or remove #{name.inspect}"
             end
             next if selected.includes?(dependency)
             selected << dependency
