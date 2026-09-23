@@ -894,6 +894,48 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "omits a recorded result's flow_id after History reuses it" do
+    port = start_origin
+    with_store do |store|
+      tools = tools_for(store)
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"list":["a"]}]),
+         "record_history" => "all",
+         "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+      wait_fuzz_done(tools, job_id)
+      original_id = call_json(tools, "fuzz_results", {job_id: job_id}.to_json)["results"][0]["flow_id"].as_i64
+      original_ref = store.flow_row(original_id).not_nil!.source_ref.not_nil!
+      next_ref = "#{job_id}:#{original_ref.split(':').last.to_i + 1}"
+
+      store.clear_flows.should be_true
+      reused_id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: Time.utc.to_unix_ms * 1000_i64, scheme: "http", host: "ref.test", port: 80,
+        method: "GET", target: "/same-job-result", http_version: "HTTP/1.1",
+        head: "GET /same-job-result HTTP/1.1\r\nHost: ref.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Fuzzer, source_surface: Gori::FlowSource::Surface::Mcp,
+        source_ref: next_ref))
+      reused_id.should eq(original_id)
+      store.flow_row(reused_id).not_nil!.source_ref.should eq(next_ref)
+
+      result = call_json(tools, "fuzz_results", {job_id: job_id}.to_json)["results"][0]
+      result["flow_id"]?.should be_nil
+
+      store.clear_flows.should be_true
+      reused_id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: Time.utc.to_unix_ms * 1000_i64, scheme: "http", host: "ref.test", port: 80,
+        method: "GET", target: "/unrelated", http_version: "HTTP/1.1",
+        head: "GET /unrelated HTTP/1.1\r\nHost: ref.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Import, source_ref: "unrelated.har"))
+      reused_id.should eq(original_id)
+
+      result = call_json(tools, "fuzz_results", {job_id: job_id}.to_json)["results"][0]
+      result["flow_id"]?.should be_nil
+    end
+  end
+
   it "ends budget_exhausted (not done) when max_requests halts before all candidates" do
     port = start_origin
     with_store do |store|

@@ -902,9 +902,15 @@ module Gori
         @issue_ids.empty?
       end
 
+      # Flow source ids are negated when History deletes their row. Preserve the original id
+      # for provenance while making it impossible for a direct id lookup to reach a successor.
+      def source_detached? : Bool
+        @source_kind.flow? && @source_id < 0
+      end
+
       # `hist #12` / `repeater #3` — the source as the RELATED row and the toasts name it.
       def source_label : String
-        "#{@source_kind.tag} ##{@source_id}"
+        "#{@source_kind.tag} ##{@source_id.abs}#{source_detached? ? " (deleted)" : ""}"
       end
     end
 

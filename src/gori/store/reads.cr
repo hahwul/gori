@@ -497,10 +497,8 @@ module Gori
     end
 
     # Hard-delete one History flow and its captured dependents (WS messages, FTS row,
-    # entity_links that pointed at it, and its h2 frame log when no sibling flow still shares
-    # the connection). Issues/Probe/Repeater that referenced the id keep the dangling
-    # cross-ref — their resolvers already surface "gone". Writer-fiber only so it races
-    # cleanly with live capture.
+    # entity_links that pointed at it, detached references, and its h2 frame log when no sibling
+    # flow still shares the connection). Writer-fiber only so it races cleanly with live capture.
     # `exec_task_ok`, for `delete_flows`' reason below: a DELETE reports nothing through
     # last_insert_rowid, so a batch rolled back by an unrelated co-submitted write is
     # indistinguishable from success — and the CLI printed "Flow #N deleted." / MCP returned
@@ -611,6 +609,12 @@ module Gori
     # `busy_timeout`, i.e. a hard `database is locked` for every other gori process. That
     # belongs in an opt-in maintenance command, not on open.
     #
+    # `issue_retest_run_steps.flow_id` is nullable, so a saved result loses only its live link;
+    # the result row, verdict and copied observation stay intact. `issue_evidence.source_id` is
+    # NOT NULL because the snapshot keeps its original provenance, so its flow id is negated as
+    # the detached marker used by `RetestStep#detached?` (#1160). Positive ids still identify
+    # live sources; the negative value is never a valid History id.
+    #
     # `ws_messages.flow_id` is NOT NULL, so a repeater-owned WS row (`repeater_id` set, which
     # `delete_flow_one` deliberately spares) keeps its id. Its session is covered instead:
     # `repeaters.flow_id` is nulled here, which is where a surface reads the provenance from.
@@ -627,7 +631,7 @@ module Gori
     # comment that says "every table".
     private def detach_flow_refs(conn : DB::Connection, id : Int64?) : Nil
       {"issues", "repeaters", "fuzz_sessions", "miner_sessions", "sequencer_sessions",
-       "events", "intercept_held", "probe_oast_probes"}.each do |table|
+       "issue_retest_run_steps", "events", "intercept_held", "probe_oast_probes"}.each do |table|
         if fid = id
           conn.exec("UPDATE #{table} SET flow_id = NULL WHERE flow_id = ?", fid)
         else
@@ -636,8 +640,12 @@ module Gori
       end
       if fid = id
         conn.exec("UPDATE probe_issues SET sample_flow_id = NULL WHERE sample_flow_id = ?", fid)
+        conn.exec("UPDATE issue_evidence SET source_id = -source_id " \
+                  "WHERE source_kind = 'flow' AND source_id = ? AND source_id > 0", fid)
       else
         conn.exec("UPDATE probe_issues SET sample_flow_id = NULL WHERE sample_flow_id IS NOT NULL")
+        conn.exec("UPDATE issue_evidence SET source_id = -source_id " \
+                  "WHERE source_kind = 'flow' AND source_id > 0")
       end
     end
 

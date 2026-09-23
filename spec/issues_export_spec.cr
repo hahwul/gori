@@ -391,14 +391,15 @@ describe Gori::Issues::Export do
 
         md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.should contain("### Frozen evidence")
-        md.should contain("- **frozen** POST https://h.test/login — hist ##{fid} · ")
+        md.should contain("- **frozen** POST https://h.test/login — hist ##{fid} (deleted) · ")
         md.should contain(" · 200 · #{snap.bytes} bytes · sha256 req #{snap.request_sha256} res #{snap.response_sha256}")
         md.should_not contain("SECRET-BODY")
 
         ev = JSON.parse(Gori::Issues::Export.json(store.issues, store))[0]["evidence"][0]
         ev["id"].as_i64.should eq(eid)
         ev["source_kind"].as_s.should eq("flow")
-        ev["source_id"].as_i64.should eq(fid)
+        ev["source_id"].as_i64.should eq(-fid)
+        ev["source_detached"].as_bool.should be_true
         ev["method"].as_s.should eq("POST")
         ev["url"].as_s.should eq("https://h.test/login")
         ev["status"].as_i.should eq(200)

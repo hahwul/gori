@@ -392,6 +392,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def evidence_open_source : Nil
     meta = evidence_controller.view.selected || return
     return (@toast = EVIDENCE_SOURCE_REUSED) if evidence_source_reused?(meta)
+    unless @session.store.evidence_source_alive?(meta)
+      @toast = "the original #{meta.source_label} is gone — the frozen copy is all there is"
+      return
+    end
     navigate_link_ref(meta.source_kind, meta.source_id)
   end
 

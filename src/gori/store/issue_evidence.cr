@@ -176,8 +176,9 @@ module Gori
     # deliberately outlive it (`delete_repeater` leaves `issue_evidence` alone). Counting by
     # id alone would badge that new tab with an exchange it never had. A copy is taken from
     # a tab that already exists, so only copies frozen AT OR AFTER the current row's
-    # `created_at` can be this tab's; the rest belong to a predecessor. Flow ids never
-    # return (both prune paths delete from the bottom), so the flow count needs no such guard.
+    # `created_at` can be this tab's; the rest belong to a predecessor. Flow ids can return,
+    # so deletion negates the source id in the same transaction; a successor's positive id
+    # cannot count a snapshot whose source is detached.
     def evidence_count_for(kind : LinkRefKind, source_id : Int64) : Int32
       if kind.repeater?
         return @db.scalar(
@@ -196,12 +197,12 @@ module Gori
     # while the copy (deliberately) outlives the close. Navigating there would present an
     # unrelated tab as "the original". A copy is always taken from a tab that already exists,
     # so the source is alive only when the row's `created_at` is at or before the copy's; a
-    # newer row under the same id is a successor. Flow ids never return (both prune paths
-    # delete from the bottom), so a flow needs only to exist.
+    # newer row under the same id is a successor. A deleted flow source carries a negative id,
+    # so it cannot be mistaken for a later row with the same positive id.
     def evidence_source_alive?(meta : IssueEvidenceMeta) : Bool
       case meta.source_kind
       when .flow?
-        !flow_row(meta.source_id).nil?
+        meta.source_id > 0 && !flow_row(meta.source_id).nil?
       when .repeater?
         @db.scalar("SELECT COUNT(*) FROM repeaters WHERE id = ? AND created_at <= ?",
           meta.source_id, meta.created_at).as(Int64) > 0

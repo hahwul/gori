@@ -310,7 +310,7 @@ module Gori::Tui
 
     # `hist #12` / `repeater #3` — one spelling for both modes, `IssueEvidenceMeta`'s.
     def source_label : String
-      "#{@snapshot.source_kind.tag} ##{@snapshot.source_id}"
+      @meta.try(&.source_label) || "#{@snapshot.source_kind.tag} ##{@snapshot.source_id}"
     end
 
     # What the card costs: the row's recorded size when there is a row, else the four blobs

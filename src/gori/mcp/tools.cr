@@ -806,6 +806,11 @@ module Gori
         # History flow ids for the stored results, index-aligned with `results`; nil when
         # record_history was off, the record failed, or the row was not one it records.
         getter result_flow_ids = [] of Int64?
+        # Unique History provenance refs, aligned with `result_flow_ids`. A job may still be
+        # running when a peer clears History, so the same job can produce a later row under a
+        # reused id; the per-result ref prevents the older result from binding to that row.
+        getter result_flow_source_refs = [] of String?
+        property history_ref_seq = 0
         property? truncated = false
         property? history_truncated = false
         property recorded_flows = 0
@@ -826,6 +831,11 @@ module Gori
         def stop : Nil
           @stop_requested_at_ms ||= Time.utc.to_unix_ms
           @engine.stop
+        end
+
+        def next_history_source_ref : String
+          @history_ref_seq += 1
+          "#{@id}:#{@history_ref_seq}"
         end
       end
 
