@@ -162,6 +162,17 @@ describe "Gori::Retest.evaluate" do
     detail.should contain("not JSON")
   end
 
+  it "reads a JSON body whose other numbers are past Int64, and compares one by its digits (#1200)" do
+    # `JSON.parse` raised on the uint64 id, so every assertion on this body — about `role`,
+    # which has nothing to do with it — answered INCONCLUSIVE and the retest could never decide.
+    body = %({"id":18446744073709551615,"big":1.5e400,"role":"user"})
+    RT.evaluate(RT::Assertion.parse("json:role=user").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json-absent:admin").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json:id=18446744073709551615").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json:id=18446744073709551614").as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
+    RT.evaluate(RT::Assertion.parse("json-absent:big").as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
+  end
+
   it "answers INCONCLUSIVE for a body comparison with no baseline behind it" do
     outcome, detail = RT.evaluate(RT::Assertion.parse("body:same").as(RT::Assertion), obs(body: "x"), nil)
     outcome.inconclusive?.should be_true

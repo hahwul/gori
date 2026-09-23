@@ -48,6 +48,15 @@ describe Gori::Sequencer::Extract do
     Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.missing")).should be_nil
   end
 
+  it "extracts a JSON path leaf when another number in the body is past Int64 (#1200)" do
+    body = %({"id":18446744073709551615,"token":"deadbeef","n":[99999999999999999999]})
+    r = response(HEAD, body)
+    Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.token")).should eq("deadbeef")
+    # The oversized number itself comes back as the digits the body carried.
+    Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.id")).should eq("18446744073709551615")
+    Q::Extract.extract(r, Q::TokenLoc.new(Q::ExtractKind::JsonPath, "$.n[0]")).should eq("99999999999999999999")
+  end
+
   it "auto-detects the first Set-Cookie as the token location" do
     loc = Q::Extract.autodetect(response(HEAD, BODY))
     loc.not_nil!.kind.should eq(Q::ExtractKind::Cookie)

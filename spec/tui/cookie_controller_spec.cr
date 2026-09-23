@@ -461,6 +461,21 @@ describe "Gori::Tui::CookieController" do
     end
   end
 
+  describe "loading a payload with a number past Int64 (#1200)" do
+    it "seeds FORGE with the payload's digits, and re-forges them intact" do
+      sess = Gori::Cookie::Flask.forge(%({"uid":18446744073709551615,"role":"user"}), SECRET, 1785656674_i64)
+      with_cookie_controller do |ctl|
+        ctl.cookie_from_text(sess)
+        ctl.load_decoded
+        ctl.focus_first; ctl.pane_advance(1); ctl.pane_advance(1) # :secret
+        type(ctl, SECRET)
+        cookie = forge_output(ctl)
+        Gori::Cookie.verify(cookie, SECRET, "flask").should be_true
+        Gori::Cookie.decode_json(cookie, "flask").should contain(%("uid":18446744073709551615))
+      end
+    end
+  end
+
   describe "session lifecycle" do
     it "opens and closes sub-tab sessions, keeping at least one" do
       with_cookie_controller do |ctl|

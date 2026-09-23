@@ -287,6 +287,15 @@ describe "Gori::Probe::Active::GraphqlIntrospection" do
     end
   end
 
+  it "recognizes a GraphQL JSON body whose variables carry a number past Int64 (#1200)" do
+    with_store do |store|
+      detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/api/gw", method: "POST",
+        req_headers: "Content-Type: application/json\r\n",
+        req_body: %({"query":"query($id:ID){node(id:$id){id}}","variables":{"id":18446744073709551615}}))
+      probe.plan(detail).should_not be_nil
+    end
+  end
+
   it "plans nothing for a non-GraphQL flow" do
     with_store do |store|
       probe.plan(probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/api/users")).should be_nil

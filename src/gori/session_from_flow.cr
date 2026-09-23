@@ -4,6 +4,7 @@ require "./bindings"
 require "./store"
 require "./proxy/codec/http1"
 require "./proxy/codec/content_decode"
+require "./raw_json"
 
 module Gori
   # One captured login flow → one session slot's header overlay.
@@ -262,7 +263,7 @@ module Gori
     #
     # The leaf must be a STRING: `{"token": {"value": …}}` is an envelope, not a token, and
     # stringifying it would put a JSON object in an `Authorization` header. Content-Type is
-    # not consulted — `JSON.parse` succeeding IS the test, and an API that mislabels its
+    # not consulted — a parse succeeding IS the test, and an API that mislabels its
     # login response should not cost the operator the feature.
     private def json_token(detail : Store::FlowDetail) : {String, String}?
       body = detail.response_body
@@ -272,13 +273,12 @@ module Gori
       # Never repair origin bytes into a different credential. An invalid body simply is not
       # a JSON token source; credentials carried by response headers remain usable.
       return nil unless text.valid_encoding?
-      obj = JSON.parse(text).as_h? || return nil
+      # `RawJson.member`, so an oversized number beside the token no longer hides it (#1200) —
+      # and one AT a token key stays a number (nil), not the String `RawJson.parse` would carry.
       TOKEN_KEYS.each do |key|
-        v = obj[key]?.try(&.as_s?)
+        v = RawJson.member(text, key).try(&.as_s?)
         return {v, key} if v && !v.empty?
       end
-      nil
-    rescue JSON::ParseException
       nil
     end
 

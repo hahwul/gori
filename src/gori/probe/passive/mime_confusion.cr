@@ -1,4 +1,5 @@
 require "json"
+require "../../raw_json"
 require "./rule"
 
 module Gori
@@ -125,12 +126,8 @@ module Gori
         # decision. A parse failure means "not JSON" — never an error for the caller.
         private def json_body?(trimmed : String) : Bool
           return false unless trimmed.starts_with?('{') || trimmed.starts_with?('[')
-          begin
-            JSON.parse(trimmed)
-            true
-          rescue
-            false
-          end
+          # Syntax only: `JSON.parse` called a body with a uint64 id "not JSON" (#1200).
+          RawJson.valid?(trimmed)
         end
 
         # A missing Content-Type, or a declared media type (parameters stripped) browsers sniff.

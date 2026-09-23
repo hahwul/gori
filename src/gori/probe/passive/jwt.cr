@@ -220,7 +220,7 @@ module Gori
           seg = token.split('.')[1]?
           return nil if seg.nil? || seg.empty?
           # `RawJson.claims`: one number past Int64 (a u64 id) no longer hides every claim (#1169).
-          Gori::Jwt::RawJson.claims(String.new(Base64.decode(seg)))
+          Gori::RawJson.claims(String.new(Base64.decode(seg)))
         rescue
           nil
         end
@@ -233,7 +233,7 @@ module Gori
           return nil if seg.nil? || seg.empty?
           # `RawJson.claims`, so an oversized number in the header cannot switch off every check
           # here — `jwt_alg_none` included (#1169).
-          Gori::Jwt::RawJson.claims(String.new(Base64.decode(seg)))
+          Gori::RawJson.claims(String.new(Base64.decode(seg)))
         rescue
           nil
         end

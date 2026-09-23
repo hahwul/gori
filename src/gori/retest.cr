@@ -4,6 +4,7 @@ require "./entity"
 require "./env"
 require "./evidence"
 require "./proxy/codec/http1"
+require "./raw_json"
 require "./repeater/flow_request"
 require "./repeater/draft_markers"
 
@@ -579,7 +580,9 @@ module Gori
       body = obs.body
       return {Outcome::Inconclusive, "no response body to read #{a.path} from"} if body.nil? || body.empty?
       doc = begin
-        JSON.parse(String.new(body).scrub)
+        # `RawJson`, not `JSON.parse`: one number past Int64 anywhere in the body (a uint64 id)
+        # made the whole document "not JSON" and every assertion on it INCONCLUSIVE (#1200).
+        RawJson.parse(String.new(body).scrub)
       rescue ex : JSON::ParseException
         # INCONCLUSIVE, not fail. "The field is absent" and "this is not JSON" are different
         # findings, and an HTML error page answering a `json-absent:` assertion as PASS is

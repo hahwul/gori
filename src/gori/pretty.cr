@@ -1,4 +1,5 @@
 require "json"
+require "./raw_json"
 require "uri"
 require "base64"
 require "mime/multipart"
@@ -177,19 +178,29 @@ module Gori
     # the graphql result; anything else → the pretty result (or nil for already-pretty/scalar).
     private def try_json_or_graphql(str : String) : Result?
       s = strip_bom(str).strip
-      json = JSON.parse(s)
+      json = begin
+        JSON.parse(s)
+      rescue JSON::ParseException
+        # Still JSON when the only trouble is a number past Int64/Float64 (#1200): pretty-print
+        # the text itself, numbers as their digits. No GraphQL sniff on this path — its pane
+        # renders variables from a tree, which cannot hold such a number.
+        return pretty_json(RawJson.reformat(s, "  "), s)
+      end
       # GraphQL sniff in its OWN rescue so a shape-check failure falls through to pretty-print
       # exactly as the old try_graphql(rescue→nil)-then-try_json path did.
       if r = (graphql_from(json) rescue nil)
         return r
       end
-      pretty = json.to_pretty_json
+      pretty_json(json.to_pretty_json, s)
+    rescue
+      nil # invalid JSON (both try_graphql and try_json returned nil here before)
+    end
+
+    private def pretty_json(pretty : String, s : String) : Result?
       return nil if pretty == s # already pretty / scalar → no-op, show raw
       slice = pretty.to_slice
       return nil if slice.size > MAX_OUT_PRETTY
       Result.new(slice, "pretty: json")
-    rescue
-      nil # invalid JSON (both try_graphql and try_json returned nil here before)
     end
 
     # ---- GraphQL (operationName + un-escaped query + pretty variables) ------
@@ -236,7 +247,7 @@ module Gori
       return nil unless t =~ JWT_RE
       # Strong signal: a JWT header always base64url-decodes to a JSON object.
       header = Base64.decode(t.split('.').first)
-      return nil unless JSON.parse(String.new(header)).as_h?
+      return nil unless RawJson.members(String.new(header)) # an object, numbers of any size
       decoded = Decoder::Codecs.jwt_decode(t.to_slice)
       slice = decoded.to_slice
       return nil if slice.size > MAX_OUT_PRETTY

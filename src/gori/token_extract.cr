@@ -1,4 +1,5 @@
 require "json"
+require "./raw_json"
 require "./repeater/engine"
 require "./proxy/codec/content_decode"
 
@@ -296,7 +297,9 @@ module Gori
 
     def self.json_path(subject : ExtractSubject, path : String) : String?
       return nil if path.empty?
-      root = JSON.parse(decoded_text(subject))
+      # `RawJson`: a number past Int64 anywhere in the body no longer hides the one asked for,
+      # and one asked for comes back as its own digits (#1200).
+      root = RawJson.parse(decoded_text(subject))
       node = walk(root, path)
       return nil unless node
       node.as_s? || (node.raw.nil? ? nil : node.to_json)

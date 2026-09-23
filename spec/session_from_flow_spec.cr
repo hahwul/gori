@@ -165,6 +165,16 @@ describe Gori::SessionFromFlow do
       headers["Authorization"].should eq("Bearer eyJhbGciOiJIUzI1NiJ9.x")
     end
 
+    it "reads the JSON token beside a number past Int64, but never takes such a number AS one (#1200)" do
+      beside = flow("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        response_body: %({"user_id":18446744073709551615,"access_token":"eyJ.x.y"}))
+      headers_of(beside)["Authorization"].should eq("Bearer eyJ.x.y")
+
+      numeric = flow("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        response_body: %({"access_token":18446744073709551615}))
+      refusal(numeric).should be_a(FromFlow::Refusal)
+    end
+
     # Provenance goes back to the operator, and a VALUE never does — this line is printed to
     # scrollback and returned over MCP, and a session cookie is a credential.
     it "names where each header came from, and never what it holds" do
