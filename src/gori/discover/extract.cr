@@ -17,7 +17,7 @@ module Gori::Discover
     # globally; this bounds what a single response can spend, before it is ever queued.
     MAX_LINKS = 4096
 
-    # href / src / action attributes (quoted or bare), plus <meta refresh url=…>.
+    # href / src / action attributes (quoted or bare). `<meta refresh>` is `META_TAG` below.
     #
     # The alternation is deliberately UNANCHORED (no `\b`), which is why `data-src`,
     # `data-href` and `formaction` are already covered by `src`/`href`/`action` — only the
@@ -26,8 +26,26 @@ module Gori::Discover
     # list, not one URL, so capturing it whole would hand `Url.resolve` a string it would
     # percent-encode into a URL nobody serves.
     ATTR = /(?:href|src|action|poster|data-(?:url|uri|endpoint|api))\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i
-    META = /<meta[^>]+http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["'][^"']*url\s*=\s*([^"'>\s]+)/i
-    LOC  = /<loc>\s*([^<\s]+)\s*<\/loc>/i
+
+    # A `<meta>` start tag's attribute run, read by `meta_refresh`. Attributes are an unordered
+    # set, so this only finds the TAG — one regex naming `http-equiv` before `content` missed
+    # `<meta content="0;url=/next" http-equiv="refresh">`, and its URL class stopped at either
+    # quote, which dropped the quoted relative `content="0; url='next'"` a browser follows (#1182).
+    # Linear: the run is consumed by its own match, so an unclosed tag cannot be rescanned.
+    META_TAG = /<meta\b([^>]*)/i
+
+    # One `name=value` attribute inside a tag's run, the value in any of its three spellings.
+    # A quoted value is consumed whole, so a `content=` written inside another attribute's value
+    # is never read as an attribute of its own. `{1,64}` bounds the name: an unclosed quote makes
+    # every start position in the name before it scan to the end of the run, so an unbounded
+    # name turned one long hostile tag into a quadratic scan.
+    TAG_ATTR = /([^\s"'>\/=]{1,64})\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/
+
+    # Cheap proof a meta tag cannot be a refresh: it has to NAME `http-equiv`. The name, not the
+    # `refresh` value, because a value may be spelled with character references and a name may not.
+    HTTP_EQUIV = /http-equiv/i
+
+    LOC = /<loc>\s*([^<\s]+)\s*<\/loc>/i
 
     # An endpoint literal in NON-markup text: an absolute http(s) URL, or a root-relative path
     # opening a quoted string. Two branches in one pass because the two shapes interleave
@@ -278,9 +296,31 @@ module Gori::Discover
       {cut, masked}
     end
 
+    # The URL a `<meta http-equiv="refresh" content="…">` names, from its tag's attribute run, or
+    # nil when the tag is not a refresh or its content names no URL. Attribute order is not
+    # significant, and the FIRST of a repeated attribute is the one HTML keeps. The content is
+    # the `Refresh` header's value grammar, so the header's parser reads it (`refresh_url`) —
+    # after its character references are resolved, which is the attribute's own escaping.
+    private def self.meta_refresh(attrs : String) : String?
+      return nil unless attrs.matches?(HTTP_EQUIV)
+      equiv = nil.as(String?)
+      content = nil.as(String?)
+      attrs.scan(TAG_ATTR) do |m|
+        value = m[2]? || m[3]? || m[4]? || ""
+        name = m[1]
+        if equiv.nil? && name.compare("http-equiv", case_insensitive: true) == 0
+          equiv = value
+        elsif content.nil? && name.compare("content", case_insensitive: true) == 0
+          content = value
+        end
+      end
+      return nil unless equiv && content
+      return nil unless decode_refs(equiv).strip.compare("refresh", case_insensitive: true) == 0
+      refresh_url(decode_refs(content))
+    end
+
     # A captured attribute value ready to become a candidate: references resolved, empty
-    # rejected, and not already `seen`. Shared by the two declared-value passes so `from_html`
-    # states each of them once.
+    # rejected, and not already `seen`.
     private def self.declared(v : String?, seen : Set(String)) : String?
       return nil unless v && !v.empty?
       d = decode_refs(v)
@@ -317,12 +357,12 @@ module Gori::Discover
           acc << Found.new(v, true)
         end
       end
-      text.scan(META) do |m|
+      text.scan(META_TAG) do |m|
         # The cap is per BODY, not per pass — this loop appends to the same `acc` the one above
         # filled, so without the guard a page could leave here over MAX_LINKS and hand the
         # orchestrator the excess anyway.
         break if acc.size >= MAX_LINKS
-        if v = declared(m[1]?, seen)
+        if (v = meta_refresh(m[1])) && seen.add?(v)
           acc << Found.new(v, true)
         end
       end
