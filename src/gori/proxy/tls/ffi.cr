@@ -47,6 +47,15 @@ lib LibCrypto
   # CA that is expired or not-yet-valid.
   fun x509_cmp_time = X509_cmp_time(s : ASN1_TIME, t : Void*) : Int
 
+  # Key identifiers (#1168). X509_pubkey_digest hashes the subjectPublicKey BIT STRING
+  # contents, i.e. RFC 5280 §4.2.1.2 method (1) when given SHA-1 — the same value
+  # OpenSSL's `subjectKeyIdentifier = hash` produces. X509_get0_subject_key_id reads an
+  # existing SKI (NULL when the cert has none); X509_get_ext_by_NID finds an extension's
+  # index (-1 when absent). All three exist in OpenSSL 1.1.1 and 3.x.
+  fun x509_pubkey_digest = X509_pubkey_digest(x : X509, type : EVP_MD, md : UInt8*, len : UInt32*) : Int
+  fun x509_get0_subject_key_id = X509_get0_subject_key_id(x : X509) : ASN1_STRING
+  fun x509_get_ext_by_nid = X509_get_ext_by_NID(x : X509, nid : Int, lastpos : Int) : Int
+
   # SubjectPublicKeyInfo (for the browser's --ignore-certificate-errors-spki-list
   # pin): grab the SPKI structure, then DER-encode it (pp == NULL returns the
   # length so we can size the buffer first).
@@ -102,6 +111,10 @@ module Gori::Proxy::Tls
   EVP_PKEY_EC      = 408 # NID_X9_62_id_ecPublicKey
   NID_BASIC_CONSTR =  87 # NID_basic_constraints
   NID_SUBJECT_ALT  =  85 # NID_subject_alt_name
+  NID_SUBJECT_KEY  =  82 # NID_subject_key_identifier
+  NID_KEY_USAGE    =  83 # NID_key_usage
+  NID_AUTH_KEY     =  90 # NID_authority_key_identifier
+  NID_EXT_KEY_USE  = 126 # NID_ext_key_usage
 
   SSL_CTRL_EXTRA_CHAIN_CERT = 14 # SSL_CTX_ctrl cmd for SSL_CTX_add_extra_chain_cert
 
