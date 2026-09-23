@@ -21,10 +21,24 @@ require "../tui/screen" # Screen.display_width — the cell measure every column
 
 module Gori
   module CLI
-    # TUI-free output formatting shared by `gori run` and the headless capture
-    # printer. Pure functions over Store read-models → Strings; no terminal, no
-    # colour. The JSON shape here is the stable, documented contract for scripts.
+    # TUI-free output formatting and stream helpers shared by `gori run` and the
+    # headless capture printer. The JSON shape here is the stable, documented script contract.
     module Output
+      # A scalar result is line-terminated for a terminal and byte-exact when piped.
+      def self.write_value(io : IO, value : String, terminal : Bool) : Nil
+        if terminal
+          io.puts value
+        else
+          io.write(value.to_slice)
+        end
+      end
+
+      # Raw byte output keeps its octets; a terminal gets a separating newline for readability.
+      def self.write_value(io : IO, value : Bytes, terminal : Bool) : Nil
+        io.write(value)
+        io.puts if terminal && !value.empty? && value[-1] != 0x0A_u8
+      end
+
       # One JSON object (one line, for JSON-Lines streams) describing a flow row.
       def self.flow_row_json(row : Store::FlowRow, request_head : Bytes? = nil,
                              columns : Array({String, String})? = nil,

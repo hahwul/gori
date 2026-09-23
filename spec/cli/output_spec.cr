@@ -132,3 +132,38 @@ describe "CLI::Output.human_us" do
     Gori::CLI::Output.human_us(1_200_000_i64).should eq("1.2s")
   end
 end
+
+describe Gori::CLI::Output do
+  describe ".write_value" do
+    it "does not add a line feed to a piped string value" do
+      output = IO::Memory.new
+      Gori::CLI::Output.write_value(output, "decoded text", false)
+      output.to_slice.should eq("decoded text".to_slice)
+    end
+
+    it "keeps a terminal line break for string values" do
+      output = IO::Memory.new
+      Gori::CLI::Output.write_value(output, "decoded text", true)
+      output.to_s.should eq("decoded text\n")
+    end
+
+    it "does not add a line feed to piped raw bytes" do
+      bytes = Bytes[0x00_u8, 0xff_u8, 0x41_u8]
+      output = IO::Memory.new
+      Gori::CLI::Output.write_value(output, bytes, false)
+      output.to_slice.should eq(bytes)
+    end
+
+    it "adds a terminal line break after raw bytes only when needed" do
+      bytes = Bytes[0x41_u8]
+      output = IO::Memory.new
+      Gori::CLI::Output.write_value(output, bytes, true)
+      output.to_slice.should eq(Bytes[0x41_u8, 0x0a_u8])
+
+      terminated = Bytes[0x41_u8, 0x0a_u8]
+      output = IO::Memory.new
+      Gori::CLI::Output.write_value(output, terminated, true)
+      output.to_slice.should eq(terminated)
+    end
+  end
+end

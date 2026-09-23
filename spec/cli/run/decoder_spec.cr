@@ -16,6 +16,11 @@ module Gori::CLI::Run
   def self.parse_render_mode_for_spec(v : String) : Gori::Decoder::RenderAs?
     parse_render_mode(v)
   end
+
+  def self.write_decoder_output_for_spec(io : IO, rendered : String,
+                                         render : Gori::Decoder::RenderAs, terminal : Bool) : Nil
+    write_decoder_output(io, rendered, render, terminal)
+  end
 end
 
 private def run_chain(input : String, chain : String) : Gori::Decoder::ChainResult
@@ -28,6 +33,25 @@ describe "gori run decoder --output" do
     Gori::CLI::Run.parse_render_mode_for_spec("text").should eq(Gori::Decoder::RenderAs::Text)
     Gori::CLI::Run.parse_render_mode_for_spec("BASE64").should eq(Gori::Decoder::RenderAs::Base64)
     Gori::CLI::Run.parse_render_mode_for_spec("Hex").should eq(Gori::Decoder::RenderAs::Hex)
+  end
+end
+
+describe "gori run decoder output" do
+  it "writes piped rendered bytes unchanged" do
+    bytes = Bytes[0x00_u8, 0xff_u8, 0x41_u8]
+    rendered = String.new(bytes)
+    output = IO::Memory.new
+    Gori::CLI::Run.write_decoder_output_for_spec(output, rendered,
+      Gori::Decoder::RenderAs::Text, false)
+    output.to_slice.should eq(bytes)
+  end
+
+  it "neutralizes terminal controls and keeps the terminal line break" do
+    rendered = "before#{27.chr}[2Jafter"
+    output = IO::Memory.new
+    Gori::CLI::Run.write_decoder_output_for_spec(output, rendered,
+      Gori::Decoder::RenderAs::Text, true)
+    output.to_s.should eq("before·[2Jafter\n")
   end
 end
 
