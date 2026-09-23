@@ -53,7 +53,8 @@ module Gori
         end)
       end
 
-      @[Tool("oast_resume", gated: true, agent_action: true)]
+      @[Tool("oast_resume", gated: true, agent_action: true,
+        requires: ["oast_poll", "oast_payload", "oast_stop", "oast_release", "list_oast_sessions"])]
       private def oast_resume(h) : Result
         row = oast_session_row(h)
         return row if row.is_a?(Result)
@@ -99,7 +100,7 @@ module Gori
 
       # Deregister the session's SERVER-side state. The row and every callback it collected
       # stay — this releases the listener, not the evidence.
-      @[Tool("oast_release", gated: true, agent_action: true)]
+      @[Tool("oast_release", gated: true, agent_action: true, requires: ["oast_stop"])]
       private def oast_release(h) : Result
         row = oast_session_row(h)
         return row if row.is_a?(Result)

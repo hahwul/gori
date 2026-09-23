@@ -113,7 +113,9 @@ module Gori
       # says when the view last MOVED (the TUI writes only on change — there is still no
       # heartbeat, deliberately), and the `tui` block says whether a window is attached RIGHT
       # NOW, off the flock marker directory beside the database. Neither corrects the other.
-      @[Tool("get_current_context")]
+      @[Tool("get_current_context", requires: [
+        "list_history", "get_issue", "list_sitemap", "get_repeater_context",
+      ])]
       private def get_current_context : Result
         raw = store.setting(Store::UI_STATE_KEY)
         parsed = raw.try do |r|
@@ -212,7 +214,7 @@ module Gori
           "QUERY_SYNTAX", field: "filter")
       end
 
-      @[Tool("get_repeater_context")]
+      @[Tool("get_repeater_context", requires: ["get_response_body_chunk"])]
       private def get_repeater_context(h) : Result
         ui = parse_ui_state
         repeater_id = int(h, "id")
@@ -666,8 +668,16 @@ module Gori
             "list_history{query: \"host:H path:P\"} reaches the traffic behind one; " \
             "list_sitemap{query: \"host:H\"} reads the node"
           when "intercept_item"
-            "intercept_get{item_id} per id in selection.ids, valid only while the hold lasts " \
-            "(intercept_list says whether the bridge is still live)"
+            if serves?("intercept_get")
+              intercept_note = "intercept_get{item_id} per id in selection.ids, valid only while the hold lasts"
+              intercept_note += " (intercept_list says whether the bridge is still live)" if serves?("intercept_list")
+              intercept_note
+            elsif serves?("intercept_list")
+              "intercept_get is not exposed; intercept_list can show this item's preview and metadata, " \
+              "but full detail is unavailable"
+            else
+              "intercept_get is not exposed by this server; this held item cannot be read through MCP"
+            end
           end
         j.field "selection_next_call", note if note
       end
@@ -712,8 +722,9 @@ module Gori
           "block. `selection.ids` is the set every TUI batch verb would act on: the MARKED rows " \
           "when any are marked, else the ONE row under the cursor, else the flow an open detail " \
           "pins; `target_source` says which of the three, so do not re-derive that rule. " \
-          "`selection_next_call` names the tool that turns them into data — only History has a " \
-          "one-call form (`list_history{ids}`). SITEMAP SELECTS (host, path) PAIRS, not flow ids: " \
+          "`selection_next_call` names the available tool that turns them into data, or says " \
+          "when a required follow-up is not exposed — only History has a one-call form " \
+          "(`list_history{ids}`). SITEMAP SELECTS (host, path) PAIRS, not flow ids: " \
           "it reports `nodes` and no `ids` at all, which is what `kind` is there to tell you. " \
           "`truncated` is the ONLY signal that the array was cut, and a partial list is not a " \
           "safe thing to act on. Do not infer it from `marked_count`, which describes the MARK " \

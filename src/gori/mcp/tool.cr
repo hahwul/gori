@@ -69,9 +69,8 @@ module Gori
     #     report on is, not because they change anything.
     #   - `read_only: false` on an UNGATED writer — the handful that gate themselves instead
     #     of being gated: `switch_project` and `create_project` (so install-and-use works on
-    #     a fresh machine), `probe_scan` (whose `active: true` mode SENDS), `oast_poll`
-    #     (which dials the provider and files what it catches), and the two message tools,
-    #     which write delivery rows.
+    #     a fresh machine), `probe_scan` (whose `active: true` mode SENDS), and
+    #     `operator_messages`, which can write delivery rows when actions are allowed.
     #
     #   `read_only: true` with `agent_action: true` is a contradiction the macro refuses: an
     #   agent action is by definition a mutation or an outbound send.
@@ -82,6 +81,12 @@ module Gori
     #   comparing two past engagements should not have to bind one of them first; with `to`
     #   omitted it still refuses, from `resolve_diff_target`, with the same NO_PROJECT
     #   sentence, because the default side IS the bound project.
+    #
+    # - `requires` — other MCP tools this tool's advertised description or schema tells the
+    #   agent it must call as part of the same workflow. `--tools` adds these transitively;
+    #   if the operator explicitly excludes one while retaining its parent, startup refuses
+    #   the conflicting filter rather than widening the allowlist or advertising a broken
+    #   workflow.
     annotation Tool
     end
   end

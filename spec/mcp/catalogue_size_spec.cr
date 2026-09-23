@@ -42,7 +42,10 @@ private def row_flags(cell : String) : {String?, Bool}?
 end
 
 private def filter_for(spec : String?) : Gori::MCP::ToolFilter?
-  spec.try { |sp| Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter) }
+  spec.try do |sp|
+    Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES,
+      Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+  end
 end
 
 private def measured(spec : String?, allow_actions : Bool) : {Int32, Int32}
@@ -57,13 +60,13 @@ end
 # "member -> named"; each entry must still occur (see the example), so the list cannot outlive
 # the text it excuses.
 private INCIDENTAL = {
-  "ql_reference -> list_sitemap"            => "lists the query language's consumers",
-  "ql_explain -> list_sitemap"              => "lists the query language's consumers",
   "ql_explain -> probe_scan"                => "lists every tool that would refuse the query",
   "list_history -> list_views"              => "`view` takes a saved view's name; the operator can give it",
   "get_response_body_chunk -> send_request" => "names a producer of truncated output, not a step",
   "operator_messages -> list_events"        => "a cursor analogy (\"forward-cursored like list_events\")",
   "list_sitemap -> set_sitemap_tag"         => "says where an operator's tag comes from",
+  "intercept_list -> intercept_forward"     => "one optional disposition; the queue is still useful to inspect without forwarding",
+  "intercept_get -> intercept_forward_edit" => "editing is an optional branch; redacted detail is useful on its own",
   "probe_issues -> probe_scan"              => "a contrast (\"unlike probe_scan's stateless rescan\")",
   "probe_issues -> probe_delete"            => "the third triage verb, left out of @recon on purpose: it erases the record",
   "list_env -> send_websocket"              => "names where env tokens are substituted",

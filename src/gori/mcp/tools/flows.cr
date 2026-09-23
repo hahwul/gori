@@ -16,7 +16,7 @@ module Gori
 
       # --- read tools ---------------------------------------------------------
 
-      @[Tool("list_history")]
+      @[Tool("list_history", requires: ["get_flow", "ql_reference"])]
       private def list_history(h) : Result
         limit = clamp(optional_int_arg(h, "limit"), 50, 500)
         before_id = optional_int_arg(h, "before_id")
@@ -304,7 +304,7 @@ module Gori
         end)
       end
 
-      @[Tool("get_flow")]
+      @[Tool("get_flow", requires: ["get_response_body_chunk"])]
       private def get_flow(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -626,18 +626,20 @@ module Gori
           s.field "include_delivered", boolprop("also return messages a live route already carried (default false)")
         end
 
-        tool j, "reply_to_operator",
-          "Answer the operator in the gori TUI. `summary` (required) is ONE line they read at a " \
-          "glance — it shows in the notification ring and on Miss Ring; put anything longer in " \
-          "`detail` (markdown-ish plain text, opened from the ring with ↵). `level` colours it: " \
-          "info (default) | success | warn | error. `in_reply_to` links it to the operator_messages " \
-          "id you are answering. Use it for the answer to a question they sent, the outcome of a " \
-          "task they asked for, or anything they must see without switching to your terminal — " \
-          "not for narration." do |s|
-          s.field "summary", strprop("one line, ≤200 characters; the rest goes in detail"), required: true
-          s.field "detail", strprop("the long form; optional, ≤32 KiB")
-          s.field "level", enumprop("how the ring colours it", %w[info success warn error])
-          s.field "in_reply_to", intprop("the operator_messages id this answers, when it does")
+        if @allow_actions
+          tool j, "reply_to_operator",
+            "Answer the operator in the gori TUI. `summary` (required) is ONE line they read at a " \
+            "glance — it shows in the notification ring and on Miss Ring; put anything longer in " \
+            "`detail` (markdown-ish plain text, opened from the ring with ↵). `level` colours it: " \
+            "info (default) | success | warn | error. `in_reply_to` links it to the operator_messages " \
+            "id you are answering. Use it for the answer to a question they sent, the outcome of a " \
+            "task they asked for, or anything they must see without switching to your terminal — " \
+            "not for narration." do |s|
+            s.field "summary", strprop("one line, ≤200 characters; the rest goes in detail"), required: true
+            s.field "detail", strprop("the long form; optional, ≤32 KiB")
+            s.field "level", enumprop("how the ring colours it", %w[info success warn error])
+            s.field "in_reply_to", intprop("the operator_messages id this answers, when it does")
+          end
         end
 
         tool j, "get_flow",

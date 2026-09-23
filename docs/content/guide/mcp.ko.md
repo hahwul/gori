@@ -74,17 +74,17 @@ gori mcp --read-only
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
 | `gori mcp` | 179 | ~203 KB | ~52k | 전부 (기본값) |
-| `--read-only` | 62 | ~66 KB | ~17k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
-| `--tools=@recon` | 32 | ~46 KB | ~12k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
-| `--tools=@recon --read-only` | 25 | ~33 KB | ~9k | `--read-only`가 끄는 도구를 뺀 `@recon` |
-| `--tools=@minimal` | 13 | ~20 KB | ~5k | History와 개별 flow 읽기, 오퍼레이터와 대화 |
+| `--read-only` | 59 | ~64 KB | ~16k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `--tools=@recon` | 34 | ~46 KB | ~12k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon --read-only` | 26 | ~33 KB | ~9k | `--read-only`가 끄는 도구를 뺀 `@recon` |
+| `--tools=@minimal` | 17 | ~25 KB | ~6k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
 
 | 프로필 | 도구 |
 | --- | --- |
-| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `operator_messages`, `reply_to_operator` |
-| `@recon` | `@minimal`에 더해 `list_sitemap`, `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `get_issue`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator` |
+| `@recon` | `@minimal`에 더해 `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 프로필은 글롭이 아니라 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`이 조용히 커지지 않습니다. 둘 다 `switch_project`와 `create_project`를 포함하므로, 프로젝트가 하나도 없는 머신에서 바인딩 없이 시작해도 동작합니다.
 
@@ -98,6 +98,8 @@ gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워
 ```
 
 도구 이름이 접두어 계열(`list_*`, `intercept_*`, `fuzz_*`, `oast_*`)로 지어져 있으므로 글롭 하나로 그룹을 고를 수 있습니다. 빼기로 시작하는 스펙은 전체에서 출발하므로 이후 버전이 도구를 추가해도 그대로 동작합니다.
+
+도구 설명에 명시된 필수 후속 도구(비동기 작업의 상태·결과·중지, flow 본문 페이지 읽기 등)는 전이적으로 자동 포함됩니다. 나중에 부모 도구는 남기고 필수 동반 도구를 제외하면 시작 시 충돌을 거부합니다. 제외 항목 뒤에 동반 도구를 다시 추가하거나 부모 도구를 빼세요. 조건부 라이브 인터셉트 읽기 도구는 명시적 제외를 따릅니다. `intercept_get`은 숨겼지만 `intercept_list`는 제공한다면 `get_current_context`가 미리보기와 메타데이터를 볼 수 있다고 안내하면서 전체 상세 내용은 제공되지 않는다고 알립니다. 둘 다 숨겼다면 민감한 읽기 도구를 되살리는 대신 보류 항목을 이 서버에서 읽을 수 없다고 알립니다.
 
 스펙을 너무 좁히면 서버가 프로젝트를 *고를* 방법조차 잃을 수 있습니다. Git 워크스페이스 밖이거나 `--no-project`로 시작했거나 지정한 데이터베이스가 열리지 않아 바인딩이 없는데 스펙이 `switch_project`와 `create_project`를 둘 다 남기지 않으면, 에이전트가 무엇을 호출해도 프로젝트를 붙일 수 없습니다. `list_projects`는 여기 포함되지 않습니다 — 목록만 보여줄 뿐 아무것도 바인딩하지 않습니다. gori는 이를 시작 시점에 경고하고, `NO_PROJECT` 오류도 없는 도구를 가리키는 대신 같은 사실을 말합니다. 스펙에 `switch_project`를 남기거나 `--project`/`--db`를 넘기세요.
 

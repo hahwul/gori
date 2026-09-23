@@ -20,7 +20,10 @@ private NAMEABLE = %w[
 ]
 
 private def instructions_under(store, spec : String?, allow_actions = true) : {String, Set(String)}
-  filter = spec.try { |sp| Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES) }
+  filter = spec.try do |sp|
+    Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES,
+      Gori::MCP::Tools::TOOL_DEPENDENCIES)
+  end
   filter.should_not be_a(String) if spec
   input = IO::Memory.new(
     %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}) + "\n" +

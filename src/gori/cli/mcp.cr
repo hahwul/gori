@@ -70,7 +70,8 @@ module Gori::CLI
       # sent the operator hunting for a typo in a name they had spelled correctly. The gate
       # is applied after the spec resolves, exactly where it is applied everywhere else
       # (`Tools#list`).
-      case parsed = MCP::ToolFilter.parse(spec, MCP::Tools::TOOL_NAMES)
+      case parsed = MCP::ToolFilter.parse(spec, MCP::Tools::TOOL_NAMES,
+        MCP::Tools::TOOL_DEPENDENCIES)
       in String          then abort parsed
       in MCP::ToolFilter then tool_filter = parsed
       end
@@ -192,6 +193,7 @@ module Gori::CLI
     String.build do |io|
       io << "Advertise only these tools: comma-separated names, globs or @profiles,\n"
       io << "'-' subtracts (e.g. '@recon', '@minimal,send_request', '-fuzz_*,-mine_*').\n"
+      io << "Required companions are included automatically; conflicting explicit exclusions are refused.\n"
       io << "The client loads every advertised tool into the model's context; the\n"
       io << "startup log says how much. Profiles:"
       MCP::ToolFilter::PROFILES.each do |pr|

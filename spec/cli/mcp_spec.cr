@@ -6,12 +6,18 @@ require "../spec_helper"
 # size at all, and the start-up line measures the listing it is about to serve.
 
 private def banner(spec : String?, read_only = false) : String
-  filter = spec.try { |sp| Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter) }
+  filter = spec.try do |sp|
+    Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES,
+      Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+  end
   Gori::CLI.mcp_catalogue_banner(filter, read_only)
 end
 
 private def kb_of(spec : String?, allow_actions = true) : Int32
-  filter = spec.try { |sp| Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES).as(Gori::MCP::ToolFilter) }
+  filter = spec.try do |sp|
+    Gori::MCP::ToolFilter.parse(sp, Gori::MCP::Tools::TOOL_NAMES,
+      Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+  end
   Gori::MCP::Tools.catalogue_kb(Gori::MCP::Tools.catalogue_json(filter, allow_actions).bytesize)
 end
 
@@ -31,6 +37,11 @@ describe "gori mcp catalogue wording" do
 
     it "states no size, since a compiled-in number is the one that drifts" do
       help.should_not match(/\d\s*(KB|tokens|k\b)/)
+    end
+
+    it "explains required companions and conflicting exclusions" do
+      help.should contain("Required companions are included automatically")
+      help.should contain("conflicting explicit exclusions are refused")
     end
   end
 

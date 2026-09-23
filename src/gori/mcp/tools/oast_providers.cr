@@ -153,6 +153,8 @@ module Gori
         tool j, "oast_presets",
           "List built-in public OAST providers (interactsh servers, BOAST, webhook.site, postbin)." { }
 
+        return unless @allow_actions
+
         tool j, "oast_poll",
           "Poll an OAST session (from oast_start) for new out-of-band callbacks. Returns only " \
           "interactions not already seen on this session; each has protocol/method/source/" \
@@ -165,8 +167,6 @@ module Gori
           "payloads in a session share the correlation id oast_poll watches." do |s|
           s.field "session_id", strprop("session id returned by oast_start"), required: true
         end
-
-        return unless @allow_actions
 
         tool j, "oast_start",
           "Register an OAST listener and return {session_id, store_session_id, provider, " \
