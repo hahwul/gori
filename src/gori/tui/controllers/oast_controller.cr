@@ -576,7 +576,13 @@ module Gori::Tui
       # payload picker all resolve through `listener_for(picked_provider.key)` — so a resumed
       # session must land under a provider key or it would be a poller the operator could see
       # and never stop.
-      config = provider_config_for(rec)
+      config = Oast::Sessions.resolve(rec, @providers)
+      if config.is_a?(Oast::Sessions::Ambiguous)
+        # Filing it under one of them would poll with that provider's token (#1192). Headless
+        # `gori run oast resume` binds no provider and polls with the session's own token.
+        return @host.status("#{Oast::Sessions.ambiguous_message(config, session_id)} — " \
+                            "resume it with `gori run oast resume #{session_id}`")
+      end
       unless config
         return @host.status("session ##{session_id}'s provider is gone — re-add #{rec.kind} #{rec.server_url} in Providers to resume it")
       end
@@ -1661,7 +1667,8 @@ module Gori::Tui
         unless reg.resumed
           reg.session.id = @host.session.store.insert_oast_session(reg.db_provider_id,
             reg.session.kind.label, reg.session.server_url, reg.session.correlation_id,
-            reg.session.secret, reg.session.private_key_pem, reg.session.token)
+            reg.session.secret, reg.session.private_key_pem, reg.session.token,
+            provider_key: Oast::Sessions.recorded_key(reg.provider_key))
         end
         id = reg.session.id
         listener = Listener.new(reg.session, reg.provider, reg.provider_key, reg.provider_label)

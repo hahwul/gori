@@ -327,6 +327,31 @@ describe "MCP oast_start persist" do
     end
   end
 
+  # #1192: a global provider has no project row id to record, so it is recorded by its key —
+  # and an ad-hoc kind + host as "", so no saved provider on that endpoint can lend it a token.
+  it "records a GLOBAL provider by its key, and an ad-hoc registration as none" do
+    # In memory only: `add_oast_provider` saves settings.json, which a later spec would reload.
+    second = "b2"
+    Gori::Settings.oast_providers = [Gori::Settings::OastProvider.new("a1", "First", "custom-http", "https://oob.example/hits", "A", true),
+                                     Gori::Settings::OastProvider.new(second, "Second", "custom-http", "https://oob.example/hits", "B", true)]
+    begin
+      with_store do |store|
+        tools = tools_for(store)
+        row = ok_json(tools, "oast_start", %({"provider_id":"g_#{second}","persist":true}))["store_session_id"].as_i64
+        adhoc = ok_json(tools, "oast_start",
+          %({"provider":"custom-http","server":"https://oob.example/hits","token":"T","persist":true}))["store_session_id"].as_i64
+        store.flush
+        store.get_oast_session(row).not_nil!.provider_key.should eq("g_#{second}")
+        store.get_oast_session(adhoc).not_nil!.provider_key.should eq("")
+        listed = Gori::Oast::Sessions.list(store)
+        listed.find!(&.id.==(row)).provider.should eq("Second")
+        listed.find!(&.id.==(adhoc)).provider_key.should be_nil
+      end
+    ensure
+      Gori::Settings.oast_providers = [] of Gori::Settings::OastProvider
+    end
+  end
+
   it "records the SAVED provider it registered through, so the session comes back named" do
     with_store do |store|
       pid = store.insert_oast_provider("lab collab", "custom-http", "https://oob.example/hits",

@@ -1409,12 +1409,13 @@ module Gori
       # picks the most-recently-POLLED session, and this one is about to be polled.
       private def persist_oast_session(session : Oast::Session,
                                        saved : Oast::ProviderConfig?) : Int64?
-        # The provider row id, and only when it IS a project row: a global provider has no row
-        # in this DB, and `Sessions.config_for` re-resolves those by kind + endpoint. Writing a
-        # global provider's hex id here would point the column at an unrelated project row.
+        # The provider row id, and only when it IS a project row: writing a global provider's
+        # hex id there would point the column at an unrelated project row. A global provider is
+        # recorded by its key instead (`provider_key`, #1192), and an ad-hoc kind + host as "".
         row = store.insert_oast_session(saved.try(&.project_id), session.kind.label,
           session.server_url, session.correlation_id, session.secret,
-          session.private_key_pem, session.token)
+          session.private_key_pem, session.token,
+          provider_key: Oast::Sessions.recorded_key(saved.try(&.key)))
         return nil if row == 0
         session.id = row
         store.touch_oast_session(row)

@@ -379,6 +379,54 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
     end
   end
 
+  # #1192: two global providers on one endpoint with different tokens. The tab must record which
+  # one a registration used, and refuse to guess for a row that recorded none.
+  it "records the global provider a registration used, and resumes under it" do
+    # In memory only: `add_oast_provider` saves settings.json, which a later spec would reload.
+    second = "b2"
+    Gori::Settings.oast_providers = [Gori::Settings::OastProvider.new("a1", "First", "interactsh", "oast.shared", "A", true),
+                                     Gori::Settings::OastProvider.new(second, "Second", "interactsh", "oast.shared", "B", true)]
+    begin
+      with_oast_controller do |controller, _host, session, _sid, _pid|
+        controller.reload
+        fresh = Gori::Oast::Session.new(0_i64, Gori::Oast::ProviderKind::Interactsh,
+          "https://oast.shared", "fr3shc0rr", "s3c", token: "B", registered: true)
+        provider = Gori::Oast::Provider.build(Gori::Oast::ProviderKind::Interactsh, "https://oast.shared", "B")
+        controller.@reg_events.send(OastController::RegOk.new(fresh, provider, "g_#{second}", nil, "Second", false))
+        controller.drain_events
+        session.store.oast_sessions.last.provider_key.should eq("g_#{second}")
+      end
+      # …and a row that recorded it resumes under that provider, not the first on the endpoint.
+      with_oast_controller do |controller, host, session, _sid, _pid|
+        recorded = session.store.insert_oast_session(nil, "interactsh", "https://oast.shared",
+          "r3c0rded", "s3c", nil, "B", provider_key: "g_#{second}")
+        controller.reload
+        controller.resume_session(recorded)
+        host.statuses.last.should contain("resuming Second")
+      end
+    ensure
+      Gori::Settings.oast_providers = [] of Gori::Settings::OastProvider
+    end
+  end
+
+  it "refuses to file an unrecorded session under one of several same-endpoint providers" do
+    Gori::Settings.oast_providers = [Gori::Settings::OastProvider.new("a1", "First", "interactsh", "oast.shared", "A", true),
+                                     Gori::Settings::OastProvider.new("b2", "Second", "interactsh", "oast.shared", "B", true)]
+    begin
+      with_oast_controller do |controller, host, session, _sid, _pid|
+        legacy = session.store.insert_oast_session(nil, "interactsh", "https://oast.shared",
+          "l3gacy", "s3c", nil, "ROTATED")
+        controller.reload
+        controller.resume_session(legacy)
+        host.statuses.last.should contain("matches 2 saved providers")
+        host.statuses.last.should contain("gori run oast resume #{legacy}")
+        controller.@listeners.should be_empty
+      end
+    ensure
+      Gori::Settings.oast_providers = [] of Gori::Settings::OastProvider
+    end
+  end
+
   # The discard path deregisters, which for interactsh tells the server to forget the
   # correlation id. Doing that to a RESUMED session — one with a row, callbacks and payloads
   # planted right now — would throw away exactly what the operator asked to get back.

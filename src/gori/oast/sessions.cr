@@ -47,12 +47,14 @@ module Gori::Oast
     end
 
     # A bound session: everything a resume or a release needs, and nothing a surface has to
-    # rebuild. `config` is the saved provider it resolved to, nil when that provider is gone.
+    # rebuild. `config` is the saved provider it resolved to, nil when that provider is gone or
+    # cannot be told apart from another (`Ambiguous`) — the row's own token is used then.
     record Bound,
       session : Session,
       provider : Provider,
       label : String,
-      config : ProviderConfig?
+      config : ProviderConfig?,
+      ambiguous : Ambiguous? = nil
 
     # Every persisted session, NEWEST FIRST — a session list is read as a stack, and the one
     # you were just using is the one you want back (same order as the TUI's resume picker).
@@ -91,12 +93,26 @@ module Gori::Oast
       return Problem::Missing unless rec
       kind = ProviderKind.parse?(rec.kind)
       return Problem::UnknownKind unless kind
-      cfg = config_for(rec, configs || Oast.provider_configs(store))
+      resolved = resolve(rec, configs || Oast.provider_configs(store))
+      cfg = resolved.as?(ProviderConfig)
       Bound.new(
         session: session_from_record(rec),
         provider: Provider.build(kind, rec.server_url, cfg.try(&.token) || rec.token),
         label: cfg.try(&.name) || kind.label,
-        config: cfg)
+        config: cfg,
+        ambiguous: resolved.as?(Ambiguous))
+    end
+
+    # The sentence a surface reports when a session's provider cannot be told apart (`Ambiguous`).
+    def ambiguous_message(amb : Ambiguous, id : Int64) : String
+      "OAST session ##{id} matches #{amb.candidates.size} saved providers at that endpoint " \
+      "(#{amb.candidates.join(", ", &.name)}) and none holds the token it registered with"
+    end
+
+    # What a headless surface says beside a resume or release it bound with `Ambiguous`: which
+    # credential it used instead of picking a provider. nil when the binding was not ambiguous.
+    def ambiguity_note(bound : Bound, id : Int64) : String?
+      bound.ambiguous.try { |amb| "#{ambiguous_message(amb, id)}; using the token stored with the session" }
     end
 
     # The sentence a surface reports for a `Problem`. One phrasing, three surfaces.
@@ -214,13 +230,25 @@ module Gori::Oast
         private_key_pem: rec.private_key_pem, token: rec.token, registered: true)
     end
 
-    # The saved provider a session belongs to, by row id where it has one.
+    # Several saved providers answer a session's kind + endpoint and none of them holds the token
+    # it registered with, so which one it belongs to cannot be told (#1192). Nothing is picked:
+    # binding one would put THAT provider's credential on this session's polls.
+    record Ambiguous, candidates : Array(ProviderConfig)
+
+    # The saved provider a session belongs to, or nil for none. `resolve` without the reason.
+    def config_for(rec : Store::OastSessionRecord,
+                   configs : Array(ProviderConfig)) : ProviderConfig?
+      resolve(rec, configs).as?(ProviderConfig)
+    end
+
+    # The saved provider a session belongs to: by the identity the row recorded, else by
+    # re-resolution — or `Ambiguous` when re-resolution has more than one answer, or nil.
     #
-    # A GLOBAL provider has no row in this project's DB, so the register recorded a NULL
-    # provider_id for it — by design, and the reason this cannot simply give up on nil: a
-    # global provider is the ordinary case for anyone who configured interactsh once and
-    # reuses it across projects. Re-resolve those by the only identity the row still carries,
-    # the kind and the server it registered against.
+    # BY IDENTITY first. A project provider is `provider_id`; a global one is `provider_key`
+    # (schema V29, #1192). Before V29 a global provider's session recorded nothing, and was
+    # re-resolved by kind + endpoint to the FIRST match: two global providers on one endpoint
+    # with different tokens, and the session the second one minted polled with the first one's
+    # credential.
     #
     # The row id alone is NOT an identity. `oast_providers.id` is a plain `INTEGER PRIMARY KEY`
     # with no AUTOINCREMENT, so SQLite hands a deleted row's id to the next insert — delete the
@@ -228,20 +256,60 @@ module Gori::Oast
     # the first now resolve to the second. `bind` takes the HOST from the session and the TOKEN
     # from the config, so that mismatch does not merely mislabel a row: it puts a webhook.site
     # api key in an `Authorization:` header aimed at an interactsh host the operator never
-    # meant to hand it to. Accept the id ONLY when the kind agrees, and fall through to the
-    # kind+endpoint re-resolution below when it does not.
+    # meant to hand it to. Accept an id ONLY when the kind agrees. A global key is a random hex
+    # id that is never reused, but it gets the same kind check for the same reason.
     #
-    # Falling through when the id is simply GONE matters for its own reason: deleting a provider
+    # BY RE-RESOLUTION otherwise: a row from before V29, or one whose provider is gone. Falling
+    # through when the provider is simply GONE matters for its own reason: deleting a provider
     # and re-adding the same one used to strand every session it minted with a provider_key of
-    # nil, which the TUI reads as "not resumable" forever. `Store#delete_oast_provider` now
-    # NULLs the column, and this is the path those rows land on.
-    def config_for(rec : Store::OastSessionRecord,
-                   configs : Array(ProviderConfig)) : ProviderConfig?
-      if pid = rec.provider_id
-        hit = configs.find { |p| p.project_id == pid }
-        return hit if hit && same_kind?(hit.kind, rec.kind)
-      end
-      configs.find { |p| same_kind?(p.kind, rec.kind) && same_endpoint?(p.host, rec.server_url) }
+    # nil, which the TUI reads as "not resumable" forever. `Store#delete_oast_provider` NULLs
+    # `provider_id`, and a re-added global provider has a new id, so both land here. Among the
+    # providers of the same kind and endpoint:
+    #
+    #   - one that holds the token the session registered with wins. It is the credential the
+    #     session was minted under, so binding it can never swap one account for another.
+    #   - failing that, a LONE match is taken: it is the rotated or re-added provider, and the
+    #     TOKEN prefers the config because a rotated credential is the live one.
+    #   - several, none with that token, is `Ambiguous`. `bind` then polls with the row's own
+    #     token and the TUI refuses to file the session under one of them.
+    #
+    # A session registered with NO saved provider (`provider_key` "") is only ever matched by
+    # that token rule: its credential was typed for it, and a provider that merely shares its
+    # endpoint has no claim to it.
+    def resolve(rec : Store::OastSessionRecord,
+                configs : Array(ProviderConfig)) : (ProviderConfig | Ambiguous)?
+      recorded_config(rec, configs) || reresolve(rec, configs)
+    end
+
+    # The provider the row names by identity, when it is still there and still the same kind.
+    private def recorded_config(rec : Store::OastSessionRecord,
+                                configs : Array(ProviderConfig)) : ProviderConfig?
+      hit =
+        if pid = rec.provider_id
+          configs.find { |p| p.project_id == pid }
+        elsif (key = rec.provider_key) && !key.empty?
+          configs.find { |p| p.global? && p.key == key }
+        end
+      hit if hit && same_kind?(hit.kind, rec.kind)
+    end
+
+    # The kind + endpoint re-resolution, with the token rule `resolve` describes.
+    private def reresolve(rec : Store::OastSessionRecord,
+                          configs : Array(ProviderConfig)) : (ProviderConfig | Ambiguous)?
+      candidates = configs.select { |p| same_kind?(p.kind, rec.kind) && same_endpoint?(p.host, rec.server_url) }
+      same_token = candidates.find { |p| p.token.presence == rec.token.presence }
+      return same_token if same_token
+      return nil if rec.provider_key == "" || candidates.empty?
+      candidates.size == 1 ? candidates.first : Ambiguous.new(candidates)
+    end
+
+    # What a fresh registration records in `provider_key` for the saved provider it used: the
+    # key of a GLOBAL one, "" for none (an ad-hoc kind + host), nil for a project one, whose
+    # `provider_id` already names it. Takes the key, not the config, because the TUI carries
+    # only the key across the fiber that registered.
+    def recorded_key(provider_key : String?) : String?
+      return "" unless provider_key
+      provider_key.starts_with?("g_") ? provider_key : nil
     end
 
     # Do a provider row and a session row name the same backend? Through `ProviderKind.parse?`

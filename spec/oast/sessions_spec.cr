@@ -218,6 +218,87 @@ describe Gori::Oast::Sessions do
     end
   end
 
+  # #1192: two GLOBAL providers on one endpoint with different tokens. A global provider has no
+  # project row id, so its sessions were re-resolved by kind + endpoint to the FIRST match — and
+  # a session the second one minted polled with the first one's credential.
+  describe ".resolve, when several saved providers share an endpoint" do
+    shared = [cfg("a", "First", "custom-http", "http://127.0.0.1:9/hits", "A", scope: "global"),
+              cfg("b", "Second", "custom-http", "http://127.0.0.1:9/hits", "B", scope: "global")]
+
+    it "binds the global provider the session recorded, not the first match" do
+      with_store do |store|
+        id = store.insert_oast_session(nil, "custom-http", "http://127.0.0.1:9/hits", "corr", "",
+          nil, "B", provider_key: "g_b")
+        store.flush
+        store.get_oast_session(id).not_nil!.provider_key.should eq("g_b")
+        bound = O::Sessions.bind(store, id, shared).as(O::Sessions::Bound)
+        bound.label.should eq("Second")
+        bound.provider.token.should eq("B")
+        bound.ambiguous.should be_nil
+        # …and keeps doing so once that provider's token is rotated: the identity is recorded.
+        rotated = [shared[0], cfg("b", "Second", "custom-http", "http://127.0.0.1:9/hits", "B2", scope: "global")]
+        O::Sessions.bind(store, id, rotated).as(O::Sessions::Bound).provider.token.should eq("B2")
+      end
+    end
+
+    # A row from before the column recorded nothing, but it did keep the token it registered with.
+    it "tells an unrecorded row's provider by the token it registered with" do
+      with_store do |store|
+        id = store.insert_oast_session(nil, "custom-http", "http://127.0.0.1:9/hits", "corr", "", nil, "B")
+        store.flush
+        O::Sessions.bind(store, id, shared).as(O::Sessions::Bound).label.should eq("Second")
+      end
+    end
+
+    it "picks none when no candidate holds that token, and polls with the session's own" do
+      with_store do |store|
+        id = store.insert_oast_session(nil, "custom-http", "http://127.0.0.1:9/hits", "corr", "", nil, "OLD")
+        store.flush
+        rec = store.get_oast_session(id).not_nil!
+        O::Sessions.resolve(rec, shared).as(O::Sessions::Ambiguous).candidates.map(&.name)
+          .should eq(["First", "Second"])
+        O::Sessions.config_for(rec, shared).should be_nil
+        bound = O::Sessions.bind(store, id, shared).as(O::Sessions::Bound)
+        bound.provider.token.should eq("OLD")
+        bound.config.should be_nil
+        O::Sessions.ambiguity_note(bound, id).not_nil!.should contain("(First, Second)")
+        # One candidate is still taken whatever its token: the rotated or re-added provider.
+        O::Sessions.resolve(rec, [shared[0]]).as(O::ProviderConfig).name.should eq("First")
+      end
+    end
+
+    it "falls back to re-resolution when the recorded global provider is gone" do
+      with_store do |store|
+        id = store.insert_oast_session(nil, "custom-http", "http://127.0.0.1:9/hits", "corr", "",
+          nil, "B", provider_key: "g_deleted")
+        store.flush
+        readded = [shared[0], cfg("c0ffee", "Second again", "custom-http", "http://127.0.0.1:9/hits", "B", scope: "global")]
+        O::Sessions.bind(store, id, readded).as(O::Sessions::Bound).label.should eq("Second again")
+      end
+    end
+
+    # Registered with no saved provider: its token was typed for it, and a provider that merely
+    # shares its endpoint has no claim to lend it another one.
+    it "binds an ad-hoc session only to a provider holding its own token" do
+      with_store do |store|
+        id = store.insert_oast_session(nil, "custom-http", "http://127.0.0.1:9/hits", "corr", "",
+          nil, "TYPED", provider_key: "")
+        store.flush
+        bound = O::Sessions.bind(store, id, [shared[0]]).as(O::Sessions::Bound)
+        bound.config.should be_nil
+        bound.provider.token.should eq("TYPED")
+        same = [cfg("t", "Typed", "custom-http", "http://127.0.0.1:9/hits", "TYPED", scope: "global")]
+        O::Sessions.bind(store, id, same).as(O::Sessions::Bound).label.should eq("Typed")
+      end
+    end
+
+    it "records a global key, none for an ad-hoc session, and leaves a project row to provider_id" do
+      O::Sessions.recorded_key("g_b").should eq("g_b")
+      O::Sessions.recorded_key(nil).should eq("")
+      O::Sessions.recorded_key("p_7").should be_nil
+    end
+  end
+
   describe ".resume / .release" do
     it "re-arms interactsh against the persisted correlation id" do
       with_store do |store|

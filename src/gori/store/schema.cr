@@ -1393,8 +1393,21 @@ module Gori
         "ALTER TABLE repeaters ADD COLUMN response_request_sha256 TEXT",
       ]
 
+      # Which saved provider an OAST session was registered with, when that provider is a GLOBAL
+      # one (#1192). `provider_id` can only name a row of this project's `oast_providers`, so a
+      # global provider's session carried no identity and was re-resolved by kind + endpoint —
+      # which binds the FIRST match, and so the wrong token whenever two global providers share
+      # an endpoint. Holds the provider's scope-qualified key (`g_<id>`, `ProviderConfig#key`),
+      # "" for a session registered with no saved provider at all (`gori run oast listen
+      # --save`, an MCP `oast_start` given a kind and host), and NULL for a project provider
+      # (`provider_id` says it) or a row written before this column. NULL is "not recorded",
+      # and `Oast::Sessions.resolve` says what it does with that.
+      V29 = [
+        "ALTER TABLE oast_sessions ADD COLUMN provider_key TEXT",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

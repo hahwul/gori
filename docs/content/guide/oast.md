@@ -56,6 +56,8 @@ Callbacks are durable per-project history. Resume is a deliberate action, not so
 
 All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project, so the tab, a script, and an agent are reading one table. `gori run oast listen` and MCP `oast_start` are ad-hoc by default — they register with no project behind them, and those registrations end with the process — but `--save` / `persist: true` writes the same kind of row, so a headless or agent-driven listener lands in this picker too.
 
+A resumed session polls with the saved provider it was started with, even when several saved providers point at the same server with different tokens. A session saved by an older gori did not record its provider, so gori matches it by the token it registered with. When that still leaves more than one provider, the tab refuses to pick one, and `gori run oast resume` and `oast_resume` poll with the session's own stored token and say so.
+
 No surface resumes on its own. Opening a project, binding an MCP server, or starting a `gori run` never re-arms a listener; someone asks for it.
 
 ## Keys
