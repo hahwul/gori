@@ -69,7 +69,7 @@ module Gori
 
         tool j, "import_flows",
           "Bulk-import flows into the project's History from a HAR export, a URL list, an " \
-          "OpenAPI/Swagger spec, a Postman Collection v2 or Insomnia v4 export, a Burp Suite " \
+          "OpenAPI 3.x or Swagger 2.0 spec (local refs only), a Postman Collection v2 or Insomnia v4 export, a Burp Suite " \
           "item export, or a WSDL 1.1 service description (SOAP 1.1/1.2) — the MCP equivalent " \
           "of `gori run import`. `path` is read from the MCP SERVER's local filesystem (this " \
           "process runs locally, same trust boundary as send_request). Only `har` and `burp` " \

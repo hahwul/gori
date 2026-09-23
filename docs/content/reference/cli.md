@@ -736,7 +736,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | -------- | ------------- |
 | `--har=PATH` | A browser/proxy HAR (HTTP Archive) export. Full request/response flows |
 | `--urls=PATH` | A text file of URLs, one per line (`#` comments and blanks ignored) |
-| `--oas=PATH` | An OpenAPI/Swagger spec (JSON or YAML). One template per operation |
+| `--oas=PATH` | OpenAPI 3.x or Swagger 2.0 (JSON or YAML); local JSON Pointer refs are resolved, remote refs are reported and not fetched |
 | `--postman=PATH` | A Postman Collection v2 export (JSON) |
 | `--insomnia=PATH` | An Insomnia v4 export (JSON) |
 | `--burp=PATH` | A Burp Suite item export (XML). Request **and** response, byte-exact |

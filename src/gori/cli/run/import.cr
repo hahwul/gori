@@ -32,14 +32,14 @@ module Gori
                      "Bulk-import flows into the project's History. Exactly one source is required:\n" \
                      "  --har       a browser/proxy HAR (HTTP Archive) export\n" \
                      "  --urls      a text file of URLs, one per line (# comments and blanks ignored)\n" \
-                     "  --oas       request templates from an OpenAPI/Swagger spec (JSON or YAML)\n" \
+                     "  --oas       OpenAPI 3.x or Swagger 2.0 request templates (JSON or YAML; local refs only)\n" \
                      "  --postman   request templates from a Postman Collection v2 export (JSON)\n" \
                      "  --insomnia  request templates from an Insomnia v4 export (JSON)\n" \
                      "  --burp      saved Burp items (XML) — request AND response, byte-exact\n" \
                      "  --wsdl      SOAP request templates from a WSDL 1.1 service description (XML)"
           p.on("--har=PATH", "Import a HAR (HTTP Archive) export") { |v| sources[:har] = v }
           p.on("--urls=PATH", "Import a URL list (one URL per line)") { |v| sources[:urls] = v }
-          p.on("--oas=PATH", "Import an OpenAPI/Swagger spec (JSON or YAML)") { |v| sources[:oas] = v }
+          p.on("--oas=PATH", "Import OpenAPI 3.x or Swagger 2.0 (JSON or YAML; local refs only)") { |v| sources[:oas] = v }
           p.on("--postman=PATH", "Import a Postman Collection v2 export") { |v| sources[:postman] = v }
           p.on("--insomnia=PATH", "Import an Insomnia v4 JSON export") { |v| sources[:insomnia] = v }
           p.on("--burp=PATH", "Import a Burp Suite item export (XML)") { |v| sources[:burp] = v }

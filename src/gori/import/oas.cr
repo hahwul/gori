@@ -6,9 +6,79 @@ require "./builder"
 module Gori
   module Import
     module Oas
-      HTTP_METHODS = %w[get post put patch delete head options trace]
+      HTTP_METHODS  = %w[get post put patch delete head options trace]
+      MAX_REF_DEPTH = 64
+
+      private class RemoteReference < Gori::Error
+      end
 
       def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
+        spec = spec_file(path)
+        # A valid-JSON-but-wrong-shape spec (top-level array/scalar) must yield a clean
+        # Gori::Error, not the raw Exception JSON::Any#[](String) throws on a non-Hash —
+        # cmd_import only rescues Gori::Error. Guarding here also makes the later
+        # spec["servers"]/["security"]/["components"] accesses safe (spec is a Hash).
+        raise Gori::Error.new("OpenAPI spec is not a JSON object") unless spec.as_h?
+        paths = spec["paths"]?
+        raise Gori::Error.new("OpenAPI spec missing paths") unless paths
+        # A `paths` that isn't an object (null / string / array) is a malformed spec, not
+        # a valid-but-empty one — raise a clean error rather than a raw JSON type-cast.
+        paths_h = paths.as_h? || raise Gori::Error.new("OpenAPI spec `paths` is not an object")
+        swagger2 = spec["swagger"]?.try(&.as_s?) == "2.0"
+        base = swagger2 ? swagger2_base(spec) : server_base(spec)
+        schemes = api_key_header_schemes(spec)
+        root_security = spec["security"]?
+        now = Time.utc.to_unix * 1_000_000
+        pairs = [] of Builder::FlowPair
+        skipped = 0
+        # `url_path`, not `path`: the enclosing method's `path` is the SPEC FILE on disk, and a
+        # block parameter named `path` shadows it for the whole loop body.
+        paths_h.each do |url_path, item|
+          resolved_item = resolve_path_item(spec, item)
+          unless resolved_item
+            skipped += 1
+            next
+          end
+          HTTP_METHODS.each do |m|
+            flow, found = import_operation(now, base, url_path.to_s, m, resolved_item,
+              spec, swagger2, schemes, root_security, prov)
+            if flow
+              pairs << flow
+            elsif found
+              skipped += 1
+            end
+          end
+        end
+        ParseResult.new(pairs, skipped)
+      end
+
+      private def self.resolve_path_item(spec : JSON::Any, item : JSON::Any) : JSON::Any?
+        resolve_ref(spec, item)
+      rescue ex : RemoteReference
+        raise ex
+      rescue
+        nil
+      end
+
+      # Return whether the path item had this method separately from the optional flow: a
+      # missing method is ordinary, while a malformed operation is a counted skip.
+      private def self.import_operation(now : Int64, base : String, url_path : String,
+                                        method : String, item : JSON::Any, spec : JSON::Any,
+                                        swagger2 : Bool, schemes : Hash(String, String),
+                                        root_security : JSON::Any?, prov : Provenance) : Tuple(Builder::FlowPair?, Bool)
+        # External references are reported to the operator instead of being counted as skips.
+        op = item[method]? rescue nil
+        return {nil, false} unless op
+        op = resolve_ref(spec, op)
+        {operation_to_flow(now, base, url_path, method, op, item, spec, swagger2,
+          schemes, root_security, prov), true}
+      rescue ex : RemoteReference
+        raise ex
+      rescue
+        {nil, true}
+      end
+
+      private def self.spec_file(path : String) : JSON::Any
         raw = File.read(path)
         json_raw = case File.extname(path).downcase
                    when ".yaml", ".yml"
@@ -32,43 +102,9 @@ module Gori
                    else
                      raw
                    end
-        spec = begin
-          JSON.parse(json_raw)
-        rescue ex : JSON::ParseException
-          raise Gori::Error.new("OpenAPI spec is not valid JSON: #{ex.message}")
-        end
-        # A valid-JSON-but-wrong-shape spec (top-level array/scalar) must yield a clean
-        # Gori::Error, not the raw Exception JSON::Any#[](String) throws on a non-Hash —
-        # cmd_import only rescues Gori::Error. Guarding here also makes the later
-        # spec["servers"]/["security"]/["components"] accesses safe (spec is a Hash).
-        raise Gori::Error.new("OpenAPI spec is not a JSON object") unless spec.as_h?
-        paths = spec["paths"]?
-        raise Gori::Error.new("OpenAPI spec missing paths") unless paths
-        # A `paths` that isn't an object (null / string / array) is a malformed spec, not
-        # a valid-but-empty one — raise a clean error rather than a raw JSON type-cast.
-        paths_h = paths.as_h? || raise Gori::Error.new("OpenAPI spec `paths` is not an object")
-        base = server_base(spec)
-        schemes = api_key_header_schemes(spec)
-        root_security = spec["security"]?
-        now = Time.utc.to_unix * 1_000_000
-        pairs = [] of Builder::FlowPair
-        skipped = 0
-        # `url_path`, not `path`: the enclosing method's `path` is the SPEC FILE on disk, and a
-        # block parameter named `path` shadows it for the whole loop body.
-        paths_h.each do |url_path, item|
-          HTTP_METHODS.each do |m|
-            # A path item / operation that isn't shaped as expected (null, string, array)
-            # skips rather than aborting the whole spec import with a raw type-check error.
-            op = item[m]? rescue nil
-            next unless op
-            begin
-              pairs << operation_to_flow(now, base, url_path.to_s, m, op, item, schemes, root_security, prov)
-            rescue
-              skipped += 1
-            end
-          end
-        end
-        ParseResult.new(pairs, skipped)
+        JSON.parse(json_raw)
+      rescue ex : JSON::ParseException
+        raise Gori::Error.new("OpenAPI spec is not valid JSON: #{ex.message}")
       end
 
       private def self.server_base(spec : JSON::Any) : String
@@ -108,27 +144,43 @@ module Gori
         raise Gori::Error.new("OpenAPI spec missing servers — add a servers[0].url block")
       end
 
+      # Swagger 2.0 puts the authority and base path in separate root fields. Its `schemes`
+      # list is optional; when absent, HTTPS is the safest usable default for a local template.
+      private def self.swagger2_base(spec : JSON::Any) : String
+        host = spec["host"]?.try(&.as_s?).try(&.presence) ||
+               raise Gori::Error.new("Swagger 2.0 spec missing host — add a host value")
+        scheme = spec["schemes"]?.try(&.as_a?).try(&.first?).try(&.as_s?).try(&.downcase) || "https"
+        unless scheme == "http" || scheme == "https"
+          raise Gori::Error.new("Swagger 2.0 spec has unsupported scheme #{scheme.inspect} — use http or https")
+        end
+        base_path = spec["basePath"]?.try(&.as_s?) || "/"
+        base_path = "/#{base_path}" unless base_path.starts_with?('/')
+        url = "#{scheme}://#{host}#{base_path}"
+        uri = URI.parse(url)
+        raise Gori::Error.new("Swagger 2.0 spec has an invalid host or basePath") if uri.host.nil?
+        url
+      rescue ex : URI::Error | OverflowError
+        raise Gori::Error.new("Swagger 2.0 spec has an unparseable host/basePath: #{ex.message}")
+      end
+
       private def self.operation_to_flow(created_at : Int64, base : String, path : String,
                                          method : String, op : JSON::Any, item : JSON::Any,
+                                         spec : JSON::Any, swagger2 : Bool,
                                          schemes : Hash(String, String),
                                          root_security : JSON::Any?,
                                          prov : Provenance) : Builder::FlowPair
         # Merge path-item-level and operation-level parameters (operation wins on a
         # name+location clash) — OpenAPI commonly declares a shared path param like
         # {id} once at the path-item level for every method beneath it.
-        params = merge_params(item, op)
-        filled = fill_path_params(path, params) # /users/{id} -> /users/1
-        query = query_string(params)            # required query params -> a=1&b=2
+        params = merge_params(spec, item, op)
+        filled = fill_path_params(spec, path, params) # /users/{id} -> /users/1
+        query = query_string(spec, params)            # required query params -> a=1&b=2
         target = query.empty? ? filled : "#{filled}?#{query}"
         url = join_url(base, target)
         headers = Builder::Headers.new
-        ct = body_content_type(op) # nil when the operation declares no requestBody
-        # Only fabricate a JSON `{}` stub for a JSON media type — a `{}` body under a
-        # multipart/xml Content-Type is self-contradictory and useless as a seed request.
-        json = ct.try { |t| t == "application/json" || t.ends_with?("+json") } || false
-        body = json ? %({}).to_slice : nil
+        ct, body = request_payload(spec, op, params, swagger2)
         headers << {"Content-Type", ct} if ct
-        headers.concat(header_params(params))
+        headers.concat(header_params(spec, params))
         security_headers(op, root_security, schemes).each { |name| headers << {name, "PLACEHOLDER"} }
         Builder.pending_request(created_at, url, method.upcase, headers, body,
           source_surface: prov.surface, source_ref: prov.ref)
@@ -140,22 +192,40 @@ module Gori
         "#{b}#{p}"
       end
 
-      private def self.body_content_type(op : JSON::Any) : String?
-        rb = op["requestBody"]?
-        return nil unless rb
-        content = rb["content"]?
-        return nil unless content
-        return "application/json" if content["application/json"]?
-        content.as_h.keys.first?.try(&.to_s)
+      private def self.request_payload(spec : JSON::Any, op : JSON::Any,
+                                       params : Array(JSON::Any), swagger2 : Bool) : {String?, Bytes?}
+        if swagger2
+          if body_param = params.find { |p| p["in"]?.to_s == "body" }
+            content_type = consumes(spec, op).first? || "application/json"
+            return {content_type, body_stub(spec, body_param["schema"]?, content_type)}
+          end
+          form_params = params.select { |p| p["in"]?.to_s == "formData" }
+          return {nil, nil} if form_params.empty?
+          return form_data_payload(spec, op, form_params)
+        end
+
+        request_body = op["requestBody"]?
+        return {nil, nil} unless request_body
+        request_body = resolve_ref(spec, request_body)
+        content_node = request_body["content"]?
+        return {nil, nil} unless content_node
+        content = content_node.as_h? ||
+                  raise Gori::Error.new("OpenAPI requestBody content is not an object")
+        media_type = content.has_key?("application/json") ? "application/json" : content.keys.first?
+        return {nil, nil} unless media_type
+        schema = content[media_type]["schema"]?
+        {media_type, body_stub(spec, schema, media_type)}
       end
 
       # Merge path-item + operation parameters, operation winning on a name+location clash.
-      private def self.merge_params(item : JSON::Any, op : JSON::Any) : Array(JSON::Any)
+      private def self.merge_params(spec : JSON::Any, item : JSON::Any,
+                                    op : JSON::Any) : Array(JSON::Any)
         merged = {} of Tuple(String, String) => JSON::Any
         {item["parameters"]?, op["parameters"]?}.each do |node|
           arr = node.try(&.as_a?)
           next unless arr
-          arr.each do |p|
+          arr.each do |raw_param|
+            p = resolve_ref(spec, raw_param)
             next unless p.as_h?
             name = p["name"]?.to_s
             loc = p["in"]?.to_s
@@ -168,34 +238,35 @@ module Gori
 
       # Path params are required by definition; fill every declared {name} regardless of a
       # `required` flag (specs frequently omit it). Undeclared {templates} pass through.
-      private def self.fill_path_params(path : String, params : Array(JSON::Any)) : String
+      private def self.fill_path_params(spec : JSON::Any, path : String,
+                                        params : Array(JSON::Any)) : String
         result = path
         params.each do |p|
           next unless p["in"]?.to_s == "path"
           name = p["name"]?.to_s
           next if name.empty?
-          result = result.gsub("{#{name}}", sample_value(p))
+          result = result.gsub("{#{name}}", sample_value(spec, p))
         end
         result
       end
 
-      private def self.query_string(params : Array(JSON::Any)) : String
+      private def self.query_string(spec : JSON::Any, params : Array(JSON::Any)) : String
         params.compact_map do |p|
           next unless p["in"]?.to_s == "query"
           next unless required?(p)
           name = p["name"]?.to_s
           next if name.empty?
-          "#{URI.encode_www_form(name)}=#{URI.encode_www_form(sample_value(p))}"
+          "#{URI.encode_www_form(name)}=#{URI.encode_www_form(sample_value(spec, p))}"
         end.join('&')
       end
 
-      private def self.header_params(params : Array(JSON::Any)) : Builder::Headers
+      private def self.header_params(spec : JSON::Any, params : Array(JSON::Any)) : Builder::Headers
         params.compact_map do |p|
           next unless p["in"]?.to_s == "header"
           next unless required?(p)
           name = p["name"]?.to_s
           next if name.empty?
-          {name, sample_value(p)}
+          {name, sample_value(spec, p)}
         end
       end
 
@@ -203,11 +274,10 @@ module Gori
         p["required"]?.try(&.as_bool?) == true
       end
 
-      private def self.sample_value(p : JSON::Any) : String
-        type = nil
-        if schema = p["schema"]?.try(&.as_h?)
-          type = schema["type"]?.try(&.to_s)
-        end
+      private def self.sample_value(spec : JSON::Any, p : JSON::Any) : String
+        schema_node = p["schema"]?
+        schema = schema_node ? resolve_ref(spec, schema_node).as_h? : nil
+        type = schema.try { |h| h["type"]?.try(&.as_s?) } || p["type"]?.try(&.as_s?)
         case type
         when "integer", "number" then "1"
         when "boolean"           then "true"
@@ -215,14 +285,123 @@ module Gori
         end
       end
 
-      # Map scheme-name => header-name for every components.securitySchemes entry that is a
-      # header-borne API key. Bounded on purpose: apiKey-in-query/cookie and non-apiKey
-      # schemes (http bearer, oauth2, openIdConnect) are NOT seeded.
+      private def self.body_stub(spec : JSON::Any, schema_node : JSON::Any?, content_type : String) : Bytes?
+        return nil unless json_media_type?(content_type)
+        return %({}).to_slice unless schema_node
+        schema = resolve_ref(spec, schema_node)
+        object = schema.as_h? || raise Gori::Error.new("OpenAPI body schema is not an object")
+        return object["example"].to_json.to_slice if object["example"]?
+        return object["default"].to_json.to_slice if object["default"]?
+        type = object["type"]?.try(&.as_s?)
+        case type
+        when "array"             then "[]".to_slice
+        when "string"            then JSON::Any.new("").to_json.to_slice
+        when "integer", "number" then "0".to_slice
+        when "boolean"           then "true".to_slice
+        else                          %({}).to_slice
+        end
+      end
+
+      private def self.json_media_type?(content_type : String) : Bool
+        media_type = content_type.split(';', 2)[0].strip
+        media_type == "application/json" || media_type.ends_with?("+json")
+      end
+
+      private def self.consumes(spec : JSON::Any, op : JSON::Any) : Array(String)
+        node = op["consumes"]? || spec["consumes"]?
+        node.try(&.as_a?).try(&.compact_map(&.as_s?)) || [] of String
+      end
+
+      private def self.form_data_payload(spec : JSON::Any, op : JSON::Any,
+                                         params : Array(JSON::Any)) : {String?, Bytes?}
+        content_type = consumes(spec, op).first? || "application/x-www-form-urlencoded"
+        media_type = content_type.split(';', 2)[0].strip
+        if media_type.compare("application/x-www-form-urlencoded", case_insensitive: true) == 0
+          if params.any? { |p| p["type"]?.try(&.as_s?) == "file" }
+            raise Gori::Error.new("Swagger 2.0 file formData requires multipart/form-data consumes")
+          end
+          body = params.map do |p|
+            name = p["name"]?.to_s
+            "#{URI.encode_www_form(name)}=#{URI.encode_www_form(sample_value(spec, p))}"
+          end.join('&')
+          return {content_type, body.to_slice}
+        end
+        unless media_type.compare("multipart/form-data", case_insensitive: true) == 0
+          raise Gori::Error.new("Swagger 2.0 formData requires multipart/form-data or application/x-www-form-urlencoded consumes")
+        end
+
+        boundary = "gori-openapi-boundary"
+        body = String.build do |io|
+          params.each do |p|
+            name = p["name"]?.to_s
+            raise Gori::Error.new("Swagger 2.0 formData parameter has an invalid name") if Builder.inject_bytes?(name)
+            quoted_name = name.gsub("\\", "\\\\").gsub("\"", "\\\"")
+            io << "--" << boundary << "\r\n"
+            if p["type"]?.try(&.as_s?) == "file"
+              io << "Content-Disposition: form-data; name=\"" << quoted_name << "\"; filename=\"file\"\r\n"
+              io << "Content-Type: application/octet-stream\r\n"
+            else
+              io << "Content-Disposition: form-data; name=\"" << quoted_name << "\"\r\n"
+            end
+            io << "\r\n" << sample_value(spec, p) << "\r\n"
+          end
+          io << "--" << boundary << "--\r\n"
+        end
+        {"multipart/form-data; boundary=#{boundary}", body.to_slice}
+      end
+
+      # Dereference only the value the current operation needs. Recursive schemas are common,
+      # so resolving their entire child tree would incorrectly reject otherwise usable body
+      # stubs. A chain of refs is tracked explicitly to stop cycles and remote refs are named
+      # rather than fetched from the network.
+      private def self.resolve_ref(root : JSON::Any, node : JSON::Any,
+                                   chain : Array(String) = [] of String) : JSON::Any
+        reference = node.as_h?.try { |h| h["$ref"]?.try(&.as_s?) }
+        return node unless reference
+        unless reference == "#" || reference.starts_with?("#/")
+          if reference.starts_with?('#')
+            raise Gori::Error.new("OpenAPI local $ref must use a JSON Pointer: #{reference}")
+          end
+          raise RemoteReference.new("OpenAPI remote $ref is not fetched: #{reference}")
+        end
+        raise Gori::Error.new("OpenAPI $ref chain exceeds #{MAX_REF_DEPTH} references") if chain.size >= MAX_REF_DEPTH
+        raise Gori::Error.new("OpenAPI $ref cycle: #{(chain + [reference]).join(" -> ")}") if chain.includes?(reference)
+        target = if reference == "#"
+                   root
+                 else
+                   resolve_pointer(root, reference)
+                 end
+        resolve_ref(root, target, chain + [reference])
+      end
+
+      private def self.resolve_pointer(root : JSON::Any, reference : String) : JSON::Any
+        node = root
+        reference[2..].split('/', remove_empty: false).each do |escaped|
+          token = escaped.gsub("~1", "/").gsub("~0", "~")
+          child = if object = node.as_h?
+                    object[token]?
+                  elsif array = node.as_a?
+                    numeric = !token.empty? && token.each_byte.all? { |byte| byte >= 0x30_u8 && byte <= 0x39_u8 }
+                    index = numeric ? token.to_i? : nil
+                    index ? array[index]? : nil
+                  end
+          node = child || raise Gori::Error.new("OpenAPI local $ref does not exist: #{reference}")
+        end
+        node
+      end
+
+      # Map scheme-name => header-name for every OpenAPI 3 components.securitySchemes or
+      # Swagger 2 securityDefinitions entry that is a header-borne API key. Bounded on purpose:
+      # apiKey-in-query/cookie and non-apiKey schemes (http bearer, oauth2, openIdConnect) are
+      # NOT seeded.
       private def self.api_key_header_schemes(spec : JSON::Any) : Hash(String, String)
         result = {} of String => String
-        comps = spec["components"]?.try(&.as_h?)
-        return result unless comps
-        schemes = comps["securitySchemes"]?.try(&.as_h?)
+        definitions = if spec["swagger"]?.try(&.as_s?) == "2.0"
+                        spec["securityDefinitions"]?.try(&.as_h?)
+                      else
+                        spec["components"]?.try(&.as_h?).try { |comps| comps["securitySchemes"]?.try(&.as_h?) }
+                      end
+        schemes = definitions
         return result unless schemes
         schemes.each do |name, scheme|
           h = scheme.as_h?
