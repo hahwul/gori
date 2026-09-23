@@ -94,9 +94,6 @@ module Gori
       getter duration_us : Int64?
       getter state : FlowState
       getter error : String?
-      # The final projection of an accepted HTTP/2 WebSocket tunnel. The Store writes its
-      # capture completion ledger entry in the same transaction as this response.
-      getter? tunnel_completed : Bool
       # See `FlowRow#advisory`. nil means "nothing new to say", which is NOT the same as ""
       # — a response-side advisory has to be able to leave the request side's alone, so
       # `Store#update_one` only writes the column when this is non-nil.
@@ -106,7 +103,7 @@ module Gori
                      @content_type = nil, @ttfb_us = nil, @duration_us = nil,
                      @state = FlowState::Complete, @error = nil,
                      @body_truncated = false, @body_size = nil, @content_encoding = nil,
-                     @advisory = nil, @tunnel_completed = false)
+                     @advisory = nil)
       end
     end
 
@@ -1881,7 +1878,7 @@ module Gori
     end
 
     # Best-effort notification that a flow row changed or an upgraded tunnel closed. Row
-    # changes publish AFTER commit; :tunnel_completed follows all transcript writes.
+    # changes publish AFTER commit; tunnel completion is a non-blocking wakeup after transcript writes.
     record FlowEvent, id : Int64, kind : Symbol # :inserted | :updated | :tunnel_completed
 
     # One row of the #124 append-only event feed (the AI firehose the MCP process tails).

@@ -360,7 +360,7 @@ module Gori::Proxy::H2
         # `finalize_all` flushes at connection close as it always has.
         return if stream.ws && !stream.req.ended?
         close_ws(stream) # flush a message whose FIN never came, ahead of the flow's own row
-        emit_response(stream, tunnel_completed: stream.websocket_accepted?)
+        emit_response(stream)
         notify_tunnel_complete(stream)
         # The exchange is complete; a stream id is never reused on a connection
         # (RFC 7540 §5.1.1), so drop its buffers to bound per-connection memory.
@@ -597,7 +597,7 @@ module Gori::Proxy::H2
     end
 
     private def emit_response(stream : Stream, *, state : Store::FlowState = Store::FlowState::Complete,
-                              error : String? = nil, tunnel_completed : Bool = false) : Nil
+                              error : String? = nil) : Nil
       flow_id = stream.flow_id
       return unless flow_id # request not yet projected (rare interleaving) — drop
       headers = stream.resp.headers.not_nil!
@@ -615,8 +615,7 @@ module Gori::Proxy::H2
         flow_id: flow_id, status: status, head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
         content_type: content_type, content_encoding: content_encoding, state: state, error: error,
-        ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream),
-        tunnel_completed: tunnel_completed))
+        ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream)))
     end
 
     # A trailing header block carried a pseudo-header, which RFC 9113 §8.1 forbids in a
@@ -684,10 +683,9 @@ module Gori::Proxy::H2
       reason = extended_connect_note(stream, reason)
       if stream.resp.headers
         if stream.resp.ended?
-          emit_response(stream, tunnel_completed: stream.websocket_accepted?)
+          emit_response(stream)
         else
-          emit_response(stream, state: Store::FlowState::Aborted, error: reason,
-            tunnel_completed: stream.websocket_accepted?)
+          emit_response(stream, state: Store::FlowState::Aborted, error: reason)
         end
       else
         duration_us = (Time.instant - stream.started_at).total_microseconds.to_i64
@@ -779,7 +777,7 @@ module Gori::Proxy::H2
       return if stream.tunnel_completion_notified?
       flow_id = stream.flow_id || return
       stream.tunnel_completion_notified = true
-      @sink.on_tunnel_complete_recorded(flow_id)
+      @sink.on_tunnel_complete(flow_id)
     end
 
     # Stop reading this stream's frames and surface whatever was mid-message. Idempotent, and

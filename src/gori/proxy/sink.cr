@@ -24,12 +24,6 @@ module Gori::Proxy
     def on_tunnel_complete(flow_id : Int64) : Nil
     end
 
-    # H2 writes its completion ledger row atomically with the final response before this
-    # callback. Test sinks inherit the ordinary callback; StoreSink only publishes a wakeup.
-    def on_tunnel_complete_recorded(flow_id : Int64) : Nil
-      on_tunnel_complete(flow_id)
-    end
-
     # --- HTTP/2 (raw-frame fidelity) -----------------------------------------
     # Default no-ops so non-h2 sinks (and test doubles) need not implement them.
 
@@ -66,10 +60,6 @@ module Gori::Proxy
 
     def on_tunnel_complete(flow_id : Int64) : Nil
       @store.notify_tunnel_complete(flow_id)
-    end
-
-    def on_tunnel_complete_recorded(flow_id : Int64) : Nil
-      @store.publish_tunnel_complete(flow_id)
     end
 
     def on_h2_open(host : String, port : Int32, alpn : String) : Int64
