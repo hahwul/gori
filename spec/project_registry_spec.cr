@@ -252,6 +252,68 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  # #1163. Built by hand, the way an older gori (or a rename) could leave it: "Client 2024"
+  # owns slug `client-2024`, and a second project is NAMED `client-2024` under `-2`.
+  it "refuses a name that is one project's slug and another project's display name" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      older = reg.create("Client 2024")
+      twin_dir = File.join(root, "client-2024-2")
+      Dir.mkdir_p(twin_dir)
+      File.write(File.join(twin_dir, Gori::ProjectRegistry::NAME_FILE), "client-2024")
+      File.write(File.join(twin_dir, Gori::ProjectRegistry::ID_FILE), "feedf00d")
+      Gori::Store.open(File.join(twin_dir, Gori::Project::DB_FILE)).close
+
+      ex = expect_raises(Gori::ProjectRegistry::Ambiguous) { reg.find("client-2024") }
+      ex.candidates.map(&.dir).sort!.should eq([older.dir, twin_dir].sort)
+      msg = ex.message.not_nil!
+      msg.should contain("\"Client 2024\" by slug")
+      msg.should contain("slug client-2024-2, id feedf00d")
+      # Each stays reachable by a handle only it answers to.
+      reg.find("Client 2024").try(&.dir).should eq(older.dir)
+      reg.find("client-2024-2").try(&.dir).should eq(twin_dir)
+      reg.find("feedf00d").try(&.dir).should eq(twin_dir)
+    end
+  end
+
+  it "lets the slug decide among same-named projects, and refuses when no slug is among them" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      api = reg.create("api")
+      ["api-2", "my-api", "my-api-2"].each_with_index do |slug, i|
+        dir = File.join(root, slug)
+        Dir.mkdir_p(dir)
+        File.write(File.join(dir, Gori::ProjectRegistry::NAME_FILE), i == 0 ? "api" : "My API")
+        Gori::Store.open(File.join(dir, Gori::Project::DB_FILE)).close
+      end
+      reg.find("api").try(&.dir).should eq(api.dir) # never `api-2` by MRU order
+      expect_raises(Gori::ProjectRegistry::Ambiguous, /is ambiguous/) { reg.find("my api") }
+      reg.find("my-api-2").try(&.dir).should eq(File.join(root, "my-api-2"))
+    end
+  end
+
+  it "refuses to create or rename a project onto another project's slug or short id" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      client = reg.create("Client 2024")
+      expect_raises(Gori::Error, /already the directory slug of project "Client 2024"/) do
+        reg.create_or_reopen("client-2024")
+      end
+      Dir.exists?(File.join(root, "client-2024-2")).should be_false # refused before any mkdir
+      reg.find("client-2024").try(&.dir).should eq(client.dir)
+
+      other = reg.create("other")
+      id = reg.id_of(client).not_nil!
+      expect_raises(Gori::Error, /short id/) { reg.create_or_reopen(id) }
+      expect_raises(Gori::Error, /directory slug/) { reg.rename(other, "CLIENT-2024") }
+      reg.find("other").try(&.dir).should eq(other.dir) # the refused rename wrote nothing
+
+      # Not collisions: reopening by the same name, and renaming onto the project's own slug.
+      reg.create_or_reopen("Client 2024")[1].should be_false
+      reg.rename(other, "other").name.should eq("other")
+    end
+  end
+
   it "rejects a blank rename" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)

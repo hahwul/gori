@@ -13,10 +13,6 @@ module Gori::CLI::Run
     project_object_counts(project)
   end
 
-  def self.ambiguous_project_name_for_spec(registry : Gori::ProjectRegistry, name : String) : Bool
-    ambiguous_name?(registry, name)
-  end
-
   def self.delete_preview_verdict_for_spec(project : Gori::Project, locked : Bool,
                                            open_elsewhere : Bool) : String
     delete_preview_verdict(project, locked, open_elsewhere)
@@ -161,24 +157,26 @@ describe "gori run project delete (preview)" do
 end
 
 describe "gori run project delete (resolution)" do
+  # The delete resolves through `ProjectRegistry#find`, which refuses a name that addresses
+  # two projects on every surface (#1163) — the rule this command used to keep privately.
   it "refuses a display name shared by two projects, and accepts either slug" do
     root = File.tempname("gori-projroot")
     begin
       registry = Gori::ProjectRegistry.new(root)
       # What create_for_workspace produces for two checkouts with the same basename:
       # distinct slugs (my-api, my-api-2), one shared display name.
-      registry.create("My API")
+      first = registry.create("My API")
       twin = File.join(root, "my-api-2")
       Dir.mkdir_p(twin)
       File.write(File.join(twin, Gori::ProjectRegistry::NAME_FILE), "My API")
       Gori::Store.open(File.join(twin, Gori::Project::DB_FILE)).close
 
       registry.list.count { |p| p.name == "My API" }.should eq(2)
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "My API").should be_true
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "my api").should be_true # find is case-insensitive
-      # Slugs are unique, and #find resolves them before the display-name pass.
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "my-api").should be_false
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "my-api-2").should be_false
+      expect_raises(Gori::ProjectRegistry::Ambiguous) { registry.find("My API") }
+      expect_raises(Gori::ProjectRegistry::Ambiguous) { registry.find("my api") } # case-insensitive
+      # Slugs are unique, so an exact one is never called ambiguous.
+      registry.find("my-api").try(&.dir).should eq(first.dir)
+      registry.find("my-api-2").try(&.dir).should eq(twin)
     ensure
       FileUtils.rm_rf(root)
     end
@@ -186,18 +184,18 @@ describe "gori run project delete (resolution)" do
 
   it "does not call a uniquely-named project ambiguous" do
     with_project_root do |registry|
-      registry.create("alpha")
+      alpha = registry.create("alpha")
       registry.create("beta")
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "alpha").should be_false
+      registry.find("alpha").try(&.dir).should eq(alpha.dir)
     end
   end
 
   it "does not call an unknown name ambiguous (that is a separate, clearer error)" do
-    # `ambiguous_name?` gates the "refuse to guess" abort; answering true for a name that
-    # matches nothing would report a collision where the real problem is a typo.
+    # Raising for a name that matches nothing would report a collision where the real
+    # problem is a typo.
     with_project_root do |registry|
       registry.create("alpha")
-      Gori::CLI::Run.ambiguous_project_name_for_spec(registry, "no-such-project").should be_false
+      registry.find("no-such-project").should be_nil
     end
   end
 end

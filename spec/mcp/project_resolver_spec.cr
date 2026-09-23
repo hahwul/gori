@@ -113,6 +113,28 @@ describe Gori::MCP::ProjectResolver do
     end
   end
 
+  # #1163: `gori mcp --project NAME` resolves through the same `ProjectRegistry#find`, so a
+  # name that addresses two projects is refused (and the CLI entry point then starts
+  # unbound with that sentence) rather than binding whichever one the slug pass saw first.
+  it "refuses --project naming one project's slug and another project's display name" do
+    with_isolated_gori_home do |base|
+      Gori::Paths.ensure_dirs
+      reg = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+      reg.create("Client 2024")
+      twin = File.join(Gori::Paths.projects_dir, "client-2024-2")
+      Dir.mkdir_p(twin)
+      File.write(File.join(twin, Gori::ProjectRegistry::NAME_FILE), "client-2024")
+      Gori::Store.open(File.join(twin, Gori::Project::DB_FILE)).close
+
+      expect_raises(Gori::ProjectRegistry::Ambiguous, /client-2024-2/) do
+        Gori::MCP::ProjectResolver.resolve(nil, "client-2024", cwd: base, env_db: nil, env_project: nil)
+      end
+      picked = Gori::MCP::ProjectResolver.resolve(nil, "client-2024-2", cwd: base,
+        env_db: nil, env_project: nil)
+      picked.db_path.should eq(File.join(twin, Gori::Project::DB_FILE))
+    end
+  end
+
   it "uses the active TUI project when workspace selection is explicitly disabled" do
     with_isolated_gori_home do |base|
       Gori::Paths.ensure_dirs

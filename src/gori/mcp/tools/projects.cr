@@ -15,6 +15,16 @@ module Gori
         ProjectRegistry.new(Paths.projects_dir)
       end
 
+      # `ProjectRegistry#find` for a tool argument: the project, nil when nothing matches, or
+      # the INVALID_ARGUMENT a name that addresses two projects gets (#1163). The refusal is
+      # the registry's own sentence — it names each candidate's short id and slug — so the
+      # agent can retry with a handle that is unique instead of reading a bare not-found.
+      private def find_project(reg : ProjectRegistry, name : String, field : String) : (Project | Result)?
+        reg.find(name)
+      rescue ex : ProjectRegistry::Ambiguous
+        err(ex.message || "ambiguous project name", "INVALID_ARGUMENT", field: field)
+      end
+
       # True while any fuzz/mine job is still running — switching or deleting a
       # project mid-job would repoint @store (and thus record_history writes) out
       # from under the running fiber, so both refuse until jobs settle.
@@ -171,7 +181,8 @@ module Gori
         name = str(h, "project")
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
         reg = registry
-        proj = reg.find(name)
+        proj = find_project(reg, name, "project")
+        return proj if proj.is_a?(Result)
         return not_found("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless proj
         return busy("cannot switch project while a fuzz/mine job is running; stop it first") if jobs_running?
 
@@ -275,7 +286,8 @@ module Gori
         name = str(h, "project")
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
         reg = registry
-        proj = reg.find(name)
+        proj = find_project(reg, name, "project")
+        return proj if proj.is_a?(Result)
         return not_found("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless proj
         return busy("cannot delete the project this server is currently serving; switch away first") if proj.db_path == @db_path
         return busy("cannot delete a project while a fuzz/mine job is running") if jobs_running?

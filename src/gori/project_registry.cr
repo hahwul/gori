@@ -51,15 +51,43 @@ module Gori
     def initialize(@root : String)
     end
 
+    # Why a name was refused because it addresses MORE THAN ONE project. A `Gori::Error`, so
+    # every surface that already turns one into a sentence (`gori run`, MCP's
+    # INVALID_ARGUMENT, `gori mcp --project`'s unbound start) prints it without new plumbing;
+    # the message names every candidate by the two handles that are unique (short id, slug).
+    class Ambiguous < Gori::Error
+      getter candidates : Array(Project)
+
+      def initialize(message : String, @candidates : Array(Project))
+        super(message)
+      end
+    end
+
     # Resolve a project by (case-insensitively, in priority order): its exact short
-    # id, its exact directory slug, its exact verbatim display name, or a UNIQUE
-    # PREFIX of its short id — git-style abbreviation. Lets `gori mcp --project=api`
-    # work when the display name is a non-ASCII phrase stored in `.name`, and
-    # `--project=a1b2` work as a short handle decoupled from the (renamable) name.
+    # id, its exact directory slug or verbatim display name, or a UNIQUE PREFIX of its
+    # short id — git-style abbreviation. Lets `gori mcp --project=api` work when the
+    # display name is a non-ASCII phrase stored in `.name`, and `--project=a1b2` work as a
+    # short handle decoupled from the (renamable) name.
     #
-    # Order matters: all three EXACT matches are tried before the id-prefix, so a
-    # hex-like display name can never be shadowed by another project's id prefix.
-    # An ambiguous prefix (2+ ids share it) resolves to nothing rather than guessing.
+    # Order matters: the exact matches are tried before the id-prefix, so a hex-like
+    # display name can never be shadowed by another project's id prefix. An ambiguous
+    # prefix (2+ ids share it) resolves to nothing rather than guessing.
+    #
+    # Slug and display name are ONE tier, and a name they split between two projects raises
+    # `Ambiguous` instead of picking (#1163). Trying the slug first meant `client-2024` —
+    # the name `project create` had just reported creating (as slug `client-2024-2`) —
+    # resolved to the older `Client 2024` whose slug it happened to be, and every
+    # `--project client-2024` wrote into the other engagement's project. Preferring the
+    # name instead is the same bug pointed the other way: a script that addressed
+    # `Client 2024` by its slug would be silently re-aimed the moment someone created
+    # `client-2024`. Refusing is the only answer that is never wrong, and both projects
+    # stay reachable by the short id and slug the refusal names.
+    #
+    # Display names are not unique by design (two checkouts with one basename share one,
+    # slugs `api` and `api-2`). When the slug match is ALSO one of the name matches, the
+    # slug decides (`--project=api` is `api`, never `api-2` by MRU order); two name matches
+    # with no slug among them are ambiguous, the rule `gori run project delete` used to
+    # keep for itself — a guess is no better for a write than for an rm_rf.
     def find(name_or_slug : String) : Project?
       q = name_or_slug.strip.downcase
       return nil if q.empty?
@@ -68,14 +96,50 @@ module Gori
 
       # Exact short id — the opaque, name-independent handle; most specific, so first.
       entries.each { |project, id| return project if id == q }
-      # A slug is unique while display names need not be (two workspaces with the
-      # same basename deliberately share a display name). Prefer an exact slug so
-      # `--project=api` cannot resolve the newer `api-2` merely due to MRU order.
-      entries.each { |project, _| return project if slug_of(project).downcase == q }
-      entries.each { |project, _| return project if project.name.downcase == q }
+      by_slug = entries.find { |project, _| slug_of(project).downcase == q }.try(&.[0])
+      by_name = entries.compact_map { |project, _| project if project.name.downcase == q }
+      return by_slug if by_slug && (by_name.empty? || by_name.any? { |p| p.dir == by_slug.dir })
+      return by_name.first if by_slug.nil? && by_name.size == 1
+      raise ambiguous(name_or_slug.strip, by_slug, by_name) unless by_name.empty?
       # Git-style abbreviation: a prefix that uniquely identifies ONE project's id.
       prefixed = entries.select { |_, id| id && id.starts_with?(q) }
       prefixed.size == 1 ? prefixed.first[0] : nil
+    end
+
+    private def ambiguous(query : String, by_slug : Project?, by_name : Array(Project)) : Ambiguous
+      candidates = by_slug ? [by_slug] + by_name : by_name
+      listed = candidates.map do |p|
+        how = by_slug && p.dir == by_slug.dir ? "by slug" : "by name"
+        "#{p.name.inspect} #{how} (slug #{slug_of(p)}, id #{id_of(p) || "—"})"
+      end
+      Ambiguous.new("project '#{query}' is ambiguous — it matches #{listed.join(" and ")}; " \
+                    "name one by its slug or short id", candidates)
+    end
+
+    # Why `name` cannot be given to a project other than `except`: it is already another
+    # project's short id or directory slug, so `#find` would resolve it there first
+    # (short id) or refuse it as ambiguous (slug) — a name `create` reports making that
+    # then never addresses the project it made (#1163). Nil when the name is free.
+    #
+    # A name equal to the project's OWN slug is not a collision (renaming `api-2` to
+    # `api-2`). `create_or_reopen` asks only before making a NEW project, so a same-name
+    # reopen never gets here; a rename onto another project's slug is refused even when that
+    # project shares the name, because the slug would still win and the renamed one would
+    # answer to nothing.
+    def shadowed_name_reason(name : String, except : Project? = nil) : String?
+      q = name.strip.downcase
+      return nil if q.empty?
+      list.each do |p|
+        next if except && p.dir == except.dir
+        if id_of(p).try(&.downcase) == q
+          return "project name #{name.strip.inspect} is already the short id of project #{p.name.inspect} — pick another name"
+        end
+        if slug_of(p).downcase == q
+          return "project name #{name.strip.inspect} is already the directory slug of project " \
+                 "#{p.name.inspect} (id #{id_of(p) || "—"}) — pick another name, or use that project"
+        end
+      end
+      nil
     end
 
     # The on-disk directory name for a project (the slugified workspace dir).
@@ -205,6 +269,12 @@ module Gori
       db_path = File.join(dir, Project::DB_FILE)
       # A DB at the resolved path is the same thing #list calls an existing project.
       reopened = File.exists?(db_path)
+      # Before anything touches disk: a NEW project whose name is already another project's
+      # slug or short id would be reported "created" and then never resolve by that name.
+      # A reopen is left alone — the project exists, and refusing it strands nothing new.
+      unless reopened
+        shadowed_name_reason(display).try { |why| raise Gori::Error.new(why) }
+      end
       Paths.ensure_dir(dir) # 0700 — the project dir holds a DB of captured secrets
       # Persist the verbatim display name so a later `list` shows "My Project", not
       # the lossy slug "my-project".
@@ -435,6 +505,9 @@ module Gori
       display = new_name.strip
       raise Gori::Error.new(BLANK_NAME) if display.empty?
       raise Gori::Error.new("project directory missing") unless Dir.exists?(project.dir)
+      # The rename twin of `create_or_reopen`'s check: a name that another project's slug or
+      # short id already answers to would make `--project NAME` resolve elsewhere or refuse.
+      shadowed_name_reason(display, except: project).try { |why| raise Gori::Error.new(why) }
       # A rename replaces a name that is already there, so it gets the same durable
       # replace as `create`'s — and unlike that one it is NOT best-effort: a rename the
       # operator asked for either lands or raises.
