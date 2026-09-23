@@ -109,9 +109,7 @@ module Gori
                                    vars : Vars::Table, missing : Set(String)) : String
         url = Vars.expand(res["url"]?.to_s.strip, vars)
         query = query_string(res["parameters"]?, vars)
-        unless query.empty?
-          url = url.includes?('?') ? "#{url}&#{query}" : "#{url}?#{query}"
-        end
+        url = Builder.append_query(url, query)
         left = Vars.unresolved(url)
         unless left.empty?
           left.each { |n| missing << n }

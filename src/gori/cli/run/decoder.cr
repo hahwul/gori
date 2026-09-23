@@ -56,20 +56,21 @@ module Gori
         else
           if final_bytes = result.output
             rendered, render = Decoder.display(final_bytes, output_mode)
-            # Neutralize ANSI/OSC on a live terminal for auto/text. A pipe or an explicit
-            # hex/base64 render stays byte-exact — the default job of this command is
-            # "give me the decoded bytes".
-            if STDOUT.tty? && render.text?
-              STDOUT.puts CLI::Output.term_safe_multiline(rendered)
-            else
-              STDOUT.puts rendered
-            end
+            write_decoder_output(STDOUT, rendered, render, STDOUT.tty?)
           end
           report_convert_failure(result) unless result.ok?
         end
         # A broken chain exits non-zero in BOTH formats — the json branch previously always
         # exited 0, burying "ok":false (inconsistent with the text view + intercept acks).
         exit 1 unless result.ok?
+      end
+
+      private def self.write_decoder_output(io : IO, rendered : String,
+                                            render : Decoder::RenderAs, terminal : Bool) : Nil
+        # Neutralize ANSI/OSC on a live terminal for text. Piped output stays byte-exact —
+        # the default job of this command is "give me the decoded bytes".
+        rendered = CLI::Output.term_safe_multiline(rendered) if terminal && render.text?
+        CLI::Output.write_value(io, rendered, terminal)
       end
 
       # The sentence `cmd_decoder` aborts with when `<chain>` holds no converter at all, or nil

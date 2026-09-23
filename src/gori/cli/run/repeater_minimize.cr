@@ -400,8 +400,7 @@ module Gori
         STDERR.puts report.note
         report.removed.each { |r| STDERR.puts "  - [#{r.kind.to_s.downcase}] #{r.label}" }
         STDERR.puts "saved back to session ##{id}" if applied
-        STDOUT.write(wire)
-        STDOUT.puts unless wire.empty? || wire[-1] == 0x0A_u8
+        CLI::Output.write_value(STDOUT, wire, STDOUT.tty?)
       end
     end
   end

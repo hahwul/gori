@@ -136,10 +136,20 @@ module Gori::Decoder
       n = 0
       acc = 0_u32
       bits = 0
+      symbols = 0
+      padding = 0
+      padding_started = false
       bytes.each do |b|
-        next if b == 0x3d_u8 || ascii_ws?(b) # '=' padding / whitespace
+        next if ascii_ws?(b)
+        if b == 0x3d_u8
+          padding_started = true
+          padding += 1
+          next
+        end
+        raise DecoderError.new("base32 data after padding") if padding_started
         v = B32_DEC[b]
         raise DecoderError.new("invalid base32 char: #{b.chr}") if v == 0xff_u8
+        symbols += 1
         acc = (acc << 5) | v.to_u32
         bits += 5
         if bits >= 8
@@ -148,6 +158,7 @@ module Gori::Decoder
           n += 1
         end
       end
+      validate_base32_tail(symbols, padding)
       buf[0, n]
     end
 
@@ -158,11 +169,21 @@ module Gori::Decoder
       n = 0
       acc = 0_u32
       bits = 0
+      symbols = 0
+      padding = 0
+      padding_started = false
       s.each_char do |c|
-        next if c == '=' || c.whitespace?
+        next if c.whitespace?
+        if c == '='
+          padding_started = true
+          padding += 1
+          next
+        end
+        raise DecoderError.new("base32 data after padding") if padding_started
         o = c.ord
         v = o < 256 ? B32_DEC[o.to_u8] : 0xff_u8
         raise DecoderError.new("invalid base32 char: #{c}") if v == 0xff_u8
+        symbols += 1
         acc = (acc << 5) | v.to_u32
         bits += 5
         if bits >= 8
@@ -171,7 +192,27 @@ module Gori::Decoder
           n += 1
         end
       end
+      validate_base32_tail(symbols, padding)
       buf[0, n]
+    end
+
+    # RFC 4648 base32 tails can carry 0, 1, 2, 3, or 4 bytes. Their symbol counts
+    # modulo eight are 0, 2, 4, 5, or 7; every other count leaves an impossible group.
+    # Unpadded valid tails remain accepted, but explicit padding must match its quantum.
+    # Unused low bits are ignored, like the stdlib's Base64 decoder.
+    private def validate_base32_tail(symbols : Int32, padding : Int32) : Nil
+      tail = symbols % 8
+      expected_padding = case tail
+                         when 0 then 0
+                         when 2 then 6
+                         when 4 then 4
+                         when 5 then 3
+                         when 7 then 1
+                         else        raise DecoderError.new("invalid base32 length")
+                         end
+      if padding > 0 && padding != expected_padding
+        raise DecoderError.new("invalid base32 padding")
+      end
     end
 
     # ---- ascii85 (Adobe; 'z' shortcut for an all-zero quad; no <~ ~> wrap) ----

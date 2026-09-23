@@ -21,6 +21,12 @@ private def heads(result : Gori::Import::ParseResult) : Array(String)
   result.flows.map { |pair| String.new(pair.request.head) }
 end
 
+module Gori::Import::Postman
+  def self.fill_path_params_for_spec(url : String, node : JSON::Any?, vars : Gori::Import::Vars::Table) : String
+    fill_path_params(url, node, vars)
+  end
+end
+
 describe Gori::Import::Postman do
   it "walks nested folders, not just the top-level item array" do
     # A flat read of `collection.item` imports almost nothing from a real export: every
@@ -52,6 +58,17 @@ describe Gori::Import::Postman do
       JSON
     result.flows.map(&.request.target).should eq(["/bare", "/raw?x=1", "/deep/path?k=v"])
     result.flows[2].request.port.should eq(8443)
+  end
+
+  it "places component query parameters before a path fragment" do
+    result = parse(<<-JSON)
+      {"info": {"name": "n"},
+       "item": [{"request": {"method": "GET", "url": {
+          "protocol": "https", "host": ["a", "test"],
+          "path": ["search#client-fragment"],
+          "query": [{"key": "q", "value": "wanted"}]}}}]}
+      JSON
+    result.flows.first.request.target.should eq("/search?q=wanted")
   end
 
   it "expands {{variables}} from the collection and from folder scope" do
@@ -157,6 +174,29 @@ describe Gori::Import::Postman do
     # neither `https://` nor the `:8443` port is touched.
     result.flows.first.request.target.should eq("/users/42/posts/:slug")
     result.flows.first.request.port.should eq(8443)
+  end
+
+  it "substitutes URL variables in the path but leaves query and fragment data unchanged" do
+    variables = JSON.parse(%([{"key":"id","value":"42"}]))
+    raw = "http://a.test/items/:id?filter=:id#client/:id"
+    filled = Gori::Import::Postman.fill_path_params_for_spec(
+      raw, variables, Gori::Import::Vars::Table.new)
+    filled.should eq("http://a.test/items/42?filter=:id#client/:id")
+
+    protocol_relative = Gori::Import::Postman.fill_path_params_for_spec(
+      "//:id@a.test/items/:id?filter=:id#client/:id", variables,
+      Gori::Import::Vars::Table.new)
+    protocol_relative.should eq("//:id@a.test/items/42?filter=:id#client/:id")
+
+    result = parse(<<-JSON)
+      {"info": {"name": "n"},
+       "item": [{"request": {"method": "GET", "url": {
+          "raw": "http://a.test/items/:id?filter=:id#client/:id",
+          "host": ["a", "test"], "path": ["items", ":id"],
+          "query": [{"key": "filter", "value": ":id"}],
+          "variable": [{"key": "id", "value": "42"}]}}}]}
+      JSON
+    result.flows.first.request.target.should eq("/items/42?filter=:id")
   end
 
   it "drops disabled headers and keeps duplicates in order" do

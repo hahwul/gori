@@ -32,6 +32,29 @@ describe Gori::Import::Oas do
     end
   end
 
+  it "puts generated query parameters before a path fragment" do
+    body = <<-JSON
+      {
+        "openapi": "3.0.3",
+        "info": {"title": "t", "version": "1"},
+        "servers": [{"url": "https://api.example.test/v1"}],
+        "paths": {
+          "/search#client-fragment": {
+            "get": {
+              "parameters": [{"name": "q", "in": "query", "required": true,
+                              "schema": {"type": "string"}}],
+              "responses": {"200": {"description": "ok"}}
+            }
+          }
+        }
+      }
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.flows.first.request.target.should eq("/v1/search?q=q")
+    end
+  end
+
   it "resolves local parameter, requestBody, and schema refs at path and operation level" do
     body = <<-JSON
       {
