@@ -221,7 +221,7 @@ module Gori
 
       # The SEND SEAM's own transform: the assembled request as the SOCKET will get it.
       #
-      # Two passes, in this order:
+      # Three passes, in this order:
       #
       #   * the `$NAME` binding pass, skipped when `resolve_bindings?` says so — for
       #     `evidence?` (somebody else wrote these bytes) or for `expand_bindings?` (the
@@ -248,7 +248,14 @@ module Gori
       #     the overlay writes the slot's own line, and every byte the operator typed that
       #     survives it is untouched.
       #
-      # Header-only overlay, so Content-Length cannot move and the body stays byte-exact (P7).
+      #   * the `chrome` TLS preset's client hints (#1174, `Env.client_hints`), last, read off
+      #     the User-Agent the first two passes left — so they agree with the UA the socket
+      #     gets, whoever wrote it. Regardless of `verbatim` for the slot's reason: the preset
+      #     is the operator answering "present as which browser", and a Chrome handshake with
+      #     no hints answers it wrongly. A request that already names any `sec-ch-ua*` header
+      #     is the operator's own set and gets nothing added.
+      #
+      # Header-only passes, so Content-Length cannot move and the body stays byte-exact (P7).
       #
       # PUBLIC, and that is the point. These two passes ran INSIDE `send`, where no caller
       # could see their output — so every surface that RECORDS or REPORTS "the outbound
@@ -271,7 +278,7 @@ module Gori
       def wire(bytes : Bytes) : Bytes
         gen = generation
         bytes = expand_send(bytes, gen) if resolve_bindings?
-        Gori::Env.overlay_slot(bytes, gen)
+        Gori::Env.client_hints(Gori::Env.overlay_slot(bytes, gen), gen)
       end
 
       def send(bytes : Bytes) : Result

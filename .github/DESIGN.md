@@ -3253,3 +3253,45 @@ $GEN.…` is wrong for two of the three families whatever it mints. And its bran
 Chromium's per-major GREASE entry, which gori would have to reproduce exactly rather than
 approximate. If gori grows client hints, they belong to the TLS preset, as a header set the
 preset owns and emits only when it is a Chromium one.
+
+### 2026-09-23: the `chrome` preset owns its client hints, read off the User-Agent the request carries
+
+#1174 answers the header-set question the #1153 entry left open. Under the `chrome` preset
+(the send's override, else the destination rule, resolved as `$GEN.USER_AGENT` resolves it),
+every gori-originated `https` request gets the three low-entropy hints Chrome sends by default:
+`sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`. The issue's three questions:
+
+**Where it is applied.** At the send seam, on the final bytes: `Env.client_hints` runs after
+`$NAME` expansion and after the slot overlay, as the last header-only pass. It does not mint
+beside `$GEN.USER_AGENT`. It reads whatever User-Agent the request carries at that point, a
+`$GEN` mint, the slot's header or a literal, and derives the brand list's seed and version
+from that UA's own major. The two cannot disagree, because one is computed from the other.
+Every seam that calls `overlay_slot` also calls `client_hints`, and
+`spec/send_seam_generation_spec.cr` holds the two counts equal per file. The one named
+exception is the intercept forward: those are a client's own bytes on the proxy path, and a
+browser that sent no hints must not gain them in transit. Field-native h2 sends take neither
+pass, for the reason `Sender#send_fields` gives. The preset lookup runs only once the head
+contains `Chrome/` at all, so a run that never sends a Chrome UA still never pays for it,
+which keeps the promise the #1153 entry made about lazy resolution.
+
+**Operator bytes win (P7).** A request that already has any `sec-ch-ua*` header (including a
+high-entropy one) belongs to the operator, and gori adds nothing beside it. Completing a
+partial set would mix two sources in one header family. A typed User-Agent is never touched;
+the hints follow it. There is no mismatch warning. gori-written hints cannot mismatch, so the
+only possible mismatch is between hints and a UA the operator typed, and that may be the test
+itself (probing a UA/client-hint consistency check). Under the `chrome` preset, a User-Agent
+of another browser gets no hints. The handshake/UA disagreement it shows is #1153's open
+warning question, and a per-send warning across a fuzz run would be noise, not signal.
+
+**Where the algorithm comes from.** It is ported from Chromium at
+`ab1ade5d1fa5f1c0b2bf80ab48d9b9cb25aa3c95` (`components/embedder_support/user_agent_utils.cc`:
+GREASE brand, stable shuffle, platform; `base/version_info/version_info.h`: OS names; blink's
+`user_agent_metadata.cc`: RFC 8941 serialization). The spec replays the vectors from that
+revision's `user_agent_utils_unittest.cc`, not from captures: a capture shows the output for
+one seed, and the unit tests pin the function itself. Faithfulness decides what gets no
+hints: only a UA in the exact shape Chrome's `BuildUserAgentFromOSAndProduct` writes counts.
+Edge, Opera and other Chromium browsers append a product token and send a brand their own
+code chooses, which Chromium's source does not state, so they get none. That includes the
+built-in corpus's Edge line. A WebSocket handshake gets none either, because Chromium's
+source does not establish that hints are sent there. Header names are lowercase and go
+immediately before `User-Agent`, the order Chrome uses on a navigation.

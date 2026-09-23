@@ -714,6 +714,8 @@ That prints the JA3 and JA4 of the hello gori really sends there, built from the
 
 **Read the presets as approximations.** They match every value-level field a classifier reads, and they will not reproduce a browser's JA3 byte for byte: extension order and GREASE placement come from OpenSSL and are not settable from it. That is usually enough to stop looking like a bare OpenSSL client, which is the thing being detected. Compare the `JA4_r` lists rather than the digests, and expect the digests to differ.
 
+**`chrome` also sends Chrome's client hints.** On an `https` request gori sends itself (Repeater, Fuzzer, Discover, Authorize, Miner, `gori run`, MCP) under the `chrome` preset, gori adds the `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` headers Chrome sends, just before `User-Agent`. It computes them from that request's own User-Agent with Chrome's own brand algorithm, so a `$GEN.USER_AGENT` and the brand list always name the same version. It adds nothing when the User-Agent is not one Chrome itself sends (Edge, Opera, a scanner string), when the request already has any `sec-ch-ua` header (yours wins), on a WebSocket handshake, and on traffic passing through the proxy. Firefox and Safari send no client hints, so their presets add none.
+
 ### Asking the question the other way round
 
 A destination rule answers "always look like Chrome to this origin". The question that gets you there is usually the opposite one, **does this endpoint answer differently as `chrome` than as `curl`?**, and that is an A/B on *one* host. Editing the rule between two sends cannot answer it: the two sends run under different settings, nothing records which was which, and every other tab and background capture hitting that host changes handshake with them.
