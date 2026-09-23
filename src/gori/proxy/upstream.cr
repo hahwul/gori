@@ -717,13 +717,21 @@ module Gori::Proxy
       parts = status.chomp.split(' ', 3)
       code = parts.size >= 2 ? (parts[1].to_i? || 0) : 0
       read = 0
+      headers_complete = false
       while line = sock.gets('\n', MAX_CONNECT_LINE)
         read += line.bytesize
         if read > MAX_CONNECT_HEADERS
           return DialError.new(DialErrorKind::Proxy,
             "#{proxy_label(route)} sent an oversized CONNECT reply header section (> #{MAX_CONNECT_HEADERS} bytes)")
         end
-        break if line.chomp.empty?
+        if line.chomp.empty?
+          headers_complete = true
+          break
+        end
+      end
+      unless headers_complete
+        return DialError.new(DialErrorKind::Proxy,
+          "#{proxy_label(route)} sent an incomplete CONNECT reply before the terminating blank line: #{status_text(status)}")
       end
       return nil if (code // 100) == 2
       DialError.new(DialErrorKind::Proxy,

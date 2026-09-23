@@ -376,7 +376,7 @@ module Gori::Proxy
       end
 
       req = Codec::Http1.parse_request_head(head)
-      return handle_connect(req) if req.method.compare("CONNECT", case_insensitive: true) == 0
+      return handle_connect(req, now_us) if req.method.compare("CONNECT", case_insensitive: true) == 0
 
       started = Time.instant
       created_at = now_us
@@ -1734,11 +1734,11 @@ module Gori::Proxy
     # path whose whole job is to relay. If that changes, it changes there first.
     #
     # So the refusal is delivered where an operator actually looks: a `gori.log` line, and an
-    # error flow for the CONNECT itself. CONNECT is otherwise never a captured flow — the
-    # reserved-host and self-loop refusals above record nothing — but those refuse BEFORE the
-    # 200, where the client still gets an answer it can read. This one cannot, so the record is
-    # the only thing left, and a row saying which rule or setting refused the tunnel is worth
-    # more than a socket that closes for no stated reason.
+    # error flow for the CONNECT itself. The upstream tunnel path records dial failures too;
+    # the reserved-host and self-loop refusals above still record nothing because they happen
+    # before the 200 and the client gets a usable local answer. This refusal happens after the
+    # 200, which an h2 client cannot read, so History is the only place left to name why the
+    # tunnel died.
     private def refuse_h2c(req : Codec::RawRequest, host : String, port : Int32,
                            reason : String) : Nil
       advice = "The client committed to HTTP/2 by sending the preface, so there is nothing to " \
@@ -2101,7 +2101,7 @@ module Gori::Proxy
     # download nor open a tunnel the sandbox refuses. Reading Settings here (not in the
     # Tunnel) is what makes the bypass cover the h2c-in-CONNECT branch too: the byte peek
     # below never happens for a passthrough host.
-    private def handle_connect(req : Codec::RawRequest) : Bool
+    private def handle_connect(req : Codec::RawRequest, created_at : Int64) : Bool
       host, port = Upstream.split_host_port(req.target, 443)
 
       # A LISTENER-pinned connection is not a forward proxy. The destination was settled before
@@ -2130,9 +2130,11 @@ module Gori::Proxy
         # URL needs, and the MITM branch's own dial (`dial_tls_result`) already says so. The
         # default `"http"` picked `HTTP_PROXY`, so an environment exporting only `HTTPS_PROXY`
         # sent this — the one shape that proxy exists to carry — direct instead (#1114).
-        upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin,
-          origin_scheme: "https")
+        upstream, dial_error = Upstream.dial_result(host, port, overrides: @host_overrides,
+          pin: dial_pin, origin_scheme: "https")
+        @last_dial_error = dial_error
         unless upstream
+          record_error(req, "https", host, port, created_at, upstream_error_message(host, port, nil))
           write_gateway_error
           return false
         end
@@ -2331,7 +2333,7 @@ module Gori::Proxy
       tls = @tls
       unless sa && tls && tls.serve_landing?
         # Same shape as the CONNECT self-loop refusal: refuse before the 200, record nothing
-        # (CONNECT is never a captured flow), and above all never dial the reserved name.
+        # for this local answer, and above all never dial the reserved name.
         return write_gateway_error
       end
 
