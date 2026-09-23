@@ -361,8 +361,15 @@ module Gori
         name = positional[0]
 
         registry = ProjectRegistry.new(Paths.projects_dir)
-        project = registry.find(name) || abort_unknown_project(registry, name)
-        abort_ambiguous_project(registry, name) if ambiguous_name?(registry, name)
+        project = begin
+          registry.find(name)
+        rescue ex : ProjectRegistry::Ambiguous
+          # Display names are deliberately NOT unique, and `#find` now refuses a name that
+          # addresses two projects on every surface (#1163) — the rule this command used to
+          # keep for itself, since a guess is not good enough for an rm_rf.
+          abort "gori run project delete: #{ex.message}"
+        end
+        project ||= abort_unknown_project(registry, name)
         print_delete_preview(registry, project, format) unless yes # NoReturn
 
         # Read the sidecars while they still exist — rm_rf takes them with the directory.
@@ -396,26 +403,6 @@ module Gori
         projects = registry.list
         have = projects.empty? ? "" : " (have: #{projects.map(&.name).join(", ")})"
         abort "gori run project delete: no project matching '#{name}'#{have}"
-      end
-
-      # Display names are deliberately NOT unique (two workspaces sharing a basename get the
-      # same name, e.g. slugs `api` and `api-2`), and #find resolves a name to the
-      # most-recently-active match. Good enough for a read; not for an rm_rf. Refuse and make
-      # the caller name the slug or short id — which, being unique, resolve before the name
-      # pass in #find, so an exact one of those is never called ambiguous.
-      private def self.ambiguous_name?(registry : ProjectRegistry, name : String) : Bool
-        q = name.strip.downcase
-        projects = registry.list
-        return false if projects.any? { |p| registry.slug_of(p).downcase == q || registry.id_of(p).try(&.downcase) == q }
-        projects.count { |p| p.name.downcase == q } > 1
-      end
-
-      private def self.abort_ambiguous_project(registry : ProjectRegistry, name : String) : NoReturn
-        q = name.strip.downcase
-        candidates = registry.list.select { |p| p.name.downcase == q }
-        listed = candidates.map { |p| "#{registry.slug_of(p)} (id #{registry.id_of(p) || "—"})" }.join(", ")
-        abort "gori run project delete: '#{name}' matches #{candidates.size} projects — " \
-              "delete by slug or short id instead: #{listed}"
       end
 
       # What --yes would destroy. Exits NON-ZERO: this path removed nothing, and a script

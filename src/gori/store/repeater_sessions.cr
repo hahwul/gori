@@ -303,10 +303,22 @@ module Gori
     # from the bottom (`WHERE id <= cutoff`), so `MAX(id)` always survives and the next insert
     # is `max + 1`. "Gone" is genuinely more informative than absent THERE. Here it is a
     # pointer that silently starts lying, which is worse than either.
+    #
+    # An issue's retest steps name repeaters with the same `ref_kind`/`ref_id` pair and had
+    # the same hole (#1160): the step read "repeater #1 no longer exists" until the next tab
+    # took id 1, then `retest run` sent that UNRELATED request and recorded a verdict on the
+    # issue. They are DETACHED here rather than deleted: a step carries the operator's role
+    # and assertion, and silently dropping one on a tab close shrinks the retest — a run of
+    # the steps left can then PASS an issue its missing step would have failed. A detached
+    # step keeps its row and keeps refusing as missing until it is removed and re-added; see
+    # `Store::RetestStep#detached?` for the encoding.
     def delete_repeater(id : Int64) : Bool
+      ts = now_us
       exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM ws_messages WHERE repeater_id = ?", id)
         c.exec("DELETE FROM entity_links WHERE ref_kind = 'repeater' AND ref_id = ?", id)
+        c.exec("UPDATE issue_retest_steps SET ref_id = -ref_id, updated_at = ? " \
+               "WHERE ref_kind = 'repeater' AND ref_id = ? AND ref_id > 0", ts, id)
         c.exec("DELETE FROM repeaters WHERE id = ?", id)
         nil
       }

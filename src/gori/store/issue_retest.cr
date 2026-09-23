@@ -270,7 +270,7 @@ module Gori
         "INSERT INTO issue_retest_run_steps (run_id, position, role, ref_kind, ref_id, label, " \
         "method, url, assertion, outcome, detail, status, duration_us, bytes, flow_id) " \
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        run_id, position, p.step.role.label, p.step.ref_kind.label, p.step.ref_id,
+        run_id, position, p.step.role.label, p.step.ref_kind.label, p.step.target_id,
         Retest.clip(p.label), p.method, Retest.clip(p.url), p.step.assertion,
         r.outcome.label, r.detail, obs.status, obs.duration_us, obs.bytes, obs.flow_id)
     end

@@ -68,7 +68,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def live_retest_rows(issue_id : Int64) : Array(Store::RetestRunStep)
     issues_controller.retest_live_rows.map_with_index do |r, i|
       p = r.planned
-      Store::RetestRunStep.new(0_i64, 0_i64, i + 1, p.step.role, p.step.ref_kind, p.step.ref_id,
+      Store::RetestRunStep.new(0_i64, 0_i64, i + 1, p.step.role, p.step.ref_kind, p.step.target_id,
         p.label, p.method, p.url, p.step.assertion, r.outcome, r.detail,
         r.observation.status, r.observation.duration_us, r.observation.bytes,
         r.observation.flow_id)

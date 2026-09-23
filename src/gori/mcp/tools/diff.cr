@@ -23,7 +23,8 @@ module Gori
         opts = diff_options(h)
         return opts if opts.is_a?(Result)
         reg = registry
-        base = reg.find(from)
+        base = find_project(reg, from, "from")
+        return base if base.is_a?(Result)
         return not_found(unknown_project(reg, "from", from)) unless base
         target = resolve_diff_target(reg, str(h, "to").try(&.strip).presence)
         return target if target.is_a?(Result)
@@ -115,7 +116,8 @@ module Gori
           return no_project unless bound && path
           return {Project.new(@project_name || File.basename(File.dirname(path)), path), bound, false}
         end
-        project = reg.find(to)
+        project = find_project(reg, to, "to")
+        return project if project.is_a?(Result)
         return not_found(unknown_project(reg, "to", to)) unless project
         # Naming the project this server is already bound to is the same side as omitting
         # `to`. Reuse the open store rather than taking a second connection to a database

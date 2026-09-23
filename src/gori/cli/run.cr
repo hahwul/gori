@@ -382,10 +382,11 @@ module Gori
       end
 
       # --db wins → else --project resolved via ProjectRegistry#find (exact short id
-      # → exact dir slug → exact display name → unique id-prefix, all
-      # case-insensitive) → else the most-recently-active project. Aborts when
-      # nothing resolves. Routing through #find is what lets a read command finally
-      # select by slug/id, not display name alone (parity with MCP --project).
+      # → exact dir slug or display name → unique id-prefix, all case-insensitive)
+      # → else the most-recently-active project. Aborts when nothing resolves, and when
+      # the name addresses two projects (#1163). Routing through #find is what lets a
+      # read command finally select by slug/id, not display name alone (parity with MCP
+      # --project).
       #
       # The default branch ANNOUNCES itself (see announce_default_project) — the whole
       # point of a default nobody typed is that it is invisible until it is wrong.
@@ -397,9 +398,12 @@ module Gori
         end
         registry = ProjectRegistry.new(Paths.projects_dir)
         if name = project_name
-          if found = registry.find(name)
-            return found
+          found = begin
+            registry.find(name)
+          rescue ex : ProjectRegistry::Ambiguous
+            abort "gori run: #{ex.message}"
           end
+          return found if found
           projects = registry.list
           abort "gori run: no project matching '#{name}'#{projects.empty? ? "" : " (have: #{projects.map(&.name).join(", ")})"}"
         end

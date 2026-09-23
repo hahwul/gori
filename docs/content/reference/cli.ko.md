@@ -103,7 +103,7 @@ gori run <subcommand> [verb] [options]
 
 읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`). 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
 
-읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다.
+읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다. gori 프로젝트가 아닌 `--db` 파일(다른 도구의 SQLite 데이터베이스나 빈 파일)은 파일에 손대기 전에 거부합니다. 데이터베이스를 만드는 명령(`import --db`, `capture --db`)은 빈 파일은 계속 초기화하지만, 다른 도구의 테이블이 든 파일은 거부합니다.
 
 #### 출력 계약 {#output-contract}
 
@@ -1281,7 +1281,7 @@ gori run project create api-test --format json
 | `--description=TEXT` | 프로젝트 설정에 저장됩니다 |
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
-이미 있는 이름은 오류가 아니라 그 프로젝트를 다시 여는 것으로 처리하며, `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 마지막 create의 대소문자로 갱신되고, `--description`을 주면 기존 설명을 덮어씁니다.
+이미 있는 이름은 오류가 아니라 그 프로젝트를 다시 여는 것으로 처리하며, `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 마지막 create의 대소문자로 갱신되고, `--description`을 주면 기존 설명을 덮어씁니다. 새 이름이 이미 다른 프로젝트의 디렉터리 slug나 짧은 id라면 거부합니다. 그 이름으로는 `--project`가 새로 만든 프로젝트에 닿을 수 없기 때문입니다.
 
 #### project delete {#project-delete}
 
@@ -1301,7 +1301,7 @@ gori run project rm api-test --yes            # actually delete
 
 미리보기는 플로우/이슈 개수, 디스크 사용량과 함께, 삭제가 지키는 잠금 **둘 다**를 보여 줍니다. 캡처가 살아 있는지(`capture_lock_held`), 그리고 다른 gori 인스턴스가 DB를 열어 두고 있는지(`open_in_another_instance` — MCP 서버는 캡처 잠금을 잡지 않으면서도 쓰기를 합니다). `deletable`은 이 둘을 합한 판정이고, 마지막 줄이 `--yes`가 실제로 통과할지를 말해 줍니다. 둘 중 하나라도 걸린 프로젝트는 삭제를 거부하므로 그 캡처를 중지하거나 그쪽에서 닫아야 합니다. `capture_lock_held`가 `null`이면 잠금 자체를 읽지 못한 것이고(쓰기 권한 없는 프로젝트 디렉터리), 이때도 삭제는 거부됩니다.
 
-표시 이름은 유일하지 않습니다(같은 basename을 쓰는 두 워크스페이스는 이름을 공유합니다). 이름이 여러 프로젝트에 걸리면 삭제를 거부하고 각각의 slug를 보여 줍니다. 잘못 고르면 되돌릴 수 없기 때문입니다. slug와 짧은 id는 유일하므로 언제나 하나로 확정됩니다.
+표시 이름은 유일하지 않습니다(같은 basename을 쓰는 두 워크스페이스는 이름을 공유합니다). 이름이 여러 프로젝트에 걸리면 다른 모든 `--project`와 마찬가지로 삭제를 거부하고 각각의 slug와 짧은 id를 보여 줍니다. 잘못 고르면 되돌릴 수 없기 때문입니다. slug와 짧은 id는 유일하므로 언제나 하나로 확정됩니다.
 
 #### project scope {#run-project-scope}
 

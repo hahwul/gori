@@ -103,7 +103,7 @@ gori run <subcommand> [verb] [options]
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`). Global flags go **after** the verb: `gori run rewriter rm 1 --project=x`, not `gori run rewriter --project=x rm 1`, which is rejected as a usage error rather than silently listing.
 
-Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. A `body:` query drains the search index and is therefore a write.
+Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. A `body:` query drains the search index and is therefore a write. A `--db` file that is not a gori project (another tool's SQLite database, or an empty file) is refused before anything touches it; commands that create their database (`import --db`, `capture --db`) still initialise an empty file, but refuse one that holds another tool's tables.
 
 Write subcommands share that project's WAL database with the TUI and MCP. They serialize through
 the Store writer and can run while the TUI is open, but a capture commit can temporarily own the
@@ -1293,7 +1293,7 @@ gori run project create api-test --format json
 | `--description=TEXT` | Stored in the project's settings |
 | `--format=FMT` | `text` (default) or `json` |
 
-A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen rewrites the stored display name (so its casing follows the last create) and replaces the description when `--description` is given.
+A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen rewrites the stored display name (so its casing follows the last create) and replaces the description when `--description` is given. A new name that is already another project's directory slug or short id is refused, since `--project` could not then reach the project it made.
 
 #### project delete
 
@@ -1313,7 +1313,7 @@ gori run project rm api-test --yes            # actually delete
 
 The preview reports flow and issue counts, on-disk size, and both of the locks the delete honours: whether a capture is live (`capture_lock_held`) and whether any other gori instance has the database open (`open_in_another_instance` — an MCP server takes no capture lock and still writes to it). `deletable` is the verdict those two add up to, and the closing line says whether `--yes` would go through. Deleting a project either one covers is refused: stop that capture, or close it there, first. A `capture_lock_held` of `null` means the lock could not be read at all (an unwritable project directory), which the delete also refuses.
 
-Display names are not unique (two workspaces with the same basename share one). When a name matches more than one project, delete refuses and lists their slugs, since the wrong guess is unrecoverable. Slugs and short ids are unique, so either always resolves.
+Display names are not unique (two workspaces with the same basename share one). When a name matches more than one project, delete refuses and lists their slugs and short ids, as every `--project` does, since the wrong guess is unrecoverable. Slugs and short ids are unique, so either always resolves.
 
 #### project scope
 

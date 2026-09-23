@@ -48,6 +48,25 @@ describe "MCP issue retest" do
     end
   end
 
+  # #1160: after its session is deleted a step names the id it had, flags it deleted, and
+  # does not resolve to the next session that takes that id.
+  it "lists a step whose session was deleted as deleted, even after the id is reused" do
+    with_store do |store|
+      iid = retest_issue(store)
+      rid = retest_repeater(store, "victim order", "GET /orders/7 HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      tools = tools_for(store)
+      mcp_ok_json(tools, "add_retest_step", %({"issue_id":#{iid},"repeater_id":#{rid},"assertion":"status:403"}))
+      mcp_ok_json(tools, "delete_repeater", %({"id":#{rid}}))
+      retest_repeater(store, "unrelated", "GET /public HTTP/1.1\r\nHost: acme.test\r\n\r\n").should eq(rid)
+
+      step = mcp_ok_json(tools, "list_retest_steps", %({"issue_id":#{iid}}))["steps"][0]
+      step["ref_id"].as_i64.should eq(rid)
+      step["ref_deleted"].as_bool.should be_true
+      step["runnable"].as_bool.should be_false
+      step["url"].as_s.should_not contain("/public")
+    end
+  end
+
   it "refuses an assertion the parser cannot read, and stores nothing" do
     with_store do |store|
       iid = retest_issue(store)

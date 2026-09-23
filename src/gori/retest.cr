@@ -331,10 +331,10 @@ module Gori
         return Planned.new(step, "?", "?", step.ref_label,
           missing: "only a Repeater session can be a retest step (#{step.ref_kind.label} has no single request to replay)")
       end
-      rec = store.get_repeater(step.ref_id)
+      rec = step.detached? ? nil : store.get_repeater(step.ref_id)
       unless rec
         return Planned.new(step, "?", "?", step.ref_label,
-          missing: "repeater ##{step.ref_id} no longer exists — re-link the session or remove the step")
+          missing: "repeater ##{step.target_id} no longer exists — remove the step and add one for a live session")
       end
       boundary = Env.head_body_boundary(rec.request)
       method, target, _ = Proxy::Codec::Http1.authored_start_line(rec.request[0, boundary])

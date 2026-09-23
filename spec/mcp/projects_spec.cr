@@ -62,6 +62,47 @@ describe "Gori::MCP::Tools project lifecycle" do
   end
 end
 
+describe "Gori::MCP::Tools project name resolution (#1163)" do
+  it "refuses a name that addresses two projects, naming each by a handle that is unique" do
+    root = File.tempname("gori-projambig")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    prev_layer = Gori::Env.layer
+    tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false,
+      selection_source: "unbound")
+    begin
+      created = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Client 2024"}))).text)
+      created["slug"].as_s.should eq("client-2024")
+      # A create that would make `client-2024` mean two projects is refused up front…
+      refused = tools.call("create_project", JSON.parse(%({"name":"client-2024"})))
+      refused.is_error.should be_true
+      refused.text.should contain("already the directory slug")
+
+      # …and a pair left behind by an older gori is refused at resolve time, not guessed.
+      twin = File.join(Gori::Paths.projects_dir, "client-2024-2")
+      Dir.mkdir_p(twin)
+      File.write(File.join(twin, Gori::ProjectRegistry::NAME_FILE), "client-2024")
+      Gori::Store.open(File.join(twin, Gori::Project::DB_FILE)).close
+      {"switch_project" => %({"project":"client-2024"}),
+       "delete_project" => %({"project":"client-2024"}),
+       "diff_projects"  => %({"from":"client-2024","to":"client-2024-2"})}.each do |tool, args|
+        r = tools.call(tool, JSON.parse(args))
+        r.is_error.should be_true
+        r.text.should contain("is ambiguous")
+        r.text.should contain("client-2024-2")
+      end
+      sw = JSON.parse(tools.call("switch_project", JSON.parse(%({"project":"client-2024-2"}))).text)
+      sw["switched"].as_bool.should be_true
+    ensure
+      tools.@store.try(&.close) rescue nil # the store the switch opened belongs to Tools
+      Gori::Env.layer = prev_layer
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+end
+
 describe "Gori::MCP::Tools unbound mode" do
   it "connects without a store, refuses traffic tools, and binds on create" do
     root = File.tempname("gori-unbound")
