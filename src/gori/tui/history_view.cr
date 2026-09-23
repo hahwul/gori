@@ -580,6 +580,15 @@ module Gori::Tui
       end
     end
 
+    # A peer's commit is the only signal an already-running TUI gets for a clear or delete it
+    # did not perform itself. Drop the same bare-id answers as the local delete paths before
+    # reloading rows; the next render repopulates only the visible window.
+    def forget_all_row_memos : Nil
+      @color_memo.clear
+      @path_memo.clear
+      @colormarker.try(&.forget_all)
+    end
+
     # Where the row loop reads flow bytes from. Nil until the controller sets it, in which case
     # every user column draws blank — the same answer a descriptor that matches nothing gives,
     # and the list itself never opens a store.
@@ -1419,9 +1428,7 @@ module Gori::Tui
       # And the id-keyed memos, for the same reason one line up — with the collision no longer
       # hypothetical: after a wipe the next capture is rowid 1, which is the id these are most
       # likely to still be holding an answer for.
-      @color_memo.clear
-      @path_memo.clear
-      @colormarker.try(&.forget_all)
+      forget_all_row_memos
       @rows.clear
       @selected = 0
       @scroll = 0

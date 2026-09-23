@@ -299,10 +299,11 @@ module Gori
     # UNRELATED request: an issue's evidence pointer confidently naming a different URL, in
     # the TUI overlay, both exports and MCP `list_links`.
     #
-    # Flows can afford to dangle because their ids never come back: both prune paths delete
-    # from the bottom (`WHERE id <= cutoff`), so `MAX(id)` always survives and the next insert
-    # is `max + 1`. "Gone" is genuinely more informative than absent THERE. Here it is a
-    # pointer that silently starts lying, which is worse than either.
+    # A flow link left dangling by retention pruning cannot re-bind: both prune paths delete
+    # from the bottom (`WHERE id <= cutoff`), so `MAX(id)` survives and the next insert is
+    # `max + 1`. Explicit History deletes and clears remove their links in the same transaction
+    # because those paths can reuse ids. "Gone" is genuinely more informative than absent
+    # THERE. Here it is a pointer that silently starts lying, which is worse than either.
     #
     # An issue's retest steps name repeaters with the same `ref_kind`/`ref_id` pair and had
     # the same hole (#1160): the step read "repeater #1 no longer exists" until the next tab

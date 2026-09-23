@@ -1,6 +1,6 @@
 require "../spec_helper"
 
-# The Evidence tab's `s` (open original source) against a REUSED Repeater id.
+# The Evidence tab's `s` (open original source) against a reused Repeater or flow id.
 #
 # `Store#evidence_count_for` has always guarded the marker with `created_at >= repeaters.created_at`
 # — `repeaters.id` has no AUTOINCREMENT, so a tab opened after the source tab was closed can
@@ -31,6 +31,7 @@ describe "the Evidence tab's source navigation" do
   it "refuses with the reason instead of opening an unrelated tab" do
     open_source = runner_evidence_code[/def evidence_open_source.*?\n  end/m].not_nil!
     open_source.should contain("evidence_source_reused?(meta)")
+    open_source.should contain("evidence_source_alive?(meta)")
     # The sentence itself is a constant now: the Issues detail's `s` (#1038 follow-up) asks
     # the same question about the same rows, and two surfaces spelling one refusal twice is
     # how they come to disagree about it.
@@ -39,6 +40,8 @@ describe "the Evidence tab's source navigation" do
       .should eq("the original repeater tab is gone (its id was reused)")
     # …and the refusal comes FIRST: `navigate_link_ref` would otherwise have already jumped.
     open_source.index("evidence_source_reused?").not_nil!
+      .should be < open_source.index("navigate_link_ref").not_nil!
+    open_source.index("evidence_source_alive?(meta)").not_nil!
       .should be < open_source.index("navigate_link_ref").not_nil!
   end
 

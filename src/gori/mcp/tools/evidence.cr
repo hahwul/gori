@@ -147,8 +147,9 @@ module Gori
           "taken at the moment they proved the finding, with provenance (source, time, status, " \
           "size), the issues each is linked to, and SHA-256 of the stored request and response. " \
           "Without issue_id this is the whole project archive, newest first, including orphans " \
-          "(no issue link left). A copy survives the Repeater's next send and History " \
-          "retention; use get_evidence for its bytes." do |s|
+          "(no issue link left). A deleted History source is marked detached and its negative " \
+          "source_id cannot resolve to a later reused flow. A copy survives the Repeater's next " \
+          "send and History retention; use get_evidence for its bytes." do |s|
           s.field "issue_id", intprop("one issue's copies only (omit for the whole project archive)")
         end
 

@@ -56,6 +56,27 @@ describe "MCP frozen evidence" do
     end
   end
 
+  it "marks a frozen flow source detached after History reuses its id" do
+    with_store do |store|
+      fid = mcp_seed_flow(store, "acme.test", "GET", "/original", 200)
+      iid = store.insert_issue("frozen source", Gori::Store::Severity::Low, "acme.test", nil)
+      tools = tools_for(store)
+      eid = mcp_ok_json(tools, "freeze_evidence",
+        %({"issue_id":#{iid},"ref_kind":"flow","ref_id":#{fid},"link":false}))[
+        "evidence"]["id"].as_i64
+
+      store.clear_flows.should be_true
+      mcp_seed_flow(store, "acme.test", "GET", "/unrelated", 200).should eq(fid)
+
+      evidence = mcp_ok_json(tools, "get_evidence", %({"id":#{eid}}))
+      evidence["source_id"].as_i64.should eq(-fid)
+      evidence["source_detached"].as_bool.should be_true
+      evidence["url"].as_s.should eq("https://acme.test/original")
+      evidence["request_head"].as_s.should contain("GET /original")
+      store.flow_row(fid).not_nil!.target.should eq("/unrelated")
+    end
+  end
+
   it "freezes a Repeater's current response, which its next send then cannot change" do
     with_store do |store|
       rid = sent_repeater(store)

@@ -1238,9 +1238,10 @@ module Gori
       # bytes are already capture-capped per flow, and `bytes` is summed against
       # `Evidence::QUOTA_BYTES` on every freeze so the table stays bounded.
       #
-      # `source_kind`/`source_id` are PROVENANCE, not a reference: the live row may be pruned
-      # or re-sent tomorrow and this row must read exactly as it does today, so nothing here
-      # is resolved back through the source. `request_sha256`/`response_sha256` are the hashes
+      # `source_kind`/`source_id` preserve PROVENANCE. A flow `source_id` is negated when its
+      # row is deleted, keeping the original id readable while preventing a later row from
+      # inheriting the source reference. The live row may otherwise be re-sent tomorrow and
+      # this snapshot must read exactly as it does today. `request_sha256`/`response_sha256` are the hashes
       # of the stored bytes (head + body), written at freeze time so a later reader — an export,
       # a report — can state what it was handed.
       #
