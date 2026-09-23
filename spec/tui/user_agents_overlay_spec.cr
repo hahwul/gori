@@ -33,6 +33,18 @@ describe UserAgentsOverlay do
     with_user_agents(["A/1.0", "B/2.0"]) { UserAgentsOverlay.new.parsed.should eq(["A/1.0", "B/2.0"]) }
   end
 
+  # The peer tick reloads `Settings.user_agents` under an open editor (#1218); an untouched
+  # editor closing must not write the list it opened on back over the peer's.
+  it "has nothing to write when left as it opened, even after the live list moved" do
+    with_user_agents(["A/1.0"]) do
+      ov = UserAgentsOverlay.new
+      Gori::Settings.user_agents = ["Peer/1.0"]
+      ov.edited_list.should be_nil
+      type_into(ov, "B/2.0\n") # the cursor opens at the top
+      ov.edited_list.should eq(["B/2.0", "A/1.0"])
+    end
+  end
+
   it "commits on esc with the typed lines" do
     with_user_agents([] of String) do
       ov = UserAgentsOverlay.new

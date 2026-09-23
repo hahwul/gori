@@ -20,7 +20,8 @@ module Gori::Tui
   # so, since there is no partial list worth writing.
   class UserAgentsOverlay < Overlay
     def initialize
-      @editor = TextArea.new(Settings.user_agents.join("\n"))
+      @opened_with = Settings.user_agents
+      @editor = TextArea.new(@opened_with.join("\n"))
       @refused = nil.as(String?)
       @card_drawn = true # see DiscoverHeadersOverlay: production draws before it reads a key
     end
@@ -28,6 +29,16 @@ module Gori::Tui
     # The parsed buffer, or the first line that cannot be a User-Agent.
     def parsed : Array(String) | String
       Settings.user_agents_from_text(@editor.text)
+    end
+
+    # The list to write on commit, or nil when there is nothing to write: a buffer that does not
+    # parse, or one the operator left as it opened. esc always commits, and the peer tick can move
+    # `Settings.user_agents` underneath an open editor (`reload_user_agents_from_disk`), so "did
+    # the operator change anything" is asked against the list this editor OPENED on, never the
+    # live one — or closing an untouched editor wrote its stale copy over a peer's new list.
+    def edited_list : Array(String)?
+      list = parsed
+      list.is_a?(Array(String)) && list != @opened_with ? list : nil
     end
 
     # The list to save; call only once `parsed` answered a list.

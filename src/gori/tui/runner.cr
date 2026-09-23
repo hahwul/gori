@@ -6197,8 +6197,8 @@ module Gori::Tui
       ov = UserAgentsOverlay.new
       ov.on_close = -> { resume_preferences(back) }
       ov.on_commit = -> {
-        list = ov.parsed
-        if list.is_a?(Array(String)) && list != Settings.user_agents
+        list = ov.edited_list
+        if list && list != Settings.user_agents
           Settings.user_agents = list
           @toast = if !Settings.save
                      "User-Agents applied — could not save to #{Settings.path}"
