@@ -30,7 +30,7 @@ module Gori
       retry : Int32?
 
     def self.sse?(content_type : String?) : Bool
-      !!content_type.try { |ct| ct.lstrip.downcase.starts_with?("text/event-stream") }
+      MediaType.essence(content_type) == "text/event-stream"
     end
 
     # True when a response head declares a text/event-stream body. Resolves the

@@ -190,7 +190,8 @@ end
 # An origin that reads the request BODY (per its framing) and reports it on `seen_body`,
 # then replies with `resp_body`. `chunked` frames the reply as Transfer-Encoding: chunked
 # (one chunk) so the response-body M&R path exercises de-chunk → re-frame.
-private def start_body_origin(resp_body : String, seen_body : Channel(String), chunked : Bool = false) : Int32
+private def start_body_origin(resp_body : String, seen_body : Channel(String), chunked : Bool = false,
+                              content_type : String? = nil) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
@@ -205,10 +206,14 @@ private def start_body_origin(resp_body : String, seen_body : Channel(String), c
         seen_body.send("")
       end
       if chunked
-        conn << "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+        conn << "HTTP/1.1 200 OK\r\n"
+        conn << "Content-Type: #{content_type}\r\n" if content_type
+        conn << "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
         conn << resp_body.bytesize.to_s(16) << "\r\n" << resp_body << "\r\n0\r\n\r\n"
       else
-        conn << "HTTP/1.1 200 OK\r\nContent-Length: #{resp_body.bytesize}\r\nConnection: close\r\n\r\n" << resp_body
+        conn << "HTTP/1.1 200 OK\r\n"
+        conn << "Content-Type: #{content_type}\r\n" if content_type
+        conn << "Content-Length: #{resp_body.bytesize}\r\nConnection: close\r\n\r\n" << resp_body
       end
       conn.flush
       conn.close
@@ -698,9 +703,9 @@ describe Gori::Proxy::Server do
     String.new(resp.body.not_nil!).should contain("data: two") # streamed body captured
   end
 
-  # The streaming decision is `Sse.sse?` — a media-type test — and not a substring scan of the
-  # whole field value. A `Content-Type` that merely CARRIES the token in a parameter is an
-  # ordinary Length-framed response to `Proto`, to `QL`'s `proto:sse`, and to History's EVENTS
+  # The streaming decision is `Sse.sse?` — an exact media-type test — and not a substring or
+  # prefix scan of the whole field value. A `Content-Type` that merely carries the token in a
+  # parameter is an ordinary Length-framed response to `Proto`, `proto:sse`, and History's EVENTS
   # pane; the proxy used to be the one reader that disagreed, and it is the reader with side
   # effects — such a response took the streaming path, which skips the intercept response hold,
   # no-ops a Match&Replace body rule, and closes the client connection instead of keeping it
@@ -1839,6 +1844,27 @@ describe Gori::Proxy::Server do
     response.should_not contain("Transfer-Encoding")
     response.should_not contain("SECRET")
     String.new(sink.responses.first.body.not_nil!).should eq("a [HIDDEN] here")
+  end
+
+  it "rewrites a text/event-stream prefix media type as an ordinary response body" do
+    seen_body = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_body_origin("the SECRET value", seen_body, content_type: "text/event-streaming")
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: BodyRewriter.new)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /events HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: close\r\n\r\n"
+    client.flush
+    response = client.gets_to_end
+    client.close
+    done.receive
+    proxy.stop
+
+    response.should contain("Content-Type: text/event-streaming")
+    response.should contain("the [HIDDEN] value")
+    response.should_not contain("SECRET")
   end
 
   # #740: the Match&Replace body gate read Content-Encoding ONLY, so a body compressed by a

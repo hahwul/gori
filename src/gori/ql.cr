@@ -814,7 +814,8 @@ module Gori
     # keeps it, as it always did).
     GRPC_SQL = "((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
                "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%'))"
-    SSE_SQL = "(content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%')"
+    SSE_SQL = "(content_type IS NOT NULL AND " \
+              "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1))) = 'text/event-stream')"
     # BOTH transports, because a WebSocket is one protocol and used to be two answers here: an
     # RFC 8441 socket is `CONNECT` answered `200`, so `status = 101` alone silently omitted
     # every h2 one from the filter an operator reaches for to find sockets. The `connect_protocol`

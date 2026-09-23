@@ -3,6 +3,7 @@
 ## Unreleased
 
 - MCP: a running server picks up another gori process's changes to session slots, global env vars, the User-Agent list and the global view, rule and colour libraries on its next call, so a rotated or deleted credential stops going out without a restart; a running TUI now follows global env vars and User-Agents too (#1215, #1216, #1217, #1218)
+- Proxy: `text/event-streaming` and other media types that only share the SSE prefix are treated as ordinary bodies, so response rules still apply (#1220)
 - Proxy: host-scoped body rules no longer buffer unrelated request and response bodies before streaming them (#1219)
 - MCP: `list_history` flags stale `since` cursors even when History is empty, so clients can reset after a clear (#1199)
 - TUI: History refreshes path and colour data after a peer clears or deletes flows, including when returning to the tab (#1202)

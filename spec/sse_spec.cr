@@ -9,6 +9,8 @@ describe Gori::Sse do
     it "recognises text/event-stream (with params / casing / leading space)" do
       Gori::Sse.sse?("text/event-stream").should be_true
       Gori::Sse.sse?(" Text/Event-Stream; charset=utf-8").should be_true
+      Gori::Sse.sse?("text/event-streaming").should be_false
+      Gori::Sse.sse?("text/event-streamx").should be_false
       Gori::Sse.sse?("application/json").should be_false
       Gori::Sse.sse?(nil).should be_false
     end

@@ -423,7 +423,8 @@ describe Gori::QL do
       "(((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
       "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%')))")
     Gori::QL.parse("proto:sse").sql.should eq(
-      "((content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%'))")
+      "((content_type IS NOT NULL AND " \
+      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1))) = 'text/event-stream'))")
     Gori::QL.parse("proto:ws").args.should be_empty
   end
 
@@ -434,7 +435,8 @@ describe Gori::QL do
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')) " \
       "AND NOT ((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
       "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%')) " \
-      "AND NOT (content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%'))")
+      "AND NOT (content_type IS NOT NULL AND " \
+      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1))) = 'text/event-stream'))")
   end
 
   it "drops an unknown proto: value (match-all EMPTY, not everything)" do
@@ -457,7 +459,8 @@ describe Gori::QL do
       "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%'))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:sses").sql.should eq(
-      "(((content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%')) " \
+      "(((content_type IS NOT NULL AND " \
+      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1))) = 'text/event-stream')) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:wss").args.should be_empty
   end
@@ -525,6 +528,10 @@ describe "Gori::Store#search (QL)" do
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: sse, status: 200, content_type: "text/event-stream; charset=utf-8",
         head: "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice))
+      prefix = capture(store, "acme.test", "GET", "/events-prefix")
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: prefix, status: 200, content_type: "text/event-streaming",
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/event-streaming\r\n\r\n".to_slice))
       # Plain HTTP (typed) and a still-pending flow (NULL status + NULL content_type).
       html = capture(store, "acme.test", "GET", "/", 200)
       pending = capture(store, "acme.test", "GET", "/pending")
@@ -534,7 +541,7 @@ describe "Gori::Store#search (QL)" do
       def_ids.call("proto:grpc").should eq([grpc])
       def_ids.call("proto:sse").should eq([sse])
       # http = everything that is NOT ws/grpc/sse — including the NULL-column pending flow.
-      def_ids.call("proto:http").should eq([html, pending].sort)
+      def_ids.call("proto:http").should eq([html, pending, prefix].sort)
       # Negation is NULL-safe too: -proto:grpc keeps the pending (NULL content_type) flow.
       def_ids.call("-proto:grpc").includes?(pending).should be_true
     end
