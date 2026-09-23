@@ -134,6 +134,14 @@ describe "CLI::Output.human_us" do
 end
 
 describe Gori::CLI::Output do
+  describe ".write_line" do
+    it "terminates textual values with a newline when piped" do
+      output = IO::Memory.new
+      Gori::CLI::Output.write_line(output, "encoded token")
+      output.to_s.should eq("encoded token\n")
+    end
+  end
+
   describe ".write_value" do
     it "does not add a line feed to a piped string value" do
       output = IO::Memory.new

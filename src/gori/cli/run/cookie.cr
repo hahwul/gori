@@ -187,7 +187,7 @@ module Gori
         if format == :json
           puts JSON.build { |j| j.object { j.field "cookie", cookie; j.field "format", type } }
         else
-          CLI::Output.write_value(STDOUT, cookie, STDOUT.tty?)
+          CLI::Output.write_line(STDOUT, cookie)
         end
       end
 

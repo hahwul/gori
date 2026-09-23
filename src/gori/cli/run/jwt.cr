@@ -149,7 +149,7 @@ module Gori
         if format == :json
           puts JSON.build { |j| j.object { j.field "token", signed; j.field "alg", alg } }
         else
-          CLI::Output.write_value(STDOUT, signed, STDOUT.tty?)
+          CLI::Output.write_line(STDOUT, signed)
         end
       rescue ex : Jwt::ForgeError
         abort "gori run jwt: #{ex.message}"

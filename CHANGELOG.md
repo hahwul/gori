@@ -4,7 +4,7 @@
 
 - Issues: the SARIF export keeps each `Set-Cookie` field separate instead of comma-joining cookies into one fabricated value, joins repeated `Cookie` fields with `; `, and writes credential header values as `[REDACTED]` unless `gori run issues --include-sensitive` asks for them (#1190, #1191)
 - Import: generated Insomnia, Postman, and OpenAPI query parameters now stay before URL fragments (#1184)
-- CLI: decoder output, encoded JWTs and forged cookies, and minimized requests no longer gain a line feed in pipes (#1185)
+- CLI: piped decoder and minimized request output stay byte-exact, while forged cookies and encoded JWTs retain a trailing newline for text pipelines (#1185)
 - Decoder: Base32 and Base64 decoding reject impossible tails and non-zero unused bits while keeping valid unpadded forms (#1186)
 - Postman: URL variables replace path placeholders only, leaving query and fragment values intact (#1187)
 - CLI: a `--db` file that is not a gori project (another tool's SQLite database, or an empty file on a read command) is refused before anything touches it, instead of having gori's schema migrated into it (#1171)

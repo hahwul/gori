@@ -33,6 +33,11 @@ module Gori
         end
       end
 
+      # A textual result is one line on both terminals and pipes.
+      def self.write_line(io : IO, value : String) : Nil
+        io.puts value
+      end
+
       # Raw byte output keeps its octets; a terminal gets a separating newline for readability.
       def self.write_value(io : IO, value : Bytes, terminal : Bool) : Nil
         io.write(value)
