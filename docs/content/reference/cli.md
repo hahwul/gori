@@ -103,7 +103,7 @@ gori run <subcommand> [verb] [options]
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`). Global flags go **after** the verb: `gori run rewriter rm 1 --project=x`, not `gori run rewriter --project=x rm 1`, which is rejected as a usage error rather than silently listing.
 
-Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. A `body:` query drains the search index and is therefore a write.
+Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. A `body:` query drains the search index and is therefore a write. A `--db` file that is not a gori project (another tool's SQLite database, or an empty file) is refused before anything touches it; commands that create their database (`import --db`, `capture --db`) still initialise an empty file, but refuse one that holds another tool's tables.
 
 Write subcommands share that project's WAL database with the TUI and MCP. They serialize through
 the Store writer and can run while the TUI is open, but a capture commit can temporarily own the

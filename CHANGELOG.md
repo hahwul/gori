@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- CLI: a `--db` file that is not a gori project (another tool's SQLite database, or an empty file on a read command) is refused before anything touches it, instead of having gori's schema migrated into it (#1171)
 - Projects: a name that points at two projects (one's slug and another's display name, or a display name two projects share) is refused on every `--project`, MCP `switch_project`, `delete_project` and `diff_projects` with each one's slug and short id, instead of silently picking one, and create or rename refuses a name that is already another project's slug or short id (#1163)
 - Retest: deleting a Repeater session marks the issue retest steps that used it as deleted, so they keep refusing to run instead of silently re-binding to the next session that reuses its id (#1160)
 - Env: `$GEN.USER_AGENT` fills in a real desktop browser User-Agent that follows the request's TLS preset, `$GEN.USER_AGENT_CHROME`/`_FIREFOX`/`_SAFARI` pick one browser, and Settings → User-Agents or `gori settings user-agents` replaces the built-in list. `$U` + ↹ now completes to it rather than `$GEN.UUID` (#1112, #1152, #1153, #1154)

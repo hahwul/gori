@@ -343,6 +343,7 @@ module Gori
       url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=#{busy_timeout_ms}" \
             "&cache_size=-64000&max_pool_size=8&checkout_timeout=#{checkout_timeout_seconds}"
       refuse_non_database(path)
+      refuse_foreign_database(path, read_only, busy_timeout_ms)
       # Announce that this process has the database open, for as long as it is (see OpenLock).
       # Taken BEFORE `DB.open` so the window in which a peer could delete the file out from
       # under a half-built store does not exist.
@@ -598,6 +599,69 @@ module Gori
       # mcp`), so one failure keeps being described one way. "wrong file header" rather than
       # their "(or unreadable)": this path READ the file, so unreadability is ruled out.
       raise Gori::Error.new("cannot open #{path}: not a valid SQLite database (wrong file header)")
+    end
+
+    # Refuse a SQLite file that is not a gori project, BEFORE anything below writes to it
+    # (#1171). `Store.open` is not a reader: the open lock drops `<path>.open.lock` beside the
+    # file, the URL's `journal_mode=wal` switches it to WAL and leaves `-wal`/`-shm`,
+    # `harden_permissions` chmods it 0600, and `Schema.migrate!` creates gori's 40-odd tables
+    # in it — a read-only open included, because a STALE gori schema must still migrate. So a
+    # mistyped `gori run history --db places.sqlite` rewrote another tool's database and then
+    # printed "no flows". Everything here is judged through a short connection of its own,
+    # opened without a pragma that writes, and closed before any of that happens.
+    #
+    # What counts as gori's: `user_version` 0 with no tables (a database nobody has
+    # initialised yet), or a nonzero `user_version` beside a `flows` table (V1 created it, no
+    # migration drops it). A version-0 file WITH tables is someone else's — gori's migrations
+    # are one transaction, so a half-migrated gori file does not exist — and so is a nonzero
+    # version with no `flows`: the version is another application's own counter, and
+    # migrating from it would run gori's ALTERs against that application's tables.
+    #
+    # An EMPTY database (a 0-byte file, or one with no tables) is refused only on a
+    # READ-ONLY open. There is nothing in it to read, and initialising it would be the same
+    # write the read path must not make; a writable open (`run import --db`, `capture --db`,
+    # "created if absent") keeps turning an empty file into a project, as it always has.
+    #
+    # A connection that cannot be made or read here (busy past the timeout, unreadable)
+    # does NOT refuse: this check exists to name a foreign file, and the open below already
+    # reports those failures in its own words.
+    private def self.refuse_foreign_database(path : String, read_only : Bool, busy_ms : Int32) : Nil
+      info = File.info?(path)
+      return unless info && info.file?
+      if info.size.zero?
+        return unless read_only
+        raise Gori::Error.new("cannot open #{path}: not a gori project (the file is empty, and a read-only open does not create one)")
+      end
+      version, tables = begin
+        peek_schema(path, busy_ms)
+      rescue DB::Error | SQLite3::Exception | IO::Error
+        return
+      end
+      if version == 0
+        if tables.empty?
+          return unless read_only
+          raise Gori::Error.new("cannot open #{path}: not a gori project (the database is empty, and a read-only open does not create one)")
+        end
+        shown = tables.first(3).join(", ") + (tables.size > 3 ? ", …" : "")
+        raise Gori::Error.new("cannot open #{path}: not a gori project (it holds tables gori did not create: #{shown})")
+      end
+      return if tables.includes?("flows")
+      raise Gori::Error.new("cannot open #{path}: not a gori project (schema version #{version}, but no flows table)")
+    end
+
+    # `user_version` and the user table names, through a connection that writes nothing:
+    # no `journal_mode` in the URL (that pragma is what converts a file to WAL), and
+    # `query_only` on the one connection the reads then use.
+    private def self.peek_schema(path : String, busy_ms : Int32) : {Int32, Array(String)}
+      DB.open("sqlite3:#{path}?busy_timeout=#{busy_ms}") do |db|
+        db.using_connection do |conn|
+          conn.exec("PRAGMA query_only = ON")
+          version = conn.scalar("PRAGMA user_version").as(Int64).to_i
+          tables = conn.query_all("SELECT name FROM sqlite_master WHERE type = 'table' " \
+                                  "AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name", as: String)
+          {version, tables}
+        end
+      end
     end
 
     # The db (and its WAL/SHM sidecars) hold captured request/response bytes — cookies,

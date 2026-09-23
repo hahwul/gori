@@ -176,6 +176,85 @@ describe "Gori::Store.open against a path that is not a regular file" do
   end
 end
 
+# #1171: `Store.open` writes before it reads — the open lock, the WAL switch, the 0600 chmod
+# and the migration — so a file that is not a gori project has to be refused before any of
+# it. Every example checks the file is left EXACTLY as it was, not merely that it raised.
+private def with_foreign_file(&)
+  dir = File.tempname("gori-foreign-db")
+  Dir.mkdir_p(dir)
+  begin
+    yield dir
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+end
+
+private def file_state(path : String) : {Int64, Int16, Array(String)}
+  info = File.info(path)
+  {info.size, info.permissions.value, Dir.children(File.dirname(path)).sort}
+end
+
+describe "Gori::Store.open on a file that is not a gori project (#1171)" do
+  it "refuses another tool's database, read-only or not, and leaves it untouched" do
+    with_foreign_file do |dir|
+      path = File.join(dir, "places.sqlite")
+      DB.open("sqlite3:#{path}") { |db| db.exec("CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT)") }
+      File.chmod(path, 0o644)
+      before = file_state(path)
+
+      [true, false].each do |read_only|
+        ex = expect_raises(Gori::Error) { Gori::Store.open(path, read_only: read_only) }
+        ex.message.to_s.should contain("not a gori project")
+        ex.message.to_s.should contain("moz_places")
+      end
+
+      file_state(path).should eq(before) # size, mode 0644, and no -wal/-shm/.open.lock
+      DB.open("sqlite3:#{path}") do |db|
+        db.scalar("PRAGMA journal_mode").should eq("delete")
+        db.scalar("PRAGMA user_version").as(Int64).should eq(0)
+        db.query_all("SELECT name FROM sqlite_master WHERE type = 'table'", as: String).should eq(["moz_places"])
+      end
+    end
+  end
+
+  it "refuses a database whose user_version is another application's counter" do
+    with_foreign_file do |dir|
+      path = File.join(dir, "app.db")
+      DB.open("sqlite3:#{path}") do |db|
+        db.exec("CREATE TABLE notes (id INTEGER PRIMARY KEY)")
+        db.exec("PRAGMA user_version = 3")
+      end
+      before = file_state(path)
+      ex = expect_raises(Gori::Error) { Gori::Store.open(path) }
+      ex.message.to_s.should contain("no flows table")
+      file_state(path).should eq(before)
+    end
+  end
+
+  it "refuses an empty file or database on a READ-ONLY open, and initialises it on a writable one" do
+    with_foreign_file do |dir|
+      empty = File.join(dir, "empty.db")
+      File.write(empty, "")
+      File.chmod(empty, 0o644)
+      before = file_state(empty)
+      ex = expect_raises(Gori::Error) { Gori::Store.open(empty, read_only: true) }
+      ex.message.to_s.should contain("not a gori project")
+      file_state(empty).should eq(before)
+
+      bare = File.join(dir, "bare.db")
+      DB.open("sqlite3:#{bare}") { |db| db.exec("PRAGMA user_version = 0; VACUUM") }
+      File.size(bare).should be > 0
+      expect_raises(Gori::Error, /database is empty/) { Gori::Store.open(bare, read_only: true) }
+
+      # The writable open is how `run import --db` / `capture --db` start a project.
+      store = Gori::Store.open(empty)
+      store.count.should eq(0)
+      store.close
+      Gori::Store.open(empty, read_only: true).close # now a gori project: readable
+    end
+  end
+end
+
 describe "Gori::Store.open at the current schema version" do
   it "opens a db already at VERSION without raising" do
     # `current == VERSION` must migrate nothing and refuse nothing: the `>` in the runner's
