@@ -2,6 +2,8 @@ require "socket"
 require "./dial_address"
 require "./store"
 
+require "./utf8"
+
 module Gori
   # A per-project /etc/hosts: maps a hostname to the address the proxy should DIAL for it.
   # The override changes ONLY the TCP connect target — SNI, the certificate hostname,
@@ -186,7 +188,7 @@ module Gori
       # typed — the whole point of HOST_RE being here is to refuse a silent dead override.
       host = OverrideHost.key(host)
       return false if host.empty?
-      return false unless host.matches?(HOST_RE)
+      return false unless Utf8.subject(host).matches?(HOST_RE)
       DialAddress.valid?(ip)
     end
 
@@ -195,7 +197,7 @@ module Gori
     # hostname pair. ONE place so the Project pane (ov_commit) and the global settings editor
     # (HostsOverlay#commit) parse and validate identically.
     def self.parse_line(text : String) : {String, String}?
-      parts = text.strip.split(/\s+/, 2)
+      parts = Utf8.subject(text).strip.split(/\s+/, 2)
       return nil if parts.size < 2
       ip = parts[0]
       host = parts[1].strip

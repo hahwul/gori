@@ -43,4 +43,9 @@ describe "Fuzz::Matcher#spec_error" do
     F::Predicate.invalid_status_term("2xx,>=4xx,404,200-299").should be_nil
     F::Predicate.invalid_status_term("6xx").should eq("6xx") # no such class
   end
+
+  it "reports an invalid UTF-8 status term instead of raising from PCRE2" do
+    invalid = String.new(Bytes[0xff])
+    F::Predicate.invalid_status_term(invalid).should eq(invalid)
+  end
 end

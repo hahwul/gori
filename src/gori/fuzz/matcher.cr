@@ -900,7 +900,7 @@ module Gori::Fuzz
           end
         end
         # `[1-5]xx` — a class no HTTP status can belong to (`6xx`) is as unsatisfiable as a typo.
-        !(rest.matches?(/\A[1-5]xx\z/) || rest.to_i?)
+        !(Utf8.subject(rest).matches?(/\A[1-5]xx\z/) || rest.to_i?)
       end
     end
 
