@@ -102,9 +102,10 @@ module Gori::Sequencer
     record TestRow, name : String, value : String, detail : String, verdict : Verdict
 
     # Which bytes of a token the byte-level tests may read — see the variable region in
-    # `analyze`. Every column of the aligned window that never varies is skipped; every byte
-    # outside the window is kept (a corpus of mixed lengths has no column evidence out there,
-    # so nothing is known to be constant). `full` keeps everything.
+    # `analyze`. Every structural column of the aligned window (one that never varies, or
+    # varies over a small slice of the alphabet) is skipped; every byte outside the window is
+    # kept (a corpus of mixed lengths has no column evidence out there, so nothing is known to
+    # be constant). `full` keeps everything.
     struct Region
       def initialize(@min_len : Int32, @constant : Array(Bool), @from_end : Bool, @all : Bool = false)
       end
@@ -178,6 +179,10 @@ module Gori::Sequencer
       # `effective_entropy` already; naming the count is what tells an operator that a
       # 40-character token is really a 24-character one.
       constant_positions : Int32 = 0,
+      # Positions that DO vary, but over a small slice of the alphabet (a UUID's variant
+      # nibble) — see `partial_columns`. Skipped by the byte-level tests like the constant ones,
+      # and credited only the entropy the sample shows them to carry (`partial_credit`).
+      partial_positions : Int32 = 0,
       # Whether the per-position window was anchored to the END of each token rather than its
       # start — see `analyze`. Always false for a fixed-length corpus, where the two agree.
       aligned_from_end : Bool = false do
@@ -211,16 +216,33 @@ module Gori::Sequencer
       #
       # It runs BEFORE the byte-frequency pass because its output decides which bytes that pass
       # is allowed to look at — see the variable region below.
-      per_pos, effective, const_mask, aligned_from_end =
+      per_pos, effective, const_mask, distinct_at, aligned_from_end =
         aligned_positions(usable, min_len, n, variable_length: len_min != len_max)
       shannon_total = per_pos.sum
       constant_positions = const_mask.count(true)
 
       region_bytes = variable_region(usable, min_len, const_mask, aligned_from_end)
+      gcounts = byte_counts(region_bytes)
+      # Columns that vary over a small slice of the alphabet (a UUID's variant nibble) are
+      # structure too — see `partial_columns`. `structural` is every column the byte-level tests
+      # skip: the constant ones, plus these when excluding them still leaves bytes to measure.
+      structural = const_mask
+      partial = partial_columns(distinct_at, gcounts.count(&.positive?), n)
+      partial_positions = partial.count(true)
+      if partial_positions > 0
+        mask = const_mask.map_with_index { |c, i| c || partial.unsafe_fetch(i) }
+        narrowed = Region.new(min_len, mask, aligned_from_end).bytes(usable)
+        if narrowed.empty?
+          partial_positions = 0
+        else
+          region_bytes = narrowed
+          gcounts = byte_counts(region_bytes)
+          structural = mask
+          effective += partial_credit(usable, min_len, partial, distinct_at, per_pos, aligned_from_end)
+        end
+      end
       total_bytes = region_bytes.size.to_i64
 
-      gcounts = Array(Int32).new(256, 0)
-      region_bytes.each { |b| gcounts[b] += 1 }
       present = [] of UInt8
       gcounts.each_with_index { |c, i| present << i.to_u8 if c > 0 }
       charset_size = present.size
@@ -279,7 +301,7 @@ module Gori::Sequencer
       tests << uniqueness_test(unique, n, duplicate_count)
       tests << TestRow.new("Sequential", seq ? "detected" : "none", seq_detail,
         seq ? Verdict::Fail : Verdict::Pass)
-      tests << structure_test(constant_positions, min_len, aligned_from_end)
+      tests << structure_test(constant_positions, partial_positions, min_len, aligned_from_end)
       tests << gate_bits(monobit_test(bit_scan, small), pow2)
       tests << gate_bits(poker_test(bits, small), pow2)
       tests << gate_bits(runs_test(bit_scan, small), pow2)
@@ -287,7 +309,7 @@ module Gori::Sequencer
       tests << chi_square_test(gcounts, present, total_bytes, small)
       tests << serial_test(sym_seq, small)
       tests << compression_test(region_bytes, total_bytes, charset_size, small)
-      tests << gate_bits(bit_bias_test(ones_at, n, small, const_mask, bps), pow2)
+      tests << gate_bits(bit_bias_test(ones_at, n, small, structural, bps), pow2)
       # The three NIST-style additions. Each reads the SAME symbol bitstream the four classic
       # bit tests do, so each is gated on a power-of-two alphabet for the same reason, and each
       # catches a failure the existing table cannot: Cusum a drift that shows up only partway
@@ -310,7 +332,8 @@ module Gori::Sequencer
         sequential: seq, rating: rating, tests: tests,
         char_counts: char_counts, len_hist: len_hist, len_min: len_min, len_max: len_max,
         per_pos_entropy: per_pos, bit_bias: bit_bias,
-        constant_positions: constant_positions, aligned_from_end: aligned_from_end)
+        constant_positions: constant_positions, partial_positions: partial_positions,
+        aligned_from_end: aligned_from_end)
     end
 
     # The per-position pass, anchored to whichever END of the token carries more entropy.
@@ -324,11 +347,11 @@ module Gori::Sequencer
     # an arbitrary anchor choice decide the grade. A fixed-length corpus yields identical
     # windows, so it never pays for the second pass.
     private def self.aligned_positions(usable : Array(String), min_len : Int32, n : Int32,
-                                       variable_length : Bool) : {Array(Float64), Float64, Array(Bool), Bool}
-      per_pos, effective, mask = positional(usable, min_len, n, from_end: false)
-      return {per_pos, effective, mask, false} unless variable_length
-      s_pos, s_eff, s_mask = positional(usable, min_len, n, from_end: true)
-      s_eff > effective ? {s_pos, s_eff, s_mask, true} : {per_pos, effective, mask, false}
+                                       variable_length : Bool) : {Array(Float64), Float64, Array(Bool), Array(Int32), Bool}
+      per_pos, effective, mask, distinct = positional(usable, min_len, n, from_end: false)
+      return {per_pos, effective, mask, distinct, false} unless variable_length
+      s_pos, s_eff, s_mask, s_distinct = positional(usable, min_len, n, from_end: true)
+      s_eff > effective ? {s_pos, s_eff, s_mask, s_distinct, true} : {per_pos, effective, mask, distinct, false}
     end
 
     # THE VARIABLE REGION: every byte except those sitting at a window column that never varies.
@@ -356,7 +379,8 @@ module Gori::Sequencer
     end
 
     # Per-position byte entropy over a fixed window of `min_len` positions, with the
-    # effective-entropy budget (Σ log2 distinct) and a mask marking the columns that never vary.
+    # effective-entropy budget (Σ log2 distinct), a mask marking the columns that never vary,
+    # and each column's distinct-byte count.
     # `from_end` reads position p as the p-th byte from the END of each token; both returned
     # arrays are in token order (left to right within the window), so a caller charting them
     # never has to know which anchor won.
@@ -364,9 +388,10 @@ module Gori::Sequencer
     # One 256-entry column table, refilled per position rather than reallocated: this runs
     # twice for a variable-length corpus and min_len reaches the hundreds.
     private def self.positional(usable : Array(String), min_len : Int32, n : Int32,
-                                from_end : Bool) : {Array(Float64), Float64, Array(Bool)}
+                                from_end : Bool) : {Array(Float64), Float64, Array(Bool), Array(Int32)}
       per_pos = Array(Float64).new(min_len, 0.0)
       constant = Array(Bool).new(min_len, false)
+      distinct_at = Array(Int32).new(min_len, 0)
       effective = 0.0
       col = Array(Int32).new(256, 0)
       (0...min_len).each do |p|
@@ -379,8 +404,68 @@ module Gori::Sequencer
         per_pos[p] = shannon(col, n.to_i64)
         effective += Math.log2(distinct.to_f) if distinct > 0
         constant[p] = distinct == 1
+        distinct_at[p] = distinct
       end
-      {per_pos, effective, constant}
+      {per_pos, effective, constant, distinct_at}
+    end
+
+    # PARTIALLY FIXED columns: ones that vary, but over far fewer byte values than the rest of
+    # the token draws from. A UUIDv4's RFC 9562 variant nibble is the case that matters — 2
+    # fixed bits, so it only ever reads 8/9/a/b in a hex alphabet of 16. Left in the variable
+    # region it is the constant-prefix problem one step further: those four bytes are
+    # over-represented in the pooled byte frequencies, its two fixed bits land in the symbol
+    # bitstream every 124 bits, and chi-square, poker and bit bias fail on 122 bits of CSPRNG
+    # output — a WEAK or CRITICAL headline beside an effective-entropy line reading 122.
+    #
+    # Those tests assume every byte they read is drawn from ONE distribution over the pooled
+    # alphabet. A column confined to a small subset of that alphabet is a different field, not
+    # a biased draw from the same one, so it is structure and is judged by what it holds — its
+    # own entropy, credited in `analyze` — rather than pooled with the columns it does not
+    # resemble.
+    #
+    # "Far fewer" is measured against what uniform draws would show: n draws from a k-symbol
+    # alphabet reveal k(1 - (1 - 1/k)^n) distinct values on average, and a column showing at
+    # most half of that is flagged. Chance does not get there: the distinct count of a truly
+    # uniform column sits within a couple of values of its mean (its variance never exceeds the
+    # mean — at n=20, k=64 the mean is 17.3 with a standard deviation of 1.5), so a random column
+    # misses the bar by many deviations at every sample size the tests run at, and the count
+    # scales with n, so a small sample is not mistaken for a small alphabet. A column that is
+    # skewed but still reaches most of the alphabet — a biased generator — stays in the region,
+    # where chi-square and the bit tests are there to catch it.
+    private def self.partial_columns(distinct : Array(Int32), k : Int32, n : Int32) : Array(Bool)
+      return Array(Bool).new(distinct.size, false) if k <= 1
+      expected = k * (1.0 - (1.0 - 1.0 / k) ** n)
+      distinct.map { |d| d > 1 && d <= expected / 2 }
+    end
+
+    # The change to `effective_entropy` for the partial columns: out goes their Σ log2(distinct),
+    # in comes what the sample can vouch for. No test reads a partial column any more, so
+    # nothing would catch a skew inside one or a dependence between them — twelve columns that
+    # always repeat one value from a-d are 2 bits, not 24. So the credit is their measured
+    # Shannon entropy, per column (a skew) and capped by the JOINT entropy of the columns taken
+    # together (a dependence). For a UUID's lone variant nibble used evenly, all three agree at
+    # 2 bits; neither measure can exceed log2(distinct).
+    private def self.partial_credit(usable : Array(String), min_len : Int32, partial : Array(Bool),
+                                    distinct_at : Array(Int32), per_pos : Array(Float64),
+                                    from_end : Bool) : Float64
+      cols = (0...min_len).select { |i| partial.unsafe_fetch(i) }
+      capacity = cols.sum { |i| Math.log2(distinct_at.unsafe_fetch(i).to_f) }
+      marginal = cols.sum { |i| per_pos.unsafe_fetch(i) }
+      tuples = Hash(String, Int32).new(0)
+      usable.each do |t|
+        sl = t.to_slice
+        w0 = from_end ? sl.size - min_len : 0
+        key = String.build(cols.size) { |io| cols.each { |i| io.write_byte(sl.unsafe_fetch(w0 + i)) } }
+        tuples[key] += 1
+      end
+      joint = shannon_hash(tuples, usable.size)
+      Math.min(marginal, joint) - capacity
+    end
+
+    private def self.byte_counts(bytes : Bytes) : Array(Int32)
+      counts = Array(Int32).new(256, 0)
+      bytes.each { |b| counts[b] += 1 }
+      counts
     end
 
     # A raw fixed-width bit test (monobit/poker/runs/long-run/bit-bias) only measures true
@@ -605,10 +690,17 @@ module Gori::Sequencer
     # How much of the token is skeleton rather than secret. INFO, never a FAIL: these columns
     # already contribute 0 to `effective_entropy`, so grading them again would charge the same
     # weakness twice — this row exists to explain a low headline figure, not to lower it.
-    private def self.structure_test(constant : Int32, min_len : Int32, from_end : Bool) : TestRow
+    private def self.structure_test(constant : Int32, partial : Int32, min_len : Int32, from_end : Bool) : TestRow
       return TestRow.new("Structure", "—", "no fixed window", Verdict::Info) if min_len <= 0
       anchor = from_end ? "aligned to token end" : "aligned to token start"
-      detail = constant == 0 ? "every position varies · #{anchor}" : "#{min_len - constant} varying · #{anchor}"
+      varying = min_len - constant - partial
+      detail = if constant + partial == 0
+                 "every position varies · #{anchor}"
+               elsif partial == 0
+                 "#{varying} varying · #{anchor}"
+               else
+                 "#{varying} varying · #{partial} partially fixed · #{anchor}"
+               end
       TestRow.new("Structure", "#{constant}/#{min_len} fixed", detail, Verdict::Info)
     end
 
@@ -784,10 +876,11 @@ module Gori::Sequencer
       0.5 * Math.erfc(-x / Math.sqrt(2.0))
     end
 
-    # `constant`/`bps` locate the window columns that never vary, whose bits are skipped. A
+    # `constant`/`bps` locate the structural window columns, whose bits are skipped. A
     # constant column's ones-count is 0 or n by definition, so every one of its bits scores
     # |z| = √n and counted as "biased" — a token behind an 8-character prefix reported 85 of 160
-    # positions biased on a corpus whose varying region was flawless. Structure is reported by
+    # positions biased on a corpus whose varying region was flawless, and a UUIDv4's variant
+    # nibble has two such bits of its own (`partial_columns`). Structure is reported by
     # its own INFO row; this row is about the bits that were supposed to be random.
     private def self.bit_bias_test(ones_at : Array(Int32), n : Int32, small : Bool,
                                    constant : Array(Bool), bps : Int32) : TestRow
@@ -1041,10 +1134,10 @@ module Gori::Sequencer
     # TUI re-runs on a throttle. `BIAS_TALLY_MAX` is the far end of the same worry.
     #
     # The extra slot is for a byte with NO alphabet index. `idx_of` is -1 for a byte that
-    # appears only in a constant column — those bytes are cut from the variable region the
+    # appears only in a structural column — those bytes are cut from the variable region the
     # alphabet was built from — and -1 shifts to all-ones, so such a byte counts toward every
     # bit, exactly as the per-bit form did. A constant column contributes the same count to all
-    # of its bits either way, which `bit_bias_test` then skips by `const_mask`.
+    # of its bits either way, which `bit_bias_test` then skips by its structural mask.
     private def self.symbol_bit_ones(usable : Array(String), min_len : Int32, bps : Int32,
                                      idx_of : Array(Int32), charset_size : Int32,
                                      from_end : Bool) : Array(Int32)
@@ -1153,7 +1246,7 @@ module Gori::Sequencer
       h
     end
 
-    private def self.shannon_hash(counts : Hash(Int32, Int32), n : Int32) : Float64
+    private def self.shannon_hash(counts : Hash(K, Int32), n : Int32) : Float64 forall K
       return 0.0 if n <= 0
       h = 0.0
       counts.each_value do |c|

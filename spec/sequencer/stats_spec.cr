@@ -8,6 +8,18 @@ private def random_hex(count : Int32, len : Int32, seed : UInt64 = 1234_u64) : A
   Array(String).new(count) { String.build { |io| len.times { io << "0123456789abcdef"[rng.rand(16)] } } }
 end
 
+# Deterministic RFC 9562 UUIDv4s: version nibble 4, variant bits 10 (8/9/a/b).
+private def random_uuid4(count : Int32, seed : UInt64, hyphens : Bool) : Array(String)
+  rng = Random.new(seed)
+  Array(String).new(count) do
+    b = Bytes.new(16) { rng.rand(256).to_u8 }
+    b[6] = (b[6] & 0x0f_u8) | 0x40_u8
+    b[8] = (b[8] & 0x3f_u8) | 0x80_u8
+    h = b.hexstring
+    hyphens ? "#{h[0, 8]}-#{h[8, 4]}-#{h[12, 4]}-#{h[16, 4]}-#{h[20, 12]}" : h
+  end
+end
+
 # The `detail` string of the Sequential test row for a given token set — the human-readable
 # classification ("constant step N", "monotonic up/down", "non-monotonic", "corr=…", "n/a").
 private def seq_detail(tokens : Array(String)) : String
@@ -575,6 +587,84 @@ describe Gori::Sequencer::Stats do
     row.value.should eq("8/32 fixed")
     row.verdict.should eq(S::Verdict::Info)               # already priced into effective_entropy — never charged twice
     report.effective_entropy.should be_close(96.0, 0.001) # 24 hex chars × 4 bits; the prefix adds 0
+  end
+
+  # ── partially fixed columns (#1198) ─────────────────────────────────────────────────
+
+  it "rates random UUIDv4s Secure: the variant nibble is structure, not a randomness failure" do
+    # The RFC 9562 variant nibble only reads 8/9/a/b. Pooled with the random columns it failed
+    # chi-square and poker and dragged a 122-bit token to WEAK or CRITICAL — a headline that
+    # contradicted its own effective-entropy line.
+    {true, false}.each do |hyphens|
+      report = S.analyze(random_uuid4(500, 21_u64, hyphens))
+      report.partial_positions.should eq(1)
+      report.constant_positions.should eq(hyphens ? 5 : 1) # the version nibble (+ 4 hyphens)
+      report.charset_size.should eq(16)
+      report.tests.count(&.verdict.fail?).should eq(0)
+      report.tests.find { |t| t.name == "Bit bias" }.not_nil!.verdict.should eq(S::Verdict::Pass)
+      report.rating.should eq(S::Rating::Secure)
+      report.effective_entropy.should be_close(122.0, 0.05) # 30 × 4 bits + the variant's 2
+      report.tests.find { |t| t.name == "Structure" }.not_nil!.detail.should contain("1 partially fixed")
+    end
+  end
+
+  it "does not mistake a small sample of a large alphabet for a partially fixed column" do
+    # 20 draws from base64 reveal ~17 of 64 values per column; the bar scales with the sample.
+    rng = Random.new(8_u64)
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    tokens = Array.new(20) { String.build { |io| 32.times { io << alphabet[rng.rand(64)] } } }
+    S.analyze(tokens).partial_positions.should eq(0)
+  end
+
+  it "keeps a token whose varying columns are mostly two-valued Weak" do
+    # 8 random hex chars (32 bits) + 24 columns that each flip between two values (24 bits).
+    rng = Random.new(9_u64)
+    tokens = Array.new(300) do
+      String.build { |io| 8.times { io << "0123456789abcdef"[rng.rand(16)] }; 24.times { io << "8a"[rng.rand(2)] } }
+    end
+    report = S.analyze(tokens)
+    report.partial_positions.should eq(24)
+    report.effective_entropy.should be < 60.0
+    report.rating.should eq(S::Rating::Weak)
+  end
+
+  it "credits a skewed partially fixed column its measured entropy, not log2(distinct)" do
+    # Excluded from the tests, a partial column's skew would go unseen if it were still worth
+    # log2(4) = 2 bits: 32 + 24 × 2 = 80 would read MODERATE for a token worth ~37.
+    rng = Random.new(10_u64)
+    tokens = Array.new(300) do
+      String.build do |io|
+        8.times { io << "0123456789abcdef"[rng.rand(16)] }
+        24.times { io << (rng.rand < 0.97 ? '8' : "9ab"[rng.rand(3)]) }
+      end
+    end
+    report = S.analyze(tokens)
+    report.partial_positions.should eq(24)
+    report.effective_entropy.should be < 45.0
+    report.rating.should eq(S::Rating::Weak)
+  end
+
+  it "credits dependent partially fixed columns once, not once per column" do
+    # 16 random hex + 12 columns that all repeat ONE value from a-d: 64 + 2 bits, not 64 + 24.
+    # No test reads partial columns, so the joint entropy is what catches the dependence.
+    rng = Random.new(12_u64)
+    tokens = Array.new(300) do
+      c = "abcd"[rng.rand(4)]
+      String.build { |io| 16.times { io << "0123456789abcdef"[rng.rand(16)] }; 12.times { io << c } }
+    end
+    report = S.analyze(tokens)
+    report.partial_positions.should eq(12)
+    report.effective_entropy.should be < 70.0
+    report.rating.value.should be < S::Rating::Secure.value
+  end
+
+  it "still flags a millisecond-timestamp token as sequential and Critical" do
+    rng = Random.new(11_u64)
+    t0 = 1_758_600_000_000_i64
+    tokens = Array.new(300) { |i| (t0 + i * 37).to_s(16) + String.build { |io| 8.times { io << "0123456789abcdef"[rng.rand(16)] } } }
+    report = S.analyze(tokens)
+    report.sequential.should be_true
+    report.rating.should eq(S::Rating::Critical)
   end
 
   # `symbol_bit_ones` counts per COLUMN above `charset + 1` tokens and asks each token
