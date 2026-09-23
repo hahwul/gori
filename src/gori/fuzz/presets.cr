@@ -1,3 +1,4 @@
+require "../embedded_list"
 require "./payload"
 
 module Gori::Fuzz
@@ -39,7 +40,7 @@ module Gori::Fuzz
     def self.builtin(name : String) : Array(String)
       key = normalize(name)
       raw = BUILTIN_RAW[key]? || raise Gori::Error.new(unknown_message(name))
-      @@cache[key] ||= parse(raw)
+      @@cache[key] ||= EmbeddedList.parse(raw)
     end
 
     # Built-in payloads, then the optional user file (read at runtime). De-duped, order
@@ -57,14 +58,14 @@ module Gori::Fuzz
           # chomp the line ending only, keeping leading/trailing whitespace, `#`-leading
           # lines (a SQL `#` comment, `#{7*7}` SSTI, a `#!/bin/sh` shebang are all valid
           # payloads) and blank lines (an intentional empty payload, sent by `-w` too).
-          # The strip + comment/blank skip below in `parse` is correct ONLY for the
+          # The strip + comment/blank skip in `EmbeddedList.parse` is correct ONLY for the
           # built-in `.txt` sets, whose headers document `#`/blank as comments.
           File.each_line(path, chomp: true) do |line|
             values << line
           end
         end
       end
-      dedup(values)
+      EmbeddedList.dedup(values)
     end
 
     private def self.normalize(name : String) : String
@@ -73,20 +74,6 @@ module Gori::Fuzz
 
     private def self.unknown_message(name : String) : String
       "unknown payload preset: #{name.strip.inspect} (available: #{names.join(", ")})"
-    end
-
-    private def self.parse(raw : String) : Array(String)
-      out = [] of String
-      raw.each_line do |line|
-        stripped = line.strip
-        out << stripped unless stripped.empty? || stripped.starts_with?('#')
-      end
-      out
-    end
-
-    private def self.dedup(list : Array(String)) : Array(String)
-      seen = Set(String).new
-      list.select { |n| seen.add?(n) }
     end
   end
 

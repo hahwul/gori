@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Env: `$GEN.USER_AGENT` fills in a real desktop browser User-Agent, drawn at random per send from a list built into gori; `$U` + ↹ now completes to it rather than `$GEN.UUID` (#1112)
+- Env: `$GEN.USER_AGENT` fills in a real desktop browser User-Agent, drawn at random per send from a list built into gori, and `$GEN.USER_AGENT_CHROME`/`_FIREFOX`/`_SAFARI` narrow it to the browser a TLS preset of that name claims; `$U` + ↹ now completes to it rather than `$GEN.UUID` (#1112, #1152)
 - Probe: SQL injection detection reaches the blind cases — a new boolean-based rule confirms a true/false differential (SimHash-guarded so a dynamic page is not mistaken for an oracle), and a new time-based rule (off by default, since it deliberately waits) confirms an injected `SLEEP`/`pg_sleep`/`WAITFOR` delay that scales across a baseline and two increasing delays (#1110)
 - Probe: the active scanner can confirm remote file inclusion out of band by planting a language-marked OAST resource in include-shaped file, page, template and locale parameters (#1111)
 - MCP: a malformed JSON-RPC envelope is refused instead of answered — `"jsonrpc"` must be the string `2.0`, and a request id must be a string, a number or null (#1138)

@@ -137,7 +137,11 @@ describe "TextArea env completion (namespaced)" do
         ta.text.should eq("$GEN.")
         rows = rows_of(ta)
         rows.find!(&.starts_with?("▎$GEN.ISO8601")).should contain("UTC RFC 3339 · per send")
-        rows.find!(&.starts_with?("$GEN.UUID")).should contain("UUID v4 · fresh per send")
+        # The catalog outgrew the eight-row viewport (#1152): UUID sorts last and sits below the
+        # fold until a letter narrows the list.
+        rows.find!(&.starts_with?("$GEN.RANDOM_HEX")).should contain("128-bit hex · fresh per send")
+        narrowed = rows_of(typed("$GEN.UU"))
+        narrowed.find!(&.includes?("$GEN.UUID")).should contain("UUID v4 · fresh per send")
       end
     end
   end
