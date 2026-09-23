@@ -782,9 +782,25 @@ module Gori
                      @created_at, @updated_at)
       end
 
+      # Whether the object this step named was deleted (#1160). Stored as the NEGATED id —
+      # no migration, and it fails closed: every resolver looks the raw `ref_id` up, finds no
+      # row with a negative id, and reports the step missing, which is also all an older gori
+      # reading this database can do with it. A positive id could be taken again by the next
+      # repeater (`repeaters.id` has no AUTOINCREMENT) and the step would re-bind to it.
+      def detached? : Bool
+        @ref_id < 0
+      end
+
+      # The id this step was created against, whether or not that object still exists — what
+      # a person or an agent should be shown. Resolve with `ref_id`, never with this.
+      def target_id : Int64
+        @ref_id.abs
+      end
+
       # `repeater #3` — how a step names its target before anything resolves it.
       def ref_label : String
-        "#{@ref_kind.label} ##{@ref_id}"
+        base = "#{@ref_kind.label} ##{target_id}"
+        detached? ? "#{base} (deleted)" : base
       end
     end
 

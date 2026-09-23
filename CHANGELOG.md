@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Retest: deleting a Repeater session marks the issue retest steps that used it as deleted, so they keep refusing to run instead of silently re-binding to the next session that reuses its id (#1160)
 - Env: `$GEN.USER_AGENT` fills in a real desktop browser User-Agent that follows the request's TLS preset, `$GEN.USER_AGENT_CHROME`/`_FIREFOX`/`_SAFARI` pick one browser, and Settings → User-Agents or `gori settings user-agents` replaces the built-in list. `$U` + ↹ now completes to it rather than `$GEN.UUID` (#1112, #1152, #1153, #1154)
 - Probe: SQL injection detection reaches the blind cases — a new boolean-based rule confirms a true/false differential (SimHash-guarded so a dynamic page is not mistaken for an oracle), and a new time-based rule (off by default, since it deliberately waits) confirms an injected `SLEEP`/`pg_sleep`/`WAITFOR` delay that scales across a baseline and two increasing delays (#1110)
 - Probe: the active scanner can confirm remote file inclusion out of band by planting a language-marked OAST resource in include-shaped file, page, template and locale parameters (#1111)

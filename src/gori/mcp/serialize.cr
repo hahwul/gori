@@ -1111,7 +1111,10 @@ module Gori
         j.field "position", s.position
         j.field "role", s.role.label
         j.field "ref_kind", s.ref_kind.label
-        j.field "ref_id", s.ref_id
+        j.field "ref_id", s.target_id
+        # The step's session was deleted: it refuses as missing until it is removed and
+        # re-added, and `ref_id` is the id it had, not one that resolves (#1160).
+        j.field "ref_deleted", s.detached?
         j.field "label", Issues::Export.one_line(pl.label)
         j.field "method", pl.method
         j.field "url", Issues::Export.one_line(pl.url)
@@ -1179,7 +1182,7 @@ module Gori
         j.field "position", s.position
         j.field "role", s.role.label
         j.field "ref_kind", s.ref_kind.label
-        j.field "ref_id", s.ref_id
+        j.field "ref_id", s.target_id
         j.field "label", Issues::Export.one_line(pl.label)
         j.field "method", pl.method
         j.field "url", Issues::Export.one_line(pl.url)

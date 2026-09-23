@@ -165,7 +165,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_scope` | 현재 스코프 include/exclude 규칙 |
 | `list_links` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `list_evidence` / `get_evidence` | 동결된 증거 목록(교환의 변경 불가 사본, 출처·연결된 이슈·SHA-256 포함. `issue_id`를 주면 한 이슈의 사본, 생략하면 고아까지 포함한 프로젝트 전체 보관함)과, 사본 하나의 바이트(`include_sensitive`가 아니면 헤드의 자격 증명은 가려지고, 본문은 `get_flow`처럼 상한 적용) |
-| `list_retest_steps` / `list_retest_runs` / `get_retest_run` | Issue의 **리테스트**: 결함을 재현하는 Repeater 전송 목록(각 단계를 현재 프로젝트 기준으로 해석하므로 응답에 무엇을 보낼지와 어떤 단계가 상태를 바꾸는지가 이미 담겨 있습니다), 보존된 실행 기록(최신순), 그리고 한 실행의 결과 표(각 행이 자기 전송의 History flow id를 보관) |
+| `list_retest_steps` / `list_retest_runs` / `get_retest_run` | Issue의 **리테스트**: 결함을 재현하는 Repeater 전송 목록(각 단계를 현재 프로젝트 기준으로 해석하므로 응답에 무엇을 보낼지와 어떤 단계가 상태를 바꾸는지가 이미 담겨 있습니다. Repeater 세션이 삭제된 단계는 `ref_deleted: true`로 표시되고, 새 세션이 그 id를 다시 받아도 실행되지 않습니다), 보존된 실행 기록(최신순), 그리고 한 실행의 결과 표(각 행이 자기 전송의 History flow id를 보관) |
 | `get_issue`의 retest 필드 | 리테스트가 있는 이슈는 `links`, `evidence` 옆에 `retest` 객체(단계 수와 마지막 실행 판정)를 함께 싣습니다. 결함을 읽는 것만으로 재현 가능한 검사가 있는지, 지난번에 뭐라고 했는지 알 수 있습니다. 리테스트가 없는 이슈에는 아예 나오지 않습니다 |
 | `compare_flows` | 두 플로우의 요청 또는 응답 줄 단위 diff. 양쪽의 status/size/time과 A→B 델타 포함. `context:N`은 동일 구간을 `{kind:fold,hidden}` 마커로 접음 |
 | `diff_projects` | 리테스트 diff: **프로젝트 두 개**를 엔드포인트 단위로 비교. 지난 엔게이지먼트 이후 무엇이 새로 생겼고, 사라졌고, 다르게 응답하는지. 엔드포인트 키는 Sitemap의 폴딩된 템플릿을 그대로 쓰고, `removed`(새 캡처가 아예 요청한 적 없음)와 `gone`(요청했고 404/410을 받음)은 별개의 판정 |

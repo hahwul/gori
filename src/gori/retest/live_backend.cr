@@ -54,12 +54,12 @@ module Gori
       end
 
       def send(p : Planned) : Observation
-        rec = @store.get_repeater(p.step.ref_id)
+        rec = p.step.detached? ? nil : @store.get_repeater(p.step.ref_id)
         # Re-read, because `Retest.plan` ran before the confirm and a peer may have closed the
         # tab while the operator was reading it. A plan-time check alone would send a request
         # built from a row that is gone.
         unless rec
-          return Observation.new(error: "repeater ##{p.step.ref_id} no longer exists")
+          return Observation.new(error: "repeater ##{p.step.target_id} no longer exists")
         end
         # Re-checked here for the same reason the row is re-read: `Retest.plan` ran before the
         # confirm, and a peer editing the tab in between can turn a runnable step into one

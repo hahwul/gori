@@ -326,4 +326,51 @@ describe "Gori::Retest.plan" do
       Gori::Retest.state_changing(pl).should be_empty
     end
   end
+
+  # #1160: `repeaters.id` has no AUTOINCREMENT, so deleting the newest session frees its id
+  # for the next one. A step left pointing at the old id silently re-bound to the new,
+  # unrelated session, and `retest run` sent it and recorded a verdict on the issue.
+  it "never re-binds a step to a later session that reuses its deleted session's id" do
+    with_store do |store|
+      iid = issue(store)
+      rid = repeater(store, "original", "https://a.test")
+      sid, _ = store.add_retest_step(iid, :variant, Gori::Store::LinkRefKind::Repeater, rid, "status:404")
+      store.delete_repeater(rid).should be_true
+
+      reused = repeater(store, "unrelated", "https://b.test")
+      reused.should eq(rid) # the hazard: the freed id comes straight back
+
+      step = store.get_retest_step(sid).not_nil!
+      step.detached?.should be_true
+      step.target_id.should eq(rid) # still names what it was created against
+      step.ref_label.should eq("repeater ##{rid} (deleted)")
+      step.assertion.should eq("status:404") # the operator's work is kept, not cascaded away
+
+      pl = Gori::Retest.plan(store, iid)
+      pl[0].runnable?.should be_false
+      pl[0].url.should_not contain("b.test")
+      pl[0].missing.not_nil!.should contain("no longer exists")
+      Gori::Retest::Engine.new(NoSendBackend.new).run(pl)[0].outcome.skipped?.should be_true
+    end
+  end
+
+  it "detaches only the deleted session's steps, across every issue" do
+    with_store do |store|
+      a_issue = issue(store, "a")
+      b_issue = issue(store, "b")
+      gone = repeater(store, "gone")
+      kept = repeater(store, "kept")
+      store.add_retest_step(a_issue, :variant, Gori::Store::LinkRefKind::Repeater, gone)
+      store.add_retest_step(b_issue, :setup, Gori::Store::LinkRefKind::Repeater, gone)
+      store.add_retest_step(b_issue, :variant, Gori::Store::LinkRefKind::Repeater, kept)
+      store.delete_repeater(gone).should be_true
+
+      store.retest_steps(a_issue).map(&.detached?).should eq([true])
+      store.retest_steps(b_issue).map(&.detached?).should eq([true, false])
+      store.retest_steps(b_issue).last.ref_id.should eq(kept)
+      # Deleting again (a peer's stale delete) must not flip the sign back.
+      store.delete_repeater(gone).should be_true
+      store.retest_steps(a_issue).first.detached?.should be_true
+    end
+  end
 end
