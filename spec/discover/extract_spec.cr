@@ -25,6 +25,29 @@ describe Gori::Discover::Extract do
     html_hrefs(body).should contain("/next-page")
   end
 
+  # #1182: attribute order is not significant, and a browser follows a quoted relative URL. The
+  # old single regex required `http-equiv` first and stopped its URL class at either quote.
+  it "extracts a meta refresh whatever the attribute order, and a quoted relative url (#1182)" do
+    html_hrefs(%(<meta content="0;url=/meta-order" http-equiv="refresh">).to_slice).should eq(["/meta-order"])
+    html_hrefs(%(<meta http-equiv="refresh" content="0; url='meta-quoted'">).to_slice).should eq(["meta-quoted"])
+    html_hrefs(%(<META Content='5; URL="a b"' HTTP-EQUIV=Refresh>).to_slice).should eq(["a b"])
+    html_hrefs(%(<meta content="0; url=/x?a=1&amp;b=2" http-equiv="&#x72;efresh">).to_slice).should eq(["/x?a=1&b=2"])
+  end
+
+  it "reads a meta refresh only from a refresh tag's own attributes (#1182)" do
+    html_hrefs(%(<meta name="x" content="0;url=/not-refresh">).to_slice).should be_empty
+    html_hrefs(%(<meta http-equiv="refresh" data-x='content="0;url=/inner"'>).to_slice).should be_empty
+    html_hrefs(%(<meta http-equiv="refresh" content="5">).to_slice).should be_empty
+    # the FIRST of a repeated attribute is the one HTML keeps
+    html_hrefs(%(<meta http-equiv="refresh" content="0;url=/first" content="0;url=/second">).to_slice)
+      .should eq(["/first"])
+  end
+
+  it "reads a hostile meta tag with a long name and an unclosed quote in bounded time" do
+    evil = ("<meta http-equiv=refresh " + ("n" * 200_000) + "=\"" + ("v" * 200_000)).to_slice
+    html_hrefs(evil).should be_empty
+  end
+
   it "extracts robots Disallow / Allow paths (skipping a bare slash)" do
     body = "User-agent: *\nDisallow: /admin\nAllow: /public\nDisallow: /\n# comment\n".to_slice
     links = E.from_robots(body)

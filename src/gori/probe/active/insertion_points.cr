@@ -3,6 +3,7 @@ require "json"
 require "./types"
 require "../../miner/types"
 require "../../miner/inject"
+require "../../json_spans"
 require "../../fuzz/content_length"
 require "../../proxy/codec/http1"
 
@@ -25,8 +26,8 @@ module Gori
       #     paths.
       #   * BYTE PRESERVATION. Captured bytes may be invalid UTF-8, and a probe must re-send an
       #     operator's untouched fields verbatim (never as U+FFFD). So query/form parsing slices on
-      #     byte offsets found by scanning (never scrubs what is re-sent), JSON carries non-injected
-      #     fields through as their parsed `JSON::Any`, and header/cookie walking is byte-safe. The
+      #     byte offsets found by scanning (never scrubs what is re-sent), JSON splices the injected
+      #     values into the captured bytes (`JsonSpans`), and header/cookie walking is byte-safe. The
       #     ONE decoded value a rule inspects (`Slot#value`) is exposed UNSCRUBBED; a rule that runs
       #     a PCRE over it scrubs at the point of use (only lfi does).
       module InsertionPoints
@@ -177,8 +178,7 @@ module Gori
             new_body = pairs.join('&').to_slice
           end
 
-          # JSON body: re-serialize top-level object with chosen string keys replaced, every other
-          # field carried through as its parsed JSON::Any (byte-preserving for untouched fields).
+          # JSON body: the top-level object with chosen keys' values spliced, every other byte kept.
           j_changes = changes.select { |(s, _)| s.loc.json? }
           if !j_changes.empty? && body && !body.empty?
             rebuilt = rebuild_json(body, j_changes)
@@ -221,38 +221,48 @@ module Gori
           end
         end
 
-        # Re-serialize a JSON object body with the chosen top-level string fields mutated. nil unless
-        # the root parses as an object (matching each_json_string_key, so build never gets a json
-        # change on a body that yielded no json slot). REPLACE substitutes the decoded value; RAW
-        # wraps the decoded string value with the payload URL-DECODED first — the rules' RAW payloads
-        # are URL-wire form (`%27%22`, `%5C`) for the query/form layer, so in a JSON string the
-        # decoded character (`'"`, `\`) is what a server actually concatenates into its SQL/template.
-        # Not `.scrub`: JSON.parse does not require valid UTF-8 inside a string, and to_json
-        # round-trips the untouched fields' bytes as-is.
+        # The JSON object body with the chosen top-level fields mutated IN PLACE, every other byte
+        # the captured one. nil unless the root is an object (matching each_json_string_key, so
+        # build never gets a json change on a body that yielded no json slot). REPLACE substitutes
+        # the decoded value; RAW wraps the string value with the payload URL-DECODED first — the
+        # rules' RAW payloads are URL-wire form (`%27%22`, `%5C`) for the query/form layer, so in a
+        # JSON string the decoded character (`'"`, `\`) is what a server actually concatenates
+        # into its SQL/template. The wrap goes inside the value's own quotes, so its original
+        # escapes are kept as spelled.
+        #
+        # Spliced, not re-serialized (#1183): `JSON.parse` + `to_json` folded a duplicated member
+        # to its last value and re-spelled every number and escape in the body. A duplicated key
+        # is mutated at EVERY occurrence, so the payload reaches a first-wins and a last-wins
+        # parser alike.
         private def self.rebuild_json(body : Bytes, changes : Array({Slot, Change})) : Bytes?
-          h = begin
-            JSON.parse(String.new(body)).as_h?
-          rescue JSON::ParseException
-            nil
-          end
-          return nil unless h
+          root = JsonSpans.root_object(body)
+          return nil unless root
           by_name = {} of String => Change
           changes.each { |(s, c)| by_name[s.name] = c }
-          merged = {} of String => JSON::Any
-          h.each do |k, v|
-            if c = by_name[k]?
-              if r = c.replace
-                merged[k] = JSON::Any.new(r)
-              elsif base = v.as_s?
-                merged[k] = JSON::Any.new("#{decode(c.prefix)}#{base}#{decode(c.suffix)}")
-              else
-                merged[k] = v
-              end
-            else
-              merged[k] = v
+          edits = [] of {Int32, Int32, String}
+          root.members.each do |m|
+            next unless c = by_name[m.key]?
+            if r = c.replace
+              edits << {m.value_start, m.value_end, r.to_json}
+            elsif m.string?(body)
+              edits << {m.value_start + 1, m.value_start + 1, json_inner(decode(c.prefix))}
+              edits << {m.value_end - 1, m.value_end - 1, json_inner(decode(c.suffix))}
             end
           end
-          merged.to_json.to_slice
+          io = IO::Memory.new(body.size + edits.sum(&.[2].bytesize))
+          pos = 0
+          edits.each do |(a, b, text)|
+            io.write(body[pos, a - pos])
+            io << text
+            pos = b
+          end
+          io.write(body[pos, body.size - pos])
+          io.to_slice
+        end
+
+        # `s` as the inside of a JSON string literal — its `to_json` without the quotes.
+        private def self.json_inner(s : String) : String
+          s.to_json[1...-1]
         end
 
         # Yield {full-list index, raw name, raw value} for each valid k=v of an &-joined string.
@@ -271,16 +281,19 @@ module Gori
         end
 
         # Yield {key, string value} for every top-level JSON object field with a string value —
-        # the fields reflected_param#canary_json canaries. Not `.scrub`: must read the same bytes
-        # build re-serializes, and JSON.parse tolerates non-UTF-8 inside a string value.
+        # the fields reflected_param#canary_json canaries. Once per key, in first-appearance order,
+        # reading the LAST occurrence's value: what `JSON.parse(..).as_h` reported, minus its
+        # failure on a number past Int64/Float64 elsewhere in the body. Not `.scrub`: must read
+        # the same bytes build splices into, and a string value may carry non-UTF-8 bytes.
         private def self.each_json_string_key(body : Bytes, & : String, String ->)
-          h = begin
-            JSON.parse(String.new(body)).as_h?
-          rescue JSON::ParseException
-            nil
+          root = JsonSpans.root_object(body)
+          return unless root
+          last = {} of String => JsonSpans::Member
+          root.members.each { |m| last[m.key] = m }
+          last.each_value do |m|
+            next unless m.string?(body)
+            yield m.key, String.from_json(String.new(body[m.value_start, m.value_end - m.value_start]))
           end
-          return unless h
-          h.each { |k, v| yield k, v.as_s if v.as_s? }
         end
 
         # Enumerate header / cookie slots from the head bytes. Byte-safe line walk (skips a line

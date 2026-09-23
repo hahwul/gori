@@ -146,6 +146,23 @@ describe "Gori::Probe::Active::InsertionPoints" do
         req.should contain("Content-Length: 21\r\n") # 17 → 21, resynced to the new body
       end
     end
+
+    # #1183's shape at the probe seam: `JSON.parse` + `to_json` folded the duplicate, re-spelled
+    # the number and the escape, and a number past Int64 hid every JSON slot outright.
+    it "splices JSON changes into the captured body, duplicates and spellings intact (#1183)" do
+      with_store do |store|
+        body = %({"id":"4\\u0032", "id":"x","n":1.0e2,"big":18446744073709551615})
+        d = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/p", method: "POST",
+          req_headers: "Content-Type: application/json\r\n", req_body: body)
+        s = IP.enumerate(d, Gori::Probe::Active::Options::DEFAULT, [Loc::Json]).not_nil!
+        s.slots.map { |x| {x.name, x.value} }.should eq([{"id", "x"}]) # last occurrence, as before
+        rep = String.new(IP.build(d, [{s.slots[0], IP::Change.new(replace: "C")}]))
+        rep.should end_with(%({"id":"C", "id":"C","n":1.0e2,"big":18446744073709551615}))
+        raw = String.new(IP.build(d, [{s.slots[0], IP::Change.new(suffix: "%27%22")}]))
+        raw.should end_with(%({"id":"4\\u0032'\\"", "id":"x'\\"","n":1.0e2,"big":18446744073709551615}))
+        String.new(IP.build(d, IP::NO_CHANGES)).should end_with(body)
+      end
+    end
   end
 end
 

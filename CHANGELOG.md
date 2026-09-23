@@ -30,6 +30,8 @@
 - JWT: a claim number past 64 bits (`18446744073709551615`, `1.5e400`) no longer blanks the payload — decode keeps its digits, and re-signing or `--set` keeps every other claim, refusing a payload it cannot read instead of rebuilding it from `{}`; the passive JWT checks no longer go blind on such a token (#1169)
 - TLS: the `chrome` preset sends Chrome's `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` hints on `https` requests gori sends, computed from that request's own User-Agent, and adds none when you typed any of them (#1174)
 - TLS: gori's root CA and the certificates it mints carry key identifiers and key usage, so Python 3.13+ and other strict clients accept them — a root minted by an older gori still needs `gori ca regenerate`, which `gori ca` now points out (#1168)
+- Discover: a `<meta http-equiv="refresh">` is followed whatever its attribute order and when its URL is quoted and relative (`content="0; url='next'"`) (#1182)
+- Miner: JSON probes add their candidate keys to the captured body instead of re-serializing it, so duplicate members, number spellings and escapes reach the target as captured; the active scanner's JSON injection does the same, and a number past 64 bits no longer hides a body's JSON parameters (#1183)
 
 ## v0.7.1
 
