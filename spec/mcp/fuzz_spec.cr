@@ -968,6 +968,31 @@ describe "MCP fuzz tools" do
     end
   end
 
+  # The size gate judges what the run can send: a caller cap at or below the ceiling bounds a
+  # draw from a larger set, so it is not refused for candidates it will never send (#1209).
+  it "lets max_requests satisfy the size gate for a candidate set past the ceiling" do
+    port = start_origin
+    with_store do |store|
+      tools = tools_for(store)
+      base = {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+              "url" => "http://127.0.0.1:#{port}", "payloads" => %([{"numbers":"1-200000"}]),
+              "allow_unscoped" => true}
+      text, err = call_raw(tools, "fuzz_start", base.to_json)
+      err.should be_true
+      text.should contain("too many requests (200000 > 100000)")
+      text.should contain("max_requests")
+      text, err = call_raw(tools, "fuzz_start", base.merge({"max_requests" => 150_000}).to_json)
+      err.should be_true
+      text.should contain("(150000 > 100000)")
+
+      start = call_json(tools, "fuzz_start", base.merge({"max_requests" => 2}).to_json)
+      start["budget_warning"].as_s.should contain("below the 200000 candidate total")
+      status = wait_fuzz_done(tools, start["job_id"].as_s)
+      status["status"].as_s.should eq("budget_exhausted")
+      status["requests"].as_i.should eq(2)
+    end
+  end
+
   it "refuses a match/filter term that can never fire, before any send" do
     with_store do |store|
       tools = tools_for(store)

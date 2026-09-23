@@ -482,7 +482,7 @@ module Gori::Tui
       in Miner::PlanError::Reason::NoTarget, Miner::PlanError::Reason::BadTarget
         "invalid target — use scheme://host[:port]/path"
       in Miner::PlanError::Reason::NoLocations
-        "no locations selected"
+        (why = ex.detail) ? "no selected location applies to this request — #{why}" : "no locations selected"
       in Miner::PlanError::Reason::Wordlist
         "wordlist error: #{ex.detail}"
       in Miner::PlanError::Reason::NoNames

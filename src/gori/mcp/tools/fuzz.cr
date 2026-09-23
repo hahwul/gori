@@ -26,8 +26,14 @@ module Gori
         sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host,
           Outbound.exclude_url(origin.scheme, origin.host, "/", origin.port))
         return scope_blocked(sc) if sc.blocked?
-        if total && total > FUZZ_MAX_REQUESTS
-          return err("too many requests (#{total} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads", "BUDGET_EXHAUSTED")
+        # Judged on what the run can SEND: a caller `max_requests` is a hard cap, so a capped
+        # draw from a set larger than the ceiling is as bounded as a small set (#1209), and
+        # `budget_warning` below says it will not check every candidate. An unknown total is
+        # still let through — the engine's own cap is never above FUZZ_MAX_REQUESTS.
+        caller_cap = optional_int_arg(h, "max_requests")
+        if (bound = Fuzz.request_bound(total, caller_cap)) && bound > FUZZ_MAX_REQUESTS
+          return err("too many requests (#{bound} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads " \
+                     "or pass max_requests (at most #{FUZZ_MAX_REQUESTS})", "BUDGET_EXHAUSTED")
         end
         @job_seq += 1
         id = "fz_#{@job_seq}"
@@ -55,7 +61,7 @@ module Gori
         fjob.reframe_grpc = bool_arg(h, "reframe_grpc", false)
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
-        warn = budget_warning(total, optional_int_arg(h, "max_requests"))
+        warn = budget_warning(total, caller_cap)
         # A `marks` token that occurs ONLY inside `§…§` that were already there — or flush
         # against one, where a second pair would merge into it — makes no position of its own,
         # and the builder can neither refuse the run (those earlier positions are real) nor
@@ -672,7 +678,11 @@ module Gori
         in Fuzz::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
         in Fuzz::PlanError::Reason::BadRaceCount
-          "race_count must be at least 2 (a race needs at least two connections in flight; 1 is just a send)"
+          if needed = ex.detail
+            "race_count exceeds max_requests: #{ex.message} — raise max_requests to #{needed} or lower race_count"
+          else
+            "race_count must be at least 2 (a race needs at least two connections in flight; 1 is just a send)"
+          end
         in Fuzz::PlanError::Reason::TlsPreset
           ex.message || "unknown tls_preset"
         end

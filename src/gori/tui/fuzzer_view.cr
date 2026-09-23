@@ -1665,7 +1665,11 @@ module Gori::Tui
       in Fuzz::PlanError::Reason::UnresolvedEnv
         "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       in Fuzz::PlanError::Reason::BadRaceCount
-        "race needs at least 2 connections — set Race to 2 or more (^O config)"
+        if needed = ex.detail
+          "race needs #{needed} requests, over Max requests — raise it or lower Race (^O config)"
+        else
+          "race needs at least 2 connections — set Race to 2 or more (^O config)"
+        end
       in Fuzz::PlanError::Reason::TlsPreset
         # The ORDINARY path here, unlike the Repeater's `␣P` (which cycles known names and so
         # cannot produce one): the advanced card's TLS fingerprint row is a TEXT field, so a

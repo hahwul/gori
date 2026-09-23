@@ -200,6 +200,19 @@ describe "Fuzz::Sender#send_race" do
     origin.close
   end
 
+  it "refuses, whole and before any dial, a group that would end over the cap (#1204)" do
+    origin = RaceOrigin.new
+    capped = F::CappedBackend.new(race_sender(origin), 2_i64)
+    results = capped.send_race(race_jobs(3))
+    results.all? { |r| r.error == F::CappedBackend::CAP_ERROR }.should be_true
+    # Warm-ups count toward what the group puts on the wire: 2 connections × 2 > 2.
+    warmup = "GET /warmup HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+    capped.send_race(race_jobs(2), warmup: warmup).all? { |r| r.error == F::CappedBackend::CAP_ERROR }.should be_true
+    capped.sent.should eq(0)
+    origin.events.should be_empty
+    origin.close
+  end
+
   it "refuses the whole group when the race WARM-UP is carved out by an exclude rule" do
     # The race request is allowed; only the warm-up is excluded. Every other send in
     # `fuzz/engine.cr` asks `sweep_block` before the socket — the warm-up must too, or an

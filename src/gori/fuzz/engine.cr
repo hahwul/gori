@@ -810,12 +810,18 @@ module Gori::Fuzz
     #
     # The cap is enforced per GROUP, not per connection within one: splitting a race group at
     # a budget boundary mid-release would corrupt the synchronization the primitive exists to
-    # provide, so a group that is already over cap is refused whole, before any dial. A
-    # per-connection warm-up is NOT pre-charged here — like a ConnPool re-send it happens inside
-    # this one call and is reported after the fact via `extra_requests` (see `Sender#send_race`).
+    # provide, so a group that would END over cap is refused whole, before any dial — judged
+    # against what the group puts on the wire, one warm-up per connection included (#1204).
+    # `Plan.build` refuses such a run up front; this holds the line for any other caller. The
+    # warm-ups are still not CHARGED to `sent`: like a ConnPool re-send they happen inside this
+    # one call and are reported after the fact via `extra_requests` (see `Sender#send_race`).
     def send_race(jobs : Array(Job), warmup : Bytes? = nil, timeout : Time::Span? = nil) : Array(Repeater::Result)
       return [] of Repeater::Result if jobs.empty?
-      return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) } if cap_reached?
+      # No warm-up goes out under h2 — `Sender#send_race` degrades to independent sends there.
+      wire = jobs.size.to_i64 * (warmup && !http2? ? 2 : 1)
+      if (c = @cap) && c > 0 && @sent + wire > c
+        return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) }
+      end
       @sent += jobs.size
       @inner.send_race(jobs, warmup: warmup, timeout: timeout)
     end

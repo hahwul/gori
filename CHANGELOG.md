@@ -40,7 +40,10 @@
 - TLS: gori's root CA and the certificates it mints carry key identifiers and key usage, so Python 3.13+ and other strict clients accept them — a root minted by an older gori still needs `gori ca regenerate`, which `gori ca` now points out (#1168)
 - Discover: a `<meta http-equiv="refresh">` is followed whatever its attribute order and when its URL is quoted and relative (`content="0; url='next'"`) (#1182)
 - Miner: JSON probes add their candidate keys to the captured body instead of re-serializing it, so duplicate members, number spellings and escapes reach the target as captured; the active scanner's JSON injection does the same, and a number past 64 bits no longer hides a body's JSON parameters (#1183)
+- Miner: a run whose every named location does not apply to the request (`json` on a GET) is refused before any request is sent, and a partly inapplicable one drops those locations from its name count, reported as `not-applicable` in MCP's `skipped` (#1203)
 - OAST: resuming a saved session polls with the provider it was started with, even when two saved providers share an endpoint with different tokens (#1192)
+- Fuzzer: auto-mark wraps a whole JSON number, exponent included, so `1e5` no longer sends every payload with a trailing `e5` (#1205)
+- Fuzzer: `--max-requests` / `max_requests` now bounds a race too, refusing a larger group (warm-ups included) before any dial instead of sending it whole, and the huge-run gate counts the requests a capped run can send rather than its candidates (#1204, #1209)
 
 ## v0.7.1
 

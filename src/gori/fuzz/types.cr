@@ -339,6 +339,18 @@ module Gori
     # plain "error ⇒ nothing arrived" reading would have thrown away a second time.
     REDIRECT_HOP_REFUSED = "redirect hop refused: "
 
+    # The most requests a run can put on the wire, as far as it is known up front: the
+    # candidate `total` bounded by a positive `max_requests` (the engine enforces that cap
+    # through `CappedBackend`, calibration and retries included). Nil when neither is known.
+    # What the surfaces' huge-run gates judge (`gori run fuzz`'s `--force`, MCP's
+    # BUDGET_EXHAUSTED), so a run the operator already capped is not refused for a candidate
+    # count it will never send (#1209).
+    def self.request_bound(total : Int64?, max_requests : Int64?) : Int64?
+      cap = max_requests.try { |m| m > 0 ? m : nil }
+      return cap unless total
+      cap ? {total, cap}.min : total
+    end
+
     # One durable verdict across CLI and TUI. `max_requests` is a wire-attempt budget,
     # so exhausting it before every payload completes is a partial run rather than `done`.
     def self.terminal_status(progress : Progress, stopped : Bool, max_requests : Int64?,

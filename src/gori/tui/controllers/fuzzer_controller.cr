@@ -1415,9 +1415,12 @@ module Gori::Tui
         @host.status("fuzz: #{ex.message}", :error)
         return
       end
-      if total.nil? || total > CONFIRM_THRESHOLD
+      # Judged, like `gori run fuzz`'s and MCP's gates, on what the run can SEND: a positive
+      # Max requests caps the wire, so it bounds the prompt too (#1209).
+      bound = Fuzz.request_bound(total, v.config.max_requests)
+      if bound.nil? || bound > CONFIRM_THRESHOLD
         e = engine
-        @host.confirm("RUN FUZZ", "Send #{total ? total.to_s : "an unknown number of"} requests to #{v.target_origin}?\nEvery result is privately spooled; the pane keeps at most 5,000 rows / 64 MiB.",
+        @host.confirm("RUN FUZZ", "Send #{bound ? bound.to_s : "an unknown number of"} requests to #{v.target_origin}?\nEvery result is privately spooled; the pane keeps at most 5,000 rows / 64 MiB.",
           confirm_label: "run", danger: false) { start_run(v, e, total) }
       else
         start_run(v, engine, total)
