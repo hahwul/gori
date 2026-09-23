@@ -2219,16 +2219,15 @@ module Gori
     # whitespace, not on the `=` buried inside the value. Returns nil when KEY is
     # invalid.
     def self.parse_line(text : String) : {String, String}?
-      # `.scrub` first: `text` is an operator-supplied env line (`gori run project env set
-      # KEY VALUE`, the TUI env editor), and both the `index(/\s/)` and `split(/\s+/, 2)`
-      # below are PCRE2 calls, which raise `ArgumentError` on a subject that is not valid
-      # UTF-8. That escapes `CLI.run`'s `Gori::Error`-only rescue as a raw backtrace.
-      raw = text.scrub.strip
+      # The whitespace lookup and split below use PCRE2. Ignore indentation before the key,
+      # refuse invalid text before they run, and retain every byte after `=`.
+      return nil unless text.valid_encoding?
+      raw = text.lstrip
       return nil if raw.empty?
       eq = raw.index('=')
       ws = raw.index(/\s/)
       if eq && (ws.nil? || eq < ws)
-        key = raw[0...eq].strip
+        key = raw[0...eq]
         val = raw[eq + 1..]
         return nil unless valid_key?(key)
         {key, val}
@@ -2382,7 +2381,7 @@ module Gori
     end
 
     def self.valid_key?(key : String) : Bool
-      return false if key.empty?
+      return false if key.empty? || !key.valid_encoding?
       return false unless KEY_HEAD.matches?(key[0].to_s)
       key.chars[1..].all? { |c| KEY_TAIL.matches?(c.to_s) }
     end

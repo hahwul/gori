@@ -1053,8 +1053,7 @@ module Gori
         parser.parse(args)
 
         abort "gori run project env set: missing KEY=value (or KEY value)" if positional.empty?
-        line = positional.join(' ')
-        parsed = Env.parse_line(line)
+        parsed = env_set_pair(positional)
         abort "gori run project env set: invalid KEY (use [A-Za-z_][A-Za-z0-9_]*)" unless parsed
         key, val = parsed
 
@@ -1076,6 +1075,24 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # argv has already separated KEY and VALUE for the two-argument form. Keep that split
+      # intact; a one-argument assignment uses its first `=` and validates the whole key.
+      private def self.env_set_pair(positional : Array(String)) : {String, String}?
+        return nil if positional.empty?
+        if positional.size == 1
+          assignment = positional[0]
+          eq = assignment.index('=')
+          return nil unless eq
+          key = assignment[0...eq]
+          value = assignment[eq + 1..]
+        else
+          key = positional[0]
+          value = positional[1..].join(' ')
+        end
+        return nil unless Env.valid_key?(key) && value.valid_encoding?
+        {key, value}
       end
 
       private def self.cmd_env_delete(args : Array(String)) : Nil

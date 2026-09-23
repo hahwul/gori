@@ -155,6 +155,19 @@ describe "ProjectView ENV pane" do
     end
   end
 
+  it "preserves leading and trailing spaces typed after an assignment equals sign" do
+    tmp_store do |store, project|
+      with_project_vars([] of {String, String}) do
+        view = env_view(store, project)
+        view.env_add_start
+        type(view, "TOKEN=  value  ")
+
+        view.env_commit.should eq(:ok)
+        view.env_vars.should eq([{"TOKEN", "  value  "}])
+      end
+    end
+  end
+
   it "closes the row only once it is genuinely empty" do
     tmp_store do |store, project|
       with_project_vars([] of {String, String}) do

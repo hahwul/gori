@@ -122,6 +122,19 @@ describe Gori::Tui::EnvOverlay do
     end
   end
 
+  it "preserves leading and trailing spaces in a typed assignment value" do
+    with_settings_home do
+      Gori::Settings.env_vars = [] of {String, String}
+      env_card do |h, ov, _|
+        h.press(Termisu::Input::Key::LowerA, 'a')
+        h.type("TOKEN=  value  ")
+        h.press(Termisu::Input::Key::Enter)
+
+        ov.to_config[1].should eq([{"TOKEN", "  value  "}])
+      end
+    end
+  end
+
   # The card persists on EVERY mutation and the `env` section is merged WHOLE, so a var edit used
   # to carry the card's opening snapshot of the grammar back over a peer's switch — silently, and
   # with every editor in the session then reading tokens under the grammar the operator had just
