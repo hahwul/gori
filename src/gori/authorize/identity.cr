@@ -58,9 +58,9 @@ module Gori
     # SEE, so the report is where the resolution happens. Not a refusal: an Authorize run that
     # dies on a half-configured identity is worse than one that says which identity went out
     # unauthenticated (`Env.take_unbound_overlay` is what a run summary drains).
-    def self.resolve(id : Identity) : Identity
+    def self.resolve(id : Identity, generation : Env::Generation) : Identity
       Env.report_unbound_overlay(id)
-      resolve_without_report(id)
+      resolve_without_report(id, generation)
     end
 
     # The RESOLUTION with NO report — for a caller that is not putting these bytes on a wire.
@@ -80,9 +80,9 @@ module Gori
     # that got there first would have SILENCED the log line at the seam that really sends.
     # ONE generation for the whole identity, for `Bindings#overlay`'s reason: an identity whose
     # SET headers use `$GEN.UUID` twice is one identity on one request, so it sends one value.
-    def self.resolve_without_report(id : Identity) : Identity
-      gen = Env::Generation.new
-      id.resolve_values { |v| Env.expand_bindings_as(v, id.name, guard_boundary: true, generation: gen) }
+    # The caller supplies it, because only the caller knows the dial it will go out on (#1153).
+    def self.resolve_without_report(id : Identity, generation : Env::Generation) : Identity
+      id.resolve_values { |v| Env.expand_bindings_as(v, id.name, guard_boundary: true, generation: generation) }
     end
 
     def self.overlay_request(head : Bytes, body : Bytes?, id : Identity) : Bytes

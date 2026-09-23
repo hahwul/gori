@@ -122,7 +122,7 @@ describe Gori::Authorize::Passive do
       Gori::Env.take_unbound_overlay
       id = Identity.new("admin", set_headers: [{"Authorization", "Bearer $SESSION"}],
         rules: ["SESSION"])
-      Gori::Authorize.resolve(id)
+      Gori::Authorize.resolve(id, Gori::Env::Generation.new)
       Gori::Env.take_unbound_overlay.map(&.[1]).should eq(["SESSION"])
     end
 
@@ -136,7 +136,7 @@ describe Gori::Authorize::Passive do
         Gori::Env.take_unbound_overlay
         id = Identity.new("admin", set_headers: [{"Authorization", "Bearer $SESSION"}],
           rules: ["SESSION"])
-        Gori::Authorize.resolve(id)
+        Gori::Authorize.resolve(id, Gori::Env::Generation.new)
         Gori::Env.take_unbound_overlay.should eq([{"admin", "SESSION"}])
       end
     end

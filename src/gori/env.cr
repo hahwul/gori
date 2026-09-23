@@ -154,8 +154,28 @@ module Gori
       @values : Hash(String, String)? = nil
       @now : Time? = nil
 
-      def initialize(values : Hash(String, String)? = nil)
+      # Where this request is dialed — host, scheme and the send's own TLS preset override
+      # (#844) — or nil when the path creating the context has no dial (#1153). Held rather than
+      # resolved: the family it implies is only needed by `$GEN.USER_AGENT`, and the preset lookup
+      # would otherwise run on every send of a fuzz run that never names it.
+      @dial : {String, String, String?}? = nil
+
+      def initialize(values : Hash(String, String)? = nil, *, @dial : {String, String, String?}? = nil)
         @values = values.dup unless values.nil? || values.empty?
+      end
+
+      # The `USER_AGENT_FAMILIES` key the plain `$GEN.USER_AGENT` is narrowed to, or nil for the
+      # whole list: the family of the TLS preset this request's handshake presents, so the UA
+      # does not claim Firefox over a Chrome-shaped ClientHello.
+      def ua_family : String?
+        (d = @dial) ? Env.ua_family_for(*d) : nil
+      end
+
+      # A context for one request dialed to `host` over `scheme`. The constructor every on-wire
+      # send path uses; spec/send_seam_generation_spec.cr holds every other `Generation.new` to
+      # a named reason.
+      def self.for_dial(host : String, scheme : String, tls_preset : String? = nil) : Generation
+        new(dial: {host, scheme, tls_preset})
       end
 
       def value?(name : String) : String?
@@ -241,6 +261,30 @@ module Gori
       split[1][family]? || USER_AGENT_FAMILIES[family]
     end
 
+    # The browser family whose User-Agent agrees with the TLS preset a dial to `host` presents,
+    # or nil when the leg is plaintext or the preset names no browser (`curl`, or none). The
+    # preset is the one `Upstream.dial_tls_result` will use: the send's override when it has one,
+    # else the destination rule `Settings.outbound_tls_for` matches on the dialed host.
+    def self.ua_family_for(host : String, scheme : String, tls_preset : String? = nil) : String?
+      return nil unless scheme == "https" || scheme == "wss"
+      preset = Settings.tls_preset_normalize(tls_preset) || Settings.outbound_tls_for(host).preset
+      family = preset.upcase
+      USER_AGENT_FAMILIES.has_key?(family) ? family : nil
+    end
+
+    # What the PLAIN `$GEN.USER_AGENT` draws from under a handshake of `family` (#1153): that
+    # family's lines of whichever list is in force. Unlike the explicit family names — which
+    # promise a browser and so fall back to the built-in family — the plain name promises the
+    # operator's list: with none of their lines in that family it keeps drawing from all of
+    # them, rather than trading an identifying UA an engagement requires for a built-in one.
+    def self.user_agents_following(family : String?) : Array(String)
+      return user_agents unless family
+      custom = Settings.user_agents
+      return USER_AGENT_FAMILIES[family] if custom.empty?
+      picked = user_agents(family)
+      picked.same?(USER_AGENT_FAMILIES[family]) ? custom : picked
+    end
+
     # Which list `$GEN.USER_AGENT` draws from, for a surface to NAME: an operator list that
     # replaced the built-in one is otherwise invisible from every place the token is offered.
     def self.user_agents_source : String
@@ -256,7 +300,7 @@ module Gori
       "TIMESTAMP"    => Generator.new("Unix seconds · per send", ->(g : Generation) { g.now.to_unix.to_s }),
       "TIMESTAMP_MS" => Generator.new("Unix milliseconds · per send", ->(g : Generation) { g.now.to_unix_ms.to_s }),
       "ISO8601"      => Generator.new("UTC RFC 3339 · per send", ->(g : Generation) { g.now.to_rfc3339(fraction_digits: 3) }),
-      "USER_AGENT"   => Generator.new("browser User-Agent · random pick per send", ->(_g : Generation) { Env.user_agents.sample }),
+      "USER_AGENT"   => Generator.new("browser User-Agent · follows the TLS preset", ->(g : Generation) { Env.user_agents_following(g.ua_family).sample }),
       # One per `chrome` / `firefox` / `safari` TLS preset, so a UA can agree with the handshake
       # it rides on (#1152). Named, not parameterised: `$GEN` takes no arguments.
       "USER_AGENT_CHROME"  => Generator.new("Chrome/Edge User-Agent · pairs with TLS preset chrome", ->(_g : Generation) { Env.user_agents("CHROME").sample }),

@@ -187,7 +187,7 @@ describe "Authorize and per-identity bindings" do
 
       loose = Gori::Authorize::Identity.new("from-a-file",
         set_headers: [{"Cookie", "sid=$SESSION"}])
-      Gori::Authorize.resolve(loose).set_headers.should eq([{"Cookie", "sid=GLOBALTOK"}])
+      Gori::Authorize.resolve(loose, Gori::Env::Generation.new).set_headers.should eq([{"Cookie", "sid=GLOBALTOK"}])
     end
   end
   # The SKIP decision asks the same question about the same bytes. `admin` and `victim` are

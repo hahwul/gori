@@ -97,10 +97,14 @@ module Gori::Miner
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       spans = @inner.evidence? ? Fuzz::Backend.all_verbatim(bytes) : verbatim
-      prepared = Gori::Env.expand_bindings(bytes, spans)
+      # ONE context across both passes, as `Fuzz::Sender#send` holds it, naming the dial so a
+      # `$GEN.USER_AGENT` agrees with the TLS preset the inner sender will present (#1153).
+      origin = @inner.origin
+      gen = Gori::Env::Generation.for_dial(origin.host, origin.scheme, @inner.as?(Fuzz::Sender).try(&.tls_preset))
+      prepared = Gori::Env.expand_bindings(bytes, spans, generation: gen)
       # The active slot's identity headers, BEFORE the hook signs them (the inner sender's own
       # overlay is off — see the class comment). A no-op when no slot is active.
-      prepared = Gori::Env.overlay_slot(prepared)
+      prepared = Gori::Env.overlay_slot(prepared, gen)
       sent, reason = Inject.hook(prepared, @argv, @timeout, @env)
       if sent.nil?
         # A hook that could not run is a SKIP with a reported reason, never a clean negative:

@@ -114,10 +114,12 @@ module Gori
         return false if identities.size < 2
         head = detail.request_head
         base_id = identities.find(&.baseline?) || identities.first
-        base = Authorize.overlay_head(head, Authorize.resolve_without_report(base_id))
+        # A context per identity, dial-less: nothing here goes on a wire, and a `$GEN` value
+        # differing between two identities is not what this predicate asks about.
+        base = Authorize.overlay_head(head, Authorize.resolve_without_report(base_id, Env::Generation.new))
         identities.any? do |id|
           next false if id.same?(base_id)
-          Authorize.overlay_head(head, Authorize.resolve_without_report(id)) != base
+          Authorize.overlay_head(head, Authorize.resolve_without_report(id, Env::Generation.new)) != base
         end
       end
 

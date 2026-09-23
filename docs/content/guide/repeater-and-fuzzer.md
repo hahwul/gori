@@ -69,12 +69,12 @@ Tokens stay as literal text in the editor and expand only on the way out: in Rep
 | `$GEN.TIMESTAMP` | Unix time in seconds |
 | `$GEN.TIMESTAMP_MS` | Unix time in milliseconds |
 | `$GEN.ISO8601` | current UTC time in RFC 3339 form, with milliseconds |
-| `$GEN.USER_AGENT` | a real desktop browser User-Agent (Chrome, Edge, Firefox, Safari), drawn at random from a list built into gori, so two sends can get the same one; it contains spaces, so use it in a header, not the request line |
+| `$GEN.USER_AGENT` | a real desktop browser User-Agent (Chrome, Edge, Firefox, Safari), drawn at random from a list built into gori, so two sends can get the same one. On an `https`/`wss` request whose TLS preset is `chrome`, `firefox` or `safari` (the send's own, or the destination's `outbound_tls` rule), it draws only from that browser, so the header agrees with the handshake. It contains spaces, so use it in a header, not the request line |
 | `$GEN.USER_AGENT_CHROME` | the same, narrowed to Chrome and Edge, to pair with the `chrome` TLS preset |
 | `$GEN.USER_AGENT_FIREFOX` | the same, narrowed to Firefox, to pair with the `firefox` TLS preset |
 | `$GEN.USER_AGENT_SAFARI` | the same, narrowed to Safari, to pair with the `safari` TLS preset |
 
-To draw from your own list instead, open **Settings → Editor & Keys → User-Agents** (or `Ctrl-P` → **Settings: User-Agents**) and enter one User-Agent per line, or run `gori settings user-agents --set FILE` (`-` reads stdin; `--reset` goes back to the built-in list). Your list replaces the built-in one. A family name with none of your lines, for example `$GEN.USER_AGENT_SAFARI` with no Safari line, still uses the built-in family. `gori settings user-agents` prints the list in use, and MCP `list_env` reports whether it is yours.
+To draw from your own list instead, open **Settings → Editor & Keys → User-Agents** (or `Ctrl-P` → **Settings: User-Agents**) and enter one User-Agent per line, or run `gori settings user-agents --set FILE` (`-` reads stdin; `--reset` goes back to the built-in list). Your list replaces the built-in one. A family name with none of your lines, for example `$GEN.USER_AGENT_SAFARI` with no Safari line, still uses the built-in family. Under a browser TLS preset, the plain `$GEN.USER_AGENT` uses your lines of that browser, or all of your lines when you listed none of it. `gori settings user-agents` prints the list in use, and MCP `list_env` reports whether it is yours.
 
 The same generator name used more than once in one request has the same value. The next request mints again. Generators run only for operator-authored request text at the final send seam; captured evidence and Fuzzer payload bytes remain literal.
 

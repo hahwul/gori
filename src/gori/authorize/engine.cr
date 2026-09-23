@@ -220,7 +220,7 @@ module Gori
         begin
           ordered.each do |id|
             break if stop.try(&.call)
-            trial = send_one(base_bytes, id, backend, baseline_trial, head_request)
+            trial = send_one(base_bytes, id, backend, baseline_trial, head_request, origin)
             baseline_trial ||= trial if id.baseline?
             trials << trial
           end
@@ -275,12 +275,16 @@ module Gori
 
       private def send_one(base_bytes : Bytes, id : Identity,
                            backend : Fuzz::Backend, baseline_trial : Trial?,
-                           head_request : Bool) : Trial
+                           head_request : Bool, origin : Fuzz::Origin) : Trial
         # RESOLVED first: a `$NAME` in this identity's own header value expands out of this
         # identity's binding table. Nothing downstream will do it — `all_verbatim` below stops
         # the message-level pass, and `Engine.live` turns the active-slot overlay off precisely
         # so these bytes stay this identity's. See `Authorize.resolve`.
-        bytes = Authorize.overlay_wire(base_bytes, Authorize.resolve(id))
+        # The mint context names the dial, so a `$GEN.USER_AGENT` in the identity's headers
+        # agrees with the TLS preset the replay presents (#1153). Authorize has no per-send
+        # preset: the destination rule decides.
+        gen = Env::Generation.for_dial(origin.host, origin.scheme)
+        bytes = Authorize.overlay_wire(base_bytes, Authorize.resolve(id, gen))
         # Whole-buffer verbatim: we supply the identity ourselves, so gori's own session-binding
         # expansion must not ALSO rewrite these bytes (the same reason Probe active marks its
         # probes evidence — see `Fuzz::Backend.all_verbatim`).

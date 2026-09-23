@@ -124,6 +124,7 @@ module Gori::Tui
       # `$GEN.RANDOM` for each: the pane then showed a Content-Length the socket never got —
       # the display lie `reflect_content_length_in_editor` exists to end. Replaced when a
       # different item loads, so the next forward still mints its own values.
+      # A dial-less placeholder until the first held item loads and replaces it (`load_text`).
       @edit_generation = Env::Generation.new
       # Cached highlight of the selected held item's bytes (read-only detail pane).
       # Held bytes are immutable, so the item id + theme is the base cache key —
@@ -530,7 +531,9 @@ module Gori::Tui
       if @loaded_id != it.id
         @editor.set_text(String.new(it.raw))
         @editor_dirty = false # freshly loaded — not yet modified
-        @edit_generation = Env::Generation.new
+        # Named by the held item's destination: the proxy's upstream dial applies the
+        # destination's TLS rule, and a `$GEN.USER_AGENT` typed here should agree with it (#1153).
+        @edit_generation = Env::Generation.for_dial(it.host, it.scheme)
       end
       @hex = nil # a text item never has one; clearing here is what keeps `text_editing?` honest
     end
