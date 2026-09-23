@@ -97,6 +97,22 @@ describe Gori::Miner::Inject do
     t.should contain(%("a":1))
   end
 
+  # #1183: the body went through `JSON.parse` + `to_json`, whose hash folded the duplicate to
+  # its last value — every probe sent `{"dup":"second",…}` while the baseline sent both, so a
+  # first-wins target was mined against a request it never received.
+  it "keeps duplicate members and every other body byte when injecting JSON (#1183)" do
+    body = %({"dup":"first", "dup":"second","n":1.0e2,"big":18446744073709551615,"s":"\\u00e9","o":{"dup":1,"dup":2}})
+    base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+    t = text(body_of(M::Inject.apply(req(base), M::Location::Json, [{"p", "v"}])))
+    t.should eq(%({"dup":"first", "dup":"second","n":1.0e2,"big":18446744073709551615,"s":"\\u00e9","o":{"dup":1,"dup":2,"p":"v"},"p":"v"}))
+  end
+
+  it "reports existing JSON names from every duplicated member (#1183)" do
+    body = %({"dup":"first","dup":"second","o":{"k":1}})
+    base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n\r\n#{body}"
+    M::Inject.existing_names(req(base), M::Location::Json).should eq(Set{"dup", "o", "k"})
+  end
+
   it "leaves a non-object JSON root unchanged" do
     base = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: 5\r\n\r\n[1,2]"
     res = M::Inject.apply(req(base), M::Location::Json, [{"p", "v"}])

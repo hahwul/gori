@@ -7,9 +7,10 @@
 #
 # The JSON row uses `apply_with_spans` — the entry the ENGINE actually calls, which also returns
 # the injected byte spans the send seam protects from `$NAME` expansion. The other locations
-# splice at a known offset, but JSON is RESERIALIZED (`any.to_json`), so the spans can only be
-# found by searching the new body; that search was O(body) per candidate and, on a nested body,
-# cost ~80× the reserialization itself until the canary-scan fast path replaced it. It is here
+# splice at ONE known offset, but JSON is spliced into every object node, so the spans can only
+# be found by searching the new body; that search was O(body) per candidate and, on a nested
+# body, cost ~80× the (then) reserialization itself until the canary-scan fast path replaced it.
+# Splicing instead of reserializing (#1183) took the row from ~1.19ms / 3.99MB to ~823µs / 2.47MB. It is here
 # so that regression cannot come back invisibly — and with CANARY values (`Canary.fresh`, what
 # the engine injects), so the fast path is the one measured.
 #
