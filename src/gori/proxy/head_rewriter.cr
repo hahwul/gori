@@ -25,10 +25,18 @@ module Gori::Proxy
     # answers anyway rather than falling through to the origin: the operator declared this
     # request contained, and dialing out because a stub file went missing would send a
     # payload they believed was never leaving the machine. The message is recorded on the
-    # flow so the failure is visible instead of silent.
+    # flow so the failure is visible instead of silent. (A map-local rule that opted into
+    # `fallthrough` declines a request whose file is absent — but it does so by returning no
+    # stub at all, before anything is answered; see `Rules#claim`.)
     # `status` is carried separately so the framing decision does not have to re-parse the
     # head it is about to frame.
-    record Stub, head : Bytes, body : Bytes, status : Int32, rule_id : Int64, error : String? = nil
+    #
+    # `ref` names the rule that answered, as text (`project rule #4 · dir app.js`, #1237), and is
+    # recorded on the flow's `source_ref`. Text rather than the id alone: the two rule stores
+    # number independently, and a mocked response must stay attributable after the rule that
+    # produced it is edited or deleted.
+    record Stub, head : Bytes, body : Bytes, status : Int32, rule_id : Int64, error : String? = nil,
+      ref : String = ""
 
     abstract def rewrite_request(head : Bytes, host : String) : Bytes
     abstract def rewrite_response(head : Bytes, host : String) : Bytes

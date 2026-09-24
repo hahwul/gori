@@ -2,7 +2,9 @@ require "./env"
 require "./process_hook"
 require "./rule_set_change"
 require "./proxy/head_rewriter"
+require "./proxy/codec/http1"
 require "./rules/stub"
+require "./rules/map_local"
 require "./rules/presets"
 require "./store"
 require "./store/safe_regexp"
@@ -58,6 +60,10 @@ module Gori
     def initialize(@store : Store, @rules : Array(Store::MatchRule))
       @mutex = Mutex.new
       @stub_bodies = RuleStubBodyCache.new
+      # `respond: dir` roots, resolved to their realpath once rather than per request (the
+      # proxy fiber pays for every filesystem call). Cleared by `refresh`, like `@stub_bodies`.
+      @dir_roots = {} of String => String
+      @dir_roots_mutex = Mutex.new
       # Lock-free fast-path flags: rewrite_* run on EVERY message, but the common case
       # is no rule for that side/part. These let the hot path skip the mutex + select-
       # array allocation entirely when nothing would match. The head counts gate the head
@@ -785,8 +791,17 @@ module Gori
       end
       return nil if active.empty?
       text = String.new(head)
-      rule = active.find { |r| stub_matches?(r, text) }
-      rule ? stub_for(rule) : nil
+      # The FIRST rule that CLAIMS the request answers it. A rule whose pattern matches almost
+      # always claims; the two exceptions are decided here, before anything is dialed: a `dir`
+      # rule whose `strip_prefix` the path is outside of, and a `dir` rule with `fallthrough`
+      # whose file is simply absent (#1237). Either one hands the request to the next rule,
+      # and past the last one to the origin.
+      active.each do |r|
+        next unless stub_matches?(r, text)
+        stub = claim(r, head)
+        return stub if stub
+      end
+      nil
     end
 
     # Whether a stub rule's pattern claims this request head. Same literal/regex split the
@@ -810,30 +825,100 @@ module Gori
     # becomes a gori-authored 502 carrying the reason, which ClientConn records on the flow —
     # falling through to the origin instead would send a request the operator declared
     # contained, and a payload leaking because a stub file was deleted is the worse failure.
+    #
+    # The ONE deliberate exception is a map-local rule with `fallthrough` (#1237), and it is
+    # not an exception to this method: that rule declines at CLAIM time (`claim`), before
+    # anything is answered or dialed, and only for a file that is simply absent — never for a
+    # path the confinement refused, and never for a root that is gone.
     private def stub_for(rule : Store::MatchRule) : Proxy::HeadRewriter::Stub
+      ref = stub_ref(rule, rule.respond.label)
       head = RuleStub.parse_head(rule.replacement)
-      return stub_failure(rule, "stub response head could not be parsed") unless head
+      return stub_failure(rule, "stub response head could not be parsed", ref) unless head
       body = if rule.body_file.empty?
                RuleStub.inline_body(rule.replacement)
              else
                begin
                  @stub_bodies.read(rule.body_file)
                rescue ex : Gori::Error
-                 return stub_failure(rule, ex.message || "stub body file unreadable")
+                 return stub_failure(rule, ex.message || "stub body file unreadable", ref)
                end
              end
-      Proxy::HeadRewriter::Stub.new(head.bytes, body, head.status, rule.id)
+      Proxy::HeadRewriter::Stub.new(head.bytes, body, head.status, rule.id, ref: ref)
+    end
+
+    # The stub a matched rule answers with, or nil when the rule does not CLAIM the request
+    # after all — see `short_circuit`. Only a `dir` rule can decline.
+    private def claim(rule : Store::MatchRule, head : Bytes) : Proxy::HeadRewriter::Stub?
+      rule.respond.dir? ? map_local(rule, head) : stub_for(rule)
+    end
+
+    # A `respond: dir` rule (#1237). See `RuleStub::MapLocal` for the confinement.
+    private def map_local(rule : Store::MatchRule, head : Bytes) : Proxy::HeadRewriter::Stub?
+      ref = stub_ref(rule, "dir")
+      root = dir_root(rule.body_file)
+      return stub_failure(rule, "the mapped directory is gone or not a directory", ref) unless root
+      # `gate_target`, the sandbox's own reading: the strict parse gives `""` for a request line
+      # with a doubled space or a tab, which would leave this rule unclaimed — and the request on
+      # its way to an origin that collapses the whitespace and serves the path anyway.
+      target = Proxy::Codec::Http1.gate_target(Proxy::Codec::Http1.parse_request_head(head))
+      res = RuleStub::MapLocal.resolve(root, rule.args.strip_prefix, target)
+      ref = stub_ref(rule, "dir #{RuleStub::MapLocal.display(res.rel)}") unless res.rel.empty?
+      case res.outcome
+      in .not_claimed?
+        return nil
+      in .missing?
+        return nil if rule.args.fallthrough?
+        return stub_failure(rule, res.reason, ref)
+      in .refused?
+        return stub_failure(rule, "map-local refused the path: #{res.reason}", ref, 404)
+      in .broken?
+        return stub_failure(rule, res.reason, ref)
+      in .hit?
+      end
+      template = rule.replacement.strip.empty? ? "200 OK" : rule.replacement
+      parsed = RuleStub.parse_head(template)
+      return stub_failure(rule, "stub response head could not be parsed", ref) unless parsed
+      body = begin
+        @stub_bodies.read(res.path)
+      rescue ex : Gori::Error
+        return stub_failure(rule, ex.message || "map-local file unreadable", ref)
+      end
+      head_bytes = parsed.bytes
+      # The template's own Content-Type wins; otherwise the extension table, or nothing.
+      if !RuleStub.header?(head_bytes, "content-type") && (ct = RuleStub::MapLocal.content_type(res.path))
+        head_bytes = String.build { |io| io.write(head_bytes); io << "Content-Type: " << ct << "\r\n" }.to_slice
+      end
+      Proxy::HeadRewriter::Stub.new(head_bytes, body, parsed.status, rule.id, ref: ref)
+    end
+
+    # The realpath of a `dir` rule's root, cached; nil when it cannot be resolved (gone), which
+    # is answered 502 rather than cached, so a directory created later is picked up.
+    private def dir_root(dir : String) : String?
+      @dir_roots_mutex.synchronize { @dir_roots[dir]? }.try { |hit| return hit }
+      real = File.realpath(dir) rescue return nil
+      @dir_roots_mutex.synchronize { @dir_roots[dir] = real }
+      real
+    end
+
+    # How a flow names the rule that answered it (`source_ref`, #1237): scope and id — the two
+    # stores number rules independently, so "rule #3" alone would send the operator to the
+    # wrong list half the time — plus what kind of answer it was.
+    private def stub_ref(rule : Store::MatchRule, detail : String) : String
+      "#{rule.scope.label} rule ##{rule.id} · #{detail}"
     end
 
     # gori's own answer when a rule cannot be honoured. Unlike a stub, this one IS marked on
     # the wire (`X-Gori-Short-Circuit: error`): the operator's bytes go out untouched, but
-    # bytes gori invented say so.
-    private def stub_failure(rule : Store::MatchRule, message : String) : Proxy::HeadRewriter::Stub
+    # bytes gori invented say so. 502 by default; a map-local path the confinement refused is
+    # a 404, because it names a file that is not there to be served.
+    private def stub_failure(rule : Store::MatchRule, message : String, ref : String,
+                             status : Int32 = 502) : Proxy::HeadRewriter::Stub
       # Names the SCOPE as well as the id: the two stores number rules independently, so
       # "rule #3" would send the operator to the wrong list half the time.
       body = "gori: short-circuit #{rule.scope.label} rule ##{rule.id} could not be applied: #{message}\n".to_slice
-      head = "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nX-Gori-Short-Circuit: error\r\n".to_slice
-      Proxy::HeadRewriter::Stub.new(head, body, 502, rule.id, error: message)
+      reason = status == 404 ? "404 Not Found" : "502 Bad Gateway"
+      head = "HTTP/1.1 #{reason}\r\nContent-Type: text/plain; charset=utf-8\r\nX-Gori-Short-Circuit: error\r\n".to_slice
+      Proxy::HeadRewriter::Stub.new(head, body, status, rule.id, error: message, ref: ref)
     end
 
     # Apply every enabled rule for `target` over a full HTTP message (head + body split on the
@@ -1828,10 +1913,20 @@ module Gori
     # it reach the origin. Same question the preview line asks of every other op ("how many
     # of your recent flows does this touch"), and the more useful one for a stub: it tells
     # the operator what they are about to stop sending.
+    # The preview's half of `short_circuit`'s claim: the pattern, plus a `dir` rule's path
+    # prefix. Deliberately NOT the filesystem — a preview asks which requests the rule would
+    # take, and whether the file happens to exist right now is the request-time answer.
+    private def stub_would_claim?(rule : Store::MatchRule, head : Bytes) : Bool
+      return false unless stub_matches?(rule, String.new(head))
+      return true unless rule.respond.dir?
+      target = Proxy::Codec::Http1.gate_target(Proxy::Codec::Http1.parse_request_head(head))
+      !RuleStub::MapLocal.claimed_rest(target, rule.args.strip_prefix).nil?
+    end
+
     private def rule_affects?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
       return false if rule.inert?
       return false unless host_matches?(rule.host, detail.row.host)
-      return stub_matches?(rule, String.new(detail.request_head)) if rule.op.short_circuit?
+      return stub_would_claim?(rule, detail.request_head) if rule.op.short_circuit?
       return false if rule.op.header? && !rule.part.head?
       return ws_rule_affects?(rule, detail) if rule.part.ws?
       bytes = flow_part_bytes(detail, rule)
@@ -1914,6 +2009,7 @@ module Gori
       # An edit may have repointed a rule at a different file; the cache is keyed by path and
       # revalidated per read, so this only drops entries no rule refers to any more.
       @stub_bodies.clear
+      @dir_roots_mutex.synchronize { @dir_roots.clear }
     end
   end
 end

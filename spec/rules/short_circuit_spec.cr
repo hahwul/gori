@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "file_utils"
 
 # The short-circuit rule op (#511): a Match&Replace rule that ANSWERS a request instead of
 # rewriting one. Covers the engine half — the parse, the two body sources, the fail-closed
@@ -427,5 +428,120 @@ describe "Gori::Rules — short-circuit sub-kind" do
       Gori::Store::RulePart::Head, "X-A", "b", Gori::Store::RuleOp::SetHeader,
       respond_args: %({"future":1}))
     rule.inert?.should be_false
+  end
+end
+
+private def with_dir_rules(&)
+  root = File.join(File.realpath(Dir.tempdir), "gori-sc-dir-#{Random.new.hex(6)}")
+  Dir.mkdir_p(File.join(root, "js"))
+  File.write(File.join(root, "js", "app.js"), "tampered()")
+  File.write(File.join(root, "data.bin"), "raw")
+  begin
+    with_store { |store| yield Gori::Rules.load(store), root }
+  ensure
+    FileUtils.rm_rf(root)
+  end
+end
+
+private def add_dir(rules, root, prefix = "/static/", fallthrough = false, template = "", pattern = "GET /static/")
+  args = Gori::Store::RespondArgs.new(strip_prefix: prefix, fallthrough: fallthrough).to_stored
+  rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+    pattern, template, op: SC, body_file: root, respond: RK::Dir, respond_args: args)
+end
+
+describe "Gori::Rules — map-local (respond: dir)" do
+  it "serves the mapped file, typed by extension, and names the rule and file it came from" do
+    with_dir_rules do |rules, root|
+      add_dir(rules, root)
+      id = rules.rules.first.id
+      stub = rules.short_circuit(get("/static/js/app.js?v=1"), "acme.test").not_nil!
+      stub.status.should eq(200)
+      stub.error.should be_nil
+      String.new(stub.body).should eq("tampered()")
+      String.new(stub.head).should contain("Content-Type: text/javascript; charset=utf-8")
+      stub.ref.should eq("project rule ##{id} · dir js/app.js")
+    end
+  end
+
+  it "lets the head template's own Content-Type win, and sends none for an unknown extension" do
+    with_dir_rules do |rules, root|
+      add_dir(rules, root, template: "200 OK\nContent-Type: application/x-custom\nCache-Control: no-store")
+      head = String.new(rules.short_circuit(get("/static/js/app.js"), "acme.test").not_nil!.head)
+      head.should contain("Content-Type: application/x-custom")
+      head.should_not contain("text/javascript")
+      head.should contain("Cache-Control: no-store")
+    end
+    with_dir_rules do |rules, root|
+      add_dir(rules, root)
+      String.new(rules.short_circuit(get("/static/data.bin"), "acme.test").not_nil!.head)
+        .should_not contain("Content-Type")
+    end
+  end
+
+  it "answers a missing file 502 unless the rule falls through — then the NEXT rule may claim it" do
+    with_dir_rules do |rules, root|
+      add_dir(rules, root)
+      stub = rules.short_circuit(get("/static/js/nope.js"), "acme.test").not_nil!
+      stub.status.should eq(502)
+      String.new(stub.head).should contain("X-Gori-Short-Circuit: error")
+    end
+    with_dir_rules do |rules, root|
+      add_dir(rules, root, fallthrough: true)
+      rules.short_circuit(get("/static/js/nope.js"), "acme.test").should be_nil # → the origin
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /static/", "404 Not Found\n\nlocal miss", op: SC)
+      String.new(rules.short_circuit(get("/static/js/nope.js"), "acme.test").not_nil!.body)
+        .should eq("local miss")
+    end
+  end
+
+  it "answers a refused path 404 and NEVER falls through, even when the rule would" do
+    with_dir_rules do |rules, root|
+      add_dir(rules, root, fallthrough: true)
+      stub = rules.short_circuit(get("/static/%2e%2e/%2e%2e/etc/passwd"), "acme.test").not_nil!
+      stub.status.should eq(404)
+      stub.error.not_nil!.should contain("refused")
+      String.new(stub.head).should contain("X-Gori-Short-Circuit: error")
+    end
+  end
+
+  it "answers 502 for a root that is gone, even when the rule would fall through" do
+    with_dir_rules do |rules, root|
+      add_dir(rules, File.join(root, "gone"), fallthrough: true)
+      rules.short_circuit(get("/static/js/app.js"), "acme.test").not_nil!.status.should eq(502)
+    end
+  end
+
+  it "hands a path outside strip_prefix to the next rule" do
+    with_dir_rules do |rules, root|
+      add_dir(rules, root, pattern: "GET /")
+      rules.short_circuit(get("/api/me"), "acme.test").should be_nil
+    end
+  end
+
+  it "previews a dir rule by its path prefix, not by what is on disk" do
+    with_dir_rules do |rules, root|
+      store = rules.@store
+      {"/static/js/app.js", "/static/nope.js", "/api/me"}.each do |target|
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+          method: "GET", target: target, http_version: "HTTP/1.1",
+          head: get(target), source: Gori::FlowSource::Kind::Proxy))
+      end
+      rule = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Request,
+        Gori::Store::RulePart::Head, "GET /", "", SC, body_file: root, respond: RK::Dir,
+        respond_args: %({"strip_prefix":"/static/"}))
+      rules.preview(rule).matched.should eq(2)
+    end
+  end
+
+  it "names the rule on an inline stub too" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/admin", "200 OK\n\nok", op: SC)
+      id = rules.rules.first.id
+      rules.short_circuit(get("/admin"), "acme.test").not_nil!.ref.should eq("project rule ##{id} · inline")
+    end
   end
 end

@@ -29,9 +29,14 @@ module Gori
     # pointed at a multi-GiB file must fail loudly rather than take the process down.
     MAX_BODY_FILE_BYTES = 8_i64 * 1024 * 1024
 
-    # How many distinct `body_file` paths stay cached. Rule sets are tiny; this only exists so
-    # a pathological set can't grow the cache without bound.
-    MAX_CACHED_FILES = 16
+    # How many distinct files stay cached. A `body_file` rule set is tiny, but a `respond: dir`
+    # rule (#1237) serves a whole directory — a page's worth of scripts and styles — so the
+    # count is sized for that, and `MAX_CACHED_BYTES` is what actually bounds the memory.
+    MAX_CACHED_FILES = 256
+
+    # Total bytes the cache may hold. Each file is already capped at `MAX_BODY_FILE_BYTES`; this
+    # keeps 256 of them from adding up to 2 GiB.
+    MAX_CACHED_BYTES = 64_i64 * 1024 * 1024
 
     # A parsed stub head: the wire bytes plus the status, which ClientConn needs in order to
     # decide whether the response may carry a body at all.
@@ -67,6 +72,14 @@ module Gori
         io << name << ": " << line[(colon + 1)..].strip << "\r\n"
       end
       Head.new(io.to_slice, status)
+    end
+
+    # Whether a parsed head (`Head#bytes`) carries a header `name` (case-insensitive).
+    def self.header?(head : Bytes, name : String) : Bool
+      String.new(head).each_line.skip(1).any? do |line|
+        colon = line.index(':')
+        colon && line[0, colon].strip.compare(name, case_insensitive: true) == 0
+      end
     end
 
     # The inline body — everything after the first blank line, verbatim. Empty when the stub
@@ -206,10 +219,12 @@ module Gori
     record Entry, mtime : Time, size : Int64, bytes : Bytes
 
     MAX_ENTRIES = RuleStub::MAX_CACHED_FILES
+    MAX_BYTES   = RuleStub::MAX_CACHED_BYTES
 
     def initialize
       @mutex = Mutex.new
       @entries = {} of String => Entry
+      @bytes = 0_i64
     end
 
     # The file's bytes. Raises `Gori::Error` when the path is unreadable, is not a regular
@@ -234,14 +249,25 @@ module Gori
       end
       bytes = load(path, size.to_i32)
       @mutex.synchronize do
-        @entries.clear if @entries.size >= MAX_ENTRIES && !@entries.has_key?(path)
+        if (old = @entries[path]?)
+          @bytes -= old.bytes.size
+        elsif @entries.size >= MAX_ENTRIES || @bytes + bytes.size > MAX_BYTES
+          # No LRU, on purpose: the set a page re-requests refills in one load, and a clear is
+          # the one policy that cannot be wrong about which entry was stale.
+          @entries.clear
+          @bytes = 0_i64
+        end
         @entries[path] = Entry.new(mtime, size, bytes)
+        @bytes += bytes.size
       end
       bytes
     end
 
     def clear : Nil
-      @mutex.synchronize { @entries.clear }
+      @mutex.synchronize do
+        @entries.clear
+        @bytes = 0_i64
+      end
     end
 
     # Read up to `size` bytes. A file that shrank between the stat and the read yields a short

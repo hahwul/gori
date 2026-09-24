@@ -783,7 +783,10 @@ module Gori::Proxy
       stored, trunc, size = capped(buffered)
       flow_id = @sink.on_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
-        body: stored, body_truncated: trunc, body_size: size, short_circuited: true, source: FlowSource::Kind::Proxy))
+        body: stored, body_truncated: trunc, body_size: size, short_circuited: true, source: FlowSource::Kind::Proxy,
+        # WHICH rule answered (#1237), as text that outlives the rule: `STUB` alone says gori
+        # answered, and this says with what, after the rule is edited or deleted.
+        source_ref: stub.ref.presence))
       resp = Codec::Http1.parse_response_head(resp_head)
       # ttfb/duration stay nil on purpose. There was no round trip to measure, and a `0`
       # would render in History as an impossibly fast origin — the exact misreading the

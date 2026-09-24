@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "socket"
+require "file_utils"
 
 # The proxy half of the short-circuit rule op (#511): gori answers the request itself and
 # `Upstream.dial` is never reached. What is pinned here is everything the engine cannot check
@@ -346,6 +347,117 @@ describe "proxy — short-circuit rule" do
       fail "gori kept reading HTTP on a connection its own stub declared upgraded" if response.nil?
       response.should contain("101 Switching Protocols")
       sink.responses.first.state.aborted?.should be_true
+    end
+  end
+  # Map-local (#1237): the directory answers, the flow says which rule and file did, a missing
+  # file falls through only when the rule opted in, and a refused path never reaches anything.
+  describe "map-local (respond: dir)" do
+    it "serves a file from the mapped directory and records which rule answered" do
+      root = File.join(File.realpath(Dir.tempdir), "gori-sc-proxy-dir-#{Random.new.hex(6)}")
+      Dir.mkdir_p(root)
+      File.write(File.join(root, "app.js"), "tampered()")
+      begin
+        with_rules do |rules|
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "GET /static/", "", op: Gori::Store::RuleOp::ShortCircuit, body_file: root,
+            respond: Gori::Store::RespondKind::Dir, respond_args: %({"strip_prefix":"/static/"}))
+          id = rules.rules.first.id
+          done = Channel(Nil).new(1)
+          sink = RecordingSink.new(done)
+          proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: rules)
+          proxy.start
+
+          client = TCPSocket.new("127.0.0.1", proxy.port)
+          client << "GET /static/app.js HTTP/1.1\r\nHost: 127.0.0.1:#{dead_port}\r\nConnection: close\r\n\r\n"
+          client.flush
+          response = client.gets_to_end
+          client.close
+          done.receive
+          proxy.stop
+
+          response.should contain("HTTP/1.1 200 OK")
+          response.should contain("Content-Type: text/javascript; charset=utf-8")
+          response.should end_with("tampered()")
+          req = sink.requests.first
+          req.short_circuited?.should be_true
+          req.source_ref.should eq("project rule ##{id} · dir app.js")
+        end
+      ensure
+        FileUtils.rm_rf(root)
+      end
+    end
+
+    it "falls through to the origin for a missing file only when the rule opted in" do
+      root = File.join(File.realpath(Dir.tempdir), "gori-sc-proxy-dir-#{Random.new.hex(6)}")
+      Dir.mkdir_p(root)
+      begin
+        with_rules do |rules|
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "GET /static/", "", op: Gori::Store::RuleOp::ShortCircuit, body_file: root,
+            respond: Gori::Store::RespondKind::Dir,
+            respond_args: %({"strip_prefix":"/static/","fallthrough":true}))
+          accepts = Channel(Nil).new(4)
+          origin_port = start_counting_origin(accepts)
+          done = Channel(Nil).new(2)
+          sink = RecordingSink.new(done)
+          proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: rules)
+          proxy.start
+
+          client = TCPSocket.new("127.0.0.1", proxy.port)
+          client << "GET /static/missing.js HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: close\r\n\r\n"
+          client.flush
+          response = client.gets_to_end
+          client.close
+          done.receive
+          proxy.stop
+
+          response.should contain("ORIGIN")
+          accepts.receive
+          sink.requests.first.short_circuited?.should be_false
+          sink.requests.first.source_ref.should be_nil
+        end
+      ensure
+        FileUtils.rm_rf(root)
+      end
+    end
+
+    it "answers a traversal 404 itself, records it, and never dials the origin" do
+      root = File.join(File.realpath(Dir.tempdir), "gori-sc-proxy-dir-#{Random.new.hex(6)}")
+      Dir.mkdir_p(root)
+      begin
+        with_rules do |rules|
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "GET /", "", op: Gori::Store::RuleOp::ShortCircuit, body_file: root,
+            respond: Gori::Store::RespondKind::Dir, respond_args: %({"fallthrough":true}))
+          accepts = Channel(Nil).new(4)
+          origin_port = start_counting_origin(accepts)
+          done = Channel(Nil).new(1)
+          sink = RecordingSink.new(done)
+          proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: rules)
+          proxy.start
+
+          client = TCPSocket.new("127.0.0.1", proxy.port)
+          client << "GET /..%2f..%2fetc/passwd HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: close\r\n\r\n"
+          client.flush
+          response = client.gets_to_end
+          client.close
+          done.receive
+          proxy.stop
+
+          response.should contain("HTTP/1.1 404 Not Found")
+          response.should contain("X-Gori-Short-Circuit: error")
+          response.should_not contain("root:")
+          sink.requests.first.short_circuited?.should be_true
+          sink.responses.first.error.not_nil!.should contain("refused")
+          select
+          when accepts.receive
+            fail "gori dialed the origin for a refused map-local path"
+          else
+          end
+        end
+      ensure
+        FileUtils.rm_rf(root)
+      end
     end
   end
 end
